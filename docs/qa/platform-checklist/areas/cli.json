@@ -170,9 +170,9 @@
       ],
       "traps": ["stale-dist"],
       "source": [
-        "packages/cli/src/commands/compile.ts#emitJson (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity; the human-path catches ending in this.error() — oclif's ExitError 2 — while the --json branch answers through emitJson + this.exit(1)) + build.ts (alias)",
+        "packages/cli/src/commands/compile.ts#Compile (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity; the human-path catches ending in this.error() — oclif's ExitError 2 — while the --json branch answers through emitJson + this.exit(1) — re-pointed #18104: emitJson is IMPORTED here from format.ts and only ever called; the pipeline this item means is what the Compile command class this file declares runs) + build.ts (alias)",
         "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode = 0 | 1 — the narrowed emitJson/emitText exit slot, NOT a bound on oclif's own error exit)",
-        "packages/cli/src/utils/format.exit-code.test.ts#emitJson (the #4873 pin: the defect was an argument in the wrong slot — timer.elapsed() landing in emitJson's positional exit code — and a number can no longer reach it at all)",
+        "packages/cli/src/utils/format.exit-code.test.ts#asExitCode (the #4873 pin: the defect was an argument in the wrong slot — timer.elapsed() landing in emitJson's positional exit code — and a number can no longer reach it at all — re-pointed #18104: emitJson is IMPORTED into this test and only called; asExitCode is the binding that carries the rejection, a duration typed into that positional slot under a @ts-expect-error)",
         "cli.flag-command-error-ux (the sibling item that owns oclif's exit 2 — cross-referenced so the two never re-collide)",
         "api-backend.formula-gates, api-backend.enforce-or-remove-authoring-gates (gate content — cross-referenced, not duplicated)"
       ],
@@ -352,7 +352,7 @@
       "automated": { "kind": "unit", "ref": "packages/cli/src/commands/verify-tenancy-posture.test.ts" },
       "source": [
         "packages/cli/src/commands/verify.ts#hardFailures (hardFailures sum, exit contract, resolveVerifyMultiTenant / #5262 / ADR-0105 D1, separate RLS stack rationale)",
-        "packages/verify/src/verify.ts#VALIDATION_FAILED (the six-member status union; 400-VALIDATION_FAILED→needs-fixture vs 5xx→create-failed classification)",
+        "packages/verify/src/verify.ts#ObjectVerifyResult (the six-member status union; 400-VALIDATION_FAILED→needs-fixture vs 5xx→create-failed classification — re-pointed #18104: VALIDATION_FAILED survives in this file only inside a regex literal; the union this item means is declared on ObjectVerifyResult and the classification that reads it is isValidation)",
         "packages/verify/src/rls.ts (#1994 class: you can't write what you can't read)"
       ],
       "history": [
@@ -841,7 +841,7 @@
       "traps": ["hydration-race", "first-boot-cold-start"],
       "source": [
         "content/docs/getting-started/quick-start.mdx ('How you verify' — `npx os validate` and `npx os dev --ui`, then open http://localhost:3000/_console/)",
-        "packages/create-objectstack/src/templates/blank/package.json#objectstack (scripts.dev = `objectstack dev`, with no --ui — correct, see the chain below)",
+        "packages/create-objectstack/src/templates/blank/package.json#scripts.dev (scripts.dev = `objectstack dev`, with no --ui — correct, see the chain below — re-pointed #18104: objectstack is a VALUE in this manifest and never a key; scripts.dev is the key pair this item reads)",
         "packages/cli/src/commands/serve.ts (`ui: Flags.boolean({..., default: true, allowNo: true })` — the console is default-ON here; `--no-ui` is the off switch)",
         "packages/cli/src/commands/dev.ts + (dev declares `ui` with NO default and forwards `...(flags.ui ? ['--ui'] : [])` — it only ever ADDS the flag, never forwards --no-ui, so an unflagged dev inherits serve's default-on)",
         "content/docs/deployment/cli.mdx ('--ui | Force Console UI on (already on by default in dev)') and ('--ui / --no-ui — Toggle Console UI at /_console/ (default on)')",
@@ -1038,7 +1038,7 @@
       "traps": ["absence-inference", "stale-dist"],
       "source": [
         "packages/cli/src/commands/doctor.ts#scanDir (flag; scan block with the scanDir = <cwd>/src, the per-hit warning row, the --verbose `→ replacement`, the #10680 reasoning comment, the two-branch hint and the clean-run success line; DEPRECATED_PATTERNS — retired-lookup pair; scanDeprecatedPatterns — absent-dir [],.ts-only walk +.test.ts filter; walkDir node_modules prune)",
-        "packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts#Doctor (#10680's pin — the class-closing sweep that every `os …` hint doctor can PRINT resolves under src/commands/, plus six end-to-end cases over Doctor.run. Added to source at revision 3 because revision 2's knownGaps asserted this surface had no automated coverage of any kind)",
+        "packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts#unregisteredHintsIn (#10680's pin — the class-closing sweep that every `os …` hint doctor can PRINT resolves under src/commands/, plus six end-to-end cases over Doctor.run. Added to source at revision 3 because revision 2's knownGaps asserted this surface had no automated coverage of any kind — re-pointed #18104: Doctor is IMPORTED here and only driven; unregisteredHintsIn is the sweep itself, the one asserted empty)",
         "content/docs/protocol/backward-compatibility.mdx (the documented workflow, including the admission that the codemod command is not yet available)",
         "packages/cli/README.md §os doctor (documents -v and --scan-deprecations)",
         "packages/create-objectstack/src/templates/blank/ (the scaffold whose src/ the seeds land in)",

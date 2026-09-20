@@ -3076,6 +3076,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -3156,6 +3157,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -3170,6 +3172,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -5285,6 +5288,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -5348,6 +5352,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -5355,6 +5360,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -6439,6 +6445,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -6502,6 +6509,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -6509,6 +6517,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -7594,6 +7603,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -7657,6 +7667,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -7664,6 +7675,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -8748,6 +8760,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -8811,6 +8824,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -8818,6 +8832,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -10269,6 +10284,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         summarizeField: z.ZodOptional<z.ZodString>;
                         titleField: z.ZodOptional<z.ZodString>;
                         columns: z.ZodArray<z.ZodString>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gantt: z.ZodOptional<z.ZodObject<{
                         startDateField: z.ZodString;
@@ -10349,6 +10365,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                             week: "week";
                             quarter: "quarter";
                         }>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gallery: z.ZodOptional<z.ZodObject<{
                         coverField: z.ZodOptional<z.ZodString>;
@@ -10363,6 +10380,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         }>>;
                         titleField: z.ZodOptional<z.ZodString>;
                         visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     chart: z.ZodOptional<z.ZodObject<{
                         chartType: z.ZodDefault<z.ZodEnum<{
@@ -13268,6 +13286,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -13348,6 +13367,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -13362,6 +13382,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -15477,6 +15498,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -15540,6 +15562,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -15547,6 +15570,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -16631,6 +16655,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -16694,6 +16719,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -16701,6 +16727,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -17786,6 +17813,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -17849,6 +17877,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -17856,6 +17885,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -18940,6 +18970,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -19003,6 +19034,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -19010,6 +19042,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -20461,6 +20494,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         summarizeField: z.ZodOptional<z.ZodString>;
                         titleField: z.ZodOptional<z.ZodString>;
                         columns: z.ZodArray<z.ZodString>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gantt: z.ZodOptional<z.ZodObject<{
                         startDateField: z.ZodString;
@@ -20541,6 +20575,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                             week: "week";
                             quarter: "quarter";
                         }>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gallery: z.ZodOptional<z.ZodObject<{
                         coverField: z.ZodOptional<z.ZodString>;
@@ -20555,6 +20590,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         }>>;
                         titleField: z.ZodOptional<z.ZodString>;
                         visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     chart: z.ZodOptional<z.ZodObject<{
                         chartType: z.ZodDefault<z.ZodEnum<{
@@ -23423,6 +23459,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 summarizeField: z.ZodOptional<z.ZodString>;
                 titleField: z.ZodOptional<z.ZodString>;
                 columns: z.ZodArray<z.ZodString>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gantt: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -23503,6 +23540,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     week: "week";
                     quarter: "quarter";
                 }>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gallery: z.ZodOptional<z.ZodObject<{
                 coverField: z.ZodOptional<z.ZodString>;
@@ -23517,6 +23555,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 }>>;
                 titleField: z.ZodOptional<z.ZodString>;
                 visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             chart: z.ZodOptional<z.ZodObject<{
                 chartType: z.ZodDefault<z.ZodEnum<{
@@ -25632,6 +25671,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -25695,6 +25735,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -25702,6 +25743,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -26786,6 +26828,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -26849,6 +26892,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -26856,6 +26900,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -27941,6 +27986,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -28004,6 +28050,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -28011,6 +28058,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -29095,6 +29143,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -29158,6 +29207,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -29165,6 +29215,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -30616,6 +30667,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -30696,6 +30748,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -30710,6 +30763,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -34362,6 +34416,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -34442,6 +34497,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -34456,6 +34512,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -36571,6 +36628,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -36634,6 +36692,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -36641,6 +36700,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -37725,6 +37785,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -37788,6 +37849,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -37795,6 +37857,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -38880,6 +38943,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -38943,6 +39007,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -38950,6 +39015,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -40034,6 +40100,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -40097,6 +40164,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -40104,6 +40172,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -41555,6 +41624,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         summarizeField: z.ZodOptional<z.ZodString>;
                         titleField: z.ZodOptional<z.ZodString>;
                         columns: z.ZodArray<z.ZodString>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gantt: z.ZodOptional<z.ZodObject<{
                         startDateField: z.ZodString;
@@ -41635,6 +41705,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                             week: "week";
                             quarter: "quarter";
                         }>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gallery: z.ZodOptional<z.ZodObject<{
                         coverField: z.ZodOptional<z.ZodString>;
@@ -41649,6 +41720,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }>>;
                         titleField: z.ZodOptional<z.ZodString>;
                         visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     chart: z.ZodOptional<z.ZodObject<{
                         chartType: z.ZodDefault<z.ZodEnum<{
@@ -43975,6 +44047,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -44055,6 +44128,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -44069,6 +44143,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -45213,6 +45288,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -45293,6 +45369,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -45307,6 +45384,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -58630,6 +58708,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 summarizeField: z.ZodOptional<z.ZodString>;
                 titleField: z.ZodOptional<z.ZodString>;
                 columns: z.ZodArray<z.ZodString>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gantt: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -58710,6 +58789,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     week: "week";
                     quarter: "quarter";
                 }>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gallery: z.ZodOptional<z.ZodObject<{
                 coverField: z.ZodOptional<z.ZodString>;
@@ -58724,6 +58804,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 }>>;
                 titleField: z.ZodOptional<z.ZodString>;
                 visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             chart: z.ZodOptional<z.ZodObject<{
                 chartType: z.ZodDefault<z.ZodEnum<{
@@ -60839,6 +60920,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -60902,6 +60984,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -60909,6 +60992,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -61993,6 +62077,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -62056,6 +62141,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -62063,6 +62149,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -63148,6 +63235,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -63211,6 +63299,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -63218,6 +63307,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -64302,6 +64392,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -64365,6 +64456,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -64372,6 +64464,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -65823,6 +65916,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -65903,6 +65997,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -65917,6 +66012,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
