@@ -30853,12 +30853,12 @@ async function selfTest() {
   t('H26: …and it carries the counted population that refuted them', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('`pm:on-hold` closed 14 and `needs-user-decision` closed 15'), true);
   t('H26: …with the control, so the count is a reading and not a bare number', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('control: `pm:blocked` closed 21'), true);
   t('H26: ⭐ …and the USEFUL half survives verbatim', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('the release has to come from the target\'s own state changing (a ruling answered, a hold restarted) and someone has to want that'), true);
-  // #19255's stand-down outlives the rewording: a DECLARED label exit for the target still takes it out of this row's population.
-  t('H26: a target with a declared label-transition exit still stands down (#19255)', h26BlockOnIndefiniteTarget({ ...waiting(), body: 'Blocked-by: #987\nUnlock-action: re-check #987 when label pm:on-hold absent' }, [tgt(987, ['pm:on-hold'])], [], REPO_OS), null);
   t('H26: …and names the target and its state', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('`#987` (`pm:on-hold`)'), true);
   t('H26: target parked in needs-user-decision -> finding', typeof h26BlockOnIndefiniteTarget(waiting(75), [tgt(68, ['needs-user-decision'])]), 'string');
   t('H26: a target carrying BOTH indefinite states names both', h26row(waiting(), [tgt(987, ['pm:on-hold', 'needs-user-decision'])]).includes('`pm:on-hold` + `needs-user-decision`'), true);
-  // The clean directions — an ordinary open target is not this row's business.
+  // The clean directions — an ordinary open target is not this row's business,
+  // nor is a parked one the card hands a fireable exit for (#19255 stands down).
+  t('H26: a parked target with a DECLARED label-transition exit stands down (#19255)', h26BlockOnIndefiniteTarget({ ...waiting(), body: 'Blocked-by: #987\nUnlock-action: re-check #987 when label pm:on-hold absent' }, [tgt(987, ['pm:on-hold'])], [], REPO_OS), null);
   t('H26: an ordinary open target -> clean', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:queue', 'domain:devx'])]), null);
   t('H26: an unlabelled open target -> clean', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, [])]), null);
   t('H26: no targets at all -> no row (H4 owns the missing line)', h26BlockOnIndefiniteTarget(waiting(), []), null);
