@@ -1398,16 +1398,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "レポート種別: tabular/summary/matrix/joined"
       },
       dataset: {
-        label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        label: "データセット",
+        helpText: "バインドするデータセット（メジャー/ディメンションはセマンティックレイヤーから取得）"
       },
       values: {
-        label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        label: "メジャー",
+        helpText: "表示するメジャー名（データセットから取得）"
       },
       rows: {
-        label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        label: "行",
+        helpText: "行をグループ化するディメンション名（データセットから取得）"
       },
       columns: {
         label: "列",
@@ -1540,7 +1540,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日付の粒度"
       },
       measures: {
-        label: "Measures",
+        label: "メジャー",
         helpText: "各メジャー：名前、集計関数、フィールド（count の場合は省略可）、表示形式/通貨"
       },
       "measures.name": {

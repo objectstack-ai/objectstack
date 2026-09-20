@@ -1398,16 +1398,16 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "报表类型：tabular / summary / matrix / joined"
       },
       dataset: {
-        label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        label: "数据集",
+        helpText: "要绑定的数据集（度量/维度来自其语义层）"
       },
       values: {
-        label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        label: "度量",
+        helpText: "要展示的度量名（来自该数据集）"
       },
       rows: {
-        label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        label: "行",
+        helpText: "用于分组行的维度名（来自该数据集）"
       },
       columns: {
         label: "列",
@@ -1540,7 +1540,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日期粒度"
       },
       measures: {
-        label: "Measures",
+        label: "度量",
         helpText: "每个度量：名称、聚合函数、字段（count 时可省略）、显示格式/货币"
       },
       "measures.name": {
