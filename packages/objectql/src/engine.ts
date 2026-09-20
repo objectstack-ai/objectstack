@@ -26,7 +26,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -9005,7 +9005,24 @@ export class ObjectQL implements IObjectQLEngine {
    *  — which returns `undefined` on every failure branch it models — over a
    *  fold that is spreads and comparisons. No I/O, no driver, no `throw` on the
    *  measured path. The pin lives in
-   *  `engine-summary-index-registry-read-failure.test.ts`. */
+   *  `engine-summary-index-registry-read-failure.test.ts`.
+   *
+   *  [#19082] The SECOND way this one function invented *"nothing to
+   *  recompute"* — a different input, the same outcome. The child→parent FK
+   *  was resolved by comparing the child field's `reference` carrier to the
+   *  parent's name, so a carrier no reader can read (a non-string where
+   *  `FieldSchema.reference` declares an optional string) compared false
+   *  against every name, `fkField` stayed unset, and the `continue` below
+   *  dropped a DECLARED roll-up out of both indexes with nothing logged.
+   *
+   *  ⛔ The fix is NOT a looser comparison — that would trade a silent
+   *  stall for a MIS-MATCHED foreign key, which is more expensive. The
+   *  carrier is read through the one arbiter and the skip now SAYS SO, at
+   *  `error` (a persisted summary silently stops tracking its children while
+   *  every write keeps reporting success — the durability class). Absence and
+   *  every readable carrier behave exactly as before; the resolution rule
+   *  itself is deliberately left where PR #18503's C2 boundary put it. Pinned
+   *  in `engine-summary-index-unreadable-carrier.test.ts`, both directions. */
   private buildSummaryIndex(): {
     byChild: Map<string, SummaryDescriptor[]>;
     byParent: Map<string, SummaryDescriptor[]>;
@@ -9025,18 +9042,92 @@ export class ObjectQL implements IObjectQLEngine {
         if (!childObject || !fn) continue;
         // Resolve the FK on the child pointing back to this parent.
         let fkField: string | undefined = so.relationshipField;
+        // [#19082] Candidate relation fields on the child whose `reference`
+        // carrier no reader can read, spelled `<child>.<field>`. Collected
+        // rather than thrown on — see the two comments below.
+        const unreadableCarriers: string[] = [];
         if (!fkField) {
           const child = this._registry.getObject(childObject) as any;
           const cfields = child?.fields || {};
           for (const [cfName, cdef] of Object.entries(cfields)) {
             const cd: any = cdef;
-            if ((cd?.type === 'master_detail' || cd?.type === 'lookup') && cd?.reference === parent.name) {
+            if (cd?.type !== 'master_detail' && cd?.type !== 'lookup') continue;
+            // [#19082] The carrier is read through the ONE arbiter, the same
+            // one {@link ObjectQL.planCascadeAtomicity} and
+            // {@link ObjectQL.cascadeDeleteRelations} were routed through —
+            // but its refusal is CAUGHT here instead of propagated, for a
+            // reason those two seams do not have: this is a SCAN over every
+            // relation field on the child, looking for the one that points
+            // back. Letting the first unreadable carrier throw would hide a
+            // perfectly readable sibling that IS the foreign key, turning a
+            // roll-up that works today into a hard failure of every write.
+            // The three answers stay distinct:
+            //
+            //  - ABSENCE (`undefined` / `null` / `''`) is unchanged and still
+            //    silent — `referenceCarrierOf` answers `undefined` for all
+            //    three, this `continue` skips the field, and a field that
+            //    names no target is a legal thing to declare.
+            //  - A READABLE carrier compares exactly as `cd.reference ===
+            //    parent.name` compared it, so every roll-up that resolved
+            //    before resolves now.
+            //  - UNREADABILITY is recorded, and it is what the skip below
+            //    stops being silent about.
+            let carrier: string | undefined;
+            try {
+              carrier = referenceCarrierOf(cd, 'ObjectQL.buildSummaryIndex');
+            } catch {
+              unreadableCarriers.push(`${childObject}.${cfName}`);
+              continue;
+            }
+            if (carrier === parent.name) {
               fkField = cfName;
               break;
             }
           }
         }
-        if (!fkField) continue; // can't resolve the relationship — skip
+        if (!fkField) {
+          // [#19082] The skip is unchanged; its SILENCE is what ends here.
+          //
+          // An unreadable carrier compares false against every name, so
+          // `fkField` stayed unset and this `continue` dropped a DECLARED
+          // roll-up out of both indexes with no diagnostic anywhere — the
+          // second way this one function invents "nothing to recompute" (the
+          // first, the registry read, is #9154 above). It is a durability
+          // degradation by the repo's own test: every write keeps reporting
+          // success while a persisted summary value silently stops tracking
+          // its children, so it is an `error`, not a `warn`, and it owes both
+          // the consequence and the fix in the line it prints.
+          //
+          // Said once per INDEX BUILD, never once per write:
+          // {@link ensureSummaryIndexes} memoises the result against the
+          // registry's `objectRevision`, which moves only on a metadata
+          // mutation. And only the unreadable case speaks — a roll-up whose
+          // child genuinely declares no relation field at all is a different
+          // (and much louder at authoring time) condition, left exactly as it
+          // was rather than widened into here.
+          if (unreadableCarriers.length > 0) {
+            const msg =
+              `[summary-index] ${parent.name}.${summaryField} is NOT indexed and will NOT recompute: `
+              + `its roll-up over '${childObject}' has no resolvable foreign key, because `
+              + `${unreadableCarriers.length} candidate relation field(s) on '${childObject}' carry a `
+              + `\`reference\` no reader can read (${unreadableCarriers.join(', ')}). `
+              + `\`FieldSchema.reference\` is an optional STRING — the target object's name — and a `
+              + `non-string carrier is refused by \`ObjectSchema.safeParse\`, so such a definition `
+              + `reached this registry around the parse seam (a raw \`registerObject\`, or a metadata `
+              + `row stored before that tightening). CONSEQUENCE: ${parent.name}.${summaryField} keeps `
+              + `whatever value it holds now through EVERY insert / update / delete of '${childObject}', `
+              + `while every one of those writes reports success and nothing else reports this. FIX: `
+              + `spell the carrier as the target object name (reference: '${parent.name}') on the `
+              + `child's master_detail/lookup field, or name the foreign key explicitly with `
+              + `summaryOperations.relationshipField on ${parent.name}.${summaryField}.`;
+            // Sanctioned logger shape (PR #9750): reach for `error`, fall back
+            // to `warn` — ⛔ never an optional call like `logger.error?.()`,
+            // which emits nothing against a sink that has no `error`.
+            if (typeof this.logger.error === 'function') this.logger.error(msg);
+            else this.logger.warn(msg);
+          }
+          continue; // can't resolve the relationship — skip
+        }
         // Optional per-summary predicate: only child rows matching it are
         // aggregated (e.g. sum receipts where { status: 'received' }). ANDed with
         // the parent-FK match at recompute time. Ignore a non-object filter.
@@ -13093,7 +13184,24 @@ export class ObjectQL implements IObjectQLEngine {
         if (!childName || !fields) continue;
         for (const fdef of Object.values(fields)) {
           if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
-          const ref = fdef.reference;
+          // [#18550] The carrier is read through the ONE arbiter, so a
+          // `reference` no reader can read REFUSES here instead of reading as
+          // "this child does not reference `name`". The two answers stay
+          // different on purpose:
+          //
+          //  - ABSENCE (`undefined` / `null` / `''`) is unchanged and still
+          //    silent. `referenceCarrierOf` answers `undefined` for all three
+          //    and this `continue` skips the field, which is what a field that
+          //    names no target legitimately means (`FieldSchema.reference` is
+          //    `.optional()`, `StrictField` declares it nullable).
+          //  - UNREADABILITY is the loud one. An object- or array-valued
+          //    carrier was TRUTHY here and then failed both name comparisons
+          //    below, so the relation was dropped from the set silently — and
+          //    this function's `'none'` is, by its own docblock above, the one
+          //    verdict that asserts something POSITIVE about the schema
+          //    ("nothing references this object"). An unreadable carrier can
+          //    no more support that claim than an unreadable registry can.
+          const ref = referenceCarrierOf(fdef, 'ObjectQL.planCascadeAtomicity');
           if (!ref) continue;
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
@@ -13541,7 +13649,14 @@ export class ObjectQL implements IObjectQLEngine {
       if (!childName || !fields) continue;
       for (const [fieldName, fdef] of Object.entries(fields)) {
         if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
-        const ref = fdef.reference;
+        // [#18550] Same arbiter, same absence-vs-unreadability split as
+        // {@link ObjectQL.planCascadeAtomicity} states above — and this is the
+        // seam where the silence was measurable end to end: an unreadable
+        // carrier made the relation invisible to the cascade, so `delete()`
+        // removed the parent, left a `master_detail` child behind, and
+        // reported success. No `restrict` refusal, no `set_null`, nothing
+        // logged. Absence still `continue`s here exactly as before.
+        const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
         if (!ref) continue;
         // Match the target object by raw or resolved name.
         let resolvedRef: string | undefined;

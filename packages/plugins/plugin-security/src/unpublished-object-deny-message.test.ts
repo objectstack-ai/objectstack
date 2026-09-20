@@ -287,20 +287,51 @@ describe('[#10401] unpublished object — the deny stays, the explanation gets h
       expect(err.message).toContain(unresolvedPostureRemedy('unpublished_draft'));
     });
 
-    it('explain keeps the unresolvable prose, and shares its remedy with the refusal too', async () => {
-      const detail = await crudDetail('unknown');
-      expect(detail).toContain('could not be resolved');
-      expect(detail).toContain(unresolvedPostureRemedy('unknown'));
+    // [#18253] These two cases changed SUBJECT, not thesis. The `'unknown'`
+    // cause is "neither the live schema nor the metadata service returned a
+    // declaration" — an object that does not exist on this runtime — and the
+    // maintainer ruling of 2026-09-17 (letter B) took explain OFF the `denies`
+    // answer there: "a typo must not look like a permission decision". So
+    // explain no longer produces a `detail` to compare on that cause; it
+    // REFUSES. The file's thesis is untouched and is asserted on the refusal
+    // instead: enforcement (403) and explanation (404) still state ONE remedy,
+    // read from the one wording module rather than re-spelled.
+    const explainRefusal = async (cause?: 'unpublished_draft' | 'unknown') =>
+      await explainAccess(explainDeps(cause), {
+        object: 'shyx_customer',
+        operation: 'read',
+        context: explainCtx,
+      }).then(
+        () => { throw new Error('explain resolved a decision for an unresolvable object'); },
+        (e: any) => e,
+      );
+
+    it('explain REFUSES the unresolvable object, and shares its remedy with the enforcement denial', async () => {
+      const refusal = await explainRefusal('unknown');
+      // The ADR-0112 pair, never a bare "it threw".
+      expect(refusal).toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
+      expect(refusal.message).toContain(unresolvedPostureRemedy('unknown'));
       const err = await denialOf(await boot({ resolvable: false, draftRow: false }));
       expect(err.message).toContain(unresolvedPostureRemedy('unknown'));
     });
 
-    it('a deps bag with no cause at all explains as the both-conditions wording', async () => {
-      // Back-compat: an explain caller wired before #10401 must not crash or
-      // silently claim "unpublished" for a condition nobody probed.
-      const detail = await crudDetail(undefined);
-      expect(detail).toBe(unresolvedPostureExplainDetail('shyx_customer', 'unknown'));
-      expect(detail).not.toContain('is not published');
+    it('a deps bag with no cause at all refuses too — it is not silently exempted', async () => {
+      // Back-compat: an explain caller wired before #10401 must not crash, and
+      // must not silently claim "unpublished" for a condition nobody probed —
+      // the absent cause reads as `'unknown'`, exactly as the prose path read
+      // it before #18253.
+      const refusal = await explainRefusal(undefined);
+      expect(refusal).toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
+      expect(refusal.message).not.toContain('is not published');
+    });
+
+    it('the unresolvable EXPLAIN prose is still the wording module verbatim for the causes that keep it', () => {
+      // `unresolvedPostureExplainDetail`'s `'unknown'` branch stays the
+      // module's documented fail-safe (and its `default:` arm), so it is read
+      // here rather than deleted with its former call site.
+      expect(unresolvedPostureExplainDetail('shyx_customer', 'unknown')).toContain('could not be resolved');
+      expect(unresolvedPostureExplainDetail('shyx_customer', 'unknown'))
+        .toContain(unresolvedPostureRemedy('unknown'));
     });
 
     it('the middleware throw is the wording module verbatim, not a second spelling', async () => {

@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { unresolvedPostureRemedy } from './unresolved-posture.js';
+
 /**
  * Typed sentinel error thrown by `SecurityPlugin` when an operation is
  * denied. Caught by `@objectstack/runtime`'s HTTP dispatcher and translated
@@ -295,6 +297,70 @@ export class PermissionSetReadUnansweredError extends Error {
     );
     this.name = 'PermissionSetReadUnansweredError';
     this.names = [...names];
+  }
+}
+
+/**
+ * [#18253] `explain` was asked about an object name that no declaration on this
+ * runtime answers to → `404 OBJECT_NOT_FOUND`.
+ *
+ * ## Why this is not a verdict, and why that matters
+ *
+ * The explain engine used to walk its nine layers for an unknown name and
+ * report `object_crud: denies` / `allowed: false` — the byte-identical pair a
+ * REAL denial produces, on a `200`. A misspelled API name therefore arrived at
+ * the caller wearing the costume of a permission decision, and the only channel
+ * that distinguished the two was the layer's prose (#10401/#10424), which no
+ * client branches on. The tool an administrator opens to answer "why can this
+ * person see this record" answered a question about a record that does not
+ * exist, confidently.
+ *
+ * Refusing is the honest answer: nothing was evaluated, so there is no verdict
+ * to report. The maintainer ruling of 2026-09-17 on #18253 (letter B) puts it
+ * as "a typo must not look like a permission decision".
+ *
+ * ## Why `OBJECT_NOT_FOUND` at 404, and nothing newly minted
+ *
+ * That pair is what this platform already answers for "the name you asked about
+ * is not a registered object" — `mapDataError` (`packages/rest/src/error-response.ts`)
+ * maps a thrown `OBJECT_NOT_FOUND` to 404 for the whole data path, and
+ * `OBJECT_NOT_FOUND` is a member of the standard catalog (`StandardErrorCode`,
+ * `packages/spec/src/api/errors.zod.ts`), so it needs no ledger row and no spec
+ * change. The ruling binds this fix to the envelope the endpoint already uses;
+ * the REST door emits it through the `/security/explain` family's ONE refusal
+ * emitter (#8073), so the body is the ADR-0112 D5 envelope by construction.
+ *
+ * ## Why BOTH `status` and `statusCode`, and why the prefix is not the matcher
+ *
+ * Same reasons the classes above record: the two transports read different
+ * property names, and `[Security] Access denied` is a MATCHER that would
+ * re-flatten this refusal into the 403 it exists to stop being.
+ *
+ * ## The three unresolved causes are NOT one condition
+ *
+ * Only the cause that says "neither the live schema nor the metadata service
+ * returned a declaration" reaches this class. An unpublished DRAFT is a
+ * declaration that exists (the remedy is "publish it", and explain already says
+ * so), and a metadata-store OUTAGE is a read that did not answer — claiming
+ * either is absent would be manufacturing a fact, which is the same species of
+ * error as the one this class fixes, pointed the other way.
+ */
+export class ExplainObjectNotFoundError extends Error {
+  readonly code = 'OBJECT_NOT_FOUND';
+  readonly status = 404;
+  readonly statusCode = 404;
+  readonly object: string;
+  readonly operation: string;
+  constructor(object: string, operation: string) {
+    super(
+      `[Security] Unknown object: explain was asked to report '${operation}' access on '${object}', but `
+      + `neither the live schema nor the metadata service returned a declaration for it on this runtime. `
+      + `No principal was evaluated, so this is NOT an access decision. `
+      + `${unresolvedPostureRemedy('unknown')}`,
+    );
+    this.name = 'ExplainObjectNotFoundError';
+    this.object = object;
+    this.operation = operation;
   }
 }
 

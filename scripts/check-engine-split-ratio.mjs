@@ -73,6 +73,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { gitFreeEnv, withoutGitEnv } from './git-env.mjs';
 import { historyHorizon } from './pm/git-history.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -166,14 +167,22 @@ function main(argv) {
     return EXIT_CANNOT_COMPUTE;
   }
 
+  // LOCAL-ONLY (#16644). Every `git` below is `log` / `rev-list` against the checkout
+  // `--cwd` names -- the self-test drives this same entry point with a mkdtemp fixture as
+  // `--cwd`, so an inherited GIT_DIR would have it measure the real repository and report
+  // a ratio about the wrong tree. No child here reaches a remote.
   const git = (...args) =>
-    execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    execFileSync('git', args, { cwd: repoRoot, env: gitFreeEnv(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
   // ── the horizon comes FIRST: nothing below may run on a window this
   //    checkout cannot see all of.
   const sinceMs = Date.now() - days * 24 * 60 * 60 * 1000;
   const sinceIso = new Date(sinceMs).toISOString();
-  const horizon = historyHorizon({ cwd: repoRoot, ref: 'HEAD', sinceMs });
+  // `withoutGitEnv`, not `gitFreeEnv`: the git child is spawned one frame down inside
+  // `scripts/pm/git-history.mjs`, which passes no environment of its own, so the only way
+  // to reach it is to detach the PROCESS for the call (#16644, the second half of the
+  // rule in scripts/git-env.mjs). Restored in a `finally` by that helper.
+  const horizon = withoutGitEnv(() => historyHorizon({ cwd: repoRoot, ref: 'HEAD', sinceMs }));
   if (!horizon.covered) {
     console.error(renderRefusal({ horizon, days, sinceIso }));
     return EXIT_CANNOT_COMPUTE;
@@ -298,7 +307,11 @@ function selfTest() {
   // ── real repos: the defect, then both legs of the guard ───────────────────
   battery('real repos: the defect, then both legs of the guard');
   const root = mkdtempSync(join(tmpdir(), 'engine-split-selftest-'));
-  const g = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  // LOCAL-ONLY (#16644): `init`, `config`, `add`, `log`, and two `clone`s whose source is
+  // a `file://` URL under this battery's own mkdtemp root -- a local object transfer that
+  // needs none of the GIT_CONFIG_* / GIT_SSL_* transport configuration this container
+  // carries, so the blanket strip costs them nothing and keeps `init` off the shared repo.
+  const g = (args, cwd) => execFileSync('git', args, { cwd, env: gitFreeEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const self = fileURLToPath(import.meta.url);
   // spawnSync, not execFileSync: this script writes to stderr on SUCCESS too
   // (the zero-scan warning), and execFileSync surfaces stderr only when it
@@ -306,6 +319,10 @@ function selfTest() {
   const runAllowFail = (args, cwd) => {
     const r = spawnSync(process.execPath, [self, ...args, '--cwd', cwd], {
       cwd,
+      // #16644: the child re-enters this file against a FIXTURE. Its own helpers strip,
+      // but the strip is applied here too so nothing the child spawns -- including the
+      // shared `historyHorizon` -- can be redirected by a variable this process inherited.
+      env: gitFreeEnv(),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -330,7 +347,11 @@ function selfTest() {
       execFileSync('git', ['commit', '--quiet', '-m', `c${i}`], {
         cwd: up,
         encoding: 'utf8',
-        env: { ...process.env, GIT_AUTHOR_DATE: d, GIT_COMMITTER_DATE: d },
+        // ⭐ NOT a blanket replace: the two date variables are set DELIBERATELY and are
+        // what dates the fixture, so they are re-applied ON TOP of the strip. Spreading
+        // `process.env` here instead would carry an inherited GIT_DIR straight into a
+        // `commit` -- the one command in this battery that writes refs (#16644).
+        env: { ...gitFreeEnv(), GIT_AUTHOR_DATE: d, GIT_COMMITTER_DATE: d },
       });
     }
     // `--days` is relative to now, so re-date the whole fixture to end today.

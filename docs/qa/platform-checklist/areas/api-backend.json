@@ -797,16 +797,16 @@
         "absence-inference"
       ],
       "source": [
-        "packages/rest/src/rest-route-ledger.ts#REST (variant source — the 19 REST families)",
+        "packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (variant source — the 19 REST families — re-pointed #18104: the bare word REST is carried in this file only as a substring of longer tokens)",
         "packages/rest/src/rest-route-ledger.conformance.test.ts",
-        "packages/runtime/src/route-ledger.ts#getLegalNextStates (dispatcher ledger — share-links/keys/notifications/suggested-bindings/i18n/analytics families + the meta.getLegalNextStates state route)",
+        "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (dispatcher ledger — share-links/keys/notifications/suggested-bindings/i18n/analytics families + the meta.getLegalNextStates state route — re-pointed #18104: getLegalNextStates is a CLIENT METHOD name, carried here only inside a dotted string value)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (AUTH_ROUTE_LEDGER — the enumerated better-auth table, #3656; raw-app mount)",
         "packages/services/service-storage/src/storage-route-ledger.ts + packages/services/service-i18n/src/i18n-route-ledger.ts (tranche-3 per-service ledgers, #3636)",
         "packages/services/service-settings/src/settings-route-ledger.ts (#7526 — the /api/settings family, ledgered; guarded by the parity dogfood gate, no per-package test by design)",
         "packages/services/service-datasource/src/datasource-route-ledger.ts + datasource-route-ledger.conformance.test.ts (#7744 — the admin family, ledgered)",
         "packages/services/service-datasource/src/admin-routes.ts#manage_platform_settings (the #9391/#9593 manage_platform_settings floor on all eleven routes, drivers catalog included)",
         "packages/metadata/src/metadata-route-ledger.ts (metadata HMR — raw-app mount, dev-only posture #12140/#5673)",
-        "packages/triggers/trigger-api/src/trigger-api-route-ledger.ts#flowName (#11863 — POST /api/v1/automation/hooks/:flowName/:hookId, raw-app mount)",
+        "packages/triggers/trigger-api/src/trigger-api-route-ledger.ts#TRIGGER_API_ROUTE_LEDGER (#11863 — POST /api/v1/automation/hooks/:flowName/:hookId, raw-app mount — re-pointed #18104: flowName is a route PATH PARAMETER, carried here only inside the route string)",
         "packages/cloud-connection/src/cloud-connection-route-ledger.ts (#11882 — 16 rows / four registrar families, raw-app mounts unfindable by the parity gate by construction)",
         "packages/cli/src/utils/console-route-ledger.ts (#11882 — the four static-asset rows)",
         "packages/qa/dogfood/test/route-ledger-live-mount-parity.dogfood.test.ts#getMountedRoutes (#7526 — the parity gate whose getMountedRoutes() blind spot the raw-app clause covers)",
@@ -1080,7 +1080,7 @@
       "source": [
         "objectui apps/console/src/pages/developer/ApiConsolePage.tsx (the API console: raw fetch to `${client.baseUrl}${url}`, status/duration/JSON pane, request history)",
         "objectui apps/console/src/pages/developer/hooks/useApiDiscovery.ts (tree built from GET /api/v1/discovery services/routes + client.meta types/objects; isServiceUsable gate per ADR-0076 D12)",
-        "packages/rest/src/rest-route-ledger.ts#REST (the REST families the tree is spot-checked against)",
+        "packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (the REST families the tree is spot-checked against — re-pointed #18104: the bare word REST is carried in this file only as a substring of longer tokens)",
         "packages/spec/src/api/discovery.zod.ts (the discovery payload)"
       ],
       "history": [

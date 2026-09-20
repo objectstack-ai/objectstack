@@ -12,6 +12,14 @@
  * unset/empty/malformed variable yields zero config-derived admins (loudly);
  * legacy grant path still honoured and logging its deprecation pointer."
  *
+ * ⚠️ [#11663 L5] That last clause is L2's, and its WALLED half has since EXPIRED.
+ * L2/L4 opened a time-boxed migration window; L5 closed it. Under a walled
+ * posture the legacy unscoped `admin_full_access` row is no longer an anchor and
+ * there is no deprecation pointer left to log — both symbols that carried it are
+ * gone from `@objectstack/core`. Under `single` the row still confers, exactly as
+ * it always did (Choice 4A, the zero-config path); its disposition is #11979's.
+ * The suites at the end of this file are the measurement of that boundary.
+ *
  * ⭐ The single most important test in this file is
  * "a session payload carrying a configured address over a sys_user row that
  * does not resolves NON-admin". `resolveUserAuthzGrants` seeds `grants.email`
@@ -27,7 +35,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ADMIN_FULL_ACCESS, ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 
 import {
-  resetLegacyPlatformAdminGrantReport,
   resetPlatformAdminEmailMemo,
   setPlatformAdminConfigSink,
   type PlatformAdminConfigSink,
@@ -76,6 +83,17 @@ interface Recorded { object: string; where: unknown }
  * `$in` is untouched by the refusal and stays supported: it appears in VALUE
  * position (`{ email: { $in: [...] } }`), which is a per-field operator the
  * resolver really does issue, not a top-level combinator.
+ *
+ * ⭐ [#11663 L5] The recorded `where` is DEEP-COPIED at record time, and that is
+ * load-bearing rather than tidy. The resolver builds one of its filters as
+ * `{ name: { $in: grants.positions } }` — a live reference to an array it goes on
+ * to MUTATE (§6c unshifts the derived `platform_admin` into it). Recording the
+ * reference makes every later assertion read the array's FINAL contents instead
+ * of the query as issued, so a multiset comparison silently reports a difference
+ * that no driver ever saw — measured here: the two postures issue byte-identical
+ * `sys_position` reads, and a by-reference recording reported them as differing
+ * because one of them derives `platform_admin` afterwards. ⛔ Do not go back to
+ * storing `opts.where` directly.
  */
 function makeQl(tables: Record<string, Array<Record<string, unknown>>>) {
   const calls: Recorded[] = [];
@@ -88,7 +106,7 @@ function makeQl(tables: Record<string, Array<Record<string, unknown>>>) {
   return {
     calls,
     async find(object: string, opts: any) {
-      calls.push({ object, where: opts?.where });
+      calls.push({ object, where: structuredClone(opts?.where ?? null) });
       const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
       return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
     },
@@ -125,7 +143,6 @@ beforeEach(() => {
   delete process.env[POSTURE_ENV];
   delete process.env[MULTI_ORG_ENV];
   resetPlatformAdminEmailMemo();
-  resetLegacyPlatformAdminGrantReport();
   sink = makeSink();
   setPlatformAdminConfigSink(sink);
 });
@@ -138,7 +155,6 @@ afterEach(() => {
   if (ambientMultiOrg === undefined) delete process.env[MULTI_ORG_ENV];
   else process.env[MULTI_ORG_ENV] = ambientMultiOrg;
   resetPlatformAdminEmailMemo();
-  resetLegacyPlatformAdminGrantReport();
   setPlatformAdminConfigSink(undefined);
 });
 
@@ -332,35 +348,74 @@ const legacyTables = () => ({
   sys_permission_set: [{ id: 'pst_1', name: ADMIN_FULL_ACCESS, active: true }],
 });
 
-describe('[#11663 L2 / P5] the legacy grant row is still honoured, loudly', () => {
+describe('[#11663 L5] the legacy grant row is an anchor under `single`, and NOWHERE else', () => {
   it('an unscoped admin_full_access grant still confers PLATFORM_ADMIN with no config at all', async () => {
+    // ⭐ The zero-config path, and the reason this card is walled-only. The
+    // harness clears both tenancy inputs, so this rig resolves `single` — what a
+    // deployment that configured no tenancy at all looks like. Choice 4A rules
+    // its first-user promotion and its row correct and UNCHANGED, and the
+    // maintainer's constraint on the ruling that authorized L5 is verbatim:
+    // 「比如临时启动的开发环境，我不可能去配置啊」. ⛔ If this arm ever goes red
+    // because the retirement widened past the wall, that is the defect, not this
+    // pin. The `single` half is #11979's to dispose of.
     declare(undefined);
     const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
-    // Nothing is revoked in this leg — that is what makes it safe to land ahead
-    // of every deployment setting the variable.
     expect(grants.posture).toBe('PLATFORM_ADMIN');
   });
 
-  it('logs the deprecation pointer once, naming the holder and the config line', async () => {
+  it('⛔ a WALLED rig derives NOTHING from the same row — the anchor is retired', async () => {
+    // The card. L4 stopped the walled BOOT from minting this row; L5 stops the
+    // walled DERIVATION from reading it. With nothing declared, a walled rig
+    // holding only this row has no platform administrator at all — which is the
+    // fail-closed answer, announced at boot by plugin-security's backstop.
     declare(undefined);
-    // [#13667] A WALLED posture — the rigs that really are inside the migration
-    // window. On the default `single` posture the same fixture is silent; that
-    // is the suite below.
+    requestPosture('isolated');
+    const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
+    expect(grants.posture).toBe('MEMBER');
+    expect(grants.positions).not.toContain('platform_admin');
+  });
+
+  it('⛔ and it says NOTHING while doing it — the deprecation pointer is gone, not relocated', async () => {
+    // L4's pointer fired here, once per process, on exactly this fixture. The
+    // window it announced has closed, so the request path has nothing left to
+    // say; the operator-facing line moved to BOOT, where an operator can act on
+    // it. ⛔ A warn appearing here again means someone reintroduced a per-request
+    // notice inside the authorization path.
+    declare(undefined);
     requestPosture('isolated');
     const ql = makeQl(legacyTables());
     await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
     await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
-    expect(sink.warns).toHaveLength(1);
-    expect(sink.warns[0]).toContain('usr_1');
-    expect(sink.warns[0]).toContain(`${ENV}=legacy@corp.example`);
+    expect(sink.warns).toEqual([]);
+    expect(sink.errors).toEqual([]);
   });
 
-  it('does NOT nag when the SAME user also resolves through the config anchor', async () => {
-    // Their standing no longer rests on the row, so there is nothing to
-    // re-anchor and nothing to say.
+  it('the CONFIG anchor still confers on that same walled rig — the row route went, not the config one', async () => {
+    // The control that keeps the arm above honest: MEMBER under a wall must come
+    // from the retired row route, not from the fixture having quietly stopped
+    // resolving anything at all.
     declare('legacy@corp.example');
-    await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
+    requestPosture('isolated');
+    const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
+    expect(grants.posture).toBe('PLATFORM_ADMIN');
     expect(sink.warns).toEqual([]);
+  });
+
+  it('⭐ the retirement takes the ANCHOR, not the GRANT — the held set still grants what it grants', async () => {
+    // The declared boundary of this card, measured rather than asserted in
+    // prose. A walled holder keeps the `admin_full_access` permission set they
+    // hold — its name, and therefore everything downstream resolves from that
+    // name — and loses only PLATFORM_ADMIN STANDING: the rung and the built-in
+    // `platform_admin` position. ⛔ Revoking the set itself would be revoking the
+    // ROW, which is ADR-0131 C3's on the v18 line and #11979's under `single` —
+    // ⛔ not this card's. If a later leg widens to the row, this pin is the one
+    // that should be re-authored deliberately rather than deleted in passing.
+    declare(undefined);
+    requestPosture('isolated');
+    const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
+    expect(grants.permissions).toContain(ADMIN_FULL_ACCESS);
+    expect(grants.posture).toBe('MEMBER');
+    expect(grants.positions).not.toContain('platform_admin');
   });
 });
 
@@ -391,104 +446,101 @@ describe('[#11663 L2] the sys_user read stays CONDITIONAL on config', () => {
 
 // ───────────────────────────────────────────────────────────────────────────
 /**
- * [#13667] The deprecation pointer is POSTURE-KEYED — the request side matching
- * the boot side.
+ * [#11663 L5] The legacy unscoped anchor is POSTURE-KEYED — the request side
+ * matching the boot side, on the standing itself rather than on a log line.
  *
  * `bootstrapPlatformAdmin` has always been posture-keyed: under `single` a
  * pre-existing unscoped `admin_full_access` holder is `already_have_admin` and
  * the boot exits silently, because under Choice 4A that row IS that rig's
  * anchor — first-user promotion mints it and is ruled correct and unchanged.
- * Only under a walled posture is the same row the LEGACY anchor. The
- * request-side pointer carried no such gate, so the default posture — `single`,
- * what an unconfigured deployment resolves to — was told once per process to
- * migrate off an anchor that is not scheduled to go away, toward a variable its
- * own promotion is pinned never to read.
+ * Only under a walled posture is the same row the LEGACY anchor, and L4 stopped
+ * the walled boot from ever writing it. This is the EXIT: the walled request
+ * path stops READING it too, so on a walled rig platform standing is derived
+ * from `OS_PLATFORM_OWNER_EMAIL` and from nothing else.
  *
- * ⚠️ BOTH directions are pinned here, deliberately. Gating the notice is only
- * correct if the walled rigs keep hearing it: the migration window's loudness
- * is the thing #11663 P5 exists to provide, and a one-sided pin would let a
- * later edit switch it off for everyone and stay green.
+ * ⚠️ BOTH directions are pinned here, deliberately. Retiring the walled anchor is
+ * only correct if the `single` rigs keep theirs: the zero-config first-user
+ * promotion is what a development environment started for a moment depends on,
+ * and a one-sided pin would let a later edit switch it off for everyone and stay
+ * green. That is the failure this card's own dispatch measured in advance —
+ * taken to every posture the retirement turns eleven pins red with the signature
+ * `expected 'MEMBER' to be 'PLATFORM_ADMIN'`.
  *
- * ⛔ And every arm below asserts STANDING as well as the log. This card changes
- * a log trigger, not access control; a `single` rig keeps exactly the
- * PLATFORM_ADMIN it had, it merely stops being nagged about it.
+ * ⛔ Every arm below asserts STANDING, not a log line. There is no log line left
+ * on this path to assert.
  */
-describe('[#13667] the legacy-grant pointer fires only on the rigs in the migration window', () => {
-  it('WALLED rigs still hear it — both walled postures, once per process, holder and config line named', async () => {
+describe('[#11663 L5] the legacy anchor confers only on the rigs Choice 4A keeps it for', () => {
+  it('⛔ WALLED rigs derive nothing from it — both walled postures, repeatedly, silently', async () => {
     for (const walled of ['group', 'isolated'] as const) {
       declare(undefined);
       requestPosture(walled);
-      resetLegacyPlatformAdminGrantReport();
       sink.warns.length = 0;
 
       const ql = makeQl(legacyTables());
       const grants = await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
       await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
 
-      expect(grants.posture, walled).toBe('PLATFORM_ADMIN');
-      expect(sink.warns, walled).toHaveLength(1);
-      expect(sink.warns[0], walled).toContain('usr_1');
-      expect(sink.warns[0], walled).toContain(`${ENV}=legacy@corp.example`);
+      expect(grants.posture, walled).toBe('MEMBER');
+      expect(grants.positions, walled).not.toContain('platform_admin');
+      expect(sink.warns, walled).toEqual([]);
     }
   });
 
-  it('a `single` rig is SILENT — and keeps the identical PLATFORM_ADMIN standing', async () => {
+  it('a `single` rig keeps the identical PLATFORM_ADMIN standing it always had', async () => {
     declare(undefined);
     requestPosture('single');
     const ql = makeQl(legacyTables());
     const grants = await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
 
-    // The half this card repairs: no notice…
-    expect(sink.warns).toEqual([]);
-    // …and the half it must not disturb: the row still confers, exactly as before.
+    // The half this card must not disturb: the row still confers, whole.
     expect(grants.posture).toBe('PLATFORM_ADMIN');
     expect(grants.positions[0]).toBe('platform_admin');
     expect(grants.permissions).toContain(ADMIN_FULL_ACCESS);
+    // …and silently, as it has been since #13667.
+    expect(sink.warns).toEqual([]);
   });
 
-  it('the DEFAULT posture is silent too — an unconfigured deployment resolves `single`', async () => {
-    // The reach of the defect: `OS_TENANCY_POSTURE` and `OS_MULTI_ORG_ENABLED`
+  it('the DEFAULT posture keeps it too — an unconfigured deployment resolves `single`', async () => {
+    // The reach of the constraint: `OS_TENANCY_POSTURE` and `OS_MULTI_ORG_ENABLED`
     // both unset is what a deployment that has configured no tenancy at all
     // looks like, and `resolveTenancyPosture()` answers `single` for it. This
-    // arm is the one that covers most rigs in the field.
+    // arm is the one that covers most rigs in the field, and it is the arm the
+    // maintainer's zero-config constraint is about.
     declare(undefined);
     requestPosture(undefined);
     const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
 
-    expect(sink.warns).toEqual([]);
     expect(grants.posture).toBe('PLATFORM_ADMIN');
+    expect(sink.warns).toEqual([]);
   });
 
-  it('the legacy-anchor detection itself is untouched: `single` + a CONFIG anchor is silent for the other reason', async () => {
-    // The control that keeps the arm above honest. Silence under `single` must
-    // come from the posture gate, not from the fixture having quietly stopped
-    // resolving through the legacy row. Here the SAME user also matches the
-    // declared list, so standing no longer rests on the row and #11663 P5's own
-    // `else if` never runs — silence with a different cause, under both postures.
+  it('a CONFIG anchor resolves under BOTH postures — the retirement is of the row route alone', async () => {
+    // The control that keeps the walled arm honest. MEMBER under a wall must
+    // come from the retired row route, not from the fixture having quietly
+    // stopped resolving. Here the SAME user also matches the declared list, so
+    // standing rests on the config anchor and both postures answer alike.
     for (const p of ['single', 'isolated'] as const) {
       declare('legacy@corp.example');
       requestPosture(p);
-      resetLegacyPlatformAdminGrantReport();
       sink.warns.length = 0;
 
       const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
-      expect(sink.warns, p).toEqual([]);
       expect(grants.posture, p).toBe('PLATFORM_ADMIN');
+      expect(sink.warns, p).toEqual([]);
     }
   });
 
   it('adds NO read: the recorded query multiset is identical under both answers of the gate', async () => {
-    // The in-place claim at the call site — "the row is read only if it was
-    // already loaded, so this notice never adds a query (and so never moves the
-    // pinned query multiset)" — re-MEASURED rather than quoted, because this
-    // card is what put a new call into that branch. `resolveTenancyPosture()`
-    // asks the ENVIRONMENT, so the reads issued against the engine must be
-    // identical whichever way it answers.
+    // The in-place claim at the call site — the posture gate "asks the
+    // ENVIRONMENT, so it issues no query and the pinned batch-equivalence query
+    // multiset cannot move whichever way it answers" — re-MEASURED rather than
+    // quoted. #13667 owed this measurement for a gate on a LOG line; L5 owes it
+    // again because the gate moved onto the derivation itself, where a stray
+    // engine read would be a per-request cost on every walled rig.
     const reads: Record<string, unknown[]> = {};
     for (const p of ['single', 'isolated'] as const) {
       declare(undefined);
       requestPosture(p);
-      resetLegacyPlatformAdminGrantReport();
       const ql = makeQl(legacyTables());
       await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
       reads[p] = ql.calls.map((c) => ({ object: c.object, where: c.where }));
@@ -497,93 +549,99 @@ describe('[#13667] the legacy-grant pointer fires only on the rigs in the migrat
     expect(reads.single.length).toBeGreaterThan(0); // the fixture really did resolve
   });
 
-  it('…and the notice still costs no sys_user read of its own — it fires with the row never loaded', async () => {
-    // The other half of the same claim, isolated. Above, `sys_user` IS read —
-    // for `grants.email` and the `ai_seat` synthesis, neither of which is this
-    // branch. Seed both of those and NOTHING in the resolution needs the row;
-    // the notice must still fire under a walled posture, reading `userRow` as
-    // the undefined it already was and falling back to the generic address
-    // placeholder. That is what "read only if it was already loaded" means, and
-    // it is unchanged by the gate.
+  it('…and costs no sys_user read of its own — the gate never reaches for the row', async () => {
+    // Seed `grants.email` and the `ai_seat` capability and NOTHING in the
+    // resolution needs the `sys_user` row. The posture gate must still answer,
+    // on both sides, without issuing one: it reads the environment. #13667 owed
+    // this for the notice's `userRow?.email` lookup; L5 owes it because the gate
+    // now decides STANDING, and a read added here would be added to every
+    // request on every walled rig.
     const seeded = { nowMs: NOW, seedEmail: 'seeded@corp.example', seedPermissions: ['ai_seat'] };
     for (const p of ['single', 'isolated'] as const) {
       declare(undefined);
       requestPosture(p);
-      resetLegacyPlatformAdminGrantReport();
       sink.warns.length = 0;
 
       const ql = makeQl(legacyTables());
       const grants = await resolveUserAuthzGrants(ql, 'usr_1', seeded);
 
       expect(ql.calls.filter((c) => c.object === 'sys_user'), p).toHaveLength(0);
-      expect(grants.posture, p).toBe('PLATFORM_ADMIN');
-      expect(sink.warns, p).toHaveLength(p === 'single' ? 0 : 1);
+      expect(grants.posture, p).toBe(p === 'single' ? 'PLATFORM_ADMIN' : 'MEMBER');
+      expect(sink.warns, p).toEqual([]);
     }
-    // The walled arm named the holder, and quoted the placeholder rather than an
-    // address it would have had to issue a read to learn.
-    expect(sink.warns[0]).toContain('usr_1');
-    expect(sink.warns[0]).toContain(`${ENV}=<the administrator's verified email address>`);
   });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
 /**
- * [#13667] STANDING is invariant under the posture — all four arms of the
- * `if (configConfersPlatformAdmin) / else if (hasPlatformAdminGrant)`
- * derivation.
+ * [#11663 L5] STANDING across the posture, all four corners of the
+ * `if (configConfersPlatformAdmin)` derivation — three invariant, ONE moved.
  *
- * The gate this card adds is nested INSIDE the `else if` body, so no arm of
- * that chain changes shape. This suite is the measurement of that claim rather
- * than an assertion about it: each of the four (config, grant) truth-table
- * corners is resolved once under `single` and once under `isolated`, and the
- * two envelopes must be deep-equal — same positions in the same order, same
- * permissions, same rung.
+ * #13667 measured all four as byte-identical, because the gate it added sat
+ * inside a branch body and could not change any arm's answer. L5's gate sits on
+ * the derivation itself, so exactly ONE corner is expected to differ:
+ * `config=F, grant=T`, the legacy-grant-only arm. This suite is the measurement
+ * of that claim rather than an assertion about it — each corner is resolved once
+ * under `single` and once under `isolated`, and the three that must not move are
+ * deep-equal while the one that must move is named and asserted in both
+ * directions.
  *
- * ⛔ If a future edit moves the posture test up into the `else if` condition, or
- * anywhere else it could suppress a branch, one of these four corners changes
- * and this suite goes red.
+ * ⛔ If a future edit moves the posture test anywhere it can suppress another
+ * corner, one of the three invariant arms goes red.
  */
-describe('[#13667] standing is byte-identical across postures in all four derivation arms', () => {
+describe('[#11663 L5] standing across postures — three arms invariant, the legacy arm moved', () => {
   const verified = { id: 'usr_1', email: 'a@b.c', email_verified: true };
 
-  const ARMS: Array<{ arm: string; env: string | undefined; tables: () => Record<string, Array<Record<string, unknown>>> }> = [
-    // config=T, grant=T — the config anchor wins and the `else if` is skipped.
+  const INVARIANT_ARMS: Array<{ arm: string; env: string | undefined; tables: () => Record<string, Array<Record<string, unknown>>> }> = [
+    // config=T, grant=T — the config anchor confers on every posture.
     { arm: 'config + legacy grant', env: 'legacy@corp.example', tables: legacyTables },
     // config=T, grant=F — config-only standing.
     { arm: 'config only', env: 'a@b.c', tables: () => configOnlyTables(verified) },
-    // config=F, grant=T — the arm this card gates the NOTICE inside.
-    { arm: 'legacy grant only', env: undefined, tables: legacyTables },
-    // config=F, grant=F — no standing at all.
+    // config=F, grant=F — no standing at all, on any posture.
     { arm: 'neither', env: undefined, tables: () => configOnlyTables(verified) },
   ];
 
-  for (const { arm, env, tables } of ARMS) {
+  for (const { arm, env, tables } of INVARIANT_ARMS) {
     it(`resolves the SAME envelope under \`single\` and under \`isolated\` — ${arm}`, async () => {
       const envelopes: Record<string, unknown> = {};
       for (const p of ['single', 'isolated'] as const) {
         declare(env);
         requestPosture(p);
-        resetLegacyPlatformAdminGrantReport();
         envelopes[p] = await resolveUserAuthzGrants(makeQl(tables()), 'usr_1', { nowMs: NOW });
       }
       expect(envelopes.single).toEqual(envelopes.isolated);
     });
   }
 
-  it('and the four arms are genuinely DISTINCT — the matrix above is not four copies of one answer', async () => {
-    // Without this control the suite above would pass just as well on four
-    // fixtures that all resolved to the same thing, proving nothing about the
-    // arms it claims to cover.
+  it('⭐ and the fourth corner — legacy grant ONLY — deliberately does NOT: that is the card', async () => {
+    // The one arm L5 moves, pinned in BOTH directions so neither half can be
+    // lost. ⛔ Making this deep-equal again would mean either the walled anchor
+    // came back or the `single` one went away; both are defects, and they are
+    // different defects.
+    const envelopes: Record<string, any> = {};
+    for (const p of ['single', 'isolated'] as const) {
+      declare(undefined);
+      requestPosture(p);
+      envelopes[p] = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
+    }
+    expect(envelopes.single).not.toEqual(envelopes.isolated);
+    expect(envelopes.single.posture).toBe('PLATFORM_ADMIN');
+    expect(envelopes.isolated.posture).toBe('MEMBER');
+  });
+
+  it('and the arms are genuinely DISTINCT — the matrix above is not copies of one answer', async () => {
+    // Without this control the suite above would pass just as well on fixtures
+    // that all resolved to the same thing, proving nothing about the arms it
+    // claims to cover. Read under `single`, where every arm that ever conferred
+    // still does.
     const seen: string[] = [];
-    for (const { env, tables } of ARMS) {
+    for (const { env, tables } of [...INVARIANT_ARMS.slice(0, 2), { env: undefined, tables: legacyTables }, INVARIANT_ARMS[2]]) {
       declare(env);
       requestPosture('single');
-      resetLegacyPlatformAdminGrantReport();
       const g = await resolveUserAuthzGrants(makeQl(tables()), 'usr_1', { nowMs: NOW });
       seen.push(`${g.posture}|${[...g.permissions].sort().join(',')}`);
     }
-    // Arms 1-3 all confer PLATFORM_ADMIN (by design — that is what makes the
-    // notice, not the standing, the only thing this card moves); arm 4 does not.
+    // Arms 1-3 all confer PLATFORM_ADMIN under `single`; arm 4 does not.
     expect(seen[0]).toContain('PLATFORM_ADMIN');
     expect(seen[1]).toContain('PLATFORM_ADMIN');
     expect(seen[2]).toContain('PLATFORM_ADMIN');

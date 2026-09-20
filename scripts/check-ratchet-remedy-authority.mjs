@@ -883,14 +883,15 @@ const CONTROL = {
   // (#14653). Same reading as the seventh, eighth and ninth: the gate hands out
   // two remedies with two different owners. Emitting the group in the CLI
   // extractor is the landing author's and touches no ratchet, so it is offered
-  // freely and first. The other path adds a group to a shrink-only exemption
-  // ledger that ships EMPTY by triage ruling — the author excusing themselves
-  // from the parity check they just failed — so it is named with its owner.
+  // freely and first. The other path adds a group to an exemption ledger the
+  // maintainer has since FILLED by ruling on that gate's own first red, and
+  // which only shrinks from there — the author excusing themselves from the
+  // parity check they just failed — so it is named with its owner.
   // `refused` would be untrue: a group keyed by strings no stack config declares
   // genuinely has no extractor face, so there IS a legitimate act here.
   'check-i18n-walk-parity.mjs': {
     expect: 'marked',
-    why: 'PR for #14653. Its exemption ledger ships empty and only shrinks; emitting the group is the author\'s remedy and is offered first, while exempting one is a decision with an owner, so that path is named with its owner rather than denied.',
+    why: 'PR for #14653. Its exemption ledger was filled by maintainer ruling on its own first red and only shrinks from there; emitting the group is the author\'s remedy and is offered first, while exempting one is a decision with an owner, so that path is named with its owner rather than denied.',
   },
 
   'check-adr-links.mjs': {

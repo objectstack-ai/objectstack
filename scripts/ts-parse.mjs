@@ -113,6 +113,70 @@
  * could not read the tree" are different verdicts and a reader should not have
  * to guess which one they got. Both are non-zero, so CI fails either way.
  *
+ * ## A FOURTH door, for a different question: text THIS PROCESS synthesised
+ *
+ * The three doors above all answer "could I read this tree?", and a refusal is
+ * right for that question because the tree belongs to the gate's own author.
+ * `packages/lint/src/checked-parse.ts` records the other side of the same axis
+ * in as many words: it answers the same question by REPORTING rather than
+ * refusing, "because a `scripts/**` gate audits a tree its own author controls"
+ * while "a publish-time validator is handed metadata by someone else".
+ *
+ * A third position was never written down, and a gate in this tree was standing
+ * on it. `tenant-audit-census.mjs` reads a receiver's declared type out of a
+ * source that PARSED, stores that type's text whitespace-collapsed, and later
+ * re-parses the stored text as a synthetic type alias
+ * (`type CensusReceiver = <the stored text>;`) to ask whether it declares a
+ * write door. When the collapse loses a member separator -- a type literal may
+ * separate its members by a newline alone, which is legal TypeScript and
+ * collapses to nothing -- the synthetic alias does not parse, and the census
+ * takes `EXIT_UNPARSEABLE` for the whole run.
+ *
+ * Measured on 2026-09-18 against TypeScript 6.0.3:
+ *
+ *   type text                                              alias parses?
+ *   ----------------------------------------------------   -------------
+ *   { insert(o: string): Promise<void>                      yes  (0 diags)
+ *     find(o: string): Promise<void> }        <- authored
+ *   { insert(o: string): Promise<void>                      NO   (1 diag,
+ *     find(o: string): Promise<void> }        <- collapsed       "';' expected")
+ *   { insert(o: string): Promise<void>;                     yes  (0 diags)
+ *     find(o: string): Promise<void>; }       <- lit control
+ *
+ * The refusal's own text is what makes the misfit legible: it names
+ * `census-receiver-type.ts`, a file that does not exist in the tree, and its
+ * reasoning -- "a file the gate could not read, reported as a file with nothing
+ * to report" -- is FALSE here. The gate read the file. What did not round-trip
+ * is the gate's own re-serialisation of a fragment of it, and that is a fact
+ * about the synthesiser, never about the corpus. Ending the process on it turns
+ * one site's unanswerable question into no answer for any site.
+ *
+ * So {@link parseDerivedText} answers "did the text I synthesised parse?" and
+ * hands the verdict BACK, and the floor is held by making that door unreachable
+ * for the question the refusal exists for: it takes an `origin` -- a
+ * `ts.SourceFile` this module has already certified -- and the only way to hold
+ * one is {@link parseSourceFile} returning, or a Program {@link
+ * createProgramChecked} vouched for. Both of those EXIT on a source that does
+ * not parse. ⇒ a source the gate could not read cannot reach the returnable
+ * door: it hits the refusal first, by construction rather than by review.
+ * Handing an uncertified origin is itself a refusal ({@link
+ * EXIT_DERIVED_MISUSE}), for the reason the section above gives: a throw there
+ * would be one `catch` away from the silent skip.
+ *
+ * Two deliberate divergences from the `packages/lint` sibling, both in the
+ * strict direction, because this is `scripts/**`:
+ *
+ *   • it returns NO tree on failure (`sourceFile: null`), where the sibling
+ *     always returns the recovered one. The sibling has callers that already
+ *     report findings off a partial tree; here there are none, and a recovered
+ *     tree is the thing a caller walks before scoring it clean. A caller that
+ *     forgets to branch gets a TypeError, which is loud and non-zero.
+ *   • the failure is not swallowable into a PASS. It is data, so a caller can
+ *     attribute it to one site -- but there is no verdict in it that reads as
+ *     "nothing to report", and `parseCensus()` counts it as a `rejection`,
+ *     never as a `refusal`: the run continued, and a census that conflated the
+ *     two would be lying about its own numerator.
+ *
  * ## The knobs that are NOT knobs
  *
  * `ScriptTarget.Latest` and `setParentNodes: true` are fixed here because all
@@ -184,12 +248,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'ts.transpileModule: the quietest of the three': 4,
   'the refusal is not swallowable on the new doors either': 1,
   'the census names which door each source came through': 1,
+  'the fourth door: a synthesis that does not parse is a VERDICT, not a takedown': 5,
+  'acceptance: a genuinely unparseable input is still REFUSED at every door': 4,
+  'the fourth door is UNREACHABLE for a source the gate could not read': 7,
+  'the fourth door parses under the SAME fixed knobs as the three above': 1,
+  'the census counts a derived parse as its own door, and a rejection as NOT a refusal': 1,
   'the diagnostics reader itself, in-process': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -269,25 +338,53 @@ function batteryFloorFailures() {
  */
 export const EXIT_UNPARSEABLE = 3;
 
-/** Parses attempted, the distinct file names, and the refusals. */
-const census = { parses: 0, programs: 0, transpiles: 0, files: new Set(), refusals: 0 };
+/** Parses attempted, the distinct file names, the refusals and the rejections. */
+const census = {
+  parses: 0, programs: 0, transpiles: 0, derived: 0, files: new Set(), refusals: 0, rejections: 0,
+};
 
 /**
  * A snapshot of what this module has been asked to parse in this process.
  *
- * `parses` counts every source that reached the parser through ANY of the three
+ * `parses` counts every source that reached the parser through ANY of the four
  * entry points, so it stays the numerator of "how much of this run was read";
- * `programs` and `transpiles` say which door they came through.
+ * `programs`, `transpiles` and `derived` say which door they came through.
+ *
+ * `refusals` and `rejections` are deliberately separate totals rather than one
+ * "failures" number. A refusal ENDED THE RUN, so every source after it went
+ * unread and the numerator above is short by an unknown amount; a rejection is
+ * a verdict {@link parseDerivedText} handed back about text this process
+ * synthesised, with the run still going and every later source still read. A
+ * single total would make those two indistinguishable in the one report whose
+ * job is to say how much of the run was actually measured.
  */
 export function parseCensus() {
   return {
     parses: census.parses,
     programs: census.programs,
     transpiles: census.transpiles,
+    derived: census.derived,
     files: census.files.size,
     refusals: census.refusals,
+    rejections: census.rejections,
   };
 }
+
+/**
+ * The `ts.SourceFile`s this module has CERTIFIED as parseable.
+ *
+ * Membership is what {@link parseDerivedText} requires of its `origin`, and it
+ * is the whole floor argument for that door: a source the parser could not read
+ * never becomes a member, because the two doors that add members
+ * ({@link parseSourceFile}, {@link createProgramChecked}) end the process
+ * instead of returning. So the one door in this module whose failure is
+ * RETURNABLE is unreachable for the input the refusal exists for.
+ *
+ * A `WeakSet` so a long scan does not retain every tree it has read, and so
+ * `has()` answers `false` for a non-object rather than throwing -- an
+ * uncertified origin must reach the misuse refusal, not a TypeError.
+ */
+const vouchedSources = new WeakSet();
 
 let censusReportArmed = false;
 
@@ -323,7 +420,8 @@ function armCensusReport() {
     const c = parseCensus();
     process.stderr.write(
       `[ts-parse census] ${c.parses} parse(s) over ${c.files} distinct file name(s) `
-        + `(${c.programs} program(s), ${c.transpiles} transpile(s)); ${c.refusals} refusal(s)\n`,
+        + `(${c.programs} program(s), ${c.transpiles} transpile(s), ${c.derived} derived); `
+        + `${c.refusals} refusal(s), ${c.rejections} rejection(s)\n`,
     );
   });
 }
@@ -484,6 +582,7 @@ export function parseSourceFile(fileName, text, scriptKind) {
     process.stderr.write(refusalReport(fileName, scriptKind, diagnostics));
     process.exit(EXIT_UNPARSEABLE);
   }
+  vouchedSources.add(sourceFile);
   return sourceFile;
 }
 
@@ -574,6 +673,13 @@ export function createProgramChecked(rootNames, options, host) {
     process.stderr.write(programRefusalReport(roots, rows));
     process.exit(EXIT_UNPARSEABLE);
   }
+  // Every file this Program pulled in has just been through the syntactic
+  // check above -- transitively, which is the point of checking the whole
+  // Program rather than its roots -- so each one is certified for
+  // {@link parseDerivedText}. A gate that reads its corpus through a Program
+  // can therefore synthesise from it on the same terms as one that parses file
+  // by file.
+  for (const sf of program.getSourceFiles()) vouchedSources.add(sf);
   return program;
 }
 
@@ -617,6 +723,154 @@ export function transpileChecked(fileName, text, transpileOptions = {}) {
     process.exit(EXIT_UNPARSEABLE);
   }
   return result;
+}
+
+/**
+ * The exit status of a MISUSE of {@link parseDerivedText} -- an origin this
+ * module never certified.
+ *
+ * Distinct from {@link EXIT_UNPARSEABLE} for the reason that code is distinct
+ * from 1: "this gate found violations", "I could not read the tree" and "this
+ * call site is asking the wrong door" are three verdicts, and a reader should
+ * not have to guess which one they got. All are non-zero, so CI fails either
+ * way.
+ */
+export const EXIT_DERIVED_MISUSE = 4;
+
+/**
+ * The refusal text for a derived parse whose origin was never certified.
+ *
+ * Separate from the exit so a self-test case can read it, exactly as
+ * {@link refusalReport} is.
+ */
+export function derivedMisuseReport(fileName, origin) {
+  const what = origin === null ? 'null'
+    : origin === undefined ? 'undefined'
+      : typeof origin === 'object' ? `an object with fileName ${JSON.stringify(origin.fileName ?? '(none)')}`
+        : `a ${typeof origin}`;
+  return [
+    `x  ts-parse — REFUSING a derived parse whose ORIGIN this module never certified.`,
+    ``,
+    `    derived text  ${fileName}`,
+    `    origin        ${what}`,
+    ``,
+    `    parseDerivedText answers a different question from parseSourceFile:`,
+    `    "did the text I synthesised parse?", not "could I read this tree?". Its`,
+    `    verdict is returnable ONLY because the tree behind it has already been`,
+    `    read, so the origin must be a ts.SourceFile this module returned from`,
+    `    parseSourceFile, or one a Program from createProgramChecked was built`,
+    `    over. Both of those end the process on a source that does not parse.`,
+    ``,
+    `    Reading a source off disk and handing its text here would route the one`,
+    `    door whose failure is NOT a refusal at exactly the input the refusal`,
+    `    exists for — a file the gate could not read, scored as a file with`,
+    `    nothing to report. Parse it with parseSourceFile, and pass the tree`,
+    `    that call returns as the origin of anything you synthesise from it.`,
+    ``,
+    `    This is an exit rather than a throw for the reason the refusals are:`,
+    `    a throw here is one \`catch\` away from the silent skip.`,
+    ``,
+  ].join('\n');
+}
+
+/**
+ * The verdict text for derived text that did not parse. NOT a refusal: it names
+ * the origin, says the run continues, and is meant to be printed by the caller
+ * against the site the text came from.
+ */
+export function derivedFailureReport(fileName, originName, scriptKind, rows) {
+  return [
+    `!  ts-parse — derived text does not parse. The source it came FROM does.`,
+    ``,
+    `    derived text  ${fileName}`,
+    `    derived from  ${originName}`,
+    `    parsed as     ${describeScriptKind(scriptKind)}`,
+    `    errors        ${rows.length} parse diagnostic(s) from TypeScript ${ts.version}`,
+    ``,
+    ...locationLines(fileName, rows),
+    ``,
+    `    This is a fact about the text THIS PROCESS SYNTHESISED, not about the`,
+    `    source above: that source was read, and certified, before this text was`,
+    `    built from it. So the run is NOT aborted — the verdict is returned, and`,
+    `    the caller attributes it to the one site it belongs to instead of`,
+    `    losing every other site to a process exit.`,
+    ``,
+    `    ⛔ It is still not a pass. No tree comes back with this (sourceFile is`,
+    `    null), so there is no recovered wreckage to walk and no reading of this`,
+    `    result that says "nothing to report". If your synthesis is supposed to`,
+    `    round-trip, this is the bug in the synthesis.`,
+    ``,
+  ].join('\n');
+}
+
+/**
+ * Parse text THIS PROCESS SYNTHESISED from a source it has already read, and
+ * hand the verdict back instead of ending the run.
+ *
+ * ⚠️ ⛔ NOT a general escape from the refusal, and ⛔ not for a source read off
+ * disk: see the `origin` parameter. The header section "A FOURTH door" carries
+ * the whole argument, the measurement behind it, and why this is the only door
+ * here whose failure is returnable.
+ *
+ * @param {ts.SourceFile} origin  The tree `text` was derived from, as returned
+ *   by {@link parseSourceFile} or pulled from a {@link createProgramChecked}
+ *   Program. Anything else ends the process with {@link EXIT_DERIVED_MISUSE}.
+ * @param {string} fileName  What to call the synthesised text. Its extension
+ *   picks the ScriptKind when `scriptKind` is omitted, exactly as for
+ *   {@link parseSourceFile}; a synthesised source has no real path, so give it
+ *   a `.ts`/`.tsx` name that says what it is.
+ * @param {string} text  The synthesised source.
+ * @param {ts.ScriptKind} [scriptKind]  Omit to let `fileName` decide.
+ * @returns {{ sourceFile: ts.SourceFile|null, failure: null|{ message: string,
+ *   line: number, column: number, count: number,
+ *   rows: { line: number, column: number, message: string }[], report: string } }}
+ *   `failure` null ⇒ it parsed and `sourceFile` is the tree. Otherwise
+ *   `sourceFile` is null — there is deliberately no recovered tree to walk —
+ *   and `failure.report` is the text to print against the site.
+ */
+export function parseDerivedText(origin, fileName, text, scriptKind) {
+  armCensusReport();
+  if (!vouchedSources.has(origin)) {
+    process.stderr.write(derivedMisuseReport(fileName, origin));
+    process.exit(EXIT_DERIVED_MISUSE);
+  }
+  census.parses += 1;
+  census.derived += 1;
+  census.files.add(fileName);
+
+  // The same fixed knobs the three doors above pass, for the reason the header
+  // gives: a call site that needs a different pair says so once, here. Pinned
+  // behaviourally by the self-test rather than by this comment -- a derived
+  // tree has its parents set and reads modern syntax, or the knobs drifted.
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    text,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    scriptKind,
+  );
+
+  const rows = describeDiagnostics(sourceFile);
+  if (rows.length === 0) {
+    // Derived text that parsed is itself a tree this module has read, so a
+    // second-order synthesis (a fragment of a fragment) can name it as origin.
+    vouchedSources.add(sourceFile);
+    return { sourceFile, failure: null };
+  }
+
+  census.rejections += 1;
+  const first = rows[0];
+  return {
+    sourceFile: null,
+    failure: {
+      message: first.message,
+      line: first.line,
+      column: first.column,
+      count: rows.length,
+      rows,
+      report: derivedFailureReport(fileName, origin.fileName, scriptKind, rows),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -753,7 +1007,8 @@ export function selfTest() {
     );
     t('the census counts parses and distinct file names',
       counted.status === 0
-        && counted.out === '{"parses":3,"programs":0,"transpiles":0,"files":2,"refusals":0}',
+        && counted.out === '{"parses":3,"programs":0,"transpiles":0,"derived":0,"files":2,'
+          + '"refusals":0,"rejections":0}',
       JSON.stringify(counted));
 
     // -- and the report is armed by the first PARSE, not by the IMPORT. Both
@@ -876,8 +1131,181 @@ export function selfTest() {
     );
     t('the census counts programs and transpiles as their own doors',
       countedAll.status === 0
-        && countedAll.out === '{"parses":3,"programs":1,"transpiles":1,"files":3,"refusals":0}',
+        && countedAll.out === '{"parses":3,"programs":1,"transpiles":1,"derived":0,"files":3,'
+          + '"refusals":0,"rejections":0}',
       JSON.stringify(countedAll));
+
+    // ⭐⭐ THE FOURTH DOOR. The fixtures are the census's own round trip, spelled
+    // the way the census spells it: a receiver type authored across lines, put
+    // through `.replace(/\s+/g, ' ')` -- the collapse in
+    // `scripts/tenant-audit-census.mjs` (line 459 as measured) -- and wrapped
+    // in the synthetic alias its line 723 (as measured) builds. Measured
+    // 2026-09-18 on TypeScript 6.0.3: the AUTHORED
+    // spelling is legal TypeScript (0 diagnostics), the COLLAPSED one is not
+    // (1: "';' expected"), and the SEMICOLON spelling is the card's lit control.
+    // All three are held here, because only the set of them says the defect is
+    // the collapse and not the shape.
+    const AUTHORED_RECEIVER = '{\n'
+      + '  insert(object: string, data: unknown): Promise<void>\n'
+      + '  find(object: string, query: unknown): Promise<void>\n'
+      + '}';
+    const COLLAPSED_RECEIVER = AUTHORED_RECEIVER.replace(/\s+/g, ' ');
+    const SEMICOLON_RECEIVER = '{ insert(object: string, data: unknown): Promise<void>;'
+      + ' find(object: string, query: unknown): Promise<void>; }';
+    const alias = (typeText) => `type CensusReceiver = ${typeText};\n`;
+
+    const IMPORT_DERIVED =
+      `import { parseDerivedText } from ${JSON.stringify(pathToFileURL(SELF).href)};\n`;
+
+    // One certified origin, then the derived parse. The origin is a real parse
+    // through the real door, so the case exercises the vouch rather than a
+    // model of it.
+    const derived = (text, fileName = 'census-receiver-type.ts') =>
+      run(
+        IMPORT_DERIVED
+          + `const origin = parseSourceFile('corpus/receiver.ts', 'export const x = 1;\\n');\n`
+          + `const r = parseDerivedText(origin, ${JSON.stringify(fileName)}, ${JSON.stringify(text)});\n`
+          + `console.log(JSON.stringify({ tree: r.sourceFile === null ? null : r.sourceFile.statements.length,`
+          + ` failure: r.failure === null ? null : { line: r.failure.line, column: r.failure.column,`
+          + ` count: r.failure.count, names: r.failure.report.includes('corpus/receiver.ts') } }));\n`,
+      );
+
+    battery('the fourth door: a synthesis that does not parse is a VERDICT, not a takedown');
+    // The defect, at the door it came in by: the collapsed text still ends the
+    // process when it arrives as a TREE to be read. ⛔ This must not change.
+    const collapsedThroughRefusal = parse(alias(COLLAPSED_RECEIVER), 'census-receiver-type.ts');
+    t('⛔ the collapsed receiver STILL exits through parseSourceFile — the refusal is untouched',
+      collapsedThroughRefusal.status === EXIT_UNPARSEABLE && collapsedThroughRefusal.out === '',
+      JSON.stringify({ status: collapsedThroughRefusal.status, out: collapsedThroughRefusal.out }));
+    // …and the same text through the fourth door: the run SURVIVES and the
+    // verdict is data the caller can attribute to one site.
+    const collapsedDerived = derived(alias(COLLAPSED_RECEIVER));
+    t('⭐ the same collapsed receiver through parseDerivedText returns a verdict and the run continues',
+      collapsedDerived.status === 0
+        && JSON.parse(collapsedDerived.out).tree === null
+        && JSON.parse(collapsedDerived.out).failure.count === 1
+        && JSON.parse(collapsedDerived.out).failure.line === 1,
+      JSON.stringify(collapsedDerived));
+    t('…and that verdict names the SOURCE the text was derived from, not only the synthetic name',
+      collapsedDerived.status === 0 && JSON.parse(collapsedDerived.out).failure.names === true,
+      JSON.stringify(collapsedDerived));
+    // LIT CONTROL, twice. The door must be capable of SUCCEEDING on this
+    // fixture family, or the case above is indistinguishable from a door that
+    // rejects everything.
+    const semicolonDerived = derived(alias(SEMICOLON_RECEIVER));
+    t('⭐ LIT CONTROL: the semicolon spelling of the SAME literal parses through the same door',
+      semicolonDerived.status === 0 && JSON.parse(semicolonDerived.out).tree === 1
+        && JSON.parse(semicolonDerived.out).failure === null,
+      JSON.stringify(semicolonDerived));
+    const authoredDerived = derived(alias(AUTHORED_RECEIVER));
+    t('⭐ LIT CONTROL: so does the AUTHORED spelling — the collapse is the defect, not the shape',
+      authoredDerived.status === 0 && JSON.parse(authoredDerived.out).tree === 1
+        && JSON.parse(authoredDerived.out).failure === null,
+      JSON.stringify(authoredDerived));
+
+    battery('acceptance: a genuinely unparseable input is still REFUSED at every door');
+    // Without this leg, "the round trip is fixed" and "the parse check was
+    // switched off" are the same green.
+    for (const [name, text] of [
+      ['merge-conflict markers', CONFLICTED],
+      ['a truncated body', TRUNCATED],
+    ]) {
+      const viaRefusal = parse(text, 'packages/foo/src/bar.ts');
+      t(`⛔ ${name}: parseSourceFile still ends the run`,
+        viaRefusal.status === EXIT_UNPARSEABLE && viaRefusal.out === '',
+        JSON.stringify({ status: viaRefusal.status, out: viaRefusal.out }));
+      // At the fourth door the refusal is not an exit -- so what has to hold is
+      // that NO TREE comes back. A caller cannot walk recovered wreckage and
+      // cannot read the result as "nothing to report".
+      const viaDerived = derived(text, 'synthesised.ts');
+      t(`⛔ ${name}: parseDerivedText hands back NO TREE, so there is nothing to score clean`,
+        viaDerived.status === 0 && JSON.parse(viaDerived.out).tree === null
+          && JSON.parse(viaDerived.out).failure.count >= 1,
+        JSON.stringify(viaDerived));
+    }
+
+    battery('the fourth door is UNREACHABLE for a source the gate could not read');
+    // The floor, by construction: the only way to hold a certified origin is a
+    // door that exits on an unparseable source. An uncertified one is refused.
+    const misuse = (originExpr) =>
+      run(
+        IMPORT_DERIVED
+          + `const r = parseDerivedText(${originExpr}, 'derived.ts', 'const a = 1;\\n');\n`
+          + `console.log('RETURNED ' + JSON.stringify(r.failure));\n`,
+      );
+    const rawOrigin = misuse(
+      `ts.createSourceFile('raw.ts', 'export const a = 1;\\n', ts.ScriptTarget.Latest, true)`,
+    );
+    t('⛔ a tree this module never certified is REFUSED, however well it parses',
+      rawOrigin.status === EXIT_DERIVED_MISUSE && rawOrigin.out === '',
+      JSON.stringify({ status: rawOrigin.status, out: rawOrigin.out }));
+    t('…and that refusal says which door to use instead',
+      rawOrigin.err.includes('parseSourceFile'), rawOrigin.err.slice(0, 400));
+    for (const [name, expr] of [['null', 'null'], ['undefined', 'undefined'], ['a string', `'not a tree'`]]) {
+      const bad = misuse(expr);
+      t(`⛔ an origin that is ${name} is refused rather than throwing a TypeError`,
+        bad.status === EXIT_DERIVED_MISUSE, JSON.stringify({ status: bad.status, err: bad.err.slice(0, 120) }));
+    }
+    const swallowedMisuse = run(
+      IMPORT_DERIVED
+        + `let caught = false;\n`
+        + `try { parseDerivedText(null, 'derived.ts', 'const a = 1;\\n'); } catch { caught = true; }\n`
+        + `console.log(caught ? 'SWALLOWED' : 'NOT REACHED');\n`,
+    );
+    t('⛔ and a caller’s try/catch cannot downgrade the misuse refusal either',
+      swallowedMisuse.status === EXIT_DERIVED_MISUSE && !swallowedMisuse.out.includes('SWALLOWED'),
+      JSON.stringify(swallowedMisuse));
+    // The other certifying door. A gate that reads its corpus through a Program
+    // can synthesise from it on the same terms.
+    const programOrigin = run(
+      IMPORT_DERIVED
+        + `import { createProgramChecked } from ${JSON.stringify(pathToFileURL(SELF).href)};\n`
+        + `const p = createProgramChecked(${JSON.stringify([okEntry])}, ${PROGRAM_OPTIONS});\n`
+        + `const origin = p.getSourceFiles().find((f) => f.fileName === ${JSON.stringify(okEntry)});\n`
+        + `const r = parseDerivedText(origin, 'from-program.ts', 'const a = 1;\\n');\n`
+        + `console.log('DERIVED ' + (r.failure === null));\n`,
+    );
+    t('⭐ a source file a checked Program was built over IS certified',
+      programOrigin.status === 0 && programOrigin.out === 'DERIVED true',
+      JSON.stringify(programOrigin));
+
+    battery('the fourth door parses under the SAME fixed knobs as the three above');
+    // Two doors, one source, the knobs compared rather than asserted in prose:
+    // a drift in either would leave the header's "the knobs that are NOT knobs"
+    // section describing one door only.
+    const knobs = run(
+      IMPORT_DERIVED
+        + `const origin = parseSourceFile('corpus/a.ts', 'export const x = 1;\\n');\n`
+        + `const direct = parseSourceFile('b.ts', 'export const y = 2;\\n');\n`
+        + `const { sourceFile: fromDerived } = parseDerivedText(origin, 'c.ts', 'export const z = 3;\\n');\n`
+        + `console.log(JSON.stringify({\n`
+        + `  sameTarget: direct.languageVersion === fromDerived.languageVersion,\n`
+        + `  latest: fromDerived.languageVersion === ts.ScriptTarget.Latest,\n`
+        + `  parentsDirect: direct.statements[0].parent !== undefined,\n`
+        + `  parentsDerived: fromDerived.statements[0].parent !== undefined,\n`
+        + `}));\n`,
+    );
+    t('the derived tree carries the same ScriptTarget and has its parents set, exactly as a direct parse',
+      knobs.status === 0
+        && knobs.out === '{"sameTarget":true,"latest":true,"parentsDirect":true,"parentsDerived":true}',
+      JSON.stringify(knobs));
+
+    battery('the census counts a derived parse as its own door, and a rejection as NOT a refusal');
+    // The numerator claim: a rejection left the run going, so conflating it
+    // with a refusal would make the one report that says how much was measured
+    // say it wrong.
+    const countedDerived = run(
+      IMPORT_DERIVED
+        + `const origin = parseSourceFile('corpus/a.ts', 'export const x = 1;\\n');\n`
+        + `parseDerivedText(origin, 'ok.ts', 'const a = 1;\\n');\n`
+        + `parseDerivedText(origin, 'bad.ts', ${JSON.stringify(alias(COLLAPSED_RECEIVER))});\n`
+        + `console.log(JSON.stringify(parseCensus()));\n`,
+    );
+    t('two derived parses, one rejected: counted as derived, and the run’s refusals stay 0',
+      countedDerived.status === 0
+        && countedDerived.out === '{"parses":3,"programs":0,"transpiles":0,"derived":2,"files":3,'
+          + '"refusals":0,"rejections":1}',
+      JSON.stringify(countedDerived));
 
     // -- the diagnostics reader itself, in-process ---------------------------
     battery('the diagnostics reader itself, in-process');
@@ -906,7 +1334,10 @@ export function selfTest() {
   console.log(
     `✓ ts-parse self-test: ${cases.length} cases pass (every measured wreck refuses and names its file, `
       + `across all three parser entry points, both ScriptKind directions, a Program's transitive import `
-      + `included, and a caller’s try/catch cannot swallow any of it).`,
+      + `included, and a caller’s try/catch cannot swallow any of it -- plus the fourth door, where text `
+      + `THIS process synthesised returns its verdict instead of ending the run, reachable only from an `
+      + `origin one of those three certified, handing back no tree when it fails, and with the census `
+      + `counting a rejection as a run that continued rather than as a refusal).`,
   );
   selfTestReachedVerdict = true;
   return 0;

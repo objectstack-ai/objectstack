@@ -105,13 +105,40 @@ export type ProjectableRefinement =
       readonly pattern: 'dependent-required';
       /** Key ⇒ the keys its presence requires. Read once here, and by the predicate. */
       readonly dependencies: Readonly<Record<string, readonly string[]>>;
-    };
+    }
+  /**
+   * "no document may carry any of these keys" — published as `propertyNames`
+   * with a `not` over the banned names, the spelling JSON Schema has for a rule
+   * about NAMES rather than about values.
+   *
+   * Exact in the JSON domain: a JSON object's properties are exactly its own
+   * enumerable string-keyed ones, and `propertyNames` judges exactly those
+   * names, so "none of the banned names is an own property" and "no property
+   * name is one of the banned names" are one sentence read from two ends. It is
+   * PRESENCE and never value — a banned key present with a `null` value is
+   * present on both sides, the same equality {@link requiredOneOf} rests on.
+   *
+   * ⛔ The predicate reads OWN properties and never `key in value`. `in` walks
+   * the prototype chain, so a ban on a name `Object.prototype` carries —
+   * `toString`, `constructor`, `valueOf` — would refuse every object including
+   * `{}`, while `propertyNames` accepts it: `'toString' in JSON.parse('{}')` is
+   * `true`. That is a disagreement about a JSON DOCUMENT, not an edge outside
+   * the domain, and an arm that could only approximate its rule does not belong
+   * in this list.
+   *
+   * ⛔ A ban over an open set of names — every key starting with `$`, say — is
+   * NOT this arm: its keys are a finite list, and a list that merely sampled an
+   * open set would be wider than the rule. Such a rule stays dropped and
+   * annotated until the list learns a pattern-shaped arm of its own.
+   */
+  | { readonly pattern: 'banned-keys'; readonly keys: readonly string[] };
 
 /** Every arm's `pattern` tag, for a reader that needs the list itself. */
 export const PROJECTABLE_REFINEMENT_PATTERNS = [
   'required-one-of',
   'non-blank-string',
   'dependent-required',
+  'banned-keys',
 ] as const;
 
 /**
@@ -222,5 +249,35 @@ export function dependentRequired<K extends string, D extends string>(
         record[key] === undefined || required.every((dependency) => record[dependency] !== undefined),
       );
   };
+  return declare(rule, declared);
+}
+
+/**
+ * "none of these keys is present", as a `.refine()` predicate that also
+ * declares itself.
+ *
+ * The key list is read once into the declaration and the predicate reads it
+ * from there, so the published `propertyNames` and the enforced rule cannot
+ * name different keys — the same construction {@link requiredOneOf} and
+ * {@link dependentRequired} use, and the reason this arm needs no drift pin
+ * either.
+ *
+ * Spell the slot's own banned keys at the call site:
+ *
+ * ```ts
+ * z.record(z.string(), z.unknown()).refine(bannedKeys(['dialect']), {
+ *   message: 'A structured filter must not carry `dialect`',
+ *   abort: true,
+ * })
+ * ```
+ */
+export function bannedKeys<K extends string>(
+  keys: readonly [K, ...K[]],
+): (value: object) => boolean {
+  const declared: ProjectableRefinement = { pattern: 'banned-keys', keys: Object.freeze([...keys]) };
+  const rule = (value: object): boolean =>
+    !(declared as { keys: readonly string[] }).keys.some((key) =>
+      Object.prototype.hasOwnProperty.call(value, key),
+    );
   return declare(rule, declared);
 }

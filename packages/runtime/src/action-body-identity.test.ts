@@ -36,9 +36,12 @@ import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
  * `ctx.api` binding is exercised end-to-end.
  */
 function makeSharingEngine(extra: Record<string, unknown> = {}) {
-    const writes: Array<{ op: string; object: string; context: any }> = [];
-    const gate = (op: string, object: string, context: any) => {
-        writes.push({ op, object, context });
+    // [#15124] `where` is recorded as well as `context`, so the "the caller's
+    // predicate must survive" case below can assert the PREDICATE instead of
+    // asserting that an entry exists.
+    const writes: Array<{ op: string; object: string; context: any; where?: unknown }> = [];
+    const gate = (op: string, object: string, context: any, where?: unknown) => {
+        writes.push({ op, object, context, where });
         if (!context?.isSystem && !context?.userId) {
             throw new Error(`FORBIDDEN: insufficient privileges to ${op} ${object}`);
         }
@@ -58,7 +61,7 @@ function makeSharingEngine(extra: Record<string, unknown> = {}) {
             return { ok: true };
         },
         async find(object: string, options?: any) {
-            gate('find', object, options?.context);
+            gate('find', object, options?.context, options?.where);
             // [#16370] The by-id pre-load has to be ANSWERED: an action door now
             // refuses a row-scoped invocation whose caller-scope subject load did
             // not deliver the row, so a rig that answered every read with `[]`
@@ -121,7 +124,9 @@ describe('#3914 — ctx.engine (buildActionEngineFacade)', () => {
         await engine.insert('crm_case', { subject: 'x' });
         await engine.update('crm_case', 'case_1', { status: 'closed' });
         await engine.delete('crm_case', 'case_1');
-        await engine.find('crm_case', { status: 'open' });
+        // [#15124] The envelope, not a bare filter — the withdrawn shape is now
+        // refused by the arm itself, so this call would throw if left as it was.
+        await engine.find('crm_case', { where: { status: 'open' } });
 
         expect(ql.writes.map((w: any) => w.op)).toEqual(['insert', 'update', 'delete', 'find']);
         for (const w of ql.writes) {
@@ -138,10 +143,14 @@ describe('#3914 — ctx.engine (buildActionEngineFacade)', () => {
     it('still passes the caller filter on find (context is additive, not a replacement)', async () => {
         const ql = makeSharingEngine();
         const engine = buildActionEngineFacade(deps, ql, { userId: 'u1' });
-        await engine.find('crm_case', { status: 'open' });
+        await engine.find('crm_case', { where: { status: 'open' } });
         expect(ql.writes[0].context).toMatchObject({ isSystem: true, userId: 'u1' });
-        // the caller's predicate must survive alongside the injected context
-        expect((ql.writes as any)[0]).toBeDefined();
+        // [#15124] The caller's predicate must survive alongside the injected
+        // context — asserted on the PREDICATE. This line used to read
+        // `expect(ql.writes[0]).toBeDefined()`, which is true of any recorded
+        // call whatever the arm did with the filter, so the one thing the case
+        // is named for was the one thing it did not check.
+        expect(ql.writes[0].where).toEqual({ status: 'open' });
     });
 });
 

@@ -249,6 +249,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "enable.clone": {
         label: "Clone"
       },
+      validations: {
+        label: "Validations",
+        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+      },
       datasource: {
         label: "Datasource",
         helpText: "Target datasource ID (default: \"default\")"
@@ -416,6 +420,24 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Options",
         helpText: "Available options (label/value pairs)"
       },
+      "options.label": {
+        label: "Label"
+      },
+      "options.value": {
+        label: "Value"
+      },
+      "options.description": {
+        label: "Description"
+      },
+      "options.color": {
+        label: "Color"
+      },
+      "options.default": {
+        label: "Default"
+      },
+      "options.visibleWhen": {
+        label: "Visible When"
+      },
       reference: {
         label: "Reference",
         helpText: "Referenced object name"
@@ -423,6 +445,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       deleteBehavior: {
         label: "Delete Behavior",
         helpText: "What happens when referenced record is deleted"
+      },
+      relatedListFilter: {
+        label: "Related List Filter",
+        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
       },
       expression: {
         label: "Expression",
@@ -809,12 +835,21 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Initial value (defaults to a type-appropriate empty value)"
       },
       "variables.source": {
-        label: "Source",
+        label: "Written By",
         helpText: "Component (by id) that writes this variable — e.g. an element:record_picker"
       },
       regions: {
         label: "Regions",
         helpText: "Layout regions (header, main, sidebar, footer) with components"
+      },
+      "regions.name": {
+        label: "Region"
+      },
+      "regions.width": {
+        label: "Width"
+      },
+      "regions.components": {
+        label: "Components"
       },
       interfaceConfig: {
         label: "Interface Config",
@@ -835,6 +870,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "interfaceConfig.sort": {
         label: "Sort",
         helpText: "Default sort order for the page, defined directly on the page."
+      },
+      "interfaceConfig.sort.field": {
+        label: "Field"
+      },
+      "interfaceConfig.sort.order": {
+        label: "Direction"
       },
       "interfaceConfig.levels": {
         label: "Levels",
@@ -966,6 +1007,57 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Widgets",
         helpText: "Dashboard widgets with position and sizing"
       },
+      "widgets.id": {
+        label: "Widget ID"
+      },
+      "widgets.title": {
+        label: "Title"
+      },
+      "widgets.description": {
+        label: "Description"
+      },
+      "widgets.type": {
+        label: "Visualization Type"
+      },
+      "widgets.chartConfig": {
+        label: "Chart Configuration"
+      },
+      "widgets.colorVariant": {
+        label: "Color Variant"
+      },
+      "widgets.requiresObject": {
+        label: "Requires Object"
+      },
+      "widgets.requiresService": {
+        label: "Requires Service"
+      },
+      "widgets.filter": {
+        label: "Filter"
+      },
+      "widgets.compareTo": {
+        label: "Compare To"
+      },
+      "widgets.dataset": {
+        label: "Dataset"
+      },
+      "widgets.dimensions": {
+        label: "Dimensions"
+      },
+      "widgets.values": {
+        label: "Values"
+      },
+      "widgets.layout": {
+        label: "Layout"
+      },
+      "widgets.options": {
+        label: "Options"
+      },
+      "widgets.filterBindings": {
+        label: "Filter Bindings"
+      },
+      "widgets.suppressWarnings": {
+        label: "Suppress Warnings"
+      },
       dateRange: {
         label: "Date Range",
         helpText: "Default date range selector"
@@ -973,6 +1065,36 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       globalFilters: {
         label: "Global Filters",
         helpText: "Filters applied to all widgets"
+      },
+      "globalFilters.name": {
+        label: "Name"
+      },
+      "globalFilters.field": {
+        label: "Field"
+      },
+      "globalFilters.object": {
+        label: "Object"
+      },
+      "globalFilters.label": {
+        label: "Label"
+      },
+      "globalFilters.type": {
+        label: "Input Type"
+      },
+      "globalFilters.options": {
+        label: "Options"
+      },
+      "globalFilters.optionsFrom": {
+        label: "Options From"
+      },
+      "globalFilters.defaultValue": {
+        label: "Default Value"
+      },
+      "globalFilters.scope": {
+        label: "Scope"
+      },
+      "globalFilters.targetWidgets": {
+        label: "Target Widgets"
       }
     }
   },
@@ -1029,6 +1151,21 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       areas: {
         label: "Areas",
         helpText: "Group items into collapsible areas"
+      },
+      "areas.id": {
+        label: "ID"
+      },
+      "areas.label": {
+        label: "Label"
+      },
+      "areas.icon": {
+        label: "Icon"
+      },
+      "areas.description": {
+        label: "Description"
+      },
+      "areas.navigation": {
+        label: "Navigation"
       },
       defaultAgent: {
         label: "Default Agent",
@@ -1124,6 +1261,60 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       params: {
         label: "Params",
         helpText: "User input parameters (show form before executing)"
+      },
+      "params.name": {
+        label: "Name"
+      },
+      "params.field": {
+        label: "Field"
+      },
+      "params.objectOverride": {
+        label: "Object Override"
+      },
+      "params.label": {
+        label: "Label"
+      },
+      "params.type": {
+        label: "Type"
+      },
+      "params.required": {
+        label: "Required"
+      },
+      "params.options": {
+        label: "Options"
+      },
+      "params.placeholder": {
+        label: "Placeholder"
+      },
+      "params.helpText": {
+        label: "Help Text"
+      },
+      "params.defaultValue": {
+        label: "Default Value"
+      },
+      "params.multiple": {
+        label: "Multiple"
+      },
+      "params.accept": {
+        label: "Accepted Types"
+      },
+      "params.maxSize": {
+        label: "Max Size (bytes)"
+      },
+      "params.reference": {
+        label: "Reference Object"
+      },
+      "params.defaultFromRow": {
+        label: "Default From Row"
+      },
+      "params.carryOver": {
+        label: "Carry Over"
+      },
+      "params.visible": {
+        label: "Visible When"
+      },
+      "params.requiresFeature": {
+        label: "Requires Feature"
       },
       confirmText: {
         label: "Confirm Text",
@@ -1226,6 +1417,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Order",
         helpText: "Sort keys, most significant first (a rows/columns dimension or a values measure). Time dimensions are chronological by default."
       },
+      "order.by": {
+        label: "Order By"
+      },
+      "order.direction": {
+        label: "Direction"
+      },
       drilldown: {
         label: "Drilldown",
         helpText: "Click an aggregated row/cell to open the underlying records"
@@ -1233,6 +1430,39 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       blocks: {
         label: "Blocks",
         helpText: "Dataset-bound sub-reports (joined report only)"
+      },
+      "blocks.name": {
+        label: "Name"
+      },
+      "blocks.label": {
+        label: "Label"
+      },
+      "blocks.description": {
+        label: "Description"
+      },
+      "blocks.type": {
+        label: "Block Type"
+      },
+      "blocks.chart": {
+        label: "Chart"
+      },
+      "blocks.dataset": {
+        label: "Dataset"
+      },
+      "blocks.rows": {
+        label: "Rows"
+      },
+      "blocks.columns": {
+        label: "Columns"
+      },
+      "blocks.values": {
+        label: "Values"
+      },
+      "blocks.runtimeFilter": {
+        label: "Runtime Filter"
+      },
+      "blocks.order": {
+        label: "Order"
       },
       runtimeFilter: {
         label: "Runtime Filter",
@@ -1294,9 +1524,48 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Dimensions",
         helpText: "Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity"
       },
+      "dimensions.name": {
+        label: "Name"
+      },
+      "dimensions.label": {
+        label: "Label"
+      },
+      "dimensions.field": {
+        label: "Field"
+      },
+      "dimensions.type": {
+        label: "Type"
+      },
+      "dimensions.dateGranularity": {
+        label: "Date Granularity"
+      },
       measures: {
         label: "Measures",
         helpText: "Each: name, aggregate, field (optional for count), and display format/currency"
+      },
+      "measures.name": {
+        label: "Name"
+      },
+      "measures.label": {
+        label: "Label"
+      },
+      "measures.aggregate": {
+        label: "Aggregate"
+      },
+      "measures.field": {
+        label: "Field"
+      },
+      "measures.filter": {
+        label: "Filter"
+      },
+      "measures.format": {
+        label: "Format"
+      },
+      "measures.currency": {
+        label: "Currency"
+      },
+      "measures.derived": {
+        label: "Derived From"
       }
     }
   },
@@ -1337,13 +1606,79 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Nodes",
         helpText: "⚠️ Consider using Flow Designer visual editor instead of JSON"
       },
+      "nodes.id": {
+        label: "ID"
+      },
+      "nodes.type": {
+        label: "Node Type"
+      },
+      "nodes.label": {
+        label: "Label"
+      },
+      "nodes.config": {
+        label: "Configuration"
+      },
+      "nodes.connectorConfig": {
+        label: "Connector Action"
+      },
+      "nodes.position": {
+        label: "Canvas Position"
+      },
+      "nodes.timeoutMs": {
+        label: "Timeout (ms)"
+      },
+      "nodes.inputSchema": {
+        label: "Input Schema"
+      },
+      "nodes.waitEventConfig": {
+        label: "Wait Event"
+      },
+      "nodes.boundaryConfig": {
+        label: "Boundary Event"
+      },
       edges: {
         label: "Edges",
         helpText: "Connections between nodes — use Flow Designer for easier editing"
       },
+      "edges.id": {
+        label: "ID"
+      },
+      "edges.source": {
+        label: "From Node"
+      },
+      "edges.target": {
+        label: "To Node"
+      },
+      "edges.condition": {
+        label: "Condition"
+      },
+      "edges.type": {
+        label: "Connection Type"
+      },
+      "edges.label": {
+        label: "Label"
+      },
+      "edges.isDefault": {
+        label: "Default Path"
+      },
       variables: {
         label: "Variables",
         helpText: "Flow variables (inputs/outputs)"
+      },
+      "variables.name": {
+        label: "Name"
+      },
+      "variables.type": {
+        label: "Type"
+      },
+      "variables.isInput": {
+        label: "Input"
+      },
+      "variables.isOutput": {
+        label: "Output"
+      },
+      "variables.defaultValue": {
+        label: "Default Value"
       },
       status: {
         label: "Status",
@@ -1705,6 +2040,15 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       triggerConditions: {
         label: "Trigger Conditions",
         helpText: "Programmatic conditions (e.g., objectName == \"case\")"
+      },
+      "triggerConditions.field": {
+        label: "Context Field"
+      },
+      "triggerConditions.operator": {
+        label: "Operator"
+      },
+      "triggerConditions.value": {
+        label: "Value"
       }
     }
   }

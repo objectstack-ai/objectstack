@@ -64,6 +64,28 @@
  * when a live property appears or disappears, and the subtraction is derived
  * rather than a second hand-maintained table.
  *
+ * ## [#19295] Why the baseline now also carries the erased-authoring mark
+ *
+ * A THIRD declared reason joined the two above, and it gets the treatment
+ * #17502 established rather than a new one. `markErasedAuthoringInput`
+ * annotates the husk arm of a member whose authoring type the output
+ * derivation erased — a `ZodPipe`'s string arm — with a vendor keyword. Nine
+ * served types carry such a member, so a baseline derived without the hook
+ * would differ from the served payload for a reason this suite does not own,
+ * and the blanket-`io: 'input'` widening it exists to refuse would once again
+ * arrive inside an already-red assertion.
+ *
+ * So the baseline is derived with the SAME `override` the server passes —
+ * the emitter's own function, never a second spelling — and what is left on
+ * the two sides is again exactly the degeneracy retry's blast radius.
+ *
+ * ⚠️ The assertion's strength is unchanged, and that is checkable rather than
+ * asserted: the mark is emitted only where the OUTPUT derivation erased an
+ * input type, so under a blanket `io: 'input'` no arm is a husk, nothing is
+ * marked on either side, and the 24 types that answer differently move on
+ * `required` / `additionalProperties` exactly as before. The widening still
+ * reds this file.
+ *
  * Harness: the real `getMetaTypes()` on one protocol instance over a stub
  * engine, so the assertions are about what the endpoint SERVES. A pin taken on
  * a derivation chosen for convenience would not cover the served path at all —
@@ -81,6 +103,10 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
 // stripped with the same code the server runs, so this pin can never drift
 // into measuring a second, hand-written idea of "admits nothing".
 import { acceptsNothing, stripUnauthorableProperties } from './unauthorable-nodes.js';
+// [#19295] The emitter's OWN erased-authoring hook, for the same reason: the
+// baseline is derived with the code the server derives with, so the only
+// difference left to find is the degeneracy retry's.
+import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 
 /**
  * The whole served surface: every declared metadata type plus every
@@ -129,7 +155,12 @@ function preFixDerivation(type: string): Record<string, unknown> | undefined {
     const schema = getMetadataTypeSchema(type);
     if (!schema) return undefined;
     try {
-        return z.toJSONSchema(schema as z.ZodTypeAny, { unrepresentable: 'any' }) as Record<string, unknown>;
+        return z.toJSONSchema(schema as z.ZodTypeAny, {
+            unrepresentable: 'any',
+            // [#19295] The emitter's own hook — see the header section on why
+            // the baseline carries it.
+            override: markErasedAuthoringInput,
+        }) as Record<string, unknown>;
     } catch {
         return undefined;
     }

@@ -21,6 +21,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 - `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
 - `node_modules/@objectstack/spec/src/automation/flow-function.zod.ts` — The contract for a **named handler function a `script` node invokes** —
+- `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol
 - `node_modules/@objectstack/spec/src/data/driver-sql.zod.ts` — Exports: SQLDialectSchema, DataTypeMappingSchema, SSLConfigSchema, SQLDriverConfigSchema, SQLiteDataTypeMappingDefaults
 - `node_modules/@objectstack/spec/src/data/driver.zod.ts` — Exports: DriverOptionsSchema, DriverCapabilitiesSchema, DriverInterfaceSchema, PoolConfigSchema, DriverConfigSchema
 - `node_modules/@objectstack/spec/src/data/driver/common.zod.ts` — Shared building blocks for the per-driver `datasource.config` shapes.
@@ -35,7 +36,9 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Exports: HookBodyCapability, ExpressionBodySchema, ScriptBodySchema, HookBodySchema
 - `node_modules/@objectstack/spec/src/data/query.zod.ts` — QueryAST — Abstract Syntax Tree for data queries.
+- `node_modules/@objectstack/spec/src/kernel/execution-context.zod.ts` — Exports: ExecutionContextSchema
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
+- `node_modules/@objectstack/spec/src/security/explain.zod.ts` — [ADR-0090 D6] Access-explanation contract — `explain(principal, object,
 - `node_modules/@objectstack/spec/src/security/rls.zod.ts` — Row-Level Security (RLS) Protocol
 - `node_modules/@objectstack/spec/src/shared/enums.zod.ts` — Exports: SortDirectionEnum, SortItemSchema, MutationEventEnum, IsolationLevelEnum
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol

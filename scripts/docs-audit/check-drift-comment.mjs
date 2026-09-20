@@ -69,6 +69,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 
+import { gitFreeEnv } from '../git-env.mjs';
+
 const HERE = dirname(new URL(import.meta.url).pathname);
 const REPO_ROOT = join(HERE, '..', '..');
 const WORKFLOW = join(REPO_ROOT, '.github', 'workflows', 'docs-drift-check.yml');
@@ -163,8 +165,12 @@ async function renderComment(scriptText, affectedJson, { headSha = 'f'.repeat(40
 // the sdk route bridge, so these repos (which declare no route ledger) do not trip the
 // bridge's broken-scan verdicts and the fixture stays about the headline.
 // ---------------------------------------------------------------------------
+// LOCAL-ONLY (#16644): every `git` and every mapper run below is aimed at a throwaway
+// fixture repository under `workdir`. `gitFreeEnv()` is the BASE so no inherited GIT_DIR /
+// GIT_WORK_TREE / GIT_INDEX_FILE can outrank that `cwd` -- the identity and config-file
+// pins that follow are deliberate and are re-applied ON TOP of the strip.
 const GIT_ENV = {
-  ...process.env,
+  ...gitFreeEnv(),
   GIT_AUTHOR_NAME: 'fixture', GIT_AUTHOR_EMAIL: 'fixture@objectstack.ai',
   GIT_COMMITTER_NAME: 'fixture', GIT_COMMITTER_EMAIL: 'fixture@objectstack.ai',
   GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
@@ -229,6 +235,37 @@ const RULE_CARRYING_BLIND_SPOT =
   + ' and it was the page that diff falsified, in four places. No shared token exists to'
   + ' detect this on, so a rule your change carries has to be re-read by hand in the pages'
   + ' that restate it.';
+
+/**
+ * The #19093 boundary line, byte-exact — the SECOND fold entry that is not a report about
+ * the run, and the second asserted on every case.
+ *
+ * The class: the line above prescribes a hand re-read, and a hand re-read is a name-based
+ * search. A name does not identify a key — `tools` is authorable on `SkillSchema` and a
+ * `[REMOVED]` tombstone on `AgentSchema` — so a grep hit on a live example is
+ * indistinguishable from evidence about the dead key. Measured on #19059, where
+ * `content/docs/ai/agents.mdx` was reported as contradicting the `agent.tools` tombstone
+ * over an example that sits inside a `defineSkill({` block.
+ *
+ * ⛔ The payload is the NAMES, never a count: the defect is precisely that a count cannot
+ * tell two identically-named keys apart. A re-measure that replaces them with a number has
+ * removed the reading, and this pin is byte-exact so it cannot happen quietly.
+ */
+const SAME_NAME_DIFFERENT_SHAPE =
+  'a key NAME is not a key, so the hand re-read the line above prescribes can land on the'
+  + ' wrong schema. The same spelling is authorable on one governed type and a `[REMOVED]`'
+  + ' tombstone on another for each of `active`, `aria`, `joins`, `objects`, `template`,'
+  + ' `tools` and `version` (censused on #19093 over the liveness ledger\'s governed types,'
+  + ' top-level keys); nothing in a search result distinguishes the two, so a grep hit on a'
+  + ' LIVE example reads as evidence about the DEAD key. Measured on #19059:'
+  + ' `content/docs/ai/agents.mdx` was reported as contradicting the `agent.tools` tombstone'
+  + ' over its `tools:` example at `:161`, which is inside the `defineSkill({` block opened'
+  + ' at `:155` — the page was already correct. Settle ownership by PARSING the value against'
+  + ' both schemas, never by the name: that literal PASSES `SkillSchema`, and as an'
+  + ' `AgentSchema` it FAILS at `tools` with the tombstone prescription. ⛔ These names are'
+  + ' not the whole class — a key retired through a `.strict()` guidance map leaves no'
+  + ' tombstone in the walked shape and none of them here (`tool.category`, live as'
+  + ' `AIToolDefinition.category`).';
 
 /**
  * `want` is the mapper contract each case rides on — asserted before any text is, so a
@@ -348,6 +385,13 @@ try {
       true, body.includes(`- ${RULE_CARRYING_BLIND_SPOT}`));
     check(c.id, 'and it stays out of the headline, which reports this run only',
       false, headline.includes('shares no identifier with the **emitter**'));
+    // #19093 — the same opposite pin, for the same reason, on the line that states the
+    // hand-grep remedy's own failure mode. Byte-exact so the NAMES cannot be quietly
+    // replaced by a count: on this class a count is structurally not a reading.
+    check(c.id, 'the same-name-different-shape boundary is stated in the fold, byte-exact',
+      true, body.includes(`- ${SAME_NAME_DIFFERENT_SHAPE}`));
+    check(c.id, 'and it stays out of the headline, which reports this run only',
+      false, headline.includes('a key NAME is not a key'));
     c.expect(headline, body);
   }
 } finally {

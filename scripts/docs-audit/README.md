@@ -552,9 +552,12 @@ How often it renders, re-derived over the 40 first-parent commits ending at `e43
 3 of the 17 package-touching runs (18%) — `20a452e664`, `f213793ddb`, `dd4113ec0b` — so it
 is a rare notice rather than a per-PR banner, which is what keeps it readable.
 
-**Cost** (the card's open question): the anchor derivation reads the same 178-page corpus
-the old one did, plus the 18 route-source/ledger files (~875 KB) and one `git show`
-per changed file per side. Measured end-to-end on the ten PRs above, `node affected-docs.mjs`
+**Cost** (the card's open question): the anchor derivation reads the same hand-written
+corpus the old one did, plus the 18 route-source/ledger files (~875 KB) and one `git show`
+per changed file per side. ⛔ The corpus SIZE is deliberately absent from that sentence —
+run `check-audit-scope.mjs` (`pnpm check:docs-audit-scope`) for today's page count. A size
+written down in the present tense decays with nothing going red, which is exactly what the
+`178` that used to stand here did. Measured end-to-end on the ten PRs above, `node affected-docs.mjs`
 went from 85-195 ms to 114-582 ms. The heaviest case is the widest diff; every case stays
 well under a second, against a job that already spends seconds checking out the repo and
 setting up Node. It is the right default for every PR.

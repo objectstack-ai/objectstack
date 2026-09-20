@@ -177,7 +177,10 @@
  * workflow facts into a dispatch prompt (four of six required-context names
  * lived in a different file than claimed). So this script embeds NO list of
  * checks and NO map from paths to checks: every run re-reads
- * `.github/workflows/*.yml`, resolves each `check:*` script through
+ * `.github/workflows/*.yml`, follows each `uses: ./.github/actions/…`
+ * into that action's `runs:` steps (#19229 — a command executed through a
+ * composite action runs on the runner exactly as an inline one does, so it is
+ * derived exactly as one), resolves each `check:*` script through
  * package.json, and scans the check scripts' own sources for the path
  * literals they operate on. When the farm grows, the next run sees it.
  *
@@ -458,6 +461,9 @@ import {
 import { EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
+// The human-merge line threshold is declared ONCE, in the landing gate; this
+// tool prints the same reading at dispatch time and never carries a second copy.
+import { HUMAN_MERGE_LINE_THRESHOLD, parseNumstat, sizeVerdict } from './check-governed-merges.mjs';
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
 // runs, not copies of them. They used to be written twice — see the shared
@@ -699,7 +705,7 @@ const maskedHashCommentBody = memoiseMask((source) =>
 // remembered, not a property of this module. The line below makes it the module's own
 // declaration, read fresh on every run and held to a subset of what this file really spells
 // — see `declaredInheritedPopulation`.
-// dispatch-gates: inherited-population .github/workflows -- the workflow directory this tool readdirs; every other module-body literal here is a package-manifest join base or a tier glob, not a path this file opens (#11556)
+// dispatch-gates: inherited-population .github/workflows .github/actions -- the two trees this tool opens: the workflow directory it readdirs and the composite actions those workflows `uses:` (#19229); every other module-body literal here is a package-manifest join base or a tier glob, not a path this file opens (#11556)
 
 // ---------------------------------------------------------------------------
 // Extraction — pure functions over file contents, self-testable offline.
@@ -2124,8 +2130,14 @@ function tailBeforeRedirection(tail, nextChar) {
  * subtree"), so a hint added for this card's convenience would fail the very
  * gate the card is about.
  */
-export function extractCheckInvocations(workflowText, workflowFile) {
+export function extractCheckInvocations(workflowText, workflowFile, { via = null } = {}) {
   const out = [];
+  // WHERE the step this invocation came out of is written (#19229). `null` is
+  // an inline step of the workflow itself; a path is the composite action file
+  // the caller `uses:`. The WORKFLOW attribution never moves — CI schedules the
+  // caller — so this rides alongside as provenance a reader can go check, the
+  // same split `readEdge` keeps for a read's spelling.
+  const withVia = (inv) => (via === null ? inv : { ...inv, viaAction: via });
   for (const { text: raw, envVariables: stepEnv } of runCommandSteps(workflowText)) {
     // ONE joined text for all three matchers, so no two of them can disagree
     // about where a command ends — the discipline `discoverFamilies` follows
@@ -2143,14 +2155,14 @@ export function extractCheckInvocations(workflowText, workflowFile) {
     // `process.env`, which no reader of the command line can see.
     const carriedEnv = envNamesNotSpelledInCommand(cmd, stepEnv);
     for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
-      out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile, envVariables: carriedEnv });
+      out.push(withVia({ check: m[2], filter: m[1] ?? null, workflow: workflowFile, envVariables: carriedEnv }));
     }
     for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
       const script = m[1];
       // The KEY is (script, args), never the path alone — `renderedArgv`'s
       // docblock carries the measurement and the classification it applies.
       const argv = renderedArgv(tailBeforeRedirection(m[2], cmd[m.index + m[0].length]));
-      out.push({
+      out.push(withVia({
         check: argv ? `${script} ${argv.args}` : script,
         script,
         filter: null,
@@ -2175,7 +2187,7 @@ export function extractCheckInvocations(workflowText, workflowFile) {
         // follows in `discoverFamilies`, and `ciOnlyMeasurement`). Before the
         // key carried the argv there was nothing here to read it off.
         selfTest: Boolean(argv) && argv.args.split(/[ \t]+/).includes('--self-test'),
-      });
+      }));
     }
     for (const m of cmd.matchAll(SELF_TEST_INVOCATION)) {
       const script = m[1];
@@ -2184,7 +2196,7 @@ export function extractCheckInvocations(workflowText, workflowFile) {
       // twice, not a second family. The skip is what keeps the two matchers
       // from disagreeing; the split into two families is done by the key.
       if (nodePath.basename(script).includes('check-')) continue;
-      out.push({
+      out.push(withVia({
         // The flag is part of the KEY because it is part of the runnable
         // command: `node scripts/pm/bare-root-worklist.mjs` on its own prints
         // a worklist and exits 0. A dev pasting the key without it runs
@@ -2196,10 +2208,182 @@ export function extractCheckInvocations(workflowText, workflowFile) {
         direct: true,
         selfTest: true,
         envVariables: carriedEnv,
-      });
+      }));
     }
   }
   return out;
+}
+
+// ── Following a command OUT of a workflow and into a composite action ────────
+//
+// Everything above reads a `run:` step out of a workflow file. That was the
+// whole population until composite actions started carrying runner-executed
+// commands, and the gap it left was measured rather than argued (#19229): six
+// gates in this repo root their population at `.github/workflows` and NONE of
+// them reads `.github/actions/**`, while every one prints a scope line that
+// reads as coverage. The positive control on the tree that filed it:
+// `.github/actions/setup-pnpm/action.yml` already carried SIX `run:` steps, so
+// the zero was a reading and not an empty query.
+//
+// A command GitHub executes through `uses: ./.github/actions/NAME` is executed
+// on the runner exactly as an inline one is, in the caller's job, under the
+// caller's triggers. So it is derived exactly as an inline one is: the steps of
+// the action are read into the CALLING workflow's invocation set, keeping the
+// caller's file name as the attribution, because the caller is what CI
+// schedules and what a `paths:` filter narrows. ⛔ The action file is NOT a
+// second workflow with triggers of its own — an action declares no `on:` block
+// at all, so attributing an invocation to it would invent a schedule nobody
+// wrote.
+//
+// ⚠️ SCOPE, and the direction each boundary fails in:
+//
+//   - Only a LOCAL action is followed (`uses: ./…`). A third-party action's
+//     steps are not in this tree, so nothing here could read them and no gate
+//     in this repo claims to audit them.
+//   - Only `./.github/actions/**` is followed, which is where GitHub's own
+//     convention puts them and where every local action in this repo lives.
+//     A local action landing outside that tree would be followed by nothing —
+//     a MISSING lead, never a fabricated one — and it is refused deliberately:
+//     the declared inherited population at the top of this file has to stay
+//     exactly equal to the trees this module really opens, and a follow that
+//     could open any directory a workflow names could not be declared at all.
+//   - A `uses:` naming a directory with no `action.yml`/`action.yaml` in it is
+//     UNRESOLVED and reported, never skipped. GitHub fails such a job outright,
+//     so on a tree where it happens the derivation must say so rather than
+//     derive a smaller answer and print it as a whole one (#4690).
+//   - The follow is RECURSIVE with a visited set, because an action may itself
+//     `uses:` a sibling action; a one-hop follow would re-open this card's own
+//     blind spot one level down.
+//
+// ⛔ What is deliberately NOT extended here, stated because an unstated
+// omission is the shape this card is about: the always-runs tail
+// (`alwaysRunSteps`) and the job-filtered tail (`jobFilteredSteps`) below still
+// read the workflow's own `jobs:` structure only. A composite action has no
+// `jobs:`, so those two walks find nothing in it and their rows are UNDER-
+// reported rather than wrong — the safe direction, and the same one
+// `extractTriggerPaths` takes for `paths-ignore:`. The size of that deferral is
+// measured by this file's own `--self-test` so it goes loud the day it grows.
+
+/** The tree local composite actions live in — the one extra tree this module opens. */
+export const COMPOSITE_ACTION_DIR = '.github/actions';
+
+/**
+ * A step that `uses:` a LOCAL composite action under `.github/actions/`.
+ *
+ * Matched on the `uses:` line rather than parsed, for the reason
+ * `extractTriggerPaths` states at length: this script is dependency-free by
+ * design and runs from a bare checkout before `pnpm install`. The value may be
+ * quoted either way and may carry a trailing comment; a local `uses:` takes no
+ * `@ref` (GitHub resolves it inside the checked-out tree), so a value carrying
+ * one is not this shape and is left alone.
+ */
+const LOCAL_COMPOSITE_USES =
+  /^[ \t]*(?:-[ \t]+)?uses:[ \t]*(['"]?)\.\/(\.github\/actions\/[\w.-]+(?:\/[\w.-]+)*)\1[ \t]*(?:#.*)?$/gm;
+
+/**
+ * Every local composite action a text `uses:`, in declaration order, deduped —
+ * as repo-relative DIRECTORY paths (`.github/actions/half-state-patrol`).
+ *
+ * Works on a workflow and on an action alike, which is what makes the follow
+ * below recursive without a second reader.
+ */
+export function localCompositeActionUses(text) {
+  const out = [];
+  for (const m of String(text ?? '').matchAll(LOCAL_COMPOSITE_USES)) {
+    if (!out.includes(m[2])) out.push(m[2]);
+  }
+  return out;
+}
+
+/**
+ * The body of an action file's top-level `runs:` block — the steps a composite
+ * action executes, and nothing else in the file.
+ *
+ * Narrowed to `runs:` rather than handing the whole file to the matchers, so a
+ * `run:` line appearing inside a top-level `description:` block scalar or an
+ * input default is not read as a step nobody wrote. The walk is the same
+ * indentation walk the three `on:` readers above use.
+ *
+ * ⛔ NOT gated on `using: composite`. A `node20` or `docker` action's `runs:`
+ * block declares no `run:` step, so it contributes nothing either way, and a
+ * gate on the `using:` value would be a second thing to keep true about a file
+ * this function already reads correctly.
+ */
+export function compositeActionRunsBlock(actionText) {
+  const lines = String(actionText ?? '').split('\n');
+  const body = [];
+  let inRuns = false;
+  for (const line of lines) {
+    if (line.trim() === '' || /^[ \t]*#/.test(line)) {
+      if (inRuns) body.push(line);
+      continue;
+    }
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    if (indent === 0) {
+      if (inRuns) break;
+      inRuns = /^runs:\s*$/.test(line.trim());
+      continue;
+    }
+    if (inRuns) body.push(line);
+  }
+  return body.join('\n');
+}
+
+/**
+ * Follow every local composite action a workflow reaches, recursively.
+ *
+ * `readAction` is a parameter rather than a filesystem call so this whole walk
+ * is a pure function over text that `--self-test` drives offline — the same
+ * discipline every extractor above keeps. It is handed a repo-relative
+ * directory and answers `{ file, text }` for the action file inside it, or
+ * `null` when there is none.
+ *
+ * @param {string} workflowText
+ * @param {(dir: string) => ({ file: string, text: string } | null)} readAction
+ * @returns {{ steps: {action: string, dir: string, text: string}[], unresolved: string[] }}
+ *   `steps[].text` is the action's `runs:` body, ready for the same matchers a
+ *   workflow's own text goes through; `unresolved` names every `uses:` target
+ *   with no action file behind it.
+ */
+export function followCompositeActions(workflowText, readAction) {
+  const steps = [];
+  const unresolved = [];
+  const seen = new Set();
+  const queue = localCompositeActionUses(workflowText);
+  while (queue.length > 0) {
+    const dir = queue.shift();
+    if (seen.has(dir)) continue;
+    seen.add(dir);
+    const found = readAction(dir);
+    if (found === null || found === undefined) {
+      unresolved.push(dir);
+      continue;
+    }
+    steps.push({ action: found.file, dir, text: compositeActionRunsBlock(found.text) });
+    // An action may `uses:` a sibling. Queued from the WHOLE action text rather
+    // than from the `runs:` body alone, so a `uses:` written beside the steps
+    // still enters the walk.
+    for (const next of localCompositeActionUses(found.text)) {
+      if (!seen.has(next)) queue.push(next);
+    }
+  }
+  return { steps, unresolved };
+}
+
+/**
+ * The filesystem half of `followCompositeActions`, rooted at this checkout.
+ *
+ * Both extensions GitHub accepts are probed, in the order GitHub resolves them.
+ */
+export function compositeActionReader(root = ROOT) {
+  return (dir) => {
+    for (const name of ['action.yml', 'action.yaml']) {
+      const rel = `${dir}/${name}`;
+      const abs = nodePath.join(root, rel);
+      if (existsSync(abs)) return { file: rel, text: readFileSync(abs, 'utf8') };
+    }
+    return null;
+  };
 }
 // ── The "always runs" tail: the steps CI runs whatever your diff is (#13333) ─
 //
@@ -5208,9 +5392,9 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *
  * ## The census, re-derived on this tree
  *
- * 253 code-position matches over the tracked JS/TS corpus. 223 are the bare
- * `selfTest`; the remaining 30 carry compound names over 27 distinct spellings,
- * and they are the rows below. Nineteen are genuine self-test batteries — the
+ * 275 code-position matches over the tracked JS/TS corpus. 244 are the bare
+ * `selfTest`; the remaining 31 carry compound names over 28 distinct spellings,
+ * and they are the rows below. Twenty are genuine self-test batteries — the
  * anchor firing on them is the anchor working. ELEVEN are production code:
  *
  *   scripts/check-self-test-wired.mjs             carriesSelfTest
@@ -5237,7 +5421,7 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  * and it is exactly the kind of claim that stops being true without anything
  * going red, which is what the pin in this module's self-test exists to catch.
  *
- * The same measurement, redone over the table's current nineteen genuine rows,
+ * The same measurement, redone over the table's current twenty genuine rows,
  * is still NOT zero, and that asymmetry is what makes the classification
  * load-bearing rather than decorative: `fixtureSelfTest` drops
  * `packages/spec/spec-changes.json` and `prePushIsArmedSelfTest` drops
@@ -5266,8 +5450,8 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *     wider — and it would make the tool's self-scan differ from every other
  *     scan, which is a hazard of its own.
  *
- * ⇒ What ships is neither. The anchor keeps firing on all 30, the mask keeps
- * blanking all 30, and the cost of the eleven accidental ones is MEASURED on
+ * ⇒ What ships is neither. The anchor keeps firing on all 31, the mask keeps
+ * blanking all 31, and the cost of the eleven accidental ones is MEASURED on
  * every run instead of asserted in prose. Silence was the defect; the remedy is
  * noise on the day it starts costing something.
  *
@@ -5303,6 +5487,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-platform-checklist.mjs', 'selfTestMetaCallSpelling', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestLineCitationBinding', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestSymbolAnchors', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestPlannedStatus', false],
   ['scripts/check-regen-pending.mjs', 'fixtureSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],
@@ -5882,57 +6067,81 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  *
  * ## The census, measured on this tree
  *
- * 3,513 top-level VALUE declarations over the 230 tracked JS/TS files under
- * `scripts/`. 64 identifiers match the predicate; 58 carry at least one string
- * literal; the whole set moves 14 hints, across 6 files:
+ * Re-measured with the `DEFERRED` arm in place, over the objectstack-ai/objectstack
+ * tree at `e6a03e6491`. The METHOD, which this block used to leave implicit: run
+ * `topLevelDecls` over every tracked JS/TS file under `scripts/`, keep the
+ * non-callable declarations, test each name against the predicate, and price
+ * the arm by diffing `extractWatchHints` against a build of this module whose
+ * predicate matches nothing. Attribution is the regex engine's own — leftmost
+ * position first, then alternation order.
  *
- *   scripts/check-doc-authoring.mjs       SKIP_PATHS, SKIP_FILES,
+ * 4,697 top-level VALUE declarations over the 287 tracked JS/TS files under
+ * `scripts/`. 75 identifiers match the predicate; 66 carry at least one string
+ * literal; the whole set moves 24 hints, across 8 files:
+ *
+ *   scripts/check-issue-citations.mjs     DEFERRED_SURFACES                 8
+ *   scripts/check-doc-authoring.mjs       SKIP_DIRS, SKIP_PATHS, SKIP_FILES,
  *                                         PACKAGES_PROSE_EXCLUDED           6
  *   scripts/check-refd-timer-probe.mjs    EXCLUDED_DIRS                     4
- *   scripts/check-corpus-claim-drift.mjs  SKIP_SUBTREES                     1
- *   scripts/check-role-word.mjs           SKIP_SUBTREES                     1
+ *   scripts/pm/measurement-claim-triage.mjs  EXCLUDED, SKIP_DIRS            2
+ *   scripts/check-corpus-claim-drift.mjs  SKIP_DIRS, SKIP_SUBTREES          1
+ *   scripts/check-role-word.mjs           SKIP_DIRS, SKIP_SUBTREES          1
  *   scripts/check-keyed-text-bounds.mjs   SKIP_DIRS                         1
- *   scripts/pm/check-half-states.mjs      H36_SHARED_PREFIX_NOISE           1
+ *   scripts/pm/check-half-states.mjs      H36_SHARED_PATH_NOISE,
+ *                                         H36_SHARED_PREFIX_NOISE           1
  *
  * Each was read against the gate that declares it, and each is an exclusion in
  * that gate's own words: "whole subtrees skipped by path", "generated
  * subtrees, excluded by PATH under ROOTS", "generated from spec/frontmatter —
  * not hand-authored, don't police", "directories `git ls-files` can still name
- * that hold no authored source", and — for `PACKAGES_PROSE_EXCLUDED`, the one
- * that is a bare string rather than a list — the `continue` in the gate's own
- * `descend` that skips it.
+ * that hold no authored source", "deliberately OUT, each with the reading that
+ * put it out", and — for `PACKAGES_PROSE_EXCLUDED`, the one that is a bare
+ * string rather than a list — the `continue` in the gate's own `descend` that
+ * skips it.
  *
- * ## What the 14 cost, which is not 14
+ * ## What the 24 cost, which is not 24
  *
- * EIGHT of them change no derivation at all, because the gate ALSO declares the
- * containing root as an inclusion population and `hintCovers` still reaches the
- * path through that. Measured per hint, probing under each dropped hint against
- * the surviving set: all six of check-doc-authoring's (`.claude/**`, `docs/**`,
- * `content/**` and `packages/**` are its `ROOT_WATCH_HINTS`) and both
- * `content/docs/references` (covered by `content/docs`). That gate's own
- * self-test already said so from the other side — every `SKIP_PATHS` entry must
- * sit UNDER a declared root — so the exclusion hints were pure duplication.
+ * THIRTEEN of them change no derivation at all, because the gate ALSO declares
+ * the containing root as an inclusion population and `hintCovers` still reaches
+ * the path through that. Measured per hint, probing under each dropped hint
+ * against the surviving set: all six of check-doc-authoring's (`.claude/**`,
+ * `docs/**`, `content/**` and `packages/**` are its `ROOT_WATCH_HINTS`), both
+ * `content/docs/references` (covered by `content/docs`), and the five test
+ * globs of the deferred table (covered by check-issue-citations' own
+ * `packages/**`). That gate's own self-test already said so from the other
+ * side — every `SKIP_PATHS` entry must sit UNDER a declared root — so those
+ * exclusion hints were pure duplication.
  *
- * SIX really leave a derivation, and every one of them is a lead that was
+ * ELEVEN really leave a derivation, and every one of them is a lead that was
  * false: `node_modules`, `dist`, `coverage` and `.turbo` off
- * check-refd-timer-probe's skip set, and `.changeset` twice — off
+ * check-refd-timer-probe's skip set; `.changeset` twice — off
  * check-keyed-text-bounds' `SKIP_DIRS` and off the noise floor the card was
- * filed on. The changeset pair is what a dev actually saw: a card that has not
- * written its changeset yet is told which families it will owe once it does,
- * and that projection carried FOUR fabricated rows, 16 -> 12 — including
+ * filed on; the two gate paths measurement-claim-triage declares it skips; and
+ * `scripts/**`, `docs/adr/**` and `.changeset/**` off `DEFERRED_SURFACES`,
+ * which is what the `DEFERRED` arm retired. The changeset pair is what a dev
+ * actually saw when #15753 was filed: a card that has not written its
+ * changeset yet is told which families it will owe once it does, and that
+ * projection carried FOUR fabricated rows, 16 -> 12 — including
  * `check-half-states.mjs --format=markdown --provenance="$PROVENANCE"`, the
  * networked half-state-patrol sweep, advertised to every card in the tree as a
- * gate its changeset would trigger.
+ * gate its changeset would trigger. The deferred table is that same reading
+ * one gate over, and it is why this arm exists: `surfaceFor` opens by
+ * returning `null` for every deferred glob, so `check:issue-citations` was
+ * offered to a changeset path as a gate it triggers while the gate looks at
+ * nothing there.
  *
  * ## The predicate: what the census kept, and what it retired
  *
  * `DENY`/`DENIED` was measured and REMOVED. It matched exactly one declaration
  * on this tree and that one is a false positive — an HTTP fixture, not an
  * exclusion list — and "deny" in this tree names AUTHORIZATION vocabulary
- * (`DENY_CODE`), never a path skip list. Matches for the surviving
- * alternatives, first-match attribution: SKIP 47, EXCLUDED 9, NOISE 2,
- * SKIPPED 2, EXCLUSION 2, EXCLUSIONS 1, EXCLUDES 1, and EXCLUDE / IGNORE /
- * IGNORED 0. The three zero-scoring arms are kept deliberately and the reason is
+ * (`DENY_CODE`), never a path skip list. `DEFERRED` was measured and ADDED: it
+ * matches two declarations on this tree, `DEFERRED_SURFACES` and
+ * `DEFERRED_GLOBS` in `check-issue-citations.mjs`, and both are that gate's
+ * own exclusion table. Matches for the surviving alternatives, first-match
+ * attribution: SKIP 54, EXCLUDED 10, EXCLUSION 4, NOISE 2, SKIPPED 2,
+ * DEFERRED 2, EXCLUSIONS 1, and EXCLUDE / EXCLUDES / IGNORE / IGNORED 0. The
+ * four zero-scoring arms are kept deliberately and the reason is
  * the direction this predicate fails in: over-matching DROPS a hint (a missing
  * lead — one card, one CI round), while under-matching KEEPS a wrong one (a
  * fabricated lead pasted into every dispatch prompt whose surface brushes it).
@@ -5955,14 +6164,16 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  * is not reached — `check-test-completeness.mjs` has the one instance on this
  * tree, and it costs nothing today because every literal in it is a bare
  * directory word the admission rule already refuses. camelCase spellings are
- * not reached either: the anchor is the SCREAMING_SNAKE segment, and the four
- * camelCase near-misses on this tree (`scripts/docs-audit/affected-docs.mjs`)
- * are counters and note strings, not populations. Both are the direction that
+ * not reached either: the anchor is the SCREAMING_SNAKE segment, and the seven
+ * camelCase near-misses on this tree (five in
+ * `scripts/docs-audit/affected-docs.mjs`, one in
+ * `scripts/check-type-check-coverage.mjs`, one here) are counters, note strings
+ * and memo caches, not populations. Both are the direction that
  * drops LESS, which is the direction a widening of this rule may not silently
  * take.
  */
 const EXCLUSION_DECL_NAME =
-  /(?:^|_)(?:NOISE|SKIP|SKIPPED|EXCLUDE|EXCLUDED|EXCLUDES|EXCLUSION|EXCLUSIONS|IGNORE|IGNORED)(?:_|$)/;
+  /(?:^|_)(?:NOISE|SKIP|SKIPPED|DEFERRED|EXCLUDE|EXCLUDED|EXCLUDES|EXCLUSION|EXCLUSIONS|IGNORE|IGNORED)(?:_|$)/;
 
 /** `topLevelDecls` classifies self-tests for its OTHER caller; this one has no stake in it. */
 const NO_SELF_TEST_STARTS = new Set();
@@ -11879,11 +12090,12 @@ export function residueLines(
 /**
  * The single source of truth for the model tier the PM lane's governance
  * reads — clause ②'s CONTRACT-REVIEW tier: the tier the clause-② REVIEW runs
- * at, both halves of it — the spec seat's review of a card that changes
- * contract accept/reject behaviour or widens the public surface, and the
- * `needs:contract-review` re-review sub-round (its opening self-check reads
- * this). The BUILD of such a card is at the default judgment tier, so this
- * constant is a review tier and never a dispatch mandate. Declared HERE
+ * at, both halves of it — the spec and skills lanes' review of every round
+ * they deliver (a card that changes contract accept/reject behaviour or
+ * widens the public surface is spec-lane work, whichever seat found it), and
+ * the `needs:contract-review` re-review sub-round (its opening self-check
+ * reads this). The BUILD of such a card is at the default judgment tier, so
+ * this constant is a review tier and never a dispatch mandate. Declared HERE
  * and only here, as a constant, so a model upgrade is a one-line change in one
  * file — the clause-① mandate rows below read it, the self-test compares
  * against it, and the PM skill's prose names it, so the model id is spelled as
@@ -11945,12 +12157,22 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  *     a file-surface predicate, and exactly what this script takes as argv;
  *   - clause ②, NOT encoded and deliberately not: a card that changes contract
  *     accept/reject behaviour or widens the public surface is built at the
- *     default tier and REVIEWED at `CONTRACT_REVIEW_TIER` — in the spec seat
- *     only, since the 2026-09-10 ruling; every other lane's clause-② review is
- *     that lane's own default-tier review plus the gates, and neither the
- *     triage seat nor the maintainer-summoned director spawns a
- *     contract-review-tier subagent for anything. That is judged from the
- *     card's CONTENT — what the change
+ *     default tier and REVIEWED at `CONTRACT_REVIEW_TIER`. WHO owes that
+ *     review is keyed by LANE — the maintainer's lane rule, keyed by seat on
+ *     2026-09-10, re-keyed by served tier on 2026-09-16 and restated as the
+ *     lane rule on 2026-09-17 (「曾经要求只有 spec 和 skills 需要 fable,其他
+ *     opus 就够了,理论上其他车道不需要契约复审」): the spec and skills lanes
+ *     owe it on every round they deliver — in-seat when the seat's served
+ *     tier is that tier, otherwise by the at-tier review subagent the seat
+ *     spawns (the fastest route, per the maintainer) — and every other lane
+ *     owes NO contract review: its whole bar is the three landing pre-checks
+ *     and the gates, ⛔ no default-tier "self-review" record is demanded of
+ *     it and ⛔ no at-tier subagent is spawned from it (neither the triage
+ *     seat nor the maintainer-summoned director spawns one for anything). A
+ *     clause-② hit outside those two lanes is lane ROUTING, never a review
+ *     demand on the lane that found it: the work is the spec lane's,
+ *     whichever seat found it, and moves there. Clause ② itself is judged
+ *     from the card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
  *     card. The closest a path can honestly get is SUSPICION:
@@ -12141,8 +12363,9 @@ export function tierLines(result) {
   }
   const clause2 =
     '  Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public' +
-    ' surface owes a contract-review-tier REVIEW too (spec seat; default-tier build), judged from the card CONTENT.' +
-    ' This line is a FLOOR, never a clearance.';
+    ' surface owes a contract-review-tier REVIEW too (owed in the spec and skills lanes, in-seat at tier or by the' +
+    ' at-tier subagent; default-tier build; a hit outside those lanes is spec-lane work and moves there), judged from' +
+    ' the card CONTENT. This line is a FLOOR, never a clearance.';
   // The suspicion tail prints only on a hit — unlike the clause-② note above,
   // which prints always: "no suspicion" and "no suspect table" must not share a
   // spelling, and the note is what keeps silence from reading as a clearance.
@@ -12151,7 +12374,7 @@ export function tierLines(result) {
     : [
         `  Clause ② SUSPECT surface — a hint, not a verdict: judge the tier from the card CONTENT as best you can` +
           ` (a card changing contract accept/reject behaviour or widening the public surface is reviewed at ${CONTRACT_REVIEW_TIER}` +
-          ' in the spec seat, built at the default tier);' +
+          ' in the spec lane — a contract-surface hit is spec-lane work whichever seat found it — built at the default tier);' +
           ` whichever tier is dispatched, the PR's actual diff passes the clause-② enqueue gate before the card may enqueue.`,
         ...suspects.map((s) => `    - ${s.path} ⇢ '${s.glob}' — ${s.why}`),
       ];
@@ -12182,6 +12405,41 @@ export function tierLines(result) {
       ' the measured quota exemption (fable unavailable ⇒ opus, never lower); the proactive low-headroom downgrade.',
     clause2,
     ...suspicion,
+  ];
+}
+
+/**
+ * The dispatch-time reading of the human-merge line threshold (maintainer
+ * ruling 2026-09-18; `HUMAN_MERGE_LINE_THRESHOLD`, declared once in
+ * check-governed-merges.mjs), printed beside the tier verdict so a seat knows
+ * BEFORE ACCEPT that the PR needs a human. Prints on EVERY run, like the tier
+ * line: an absent line would mean both "under" and "this build has no size
+ * derivation", and a claim comment is written from whatever the run said. An
+ * explicit path list carries no diff, so it is NOT MEASURED — said out loud,
+ * never a silent "under". Pure.
+ */
+export function changedLineLines(size) {
+  const s = sizeVerdict(size);
+  const t = s.threshold;
+  if (!s.measured) {
+    return [
+      `Changed lines — NOT MEASURED: a path list carries no diff to count. The human-merge threshold (${t},` +
+        ' additions + deletions, generated files INCLUDED) is read off the worktree by this tool run with no paths,' +
+        ' and at landing by `node scripts/pm/check-governed-merges.mjs --pr <n>`.',
+    ];
+  }
+  const reading = `Changed lines — ${s.changedLines} (+${s.additions} / -${s.deletions}; generated files INCLUDED) vs the human-merge threshold ${t}:`;
+  if (!s.exceeds) {
+    return [
+      `${reading} under. Read off THIS worktree's diff against the merge base, not off the PR; the landing pre-check` +
+        ' (`check-governed-merges.mjs --pr <n>`) reads the PR\'s own number.',
+    ];
+  }
+  return [
+    `${reading} ⛔ OVER — this PR lands only by a HUMAN MERGE (maintainer ruling 2026-09-18; no exemption for generated` +
+      ' files, regen artefacts, docs builds or reverts). The governed terminal: no seat flips it ready, enqueues it, or' +
+      ' arms auto-merge — ACCEPT on the card, `needs-user-decision` on the PR, the final 维护者速读, review requested' +
+      ' from GOVERNED_APPROVERS. The landing pre-check `check-governed-merges.mjs --pr <n>` reads the PR\'s own number.',
   ];
 }
 
@@ -12277,10 +12535,29 @@ function discoverFamiliesPass(tree) {
   // families it is printed beside, and the whole point of the tail is that it
   // states what the family list does not cover.
   const workflowEntries = [];
+  // The composite actions the workflows reach, read ONCE for the whole pass and
+  // keyed by the action file, so a helper two workflows `uses:` is opened once
+  // and cannot arrive as two revisions of itself (#19229).
+  const readAction = compositeActionReader();
+  const compositeActionFiles = new Set();
+  const unresolvedCompositeUses = [];
   for (const wf of workflows) {
     const text = readFileSync(nodePath.join(wfDir, wf), 'utf8');
-    workflowEntries.push({ file: wf, text });
+    // The steps this workflow executes THROUGH a composite action. They are
+    // derived under the caller's name because the caller is what CI schedules;
+    // the action file rides along as `viaAction` provenance. See
+    // `followCompositeActions` for the boundaries and the direction each fails
+    // in.
+    const followed = followCompositeActions(text, readAction);
+    for (const dir of followed.unresolved) {
+      unresolvedCompositeUses.push(`.github/workflows/${wf} uses ./${dir}, which holds no action.yml`);
+    }
+    workflowEntries.push({ file: wf, text, composites: followed.steps });
     invocations.push(...extractCheckInvocations(text, wf));
+    for (const step of followed.steps) {
+      compositeActionFiles.add(step.action);
+      invocations.push(...extractCheckInvocations(step.text, wf, { via: step.action }));
+    }
     triggerPathsByWorkflow.set(wf, extractTriggerPaths(text));
     for (const pop of jobPathPopulations(text, wf)) {
       for (const check of pop.checks) {
@@ -12293,6 +12570,14 @@ function discoverFamiliesPass(tree) {
     }
   }
   if (invocations.length === 0) throw new Error('no check:* invocations found in any workflow');
+  // A `uses: ./…` with no action file behind it is a job GitHub refuses to
+  // start, so a derivation that quietly dropped it would be describing a CI
+  // this repo does not have. Loud, naming every one (#4690).
+  if (unresolvedCompositeUses.length > 0) {
+    throw new Error(
+      `composite action(s) named by a workflow but absent from the tree:\n  ${unresolvedCompositeUses.join('\n  ')}`,
+    );
+  }
 
   // Dedupe by (check, workflow); resolve each to script files + watch hints.
   const byCheck = new Map();
@@ -12301,6 +12586,11 @@ function discoverFamiliesPass(tree) {
     if (!byCheck.has(key)) byCheck.set(key, { ...inv, workflows: new Set(), files: [], hints: [] });
     const merged = byCheck.get(key);
     merged.workflows.add(inv.workflow);
+    // The composite action file this invocation was read out of, when it was
+    // not written inline (#19229). A SET because one family may be reached both
+    // ways, and the union is the honest answer to "where is this command
+    // written".
+    if (inv.viaAction) (merged.viaActions ??= new Set()).add(inv.viaAction);
     // INTERSECTION, not union (#15761). `argvVariables` needs no merge — argv
     // is part of the KEY, so every invocation under one key spells the same
     // one. `env:` is NOT part of the key, so two workflows can run the same
@@ -12719,7 +13009,11 @@ function discoverFamiliesPass(tree) {
       ? { variables: workflowValues, envVariables: [...entry.envValues] }
       : null;
   }
-  return { byCheck, workflows, workflowEntries };
+  // `compositeActions` is the reading that makes this pass's new tree a
+  // MEASUREMENT rather than a capability nobody can size (#19229): the action
+  // files really opened on this run, sorted. A zero here on a tree that holds
+  // composite actions is a follow that stopped following.
+  return { byCheck, workflows, workflowEntries, compositeActions: [...compositeActionFiles].sort() };
 }
 
 /**
@@ -14017,7 +14311,7 @@ function notMeasuredEvidenceTerm(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
+export function derivationJson({ paths, size = null, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -14025,6 +14319,12 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
     repo: identity?.slug ?? null,
     commit: identity?.head ?? null,
     paths: [...paths],
+    // The changed-line reading (2026-09-18 human-merge threshold), measured
+    // only when the change set was derived from git: an explicit path list
+    // carries no diff, and `measured: false` says so rather than a zero.
+    changedLines: size
+      ? { ...sizeVerdict(size), files: size.files, binaryFiles: size.binaryFiles, untrackedFiles: size.untrackedFiles }
+      : sizeVerdict(null),
     commands,
     spelling: otherCommands.length ? { ...spelling, otherCommands } : spelling,
     matched: matchedRows,
@@ -14100,13 +14400,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * and the declared WIDE population was not mentioned in it at all. It reads
  * `outsideBlockNames` now, with the counts this function already holds (#16795).
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
+function machineReadableOutput(mode, { paths, size = null, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters, jobFiltered }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, size, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters, jobFiltered }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
@@ -14228,7 +14528,7 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
   );
 }
 
-function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } = {}) {
+function derive(paths, { showResidue = false, mode = 'human', runRecord = [], size = null } = {}) {
   // The reachability sweep runs BEFORE a line is printed, so its refusals
   // (#4690: an empty corpus, or an all-unreachable answer) come out as a
   // failed derivation rather than as a footnote under an answer that already
@@ -14412,6 +14712,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   if (mode !== 'human') {
     machineReadableOutput(mode, {
       paths,
+      size,
       matchedRows,
       kindGroups,
       pending,
@@ -14455,6 +14756,9 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // build has no tier derivation" — and the claim comment is written from
   // whatever the run said.
   for (const line of tierLines(deriveTier(paths))) console.log(line);
+  // The changed-line reading beside it (2026-09-18 ruling), on every run for
+  // the same reason the tier verdict is.
+  for (const line of changedLineLines(size)) console.log(line);
   console.log('');
   // The block a dev PASTES carries only families a dev can run (#14004). The
   // CI-measured ones are not dropped — they get their own heading below, past
@@ -14870,7 +15174,65 @@ export function changedPathsFromGit({ cwd = ROOT, base = DEFAULT_BASE_REF } = {}
   const untracked = gitLines(['ls-files', '--others', '--exclude-standard'], cwd);
 
   const paths = [...new Set([...committed, ...worktree, ...untracked])].sort();
-  return { paths, base, baseSha, mergeBase, counts: { committed: committed.length, worktree: worktree.length, untracked: untracked.length } };
+  const size = changedLinesFromGit({ cwd, mergeBase, untracked });
+  return { paths, base, baseSha, mergeBase, counts: { committed: committed.length, worktree: worktree.length, untracked: untracked.length }, size };
+}
+
+/**
+ * The changed-line count of the same change set (the 2026-09-18 human-merge
+ * line threshold, `HUMAN_MERGE_LINE_THRESHOLD` in check-governed-merges.mjs):
+ * `git diff --numstat --no-renames <merge-base>` against the WORKING TREE, so
+ * committed and uncommitted edits to tracked files count in one read, plus
+ * every untracked file counted from disk — under-derivation is the one
+ * failure direction the path derivation above refuses, and the size follows
+ * it. A binary file (a NUL in its first 8000 bytes, git's own heuristic) is a
+ * file and 0 lines, as GitHub counts it. An untracked file that cannot be read
+ * is counted as 0 lines and NAMED in the reading rather than crashing the
+ * derivation. Throws on a `--numstat` that does not read: an unanswered size
+ * is never a size of zero.
+ */
+export function changedLinesFromGit({ cwd = ROOT, mergeBase, untracked = null }) {
+  const tracked = runGit(['diff', '--numstat', '--no-renames', mergeBase], cwd);
+  if (tracked.status !== 0) {
+    throw new Error(`git diff --numstat ${mergeBase.slice(0, 9)} failed — ${tracked.stderr || `exit ${tracked.status}`}; the changed-line count cannot be answered, and an unanswered count is never zero`);
+  }
+  const counted = parseNumstat(tracked.stdout);
+  const others = untracked ?? gitLines(['ls-files', '--others', '--exclude-standard'], cwd);
+  let untrackedLines = 0;
+  let untrackedBinary = 0;
+  let unreadable = 0;
+  for (const rel of others) {
+    let bytes;
+    try {
+      bytes = readFileSync(nodePath.join(cwd, rel));
+    } catch {
+      unreadable += 1;
+      continue;
+    }
+    const n = lineCountOf(bytes);
+    if (n === null) untrackedBinary += 1;
+    else untrackedLines += n;
+  }
+  return {
+    additions: counted.additions + untrackedLines,
+    deletions: counted.deletions,
+    files: counted.files + others.length,
+    binaryFiles: counted.binaryFiles + untrackedBinary,
+    untrackedFiles: others.length,
+    unreadableFiles: unreadable,
+    source: 'git diff --numstat off the merge base against the working tree, plus untracked files counted from disk',
+  };
+}
+
+/** Lines in a buffer as GitHub would count a NEW file: null for binary (a NUL in the first 8000 bytes). Pure. */
+export function lineCountOf(bytes) {
+  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes ?? ''), 'utf8');
+  if (buf.subarray(0, 8000).includes(0)) return null;
+  if (buf.length === 0) return 0;
+  let n = 0;
+  for (const b of buf) if (b === 10) n += 1;
+  if (buf[buf.length - 1] !== 10) n += 1;
+  return n;
 }
 
 /**
@@ -14881,10 +15243,19 @@ export function changedPathsFromGit({ cwd = ROOT, base = DEFAULT_BASE_REF } = {}
  * produced the list — a derived run that looked identical to an explicit-path
  * run would just move the unverifiable claim one level up.
  */
-function derivationProvenance({ paths, base, mergeBase, counts }) {
+function derivationProvenance({ paths, base, mergeBase, counts, size = null }) {
+  const sized = sizeVerdict(size);
+  const sizeLine = sized.measured
+    ? [
+        `  changed lines: ${sized.changedLines} (+${sized.additions} / -${sized.deletions}; ${size.files} file(s), ${size.binaryFiles} binary counted 0,` +
+          ` ${size.untrackedFiles} untracked counted from disk${size.unreadableFiles ? `, ${size.unreadableFiles} unreadable counted 0` : ''})` +
+          ` vs the human-merge threshold ${sized.threshold}: ${sized.exceeds ? 'OVER — see the Changed-lines line on stdout' : 'under'}`,
+      ]
+    : [];
   return [
     `dispatch-gates: change set derived from git — ${paths.length} path(s) vs merge base ${mergeBase.slice(0, 9)} of '${base}' and HEAD`,
     `  (committed ${counts.committed}, working tree ${counts.worktree}, untracked ${counts.untracked}; three-dot semantics, never '${base}..HEAD')`,
+    ...sizeLine,
     ...paths.map((p) => `  · ${p}`),
   ];
 }
@@ -15037,7 +15408,7 @@ export function repoIdentity({ cwd = ROOT } = {}) {
  * a single family, which is what makes this list the right filter and raw
  * commit distance the wrong one.
  */
-export const DERIVATION_SURFACE = ['.github/workflows', 'package.json', 'scripts'];
+export const DERIVATION_SURFACE = ['.github/workflows', '.github/actions', 'package.json', 'scripts'];
 
 /**
  * How far behind `DEFAULT_BASE_REF` this checkout is — and whether that matters.
@@ -17017,7 +17388,7 @@ function selfTest() {
   t('and a declaration AFTER it is unaffected — the span closes where the statement does', multilineHints.includes('packages/core/src'));
   // The named spellings, one case each, so a narrowing of the predicate is
   // visible here rather than only in the live census.
-  for (const word of ['SKIP', 'EXCLUDE', 'EXCLUDED', 'EXCLUSIONS', 'IGNORE']) {
+  for (const word of ['SKIP', 'EXCLUDE', 'EXCLUDED', 'EXCLUSIONS', 'IGNORE', 'DEFERRED']) {
     const named = `const ${word}_PATHS = ['packages/skipped/src'];`;
     t(`\`${word}\` names an exclusion too — the predicate is the convention, not one constant`, !extractWatchHints(named).includes('packages/skipped/src'));
   }
@@ -20026,6 +20397,197 @@ function selfTest() {
   t('the flow-sequence spelling is read too', extractTriggerPaths("on:\n  pull_request:\n    paths: ['a/**', \"b/c\"]\n").join('|') === 'a/**|b/c');
   t('pull_request_target is not mistaken for pull_request', extractTriggerPaths("on:\n  pull_request_target:\n    paths:\n      - 'x/**'\n").length === 0);
 
+  // ── Derivation THROUGH a composite action (#19229) ─────────────────────────
+  //
+  // The card: six gates root their population at `.github/workflows` and none
+  // reads `.github/actions/**`, so a command executed through a composite
+  // action was audited by nothing while every scope line read as coverage. The
+  // repair is `followCompositeActions` + the `viaAction` provenance it carries;
+  // these cases are the firing control and the dark control for it.
+  //
+  // ⛔ The repair the card REFUSES, recorded here because this is where someone
+  // would take it: re-pointing the four live-specimen CONTROL assertions below
+  // at a different value-bearing family. That turns the pin green while leaving
+  // the derivation blind, which is the declaration-without-an-assertion shape
+  // this whole file exists to refuse.
+  const compositeCallerWf = [
+    'name: Fixture',
+    'on:',
+    '  pull_request: {}',
+    'jobs:',
+    '  sweep:',
+    '    runs-on: ubuntu-latest',
+    '    steps:',
+    '      - uses: actions/checkout@v7',
+    '      - name: Through the action',
+    '        uses: ./.github/actions/fixture-gate',
+    '',
+  ].join('\n');
+  const compositeActionYml = [
+    'name: Fixture gate',
+    'description: >-',
+    '  A description whose folded body mentions run: and must never be read as a step.',
+    'runs:',
+    '  using: composite',
+    '  steps:',
+    '    - name: Run the gate',
+    '      shell: bash',
+    '      run: |',
+    '        node scripts/check-nul-bytes.mjs',
+    '        pnpm check:agent-model-declared',
+    '',
+  ].join('\n');
+  const compositeReader = (files) => (dir) =>
+    (Object.hasOwn(files, dir) ? { file: `${dir}/action.yml`, text: files[dir] } : null);
+  t(
+    'a local composite `uses:` is read out of a workflow, in its repo-relative spelling',
+    localCompositeActionUses(compositeCallerWf).join('|') === '.github/actions/fixture-gate',
+  );
+  t(
+    'the quoted spellings and a trailing comment are read too, and a repeat is read once',
+    localCompositeActionUses(
+      [
+        "      - uses: './.github/actions/a'",
+        '      - uses: "./.github/actions/b"   # why',
+        '      - uses: ./.github/actions/a',
+      ].join('\n'),
+    ).join('|') === '.github/actions/a|.github/actions/b',
+  );
+  t(
+    'a third-party action and a local path outside .github/actions are NOT followed — a missing lead, never a fabricated one',
+    localCompositeActionUses(
+      ['      - uses: actions/checkout@v7', '      - uses: ./tools/some-action', '      - uses: ./.github/workflows/x.yml'].join('\n'),
+    ).length === 0,
+  );
+  t(
+    "an action's `runs:` body is what is read — a `run:` mentioned in a top-level description block scalar is not a step",
+    runCommandSteps(compositeActionRunsBlock(compositeActionYml)).length === 1
+      && !compositeActionRunsBlock(compositeActionYml).includes('description'),
+  );
+  // ⭐ THE FIRING CONTROL. The caller invokes no check of its own; both families
+  // exist only because the action's steps were read, and both are attributed to
+  // the CALLER, which is what CI schedules.
+  const compositeFollowed = followCompositeActions(
+    compositeCallerWf,
+    compositeReader({ '.github/actions/fixture-gate': compositeActionYml }),
+  );
+  const compositeVia = compositeFollowed.steps.flatMap((s) =>
+    extractCheckInvocations(s.text, 'fixture.yml', { via: s.action }));
+  t(
+    'the caller itself invokes no check family, so the families below can only come from the action',
+    extractCheckInvocations(compositeCallerWf, 'fixture.yml').length === 0,
+  );
+  t(
+    '⭐ a command executed THROUGH a composite action is derived exactly as an inline one is'
+      + ` (${compositeVia.map((i) => i.check).join(', ') || 'none'})`,
+    compositeVia.map((i) => i.check).sort().join('|')
+      === 'check:agent-model-declared|scripts/check-nul-bytes.mjs',
+  );
+  t(
+    '…attributed to the CALLING workflow, with the action file carried beside it as provenance',
+    compositeVia.length > 0
+      && compositeVia.every((i) => i.workflow === 'fixture.yml'
+        && i.viaAction === '.github/actions/fixture-gate/action.yml'),
+  );
+  t(
+    'and an INLINE invocation carries no viaAction at all, so the two spellings stay legible',
+    extractCheckInvocations('    - run: node scripts/check-nul-bytes.mjs\n', 'fixture.yml')
+      .every((i) => i.viaAction === undefined),
+  );
+  // ⭐ THE DARK CONTROL, both halves: with the action file gone the families
+  // disappear (so they really came from it), and the absence is REPORTED rather
+  // than skipped — GitHub refuses to start a job whose `uses: ./…` resolves to
+  // nothing, so a derivation that dropped it quietly would describe a CI this
+  // repo does not have.
+  const compositeDark = followCompositeActions(compositeCallerWf, compositeReader({}));
+  t(
+    'the dark control fires — with no action file behind the `uses:`, not one family is derived',
+    compositeDark.steps.length === 0
+      && compositeDark.steps.flatMap((s) => extractCheckInvocations(s.text, 'fixture.yml')).length === 0,
+  );
+  t(
+    '…and the absence is NAMED, never skipped (#4690)',
+    compositeDark.unresolved.join('|') === '.github/actions/fixture-gate',
+  );
+  // An action may `uses:` a sibling. A one-hop follow would re-open this card's
+  // own blind spot one level down, so the walk recurses — and terminates on a
+  // cycle rather than spinning, which a fixture asserts rather than a comment.
+  const nestedOuter = ['runs:', '  using: composite', '  steps:', '    - uses: ./.github/actions/inner', ''].join('\n');
+  const nestedInner = ['runs:', '  using: composite', '  steps:', '    - shell: bash', '      run: node scripts/check-nul-bytes.mjs', ''].join('\n');
+  const nested = followCompositeActions(
+    '      - uses: ./.github/actions/outer\n',
+    compositeReader({ '.github/actions/outer': nestedOuter, '.github/actions/inner': nestedInner }),
+  );
+  t(
+    'the follow recurses — a gate an action reaches through a SECOND action is derived too',
+    nested.steps.map((s) => s.dir).join('|') === '.github/actions/outer|.github/actions/inner'
+      && nested.steps.flatMap((s) => extractCheckInvocations(s.text, 'fixture.yml')).length === 1,
+  );
+  const cyclicA = ['runs:', '  using: composite', '  steps:', '    - uses: ./.github/actions/b', ''].join('\n');
+  const cyclicB = ['runs:', '  using: composite', '  steps:', '    - uses: ./.github/actions/a', ''].join('\n');
+  t(
+    'and a cycle terminates with each action read exactly once, rather than spinning',
+    followCompositeActions(
+      '      - uses: ./.github/actions/a\n',
+      compositeReader({ '.github/actions/a': cyclicA, '.github/actions/b': cyclicB }),
+    ).steps.map((s) => s.dir).join('|') === '.github/actions/a|.github/actions/b',
+  );
+  // ── LIVE: the card's own positive control, re-taken here ───────────────────
+  //
+  // Fixtures cannot prove the live derivation opens the tree at all. The card's
+  // control is `.github/actions/setup-pnpm/action.yml` and its `run:` steps —
+  // audited by nothing on the day the card was filed, and read by the discovery
+  // pass now. A zero here is a follow that stopped following.
+  const liveComposites = discoverFamilies().compositeActions ?? [];
+  t(
+    `⭐ the live discovery really opens the composite action tree (${liveComposites.join(', ') || 'none'})`,
+    liveComposites.length > 0 && liveComposites.includes('.github/actions/setup-pnpm/action.yml'),
+  );
+  const liveCompositeRunSteps = liveComposites.reduce(
+    (n, rel) => n + runCommandSteps(compositeActionRunsBlock(readFileSync(nodePath.join(ROOT, rel), 'utf8'))).length,
+    0,
+  );
+  t(
+    `…and really reads the steps in it — ${liveCompositeRunSteps} \`run:\` step(s) that no gate rooted at`
+      + ' .github/workflows could see, which is the card\'s positive control',
+    liveCompositeRunSteps > 0,
+  );
+  // ── The BOUNDARY, measured rather than assumed ─────────────────────────────
+  //
+  // A script path that reaches the command through a step `env:` value is
+  // derived by NEITHER spelling — written inline in a workflow, or written in a
+  // composite action. That is one blind spot and it is not this one: the
+  // composite follow makes an action's step read EXACTLY like an inline step,
+  // including where an inline step is already not derived. Pinned so nobody
+  // reads a green follow as coverage of the env-carried class, and so the day
+  // that class is closed it is closed for both spellings at once.
+  const envCarriedStep = [
+    '      - name: Run the sweep',
+    '        shell: bash',
+    '        env:',
+    '          SWEEPER: ${{ steps.sources.outputs.root }}/scripts/pm/check-half-states.mjs',
+    '        run: node "$SWEEPER" --format=markdown',
+    '',
+  ].join('\n');
+  const envCarriedAction = ['runs:', '  using: composite', '  steps:', envCarriedStep].join('\n');
+  t(
+    'an env-carried script path is derived by neither spelling — the composite follow closes the ACTION'
+      + ' boundary, not the env-carrier one',
+    extractCheckInvocations(envCarriedStep, 'fixture.yml').length === 0
+      && followCompositeActions('      - uses: ./.github/actions/c\n', compositeReader({ '.github/actions/c': envCarriedAction }))
+        .steps.flatMap((s) => extractCheckInvocations(s.text, 'fixture.yml')).length === 0,
+  );
+  // The second declared deferral, sized rather than described: the always-runs
+  // tail walks `jobs:` and a composite action has none, so its rows still
+  // under-report by exactly the composite steps the follow now reads. Under-
+  // reporting is the safe direction (a MISSING lead), and this number is what
+  // makes the deferral honest instead of merely convenient.
+  t(
+    `the always-runs tail still reads no composite step — ${liveCompositeRunSteps} step(s) deferred, a`
+      + ' MISSING lead and never a fabricated one; when this number matters, extend that walk',
+    alwaysRunSteps(discoverFamilies().workflowEntries).rows.every((r) => r.workflow.endsWith('.yml')),
+  );
+
   // ── The SCHEDULED-ONLY routing question, measured and answered ZERO (#14899)
   //
   // The card: the derivation named `node scripts/pm/check-half-states.mjs` —
@@ -21951,10 +22513,16 @@ function selfTest() {
   const ownPopulation = ownDeclared?.population ?? [];
   t('this module declares what a follower inherits', (ownDeclared?.reason ?? '').length > 0);
   t(
-    'it declares exactly the workflow tree it readdirs',
-    ownPopulation.length === 1 && ownPopulation[0] === '.github/workflows',
+    'it declares exactly the two trees it opens — the workflow directory it readdirs and the composite actions those workflows use',
+    ownPopulation.length === 2
+      && ownPopulation[0] === '.github/workflows'
+      && ownPopulation[1] === '.github/actions',
   );
   t('so a follower still reaches the workflow files this tool really opens', covers(ownPopulation, '.github/workflows/lint.yml'));
+  t(
+    '…and the composite action files it really opens through them (#19229)',
+    covers(ownPopulation, '.github/actions/setup-pnpm/action.yml'),
+  );
   // The four fabricating classes the card measured, each pinned as SPELLED but
   // NOT INHERITED — the two halves have to be asserted together, because the
   // literal disappearing from the file would also pass "not inherited" while
@@ -22045,21 +22613,29 @@ function selfTest() {
   }
   const censusRows = liveMarkerCensus.map((r) => `${r.file}:${r.line} ${r.key}`).sort();
   t(
-    `the live tree carries the six declarations this card measured, and no others (${censusRows.join(' · ') || 'none'})`,
+    `the live tree carries the seven declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
     censusRows.join(' · ') === [
+      // Seventh row, added with the declaration it names: `checklist-status.yml`
+      // is paths-filtered (its `pull_request:` trigger is filtered to itself) and
+      // its only working step invokes the GENERATOR `pnpm gen:checklist-status`,
+      // so it discovers no `check:` family and declares why. ⚠️ This roster is the
+      // maintenance this pin exists to force: it is NAMED rather than counted
+      // precisely so a seventh declaration reddens WITH the six already read
+      // printed beside it, and the author adds their row instead of a number.
+      '.github/workflows/checklist-status.yml:57 no-check-families',
       '.github/workflows/merged-branch-reaper.yml:212 no-check-families',
       '.github/workflows/os-create-smoke.yml:48 no-check-families',
       '.github/workflows/scaffold-e2e.yml:23 no-check-families',
       'scripts/cli-build-prerequisite.mjs:111 inherited-population',
       'scripts/pm/check-expected-skips.mjs:131 self-test-reads',
-      'scripts/pm/dispatch-gates.mjs:702 inherited-population',
+      'scripts/pm/dispatch-gates.mjs:708 inherited-population',
     ].join(' · '),
     censusRows.join(' · '),
   );
   const censusCut = liveMarkerCensus.filter((r) => !r.whole).map((r) => `${r.file}:${r.line} ${r.key}`);
   t(
     `every live reason on those markers ENDS on its own marker line (cut: ${censusCut.join(', ') || 'none'})`,
-    censusCut.length === 0 && liveMarkerCensus.length === 6,
+    censusCut.length === 0 && liveMarkerCensus.length === 7,
   );
   t(
     'and every one of them carries a non-empty reason — whole is not the same claim as present, and both are owed',
@@ -23763,30 +24339,14 @@ function selfTest() {
   // filter is `packages/**` and already covered them; it gains the right
   // PROVENANCE, and it is what this case exists to keep honest.
   const CLASS_SEVENTH = 'check:dual-build-cjs-loads';
-  // ⭐ THE EIGHTH, and it is the same question answered a second time by a gate
-  // that did not exist when the seventh was recorded. `check:api-surface-declarations`
-  // (#16045) walks the spec `exports` map to the packed `.d.ts` of every entry
-  // point and snapshots the declaration text it finds there, so that export
-  // surface is its subject in exactly the sense the six and the seventh are. It
-  // is declared here for one reason: the edge ALREADY gave it a population on
-  // the run that landed it, before any list named it — which is the ruling's
-  // question ("does the next gate of this class get covered automatically")
-  // answered live for a second time, by a family nobody wired in.
-  const CLASS_EIGHTH = 'check:api-surface-declarations';
   t(
     `and every family the edge gives a population to really re-derives from an export surface` +
       ` (${[...new Set(manifestInherited.map(([c]) => c))].join(' · ') || 'none'})`,
-    manifestInherited.every(
-      ([c]) => EXPORT_SURFACE_SIX.includes(c) || c === CLASS_SEVENTH || c === CLASS_EIGHTH,
-    ),
+    manifestInherited.every(([c]) => EXPORT_SURFACE_SIX.includes(c) || c === CLASS_SEVENTH),
   );
   t(
     `⭐ and a SEVENTH live gate the card never named is covered by the same edge (${CLASS_SEVENTH})`,
     manifestInherited.some(([c]) => c === CLASS_SEVENTH),
-  );
-  t(
-    `⭐ …and an EIGHTH, added after that reading was taken (${CLASS_EIGHTH})`,
-    manifestInherited.some(([c]) => c === CLASS_EIGHTH),
   );
 
   // Additive BY CONSTRUCTION, the claim the wiring comment makes: the manifest
@@ -24594,6 +25154,13 @@ function selfTest() {
   t('the no-mandate rendering claims no mandate', !plainLines.includes('MANDATORY'));
   t('the no-mandate rendering names the floor and the default, so the judgment call has its band', plainLines.includes(TIER_FLOOR) && plainLines.includes(TIER_DEFAULT));
   t('BOTH renderings state that clause ② is out of reach of paths — a no-mandate line is not a clearance', plainLines.includes('Clause ②') && mandLines.includes('Clause ②'));
+  // The lane key (#18536): the maintainer's lane rule restated — the review is
+  // owed in the spec and skills lanes, in-seat at tier or by the at-tier
+  // subagent, and in no other lane; the 2026-09-10 SEAT key and the
+  // 2026-09-16 TIER key are both retired spellings and must not come back.
+  t('BOTH renderings key the clause-② review by LANE — the spec and skills lanes, in-seat at tier or by the at-tier subagent', [plainLines, mandLines].every((l) => l.includes('spec and skills lanes') && l.includes('at-tier subagent')));
+  t('…and neither spells a retired key — no "spec seat" (2026-09-10) and no default-tier review or self-review (2026-09-16)', [plainLines, mandLines].every((l) => !l.includes('spec seat') && !l.includes('default-tier review') && !l.includes('self-review')));
+  t('…and both say a clause-② hit outside those lanes is spec-lane work that MOVES there — lane routing, never a review demand on the lane that found it', [plainLines, mandLines].every((l) => l.includes('spec-lane work and moves there')));
   t('the no-mandate rendering says how many globs it checked, so an empty table cannot read as a clearance', plainLines.includes(`${MANDATORY_TIER_GLOBS.length} declared glob`));
   // Refusals: a contradiction is not printed, and an ambiguity is not guessed.
   let tierRefused = false;
@@ -24661,12 +25228,25 @@ function selfTest() {
   t('the suspicion rendering sends the seat to the card CONTENT for the tier call', suspectRendered.includes('judge the tier from the card CONTENT'));
   t('the suspicion rendering routes EVERY dispatch through the enqueue gate on the ACTUAL diff', suspectRendered.includes('whichever tier is dispatched') && suspectRendered.includes('enqueue gate'));
   t('the suspicion rendering names the contract-review tier from its single-source constant', suspectRendered.includes(CONTRACT_REVIEW_TIER));
+  t('the suspicion rendering keys the review by LANE — "in the spec lane", the work being the spec lane\'s whichever seat found it — never by seat (#18536)', suspectRendered.includes('in the spec lane') && suspectRendered.includes('whichever seat found it') && !suspectRendered.includes('spec seat'));
   const noSuspicion = fableOf(['packages/runtime/src/kernel.ts']);
   t('an ordinary non-contract surface raises no suspicion', noSuspicion.suspects.length === 0);
   t('no suspicion ⇒ no suspect line — absence and clearance must not share a spelling with a hit', !tierLines(noSuspicion).join('\n').includes('SUSPECT'));
   const mandatedAndSuspect = fableOf(['.claude/skills/pm-dispatch/SKILL.md', 'packages/spec/src/data/filter.zod.ts']);
   t('a mandated surface still prints its suspect paths — the enqueue gate reads diffs, not dispatch tiers', mandatedAndSuspect.mandatory && mandatedAndSuspect.suspects.length === 1 && tierLines(mandatedAndSuspect).join('\n').includes('SUSPECT'));
   t('a verdict built without a suspects field still renders (suspicion defaults empty)', tierLines({ mandatory: false, tier: null, hits: [], declared: 1 }).length === 3);
+
+  // ── The changed-line reading beside the tier verdict (2026-09-18 ruling) ──
+  const overLine = changedLineLines({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 1 }).join('\n');
+  t('over the threshold, the line says HUMAN MERGE, names the governed terminal and the landing pre-check',
+    overLine.includes('HUMAN MERGE') && overLine.includes(`threshold ${HUMAN_MERGE_LINE_THRESHOLD}`) && overLine.includes('arms auto-merge') && overLine.includes('check-governed-merges.mjs --pr'), overLine);
+  const atLine = changedLineLines({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 0 }).join('\n');
+  t('exactly at the threshold is under it — strictly greater, as the gate reads it', atLine.includes('under.') && !atLine.includes('HUMAN MERGE'), atLine);
+  const noneLine = changedLineLines(null).join('\n');
+  t('an explicit path list is NOT MEASURED, said out loud, never a silent under', noneLine.includes('NOT MEASURED') && !noneLine.includes('under.') && noneLine.includes('--pr'), noneLine);
+  t('the threshold is read from the gate — no second copy here — and it is the ruled 5000', HUMAN_MERGE_LINE_THRESHOLD === 5000 && changedLineLines({ additions: 5001, deletions: 0 }).join('\n').includes('OVER'));
+  t('a text buffer counts its lines, an unterminated last line included', lineCountOf(Buffer.from('a\nb\n')) === 2 && lineCountOf(Buffer.from('a\nb')) === 2 && lineCountOf(Buffer.alloc(0)) === 0);
+  t('a buffer with a NUL in its first 8000 bytes is binary: null, which the caller counts as zero lines', lineCountOf(Buffer.from([0x61, 0, 0x62])) === null);
   // Same liveness guards as the mandatory table: dead data reading as
   // protection is the incident class itself.
   const deadSuspects = SUSPECT_TIER_GLOBS.filter(
@@ -24838,6 +25418,10 @@ function selfTest() {
       !derived.paths.includes('packages/runtime/sibling-landed.ts'),
     );
     t('the derived set reports the merge base it measured from', /^[0-9a-f]{40}$/.test(derived.mergeBase));
+    // The changed-line count (2026-09-18 human-merge threshold) rides the same
+    // merge base: the sibling's landed line is not ours either.
+    t('the derived set carries the changed-line count off the same merge base: +1 / -0 for this branch own committed line',
+      derived.size.additions === 1 && derived.size.deletions === 0 && derived.size.untrackedFiles === 0 && derived.size.binaryFiles === 0, derived.size);
 
     // Uncommitted and untracked work counts: a dev re-deriving before the
     // commit must not be handed a SHORT list.
@@ -24847,6 +25431,14 @@ function selfTest() {
     t('an uncommitted edit to a tracked file joins the change set', withDirty.paths.includes('packages/spec/base.ts'));
     t('an untracked new file joins the change set', withDirty.paths.includes('packages/ddd/brand-new.ts'));
     t('the sibling file stays out once the tree is dirty too', !withDirty.paths.includes('packages/runtime/sibling-landed.ts'));
+    t('an uncommitted edit and an untracked file join the changed-line count too: +3 / -1, one untracked file counted from disk',
+      withDirty.size.additions === 3 && withDirty.size.deletions === 1 && withDirty.size.untrackedFiles === 1, withDirty.size);
+    write(up, 'packages/ddd/blob.bin', Buffer.from([0, 1, 2, 0]));
+    const withBinary = changedPathsFromGit({ cwd: up });
+    t('an untracked BINARY file is a file and zero lines, as GitHub counts it',
+      withBinary.size.binaryFiles === 1 && withBinary.size.additions === 3 && withBinary.size.untrackedFiles === 2 && withBinary.size.files === 4, withBinary.size);
+    t('and the provenance names the count, the threshold and the verdict beside the path list',
+      derivationProvenance(withBinary).some((l) => l.includes('changed lines: 4 (+3 / -1') && l.includes(`threshold ${HUMAN_MERGE_LINE_THRESHOLD}: under`)), derivationProvenance(withBinary));
 
     // A branch that changes nothing derives an EMPTY set rather than the
     // base branch history — the CLI turns that into a refusal, not "no gates".
@@ -25498,6 +26090,8 @@ function selfTest() {
     moduleStderrLines(cliBaseline, cliBaseline).length === 0 && moduleStderrLines(plainRun, cliBaseline).length > 0,
   );
   t('the banner stays OFF stdout, which is pasted verbatim into claim comments', !(plainRun.stdout ?? '').includes('gate list derived from the tree of'));
+  t('--tier on an explicit path list prints the changed-lines line beside the tier verdict, as NOT MEASURED (a path list has no diff)',
+    (plainRun.stdout ?? '').includes('Changed lines — NOT MEASURED'), plainRun.stdout);
   const liveSlug = repoIdentity().slug;
   /**
    * A CLI run whose card names a path that is HYPOTHETICAL by design — the
@@ -26734,6 +27328,25 @@ function selfTest() {
     // that combination — the two input modes answer different questions — and
     // its refusal carries a different sentence at the same exit 2, which is
     // exactly the confusion the predicate has to survive.
+    // The changed-line reading on a DERIVED run, end to end (2026-09-18
+    // ruling): stdout carries the measured line beside the tier verdict and
+    // stderr's provenance carries the count — or the same no-diff refusal.
+    const tierDerivedRun = runCli(['--tier']);
+    t(
+      '--tier with no paths derives the change set and prints the MEASURED changed-lines line beside the tier verdict'
+        + ' — or the exit-2 no-diff refusal on a tree that has nothing to derive',
+      (tierDerivedRun.status === 0 && (tierDerivedRun.stdout ?? '').includes('Changed lines — ')
+        && !(tierDerivedRun.stdout ?? '').includes('NOT MEASURED') && (tierDerivedRun.stderr ?? '').includes('changed lines:'))
+        || (tierDerivedRun.status === 2 && (tierDerivedRun.stderr ?? '').includes(NO_DIFF_REFUSAL)),
+      { status: tierDerivedRun.status, out: (tierDerivedRun.stdout ?? '').slice(0, 300), err: (tierDerivedRun.stderr ?? '').slice(0, 300) },
+    );
+    const jsonExplicitRun = runCli(['--json', 'packages/spec/src/index.ts']);
+    let jsonExplicitDoc = null;
+    try { jsonExplicitDoc = JSON.parse(jsonExplicitRun.stdout ?? ''); } catch { /* asserted below */ }
+    t('--json on an explicit path list carries changedLines as NOT MEASURED with the ruled threshold, never as a zero',
+      jsonExplicitRun.status === 0 && jsonExplicitDoc?.changedLines?.measured === false && jsonExplicitDoc?.changedLines?.threshold === HUMAN_MERGE_LINE_THRESHOLD
+        && jsonExplicitDoc?.changedLines?.changedLines === null,
+      (jsonExplicitRun.stdout ?? '').slice(0, 200));
     const changedPathRun = runCli(['--changed', '--commands', seamCard]);
     t(
       '…and that same predicate REJECTS the illegal --changed-with-a-path combination, so no parse failure can satisfy the control above',
@@ -28099,6 +28712,9 @@ if (invokedDirectly) {
       }
     }
     let paths;
+    // The changed-line reading travels with a DERIVED change set only; an
+    // explicit path list carries no diff and prints NOT MEASURED.
+    let size = null;
     if (argvPaths.length > 0) {
       paths = declaredPaths;
     } else {
@@ -28127,6 +28743,7 @@ if (invokedDirectly) {
       for (const line of derivationProvenance(derived)) console.error(line);
       console.error('');
       paths = derived.paths;
+      size = derived.size;
     }
     try {
       // `--tier` answers the claim-time question alone: it reads no workflow and
@@ -28134,13 +28751,14 @@ if (invokedDirectly) {
       // cannot run — and a claim comment is written before any of that matters.
       if (process.argv.includes('--tier')) {
         for (const line of tierLines(deriveTier(paths))) console.log(line);
+        for (const line of changedLineLines(size)) console.log(line);
       } else {
         // The only mode with a VERDICT in it, so the only one whose exit code
         // carries an answer rather than "the derivation completed". A run that
         // names unrun families must not exit 0: this mode exists because a
         // report claiming coverage it did not have read exactly like one that
         // did, and an exit code is the half of that a caller cannot paraphrase.
-        const status = derive(paths, { showResidue: process.argv.includes('--residue'), mode, runRecord });
+        const status = derive(paths, { showResidue: process.argv.includes('--residue'), mode, runRecord, size });
         if (status) process.exit(status);
       }
     } catch (err) {

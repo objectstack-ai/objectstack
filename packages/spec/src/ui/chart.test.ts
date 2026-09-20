@@ -357,8 +357,13 @@ describe('#4001 批 15 — the five closed chart sites', () => {
       name: 'dash_one', label: 'D',
       widgets: [{ id: 'w1', type: 'bar', title: 'W', dataset: 'ds', dimensions: ['a'], values: ['b'], chartConfig }],
     });
-    expect(dash!.safeParse(widget({ type: 'bar' })).success, 'control').toBe(true);
-    const r = dash!.safeParse(widget({ type: 'bar', chartType: 'bar' }));
+    // ⚠️ The control is APPEARANCE, not `{ type: 'bar' }`, and the reason is
+    // the rule this door now carries: on a dataset-bound widget `chartConfig`
+    // parses as `DashboardWidgetChartConfigSchema`, which tombstones the four
+    // structure keys (ADR-0021; ruling 2026-09-12). A `type` control here would
+    // assert a document the protocol refuses.
+    expect(dash!.safeParse(widget({ title: 'W' })).success, 'control').toBe(true);
+    const r = dash!.safeParse(widget({ title: 'W', chartType: 'bar' }));
     expect(r.success).toBe(false);
     expect(JSON.stringify(r.error?.issues)).toContain('widgets');
   });
@@ -560,9 +565,30 @@ describe('#4001 批 15 — the two chart sites left open on a measurement, CLOSE
     expect(rootCount, 'roots must include every metadata type plus ObjectStackSchema').toBeGreaterThan(20);
     expect(nodeCount, 'the graph must actually have been walked').toBeGreaterThan(1000);
 
-    // Positive controls: the five closed sites of this file resolve.
-    expect(verdict(ChartConfigSchema), 'positive control').toBe('direct');
-    expect(verdict(ChartAxisSchema), 'positive control').toBe('direct');
+    // Positive controls: the closed sites of this file resolve — but TWO of the
+    // five verdicts moved when the chart-structure ownership ruling landed
+    // (2026-09-12, ADR-0021), and the moves are the measurement rather than a
+    // weakening. They are written out because a reader who finds a non-`direct`
+    // verdict on a "closed site" will otherwise read it as rot.
+    //
+    // `ChartConfigSchema` → `derived-clone`: no root reaches the base shape
+    // itself any more. `dashboard.widgets[].chartConfig` reaches
+    // `DashboardWidgetChartConfigSchema` and `report.chart` reaches
+    // `ReportChartSchema` — both `.extend()` clones, both carrying its
+    // strictness and its error map. The testkit's vocabulary is explicit that
+    // `direct` and `derived-clone` both mean there IS a door.
+    //
+    // `ChartAxisSchema` → `unreachable`, and this one is a real change of
+    // FACT, not of route: the dashboard clone tombstones `xAxis`/`yAxis`, and
+    // `ReportChartSchema` re-declares both as plain dataset-name strings, so no
+    // authoring path from any metadata root now parses a chart AXIS object. Its
+    // remaining carrier is the react tier's published `<ObjectChart>` dataProps
+    // (`react-blocks.ts`), which is a DECLARATION, not a parse — so the #4583
+    // question ("is this strict shape gating anything?") is genuinely open for
+    // this one shape and is recorded on #17385 rather than answered here by
+    // quietly weakening the assertion.
+    expect(verdict(ChartConfigSchema), 'positive control').toBe('derived-clone');
+    expect(verdict(ChartAxisSchema), 'moved: no metadata root parses an axis OBJECT any more').toBe('unreachable');
     expect(verdict(ChartSeriesSchema), 'positive control').toBe('direct');
     expect(verdict(ChartAnnotationSchema), 'positive control').toBe('direct');
     expect(verdict(ChartInteractionSchema), 'positive control').toBe('direct');

@@ -102,9 +102,34 @@ beforeEach(() => {
   resetPlatformAdminEmailMemo();
 });
 
+/**
+ * [#11663 L5] The tenancy posture is PINNED to `single` for this whole file, and
+ * it is pinned rather than inherited because the answer now depends on it: the
+ * guard's grant-anchored grade is posture-keyed, so a suite that leaves
+ * `OS_TENANCY_POSTURE` / `OS_MULTI_ORG_ENABLED` unset measures whatever the box
+ * exports. `single` is the posture every case here was written against — the
+ * default, and the one Choice 4A keeps the grant anchor for. The WALLED half is
+ * covered next door in `last-admin-guard.config-anchor.test.ts`.
+ */
+const POSTURE_ENV = 'OS_TENANCY_POSTURE';
+const MULTI_ORG_ENV = 'OS_MULTI_ORG_ENABLED';
+let ambientPosture: string | undefined;
+let ambientMultiOrg: string | undefined;
+
+beforeEach(() => {
+  ambientPosture = process.env[POSTURE_ENV];
+  ambientMultiOrg = process.env[MULTI_ORG_ENV];
+  process.env[POSTURE_ENV] = 'single';
+  delete process.env[MULTI_ORG_ENV];
+});
+
 afterEach(async () => {
   if (ambient === undefined) delete process.env[ENV];
   else process.env[ENV] = ambient;
+  if (ambientPosture === undefined) delete process.env[POSTURE_ENV];
+  else process.env[POSTURE_ENV] = ambientPosture;
+  if (ambientMultiOrg === undefined) delete process.env[MULTI_ORG_ENV];
+  else process.env[MULTI_ORG_ENV] = ambientMultiOrg;
   resetPlatformAdminEmailMemo();
   const open = engines;
   engines = [];

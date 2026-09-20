@@ -5,6 +5,9 @@ import { describe, it, expect } from 'vitest';
 // the coverage describe block at the foot of this file. `@objectstack/spec` is
 // already a runtime dependency of this package, so the pin adds no edge.
 import { ObjectTranslationDataSchema } from '@objectstack/spec/system';
+// The schema the #18441 fold is SIZED against — see the surface pin in that
+// block. Same package, already a runtime dependency, so no new edge either.
+import { ObjectExtensionSchema } from '@objectstack/spec/data';
 import {
   validateTranslationReferences,
   TRANSLATION_TARGET_UNKNOWN,
@@ -814,6 +817,602 @@ describe('validateTranslationReferences — contributed navigation (#18203)', ()
     // `packageBodyAsStack(body, entries)` — the body IS its own manifest.
     const findings = validateTranslationReferences({ ...ownerBody, manifest: ownerBody, packages: artifactPackages });
     expect(findings).toEqual([]);
+  });
+});
+
+/**
+ * ⭐ #18441 — the same class as the contributed-navigation block above, one
+ * collection over: `objectExtensions[]` is the DECLARED cross-package
+ * field-injection surface (canonical target key `extend`), and the fields it
+ * carries never enter the target object's own `fields` declaration —
+ * `ObjectQL.registerApp` registers the extension as its own `'extend'` layer
+ * and the registry merges the layers on read.
+ *
+ * So a universe built from `stack.objects` alone reported the locale key for a
+ * CORRECTLY injected field as an orphan, at `error`, in the same words as a
+ * real typo. That indistinguishability is the defect, not the count: measured
+ * on the probe stack below, the correct key and a `zzz_gone` typo each produced
+ * exactly one finding whose rule, severity, message and remedy ("Point the key
+ * at a declared field, or drop it") differed only in the field name — so the
+ * author who extended the object correctly was told their correct key was
+ * wrong, and the run FAILED on it.
+ *
+ * Both halves are pinned here: the injected names resolve, and every control
+ * still fires. ⛔ The fold is exactly two rungs wide because the schema is —
+ * see the last case in this block, which pins that surface against drift.
+ */
+describe('validateTranslationReferences — objectExtensions-injected surfaces (#18441)', () => {
+  /**
+   * The #18441 probe stack: `crm_lead` declares `name`; `sla_tier` and the
+   * `sla_required` rule arrive through an extension aimed at it.
+   */
+  const extendedLead = (objectNode: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_lead', label: 'Lead', fields: { name: { type: 'text', label: 'Name' } } }],
+    objectExtensions: [
+      {
+        extend: 'crm_lead',
+        fields: { sla_tier: { type: 'text', label: 'SLA Tier' } },
+        validations: [
+          {
+            name: 'sla_required',
+            type: 'cross_field',
+            message: 'An SLA tier is required once a due date is set',
+            condition: 'record.sla_tier != null',
+            fields: ['sla_tier'],
+          },
+        ],
+      },
+    ],
+    translations: [{ 'zh-CN': { objects: { crm_lead: objectNode } } }],
+  });
+
+  it('accepts a locale key for a field an extension injects', () => {
+    const findings = validateTranslationReferences(
+      extendedLead({ label: '线索', fields: { sla_tier: { label: 'SLA 等级' } } }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  /**
+   * ⭐ The control — and the reading that graded this card a bug. Widening a
+   * universe trades a false positive for a blind spot unless the genuine
+   * orphan still reports, so the same stack with one key nothing declares has
+   * to stay an `error` with its rule id intact.
+   */
+  it('still reports a genuinely undeclared field on the same stack, at `error`', () => {
+    const findings = validateTranslationReferences(extendedLead({ fields: { zzz_gone: { label: '没了' } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].objects.crm_lead.fields.zzz_gone',
+    });
+    // The injected name joins the population the remedy enumerates — which is
+    // also the evidence the fold reached this run at all, rather than the leg
+    // having gone quiet.
+    expect(findings[0].hint).toContain('Declared fields: name, sla_tier.');
+  });
+
+  it('separates the two directions on ONE bundle — the injected key is silent, the typo is not', () => {
+    const findings = validateTranslationReferences(
+      extendedLead({ fields: { sla_tier: { label: 'SLA 等级' }, zzz_gone: { label: '没了' } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_lead.fields.zzz_gone');
+  });
+
+  it('accepts a `_validations` key for a rule an extension merges in', () => {
+    const findings = validateTranslationReferences(
+      extendedLead({ _validations: { sla_required: { message: 'SLA 等级为必填' } } }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('still reports a `_validations` key naming no rule at any layer', () => {
+    const findings = validateTranslationReferences(
+      extendedLead({ _validations: { zzz_rule: { message: '没了' } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].objects.crm_lead._validations.zzz_rule',
+    });
+    expect(findings[0].hint).toContain('Declared rules: sla_required.');
+  });
+
+  /**
+   * The per-PACKAGE leg (`packageBodyAsStack`, #16611). Here the package that
+   * OWNS the object carries the translations and declares no extension itself,
+   * so the injected name is only readable through the artifact's own
+   * `packages[]`. Without that carrier the union leg would accept this key and
+   * the per-package leg would report it alone — one key, two verdicts.
+   */
+  it('reads an extension declared by a SIBLING package of the same artifact', () => {
+    const ownerBody = {
+      id: 'crm_core',
+      objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+      translations: [{ 'zh-CN': { objects: { crm_lead: { fields: { sla_tier: { label: 'SLA 等级' } } } } } }],
+    };
+    const artifactPackages = [
+      { manifest: ownerBody },
+      {
+        manifest: {
+          id: 'crm_service',
+          objectExtensions: [{ extend: 'crm_lead', fields: { sla_tier: { type: 'text' } } }],
+        },
+      },
+    ];
+    const findings = validateTranslationReferences({
+      ...ownerBody,
+      manifest: ownerBody,
+      packages: artifactPackages,
+    });
+    expect(findings).toEqual([]);
+  });
+
+  /**
+   * Rung 2b of the §4 ladder. An extension exists to reach an object ANOTHER
+   * package owns, so the target is routinely one this stack does not define —
+   * and then the owner's field set is no more visible here than a platform
+   * object's. The object key resolves (the extension is proof the stack means
+   * that name) and the subtree is skipped WHOLLY, for rung 2's reason.
+   */
+  describe('rung 2b — an extension target this stack does not define', () => {
+    const contributorStack = (bundleObjects: Record<string, unknown>) => ({
+      objects: [{ name: 'svc_ticket', fields: { name: { type: 'text' } } }],
+      objectExtensions: [{ extend: 'crm_lead', fields: { sla_tier: { type: 'text' } } }],
+      translations: [{ 'zh-CN': { objects: bundleObjects } }],
+    });
+
+    it('accepts the object key, and judges nothing under it', () => {
+      const findings = validateTranslationReferences(
+        contributorStack({
+          // `name` is the OWNER's field and `sla_tier` the injected one: from
+          // here the two are indistinguishable, which is why neither is judged.
+          crm_lead: { label: '线索', fields: { sla_tier: { label: 'SLA 等级' }, name: { label: '名称' } } },
+        }),
+      );
+      expect(findings).toEqual([]);
+    });
+
+    /** ⭐ The control: 2b resolves the names an extension NAMES, not a path. */
+    it('still reports an object neither defined nor extended, on the same stack', () => {
+      const findings = validateTranslationReferences(
+        contributorStack({
+          crm_lead: { fields: { sla_tier: { label: 'SLA 等级' } } },
+          zzz_nothing: { label: '没了' },
+        }),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        severity: 'error',
+        path: 'translations[0]["zh-CN"].objects.zzz_nothing',
+      });
+    });
+
+    it('an extension entry with no `extend` makes nothing addressable', () => {
+      const findings = validateTranslationReferences({
+        objects: [{ name: 'svc_ticket', fields: { name: { type: 'text' } } }],
+        objectExtensions: [{ fields: { sla_tier: { type: 'text' } } }],
+        translations: [{ 'zh-CN': { objects: { crm_lead: { fields: { sla_tier: { label: 'x' } } } } } }],
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_lead');
+    });
+  });
+
+  /**
+   * ⛔ The fold reaches `fields.*` and `_validations.*` and no other rung,
+   * because `ObjectExtensionSchema` reaches no further: an author cannot
+   * contribute a view, a section, a filter-preset tab or an action through an
+   * extension at all, so a key for one is an orphan exactly as it was.
+   */
+  it('folds no other rung — an extended object still reports its ghost view, section, tab and action', () => {
+    const findings = validateTranslationReferences(
+      extendedLead({
+        _views: { zzz_board: { label: 'x' } },
+        _sections: { zzz_sla: { label: 'x' } },
+        _tabs: { zzz_breached: { label: 'x' } },
+        _actions: { zzz_escalate: { label: 'x' } },
+      }),
+    );
+    expect(findings.map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.crm_lead._views.zzz_board',
+      'translations[0]["zh-CN"].objects.crm_lead._sections.zzz_sla',
+      'translations[0]["zh-CN"].objects.crm_lead._tabs.zzz_breached',
+      'translations[0]["zh-CN"].objects.crm_lead._actions.zzz_escalate',
+    ]);
+  });
+
+  /**
+   * …and the pin that keeps the sentence above true. The fold is sized against
+   * the SCHEMA, so if `ObjectExtensionSchema` ever accepts one of these keys,
+   * this fails here rather than leaving the rule reporting correct keys for a
+   * surface that has started to exist. Both arms are asserted, so the refusal
+   * reading is not a dead instrument: the two keys the fold DOES read parse.
+   */
+  it('pins the extension key surface the fold is sized against', () => {
+    const refusedByName = (key: string): boolean => {
+      const parsed = ObjectExtensionSchema.safeParse({ extend: 'crm_lead', [key]: [] } as unknown);
+      if (parsed.success) return false;
+      return parsed.error.issues.some(
+        (issue) => issue.code === 'unrecognized_keys' && (issue.path ?? []).length === 0,
+      );
+    };
+    const surface = ['views', 'listViews', 'actions', 'fieldGroups', 'sections', 'tabs', 'hooks'];
+    expect(surface.map((key) => `${key}:${refusedByName(key) ? 'refused' : 'accepted'}`)).toEqual([
+      'views:refused',
+      'listViews:refused',
+      'actions:refused',
+      'fieldGroups:refused',
+      'sections:refused',
+      'tabs:refused',
+      'hooks:refused',
+    ]);
+    expect(
+      ObjectExtensionSchema.safeParse({ extend: 'crm_lead', fields: { sla_tier: { type: 'text' } } } as unknown).success,
+    ).toBe(true);
+    expect(
+      ObjectExtensionSchema.safeParse({
+        extend: 'crm_lead',
+        validations: [
+          {
+            name: 'sla_required',
+            type: 'cross_field',
+            message: 'An SLA tier is required',
+            condition: 'record.sla_tier != null',
+            fields: ['sla_tier'],
+          },
+        ],
+      } as unknown).success,
+    ).toBe(true);
+  });
+});
+
+/**
+ * ⭐ #18442 — the app-name rung of the same rule. A package contributes items
+ * into an app it does not own and ships the labels for the items it
+ * contributed; declaring that app is the OTHER package's job. The rule told it
+ * the app is one "which this stack does not define", at `error`, with the
+ * remedy "Match the key to an app's `name`, or drop it" — and because the app
+ * rung `continue`s, the whole subtree went with it.
+ *
+ * ⛔ Accepting it is not a new resolution-context decision. The runtime's own
+ * contribution diagnostic already took that decision, in the opposite
+ * direction of severity and one field over: `checkNavContributionGroups`
+ * yields NOTHING for a contribution whose target app is absent, because "a
+ * package may legally contribute into an app shipped by a DIFFERENT artifact
+ * installed separately" — reporting the absent-app case there "would refuse the
+ * supported cross-artifact case at build time". Both worlds are pinned below,
+ * owner inside the artifact and owner outside it, because the false positive
+ * was measured in both.
+ */
+describe('validateTranslationReferences — an app a package contributes into without declaring (#18442)', () => {
+  const contribution = {
+    app: 'crm_enterprise',
+    group: 'group_service',
+    priority: 100,
+    items: [{ id: 'nav_case', type: 'object', objectName: 'crm_case' }],
+  };
+  /** The contributor package's own assembled body: contributions, translations, no apps. */
+  const contributorBody = (bundleApps: Record<string, unknown>) => ({
+    id: 'crm_service',
+    navigationContributions: [contribution],
+    translations: [{ 'zh-CN': { apps: bundleApps } }],
+  });
+  /** `packageBodyAsStack(body, entries)` — the body IS its own manifest. */
+  const asPerPackageLeg = (body: Record<string, unknown>, entries: unknown[]) => ({
+    ...body,
+    manifest: body,
+    packages: entries,
+  });
+  const ownerEntry = {
+    manifest: {
+      id: 'crm_core',
+      apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }],
+    },
+  };
+
+  it('accepts the label the contributor ships for the item it contributed', () => {
+    const body = contributorBody({ crm_enterprise: { navigation: { nav_case: { label: '个案' } } } });
+    expect(validateTranslationReferences(asPerPackageLeg(body, [ownerEntry, { manifest: body }]))).toEqual([]);
+  });
+
+  it('accepts it with the app owner OUTSIDE the artifact too — the separately installed app', () => {
+    const body = contributorBody({ crm_enterprise: { navigation: { nav_case: { label: '个案' } } } });
+    expect(validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]))).toEqual([]);
+  });
+
+  it('accepts it on the single-`defineStack` shape, contributions on the stack\'s own `manifest`', () => {
+    const findings = validateTranslationReferences({
+      manifest: { id: 'crm_service', navigationContributions: [contribution] },
+      translations: [{ 'zh-CN': { apps: { crm_enterprise: { navigation: { nav_case: { label: '个案' } } } } } }],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  /**
+   * Leaf copy under a contribution target resolves too: `stack.translations`
+   * merge across the packages of a composition, so the app title a contributor
+   * ships is read by the same resolver that reads the owner's. ⛔ This rule
+   * judges whether a key RESOLVES, never which package ought to have written
+   * it — from a per-package leg it cannot see who owns the app, and an
+   * ownership verdict drawn from that blindness is the finding being removed.
+   */
+  it('accepts leaf copy under a contribution target', () => {
+    const body = contributorBody({ crm_enterprise: { label: '企业版 CRM' } });
+    expect(validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]))).toEqual([]);
+  });
+
+  /**
+   * ⭐ The control. The nav rung stays judged under a contribution target — the
+   * ids contributed from here are a complete universe for what this package may
+   * address — and the diagnosis says which question it answered.
+   */
+  it('still reports an id nothing contributes, at `error`, with the contribution diagnosis', () => {
+    const body = contributorBody({
+      crm_enterprise: { navigation: { nav_case: { label: '个案' }, nav_deleted: { label: '没了' } } },
+    });
+    const findings = validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].apps.crm_enterprise.navigation.nav_deleted',
+    });
+    expect(findings[0].message).toContain('which this stack contributes into');
+    expect(findings[0].hint).toContain('Contributed navigation ids: nav_case.');
+  });
+
+  /** ⭐ The other control: the widening is per contributed app, not per key. */
+  it('still reports an app this stack neither defines nor contributes into', () => {
+    const body = contributorBody({ zzz_not_an_app: { label: '没了' } });
+    const findings = validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].apps.zzz_not_an_app',
+    });
+    expect(findings[0].hint).toContain('Apps this stack defines or contributes into: crm_enterprise.');
+  });
+
+  /**
+   * A contribution names ONE target app, and that stays true when the target
+   * is resolvable only BECAUSE of the contribution — otherwise one widening
+   * would make every contributed id addressable under every contributed app.
+   */
+  it('keeps contributed ids per app', () => {
+    const body = {
+      id: 'crm_service',
+      navigationContributions: [contribution, { app: 'ops_console', items: [{ id: 'nav_ops', type: 'dashboard' }] }],
+      translations: [{ 'zh-CN': { apps: { ops_console: { navigation: { nav_case: { label: '个案' } } } } } }],
+    };
+    const findings = validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].apps.ops_console.navigation.nav_case');
+    expect(findings[0].hint).toContain('Contributed navigation ids: nav_ops.');
+  });
+
+  it('resolves the app even when no contributed item carries an id, and says so', () => {
+    const body = {
+      id: 'crm_service',
+      navigationContributions: [{ app: 'crm_enterprise', items: [{ type: 'object', objectName: 'crm_case' }] }],
+      translations: [{ 'zh-CN': { apps: { crm_enterprise: { navigation: { nav_case: { label: '个案' } } } } } }],
+    };
+    const findings = validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].apps.crm_enterprise.navigation.nav_case');
+    expect(findings[0].hint).toContain('contributes no identified item into "crm_enterprise" at all.');
+  });
+
+  /**
+   * ⛔ The contribution wording is for contribution targets only: an app this
+   * stack DECLARES keeps the diagnosis it had, so the new branch cannot leak
+   * into the population #18203 already covers.
+   */
+  it('leaves the declared-app diagnosis alone', () => {
+    const findings = validateTranslationReferences({
+      apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }],
+      translations: [{ 'zh-CN': { apps: { crm_enterprise: { navigation: { nav_zzz: { label: '没了' } } } } } }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('which app "crm_enterprise" does not declare');
+    expect(findings[0].hint).toContain('Declared navigation ids: group_service.');
+  });
+});
+
+/**
+ * ⭐ #19064 — the OBJECT rung of the same rule, on the same per-package leg.
+ *
+ * `os build` judges each package body as its own stack
+ * (`packageBodyAsStack(body, entries)`, `compile.ts` step 3b-ii), where the
+ * universe's object collection holds what THIS package declares and nothing
+ * else. So a package that translates an object a SIBLING package of the same
+ * artifact declares had its object key reported `translation-target-unknown`
+ * at `error` — "which no object in this stack defines", remedy "Rename the key
+ * to the object it was written for, drop it" — in the same words a genuine
+ * typo gets, and the run FAILS on it.
+ *
+ * ⛔ Not a new resolution-context decision. `validateObjectReferences` took it
+ * on this exact carrier for object NAMES (#16611 — `artifactProvidedObjectNames`
+ * folded into its `resolvable` set), ADR-0130 makes the release artifact the
+ * co-ownership boundary, and this rule's own docblock already declared the same
+ * reach for this rung while the rung read `stack.objects` alone.
+ *
+ * What differs from the precedent is the RETURN, and two cases below are what
+ * pin it: this universe is keyed by FACTS, not names, so the sibling's fields,
+ * options, views, sections and rules are folded WITH the name. A name-only fold
+ * would resolve the object key and then judge the owner's own field keys
+ * against an empty fact set — the trap `objectExtensionsByTarget` records one
+ * level up — and a wholesale subtree SKIP (rung 2b's answer, for a target whose
+ * declaration is genuinely invisible from here) would leave this leg unable to
+ * see a typo the union leg reports.
+ */
+describe('validateTranslationReferences — an object a SIBLING package of the artifact declares (#19064)', () => {
+  /**
+   * `examples/app-multi-package`'s shape — the same corpus
+   * `validateObjectReferences`' #16611 block models: `core` owns `crm_account`
+   * and `orders` reads it, and here `orders` also TRANSLATES it.
+   */
+  const CORE_BODY = {
+    id: 'com.example.multi.core',
+    objects: [
+      {
+        name: 'crm_account',
+        label: 'Account',
+        fields: {
+          name: { type: 'text', label: 'Name' },
+          industry: { type: 'select', label: 'Industry', options: [{ value: 'tech', label: 'Tech' }] },
+        },
+        validations: [
+          {
+            name: 'industry_required',
+            type: 'cross_field',
+            message: 'An industry is required',
+            condition: 'record.industry != null',
+            fields: ['industry'],
+          },
+        ],
+      },
+    ],
+  };
+  const ordersBody = (bundleObjects: Record<string, unknown>) => ({
+    id: 'com.example.multi.orders',
+    objects: [{ name: 'crm_order', fields: { number: { type: 'text' } } }],
+    translations: [{ 'zh-CN': { objects: bundleObjects } }],
+  });
+  /** `packageBodyAsStack(body, entries)` — the body IS its own manifest. */
+  const asPerPackageLeg = (body: Record<string, unknown>, entries: unknown[]) => ({
+    ...body,
+    manifest: body,
+    packages: entries,
+  });
+  const perPackageLeg = (bundleObjects: Record<string, unknown>) => {
+    const body = ordersBody(bundleObjects);
+    return validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }, { manifest: CORE_BODY }]));
+  };
+
+  /**
+   * ⭐ The reproduction, kept as the control: judged with its own entry alone,
+   * the very same bundle still errors. Without this leg "no findings" above is
+   * indistinguishable from the rung having gone quiet.
+   */
+  it('CONTROL — the same package judged ALONE still errors, so the context is what does the work', () => {
+    const body = ordersBody({ crm_account: { label: '客户' } });
+    const findings = validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].objects.crm_account',
+    });
+  });
+
+  it('accepts the object key when a sibling package of the same artifact declares it', () => {
+    expect(perPackageLeg({ crm_account: { label: '客户' } })).toEqual([]);
+  });
+
+  it("judges the subtree against the SIBLING's declaration — its field, option and rule keys resolve", () => {
+    expect(
+      perPackageLeg({
+        crm_account: {
+          label: '客户',
+          fields: { industry: { label: '行业', options: { tech: '科技' } } },
+          _validations: { industry_required: { message: '行业为必填' } },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  /**
+   * ⭐ The false-NEGATIVE control. Widening a universe trades a false positive
+   * for a blind spot unless every genuine orphan still reports, so a name no
+   * entry of the artifact declares stays an `error` with its rule id intact.
+   */
+  it('NON-DEGENERACY — a name NO package of the artifact declares still errors', () => {
+    const findings = perPackageLeg({ zzz_not_an_object: { label: '没了' } });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].objects.zzz_not_an_object',
+    });
+    // The remedy enumerates what the ARTIFACT provides, not this package's own
+    // objects alone — the same reading `validateObjectReferences` pins for the
+    // same widening, and the evidence the fold reached this run at all.
+    expect(findings[0].hint).toContain('Defined objects: crm_account, crm_order.');
+  });
+
+  /** ⭐ The second false-negative control, one rung down: the subtree stays judged. */
+  it('NON-DEGENERACY — a field the sibling does not declare is still an `error` under the resolved object', () => {
+    const findings = perPackageLeg({ crm_account: { fields: { zzz_gone: { label: '没了' } } } });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].objects.crm_account.fields.zzz_gone',
+    });
+    expect(findings[0].hint).toContain('Declared fields: industry, name.');
+  });
+
+  it('separates the two directions on ONE bundle — the sibling key is silent, the typo is not', () => {
+    const findings = perPackageLeg({
+      crm_account: { fields: { industry: { label: '行业' }, zzz_gone: { label: '没了' } } },
+      zzz_not_an_object: { label: '没了' },
+    });
+    expect(findings.map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.crm_account.fields.zzz_gone',
+      'translations[0]["zh-CN"].objects.zzz_not_an_object',
+    ]);
+  });
+
+  /**
+   * ⛔ Only the ADR-0130 D4 entry shape is read. A segment reference carries no
+   * manifest content, and inventing a name for one would be the one mistake
+   * this context must not make — a name in here SILENCES the ladder.
+   */
+  it('an entry with no readable body makes nothing addressable', () => {
+    const body = ordersBody({ crm_account: { label: '客户' } });
+    const findings = validateTranslationReferences(
+      asPerPackageLeg(body, [{ manifest: body }, { ref: 'com.example.multi.core@1.0.0', integrity: 'sha512-zzz' }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_account');
+  });
+
+  /**
+   * Which layer's `options` a merged field ends up carrying is the registry's
+   * precedence question, and `checkOptionKeys` is the only consumer of the
+   * stored definition here — so the declaration this leg is JUDGING keeps the
+   * slot, exactly as the `objectExtensions` fold decided one collection over.
+   */
+  it("keeps the stack's OWN declaration when a sibling declares the same object name", () => {
+    const body = {
+      id: 'com.example.multi.orders',
+      objects: [{ name: 'crm_account', fields: { industry: { type: 'select', options: [{ value: 'retail' }] } } }],
+      translations: [
+        { 'zh-CN': { objects: { crm_account: { fields: { industry: { options: { retail: '零售' } } } } } } },
+      ],
+    };
+    expect(
+      validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }, { manifest: CORE_BODY }])),
+    ).toEqual([]);
+  });
+
+  /**
+   * The single-`defineStack` shape is untouched: `objects` is a STACK
+   * collection, not a manifest key, so there is no `stack.manifest.objects`
+   * form to read and a bundle keyed to a name nothing declares still errors.
+   */
+  it('leaves the single-stack shape alone — no `packages[]`, no widening', () => {
+    const findings = validateTranslationReferences({
+      objects: [{ name: 'crm_order', fields: { number: { type: 'text' } } }],
+      translations: [{ 'zh-CN': { objects: { crm_account: { label: '客户' } } } }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_account');
   });
 });
 

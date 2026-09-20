@@ -369,7 +369,7 @@ The ADR's `DatasetSchema` / `DimensionSchema` / `MeasureSchema` are all taken: `
 
 - **Rendering is in the sibling repo `objectui`**, not here — Dashboard/Report renderers, `useReportData`, builders, the `data-objectstack` adapter. Any field change is a **two-repo change** + a `.objectui-sha` bump.
 - **`ReportSchema` (pivot) has no runtime executor** — `plugin-reports` is a separate saved-query/CSV emailer; pivoting happens entirely client-side in `useReportData.ts`.
-- **Registration touches 4 surfaces**, not 1: `kernel/metadata-type-schemas.ts`, `kernel/metadata-plugin.zod.ts` (enum + `DEFAULT_METADATA_TYPE_REGISTRY`, `loadOrder` < report/dashboard), `shared/metadata-collection.zod.ts` (`MAP_SUPPORTED_FIELDS` + `PLURAL_TO_SINGULAR`), `objectql/engine.ts` `metadataArrayKeys` (**two** lists, L806 + L961).
+- **Registration touches 4 surfaces**, not 1: `kernel/metadata-type-schemas.ts`, `kernel/metadata-plugin.zod.ts` (enum + `DEFAULT_METADATA_TYPE_REGISTRY`, `loadOrder` < report/dashboard), `shared/metadata-collection.zod.ts` (`MAP_SUPPORTED_FIELDS` + `PLURAL_TO_SINGULAR`), `objectql/engine.ts` `metadataArrayKeys` (**two** lists).
 - **Migration scope:** 7 reports (2 files) + 64 widgets (4 files; heaviest `chart-gallery.dashboard.ts` = 38) + 2 chart-views (2 files) = **8 source files, two inline shapes**. Tests to rewrite: `view.test.ts` (214) + `dashboard.test.ts` (146) + `report.test.ts` (51) + `report-service.test.ts` + `view-expand.test.ts` + 3 example integration tests. No JSON/seed instance data. JSON-schema regenerates via `pnpm gen:schema`.
 
 ### Resolved decisions (gate everything) — decided 2026-05-31 on the AI-author / human-review criterion

@@ -95,19 +95,27 @@ describe('sms channel', () => {
         // implementation broken in another direction — see the same block in
         // `email-channel.test.ts` for the enumeration.
         //
-        // ⚠️ This channel declares no `isAvailable()`, so fan-out cannot suppress
-        // it and `send()` is reached on the ORDINARY path, not only on the
-        // durable residue: the silent success needed no special composition.
-        it('refuses with the declared transport_not_configured reason', async () => {
+        // [#18567] This channel now declares `isAvailable()` too, so fan-out
+        // suppresses it pre-write and `send()` is reached only on the DURABLE
+        // RESIDUE — a transport present at emit and gone by dispatch, where the
+        // row already exists. The refusal below is that residue's answer, and it
+        // is unchanged: ⛔ #18567 did not weaken #18562's fix.
+        it('refuses with the SAME declared reason isAvailable() returns', async () => {
             const ch = channel(() => undefined, fakeData());
             const r = await ch.send(silentCtx(), delivery());
 
             expect(r.ok).toBe(false);
             expect(r.externalId).toBeUndefined();
-            // The same closed-vocabulary token the email channel's
-            // `isAvailable()` returns and `sys_notification.suppressed_channels`
-            // stores — one condition, one name, aggregatable by an operator.
-            expect(r.error?.startsWith('transport_not_configured:')).toBe(true);
+            // ⭐ One condition, one answer. Read the token off `isAvailable()`
+            // rather than retyping it, so a future rename of the reason cannot
+            // leave the two members disagreeing while both tests stay green.
+            // It is the same closed-vocabulary token
+            // `sys_notification.suppressed_channels` stores.
+            const probe = ch.isAvailable?.(silentCtx(), {});
+            expect(probe).toEqual({ available: false, reason: 'transport_not_configured' });
+            const reason = (probe as { reason: string }).reason;
+            expect(r.error).toContain(reason);
+            expect(r.error?.startsWith(`${reason}:`)).toBe(true);
             expect(r.error).toContain('user_1');
         });
 
@@ -132,6 +140,14 @@ describe('sms channel', () => {
         it('END TO END: one emit, one outbox, one dispatcher tick — the row lands `dead`, ⛔ not `success`', async () => {
             // What an operator reads off `sys_notification_delivery`. Before
             // #18424 this row read `status: 'success'` — the silent half.
+            //
+            // [#18567] The resolver is now present at emit and gone by dispatch.
+            // Since this channel declares `isAvailable()`, a resolver that is
+            // absent THROUGHOUT is suppressed at fan-out and writes no row at
+            // all (pinned separately below), which would make this test assert
+            // `dead` over an empty table. The residue the pre-write answer
+            // cannot cover is exactly this shape — and it is the shape
+            // `email-channel.test.ts` already uses for the same reason.
             const data = fakeData();
             const outbox = new MemoryNotificationOutbox(1);
             const service = new MessagingService({
@@ -141,7 +157,7 @@ describe('sms channel', () => {
             });
             service.registerChannel(
                 createSmsChannel({
-                    getSms: () => undefined,
+                    getSms: (() => { let n = 0; return () => (n++ === 0 ? ({ async send() { return { id: 'sms_1' }; } }) : undefined); })(),
                     getData: () => data,
                     store: new NotificationTemplateStore({ getData: () => data }),
                 }),
@@ -335,6 +351,150 @@ describe('sms channel', () => {
             // Everything else stays retryable — a transport hiccup is not a wall.
             expect(ch.classifyError?.('sms send failed: gateway timeout')).toBe('retryable');
             expect(ch.classifyError?.(undefined)).toBe('retryable');
+        });
+    });
+    // ── #18567 — the availability half. `email` could be suppressed before a
+    // delivery row was written and `sms` could not, so ONE condition (no
+    // transport) was answered two ways depending on which channel fan-out
+    // asked. These pin the channel's own answer and then DRIVE the consequence
+    // the card is written against: what fan-out writes, and what it stops
+    // writing.
+    describe('availability at fan-out (#18567)', () => {
+        it('answers unavailable with a declared reason when no sms service is registered', () => {
+            const data = fakeData();
+            const ch = createSmsChannel({
+                getSms: () => undefined,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            expect(ch.isAvailable?.(silentCtx(), { organizationId: 'org_1' }))
+                .toEqual({ available: false, reason: 'transport_not_configured' });
+        });
+
+        it('THE CONTROL: answers available once an sms service is registered', () => {
+            // Pairs with the test above on ONE variable — the transport — so
+            // "it answered unavailable" cannot be read as "it always does".
+            const data = fakeData();
+            const sms = fakeSms();
+            const ch = createSmsChannel({
+                getSms: () => sms.service,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            expect(ch.isAvailable?.(silentCtx(), { organizationId: 'org_1' })).toEqual({ available: true });
+        });
+
+        it('re-reads the transport on every call — an answer is never memoized', () => {
+            // The transport is hot-swapped by the `sms` settings change bus, so
+            // a cached answer would outlive the configuration that produced it.
+            const data = fakeData();
+            const sms = fakeSms();
+            let installed: ReturnType<typeof fakeSms>['service'] | undefined;
+            const ch = createSmsChannel({
+                getSms: () => installed,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            expect(ch.isAvailable?.(silentCtx(), {})).toEqual({ available: false, reason: 'transport_not_configured' });
+            installed = sms.service;
+            expect(ch.isAvailable?.(silentCtx(), {})).toEqual({ available: true });
+        });
+
+        it('performs no data access to answer — the probe is not a send', () => {
+            const data = fakeData();
+            const sms = fakeSms();
+            const ch = createSmsChannel({
+                getSms: () => sms.service,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            const before = data.findOnes.length;
+            ch.isAvailable?.(silentCtx(), { organizationId: 'org_1' });
+            expect(data.findOnes.length).toBe(before);
+            expect(sms.sent).toHaveLength(0);
+        });
+
+        it('DRIVEN: fan-out suppresses the real channel pre-write and records the reason on sys_notification', async () => {
+            // Leg C of the finding's matrix, inverted. Before this change the
+            // same composition wrote an sms delivery row per recipient that the
+            // dispatcher could only dead-letter, because fan-out took the
+            // "no isAvailable ⇒ AVAILABLE" branch for this channel.
+            const inserts: Array<{ object: string; row: Record<string, unknown> }> = [];
+            const engine = {
+                async insert(object: string, row: Record<string, unknown>) {
+                    inserts.push({ object, row });
+                    return { id: `evt_${inserts.length}`, ...row };
+                },
+                async find() { return []; },
+            } as any;
+            const outbox = new MemoryNotificationOutbox(1);
+            const service = new MessagingService({
+                logger: { info: () => {}, warn: () => {}, error: () => {} },
+                outbox,
+                getData: () => engine,
+            });
+            // The direct composition the package's PUBLIC `createSmsChannel`
+            // export invites — no `lazyChannelMount` gate in front of it.
+            service.registerChannel(
+                createSmsChannel({
+                    getSms: () => undefined,
+                    getData: () => engine,
+                    store: new NotificationTemplateStore({ getData: () => engine }),
+                }),
+            );
+
+            const result = await service.emit({
+                topic: 'deal.won',
+                audience: ['user_1', 'user_2'],
+                channels: ['sms'],
+                organizationId: 'org_1',
+                payload: { title: 'Deal closed', body: 'Acme signed' },
+            });
+
+            // (1) No delivery row at all — the rows that used to exist only to
+            //     dead-letter are gone.
+            expect(await outbox.list()).toHaveLength(0);
+            expect(result.enqueued).toBe(0);
+            expect(result.failed).toBe(0);
+            // (2) …and the reason is durable on the L2 event, in the SAME
+            //     insert that created it, so (1) cannot be read as "the emit
+            //     vanished". Without this, writing nothing at all also passes.
+            expect(inserts).toHaveLength(1);
+            expect(inserts[0].object).toBe('sys_notification');
+            expect(inserts[0].row.suppressed_channels)
+                .toEqual([{ channel: 'sms', reason: 'transport_not_configured' }]);
+            expect(result.suppressed).toEqual([{ channel: 'sms', reason: 'transport_not_configured' }]);
+        });
+
+        it('THE CONTROL, other side: with a transport the same emit still enqueues one row per recipient', async () => {
+            // The instrument is live: the suppression above is caused by the
+            // absent transport, ⛔ not by this channel having become unemittable.
+            const data = fakeData({ users: { user_1: '+8613800000000', user_2: '+8613800000001' } });
+            const sms = fakeSms();
+            const outbox = new MemoryNotificationOutbox(1);
+            const service = new MessagingService({
+                logger: { info: () => {}, warn: () => {}, error: () => {} },
+                outbox,
+                getData: () => data,
+            });
+            service.registerChannel(
+                createSmsChannel({
+                    getSms: () => sms.service,
+                    getData: () => data,
+                    store: new NotificationTemplateStore({ getData: () => data }),
+                }),
+            );
+
+            const result = await service.emit({
+                topic: 'deal.won',
+                audience: ['user_1', 'user_2'],
+                channels: ['sms'],
+                organizationId: 'org_1',
+                payload: { title: 'Deal closed', body: 'Acme signed' },
+            });
+
+            expect((await outbox.list()).map((r) => r.recipientId).sort()).toEqual(['user_1', 'user_2']);
+            expect(result.suppressed).toEqual([]);
         });
     });
 });

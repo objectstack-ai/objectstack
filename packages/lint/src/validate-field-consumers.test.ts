@@ -471,3 +471,62 @@ describe('validateFieldConsumers (#15922)', () => {
     });
   });
 });
+
+/**
+ * [#18550] The `displayField` consumer edge must refuse a `reference` carrier
+ * it cannot read, rather than recording no edge at all.
+ *
+ * One of the measured residue sites of ruling letter E item 2 on #18095. The
+ * read was `strName(field.reference)`, which answers `undefined` for an
+ * unreadable carrier exactly as it does for an absent one — so a field a
+ * lookup DOES display was recorded as consumed by nobody, and this rule then
+ * reported it as carrier-only. The ledger under-reported, and the finding
+ * pointed at the displayed field instead of the unreadable carrier.
+ *
+ * Absence keeps its answer: with no target there is no object to look a
+ * `displayField` up on, so no edge is recorded and nothing throws.
+ */
+describe('validateFieldConsumers — an unreadable `reference` carrier is refused (#18550)', () => {
+  const stackWith = (carrier: AnyRec): AnyRec => ({
+    objects: [
+      { name: 'crm_account', fields: { name: { type: 'text' }, legal_name: { type: 'text' } } },
+      {
+        name: 'crm_contact',
+        fields: {
+          name: { type: 'text' },
+          account: { type: 'lookup', displayField: 'legal_name', ...carrier },
+        },
+      },
+    ],
+    // A consumer root OTHER than `objects` is this rule's entry condition
+    // (`hasConsumerRoot`): with only `objects` present it returns early and
+    // never walks a field, so a fixture without one would make every case
+    // below vacuous.
+    views: [{ name: 'contact_list', object: 'crm_contact', viewKind: 'list', columns: ['name'] }],
+  });
+
+  it('control: a READABLE carrier records the `displayField` edge, so the target is not carrier-only', () => {
+    const findings = validateFieldConsumers(stackWith({ reference: 'crm_account' }));
+    expect(findings.map((f) => f.path)).not.toContain('objects[0].fields.legal_name');
+  });
+
+  it('an OBJECT-valued carrier REFUSES — ⛔ not a silent missing edge', () => {
+    const run = () => validateFieldConsumers(stackWith({ reference: { object: 'crm_account' } }));
+    expect(run).toThrow(TypeError);
+    expect(run).toThrow(/validate-field-consumers walkObject/);
+    expect(run).toThrow(/`reference` is an object/);
+    expect(run).toThrow(/FieldSchema declares it as an optional STRING/);
+  });
+
+  it.each([
+    ['undefined (the key omitted)', {}],
+    ['null (`StrictField` declares it nullable)', { reference: null }],
+    ["'' (names no object)", { reference: '' }],
+  ])('absence records no edge and does NOT throw: %s', (_label, carrier) => {
+    // With no target there is no object to resolve `displayField` against, so
+    // the displayed field is genuinely unconsumed here — the rule's ordinary
+    // answer, reached without a throw.
+    const findings = validateFieldConsumers(stackWith(carrier as AnyRec));
+    expect(findings.map((f) => f.path)).toContain('objects[0].fields.legal_name');
+  });
+});

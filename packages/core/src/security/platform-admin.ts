@@ -331,43 +331,21 @@ export function isConfiguredPlatformAdminEmail(
 }
 
 /**
- * [#11663 P5] The migration pointer for the LEGACY anchor.
+ * [#11663 L5] ⛔ The migration pointer for the LEGACY anchor is GONE, and with it
+ * `reportLegacyPlatformAdminGrant` / `resetLegacyPlatformAdminGrantReport`.
  *
- * Nothing is revoked in this leg: an unscoped, in-window `admin_full_access`
- * grant still confers `PLATFORM_ADMIN` exactly as it did (design §5 step 3 —
- * config-derived standing is ADDED, which is what makes this safe to land ahead
- * of every deployment setting the variable). What changes is that the row is now
- * the OLD anchor, so a holder whose standing rests on it alone is told, once,
- * which config line re-anchors them before the row route is removed.
+ * L4 opened a time-boxed, loud migration window: a walled rig whose platform
+ * standing rested on the unscoped `admin_full_access` grant row alone was told,
+ * once per process, which configuration line re-anchors it. L5 is that window's
+ * EXIT — on a walled rig the row is no longer an anchor at all
+ * (`resolve-authz-context.ts` §6b), so there is nothing left to point away from.
  *
- * Once per process, naming ONE holder. Deliberately not once per holder: this
- * runs inside the authorization path, and an unbounded per-user ledger there is
- * a memory surface for something whose whole job is to say "go look at the
- * configuration". The population question (who ALL the administrators are) is
- * the audit surface's, filed as its own leg.
+ * ⛔ Do not reintroduce a request-path notice for this. The walled rig that has
+ * declared nobody is told at BOOT, by the fail-closed backstop in
+ * `plugin-security/src/bootstrap-platform-admin.ts`, where an operator can act on
+ * it — not once per process from inside the authorization path.
+ *
+ * ⚠️ The `single` posture is NOT affected: its first-user promotion and its grant
+ * row stand (Choice 4A), and that row is still that rig's anchor. Its disposition
+ * is #11979's. See ADR-0131 D5, as amended 2026-09-17 (#18413).
  */
-let legacyGrantPointerSaid = false;
-
-export function reportLegacyPlatformAdminGrant(input: {
-  userId: string;
-  email?: unknown;
-}): void {
-  if (legacyGrantPointerSaid) return;
-  legacyGrantPointerSaid = true;
-  const email = normalizePlatformAdminEmail(input.email);
-  sink.warn(
-    `[authz] user ${input.userId} holds PLATFORM_ADMIN through the legacy unscoped `
-      + `'admin_full_access' grant row, not through ${PLATFORM_OWNER_EMAIL_ENV}. The grant row is `
-      + 'the OLD anchor and is honoured for now; it is removed in a later release. Re-anchor this '
-      + `deployment by declaring its administrators in configuration: ${PLATFORM_OWNER_EMAIL_ENV}=`
-      + `${email || '<the administrator\'s verified email address>'}`
-      + ' (comma-separated for several), and make sure each account\'s email is VERIFIED — an '
-      + 'unverified account holding a configured address is not an administrator. Reported once '
-      + 'per process; further holders are not listed.',
-  );
-}
-
-/** Drop the once-per-process latch — for tests. */
-export function resetLegacyPlatformAdminGrantReport(): void {
-  legacyGrantPointerSaid = false;
-}

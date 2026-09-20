@@ -182,7 +182,7 @@ followed by your normal build.
 ### One command covers every major you skipped
 
 ```bash
-os migrate meta --from 15     # the major your metadata was authored against
+os migrate meta --from 16     # the major your metadata was authored against
 ```
 
 `--from` is the major **you** wrote against, not the one you are going to. The
@@ -193,14 +193,21 @@ them by hand:
 
 | You ran | Steps it replays |
 | :--- | :--- |
-| `os migrate meta --from 16` | 17 |
-| `os migrate meta --from 15` | 16, 17 |
-| `os migrate meta --from 14` | 15, 16, 17 |
-| `os migrate meta --from 12` | 13, 14, 15, 16, 17 |
+| `os migrate meta --from 16` | 17, then every later major this build carries a step for |
 
-The chain reaches back to **protocol 10** — that floor is a release-policy
+The chain reaches back to **protocol 16** — that floor is a release-policy
 decision, not an accident of what still exists. Below it the command refuses
 with a message naming the floor rather than half-migrating you.
+
+<Callout type="warn">
+  **The floor was raised from 10 to 16.** Earlier releases replayed the chain
+  from protocol 10, so `--from 10` through `--from 15` used to work and now
+  answer `Cannot migrate from protocol N: the chain's support floor is 16`.
+  Nothing half-migrates: the command refuses before it rewrites anything. If
+  your metadata is still authored against protocol 10–15, reach protocol 16 by
+  another path first — an older `@objectstack/cli` still carries those steps —
+  and then run the command above.
+</Callout>
 
 Useful flags:
 
@@ -208,7 +215,7 @@ Useful flags:
 | :--- | :--- |
 | `--step` | Report each major's hop separately, so a failure bisects to the exact major |
 | `--out migrated.stack.json` | Also write the migrated stack as a JSON snapshot — the only file the command writes |
-| `--to 16` | Stop at an intermediate major instead of this runtime's |
+| `--to 17` | Stop at an intermediate major instead of this runtime's |
 | `--json` | Machine-readable output, for CI or an agent |
 
 It reads **your source** and no database. (Its sibling,
@@ -265,7 +272,7 @@ has already done.
 ### The loop
 
 ```bash
-os migrate meta --from 15     # 1. read the mechanical change list and the to-dos
+os migrate meta --from 16     # 1. read the mechanical change list and the to-dos
                               # 2. apply the edits by hand; resolve the to-dos
                               #    and the checklist items below
 os validate                   # 3. the gate — schema, CEL predicates, widget bindings
@@ -335,8 +342,27 @@ jq '.release | {fromVersion, toVersion,
 named — `"./ai: AgentSchema (const)"`, the entry point followed by the export
 and its kind. `converted` and `migrated` are the ADR-0087 conversions and
 semantic migrations first registered in that release. The same file's
-`aggregate` and `perMajor` records are unchanged and still answer the
-major-boundary question.
+`perMajor` records are unchanged and still answer the major-boundary question,
+and so does `aggregate` — for its `converted` and `migrated`, which are derived
+from the ADR-0087 registries across the whole `from` → `to` range.
+
+⛔ **But not for `aggregate.added` / `aggregate.removed`.** Those come from the
+same one-release export diff as the section above, not from the major range the
+record is keyed by, so when they are filled the `aggregate` record carries a
+`surfaceScope` naming the exact pair they span:
+
+```bash
+jq '.aggregate | {from, to, surfaceScope,
+                  added: (.added | length), removed: (.removed | length)}' \
+  node_modules/@objectstack/spec/spec-changes.json
+```
+
+`surfaceScope` absent means that record claims no export diff at all and its
+`added` / `removed` are empty — the registry-only shape. ⛔ Read that as "this
+record does not say", never as "nothing was added between `from` and `to`",
+which is the same rule the `release` section states for itself below. A release
+whose `aggregate` arrays disagree with the two published tarballs, or carry no
+`surfaceScope`, does not publish.
 
 The `os` CLI reads the same section, so a CI job does not have to know the file
 exists:

@@ -20,6 +20,9 @@
  *     set and `\S` is its complement, so the pin is the whole argument; JSON
  *     Schema specifies `pattern` as an ECMA-262 regex, which is the same engine
  *     this assertion runs on.
+ *   - `banned-keys` — over the whole key-presence lattice, with a
+ *     present-but-`null` value, and on a name `Object.prototype` carries, which
+ *     is the one JSON shape where "own property" and `in` come apart.
  *
  * ## Why an equality pin and not a comment
  *
@@ -44,11 +47,13 @@ import {
   NON_BLANK_PATTERN,
   NON_BLANK_STRING,
   PROJECTABLE_REFINEMENT_PATTERNS,
+  bannedKeys,
   dependentRequired,
   projectableRefinementOf,
   requiredOneOf,
 } from '../src/shared/refinement-projection';
 import { SSLConfigSchema } from '../src/data/driver-sql.zod';
+import { TraceSamplingConfigSchema } from '../src/system/tracing.zod';
 import {
   emitProjectableRefinement,
   projectPublishedJsonSchema,
@@ -86,6 +91,30 @@ const requiredOneOfSatisfied = (node: Record<string, unknown>, doc: Record<strin
 };
 
 /**
+ * The node's banned-key rule — `propertyNames.not.enum`, wherever the emitter put
+ * it — evaluated the way a validator would, and refusing to report anything when
+ * the node carries no such rule, so a projection that stopped emitting fails
+ * rather than passing vacuously.
+ *
+ * Both placements are read because the emitter chooses between them by what the
+ * node already carries: a record already states `propertyNames: { type:
+ * 'string' }`, so its ban is conjoined through `allOf`; a bare object has no
+ * `propertyNames` and takes the rule directly.
+ */
+const bannedKeysSatisfied = (node: Record<string, unknown>, doc: Record<string, unknown>): boolean => {
+  const clauses = [node, ...((node.allOf as Record<string, unknown>[] | undefined) ?? [])];
+  const banned = clauses
+    .map((clause) => (clause.propertyNames as { not?: { enum?: string[] } } | undefined)?.not?.enum)
+    .filter((list): list is string[] => Array.isArray(list));
+  if (banned.length === 0) {
+    throw new Error('the node carries no propertyNames.not.enum — nothing to evaluate');
+  }
+  return banned.every((list) =>
+    Object.keys(doc).every((name) => !list.includes(name)),
+  );
+};
+
+/**
  * ECMA-262 WhiteSpace ∪ LineTerminator, by code point so no control byte is
  * ever written into this file (`scripts/check-nul-bytes.mjs` is the authority
  * on why a raw one is a defect rather than a spelling).
@@ -98,7 +127,7 @@ const BLANK_CODE_POINTS = [
 ];
 
 describe('the list of projectable patterns is CLOSED', () => {
-  it('names exactly the two arms this change landed', () => {
+  it('names exactly the arms this list has landed, and nothing else', () => {
     // ⛔ Growing this is a public-contract decision: every arm narrows a
     // published artifact. A new arm updates this line in the same PR, which is
     // what makes it a reviewed diff rather than a quiet widening of the
@@ -107,6 +136,7 @@ describe('the list of projectable patterns is CLOSED', () => {
       'required-one-of',
       'non-blank-string',
       'dependent-required',
+      'banned-keys',
     ]);
   });
 
@@ -459,6 +489,175 @@ describe('dependent-required: one dependency map, read twice', () => {
         `disagreement on ${JSON.stringify(doc)}`,
       ).toBe(SSLConfigSchema.safeParse(doc).success);
     }
+  });
+});
+
+describe('banned-keys: one key list, read twice', () => {
+  it('declares the keys it was given', () => {
+    const rule = bannedKeys(['dialect']);
+    expect(projectableRefinementOf(rule)).toEqual({ pattern: 'banned-keys', keys: ['dialect'] });
+  });
+
+  it('emits `propertyNames` with a `not` over the names, when the node states none', () => {
+    const node: Record<string, unknown> = { type: 'object' };
+    emitProjectableRefinement(node, { pattern: 'banned-keys', keys: ['a', 'b'] });
+    expect(node).toEqual({ type: 'object', propertyNames: { not: { enum: ['a', 'b'] } } });
+  });
+
+  it('conjoins through `allOf` rather than replacing the `propertyNames` a record already states', () => {
+    // A record emits `propertyNames: { type: 'string' }` of its own. Replacing
+    // it would trade the key-TYPE rule the node already stated for the key-NAME
+    // rule this arm adds, which is a narrowing paid for with a widening.
+    const node: Record<string, unknown> = { type: 'object', propertyNames: { type: 'string' } };
+    emitProjectableRefinement(node, { pattern: 'banned-keys', keys: ['dialect'] });
+    expect(node.propertyNames).toEqual({ type: 'string' });
+    expect(node.allOf).toEqual([{ propertyNames: { not: { enum: ['dialect'] } } }]);
+  });
+
+  it('⛔ never writes a TOP-LEVEL `anyOf` or disturbs the node’s own shape', () => {
+    const node: Record<string, unknown> = { type: 'object', properties: { a: { type: 'string' } } };
+    emitProjectableRefinement(node, { pattern: 'banned-keys', keys: ['b'] });
+    expect(node.anyOf).toBeUndefined();
+    expect(node.properties).toEqual({ a: { type: 'string' } });
+  });
+
+  it('is idempotent — the same arm twice states one rule, not two', () => {
+    const node: Record<string, unknown> = { type: 'object', propertyNames: { type: 'string' } };
+    emitProjectableRefinement(node, { pattern: 'banned-keys', keys: ['dialect'] });
+    emitProjectableRefinement(node, { pattern: 'banned-keys', keys: ['dialect'] });
+    expect(node.allOf).toEqual([{ propertyNames: { not: { enum: ['dialect'] } } }]);
+  });
+
+  it('drops an empty key list \u2014 `enum: []` is an INVALID schema, not a vacuous one', () => {
+    // ⛔ Not "it would ban nothing": `enum` is specified as a non-empty array,
+    // so `{ not: { enum: [] } }` fails validator schema-compilation outright
+    // (ajv: "enum must have non-empty array") and would take the whole
+    // published file down rather than sit there unread.
+    const node: Record<string, unknown> = { type: 'object' };
+    emitProjectableRefinement(node, { pattern: 'banned-keys', keys: [] });
+    expect(node).toEqual({ type: 'object' });
+  });
+
+  it('the predicate and the keywords agree over the whole presence lattice', () => {
+    const rule = bannedKeys(['x', 'y']);
+    const node = publish(z.record(z.string(), z.unknown()).refine(rule));
+    const keys = ['x', 'y', 'z'] as const;
+    for (let mask = 0; mask < 8; mask += 1) {
+      const doc: Record<string, unknown> = {};
+      keys.forEach((key, i) => {
+        if (mask & (1 << i)) doc[key] = 'v';
+      });
+      const asJson = JSON.parse(JSON.stringify(doc)) as Record<string, unknown>;
+      expect(
+        rule(asJson),
+        `runtime vs keywords disagree for ${JSON.stringify(asJson)}`,
+      ).toBe(bannedKeysSatisfied(node, asJson));
+    }
+  });
+
+  it('a banned key present with a `null` value is PRESENT on both sides', () => {
+    const rule = bannedKeys(['dialect']);
+    const node = publish(z.record(z.string(), z.unknown()).refine(rule));
+    const doc = JSON.parse('{"dialect":null}') as Record<string, unknown>;
+    expect(rule(doc)).toBe(false);
+    expect(bannedKeysSatisfied(node, doc)).toBe(false);
+  });
+
+  it('⛔ judges OWN properties — a name `Object.prototype` carries is not "present" in an empty document', () => {
+    // The measurement behind the predicate reading `hasOwnProperty` and never
+    // `key in value`: `in` walks the prototype chain, so a ban spelled with it
+    // would refuse `{}` itself while `propertyNames` accepts it. That is a
+    // disagreement about a JSON DOCUMENT, not an edge outside the domain.
+    const rule = bannedKeys(['toString']);
+    const node = publish(z.record(z.string(), z.unknown()).refine(rule));
+    const empty = JSON.parse('{}') as Record<string, unknown>;
+    expect('toString' in empty).toBe(true);
+    expect(rule(empty)).toBe(true);
+    expect(bannedKeysSatisfied(node, empty)).toBe(true);
+  });
+
+  it('LIT CONTROL — the same name written INTO the document is refused by both', () => {
+    const rule = bannedKeys(['toString']);
+    const node = publish(z.record(z.string(), z.unknown()).refine(rule));
+    const doc = JSON.parse('{"toString":"x"}') as Record<string, unknown>;
+    expect(rule(doc)).toBe(false);
+    expect(bannedKeysSatisfied(node, doc)).toBe(false);
+  });
+});
+
+describe("the LIVE seam: the card's own worked instance stops saying yes", () => {
+  /**
+   * The published `TraceSamplingConfig.composite[].condition` node.
+   *
+   * ⭐ It is the node ITSELF, not a union arm. #18118 retired this slot's CEL
+   * expression arm (PR #19084), so the union collapsed to the structured-filter
+   * record it always had beside it — which is why the ban lands directly on
+   * `condition` and is still conjoined through `allOf`: a record states its own
+   * `propertyNames: { type: 'string' }`, and that key-TYPE rule is not the one
+   * this arm adds.
+   */
+  const conditionNode = (): Record<string, unknown> => {
+    const node = publish(TraceSamplingConfigSchema);
+    const composite = (node.properties as Record<string, Record<string, unknown>>).composite;
+    const item = composite.items as Record<string, Record<string, Record<string, unknown>>>;
+    return item.properties.condition as unknown as Record<string, unknown>;
+  };
+
+  /** A `TraceSamplingConfig` that parses, with only `condition` varying. */
+  const parses = (condition: unknown): boolean =>
+    TraceSamplingConfigSchema.safeParse({
+      type: 'composite',
+      composite: [{ strategy: 'always_on', condition }],
+    }).success;
+
+  it('states the ban, and keeps the record shape it always stated', () => {
+    const node = conditionNode();
+    expect(node.type).toBe('object');
+    expect(node.propertyNames).toEqual({ type: 'string' });
+    expect(node.allOf).toEqual([{ propertyNames: { not: { enum: ['dialect'] } } }]);
+  });
+
+  it("the card's own specimen — `{ dialect: 'cel' }` — is refused by BOTH sides now", () => {
+    const doc = JSON.parse('{"dialect":"cel"}') as Record<string, unknown>;
+    expect(parses(doc)).toBe(false);
+    expect(bannedKeysSatisfied(conditionNode(), doc)).toBe(false);
+  });
+
+  it('⛔ the runtime and the emitted keywords agree on every document in the corpus', () => {
+    const node = conditionNode();
+    const corpus: Array<Record<string, unknown>> = [
+      {},
+      { amount: { $gt: 1 } },
+      { service: 'api', attributes: { 'http.route': '/v1/orders' } },
+      { dialect: 'cel' },
+      { dialect: null },
+      // Since #18118 retired the expression arm, a healthy CEL envelope is
+      // refused at this slot too — so the two sides agree here as well, where
+      // before the retirement the union's other arm accepted it.
+      { dialect: 'cel', source: 'record.amount > 10' },
+    ];
+    for (const doc of corpus) {
+      const asJson = JSON.parse(JSON.stringify(doc)) as Record<string, unknown>;
+      // Equality, not implication: this arm is exact, so a one-sided pin would
+      // pass a projection that had stopped narrowing at all.
+      expect(
+        bannedKeysSatisfied(node, asJson),
+        `disagreement on ${JSON.stringify(asJson)}`,
+      ).toBe(parses(asJson));
+    }
+  });
+
+  it('LIT CONTROL — a structured filter with no `dialect` is accepted by both', () => {
+    const doc = JSON.parse('{"amount":{"$gt":10}}') as Record<string, unknown>;
+    expect(parses(doc)).toBe(true);
+    expect(bannedKeysSatisfied(conditionNode(), doc)).toBe(true);
+  });
+
+  it('its ledger row is gone because the site now reads `projected`, naming the arm', () => {
+    const census = collectDroppedRefinements('system/TraceSamplingConfig', TraceSamplingConfigSchema);
+    const site = census.projected.find((s) => s.path === 'composite.element.condition');
+    expect(site?.declaredPatterns).toEqual(['banned-keys']);
+    expect(census.dropped).toEqual([]);
   });
 });
 

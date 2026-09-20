@@ -24,14 +24,23 @@ import { strictObject } from '../shared/strict-object';
 
 /**
  * The one locale tag with standing in an email-template bundle: the schema
- * default for {@link EmailTemplateDefinitionSchema}.`locale` AND the sole rung
- * `IEmailService.sendTemplate` retries after an exact `(name, locale)` miss.
+ * default for {@link EmailTemplateDefinitionSchema}.`locale` AND the only rung
+ * `IEmailService.sendTemplate` retries after an exact `(name, locale)` miss on
+ * a call that NAMED a locale.
  *
  * Named because those two roles are the same fact and authors keep reading it
  * as neither: the resolver does no language-subtag folding, so this literal —
  * not the stack's `i18n.defaultLocale`, not a bare `en` — is what makes a
  * bundle reachable from a recipient locale nobody authored a row for. A bundle
- * without a row at this tag has no fallback floor at all.
+ * without a row at this tag has no fallback floor for any call that names one.
+ *
+ * ⛔ That scope is the sentence, not a hedge on it. A call naming NO locale has
+ * a rung BELOW this constant — the bundle's lowest locale tag — so the same
+ * floorless bundle still renders for it, silently, in whichever language sorts
+ * first. Loud refusal and silent fill are selected by the CALL, not by the
+ * bundle. `SendTemplateInput.locale` in
+ * `packages/spec/src/contracts/email-service.ts` carries the full three-rung
+ * ladder and is the one place to read it; this constant is its rung 2.
  *
  * ⚠️ `@objectstack/plugin-email` spells the same value as its own
  * `DEFAULT_TEMPLATE_LOCALE` (that package implements the ladder; this one only
@@ -99,20 +108,31 @@ export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
   /**
    * IETF BCP-47 locale tag — the second half of the bundle key.
    *
-   * Multiple rows sharing one `name` form an i18n bundle. The resolver
-   * (`IEmailService.sendTemplate`) matches `(name, locale)` **exactly** and
-   * then retries exactly one rung: the **literal** string
-   * {@link EMAIL_TEMPLATE_FLOOR_LOCALE}. There is no language-subtag folding
-   * on that path — `en-US` does not fall back to `en`, and `en` is not
-   * reachable from `en-US`.
+   * Multiple rows sharing one `name` form an i18n bundle, so `en` and `en-US`
+   * are two ROWS of one bundle rather than two bundles — and neither reaches
+   * the other. The resolver (`IEmailService.sendTemplate`) matches
+   * `(name, locale)` **exactly**; for a call that NAMES a locale it then
+   * retries exactly one rung — the **literal** string
+   * {@link EMAIL_TEMPLATE_FLOOR_LOCALE} — and stops. There is no
+   * language-subtag folding on that path: `en-US` does not fall back to `en`,
+   * and `en` is not reachable from `en-US`.
    *
-   * ⚠️ So `en-US` is the bundle's FLOOR, and a bundle carrying no `en-US` row
-   * has none: every recipient locale the bundle does not itself carry a row
-   * for raises `TEMPLATE_NOT_FOUND`, which classifies **permanent** — the
-   * delivery dead-letters with no retry. The reachable locale set is not the
-   * set the author enumerated either: `sys_user.locale` is user-editable
-   * free-text BCP-47, unconstrained by the stack's `i18n.supportedLocales`,
-   * so a recipient can select a legal tag nobody authored.
+   * ⚠️ So `en-US` is the bundle's FLOOR for every call that names a locale,
+   * and a bundle carrying no `en-US` row has none for them: every recipient
+   * locale the bundle does not itself carry a row for raises
+   * `TEMPLATE_NOT_FOUND`, which classifies **permanent** — the delivery
+   * dead-letters with no retry. The reachable locale set is not the set the
+   * author enumerated either: `sys_user.locale` is user-editable free-text
+   * BCP-47, unconstrained by the stack's `i18n.supportedLocales`, so a
+   * recipient can select a legal tag nobody authored.
+   *
+   * ⛔ A call that names NO locale is the OTHER case and does NOT dead-letter.
+   * It starts at `en-US` by name, and when the bundle carries no `en-US` row
+   * it drops to the bundle's lowest locale tag and renders that — a silent
+   * fill, in whichever language sorts first, where the paragraph above
+   * promises a permanent refusal. The full three-rung ladder lives on
+   * `SendTemplateInput.locale` in
+   * `packages/spec/src/contracts/email-service.ts`; do not restate it here.
    *
    * ⛔ The stack's own declared `i18n.defaultLocale` is the WRONG tag here
    * whenever it is not spelled `en-US`. An app that declares
@@ -123,11 +143,13 @@ export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
    * bundle that carries `supportedLocales` rows without an `en-US` one.
    */
   locale: z.string().default(EMAIL_TEMPLATE_FLOOR_LOCALE).describe(
-    'BCP-47 locale (e.g. en-US, zh-CN) — the bundle key the resolver matches EXACTLY, with one '
-    + 'retry rung: the literal `en-US`. No language-subtag folding, so `en` and `en-US` are '
-    + 'different bundles and neither reaches the other. A bundle with no `en-US` row therefore has '
-    + 'no fallback floor: any recipient locale it does not carry a row for raises '
-    + 'TEMPLATE_NOT_FOUND, which is permanent — the delivery dead-letters with no retry. Your '
+    'BCP-47 locale (e.g. en-US, zh-CN) — the bundle key the resolver matches EXACTLY. A call that '
+    + 'NAMES a locale gets exactly one retry rung, the literal `en-US`, with no language-subtag '
+    + 'folding: `en` and `en-US` are different ROWS of one bundle and neither reaches the other, '
+    + 'so a bundle with no `en-US` row has no fallback floor for those calls and every recipient '
+    + 'locale it does not carry a row for raises TEMPLATE_NOT_FOUND, which is permanent — the '
+    + 'delivery dead-letters with no retry. A call naming NO locale is the other case and does not '
+    + "dead-letter: it drops to the bundle's lowest locale tag and renders that silently. Your "
     + "stack's own `i18n.defaultLocale` is the wrong tag here unless it is spelled `en-US`.",
   ),
 

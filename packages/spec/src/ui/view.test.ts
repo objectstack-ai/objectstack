@@ -44,6 +44,8 @@ import {
   ViewItemSchema,
   ViewMetadataSchema,
   VIEW_METADATA_MEMBERS,
+  TreeConfigSchema,
+  DEFAULT_VIEW_ROW_LIMIT,
 } from './view.zod';
 
 import {
@@ -57,6 +59,9 @@ import {
 // schemas deliberately leave open — imported so the two-door split is asserted
 // from the side that can see both.
 import { checkViewCompleteness } from '../kernel/functional-completeness';
+// [#19088] The object-field `scale` site #18972 bounded — read only, to pin
+// that this row's refusal text and that one's are the same platform fact.
+import { FieldSchema } from '../data/field.zod';
 describe('HttpMethodSubsetSchema', () => {
   it('should accept valid HTTP methods', () => {
     const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -1785,6 +1790,131 @@ describe('FormFieldSchema', () => {
       for (const key of ['maxLength', 'minLength', 'min', 'max', 'precision', 'scale']) {
         expect(key in parsed).toBe(false);
       }
+    });
+  });
+
+  /**
+   * #19088 (the third site of #18972 / objectui#9808) — this row's `scale` also
+   * needs an UPPER bound, and the number is the PLATFORM's, not a policy.
+   *
+   * The block above bounds the *bottom* of the range (#8321: a digit count is a
+   * non-negative integer). The top was open: `scale: 101` parsed clean here
+   * while every renderer that turns it into fraction digits throws. The route
+   * from this row to those renderers, measured at the `.objectui-sha` pin
+   * `53ded82bf7`: plugin-form copies the row's constraint keys onto the runtime
+   * field (`packages/plugin-form/src/sectionFields.ts:220`) and the number cell
+   * renderer passes that value into `Intl.NumberFormat`'s
+   * `maximumFractionDigits` (`packages/fields/src/index.tsx:661-667`). So a
+   * spec-valid declaration published clean and arrived as a `RangeError` in
+   * someone else's repository, with no signal to its author. ⛔ The spec-bridge
+   * half of the #12174 citation above is retired at that pin; the plugin-form
+   * leg carries the premise on its own.
+   *
+   * The refusal is pinned on its SUBSTANCE, not just its code: it has to say
+   * WHY (the renderer ceiling), because "too big" alone leaves an author
+   * guessing at a cap somebody chose.
+   *
+   * The malformed-declaration refusals in the #12174 block above are this
+   * change's dark control — narrowing the top of the range must not restate the
+   * bottom of it — and they are re-asserted here against the same probe so the
+   * before/after reading is one test's worth of evidence.
+   */
+  describe('an unrenderable scale is refused at authoring (#19088)', () => {
+    const parseScale = (scale: number) => FormFieldSchema.safeParse({ field: 'amount', scale });
+
+    /** Did `fn` throw a RangeError? (Probing the platform, not the schema.) */
+    const throwsRangeError = (fn: () => unknown): boolean => {
+      try { fn(); return false; } catch (e) { return e instanceof RangeError; }
+    };
+
+    it('accepts the ceiling itself — 100 is renderable and round-trips', () => {
+      const result = parseScale(100);
+      expect(result.success).toBe(true);
+      if (result.success) expect((result.data as Record<string, unknown>).scale).toBe(100);
+    });
+
+    it('refuses 101 with a too_big issue at [scale]', () => {
+      const result = parseScale(101);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find((i) => i.path[0] === 'scale');
+        expect(issue?.code).toBe('too_big');
+      }
+    });
+
+    it('the refusal says WHY — it names the renderer ceiling, not just the size', () => {
+      const result = parseScale(101);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const message = result.error.issues.find((i) => i.path[0] === 'scale')?.message ?? '';
+        // Both primitives, the failure mode, and the legal maximum: an author
+        // can verify the claim without leaving the message.
+        expect(message).toMatch(/toFixed/);
+        expect(message).toMatch(/maximumFractionDigits/);
+        expect(message).toMatch(/RangeError/);
+        expect(message).toMatch(/100/);
+      }
+    });
+
+    it('the bound IS the platform ceiling, measured here rather than asserted', () => {
+      // If a future runtime moves either limit, this goes red and the
+      // declaration is re-argued — the number is not ours to keep by habit.
+      expect(throwsRangeError(() => (1.5).toFixed(100))).toBe(false);
+      expect(throwsRangeError(() => (1.5).toFixed(101))).toBe(true);
+      expect(throwsRangeError(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 100 }))).toBe(false);
+      expect(throwsRangeError(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 101 }))).toBe(true);
+      // ... and the schema's own accept/refuse boundary sits exactly there.
+      expect(parseScale(100).success).toBe(true);
+      expect(parseScale(101).success).toBe(false);
+    });
+
+    it('refuses with the SAME text as the object-field site — one fact, not two dialects', () => {
+      // #19088's shared-constant half, pinned from the consuming end. This row
+      // reads `shared/scale-ceiling.ts`; `data/field.zod.ts` still carries the
+      // module-private copy #18972 minted, because that file belongs to another
+      // card's declared surface. Byte-identity is what keeps the two copies one
+      // platform fact: if either drifts, this goes red instead of shipping two
+      // different explanations of the same limit. When that file adopts the
+      // shared module the assertion simply keeps holding.
+      const here = parseScale(101);
+      const there = FieldSchema.safeParse({ name: 'amount', label: 'Amount', type: 'number', scale: 101 });
+      expect(here.success).toBe(false);
+      expect(there.success).toBe(false);
+      if (!here.success && !there.success) {
+        const hereMessage = here.error.issues.find((i) => i.path[0] === 'scale')?.message;
+        const thereMessage = there.error.issues.find((i) => i.path[0] === 'scale')?.message;
+        expect(hereMessage).toBeDefined();
+        expect(hereMessage).toBe(thereMessage);
+      }
+    });
+
+    it('leaves the malformed-declaration refusals (#8321/#12174) reading exactly as before', () => {
+      // The dark control, in one place: the codes and the wording below are the
+      // readings taken on this same probe BEFORE the upper bound was added.
+      const negative = parseScale(-1);
+      expect(negative.success).toBe(false);
+      if (!negative.success) {
+        const issue = negative.error.issues.find((i) => i.path[0] === 'scale');
+        expect(issue?.code).toBe('too_small');
+        expect(issue?.message).toBe('Too small: expected number to be >=0');
+      }
+      const fractional = parseScale(2.5);
+      expect(fractional.success).toBe(false);
+      if (!fractional.success) {
+        const issue = fractional.error.issues.find((i) => i.path[0] === 'scale');
+        expect(issue?.code).toBe('invalid_type');
+        expect(issue?.message).toBe('Invalid input: expected int, received number');
+      }
+    });
+
+    it('does NOT bound `precision` — a different key this card does not claim', () => {
+      // Recorded so the next reader knows the omission was measured, not
+      // missed: `precision` is a TOTAL digit count and reaches no `toFixed` /
+      // `Intl` argument, so the renderer-ceiling argument does not carry to it.
+      // #18972 measured the same on the object-field surface and left it alone;
+      // whether the three `precision` arms should agree is its own judgement.
+      const result = FormFieldSchema.safeParse({ field: 'amount', precision: 101 });
+      expect(result.success).toBe(true);
     });
   });
 });
@@ -4658,5 +4788,120 @@ describe('ListViewSchema — `viewType` is not a spelling of `type` (#16577)', (
     expect(r.success).toBe(true);
     expect((r as { data: Record<string, unknown> }).data).not.toHaveProperty('viewType');
     expect((r as { data: { type?: unknown } }).data.type).toBe('grid');
+  });
+});
+
+
+// ============================================================================
+// [#17393] The author-settable row ceiling on the page-shaped view configs.
+//
+// A protocol-first card: objectui caps kanban and timeline by author choice off
+// a key `@objectstack/spec` never declared (`$top: schema.limit ?? DEFAULT_*_LIMIT`),
+// and the gallery — the third page-shaped view — caps not at all. These pins
+// hold the new declaration to the three things a ceiling has to be: APPLIED
+// (the default the prose states is the default the parse produces), BOUNDED
+// (a value that could not cap a fetch is refused by name), and SCOPED (the
+// non-grid four keep objectui#7210's platform ceiling and do not gain an
+// authorable one).
+// ============================================================================
+
+describe('view row ceiling — `limit` on the page-shaped view configs (#17393)', () => {
+  /**
+   * One minimal, parse-clean block per page-shaped config, so every verdict
+   * below is about `limit` alone rather than about a missing sibling key.
+   */
+  const PAGE_SHAPED = [
+    ['gallery', GalleryConfigSchema as unknown as z.ZodTypeAny, {}],
+    ['kanban', KanbanConfigSchema as unknown as z.ZodTypeAny, { groupByField: 'status', columns: ['name'] }],
+    ['timeline', TimelineConfigSchema as unknown as z.ZodTypeAny, { startDateField: 'start_date', titleField: 'name' }],
+  ] as const;
+
+  /** The `limit` member's own `.describe()` text, off the built shape. */
+  const describeOf = (schema: z.ZodTypeAny): string =>
+    (schema as unknown as { shape: Record<string, { description?: string }> }).shape.limit?.description ?? '';
+
+  it('applies the ceiling it declares when the author writes none', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      const parsed = schema.parse({ ...minimal }) as { limit?: unknown };
+      expect(parsed.limit, label).toBe(DEFAULT_VIEW_ROW_LIMIT);
+    }
+  });
+
+  it('accepts an authored ceiling as a MEMBER, with both controls firing on the same shape', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      // CONTROL-1 — this surface CAN refuse a key, so acceptance below means something.
+      const control = schema.safeParse({ ...minimal, zzUnlikelyBogusKey__: 7 });
+      expect(control.success, label).toBe(false);
+      expect(JSON.stringify((control as { error?: z.ZodError }).error?.issues), label)
+        .toContain('unrecognized_keys');
+
+      // CONTROL-2 — the refusal is about the NAME: the same block without it parses.
+      expect(schema.safeParse({ ...minimal }).success, label).toBe(true);
+
+      // PROBE — the authored value SURVIVES the parse; it is not merely tolerated.
+      const probe = schema.safeParse({ ...minimal, limit: 25 });
+      expect(probe.success, label).toBe(true);
+      expect(((probe as { data?: { limit?: unknown } }).data)?.limit, label).toBe(25);
+    }
+  });
+
+  it('refuses a value that could not bound a fetch — and refuses it BY NAME', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      for (const bad of [0, -1, 2.5, '100', null] as const) {
+        const at = `${label} limit=${JSON.stringify(bad)}`;
+        const result = schema.safeParse({ ...minimal, limit: bad });
+        expect(result.success, at).toBe(false);
+        const issues = (result as { error?: z.ZodError }).error?.issues ?? [];
+        expect(issues.some((issue) => issue.path[0] === 'limit'), `${at}: ${JSON.stringify(issues)}`)
+          .toBe(true);
+      }
+    }
+  });
+
+  it('states the default it ACTUALLY applies — prose and schema pinned to each other', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      const description = describeOf(schema);
+      const stated = /default (\d+)/.exec(description);
+      expect(stated, `${label}: ${description}`).not.toBeNull();
+      const applied = (schema.parse({ ...minimal }) as { limit: number }).limit;
+      expect(Number(stated?.[1]), `${label}: ${description}`).toBe(applied);
+    }
+  });
+
+  it('tells the author the renderer owes a VISIBLE truncation signal', () => {
+    // ⛔ The signal itself is the renderer's half and cannot be enforced from a
+    // schema. What the protocol can do — and what objectui#7390's ruling turns
+    // on — is say the cap is owed a signal, so that "bounded and silent" is
+    // never read as the finished job.
+    for (const [label, schema] of PAGE_SHAPED) {
+      expect(describeOf(schema), label).toContain('visible truncation signal');
+    }
+  });
+
+  it('leaves the non-grid four WITHOUT an authorable ceiling (objectui#7210 keeps theirs)', () => {
+    // The card scopes those four out by name: their rows are capped by a
+    // platform constant the renderer owns, because a gantt range, a map camera
+    // fit and a tree parent chain are computed over the whole set. An
+    // authorable ceiling there would be surface no renderer reads.
+    const NON_GRID_FOUR = [
+      ['gantt', GanttConfigSchema as unknown as z.ZodTypeAny],
+      ['calendar', CalendarConfigSchema as unknown as z.ZodTypeAny],
+      ['map', ListMapConfigSchema as unknown as z.ZodTypeAny],
+      ['tree', TreeConfigSchema as unknown as z.ZodTypeAny],
+    ] as const;
+
+    for (const [label, schema] of NON_GRID_FOUR) {
+      const result = schema.safeParse({ limit: 10 });
+      expect(result.success, label).toBe(false);
+      // Asserted on the REFUSED KEY LIST rather than on a stringified issue:
+      // when the key is accepted there is no issue to stringify, and the red
+      // then reads as an argument-type complaint instead of as a statement
+      // about this view type. Measured — it is how this case first reddened.
+      const refused = ((result as { error?: z.ZodError }).error?.issues ?? [])
+        .filter((issue) => issue.code === 'unrecognized_keys')
+        .flatMap((issue) => (issue as unknown as { keys?: string[] }).keys ?? []);
+      expect(refused, `${label} accepts an authorable row ceiling it should not declare`)
+        .toContain('limit');
+    }
   });
 });

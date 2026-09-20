@@ -90,6 +90,27 @@
 
 set -euo pipefail
 
+# ⛔ #16644 -- every `git` this script runs is LOCAL-ONLY, so the ambient GIT_* pointers go
+# before any of them do.
+#
+# Git exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE into every child it runs and those
+# OUTRANK both `cwd` and `-C`. The self-test below builds throwaway repositories with
+# `git init`, `git add -A`, `git commit` and three `git clone`s; with one of those
+# variables in the environment they land on the repository it names instead. Measured on
+# #16624: 8,190 paths staged as deleted in a shared index and `core.bare = true` written
+# into the `.git/config` every linked worktree of that clone reads, from a self-test that
+# printed ticks throughout.
+#
+# LOCAL-ONLY is the whole population here, so nothing loses transport configuration: the
+# four report sections read checkouts by path and never reach a remote, and the self-test's
+# `clone`/`fetch` name a `file://` URL under its own mktemp root. ⛔ The per-command
+# `GIT_AUTHOR_DATE=... GIT_COMMITTER_DATE=... git commit` prefixes in the fixture loop are
+# applied per invocation, AFTER this line, and are deliberately unaffected.
+#
+# The node counterpart of this line is `gitFreeEnv()` in `scripts/git-env.mjs`, whose
+# header carries the measurement and the one boundary.
+unset $(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p')
+
 FRAMEWORK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OBJECTUI_ROOT="${OBJECTUI_ROOT:-$(cd "${FRAMEWORK_ROOT}/../objectui" 2>/dev/null && pwd || true)}"
 CLOUD_ROOT="${CLOUD_ROOT:-$(cd "${FRAMEWORK_ROOT}/../cloud" 2>/dev/null && pwd || true)}"

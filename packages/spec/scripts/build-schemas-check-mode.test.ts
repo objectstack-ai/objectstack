@@ -54,6 +54,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { gitFreeEnv } from '../../../scripts/git-env.mjs';
 import { schemaStamp } from '../../../scripts/check-regen-pending.mjs';
 import { RENAMED_DEFS } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
@@ -232,25 +233,23 @@ let surfaceBaseDescription: string;
 // are already serial — vitest runs a file's tests one at a time, and every repo
 // here is an `fs.mkdtemp`, so no concurrently running test FILE can name one.
 
-/** `GIT_*` variables that would point a fixture's git at a different repository
- *  (or a different index/object store) than the directory it was handed. */
-const LEAKED_GIT_ENV = [
-  'GIT_DIR',
-  'GIT_WORK_TREE',
-  'GIT_COMMON_DIR',
-  'GIT_INDEX_FILE',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-  'GIT_NAMESPACE',
-  'GIT_CEILING_DIRECTORIES',
-  'GIT_TEMPLATE_DIR',
-  'GIT_CONFIG',
-] as const;
+/* #16644 -- a hand-maintained allowlist of ten GIT_* location variables used to stand
+ * here. It is retired in favour of the blanket strip in `scripts/git-env.mjs`, and the
+ * constant is not re-spelled anywhere in this file so that a census of the retired shape
+ * does not match this paragraph.
+ *
+ * The reason the allowlist goes rather than gets one more entry: it had to be kept level
+ * with git's own list of location variables, and its failure mode is that THE KEY IT
+ * MISSES IS THE KEY THAT BITES. `gitFreeEnv()` removes every GIT_-prefixed key instead,
+ * which is the shape #16624 landed and #16753 applied. ⛔ One spelling in the repo, not
+ * two -- no "either is fine" transition state.
+ *
+ * Every git this file spawns is LOCAL-ONLY: it operates on the `fs.mkdtemp` fixture named
+ * by its `cwd`, so the blanket strip takes no transport configuration away from it. */
 
 /** The environment every fixture git — and every generator run inside one — gets. */
 const HERMETIC_ENV: NodeJS.ProcessEnv = (() => {
-  const env = { ...process.env };
-  for (const key of LEAKED_GIT_ENV) delete env[key];
+  const env = gitFreeEnv();
   // git's own documented "read no config file" spellings. `/dev/null` parses as
   // an empty config, which is what makes `init.templateDir`, `core.hooksPath`
   // and any ambient `[gc]` block unable to reach a fixture.

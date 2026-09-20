@@ -164,6 +164,36 @@ function emitDependentRequired(
   jsonSchema.allOf = [...allOf, { dependentRequired: emitted }];
 }
 
+/**
+ * `propertyNames` with a `not` over the banned names — the keyword JSON Schema
+ * has for a rule about NAMES, so nothing is encoded and nothing approximated.
+ *
+ * A node that already carries `propertyNames` is conjoined through `allOf`
+ * rather than overwritten, for the reason `emitRequiredOneOf` is: a record
+ * emits `propertyNames: { type: 'string' }` of its own, and replacing it would
+ * trade the rule this arm adds for the key-type rule the node already stated.
+ * An identical rule already present is left alone rather than duplicated, so
+ * the arm is idempotent the way `emitNonBlankString` is.
+ *
+ * An EMPTY key list emits nothing, and the reason is stronger than "it would
+ * ban nothing": `enum` is specified as a non-empty array, so `{ not: { enum:
+ * [] } }` is an INVALID SCHEMA rather than a vacuous one — ajv refuses it with
+ * "enum must have non-empty array", which would take the whole published file
+ * down with it instead of leaving a keyword nobody reads.
+ */
+function emitBannedKeys(jsonSchema: JsonObject, keys: readonly string[]): void {
+  if (keys.length === 0) return;
+  const rule = { not: { enum: [...keys] } };
+  if (!('propertyNames' in jsonSchema)) {
+    jsonSchema.propertyNames = rule;
+    return;
+  }
+  if (JSON.stringify(jsonSchema.propertyNames) === JSON.stringify(rule)) return;
+  const allOf = Array.isArray(jsonSchema.allOf) ? (jsonSchema.allOf as unknown[]) : [];
+  if (allOf.some((clause) => JSON.stringify(clause) === JSON.stringify({ propertyNames: rule }))) return;
+  jsonSchema.allOf = [...allOf, { propertyNames: rule }];
+}
+
 /** Write one declared arm's keywords onto one emitted node. */
 export function emitProjectableRefinement(jsonSchema: JsonObject, declared: ProjectableRefinement): void {
   switch (declared.pattern) {
@@ -175,6 +205,9 @@ export function emitProjectableRefinement(jsonSchema: JsonObject, declared: Proj
       return;
     case 'dependent-required':
       emitDependentRequired(jsonSchema, declared.dependencies);
+      return;
+    case 'banned-keys':
+      emitBannedKeys(jsonSchema, declared.keys);
       return;
   }
 }
@@ -226,10 +259,49 @@ export interface ProjectionOverrideContext {
 }
 
 /**
- * ⭐ The ONE call through which `z.toJSONSchema` is reached anywhere the
- * published projection is produced — the generator's three attempts, the
- * union-branch projector behind the third, and the detector's differential in
- * `dropped-refinements.ts`.
+ * ⭐ The ONE call through which `z.toJSONSchema` is reached anywhere
+ * **`packages/spec` writes a published JSON Schema artifact**. Four producers,
+ * named because the claim is only worth as much as its enumeration:
+ *
+ *   1. `build-schemas.ts` — the generator's three attempts, writing
+ *      `json-schema/<category>/<Name>.json`;
+ *   2. `lib/union-branch-projection.ts` — the union-branch projector behind the
+ *      third of those attempts;
+ *   3. `lib/dropped-refinements.ts` — the detector's differential, which is
+ *      only about the real published file while it projects the way (1) does;
+ *   4. `build-openapi.ts` — the OpenAPI generator, writing
+ *      `json-schema/openapi.json`. That file ships in the tarball (`files[]`
+ *      carries `json-schema`) and is exported as `./openapi.json`, so it is a
+ *      published projection like any other; it reached this list late, and the
+ *      shape of the gap is the point — see below.
+ *
+ * ## ⛔ What is NOT behind it — stated so the next reader need not re-derive it
+ *
+ * This helper governs the projection CALL for the four producers above. It is
+ * ⛔ not a repo-wide guarantee, and three populations sit deliberately outside
+ * it. Naming them is the difference between a claim and a slogan; each was
+ * measured, not assumed:
+ *
+ *   - **The representability probe** in `union-branch-projection.ts`
+ *     (`projectsUnderStrictMode`) calls `z.toJSONSchema(..., { unrepresentable:
+ *     'throw' })` to ask zod a yes/no question and DISCARDS the result. Nothing
+ *     it produces is published, so routing it here would answer a different
+ *     question.
+ *   - **Producers outside `packages/spec`'s own artifacts** — the CLI's
+ *     `os generate` writes a JSON Schema of `ObjectStackDefinitionSchema` into
+ *     an author's project, and `build-react-blocks-contract.ts` renders block
+ *     prop tables into the published skills catalog. Both call
+ *     `z.toJSONSchema` directly, and the first was measured DIVERGENT from this
+ *     projection at seven declared sites. They are a separate decision about
+ *     how wide the published-projection guarantee reaches, ⛔ not an oversight
+ *     to be silently swept in here.
+ *   - **Runtime derivations** (`packages/metadata-protocol`) project schemas to
+ *     SERVE them, not to publish an artifact; they are governed by their own
+ *     contracts.
+ *
+ * `published-projection-choke-point.test.ts` holds the first bullet's boundary
+ * mechanically — it fails when a producer in this package grows a direct call —
+ * so the enumeration above cannot rot into prose.
  *
  * ## Why a choke point and not a convention
  *

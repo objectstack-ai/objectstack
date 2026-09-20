@@ -38,7 +38,20 @@ export const skillForm = defineForm({
       fields: [
         // `triggerPhrases` input removed with the key (#3896 close-out): phrases
         // were never matched; routing is triggerConditions + the agent allowlist.
-        { field: 'triggerConditions', type: 'repeater', helpText: 'Programmatic conditions (e.g., objectName == "case")' },
+        {
+          field: 'triggerConditions',
+          type: 'repeater',
+          helpText: 'Programmatic conditions (e.g., objectName == "case")',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'field', label: 'Context Field' },
+            { field: 'operator', label: 'Operator' },
+            { field: 'value', label: 'Value' },
+          ],
+        },
       ],
     },
   ],

@@ -12,6 +12,7 @@ import {
   normalizeStackInput,
   MigrationFloorError,
   MIGRATION_MAJORS,
+  MIGRATION_SUPPORT_FLOOR,
 } from '@objectstack/spec';
 import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import { FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, STRUCTURED_JSON_TYPES } from '@objectstack/spec/data';
@@ -274,11 +275,16 @@ export default class MigrateMeta extends Command {
     'Replay the metadata protocol migration chain from a past major to current (ADR-0087 D3). ' +
     'With --stored, replay it over this deployment\'s sys_metadata rows instead of an authored config.';
 
+  // Derived from the chain's own floor, never typed: every `--from N` below is
+  // a command a reader copies, and `applyMetaMigrations` throws
+  // `MigrationFloorError` for any N under the floor. Written as literals these
+  // went stale the moment the floor moved 10 -> 16 (#19056), advertising four
+  // commands that all refuse.
   static override examples = [
-    '$ os migrate meta --from 10',
-    '$ os migrate meta --from 10 --step',
-    '$ os migrate meta --from 11 --to 12 --json',
-    '$ os migrate meta --from 10 --out migrated.stack.json',
+    `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR}`,
+    `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --step`,
+    `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --to ${MIGRATION_SUPPORT_FLOOR + 1} --json`,
+    `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --out migrated.stack.json`,
     '$ os migrate meta --stored',
     '$ os migrate meta --stored --apply',
     '$ os migrate meta --stored --apply --yes --json',

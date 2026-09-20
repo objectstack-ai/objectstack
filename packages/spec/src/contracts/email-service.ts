@@ -150,8 +150,9 @@ export interface SendEmailResult {
 export interface SendTemplateInput {
   /**
    * Template identifier (matches `sys_email_template.name`), e.g.
-   * `'auth.password_reset'`. The service picks the best-matching
-   * locale row (falls back to `en-US`).
+   * `'auth.password_reset'`. There is no "best match" and no language-subtag
+   * folding: the locale row is resolved by the exact ladder documented on
+   * `locale` below.
    */
   template: string;
   /** Envelope recipients. */
