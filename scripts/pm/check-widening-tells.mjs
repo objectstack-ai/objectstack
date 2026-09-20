@@ -1286,7 +1286,7 @@
  *     this reading 29,552. ⭐ Base → here: 29,552 stand, **28 decline, 0 begin**,
  *     5,164 change only their sentence. All 28 are T2 and all 28 were re-read
  *     THROUGH THIS READER rather than by eye: callee `Set` on 28 of 28, 0
- *     exceptions, across nine bindings — the three `field-value.zod.ts` value
+ *     exceptions, across eleven bindings — the three `field-value.zod.ts` value
  *     classes, `VALUE_DOMAIN_FIELD_TYPES`, `TEXT_OPERATOR_DOOR_PASSING_TYPES`,
  *     `IMPORT_REFERENCE_TYPES`, `PUBLIC_FORM_SERVER_MANAGED_FIELDS`,
  *     `CONTAINER_ISSUE_CODES`, `VIEW_WRITE_PATH_IDENTITY_KEYS`,
@@ -1350,12 +1350,23 @@
  *     REFUSES what an author wrote, and again on the write path in
  *     `record-validator.ts`), `TEXT_OPERATOR_DOOR_PASSING_TYPES`
  *     (`data/filter-text-operator-declared-type.ts`), `IMPORT_REFERENCE_TYPES`
- *     (`data/import-coercion.ts`), `PUBLIC_FORM_SERVER_MANAGED_FIELDS`
- *     (`security/public-form.ts`, read by four seams of `rest-server.ts` to
- *     refuse a visitor's value), `CONTAINER_ISSUE_CODES`
- *     (`shared/union-branch-policy.ts`) and `VIEW_WRITE_PATH_IDENTITY_KEYS`
- *     (`ui/view.zod.ts`). ⛔ At least three of those decide what an authored
- *     document may say.
+ *     (`data/import-coercion.ts`, read by `rest`'s import coercion),
+ *     `PUBLIC_FORM_SERVER_MANAGED_FIELDS` (`security/public-form.ts`, read by
+ *     four seams of `rest-server.ts` to refuse a visitor's value),
+ *     `CONTAINER_ISSUE_CODES` (`shared/union-branch-policy.ts`) and
+ *     `VIEW_WRITE_PATH_IDENTITY_KEYS` (`ui/view.zod.ts`).
+ *
+ * ⛔ Which of them the silence actually costs, measured by reading the
+ * consumers rather than the names: `VALUE_DOMAIN_FIELD_TYPES` refuses an
+ * authored `valueDomain` at parse time and again at write time, and
+ * `PUBLIC_FORM_SERVER_MANAGED_FIELDS` decides what an anonymous visitor may
+ * send — those two are accept sets in the doctrine's sense, and so is
+ * `VALID_AST_OPERATORS` (`data/filter.zod.ts`), which `isFilterAST` and three
+ * `packages/lint` walks read to judge a filter. ⚠️ And one correction to the
+ * record this round was dispatched against: `TEXT_OPERATOR_DOOR_PASSING_TYPES`
+ * has NO non-test consumer — `textOperatorDoorVerdict` reads the REFUSED set,
+ * not this one — so it is a published derived constant whose own parity test
+ * reds on a change, not a second live accept set.
  *   `.default([`: `allowedLicenses` and `prohibitedLicenses`
  *     (`kernel/plugin-security.zod.ts`) and `redact` (`system/logging.zod.ts`)
  *     — a default VALUE list, which is the one member of this vocabulary whose
@@ -3001,11 +3012,13 @@ const NON_SET_CALLEE_NAMES = Object.freeze(['Set', 'default']);
  *     seven false positives — and this tree spells two real ACCEPT sets exactly
  *     the same way: `VALUE_DOMAIN_FIELD_TYPES` in `data/field.zod.ts`, whose
  *     `.has(field.type)` inside a `superRefine` REFUSES what an author wrote
- *     (its own docblock calls a member addition "a widening of this set"), and
- *     `TEXT_OPERATOR_DOOR_PASSING_TYPES` in
- *     `data/filter-text-operator-declared-type.ts`. Measured on the shape a
- *     real PR carries: adding `'email',` to the first is base exit 4 / this
- *     reading exit 0, and `'number',` to the second the same. ⛔ The rationale
+ *     (its own docblock calls a member addition "a widening of this set"),
+ *     `PUBLIC_FORM_SERVER_MANAGED_FIELDS` in `security/public-form.ts`, which
+ *     four seams of `rest-server.ts` read to refuse a visitor's value, and
+ *     `VALID_AST_OPERATORS` in `data/filter.zod.ts`, which `isFilterAST` reads
+ *     to judge a filter. Measured on the shape a real PR carries: adding
+ *     `'email',` to the first is base exit 4 / this reading exit 0, and the
+ *     header's census names every landed row the silence covers. ⛔ The rationale
  *     this bullet used to carry — "a set of internal discriminants is not an
  *     accept set, no author's document is ever parsed against it" — is FALSE of
  *     both. The two constructs are byte-indistinguishable INSIDE A HUNK: same
@@ -6109,7 +6122,7 @@ export function selfTest() {
   // moves with it — and so that nobody re-derives the false rationale this
   // reading used to carry ("no author's document is ever parsed against it").
   t('⚠️ THE RESIDUAL — `VALUE_DOMAIN_FIELD_TYPES` is a real ACCEPT set spelled `new Set([`, refused by a `superRefine` that reads it, and this reader silences it', closedSetMembership([CTX('export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set(['), CTX("  'text',")], 1) === 'refused');
-  t('…so is `TEXT_OPERATOR_DOOR_PASSING_TYPES`, and PR #19314\'s internal discriminant set is BYTE-INDISTINGUISHABLE from both inside a hunk — same head, same element shape — which is why only CONSUMPTION separates them and no hunk-shaped reader can', closedSetMembership([CTX('export const TEXT_OPERATOR_DOOR_PASSING_TYPES: ReadonlySet<string> = new Set(['), CTX("  'autonumber',")], 1) === 'refused' && closedSetMembership([CTX('const COLLECTION_WALK_WRAPPERS: ReadonlySet<string> = new Set(['), CTX("  'pipe',")], 1) === 'refused');
+  t('…so is `PUBLIC_FORM_SERVER_MANAGED_FIELDS`, which decides what an anonymous visitor may send — and PR #19314\'s internal discriminant set is BYTE-INDISTINGUISHABLE from both inside a hunk — same head, same element shape — which is why only CONSUMPTION separates them and no hunk-shaped reader can', closedSetMembership([CTX('export const PUBLIC_FORM_SERVER_MANAGED_FIELDS: ReadonlySet<string> = new Set(['), CTX("  'owner_id',")], 1) === 'refused' && closedSetMembership([CTX('const COLLECTION_WALK_WRAPPERS: ReadonlySet<string> = new Set(['), CTX("  'pipe',")], 1) === 'refused');
   // -- the readings the vocabulary is derived from, pinned as ONE ------------
   t('⭐ the `new` prefix is LOAD-BEARING on `before` and nowhere else — the NAME is found either way because the pattern is unanchored at its start, but the slice must begin AT `new` or a transparent strip leaves one behind', callHeadOfFrame('const S = new Set(')?.before === 'const S = ' && callHeadOfFrame('const S = new Set(')?.callee === 'Set');
   t('…and `before` is the text left of the WHOLE call, its receiver chain included', callHeadOfFrame('export const X = Object.freeze(')?.before === 'export const X = ' && callHeadOfFrame('export const X = Object.freeze(')?.callee === 'freeze');
