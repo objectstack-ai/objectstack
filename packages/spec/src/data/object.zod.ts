@@ -15,6 +15,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { retiredKey } from '../shared/retired-key';
+import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
@@ -1961,9 +1962,26 @@ const ObjectSchemaBase = strictObject(
   /**
    * Data Model
    */
-  fields: z.record(z.string().regex(/^[a-z_][a-z0-9_]*$/, {
-    message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
-  }), FieldSchema).describe('Field definitions map. Keys must be snake_case identifiers.'),
+  fields: refuseRecordProtoKey(
+    z.record(
+      z.string()
+        .regex(/^[a-z_][a-z0-9_]*$/, {
+          message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
+        })
+        // [objectstack#17852] `__proto__` cannot reach this key schema at
+        // all — zod's record parser skips it before the key ever runs (see
+        // `refuseRecordProtoKey`, which refuses it on the raw input
+        // instead). `constructor` and `prototype` DO reach here (ordinary
+        // lowercase words the regex above already admits), so they are
+        // refused explicitly — the changeset's "three JS-prototype names"
+        // sentence is only true once both mechanisms are in place.
+        .refine((key) => key !== 'constructor' && key !== 'prototype', {
+          message: 'Field names must not be "constructor" or "prototype" (reserved JavaScript prototype property names).',
+        }),
+      FieldSchema,
+    ),
+    'fields',
+  ).describe('Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused.'),
   indexes: z.array(IndexSchema).optional().describe('Database performance indexes'),
 
   /**
