@@ -208,6 +208,20 @@ import { probeBashCapabilities, unsupportedConstructs } from './check-bash32-flo
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 const WORKFLOW_DIR = join('.github', 'workflows');
+// The SECOND root (#19229). A composite action's steps run on the runner under
+// the same `bash -e <file>` a workflow step does -- so the first non-zero exit
+// aborts the block and everything after it is neither green nor red, which is
+// this gate's whole subject. Rooting the population at `.github/workflows`
+// alone made a directory boundary into a coverage boundary; this gate's row in
+// #19229's table was UNJUDGED precisely because the root is assembled with
+// `join` and a literal grep for `.github/workflows` found nothing here.
+//
+// ⚠️ Absent is NOT a refusal: a repo may hold no composite action. What keeps
+// the root from going quiet on a repo that has them is the live assertion in
+// `--self-test`, which is the #4690 floor in the form this root can carry.
+const ACTION_DIR = join('.github', 'actions');
+/** The file names GitHub accepts for a local action, in the order it resolves them. */
+const ACTION_FILES = ['action.yml', 'action.yaml'];
 
 /** The block this gate requires, recognised by the helper it must define. */
 const COLLECTOR_ANCHOR = /^\s*run_self_test\s*\(\)\s*\{/m;
@@ -397,8 +411,39 @@ export function collectedCommands(runText) {
 }
 
 /**
- * Judge one workflow's text. Pure over the text, so the self-test drives the
- * same predicate the gate does rather than a paraphrase of it.
+ * The step lists a parsed document holds, each with the name a message should
+ * attribute it to.
+ *
+ * TWO document shapes, one predicate (#19229). A workflow declares its steps
+ * under `jobs.<id>.steps`; a composite action declares them under `runs.steps`
+ * and has no `jobs:` at all. The masking defect is identical in both -- the
+ * runner writes the block to a file and runs `bash -e` on it either way -- so
+ * the judgement below is shared and only the walk to the steps differs. A
+ * document with neither shape contributes nothing, which is what a reusable
+ * workflow call or a `node20` action does.
+ *
+ * @param {unknown} doc
+ * @returns {{ job: string, steps: unknown[] }[]}
+ */
+function stepGroups(doc) {
+  if (!doc || typeof doc !== 'object') return [];
+  const out = [];
+  const jobs = doc.jobs;
+  if (jobs && typeof jobs === 'object') {
+    for (const [job, body] of Object.entries(jobs)) {
+      if (Array.isArray(body?.steps)) out.push({ job, steps: body.steps });
+    }
+  }
+  // A composite action: ONE implicit group, labelled so a finding names the
+  // shape a reader will find in the file rather than a job id that is not there.
+  if (Array.isArray(doc.runs?.steps)) out.push({ job: 'runs (composite)', steps: doc.runs.steps });
+  return out;
+}
+
+/**
+ * Judge one workflow's or one composite action's text. Pure over the text, so
+ * the self-test drives the same predicate the gate does rather than a
+ * paraphrase of it.
  *
  * @param {string} text  workflow YAML source
  * @param {string} file  its file name, for messages
@@ -415,11 +460,8 @@ export function scanWorkflowText(text, file, parseYaml) {
   } catch (error) {
     return { problems: [`${file} does not parse as YAML: ${error.message}`], steps: 0, collectors: [] };
   }
-  const jobs = doc && typeof doc === 'object' ? doc.jobs : undefined;
-  if (!jobs || typeof jobs !== 'object') return { problems, steps, collectors };
-
-  for (const [job, body] of Object.entries(jobs)) {
-    for (const step of Array.isArray(body?.steps) ? body.steps : []) {
+  for (const { job, steps: group } of stepGroups(doc)) {
+    for (const step of group) {
       if (typeof step?.run !== 'string') continue;
       steps++;
       const targets = selfTestTargets(step.run);
@@ -470,11 +512,29 @@ export function scanWorkflowText(text, file, parseYaml) {
 }
 
 /**
- * Scan every checked-in workflow.
+ * Every `action.yml` / `action.yaml` under `<root>/.github/actions/`, relative
+ * to that directory. Walked rather than read one level deep, because a local
+ * action may be nested (`uses: ./.github/actions/a/b`). A missing directory
+ * answers `[]` -- see ACTION_DIR for why absence here is a state and not a
+ * refusal.
+ */
+function actionFilesUnder(dir, prefix = '', out = []) {
+  if (!existsSync(dir)) return out;
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory()) actionFilesUnder(join(dir, entry.name), `${prefix}${entry.name}/`, out);
+    else if (ACTION_FILES.includes(entry.name)) out.push(`${prefix}${entry.name}`);
+  }
+  return out;
+}
+
+/**
+ * Scan every checked-in workflow AND every checked-in composite action.
  *
  * Missing input is a failure, never a pass (#4690): no workflow directory, and
  * no collector found at all, are both problems -- a scan that reads nothing is
- * indistinguishable from a scan that found nothing wrong.
+ * indistinguishable from a scan that found nothing wrong. The SECOND root is
+ * the one exception and it is declared rather than assumed: `.github/actions/`
+ * absent is a real state, so it answers zero files instead of a refusal.
  *
  * @param {string} root
  * @param {(source: string) => unknown} parseYaml
@@ -482,19 +542,27 @@ export function scanWorkflowText(text, file, parseYaml) {
 export function scanWorkflows(root, parseYaml) {
   const dir = join(root, WORKFLOW_DIR);
   if (!existsSync(dir)) {
-    return { problems: [`${WORKFLOW_DIR} does not exist -- nothing was verified (see #4690).`], steps: 0, collectors: [], files: 0 };
+    return { problems: [`${WORKFLOW_DIR} does not exist -- nothing was verified (see #4690).`], steps: 0, collectors: [], files: 0, actionFiles: 0 };
   }
-  const files = readdirSync(dir)
+  const workflowNames = readdirSync(dir)
     .filter((n) => n.endsWith('.yml') || n.endsWith('.yaml'))
     .sort();
-  if (files.length === 0) {
-    return { problems: [`${WORKFLOW_DIR} holds no workflow files -- nothing was verified (see #4690).`], steps: 0, collectors: [], files: 0 };
+  if (workflowNames.length === 0) {
+    return { problems: [`${WORKFLOW_DIR} holds no workflow files -- nothing was verified (see #4690).`], steps: 0, collectors: [], files: 0, actionFiles: 0 };
   }
+  const actionNames = actionFilesUnder(join(root, ACTION_DIR)).sort();
+  // Each entry carries the path it is REPORTED under: `action.yml` is the same
+  // string in every action directory, so a bare name is an attribution nobody
+  // can open.
+  const files = [
+    ...workflowNames.map((n) => ({ rel: `${WORKFLOW_DIR}/${n}`, abs: join(dir, n) })),
+    ...actionNames.map((n) => ({ rel: `${ACTION_DIR}/${n}`, abs: join(root, ACTION_DIR, n) })),
+  ];
   const problems = [];
   const collectors = [];
   let steps = 0;
-  for (const file of files) {
-    const out = scanWorkflowText(readFileSync(join(dir, file), 'utf8'), file, parseYaml);
+  for (const { rel, abs } of files) {
+    const out = scanWorkflowText(readFileSync(abs, 'utf8'), rel, parseYaml);
     problems.push(...out.problems);
     collectors.push(...out.collectors);
     steps += out.steps;
@@ -506,7 +574,7 @@ export function scanWorkflows(root, parseYaml) {
         `(#4690). Recognised enumeration spellings for a discovered set:\n${discoverySpellingHelp()}`,
     );
   }
-  return { problems, steps, collectors, files: files.length };
+  return { problems, steps, collectors, files: workflowNames.length, actionFiles: actionNames.length };
 }
 
 // -- The dynamic half: drive a real block under a real `bash -e` --------------
@@ -631,14 +699,15 @@ async function loadYamlParser() {
 
 async function run() {
   const parseYaml = await loadYamlParser();
-  const { problems, steps, collectors, files } = scanWorkflows(REPO_ROOT, parseYaml);
+  const { problems, steps, collectors, files, actionFiles } = scanWorkflows(REPO_ROOT, parseYaml);
   if (problems.length > 0) {
     console.error(`✗ check-step-collectors -- ${problems.length} problem(s)\n`);
     for (const p of problems) console.error(`  • ${p}\n`);
     return 1;
   }
   console.log(
-    `✓ check-step-collectors: ${steps} \`run:\` steps across ${files} workflow(s); ` +
+    `✓ check-step-collectors: ${steps} \`run:\` steps across ${files} workflow(s) and ` +
+      `${actionFiles} composite action(s); ` +
       `${collectors.length} step(s) run 2+ independent self-tests, all of them through a collector.`,
   );
   return 0;
@@ -734,6 +803,87 @@ async function selfTest() {
     scanWorkflows(join(tmpdir(), 'os-step-collectors-absent'), parseYaml).problems.some((p) => p.includes('does not exist')),
     '#4690: a missing workflow directory is a failure, never a pass',
   );
+
+  // ---- The composite action root (#19229) ----------------------------------
+  //
+  // The runner writes a composite action's `run:` body to a file and executes
+  // `bash -e` on it, exactly as it does a workflow step's -- so the masking this
+  // gate exists to stop is the same defect in the same shell, and the only thing
+  // that differed was which directory the file sat in. This gate's row in the
+  // filing card was UNJUDGED rather than clean: its root is assembled with
+  // `join('.github', 'actions')`, so a literal grep for the path spelling found
+  // nothing here and said nothing about the population.
+  const compositeBare = [
+    'name: Fixture gate',
+    'description: two independent self-tests, bare',
+    'runs:',
+    '  using: composite',
+    '  steps:',
+    '    - name: Two self-tests, bare',
+    '      shell: bash',
+    '      run: |',
+    '        node scripts/alpha.mjs --self-test',
+    '        node scripts/beta.mjs --self-test',
+    '',
+  ].join('\n');
+  const compositeFlag = scanWorkflowText(compositeBare, 'fixture-action.yml', parseYaml);
+  assert(
+    compositeFlag.steps === 1 && compositeFlag.problems.length === 1,
+    `the FIRING control: a composite action's own steps are judged (steps=${compositeFlag.steps}, problems=${compositeFlag.problems.length})`,
+  );
+  assert(
+    (compositeFlag.problems[0] ?? '').includes('runs (composite)')
+      && (compositeFlag.problems[0] ?? '').includes('2 independent self-tests'),
+    'the finding names the shape a reader will find in the file -- an action has no job id to attribute to',
+  );
+  // The DARK control for the judgement: the same two self-tests, routed through
+  // a collector, are green -- so the flag above is about the bare sequence and
+  // not about the shape merely being read.
+  const compositeCollected = compositeBare.replace(
+    '      run: |\n        node scripts/alpha.mjs --self-test\n        node scripts/beta.mjs --self-test',
+    '      run: |\n        run_self_test() { "$@"; }\n        run_self_test node scripts/alpha.mjs --self-test\n'
+      + '        run_self_test node scripts/beta.mjs --self-test',
+  );
+  assert(
+    scanWorkflowText(compositeCollected, 'fixture-action.yml', parseYaml).problems.length === 0
+      && scanWorkflowText(compositeCollected, 'fixture-action.yml', parseYaml).collectors.length === 1,
+    'the same pair routed through a collector is green inside a composite action too',
+  );
+  // And the same thing through the REAL root walk, which is the half a pure
+  // text predicate cannot prove: the file has to be FOUND before it is judged.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'os-step-collectors-actions-'));
+    try {
+      mkdirSync(join(dir, WORKFLOW_DIR), { recursive: true });
+      writeFileSync(
+        join(dir, WORKFLOW_DIR, 'lint.yml'),
+        'jobs:\n  lint:\n    steps:\n      - name: A collector\n        run: |\n'
+          + '          run_self_test() { "$@"; }\n          run_self_test node scripts/a.mjs --self-test\n'
+          + '          run_self_test node scripts/b.mjs --self-test\n',
+      );
+      const withoutActions = scanWorkflows(dir, parseYaml);
+      assert(
+        withoutActions.problems.length === 0 && withoutActions.actionFiles === 0,
+        `the DARK control: a tree with no ${ACTION_DIR}/ is green and NOT a refusal (${withoutActions.problems[0] ?? ''})`,
+      );
+      mkdirSync(join(dir, ACTION_DIR, 'nested', 'gate'), { recursive: true });
+      writeFileSync(join(dir, ACTION_DIR, 'nested', 'gate', 'action.yml'), compositeBare);
+      const withActions = scanWorkflows(dir, parseYaml);
+      assert(
+        withActions.actionFiles === 1
+          && withActions.problems.length === 1
+          && (withActions.problems[0] ?? '').startsWith(`${ACTION_DIR}/nested/gate/action.yml:`),
+        `the same tree plus one nested action file is flagged, and the finding names the path (${withActions.problems[0] ?? 'none'})`,
+      );
+      writeFileSync(join(dir, ACTION_DIR, 'nested', 'gate', 'README.md'), '- run: node scripts/a.mjs --self-test\n');
+      assert(
+        scanWorkflows(dir, parseYaml).actionFiles === 1,
+        `only action.yml/action.yaml are read under ${ACTION_DIR}/ -- a README beside one is not an action`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
 
   // ---- DISCOVERED sets: recognition, both reds, and the driven block -------
   //
@@ -943,6 +1093,13 @@ async function selfTest() {
   // ---- The dynamic half: the LIVE blocks, under a real `bash -e` ------------
   const live = scanWorkflows(REPO_ROOT, parseYaml);
   assert(live.problems.length === 0, `the checked-in workflows pass the static half (${live.problems[0] ?? ''})`);
+  // The #4690 floor the second root CAN carry: absence there is legal in
+  // general, so on a repo that HOLDS composite actions a zero is a reader that
+  // stopped reading rather than a tree that stopped having them (#19229).
+  assert(
+    live.actionFiles > 0,
+    `this repo holds composite actions and the live scan read ${live.actionFiles} of them`,
+  );
   assert(live.collectors.length >= 2, `at least the two known collectors are found (found ${live.collectors.length})`);
 
   for (const collector of live.collectors) {
