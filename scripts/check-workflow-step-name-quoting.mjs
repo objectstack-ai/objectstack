@@ -62,11 +62,29 @@
 // reference) errors LOUDLY at YAML-parse time and reds CI on its own; it does
 // not need a gate to notice.
 //
-// ## Scope: the population is `- name:` lines under .github/workflows/ only
+// ## Scope: the population is `- name:` lines under .github/workflows/ AND
+// .github/actions/
 //
-// The population is spelled directly as the WORKFLOW_DIR literal below (the
-// check-workflow-status-functions.mjs convention) -- narrow and named, so it
-// needs no dispatch-gates population marker of its own.
+// The population is spelled directly as the WORKFLOW_DIR and ACTION_DIR
+// literals below (the check-workflow-status-functions.mjs convention) --
+// narrow and named, so it needs no dispatch-gates population marker of its own.
+//
+// The second root landed with #19229, which measured the class: six gates in
+// this repo rooted their population at `.github/workflows` and none read
+// `.github/actions/**`, while every one printed a scope line that reads as
+// coverage. This gate's subject is a YAML quoting hazard in a `- name:` scalar,
+// and a composite action's steps carry `- name:` scalars parsed by the same
+// YAML, in the same repo, under the same house style of writing issue numbers
+// into step names. There is no reading under which the hazard stops at the
+// directory boundary -- `.github/actions/setup-pnpm/action.yml` alone carried
+// eight step names that this gate could not see.
+//
+// `.github/actions/` ABSENT is not a refusal: a repo may legitimately hold no
+// composite action, and a missing second root is a real state rather than a
+// broken reader. `.github/workflows/` absent or empty stays a refusal, because
+// this repo cannot be in that state. What keeps the second root from going
+// quiet is the live battery below, which asserts the real tree's action files
+// are in the scan -- the #4690 floor in the form this root can carry.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -76,6 +94,10 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const WORKFLOW_DIR = '.github/workflows';
+const ACTION_DIR = '.github/actions';
+
+/** The file names GitHub accepts for a local action, in the order it resolves them. */
+const ACTION_FILES = ['action.yml', 'action.yaml'];
 
 /** A step-name line: `- name:` at the start of a mapping entry, with the rest of the line captured. */
 const STEP_NAME_LINE = /^(\s*)-\s+name:(.*)$/;
@@ -108,20 +130,28 @@ export function scan(root) {
   const dir = join(root, WORKFLOW_DIR);
   if (!existsSync(dir) || !statSync(dir).isDirectory()) {
     problems.push(`${WORKFLOW_DIR}/ does not exist -- nothing was scanned, so nothing was verified.`);
-    return { violations, quoted, unquotedSafe, problems, files: 0, stepNames: 0 };
+    return { violations, quoted, unquotedSafe, problems, files: 0, actionFiles: 0, stepNames: 0 };
   }
 
-  const files = readdirSync(dir)
+  const workflowFiles = readdirSync(dir)
     .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
     .sort();
-  if (files.length === 0) {
+  if (workflowFiles.length === 0) {
     problems.push(`${WORKFLOW_DIR}/ holds no .yml/.yaml file -- nothing was scanned, so nothing was verified.`);
-    return { violations, quoted, unquotedSafe, problems, files: 0, stepNames: 0 };
+    return { violations, quoted, unquotedSafe, problems, files: 0, actionFiles: 0, stepNames: 0 };
   }
 
-  for (const fileName of files) {
-    const rel = `${WORKFLOW_DIR}/${fileName}`;
-    const source = readFileSync(join(dir, fileName), 'utf8');
+  // The SECOND root (#19229). Absent is a real state, never a refusal -- see
+  // the header. Walked rather than readdir'd at one level, because a local
+  // action may be nested (`uses: ./.github/actions/a/b`).
+  const actionFiles = actionFilesUnder(join(root, ACTION_DIR)).sort();
+  const files = [
+    ...workflowFiles.map((f) => ({ rel: `${WORKFLOW_DIR}/${f}`, abs: join(dir, f) })),
+    ...actionFiles.map((f) => ({ rel: `${ACTION_DIR}/${f}`, abs: join(root, ACTION_DIR, f) })),
+  ];
+
+  for (const { rel, abs } of files) {
+    const source = readFileSync(abs, 'utf8');
     const lines = source.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
@@ -159,7 +189,34 @@ export function scan(root) {
     }
   }
 
-  return { violations, quoted, unquotedSafe, problems, files: files.length, stepNames };
+  return {
+    violations,
+    quoted,
+    unquotedSafe,
+    problems,
+    files: files.length,
+    workflowFiles: workflowFiles.length,
+    actionFiles: actionFiles.length,
+    stepNames,
+  };
+}
+
+/**
+ * Every `action.yml` / `action.yaml` under `<root>/.github/actions/`, as paths
+ * relative to that directory.
+ *
+ * A missing directory answers `[]` rather than throwing: absence is a real
+ * state for this root (see the header), and the live self-test battery is what
+ * keeps a real tree's actions from silently dropping out of the scan.
+ */
+function actionFilesUnder(dir, prefix = '', out = []) {
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return out;
+  for (const entry of readdirSync(dir).sort()) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) actionFilesUnder(full, `${prefix}${entry}/`, out);
+    else if (ACTION_FILES.includes(entry)) out.push(`${prefix}${entry}`);
+  }
+  return out;
 }
 
 // ── Reporting ───────────────────────────────────────────────────────────────
@@ -168,8 +225,14 @@ function repoRoot() {
   return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 }
 
-function summarise({ files, stepNames, quoted, unquotedSafe }) {
-  return `scanned ${files} workflow file(s), ${stepNames} step name(s) -- ${quoted.length} already quoted, ${unquotedSafe.length} unquoted-and-safe`;
+function summarise({ workflowFiles, actionFiles, stepNames, quoted, unquotedSafe }) {
+  // Both roots are NAMED and both counts are printed, so the scope line says
+  // what was read rather than implying it (#19229). A zero on the second root
+  // is a reading a reader can act on, not a silence.
+  return (
+    `scanned ${workflowFiles} workflow file(s) + ${actionFiles} composite action file(s), ` +
+    `${stepNames} step name(s) -- ${quoted.length} already quoted, ${unquotedSafe.length} unquoted-and-safe`
+  );
 }
 
 function reportProblems(problems) {
@@ -264,12 +327,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // contains ` #`" shape would have gotten wrong.
   '4. A normal trailing YAML comment on a non-name line stays green': 3,
   '5. Missing input must go red, in both shapes (#4690)': 2,
-  '6. The real repository is what this gate actually guards': 3,
+  '6. The real repository is what this gate actually guards': 5,
+  // #19229: the second root. A firing control (the same hazard inside a
+  // composite action IS flagged), a dark control (it is flagged only because
+  // the action file is read), and the absence case the second root must NOT
+  // turn into a refusal.
+  '7. A composite action\'s step names are in the population (#19229)': 5,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -416,6 +484,95 @@ jobs:
     assert(
       real.violations.length === 0,
       `the repo is expected to be clean at self-test time -- got ${real.violations.length}: ${JSON.stringify(real.violations)}`,
+    );
+    // ⭐ The #4690 floor the second root CAN carry. Absence there is a legal
+    // state in general, so it is not a refusal -- which means the only thing
+    // standing between "this repo's actions are scanned" and a root that
+    // silently stopped being read is this pair of live assertions.
+    assert(
+      real.actionFiles > 0,
+      `this repo holds composite actions, so a zero here is a reader that stopped reading -- got ${real.actionFiles}`,
+    );
+    assert(
+      real.quoted.concat(real.unquotedSafe, real.violations).some((e) => e.file.startsWith(`${ACTION_DIR}/`)),
+      'and their step names are really in the judged population, not merely their files in the count',
+    );
+
+    // ── 7. A composite action's step names are in the population (#19229) ──
+    //
+    // The hazard is identical on both roots: ` #` inside an unquoted plain
+    // scalar begins a YAML comment, so the step's parsed name is the text
+    // before it. What differed was only which directory the file sat in.
+    battery("7. A composite action's step names are in the population (#19229)");
+    const actionBody = `name: Fixture gate
+description: does a thing
+runs:
+  using: composite
+  steps:
+    - name: The #13419 name-fold fixture has no non-test loader
+      shell: bash
+      run: echo hi
+    - name: 'A quoted #456 name stays green'
+      shell: bash
+      run: echo hi
+`;
+    const withAction = makeRoot({
+      '.github/workflows/lint.yml': `name: Lint
+on: [push]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Use the action
+        uses: ./.github/actions/fixture-gate
+`,
+      '.github/actions/fixture-gate/action.yml': actionBody,
+    });
+    const actionResult = scan(withAction);
+    // FIRING control: the violation exists only inside the action file.
+    assert(
+      actionResult.violations.length === 1
+        && actionResult.violations[0]?.file === `${ACTION_DIR}/fixture-gate/action.yml`,
+      `the hazard inside a composite action is flagged, and named by its own path -- got ${JSON.stringify(actionResult.violations)}`,
+    );
+    assert(
+      actionResult.actionFiles === 1 && actionResult.workflowFiles === 1,
+      `both roots are counted separately, got ${actionResult.workflowFiles} + ${actionResult.actionFiles}`,
+    );
+    assert(
+      actionResult.quoted.length === 1 && actionResult.stepNames === 3,
+      `the action's second (quoted) name and the caller's own name are judged too, got ${actionResult.stepNames} step name(s)`,
+    );
+    // DARK control: the SAME workflow with the action file absent is green, so
+    // the flag above can only have come from reading the second root.
+    const withoutAction = makeRoot({
+      '.github/workflows/lint.yml': `name: Lint
+on: [push]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Use the action
+        uses: ./.github/actions/fixture-gate
+`,
+    });
+    const darkResult = scan(withoutAction);
+    assert(
+      darkResult.violations.length === 0 && darkResult.actionFiles === 0 && darkResult.problems.length === 0,
+      `with no ${ACTION_DIR}/ the same tree is green and NOT a refusal -- got ${darkResult.violations.length} violation(s), ${darkResult.problems.length} problem(s)`,
+    );
+    // A non-action file sitting in the tree is not an action: the two names
+    // GitHub resolves are the whole population, so a README beside an action
+    // contributes no step names.
+    const strayResult = scan(
+      makeRoot({
+        '.github/workflows/lint.yml': "name: Lint\non: [push]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Build\n        run: echo hi\n",
+        '.github/actions/fixture-gate/README.md': '- name: Not a #123 step at all\n',
+      }),
+    );
+    assert(
+      strayResult.actionFiles === 0 && strayResult.violations.length === 0,
+      `only action.yml/action.yaml are read under ${ACTION_DIR}/, got ${strayResult.actionFiles} file(s)`,
     );
   } finally {
     for (const dir of roots) rmSync(dir, { recursive: true, force: true });
