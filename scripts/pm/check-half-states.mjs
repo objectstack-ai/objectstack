@@ -34209,6 +34209,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   const SELF19191 = readFileSync(SELF_PATH, 'utf8');
   t('#19191 knob: ONE git read site in the file, so a fourth reader cannot skip the cwd', SELF19191.split(['execFileSync', "('git'"].join('')).length - 1, 1);
   t('#19191 knob: …and no `spawnSync` git read beside it', SELF19191.split(['spawnSync', "('git'"].join('')).length - 1, 0);
+  t('#19191 knob: …and that one site takes the knob as its `cwd`', /resolveSweepCheckout\(process\.env\)\.path[\s\S]{0,120}cwd,/.test(SELF19191), true);
   t('#19191 knob: unset is the inherited cwd — no path is handed to git', resolveSweepCheckout({}).path, null);
   t('#19191 knob: whitespace is unset too', resolveSweepCheckout({ PM_SWEEP_CHECKOUT: '  ' }).set, false);
   t('#19191 knob: a path becomes the cwd every local git read takes', resolveSweepCheckout({ PM_SWEEP_CHECKOUT: '/home/user/objectui' }).path, '/home/user/objectui');
