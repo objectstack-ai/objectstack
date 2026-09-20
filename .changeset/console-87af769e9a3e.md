@@ -214,6 +214,6 @@ Derived from the changesets objectui declared over the range — 584 releasing o
 - _(no changeset)_ test(scripts): census the `$`-dialect lowercase aliases before objectui#8568 is ruled (#8977) (objectui `ca67d42f0`)
 - …and 179 more commits with no changeset — this list is capped at 100, the range has 279 in total. Run `node scripts/objectui-range.mjs --from 53ded82bf7a4 --to 87af769e9a3e --all` for the complete list.
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+<!-- adr-0087: not-required (no-migration-prescription) PROBE — measuring whether the detector fires on this body. -->
 
 objectui range: `53ded82bf7a4...87af769e9a3e`
