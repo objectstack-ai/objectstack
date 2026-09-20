@@ -249,6 +249,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "enable.clone": {
         label: "Clone"
       },
+      validations: {
+        label: "Validations",
+        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+      },
       datasource: {
         label: "データソース",
         helpText: "対象データソース ID（既定: \"default\"）"
@@ -423,6 +427,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
+      },
+      relatedListFilter: {
+        label: "Related List Filter",
+        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
       },
       expression: {
         label: "式",

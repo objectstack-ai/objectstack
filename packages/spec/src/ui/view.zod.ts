@@ -53,7 +53,7 @@ import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE, VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 // [#13855] The section → field-group reference form, shared with the
@@ -1743,9 +1743,45 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (same collision, same resolution as `ListChartConfigSchema` vs the
  * `chart.zod.ts` `ChartConfigSchema`).
  *
- * Closed (strict) from the start: the map renderer's read set is itself closed
- * — it validates `schema.map` against a local zod schema with exactly these
- * keys, so an extra key here would be dropped there. That parity was one key
+ * Closed (strict) from the start, and the strictness stands on its own: it does
+ * NOT rest on the renderer refusing an undeclared key, because nothing
+ * downstream refuses one. Measured at the `.objectui-sha` pin `53ded82b` by
+ * EXECUTING the pinned declarations, not by reading them — and each anchor
+ * below quotes the line it was read at, so the next pin bump reds instead of
+ * rotting (`check:objectui-pin-citations`):
+ *
+ * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
+ *   (`packages/plugin-list/src/ListView.tsx:113` first line
+ *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1381` first line
+ *   `case 'map':`) copy it through a HAND-LISTED whitelist
+ *   (`packages/plugin-list/src/ListView.tsx:67` first line
+ *   `export const FLAT_MAP_CONFIG_KEYS = [`) — this block's keys minus
+ *   `style` — and emit those as flat props. An undeclared key IS dropped
+ *   there, but by a whitelist and in SILENCE: no parse, no warning, no
+ *   diagnostic of any kind.
+ * - **The renderer's own zod schema does not close the set.**
+ *   `packages/types/src/zod/objectql.zod.ts:562` first line
+ *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
+ *   NOT strict, so an undeclared key parses clean there: zero issues, no
+ *   warning. `getMapConfig` consults that `safeParse`
+ *   (`packages/plugin-map/src/ObjectMap.tsx:373` first line
+ *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
+ *   whether to `console.warn`, then returns a spread of the AUTHORED block
+ *   (`:378` first line `return { ...config, style: config.style || style };`),
+ *   undeclared key and all. That spread is reached by objectui's own
+ *   component-node `map` prop, never by this face's flatten product ("neither
+ *   flattener emits a `map` key at all", `getMapConfig`).
+ *
+ * ⛔ So relaxing this block to `passthrough` would hand the extra key to no
+ * checker at all: it dies in the whitelist without a word, and the one schema
+ * that could have reported it is open and warn-only. And this parse is the only
+ * place an author is told ANYWHERE: `map` is not in objectui's
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:313`
+ * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
+ * `ListViewSchema` imports THIS block by reference and the document check on
+ * that side is this same schema. The two key sets MIRROR each other, key for
+ * key. That parity was one key
  * SHORT until the `style` row below landed: the renderer's own
  * `ObjectMapConfigSchema` declares `style` and `getMapConfig` reads it
  * (`schema.map?.style`) while this block did not declare it, so strictness here
@@ -2358,7 +2394,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
       color: 'Row colouring by field value has its own block — see `rowColor` on this list view. To set a CSS colour from a predicate, put it in `style`: `{ condition, style: { color: "#b91c1c" } }`.',
     },
   }, {
-    condition: ExpressionInputSchema.describe('Predicate (CEL) to evaluate.'),
+    condition: EvaluatedExpressionInputSchema.describe('Predicate (CEL) to evaluate.'),
     style: z.record(z.string(), z.string()).describe('CSS styles to apply when condition is true'),
   })).optional().describe('Conditional formatting rules for list rows'),
 
@@ -2888,9 +2924,9 @@ const FormFieldBaseSchema = lazySchema(() => {
    * this one is ENFORCED: see {@link checkFormViewPredicateFeaturesRoot} for
    * the ruling and the scanner.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
+  visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
   };
   return z.object(shape, {
@@ -3095,9 +3131,9 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * refused at parse (ruled 2026-08-27, objectui#6262; see
    * {@link checkFormViewPredicateFeaturesRoot}).
    */
-  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open.'),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open.'),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
+  visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
   columns: z.union([
     z.enum(['1', '2', '3', '4']),
     z.literal(1),

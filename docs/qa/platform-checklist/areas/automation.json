@@ -809,7 +809,7 @@
         "objectui packages/app-shell/src/views/FlowRunner.tsx (onClose = dismiss without POSTing resume; the durable suspension is untouched, so the paused run stays resumable)",
         "examples/app-showcase/src/automation/flows/index.ts#ReassignWizardFlow (ReassignWizardFlow)",
         "packages/services/service-automation/src/builtin/screen-resume-validation.test.ts + src/screen-input-contract.ts (400 on missing required inputs)",
-        "packages/runtime/src/route-ledger.ts#getScreen (resume + getScreen routes)"
+        "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (resume + getScreen routes — re-pointed #18104: getScreen is a CLIENT METHOD name, carried here only inside a dotted string value)"
       ],
       "history": [
         {
@@ -991,7 +991,7 @@
       ],
       "source": [
         "examples/app-showcase/src/automation/flows/index.ts#TaskCompletedRestPingFlow (TaskCompletedRestPingFlow, ShowcaseDeclarativeConnectorPingFlow, ShowcaseMcpConnectorEchoFlow)",
-        "examples/app-showcase/objectstack.config.ts#ConnectorRestPlugin (ConnectorRestPlugin/ConnectorSlackPlugin/ConnectorMcpPlugin + declarative connectors)",
+        "examples/app-showcase/objectstack.config.ts#plugins (ConnectorRestPlugin/ConnectorSlackPlugin/ConnectorMcpPlugin + declarative connectors — re-pointed #18104: the three plugin classes are IMPORTED here and declared in their own packages; the host declaration this item is about is the plugins list itself)",
         "packages/runtime/src/route-ledger.ts (GET /automation/connectors)",
         "ADR-0097 (provider-bound declarative connector instances)"
       ],
@@ -1085,7 +1085,7 @@
         "objectui apps/console/src/pages/developer/FlowRunsPage.tsx (FlowTestRunner + inline FlowRunsPanel; framework#3528 — hands a paused screen run to FlowRunner so it no longer orphans a paused row)",
         "objectui packages/app-shell/src/views/FlowRunner.tsx (the shared screen runner reused here)",
         "objectui apps/console/src/AppContent.tsx (Route path 'developer/flow-runs') + registerDeveloperComponents.tsx (ref 'developer:flow-runs')",
-        "packages/runtime/src/route-ledger.ts#runId (POST /automation/:name/trigger, GET /automation/:name/runs, POST /automation/:name/runs/:runId/resume)",
+        "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (POST /automation/:name/trigger, GET /automation/:name/runs, POST /automation/:name/runs/:runId/resume — re-pointed #18104: runId is a route PATH PARAMETER, carried here only inside the route string)",
         "examples/app-showcase/src/automation/flows/index.ts#BatchRemindersFlow (BatchRemindersFlow tasks input, ReassignWizardFlow screen)"
       ],
       "history": [
@@ -1161,7 +1161,7 @@
         "dispatcher-vs-hono-route"
       ],
       "source": [
-        "packages/runtime/src/route-ledger.ts#getRuntimeStatus (POST /automation/:name/toggle → automation.toggle; GET /automation/_status → automation.getRuntimeStatus)",
+        "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (POST /automation/:name/toggle → automation.toggle; GET /automation/_status → automation.getRuntimeStatus — re-pointed #18104: getRuntimeStatus is a CLIENT METHOD name, carried here only inside a dotted string value)",
         "packages/services/service-automation/src/engine.ts#toggleFlow (toggleFlow — writes the sys_metadata_activation row FIRST, then updates the flowLedgerDisabled projection and activateFlowTrigger/deactivateFlowTrigger; the process-local flowEnabled map this item originally cited is RETIRED by ADR-0126 §7.2) + (flowLedgerDisabled is a projection of the ledger, not the old map under a new name) + getFlowRuntimeStates enabled/bound",
         "docs/adr/0126-packaged-metadata-customization-model.md §7.2 (the durable ledger row replaces the process-local flowEnabled map as the sanctioned off-switch)",
         "examples/app-showcase/src/automation/flows/index.ts#UrgentTaskAlertFlow (UrgentTaskAlertFlow — the record_change flow, #3427)",

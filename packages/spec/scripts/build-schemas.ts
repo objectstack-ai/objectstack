@@ -42,9 +42,17 @@ import {
   type UnemittedSkip,
 } from './lib/unemitted-schemas';
 import {
+  UNPROJECTABLE_BRANCHES_KEY,
+  auditUnprojectableBranchRecord,
   projectByPruningUnionBranches,
+  type BranchProjection,
   type PrunedBranch,
 } from './lib/union-branch-projection';
+// The closed list of refinements this generator DOES publish (#18670 item 2).
+// The ratchet below measures against this same override, so a rule the list
+// emits leaves the ledger and a rule it does not emit stays in it — see the
+// module header for why the two halves must not be read against each other.
+import { projectPublishedJsonSchema } from './lib/refinement-projection';
 // The dropped-refinement ratchet (#18670). The mirror image of the branch
 // pruning above, and deliberately its own module for the same reason: the
 // pruner guards a projection NARROWER than the Zod type, this one the direction
@@ -444,6 +452,13 @@ const branchPrunedProjections: Array<{
 // keyed by something else is a second thing to keep in step.
 const refinementCensus: RefinementCensusEntry[] = [];
 
+// Every disagreement between an `x-unprojectable-branches` record and the
+// artifact it was written onto (#17107). Collected rather than thrown because
+// this loop's own catch reads a throw as "this export has no JSON Schema" and
+// would file the export as an ordinary skip — the record being wrong is the
+// opposite of that, and it is a build failure of its own kind, reported below.
+const branchRecordDefects: string[] = [];
+
 // Error messages for schema types that inherently cannot be represented in JSON Schema.
 // These are expected warnings, not build-breaking errors.
 const KNOWN_UNSUPPORTED_PATTERNS = [
@@ -492,18 +507,14 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           let jsonSchema: Record<string, unknown>;
           let io: 'output' | 'input' = 'output';
           let prunedBranches: readonly PrunedBranch[] = [];
+          let branchProjection: BranchProjection | null = null;
           try {
-            jsonSchema = z.toJSONSchema(value, {
-              target: 'draft-2020-12',
-            }) as Record<string, unknown>;
+            jsonSchema = projectPublishedJsonSchema(value) as Record<string, unknown>;
           } catch (outputError) {
             if (!isKnownUnsupported(outputError)) throw outputError;
             io = 'input';
             try {
-              jsonSchema = z.toJSONSchema(value, {
-                target: 'draft-2020-12',
-                io: 'input',
-              }) as Record<string, unknown>;
+              jsonSchema = projectPublishedJsonSchema(value, { io: 'input' }) as Record<string, unknown>;
             } catch (inputError) {
               if (!isKnownUnsupported(inputError)) throw inputError;
               // THIRD attempt, #16431 (a): both directions above refuse the
@@ -519,11 +530,12 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
               // then re-thrown with the message Zod produced, so this attempt
               // can never change WHY an export is skipped, and so never the
               // `cause` recorded for it in unemitted-schemas.baseline.json.
-              const projected = projectByPruningUnionBranches(value, { target: 'draft-2020-12' });
+              const projected = projectByPruningUnionBranches(value);
               if (!projected) throw inputError;
               jsonSchema = projected.schema;
               io = projected.io;
               prunedBranches = projected.pruned;
+              branchProjection = projected;
             }
           }
 
@@ -536,29 +548,46 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
             // shape — parse-time transforms/defaults are not applied in it.
             jsonSchema['x-io'] = 'input';
           }
-          if (prunedBranches.length > 0) {
+          if (branchProjection && prunedBranches.length > 0) {
             // Say it on the artifact, not only in the build log (#16431 (a)).
             // A reader of this file — or of the reference page rendered from it
             // — can otherwise not tell that the Zod type carries a branch no
             // JSON document could ever satisfy, and the `.describe()` prose
             // above the union DOES name it (the ordering comparand's text says
             // "a number, a Date, a string, or a { $field } reference").
-            jsonSchema['x-unprojectable-branches'] = prunedBranches.map((branch) => ({
+            jsonSchema[UNPROJECTABLE_BRANCHES_KEY] = prunedBranches.map((branch) => ({
               at: branch.at,
               type: branch.type,
             }));
+            // ⭐ And READ it back, here, in the one place that still holds the
+            // tree the record describes (#17107). A published record nothing
+            // consumes is a claim no run can contradict: the guard below is
+            // what makes `x-unprojectable-branches` a statement about this
+            // artifact rather than a decoration on it. It reads the record
+            // the way a consumer of the file would — off `jsonSchema`, by its
+            // key — and checks it against the projection, so the two can never
+            // agree merely by being computed from the same expression twice.
+            for (const defect of auditUnprojectableBranchRecord(jsonSchema, branchProjection)) {
+              branchRecordDefects.push(`${namespaceName}.${key}: ${defect}`);
+            }
             branchPrunedProjections.push({ namespace: namespaceName, exportKey: key, pruned: prunedBranches });
           }
 
-          // The refinements this projection DROPPED (#18670), named on the
+          // The refinements this projection STILL drops (#18670), named on the
           // artifact for the same reason `x-unprojectable-branches` is: a reader
           // of this file — an author, a reference page, an AI validating a
           // document against it — can otherwise not tell that the contract
           // underneath carries rules this file does not state. It is an
           // annotation and nothing more: `x-` keywords are ignored by every
           // validator, so the set of documents this schema ACCEPTS is unchanged
-          // by it. Narrowing the published shape to match the Zod type is a
-          // public-contract change and is deliberately NOT done here.
+          // by it.
+          //
+          // What DID narrow (#18670 item 2) is the closed list in
+          // `src/shared/refinement-projection.ts`, applied by the `override`
+          // above: a refinement declared through it is emitted as real
+          // keywords, so it never reaches `census.dropped` and never reaches
+          // this annotation. ⛔ The two are exclusive by construction — a site
+          // cannot be both stated and annotated as unstated.
           const census = collectDroppedRefinements(`${categorySlug}/${schemaName}`, value);
           refinementCensus.push(census);
           if (census.dropped.length > 0) {
@@ -645,6 +674,21 @@ if (errorCount > 0) {
 // measure def keys, and a collision produces exactly one), and neither should
 // adjudicate a build whose output already depends on export iteration order.
 // See lib/def-key-collisions.ts for why a self-alias is exempt.
+// ─── Guard: the branch record describes the artifact it rides on (#17107) ───
+// `x-unprojectable-branches` is published — `files[]` ships `json-schema/` — and
+// until this guard it had one writer and no reader at all, so nothing in the
+// repo could tell a faithful record from one naming branches this projection
+// never dropped. Fatal, not a warning: the record is the only statement on the
+// file that the Zod type behind it accepts a shape the file does not.
+if (branchRecordDefects.length > 0) {
+  console.error(
+    `\n❌ ${branchRecordDefects.length} \`${UNPROJECTABLE_BRANCHES_KEY}\` record(s) disagree with the ` +
+      `schema they annotate:`,
+  );
+  for (const defect of branchRecordDefects) console.error(`     ⤷ ${defect}`);
+  process.exit(1);
+}
+
 const defKeyCollisions = findDefKeyCollisions(emittedDefs);
 if (defKeyCollisions.length > 0) {
   console.error(`\n❌ ${formatDefKeyCollisions(defKeyCollisions)}`);
@@ -3421,9 +3465,16 @@ if (unemittedSkips.length > 0) {
 // no. Measured on this tree at the change that added this block: 682 refinement
 // sites across 237 published schemas, zero of which projected anything.
 //
-// ⛔ It does NOT narrow any published shape and does not touch the refinements
-// themselves — the runtime rule is correct. It makes the population declared,
-// so the next one arrives as a line in a diff instead of as nothing at all.
+// ⛔ This ratchet still narrows nothing by itself and touches no refinement —
+// the runtime rule is correct. It makes the remaining population declared, so
+// the next gap arrives as a line in a diff instead of as nothing at all.
+//
+// The narrowing is the CLOSED list in `src/shared/refinement-projection.ts`
+// (#18670 item 2), emitted by the `override` this generator passes to every
+// projection. It and this ratchet compose in one direction: a site the list
+// emits is `projected` and its ledger row is deleted in the same PR; every
+// other site is `dropped` and stays declared. So the ledger is shrink-only in
+// the strong sense — a repair is the only thing that shortens it.
 const droppedRefinementsBaseline = readDroppedRefinementsBaseline(PKG_DIR);
 if (!droppedRefinementsBaseline) {
   console.error(`\n❌ ${DROPPED_REFINEMENTS_BASELINE_FILE} is missing — it is a committed, hand-edited ledger (#18670).`);
@@ -3544,15 +3595,75 @@ if (droppedSiteTotal > 0) {
       `RUNTIME and not the published JSON Schema — all declared in ${DROPPED_REFINEMENTS_BASELINE_FILE} (#18670).`,
   );
   console.log(
-    `     The published files are therefore WIDER than the Zod types they are generated from:\n` +
-      `     a document one of them accepts can still be refused at parse time. Each affected file\n` +
-      `     names its own sites as \`x-dropped-refinements\`. Narrowing the published shape to match\n` +
-      `     is a public-contract change and is NOT what this ratchet does.`,
+    `     Those files are therefore still WIDER than the Zod types they are generated from:\n` +
+      `     a document one of them accepts can be refused at parse time. Each affected file names\n` +
+      `     its own remaining sites as \`x-dropped-refinements\`. Closing one means teaching the\n` +
+      `     CLOSED list in src/shared/refinement-projection.ts a NAMED pattern — ⛔ never deleting\n` +
+      `     the refinement, and ⛔ never an open-ended translator over the whole population.`,
   );
   console.log(
     `     Also measured this run: ${projectedSiteTotal} refinement site(s) DID reach the file, ` +
       `${undecidableSiteTotal} had no JSON form on either side to compare.`,
   );
+}
+
+// Which projected sites got there through which arm of the closed list (#18670
+// item 2). Printed per pattern rather than as one total, for the reason the
+// ledger records sites rather than a count: a total cannot tell "one arm stopped
+// emitting" from "somebody deleted a refinement", and the two have opposite
+// remedies. A site that projects with NO declared pattern is reported on its own
+// line — it means zod started emitting something by itself, which is news.
+if (projectedSiteTotal > 0) {
+  const byPattern = new Map<string, number>();
+  for (const entry of refinementCensus) {
+    for (const site of entry.projected) {
+      const key = site.declaredPatterns.length > 0
+        ? site.declaredPatterns.join('+')
+        : 'UNDECLARED — zod projected this on its own';
+      byPattern.set(key, (byPattern.get(key) ?? 0) + 1);
+    }
+  }
+  console.log(
+    `\n📣 ${projectedSiteTotal} refinement site(s) DO reach the published JSON Schema, by declared pattern:`,
+  );
+  for (const [pattern, n] of [...byPattern].sort((a, b) => b[1] - a[1])) {
+    console.log(`     ${String(n).padStart(4)}  ${pattern}`);
+  }
+}
+
+// Nodes whose projection MOVED and which are still counted as dropped — the
+// reading the per-node differential cannot express as a verdict (#18670 third
+// arm). Two shapes reach this line and both are news:
+//
+//   - a node carrying a DECLARED arm beside a rule the closed list does not
+//     cover, so part of it is stated in the file and part of it is not. It is
+//     ledgered and annotated conservatively, which is what the ruling's 「A
+//     refinement that is not one of these named patterns stays dropped and
+//     annotated」 requires — before the verdict was per-check-aware such a node
+//     read `projected` outright and its undeclared rule was recorded nowhere;
+//   - zod having started to project a `custom` check on its own, which is the
+//     upgrade this whole instrument is waiting for and must not swallow.
+//
+// Printed rather than fatal: the site is already held by the ledger as a drop,
+// so a NEW one fails the ratchet above on its own. What this line adds is WHICH
+// of the declared population is only half-stated, which no count can say.
+const partiallyStated = refinementCensus.flatMap((entry) =>
+  entry.dropped
+    .filter((site) => site.projectionMoved)
+    .map((site) => ({ defKey: entry.defKey, site })),
+);
+if (partiallyStated.length > 0) {
+  console.log(
+    `\n🪢 ${partiallyStated.length} refinement site(s) are PARTIALLY stated by the published file — ` +
+      `the projection moved, yet not every \`custom\` check on the node is one the closed list declares, ` +
+      `so the node stays dropped and annotated (#18670).`,
+  );
+  for (const { defKey, site } of partiallyStated) {
+    const declared = site.declaredPatterns.length > 0
+      ? site.declaredPatterns.join('+')
+      : 'nothing declared — zod projected this on its own';
+    console.log(`     ${defKey} at "${site.path}": ${site.count} check(s), declared: ${declared}`);
+  }
 }
 
 // ─── Generate Bundled Schema ─────────────────────────────────────────

@@ -114,12 +114,31 @@ Why each one matters, since none of them changes which rows match:
 - **`expand`** — an unexpanded relation is indistinguishable from one whose
   foreign keys are all null, so clients render raw ids where names belong.
 
-Sorts accept any of these spellings, all equivalent:
-`?sort=-created_at`, `?$orderby=-created_at`, and — on
-`POST /data/:object/query` — `{"orderBy": [{"field": "created_at", "order":
-"desc"}]}`, `{"orderBy": ["-created_at"]}` or `{"orderBy": {"created_at":
-"desc"}}`. A shape that is none of these (a number, an entry naming no field,
-a direction that is neither `asc` nor `desc`) is `400 INVALID_SORT`.
+Sort spellings are slot-specific, and the two routes take different sets — a
+slot that does not take a shape answers `400` instead of sorting. Measured on
+both routes:
+
+| Sort value | On the querystring — `GET /data/:object` | In the body of `POST /data/:object/query` |
+|:---|:---|:---|
+| `-created_at`, or `created_at desc` — the shorthand string | `?sort=-created_at`, `?$orderby=-created_at` and `?orderBy=-created_at` — each of them sorts; they normalize to one parameter | `400 VALIDATION_FAILED` on every slot — `orderBy`, `$orderby` and `sort` alike |
+| `["-created_at"]` — an array of those shorthand strings | `400 INVALID_SORT` — this route parses no JSON here, so the whole value is read as one field name | `400 VALIDATION_FAILED` on every slot |
+| `{"created_at": "desc"}` — a field-to-direction map (`1` / `-1` are read as `asc` / `desc`) | `400 INVALID_SORT` — same reason | sorts on `$orderby` and on `sort`; on `orderBy` it is `400 VALIDATION_FAILED` |
+| `[{"field": "created_at", "order": "desc"}]` — `SortNode[]`, the canonical shape | `400 INVALID_SORT` — same reason | `{"orderBy": …}` sorts, and so do `$orderby` and `sort` |
+
+So read the last column before copying a sort into a request body. The
+shorthand string is a querystring spelling and reaches no body slot at all; the
+map reaches `$orderby` and `sort` but never `orderBy`; `SortNode[]` is the one
+shape the canonical slot and its two transport aliases all accept.
+
+Naming something that is not a field on the object is `400 INVALID_SORT` on
+either route — `?sort=no_such_field` and
+`{"orderBy": [{"field": "no_such_field", "order": "asc"}]}` alike. A body whose
+sort has the wrong *shape* never reaches that check: it is
+`400 VALIDATION_FAILED`, and the offending path is named in `fields`
+(`query.orderBy.0` for an entry that names no field, `query.orderBy.0.order`
+for a direction that is neither `asc` nor `desc`). The querystring has no body
+to validate first, so it reports that direction as `400 INVALID_SORT` —
+`?sort=name sideways`.
 
 `GET /data/:object/:id` applies the same `select` and `expand` rules, so the
 list and single-record routes cannot disagree about one field map.

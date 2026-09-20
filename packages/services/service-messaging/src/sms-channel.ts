@@ -2,6 +2,8 @@
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type {
+    ChannelAvailability,
+    ChannelAvailabilityQuery,
     ChannelUnavailableReason,
     Delivery,
     ErrorClass,
@@ -82,10 +84,11 @@ const PHONE_SHAPE = (s: string): string | undefined => {
 const SMS_QUOTA_EXCEEDED_CODE = 'TOO_MANY_REQUESTS';
 
 /**
- * The ONE token used for "there is no transport" (#18424) — the same value the
- * email channel's `isAvailable()` returns, so the refusal this channel writes
- * onto a delivery row and the suppression fan-out records on
- * `sys_notification.suppressed_channels` name one condition.
+ * The ONE token both members of this channel use for "there is no transport"
+ * (#18424, #18567) — the reason `isAvailable()` returns, reused verbatim so the
+ * refusal `send()` writes onto a delivery row and the suppression fan-out
+ * records on `sys_notification.suppressed_channels` name one condition. The
+ * email channel names the same condition with the same token.
  *
  * ⛔ Deliberately NOT a new error code. The vocabulary is the closed
  * `CHANNEL_UNAVAILABLE_REASONS` set in `channel.ts`, and the annotation is what
@@ -112,6 +115,12 @@ const TRANSPORT_NOT_CONFIGURED: ChannelUnavailableReason = 'transport_not_config
  * `permanent` so the row dead-letters on attempt one; a recipient with no
  * resolvable phone number ⇒ a reported failure. Either way the delivery row
  * shows why — ⛔ nothing this channel did not send is recorded as delivered.
+ *
+ * An absent transport is answered TWICE, at the two points it is decidable
+ * (#18567): `isAvailable()` suppresses the channel BEFORE fan-out writes any
+ * delivery row, and `send()` still refuses the residue that answer cannot cover
+ * — a transport present at emit and gone by dispatch. Both name the one
+ * `transport_not_configured` token, exactly as the email channel does.
  */
 export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
     const userObject = opts.userObject ?? USER_OBJECT;
@@ -168,6 +177,63 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
 
     return {
         id: 'sms',
+
+        /**
+         * Can this tenant send SMS at all? (#18567 — #17732's unfinished half.)
+         *
+         * Answered from the composition's transport configuration — the `sms`
+         * service this channel was handed — and from nothing else. No delivery
+         * I/O, no recipient lookup, no settings read: a service-registry
+         * closure call, which is why fan-out consults it inline and holds no
+         * cache. The email channel answers the same question the same way.
+         *
+         * ## Why the member had to exist here too
+         *
+         * Without it, fan-out's `resolveChannelAvailability` takes the
+         * "no `isAvailable` ⇒ AVAILABLE" branch for `sms` and writes a
+         * `sys_notification_delivery` row per recipient that the pipeline is
+         * guaranteed to dead-letter — while `email` under the SAME absent
+         * transport is suppressed before the first write. One condition was
+         * answered two ways depending on which channel was asked.
+         *
+         * ⛔ This does NOT weaken the `send()` refusal below. The two members
+         * answer ONE condition and both still answer it: fan-out suppresses
+         * pre-write where it can, and `send()` still REFUSES the residue the
+         * pre-write answer cannot cover — a transport present at emit and gone
+         * by dispatch, where the row already exists.
+         *
+         * ## The cost measurement
+         *
+         * SMS configuration in this tree is the `sms` settings namespace, and
+         * that manifest declares `scope: 'global'`
+         * (`packages/services/service-settings/src/manifests/sms.manifest.ts`):
+         * one deployment-wide provider, materialised ONCE onto the `SmsService`
+         * and hot-swapped by the settings change bus (`SmsServicePlugin`
+         * subscribes to `sms` and re-runs `setTransport`). So there is no
+         * per-tenant transport row to read, and the answer costs no round trip.
+         *
+         * ⇒ NO CACHE, for two independent reasons: it would save nothing, and
+         * it would be WRONG — a tick-scoped memo would keep answering
+         * "unavailable" straight through the settings save that fixed it.
+         *
+         * The query still takes the tenant context, because the seam outlives
+         * this measurement: the day SMS configuration becomes tenant-scoped,
+         * the answer changes here and no published interface has to move again.
+         */
+        isAvailable(_ctx: MessagingChannelContext, _query: ChannelAvailabilityQuery): ChannelAvailability {
+            // A pure probe: no logging, no I/O, no side effects. The suppression
+            // it causes is announced ONCE per emit by the service and recorded
+            // durably on `sys_notification.suppressed_channels` — a line per
+            // emit here would be the noisy half of an answer already written down.
+            //
+            // The reason is READ OFF the constant `send()` refuses with, ⛔ not
+            // retyped: the refusal on the delivery row, the suppression record
+            // and this answer must name ONE condition, and a retyped literal
+            // lets a future rename leave them disagreeing while both stay green.
+            return opts.getSms()
+                ? { available: true }
+                : { available: false, reason: TRANSPORT_NOT_CONFIGURED };
+        },
 
         async send(ctx: MessagingChannelContext, delivery: Delivery): Promise<SendResult> {
             const sms = opts.getSms();

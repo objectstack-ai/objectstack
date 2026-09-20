@@ -138,9 +138,14 @@ describe('#7127 checkLiteralDefaultValue — the shared stored-form literal chec
     expect(v.detail).toContain('`latitude` \u2192 `lat`');
     expect(v.detail).toContain('`longitude` \u2192 `lng`');
     expect(v.detail).not.toContain('expected number, received undefined');
-    // Edit distance cannot reach `latitude` -> `lat`; the curated `aliases`
-    // map is the only thing that can, which is why discarding it cost the
-    // author the whole prescription.
+    // `latitude` -> `lat` is 5 edits against a budget of 2, so the curated
+    // `aliases` map is the only thing that produces THIS rename. Note what the
+    // fallback does instead of nothing: `altitude` is a declared member 2
+    // edits away, so without the entry the author would be pointed at the
+    // elevation member — the alias overrules a wrong answer here rather than
+    // filling a silent gap (`field-value.test.ts` pins both halves). Either
+    // way the prescription rides the unrecognized-keys issue, which is why
+    // discarding it cost the author the whole thing.
   });
 
   it('#16077 prefers the rename over a WRONG-TYPED-member error (address)', () => {

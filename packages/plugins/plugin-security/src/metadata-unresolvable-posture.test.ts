@@ -207,14 +207,29 @@ describe('[#3545] unresolvable object metadata — security posture fails closed
       expect(d.layers.find((l) => l.layer === 'object_crud')!.verdict).toBe('grants');
     });
 
-    it('an unresolvable posture explains as DENIED, naming the real cause', async () => {
-      const d = await explainAccess(explainDeps(true), { object: 'task', operation: 'read', context: ctx });
-      expect(d.allowed).toBe(false);
-      const crud = d.layers.find((l) => l.layer === 'object_crud')!;
-      expect(crud.verdict).toBe('denies');
-      expect(crud.detail).toContain('could not be resolved');
+    // [#18253] Same subject, one rung louder. Enforcement's answer here is
+    // untouched (#3545 fail-closed, `403 PERMISSION_DENIED` — asserted above in
+    // this file); what moved is EXPLAIN's, under the maintainer ruling of
+    // 2026-09-17 (letter B). An unresolvable posture with no cause to narrow it
+    // is "neither the live schema nor the metadata service returned a
+    // declaration" — an object that is not there — and reporting `denies` for
+    // it handed the reader the byte-identical pair a REAL denial produces. So
+    // explain refuses, and the parity claim this describe block exists for is
+    // asserted on the refusal: the cause is named, and it is not misattributed
+    // to the permission sets, which were never the problem.
+    it('an unresolvable posture makes explain REFUSE, naming the real cause', async () => {
+      const refusal = await explainAccess(explainDeps(true), {
+        object: 'task', operation: 'read', context: ctx,
+      }).then(
+        () => { throw new Error('explain resolved a decision for an unresolvable posture'); },
+        (e: any) => e,
+      );
+      // The ADR-0112 pair, not a bare "it threw".
+      expect(refusal).toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
+      expect(refusal.message).toContain("'task'");
+      expect(refusal.message).toContain('NOT an access decision');
       // Not misattributed to the permission sets — they were never the problem.
-      expect(crud.detail).not.toContain('No resolved permission set');
+      expect(refusal.message).not.toContain('No resolved permission set');
     });
   });
 });

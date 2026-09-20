@@ -5237,6 +5237,14 @@ export default class Serve extends Command {
         // owns that refusal now, and this row just reports what it decided.
         tenancyPosture,
         seededAdmin,
+        // #17556 — read straight off the definition this process booted, the
+        // same object `config.devPlugins` is read from twenty lines up. The
+        // platform describes the account it seeded; only the APPLICATION knows
+        // which of its audiences shows something, and these two keys are how it
+        // says so. `printServerReady` gates them on `isDev` and scrubs them —
+        // they are author-controlled text reaching a terminal.
+        devLogins: Array.isArray((config as any)?.devLogins) ? (config as any).devLogins : undefined,
+        devHint: typeof (config as any)?.devHint === 'string' ? (config as any).devHint : undefined,
         automation: automationSummary,
         seeds: seedSummary,
         // #17329 — read HERE, inside the banner thunk, so it is the tally as of

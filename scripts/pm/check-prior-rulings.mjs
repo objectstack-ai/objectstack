@@ -3,7 +3,8 @@
 
 /**
  * check-prior-rulings — the MECHANICAL half of the governing-text step: given a
- * decision card, list the ADR decisions that already rule on its terms (#17009).
+ * decision card, list the ADR decisions that already rule on its terms (#17009)
+ * AND the ruling comments already standing on the card's OWN thread (#18993).
  *
  *   node scripts/pm/check-prior-rulings.mjs --card 16934
  *   node scripts/pm/check-prior-rulings.mjs --card 16934 --terms single,posture,tenant
@@ -11,13 +12,21 @@
  *   node scripts/pm/check-prior-rulings.mjs --card 16934 --json
  *   node scripts/pm/check-prior-rulings.mjs --self-test
  *
+ * `--card` reads the card AND its comment thread from the board (a token, and
+ * in an agent container the proxy route below). `--terms` alone reads nothing
+ * from the board, so its line says the thread was NOT read rather than
+ * pretending it was empty. `--card N --terms …` keeps the override for the
+ * tree-corpus terms and still reads the thread: the thread half is about the
+ * card, not about the terms.
+ *
  * The board the card is read from is `PM_SWEEP_REPO`, resolved the way
  * `check-half-states.mjs` resolves it. ⛔ There is no `--repo` flag, for the
- * reason that file gives and one more of this file's own: the CORPUS is always
- * THIS checkout (`docs/adr/**`, `AGENTS.md`, `packages/spec/src/**` are
+ * reason that file gives and one more of this file's own: the tree CORPORA are
+ * always THIS checkout (`docs/adr/**`, `AGENTS.md`, `packages/spec/src/**` are
  * objectstack paths), so a flag naming a different board would read a card from
  * one repo and answer it out of another repo's rulings, with nothing in the
- * output saying so.
+ * output saying so. The thread corpus is the one corpus that lives on the
+ * board, and it is read from the same board the card is.
  *
  * ## Why this file exists at all
  *
@@ -130,13 +139,76 @@
  * (⛔ 不推翻既有维护者裁决) binds on accepted rulings; the rest are printed in the
  * body, flagged, so a `proposed` near-miss is visible rather than silently
  * dropped.
+ *
+ * ## The card's own thread — the fourth corpus, and why its face is a SHAPE
+ *
+ * The three tree corpora above cannot see the cheapest ruling there is: the
+ * one already written on the card being checked. Measured on #17518: a
+ * director-seat ruling (comment 5651572469, 2026-09-13, maintainer verbatim
+ * 「其他同意」) was followed four days later by a `pm:retriage` that moved the
+ * card back to `needs-user-decision` without citing it; the maintainer ruled
+ * again (5716259259, 2026-09-17, 「同意」) with a different prescription, and a
+ * whole dispatch round ended with zero diff between the two. This file, run on
+ * that card, could not have said so — the thread was in no corpus. So the
+ * thread is one now, and `Prior rulings read:` carries a `thread:` clause.
+ *
+ * **What counts as a ruling comment is a SHAPE, not an author.** Measured over
+ * 1,100 comments in two windows of the live board (REST, reads only):
+ *
+ *     window (UTC)                     first content line              n   authors
+ *     2026-09-11T06 → 09-13T21 (600)   `## Ruling recorded — …`       22   os-tesla 19 · claude[bot] 3
+ *                                      `Ruling: batch #n item k …`     4   os-tesla 2 · claude[bot] 2
+ *     2026-09-18T04 → 11 (500)         `Ruling: batch #n item k …`    26   hotlong 26
+ *                                      `Ruling addendum …`             2   hotlong 2
+ *
+ * The charter pins the first-line shape (`references/lanes/director.md`:
+ * 「裁决评论首行固定一条:`Ruling: batch #<n> item <k> · letter <X> · maintainer
+ * 「<verbatim>」 <UTC>`」, landed 2026-09-13T11:27Z); the `Ruling recorded`
+ * heading is the same seat's shape from before that line, and 5651572469 — the
+ * ruling this corpus was added for — is written in it. So both are read, plus
+ * the addendum, and every hit prints its shape so the reading stays checkable.
+ * ⛔ Not an author predicate: the director seat wrote as three logins in five
+ * days, and `GOVERNED_APPROVERS` would have missed every 2026-09-13 ruling,
+ * 5651572469 included. ⛔ Not a quoted-「同意」/「agreed」 predicate: 63 of the 500
+ * recent comments carry one — claims, ledgers and dev reports quote rulings —
+ * so it names nothing. Two measured NEAR-MISSES are pinned OUT:
+ * `**Ruling C landing step** — …` (a skills-seat landing note, six of them) and
+ * `## Ruling A's `patch` is falsified …` (an objection). Both open with the
+ * word and neither is a ruling; the report lists them, uncounted, so a drift in
+ * the seats' spelling shows up as a near-miss rather than as an empty thread.
+ *
+ * **The cost is a fixed cost on every read, and it is measured, not assumed.**
+ * One paged `GET …/issues/{n}/comments?per_page=100&page=P`, page numbers
+ * walked to a short page (`references/rest-channel.md`: never `Link: rel=next`),
+ * the count reconciled against the card's own `comments` field:
+ *
+ *     thread                         comments  pages      bytes   thread read   whole run
+ *     #17518 (the incident)                17      1    141,623      ~0.35 s      ~2.4 s
+ *     #12708 (director seat post)         372      4  2,212,674      ~2.0 s      ~3.7 s
+ *     #6015  (longest on the board)       962     10  7,365,556      ~4.4 s      ~6.3 s
+ *
+ * (This file's own meter, node `fetch` on the re-exec'd route, pages serial,
+ * 2026-09-18; the whole run includes the re-exec, the card read and the ~0.6 s
+ * tree-corpus read. `curl` on the same pages reads ~10% more bytes — GitHub
+ * pretty-prints for it and minifies for this reader; the count is what THIS
+ * route pays.) The incident card costs one page and a third of a second; the
+ * longest thread on the board costs ten pages and under five. #12708 and #6015
+ * are the negative controls: hundreds of ledger comments quoting rulings, zero
+ * rulings, zero near-misses.
+ *
+ * Bounded at `MAX_THREAD_PAGES`; a thread that fills the bound is `unresolved`,
+ * never a clean read of its first pages. A thread that could not be read at all
+ * is `unresolved` exactly as an unreadable corpus is — exit 3, the WHOLE line —
+ * and ⛔ never `none`: that split is the one this file exists for.
  */
 
 import process from 'node:process';
+import { Buffer } from 'node:buffer';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 // ⛔ Not copied. The board resolver and the proxy-rearm plan are ONE source in
@@ -207,8 +279,10 @@ function rearmThroughProxy(args) {
 }
 
 /**
- * The corpora, declared once so the report, the JSON and `dispatch-gates.mjs`
- * cannot come to disagree about what was searched.
+ * The tree corpora, declared once so the report, the JSON and
+ * `dispatch-gates.mjs` cannot come to disagree about what was searched. The
+ * fourth corpus — the card's own thread — is `THREAD_CORPUS` below: it lives on
+ * the board, not in the tree, so it has its own loader and no `--rev`.
  *
  * `named` is whether a hit in this corpus can be reported as an identified
  * thing. It is a property of the corpus's STRUCTURE, not of its size: ADR
@@ -220,6 +294,89 @@ export const CORPORA = Object.freeze([
   Object.freeze({ id: 'agents', path: 'AGENTS.md', what: 'AGENTS.md lines', named: true }),
   Object.freeze({ id: 'spec', path: 'packages/spec/src', what: 'packages/spec/src docblocks', named: false }),
 ]);
+
+/** The fourth corpus (see the header): a ruling comment has a comment id, so it is named. */
+export const THREAD_CORPUS = Object.freeze({
+  id: 'thread',
+  what: "the card's own comment thread (ruling comments, by first-line shape)",
+  named: true,
+});
+
+/** GitHub's page-size ceiling for the comments listing — the shared page size. */
+export const THREAD_PAGE_SIZE = 100;
+/**
+ * The most pages one thread read walks: 5,000 comments. Measured: the longest
+ * thread on the board (#6015) is 962 comments, 10 pages. A thread that fills
+ * the bound is reported `unresolved`, ⛔ never as a clean read of its first
+ * pages.
+ */
+export const MAX_THREAD_PAGES = 50;
+/** How many near-miss comment ids the report names before it counts the rest. */
+export const THREAD_NEAR_MISS_CAP = 5;
+
+/**
+ * The three measured first-line shapes of a ruling comment (the header has the
+ * census). Case-sensitive on purpose: all 54 measured instances and the charter
+ * spell the word capitalised, and a lowercase `ruling:` heading a paragraph of
+ * prose is not the seat's record.
+ */
+export const RULING_COMMENT_SHAPES = Object.freeze([
+  Object.freeze({ shape: 'ruling-line', re: /^Ruling\s*[:：]/, where: 'the charter shape — `Ruling: batch #n item k · letter X · maintainer 「…」 UTC` (director.md)' }),
+  Object.freeze({ shape: 'ruling-addendum', re: /^Ruling addendum\b/, where: 'a director addendum on an already-ruled card' }),
+  Object.freeze({ shape: 'ruling-recorded', re: /^Ruling recorded\b/, where: 'the pre-charter director shape — `## Ruling recorded — X: …` (decision batches up to #131)' }),
+]);
+
+/**
+ * The first line of a comment that carries content, with its markdown
+ * decoration stripped: blockquote and heading markers, then emphasis. A ruling
+ * is recognised on THAT line only — a dev report or a ledger that quotes a
+ * ruling mid-body is about a ruling, not one.
+ */
+export function firstContentLine(body) {
+  const line = String(body ?? '').split('\n').find((l) => l.trim() !== '');
+  if (line === undefined) return '';
+  return line.replace(/^[\s>]+/, '').replace(/^#{1,6}\s+/, '').replace(/^[*_`\s]+/, '').trim();
+}
+
+/** The shape a comment's first content line carries, or null when it is not a ruling. */
+export function classifyRulingComment(body) {
+  const line = firstContentLine(body);
+  for (const s of RULING_COMMENT_SHAPES) if (s.re.test(line)) return { shape: s.shape, line };
+  return null;
+}
+
+/**
+ * A comment that opens with the word `Ruling` and matches no shape — listed so
+ * a drift in the seats' spelling is visible as a near-miss instead of as a
+ * thread that reads empty. Measured instances: `**Ruling C landing step** — …`
+ * and `## Ruling A's `patch` is falsified …`; neither is a ruling.
+ */
+export function isRulingNearMiss(body) {
+  return /^Ruling\b/.test(firstContentLine(body)) && classifyRulingComment(body) === null;
+}
+
+/**
+ * The thread half of the search — pure over already-read comment rows, the way
+ * `search` is pure over the tree corpora. Rows keep thread order (the API's
+ * ascending `created_at`), so two rulings print oldest first and the later one
+ * is never mistaken for the only one.
+ */
+export function readThreadRulings(comments) {
+  const rows = Array.isArray(comments) ? comments : [];
+  const rulings = [];
+  const nearMisses = [];
+  for (const c of rows) {
+    const hit = classifyRulingComment(c?.body);
+    if (hit) rulings.push({ id: c.id, author: c.author ?? '', at: c.at ?? '', shape: hit.shape, line: hit.line });
+    else if (isRulingNearMiss(c?.body)) nearMisses.push(c.id);
+  }
+  return { comments: rows.length, rulings, nearMisses };
+}
+
+/** One page of the thread, by page NUMBER — walked to a short page, never by `Link:`. */
+export function threadPagePath(repo, number, page) {
+  return `/repos/${repo}/issues/${number}/comments?per_page=${THREAD_PAGE_SIZE}&page=${page}`;
+}
 
 /**
  * Stopwords — dropped from a derived term set, never from an explicit `--terms`.
@@ -603,7 +760,21 @@ export function tierHistogram(ranked) {
  * `<n>` counts ADR DECISION CANDIDATES, not raw grep lines: the line records a
  * prior-ruling reading, and "2,214 matching lines" is not one.
  */
-export function formatPasteLine({ terms, candidateCount, accepted, unresolved = false }) {
+/**
+ * The `thread:` clause of the paste line. Three spellings, kept apart on
+ * purpose: `none` is a thread that was READ and carries no ruling; `not read
+ * (no --card)` is a `--terms`-only run, which never touched the board — pasted,
+ * it records that the thread half was not taken, which is the honest record;
+ * and a thread that could not be read never reaches this function at all: the
+ * WHOLE line is `unresolved` (exit 3), exactly as for an unreadable corpus.
+ */
+export function formatThreadClause(thread) {
+  if (!thread) return 'thread: not read (no --card)';
+  if (thread.rulings.length === 0) return 'thread: none';
+  return `thread: ${thread.rulings.length} ruling(s) (${thread.rulings.map((r) => r.id).join(', ')})`;
+}
+
+export function formatPasteLine({ terms, candidateCount, accepted, unresolved = false, thread = null }) {
   if (unresolved) return 'Prior rulings read: unresolved';
   const named = accepted.length > 0 ? accepted.join(', ') : 'none';
   // The term list is BOUNDED. Measured on #16934: title plus governing text
@@ -615,11 +786,15 @@ export function formatPasteLine({ terms, candidateCount, accepted, unresolved = 
   const head = terms.slice(0, MAX_PASTE_TERMS);
   const rest = terms.length - head.length;
   const shown = rest > 0 ? `${head.join(',')} (+${rest} more)` : head.join(',');
-  return `Prior rulings read: ${shown} → ${candidateCount} hits; ${named}`;
+  return `Prior rulings read: ${shown} → ${candidateCount} hits; ${named}; ${formatThreadClause(thread)}`;
 }
 
-/** The whole search, pure over already-loaded corpora. */
-export function search({ terms, adrUnits, agentsLines, docblocks, top = DEFAULT_TOP }) {
+/**
+ * The whole search, pure over already-loaded corpora. `thread` is the result of
+ * `readThreadRulings` (plus its read cost) or null when no card was named —
+ * the paste line spells the two apart.
+ */
+export function search({ terms, adrUnits, agentsLines, docblocks, top = DEFAULT_TOP, thread = null }) {
   const adr = rankUnits(adrUnits, terms);
   const agents = rankUnits(agentsLines, terms);
   const spec = rankUnits(docblocks, terms);
@@ -643,7 +818,8 @@ export function search({ terms, adrUnits, agentsLines, docblocks, top = DEFAULT_
     spec,
     shown,
     accepted,
-    pasteLine: formatPasteLine({ terms, candidateCount: adr.length, accepted }),
+    thread,
+    pasteLine: formatPasteLine({ terms, candidateCount: adr.length, accepted, thread }),
   };
 }
 
@@ -656,15 +832,23 @@ export function search({ terms, adrUnits, agentsLines, docblocks, top = DEFAULT_
  * the fleet runs on ONE shared identity, and a reader that retries a 403 spends
  * somebody else's quota to learn the same thing twice.
  */
-export function classifyCardRead({ status, networkError, hasToken }) {
+export function classifyCardRead({ status, networkError, hasToken, what = 'the card' }) {
   if (!hasToken) return { kind: 'no-token', headline: 'no GITHUB_TOKEN / GH_TOKEN in the environment' };
-  if (networkError) return { kind: 'network', headline: `the request did not complete (${networkError})` };
-  if (status === 200) return { kind: 'ok', headline: 'the card was read' };
-  if (status === 401) return { kind: 'unauthorized', headline: 'the token was rejected (401)' };
-  if (status === 403) return { kind: 'forbidden', headline: 'the read was refused (403) — quota, or the token cannot see this board' };
-  if (status === 429) return { kind: 'rate-limited', headline: 'the read was rate-limited (429)' };
+  if (networkError) return { kind: 'network', headline: `the request for ${what} did not complete (${networkError})` };
+  if (status === 200) return { kind: 'ok', headline: `${what} was read` };
+  if (status === 401) return { kind: 'unauthorized', headline: `the token was rejected (401) reading ${what}` };
+  if (status === 403) return { kind: 'forbidden', headline: `the read of ${what} was refused (403) — quota, or the token cannot see this board` };
+  if (status === 429) return { kind: 'rate-limited', headline: `the read of ${what} was rate-limited (429)` };
   if (status === 404) return { kind: 'not-found', headline: 'no such card on this board (404) — check PM_SWEEP_REPO' };
-  return { kind: 'unclassified-status', headline: `the read answered ${status}` };
+  return { kind: 'unclassified-status', headline: `the read of ${what} answered ${status}` };
+}
+
+function boardHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'objectstack-check-prior-rulings',
+  };
 }
 
 async function readCard(number, repo, env) {
@@ -672,20 +856,78 @@ async function readCard(number, repo, env) {
   if (!token) return { verdict: classifyCardRead({ hasToken: false }) };
   let res;
   try {
-    res = await fetch(`https://api.github.com/repos/${repo}/issues/${number}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'User-Agent': 'objectstack-check-prior-rulings',
-      },
-    });
+    res = await fetch(`https://api.github.com/repos/${repo}/issues/${number}`, { headers: boardHeaders(token) });
   } catch (err) {
     return { verdict: classifyCardRead({ hasToken: true, networkError: err?.message ?? 'unknown' }) };
   }
   const verdict = classifyCardRead({ hasToken: true, status: res.status });
   if (verdict.kind !== 'ok') return { verdict };
   const json = await res.json();
-  return { verdict, card: { number: json.number, title: json.title ?? '', body: json.body ?? '', state: json.state } };
+  // `comments` is the card's own count of its thread — the total the paged
+  // read below is reconciled against (an unreconciled enumeration is not a
+  // reading, `references/rest-channel.md`).
+  const comments = Number.isInteger(json.comments) ? json.comments : null;
+  return { verdict, card: { number: json.number, title: json.title ?? '', body: json.body ?? '', state: json.state, comments } };
+}
+
+// ---------------------------------------------------------------------------
+// Thread read — paged by page NUMBER to a short page, cost measured, no retry
+// ---------------------------------------------------------------------------
+
+/**
+ * The card's own thread. Page numbers are walked until a short page — never a
+ * `Link:` header, whose cursor walk stops short on this board — with bytes and
+ * wall time measured on the way, and ⛔ no retry on any status (the fleet's one
+ * shared identity; see `classifyCardRead`). `fetchImpl` is injectable so the
+ * self-test can serve a fixture thread, a refusal and a bound-filling thread
+ * offline; a live run passes nothing and gets the global `fetch` on the
+ * re-exec'd route.
+ *
+ * Returns `{ verdict, thread }` on a complete read and `{ verdict, partial }`
+ * otherwise; `partial` says how far the read got, for the refusal report.
+ */
+export async function readThread(number, repo, env, fetchImpl = fetch) {
+  const token = env.GITHUB_TOKEN || env.GH_TOKEN || '';
+  if (!token) return { verdict: classifyCardRead({ hasToken: false }) };
+  const what = 'the thread';
+  const started = performance.now();
+  const comments = [];
+  let bytes = 0;
+  let pages = 0;
+  let lastPageFull = false;
+  for (let page = 1; page <= MAX_THREAD_PAGES; page++) {
+    let res;
+    try {
+      res = await fetchImpl(`https://api.github.com${threadPagePath(repo, number, page)}`, { headers: boardHeaders(token) });
+    } catch (err) {
+      return { verdict: classifyCardRead({ hasToken: true, networkError: err?.message ?? 'unknown', what }), partial: { pages, comments: comments.length } };
+    }
+    const verdict = classifyCardRead({ hasToken: true, status: res.status, what });
+    if (verdict.kind !== 'ok') return { verdict, partial: { pages, comments: comments.length } };
+    const text = await res.text();
+    bytes += Buffer.byteLength(text, 'utf8');
+    pages++;
+    let rows;
+    try {
+      rows = JSON.parse(text);
+    } catch {
+      rows = null;
+    }
+    if (!Array.isArray(rows)) {
+      return { verdict: { kind: 'malformed', headline: `page ${page} of the thread was not a JSON array` }, partial: { pages, comments: comments.length } };
+    }
+    for (const r of rows) comments.push({ id: r?.id, author: r?.user?.login ?? '', at: r?.created_at ?? '', body: r?.body ?? '' });
+    lastPageFull = rows.length >= THREAD_PAGE_SIZE;
+    if (!lastPageFull) break;
+  }
+  const ms = Math.round(performance.now() - started);
+  if (lastPageFull) {
+    return {
+      verdict: { kind: 'truncated', headline: `the thread did not end within ${MAX_THREAD_PAGES} pages (${comments.length} comments read) — a bound, not a reading` },
+      partial: { pages, comments: comments.length },
+    };
+  }
+  return { verdict: classifyCardRead({ hasToken: true, status: 200, what }), thread: { comments, pages, bytes, ms } };
 }
 
 // ---------------------------------------------------------------------------
@@ -714,6 +956,21 @@ export function renderReport(result, meta) {
   for (const c of CORPORA) {
     const k = result.counts[c.id];
     L.push(`  ${c.path}: ${k.hit} hit of ${k.scanned} ${c.named ? 'searched' : 'searched (not named — see below)'}`);
+  }
+  const th = result.thread;
+  if (th) {
+    L.push(`  ${THREAD_CORPUS.what}: ${th.rulings.length} ruling(s) of ${th.comments} comment(s) — read in ${th.pages} page(s), ${commas(th.bytes)} bytes, ${th.ms} ms`);
+    if (Number.isInteger(meta.card?.comments) && meta.card.comments !== th.comments) {
+      L.push(`    ⚠️ the card's metadata says ${meta.card.comments} comment(s) and ${th.comments} were read — one landed between the two reads; re-run before pasting.`);
+    }
+    for (const r of th.rulings) L.push(`      ${r.id}  ${r.author}  ${r.at}  [${r.shape}]  ${truncate(r.line, 88)}`);
+    if (th.nearMisses.length > 0) {
+      const named = th.nearMisses.slice(0, THREAD_NEAR_MISS_CAP).join(', ');
+      const more = th.nearMisses.length - Math.min(th.nearMisses.length, THREAD_NEAR_MISS_CAP);
+      L.push(`    near-miss (opens with \`Ruling\`, matches no shape — read it, it is NOT counted): ${named}${more > 0 ? ` (+${more} more)` : ''}`);
+    }
+  } else {
+    L.push(`  ${THREAD_CORPUS.what}: not read — no --card names a thread; the paste line says so.`);
   }
   L.push('');
   L.push(`  ADR decision candidates: ${result.adr.length}; distinct-term tiers ${JSON.stringify(result.tiers)}`);
@@ -758,8 +1015,25 @@ export function renderReport(result, meta) {
     L.push('     gate, or `pm:queue`. Read the decision before presenting the card.');
     L.push('');
   }
+  if (th && th.rulings.length > 0) {
+    L.push(`  ⚠️ A ruling ALREADY STANDS on this card's own thread (${th.rulings.map((r) => r.id).join(', ')}).`);
+    L.push('     Under SKILL.md 〈升级与决策〉③ (⛔ 不推翻既有维护者裁决) the card is EXECUTION, not a');
+    L.push('     decision: cite the ruling by comment id on a `Ruling-ref:` line, and ⛔ never re-present');
+    L.push('     the card as unruled.');
+    if (th.rulings.length > 1) {
+      L.push(`     ${th.rulings.length} rulings on one thread: read every one before acting — the later is not the`);
+      L.push('     governing one by date alone, and two prescriptions that disagree go back to the director');
+      L.push('     seat as a conflict, ⛔ not to a dev as a choice.');
+    }
+    L.push('');
+  }
   L.push('  Report-only: this file writes nothing and decides nothing.');
   return L.join('\n');
+}
+
+/** `8228490` → `8,228,490`, locale-free. */
+function commas(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 export function reportPrerequisiteNotMet(verdict, extra = []) {
@@ -862,23 +1136,37 @@ async function run(argv) {
   }
 
   let card = null;
-  if (opts.card !== null && opts.terms === null) {
-    // Transport before questions about it: a card read taken on the BYPASSED
+  let thread = null;
+  if (opts.card !== null) {
+    // Transport before questions about it: a board read taken on the BYPASSED
     // route answers about the wrong route. Re-exec first, then ask. Placed
     // after argument validation so a bad-usage run never pays for a child, and
-    // after the corpus tip read so a `--rev` typo is not diagnosed twice.
+    // after the corpus tip read so a `--rev` typo is not diagnosed twice. Every
+    // board read of this run — the card and its thread — rides the re-exec.
     const rearmed = rearmThroughProxy(argv);
     if (rearmed !== null) return rearmed;
     const read = await readCard(opts.card, sweep.repo, process.env);
     if (read.verdict.kind !== 'ok') {
       return reportPrerequisiteNotMet(read.verdict, [
         `  Board: ${sweep.repo} (${sweep.source}); card: ${opts.card}.`,
-        '  You can still search by hand: --terms a,b,c needs no card and no token.',
+        '  You can still search the tree corpora by hand: --terms a,b,c needs no card and no',
+        '  token — and its line says the thread was not read.',
       ]);
     }
     card = read.card;
-  } else if (opts.card !== null) {
-    card = { number: opts.card, title: '', body: '', state: null };
+    // The card's own thread — the corpus that was missing (see the header).
+    // Read BEFORE the tree corpora, so an exit 3 here still means "nothing was
+    // searched", the sentence the card-read refusal prints.
+    const th = await readThread(opts.card, sweep.repo, process.env);
+    if (th.verdict.kind !== 'ok') {
+      return reportPrerequisiteNotMet(th.verdict, [
+        `  Board: ${sweep.repo} (${sweep.source}); card: ${opts.card}; the CARD was read, its THREAD was not` +
+          ` (${th.partial?.pages ?? 0} page(s), ${th.partial?.comments ?? 0} comment(s) before the failure).`,
+        '  ⛔ A line without the thread half is not a reading of this card: the thread is where the',
+        '     cheapest ruling lives, and the one this corpus was added for.',
+      ]);
+    }
+    thread = { ...readThreadRulings(th.thread.comments), pages: th.thread.pages, bytes: th.thread.bytes, ms: th.thread.ms };
   }
 
   const built = buildTermSet({ title: card?.title ?? '', body: card?.body ?? '', override: opts.terms });
@@ -908,7 +1196,7 @@ async function run(argv) {
     extractDocblocks(f.path, f.text).map((d) => ({ corpus: 'spec', file: d.path, line: d.line, text: d.text })),
   );
 
-  const result = search({ terms: built.terms, adrUnits, agentsLines, docblocks, top: opts.top });
+  const result = search({ terms: built.terms, adrUnits, agentsLines, docblocks, top: opts.top, thread });
   const meta = { rev: opts.rev, tip, repo: sweep.repo, card, sources: built.sources, governing: built.governing, governingAbsent: built.governingAbsent };
 
   if (opts.json) {
@@ -916,7 +1204,10 @@ async function run(argv) {
       rev: opts.rev,
       tip,
       repo: sweep.repo,
-      card: card ? { number: card.number, title: card.title } : null,
+      card: card ? { number: card.number, title: card.title, comments: card.comments } : null,
+      thread: thread
+        ? { comments: thread.comments, pages: thread.pages, bytes: thread.bytes, ms: thread.ms, rulings: thread.rulings, nearMisses: thread.nearMisses }
+        : null,
       terms: built.terms.map((t) => ({ term: t, source: built.sources.get(t) })),
       governingText: built.governing ? { shape: built.governing.shape } : null,
       counts: result.counts,
@@ -1004,7 +1295,7 @@ function writeFixtureCorpus(dir) {
   ].join('\n'));
 }
 
-export function selfTest() {
+export async function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push({ name, actual, expected, ok: Object.is(actual, expected) });
 
@@ -1128,7 +1419,7 @@ export function selfTest() {
     // NEGATIVE case — terms that hit nothing must say `none`, not a false hit.
     const nil = search({ terms: ['websocket', 'graphql', 'kubernetes'], adrUnits: units, agentsLines: [], docblocks: [], top: 10 });
     t('a term set that hits nothing finds no candidate', nil.adr.length, 0);
-    t('…and its paste line says `none`', nil.pasteLine, 'Prior rulings read: websocket,graphql,kubernetes → 0 hits; none');
+    t('…and its paste line says `none`', nil.pasteLine, 'Prior rulings read: websocket,graphql,kubernetes → 0 hits; none; thread: not read (no --card)');
     t('…and `none` is NOT `unresolved`', nil.pasteLine.includes('unresolved'), false);
     t('an unresolved read is spelled differently from `none`', formatPasteLine({ unresolved: true, terms: [], candidateCount: 0, accepted: [] }), 'Prior rulings read: unresolved');
 
@@ -1138,7 +1429,7 @@ export function selfTest() {
     t('an all-stopword title derives no term', noisy.terms.length, 0);
 
     // The paste line's shape, pinned exactly as `decision-analysis.md` states it.
-    t('the paste line is pinned', formatPasteLine({ terms: ['single', 'posture'], candidateCount: 4, accepted: ['ADR-0131 D8'] }), 'Prior rulings read: single,posture → 4 hits; ADR-0131 D8');
+    t('the paste line is pinned', formatPasteLine({ terms: ['single', 'posture'], candidateCount: 4, accepted: ['ADR-0131 D8'] }), 'Prior rulings read: single,posture → 4 hits; ADR-0131 D8; thread: not read (no --card)');
     t('the paste line is extractable by a literal grep', /^Prior rulings read: /.test(found.pasteLine), true);
     // A long term set is BOUNDED and says how much it bounded. Measured: the
     // real #16934 run derives 42 terms, and the unbounded line was unusable.
@@ -1146,7 +1437,7 @@ export function selfTest() {
     const bounded = formatPasteLine({ terms: long, candidateCount: 7, accepted: [] });
     t('a long term list is truncated', bounded.includes('term12'), false);
     t('…and counts what it truncated', bounded.includes('(+8 more)'), true);
-    t('…and still parses as the pinned shape', /^Prior rulings read: .+ → 7 hits; none$/.test(bounded), true);
+    t('…and still parses as the pinned shape', /^Prior rulings read: .+ → 7 hits; none; thread: not read \(no --card\)$/.test(bounded), true);
     t('a term list at the cap is not annotated', formatPasteLine({ terms: long.slice(0, MAX_PASTE_TERMS), candidateCount: 1, accepted: [] }).includes('more)'), false);
 
     // Corpus counting: a corpus that is searched reports how much, always.
@@ -1180,6 +1471,85 @@ export function selfTest() {
   t('PM_SWEEP_REPO overrides it', resolveSweepRepo({ PM_SWEEP_REPO: 'objectstack-ai/objectui' }).repo, 'objectstack-ai/objectui');
   t('a malformed board is refused', resolveSweepRepo({ PM_SWEEP_REPO: 'not-a-repo' }).valid, false);
 
+  // ---- the card's own thread: the three measured shapes -------------------
+  // First lines VERBATIM from the board (the header's census), not paraphrased:
+  // a fixture cut to the words that make it pass is a fixture that proves the cut.
+  const CHARTER = 'Ruling: batch #149 item 1 · letter B (artifact-stage JSON-only variants of `FlowFunctionEntrySchema` / `HookSchema`) · maintainer 「同意」 2026-09-17T14:41Z\n\nDirector seat, summon #24.';
+  const RECORDED = '## Ruling recorded — B: `packages/spec` declares the inert-JSON artifact stage; the read API\'s two `z.unknown()` keys are rebound to it (director seat, decision batch #127 item 4, 2026-09-13)\n\nMaintainer, verbatim: 「其他同意」';
+  const ADDENDUM = 'Ruling addendum (batch #157 item 1, on #18885 并 — the clause-② content limb is narrowed to the protocol) · maintainer 「同意」';
+  t('the charter first-line shape is a ruling', classifyRulingComment(CHARTER)?.shape, 'ruling-line');
+  t('the pre-charter heading shape is a ruling — the incident\'s own comment is written in it', classifyRulingComment(RECORDED)?.shape, 'ruling-recorded');
+  t('a director addendum is a ruling', classifyRulingComment(ADDENDUM)?.shape, 'ruling-addendum');
+  t('a full-width colon spells the charter shape too', classifyRulingComment('Ruling：batch #1 item 1 · letter A')?.shape, 'ruling-line');
+  t('leading blank lines and a blockquote marker are stripped first', classifyRulingComment('\n\n> Ruling: batch #2 item 3 · letter A')?.shape, 'ruling-line');
+  t('bold around the shape is decoration, not a different shape', classifyRulingComment('**Ruling: batch #3 item 1 · letter B**')?.shape, 'ruling-line');
+  // The two measured near-misses, verbatim — read, ⛔ never counted.
+  t('a landing-step note that opens with the word is NOT a ruling', classifyRulingComment('**Ruling C landing step** — skills seat (session `session_x`), 2026-09-13T10:18Z. Authorized approval'), null);
+  t('…but is listed as a near-miss', isRulingNearMiss('**Ruling C landing step** — skills seat'), true);
+  t('an objection headed with the word is NOT a ruling', classifyRulingComment("## Ruling A's `patch` is falsified by the precedent Ruling A names — the six rename cards grade `minor`, not `patch`"), null);
+  t('…and is a near-miss too', isRulingNearMiss("## Ruling A's `patch` is falsified"), true);
+  t('a claim whose Ruling-ref points at a ruling is neither', classifyRulingComment('Claim: PM loop round 4\nRuling-ref: 5651572469') === null && isRulingNearMiss('Claim: PM loop round 4\nRuling-ref: 5651572469') === false, true);
+  t('a report QUOTING a ruling mid-body is not a ruling — the first content line decides', classifyRulingComment('os-dev-report\n\nThe ruling reads 「Ruling: batch #149 item 1 · letter B」 and the dev measured it.'), null);
+  t('a lowercase `ruling:` heading a paragraph of prose is not the seat\'s record', classifyRulingComment('ruling: I think we should do B'), null);
+  t('a triage comment is nothing', classifyRulingComment('**Triage 定级(深读档)** · 2026-09-18T11:02Z') === null && isRulingNearMiss('**Triage 定级(深读档)**') === false, true);
+  t('an empty body is nothing', classifyRulingComment('') === null && isRulingNearMiss(undefined) === false, true);
+  t('every shape is named, so the report can print it beside each hit', RULING_COMMENT_SHAPES.map((s) => s.shape).join(','), 'ruling-line,ruling-addendum,ruling-recorded');
+
+  // ---- the thread fixture: one ruling and one non-ruling per shape --------
+  const threadRows = [
+    { id: 1, author: 'os-litant', at: '2026-09-10T19:27:42Z', body: 'Triage: lands in `packages/spec/src/stack.zod.ts` ⇒ **`domain:spec`**' },
+    { id: 2, author: 'os-tesla', at: '2026-09-13T06:10:22Z', body: RECORDED },
+    { id: 3, author: 'os-bill', at: '2026-09-17T00:55:23Z', body: '## `pm:retriage` —— 异议:本卡读起来是决策卡,不是可派发卡' },
+    { id: 4, author: 'hotlong', at: '2026-09-17T14:41:18Z', body: CHARTER },
+    { id: 5, author: 'claude[bot]', at: '2026-09-17T15:00:00Z', body: '**Ruling C landing step** — skills seat' },
+    { id: 6, author: 'os-steve', at: '2026-09-18T09:51:33Z', body: 'Claim: PM loop round 4\nRuling-ref: 2' },
+  ];
+  const thr = readThreadRulings(threadRows);
+  t('the fixture thread counts every comment it was handed', thr.comments, 6);
+  t('…finds exactly the two rulings', thr.rulings.map((r) => r.id).join(','), '2,4');
+  t('…oldest first — the later one is never mistaken for the only one', `${thr.rulings[0].shape}/${thr.rulings[1].shape}`, 'ruling-recorded/ruling-line');
+  t('…keeps author and time so the report can print them', `${thr.rulings[1].author} ${thr.rulings[1].at}`, 'hotlong 2026-09-17T14:41:18Z');
+  t('…and lists the near-miss, uncounted', thr.nearMisses.join(','), '5');
+  t('the thread clause names the rulings by comment id', formatThreadClause(thr), 'thread: 2 ruling(s) (2, 4)');
+  const emptyThread = readThreadRulings([threadRows[0], threadRows[2]]);
+  t('a READ thread with no ruling says `none`', formatThreadClause(emptyThread), 'thread: none');
+  t('an UNREAD thread (a --terms-only run) says so, ⛔ never `none`', formatThreadClause(null), 'thread: not read (no --card)');
+  t('…and the two are different strings', formatThreadClause(null) === formatThreadClause(emptyThread), false);
+  t('the full paste line carries the thread clause after the ADR half', formatPasteLine({ terms: ['single', 'posture'], candidateCount: 4, accepted: ['ADR-0131 D8'], thread: thr }), 'Prior rulings read: single,posture → 4 hits; ADR-0131 D8; thread: 2 ruling(s) (2, 4)');
+  t('…and `search` threads it through', search({ terms: ['posture'], adrUnits: [], agentsLines: [], docblocks: [], thread: thr }).pasteLine.endsWith('; none; thread: 2 ruling(s) (2, 4)'), true);
+  t('an unresolved read is the WHOLE line, thread included — no half-line', formatPasteLine({ unresolved: true, terms: [], candidateCount: 0, accepted: [], thread: thr }), 'Prior rulings read: unresolved');
+  t('a non-array handed to the thread half is an empty read, not a crash', readThreadRulings(undefined).comments, 0);
+
+  // ---- the thread READ, offline: a fake board -----------------------------
+  // The page walk, the byte and time meters, the short-page stop, the refusal,
+  // the bound and the network failure — each on a served fixture, no network.
+  const servedPage = (rows) => ({ status: 200, text: async () => JSON.stringify(rows) });
+  const servedRow = (id) => ({ id, user: { login: 'os-x' }, created_at: '2026-09-18T00:00:00Z', body: id === 7 ? CHARTER : 'noise' });
+  const fullPage = () => Array.from({ length: THREAD_PAGE_SIZE }, (_, i) => servedRow(i + 1));
+  const twoPages = async (url) => (/[?&]page=1$/.test(url) ? servedPage(fullPage()) : servedPage([servedRow(101), servedRow(102)]));
+  const twoPagesRead = await readThread(17518, 'o/r', { GITHUB_TOKEN: 'x' }, twoPages);
+  t('a two-page thread is walked to its short page', twoPagesRead.thread?.pages, 2);
+  t('…and every row is kept', twoPagesRead.thread?.comments.length, 102);
+  t('…with bytes counted off the wire, not guessed', twoPagesRead.thread?.bytes > 0, true);
+  t('…and the wall time measured', Number.isFinite(twoPagesRead.thread?.ms), true);
+  t('…and the ruling on page 1 found', readThreadRulings(twoPagesRead.thread?.comments).rulings.map((r) => r.id).join(','), '7');
+  const oneShort = await readThread(17518, 'o/r', { GH_TOKEN: 'x' }, async () => servedPage([servedRow(1)]));
+  t('a one-page thread stops after one request (GH_TOKEN is a token too)', oneShort.thread?.pages, 1);
+  const refused = await readThread(17518, 'o/r', { GITHUB_TOKEN: 'x' }, async () => ({ status: 403, text: async () => '' }));
+  t('a refused thread read classifies, ⛔ is not an empty thread', refused.verdict.kind, 'forbidden');
+  t('…and names the thread, not the card', refused.verdict.headline.includes('the thread'), true);
+  t('…and hands the caller no thread to mistake for one', refused.thread, undefined);
+  const noToken = await readThread(17518, 'o/r', {}, async () => { throw new Error('must not be called'); });
+  t('no token is a prerequisite failure before any request', noToken.verdict.kind, 'no-token');
+  const bound = await readThread(17518, 'o/r', { GITHUB_TOKEN: 'x' }, async () => servedPage(fullPage()));
+  t('a thread that fills the bound is `truncated`, ⛔ never a clean read of its first pages', bound.verdict.kind, 'truncated');
+  t('…after exactly the bound', bound.partial?.pages, MAX_THREAD_PAGES);
+  const netFail = await readThread(17518, 'o/r', { GITHUB_TOKEN: 'x' }, async () => { throw new Error('ECONNRESET'); });
+  t('a network failure classifies as one', netFail.verdict.kind, 'network');
+  const malformed = await readThread(17518, 'o/r', { GITHUB_TOKEN: 'x' }, async () => ({ status: 200, text: async () => '{"message":"not a list"}' }));
+  t('a page that is not a JSON array is a failed read, not an empty thread', malformed.verdict.kind, 'malformed');
+  t('the page path walks page NUMBERS at the shared page size', threadPagePath('o/r', 17518, 3), '/repos/o/r/issues/17518/comments?per_page=100&page=3');
+
   // ---- the proxy route ---------------------------------------------------
   // Measured in the seat's container: both token variables hold the literal
   // `proxy-injected`, so an unrouted fetch 401s while `curl` gets 200. The plan
@@ -1198,6 +1568,9 @@ export function selfTest() {
   const codeOnly = ownSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   t('no write method reaches the API from this file', /method:\s*['"](POST|PATCH|PUT|DELETE)['"]/i.test(codeOnly), false);
   t('no retry loop over a spent quota', /(while|for)\s*\([^)]*(retry|attempt|429|403)/i.test(codeOnly), false);
+  // The thread walk goes by page NUMBER (rest-channel.md: the cursor walk stops
+  // short on this board). The pattern is assembled so this line cannot match itself.
+  t('the thread read never follows a `Link` header', new RegExp(['rel', '=', '"?', 'next'].join('')).test(codeOnly), false);
 
   // ---- the ONE live-tree pin --------------------------------------------
   // Everything above is offline. This leg is deliberately not: its job is to go
@@ -1242,20 +1615,31 @@ export function selfTest() {
       'of `proposed`; the #16934 fixture surfacing ADR-0131 D8 at rank 1 with a superseded near-miss ' +
       'found-but-unnamed; the NEGATIVE case reading `none` and the unresolved read reading differently; ' +
       'the all-stopword refusal; the pinned paste line with its counted truncation; the exit register; ' +
-      'the imported board resolver and proxy plan with this file\'s own re-exec guard; the structural ' +
-      'no-write-path and no-retry-loop assertions; and the one live-tree D8 existence pin).',
+      'the imported board resolver and proxy plan with this file\'s own re-exec guard; the card\'s own ' +
+      'thread — the three measured ruling shapes with the two measured near-misses pinned OUT, first-' +
+      'content-line anchoring, the fixture thread with its two rulings oldest-first, `none` against ' +
+      '`not read` against the whole-line `unresolved`, and the offline board read (paged to a short ' +
+      'page with bytes and ms measured, a refusal, no token, the page bound, a network failure, a ' +
+      'malformed page); the structural no-write-path, no-retry-loop and no-Link-walk assertions; and ' +
+      'the one live-tree D8 existence pin).',
   );
   return { code: EXIT_OK, verdict: SELF_TEST_VERDICT };
 }
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    const r = selfTest();
-    if (r.verdict !== SELF_TEST_VERDICT) {
-      console.error('\n✗ check-prior-rulings self-test: selfTest() returned without reaching its verdict,\nso no success line was printed. Exiting 0 here would report a self-test that never finished as one.\n');
-      process.exit(EXIT_SELF_TEST_FAILED);
-    }
-    process.exit(r.code);
+    selfTest()
+      .then((r) => {
+        if (r.verdict !== SELF_TEST_VERDICT) {
+          console.error('\n✗ check-prior-rulings self-test: selfTest() returned without reaching its verdict,\nso no success line was printed. Exiting 0 here would report a self-test that never finished as one.\n');
+          process.exit(EXIT_SELF_TEST_FAILED);
+        }
+        process.exit(r.code);
+      })
+      .catch((err) => {
+        console.error(`\n✗ check-prior-rulings self-test: threw before reaching its verdict — ${err?.message ?? err}\n`);
+        process.exit(EXIT_SELF_TEST_FAILED);
+      });
   } else {
     run(process.argv.slice(2))
       .then((code) => process.exit(code))

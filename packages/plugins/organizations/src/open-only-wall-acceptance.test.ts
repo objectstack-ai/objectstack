@@ -7,7 +7,7 @@
  *
  * ## The gap this closes, stated as a measurement
  *
- * `packages/rest/src/single-kernel-isolated-api-key-matrix.test.ts` and
+ * The REST package's `single-kernel-isolated-api-key-matrix.test.ts` and
  * `single-kernel-isolated-session-org-claim-matrix.test.ts` already drive the
  * whole matrix at REST level under a live `isolated` posture. Both MANUFACTURE
  * that posture:
@@ -768,15 +768,28 @@ describe('[#16137] §2 — an ex-member SESSION, under the resolved posture', ()
 // ---------------------------------------------------------------------------
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = (() => {
+/**
+ * The workspace root, by its marker file — spelled `findUp` deliberately.
+ *
+ * `check:cross-package-test-inputs` recognises this seed by its SPELLING, not
+ * by its behaviour. The IIFE-bound `for (;;)` walk this replaced did the same
+ * thing and resolved to nothing there, so the workspace-manifest reads below
+ * produced no escape at all and this file's radius was held only by a sibling
+ * that declares the same glob for its own reasons (#18871). The spelling is
+ * `no-framework-dependents.pin.test.ts`'s.
+ */
+function findUp(predicate: (dir: string) => boolean): string {
     let dir = HERE;
     for (;;) {
-        if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
+        if (predicate(dir)) return dir;
         const parent = dirname(dir);
-        if (parent === dir) throw new Error('reached the filesystem root without a workspace root');
+        if (parent === dir) throw new Error('reached the filesystem root without a match');
         dir = parent;
     }
-})();
+}
+
+/** The repo root — the directory carrying `pnpm-workspace.yaml`. */
+const REPO = findUp((dir) => existsSync(join(dir, 'pnpm-workspace.yaml')));
 
 /** What a licence gate is SPELLED like, in a name or in a call. */
 const LICENCE_SHAPE = /licen[cs]e|entitle|entitlement|security-enterprise/i;

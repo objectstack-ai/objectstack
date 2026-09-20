@@ -179,6 +179,13 @@
 // package's manifest) -- which it answers with the trade `walkLiteral` already
 // makes for an unreadable argument: keep the escape verdict, invent no name.
 //
+// An anchor is recognised by its SPELLING and not by its behaviour, so a
+// hand-rolled root walk -- a `for (;;)` loop to the same marker file, named
+// anything, bound anywhere -- resolves to nothing here and takes every read
+// built on it with it: seed a repo root with `findUp` (#18871 reseeded the two
+// live instances of that and keeps the class on record; a third one is the
+// evidence for widening this recogniser instead).
+//
 // ── The fourth way to be invisible: the LINE BREAK (#11093) ────────────────
 //
 // Every section above widened the set of recognised SHAPES. This one is not a

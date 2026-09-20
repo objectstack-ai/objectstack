@@ -1349,11 +1349,43 @@ export function markerMatches(marker, text) {
  *     the corpus above, so it is left unnamed rather than guessed at — add it
  *     WITH its fixture when a live line appears.
  *
+ * ## The `leading-sigil` form (#18829 A) — the shape a SECOND stripper used to swallow
+ *
+ * `check-clause2-carriers.mjs` read its retraction lines through a stripper of
+ * its own, which removed every leading non-letter/non-digit character before
+ * matching — so `🚨 Claim:`, `## Claim:`, `- Claim:` and `__Claim:__` all
+ * read as the directive THERE while `markerMatches` refused every one of them:
+ * two undecoration paths, 5 of 12 spellings apart. The maintainer ruled (batch
+ * #156 item 4, letter A) that the protocol's definition of a decorated
+ * ownership line is THIS reading, that the other stripper is deleted, and that
+ * the sigil-led #18373 shape 「becomes a **named** near-miss row with its own
+ * fixture, so the loud, declared direction keeps reading it」. This member is
+ * that row.
+ *
+ * A sigil is an emoji or symbol run (`So` / `Sm` / `Sk` / `Sc`, with its
+ * combining and format marks) in front of the word — 「🚨 」, 「⚠️ 」, 「⇒ 」,
+ * 「⛔ 」, the fleet's own openers — optionally under a bullet or a blockquote
+ * (「- ⚠️ 」 is on #18373's own thread). It is ⛔ NOT decoration:
+ * `undecorateProseLine` strips asterisks and backticks and nothing else, on
+ * purpose, so a sigil-led `**Release:**` stays unread by `markerMatches` and
+ * is NAMED here instead — the same trade the `underscore-emphasis` member
+ * makes. The fixture is the #18373 line written in the act the protocol names
+ * (`Release:`, 去向 「让先到者」 — #18773 A), sigil and bold intact.
+ *
+ * ⚠️ Two boundaries, stated: the specimen's own PROSE (「🚨 **撤回上一条认领…」)
+ * is named by NO form, because naming it would mean reading the verb — the
+ * channel #18773 A retires (⛔ B: 「a reader inferring an act from a verb
+ * replays the next spelling」); its thread is named by the cross-author row
+ * one file over instead. And a heading AND a sigil (`## 🚨 Release:`) is named
+ * by no form — no live line has shown it; add it WITH its fixture when one does.
+ *
  * Ordered MOST SPECIFIC FIRST: the form a line is named by is the first that
  * matches it, so `## __Release:__` is a heading rather than an emphasis, and
  * `## Claim + dispatch` is `heading-bare` rather than `heading` only because
- * `heading` holds out for the colon. The two additions sit LAST, so neither can
- * rename a line an older form already read.
+ * `heading` holds out for the colon. The two #18831 additions sit LAST, so
+ * neither can rename a line an older form already read; `leading-sigil` sits
+ * between `separator` and them — no older form's fixture opens with a sigil,
+ * and neither addition's does.
  *
  * `re` matches the OFFENDING OPENING only and never the remainder, so the
  * matched text IS the prefix a row prints and a seat greps for. No `g` flag,
@@ -1391,6 +1423,12 @@ export const OWNERSHIP_MARKER_NEAR_MISS_FORMS = Object.freeze([
     re: /^[ \t]*>?[ \t]*[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[：–—-]/iu,
   }),
   Object.freeze({
+    id: 'leading-sigil',
+    what: 'the directive led by a SIGIL — an emoji or symbol run before the word, which the shared stripper does not remove (it strips decoration, ⛔ never a sigil)',
+    example: '🚨 **Release:** session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者',
+    re: /^[ \t]*>?[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(?:[\p{So}\p{Sm}\p{Sk}\p{Sc}][\p{So}\p{Sm}\p{Sk}\p{Sc}\p{Mn}\p{Me}\p{Cf}]*[ \t]*)+[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
+  }),
+  Object.freeze({
     id: 'heading-bare',
     what: 'the directive written as a markdown HEADING with NO colon after the word — a `+`, a dash, or nothing at all',
     example: '## Claim + dispatch — **design only**, no implementation, no follow-up cards filed',
@@ -1406,6 +1444,121 @@ export const OWNERSHIP_MARKER_NEAR_MISS_FORMS = Object.freeze([
 
 /** How many near misses one summary clause NAMES before it stops. */
 export const OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP = 5;
+
+/**
+ * The census POPULATION — a `pm:seat` post is OUT of it (#18926).
+ *
+ * The vocabulary above asks 「does this line LOOK like an ownership record the
+ * reader refused?」. The population asks a prior question the first version never
+ * asked: 「is an ownership record owed on this thread AT ALL?」. On a `pm:seat`
+ * post the answer is no, and the protocol says so in as many words: a seat
+ * post's ownership is its BODY (the registration, the 🟢/⏳ title the H5 pair
+ * reads) plus its AUDIT COMMENTS — the protocol never puts a `Claim:` comment on
+ * one. What its comments carry instead is SHIFT NARRATION, and a shift
+ * narration written by a seat about its own lane opens sentences with exactly
+ * the directive words this vocabulary anchors on.
+ *
+ * Measured, ⛔ not assumed — objectstack's OPEN board read through the REST
+ * proxy 2026-09-18T13:0xZ with the tree at `784366372`, 539 open cards, 484 of
+ * them carrying a comment, the census run over every thread: 36 near-miss lines
+ * on 30 cards, of which 9 lines on 5 `pm:seat` posts (#6017 · #6021 · #6023 ×4 ·
+ * #6026 · #6367). Every one of the nine is narration — 「Claimed and dispatched,
+ * batch refilled to 3:」, 「### Released clean」 — and not one of them asks
+ * anything of anybody. Four of the five are rows 1–4 of #18914's sixteen, filed
+ * as 「no readable ownership record」 where no record was ever owed.
+ *
+ * ⛔ It is NOT a silent drop, and the difference is the whole point of a census:
+ * an excluded thread is COUNTED and reported under its own clause member, so the
+ * report says 「5 `pm:seat` thread(s) OUT of the population (9 line(s))」 rather
+ * than shrinking a number nobody can reconstruct. A filter you cannot see is
+ * indistinguishable from the over-reading it replaced.
+ *
+ * ⛔ And it reads the LABEL, buying nothing: the same `labelNames` the H5/H6 seat
+ * rows read, off the issue the caller already holds from the label page it
+ * already consumed. No extra request, which is what lets the census keep its
+ * 「buys NOTHING」 contract.
+ *
+ * @param {object} issue — the REST issue row the sweep already holds.
+ * @returns {boolean} — false for a `pm:seat` post, true for every work card.
+ */
+export function ownershipCensusSpeaksAbout(issue) {
+  return !labelNames(issue ?? {}).includes('pm:seat');
+}
+
+/**
+ * The release ANNOUNCEMENT heading — a delivery report, ⛔ not an ownership
+ * near miss (#18926).
+ *
+ * The shape, measured on the live board rather than guessed at: a heading whose
+ * word is the PARTICIPLE `Released`, whose remainder names the `PR #n` that
+ * landed or the `pm:*` → `pm:*` transition it unblocked, and which names NO
+ * session. The specimen the filing card is about, pasted from the REST read of
+ * objectstack#17536 comment `5625672905`:
+ *
+ *   `## Released — **PR #17517 merged.** `pm:blocked` → `pm:queue`; …`
+ *
+ * That line hands nothing over. #17536 was never claimed — no assignee, no
+ * `Claim:` of any spelling — so no `Release:` is owed on it, and the heading is
+ * reporting that a blocker fell, in the voice of the board rather than of a
+ * holder. Read as a near miss it says 「someone's release line is unreadable」
+ * about a card nobody ever held.
+ *
+ * ## The three narrowings, each with the line that forced it
+ *
+ * Measured over the same corpus `ownershipCensusSpeaksAbout` names (539 open
+ * cards, 484 threads, 36 near-miss lines). ⚠️ Every one of these is a
+ * NARROWING — a line this reading declines to swallow stays in the census, which
+ * is the safe direction for a filter whose failure mode is silence:
+ *
+ *   · HEADING forms only (`RELEASE_ANNOUNCEMENT_HEADING_FORMS`). A heading is an
+ *     announcement; the colon-anchored DIRECTIVE spellings are how the protocol
+ *     writes an ownership record, and `inflected-word`'s own fixture is
+ *     `Released: session …`. The corpus carries three `separator` lines spelled
+ *     `Release-landed: … (PR #18852)` (#18740 ×3, #16529) which name a PR and no
+ *     session: they are NOT swallowed, because they are not headings.
+ *   · The PARTICIPLE, ⛔ never the bare noun `Release`. `Release` opens the
+ *     directive (`## Release: …`, `## Release + seat ruling — …`) and the corpus
+ *     carries three such headings on live work cards (#16233 names a PR inside
+ *     one — `### Release: PR #18523 落下了…` — and stays listed; #16712, #18172).
+ *     `Releasing` is left unnamed: measured ZERO, and this file adds a form WITH
+ *     its fixture, never from symmetry.
+ *   · NO session token on the line, in either spelling (`session`, 「会话」). This
+ *     is the clause the mechanism assumption demanded be tested: a release that
+ *     DOES name its session is a record, readable or not, and must stay in the
+ *     census. The corpus's own counter-example is #6023's
+ *     `## Released tail — in flight under THIS session's process tree` — a
+ *     participle heading that is not swallowed by this reading at all.
+ *
+ * Judged on the LINE, ⛔ not the comment: the census is line-level by
+ * construction, and the comment level is already `markerMatches`' — a thread
+ * carrying a readable record elsewhere is a question for the rows that read
+ * ownership, never for this one.
+ *
+ * @param {string} formId — the form the census named the line by.
+ * @param {string} prefix — the offending prefix the census captured.
+ * @param {string} line — the whole line, for the session and remainder reads.
+ * @returns {{ pr: boolean, transition: boolean }|null} — null when the line is
+ *   an ordinary near miss, otherwise WHICH of the two things it names.
+ */
+export const RELEASE_ANNOUNCEMENT_HEADING_FORMS = Object.freeze(['heading-bare']);
+/** `PR #n` in the remainder — the delivery the announcement reports. */
+export const RELEASE_ANNOUNCEMENT_PR_RE = /\bPR[ \t]*#\d+/iu;
+/** A `pm:x` → `pm:y` transition — the unblocking, decorations tolerated. */
+export const RELEASE_ANNOUNCEMENT_TRANSITION_RE =
+  /[_*`]{0,3}pm:[a-z][a-z-]*[_*`]{0,3}[ \t]*(?:→|⇒|->|=>)[ \t]*[_*`]{0,3}pm:[a-z][a-z-]*/iu;
+/** The token that makes a line a RECORD rather than an announcement. */
+export const OWNERSHIP_SESSION_TOKEN_RE = /session|会话/iu;
+
+export function releaseAnnouncementHeading(formId, prefix, line) {
+  if (!RELEASE_ANNOUNCEMENT_HEADING_FORMS.includes(String(formId))) return null;
+  if (String(prefix ?? '').replace(/[#_*`\s]/gu, '').toLowerCase() !== 'released') return null;
+  const text = String(line ?? '');
+  if (OWNERSHIP_SESSION_TOKEN_RE.test(text)) return null;
+  const pr = RELEASE_ANNOUNCEMENT_PR_RE.test(text);
+  const transition = RELEASE_ANNOUNCEMENT_TRANSITION_RE.test(text);
+  if (!pr && !transition) return null;
+  return { pr, transition };
+}
 
 /**
  * Every near miss on one thread — the card-level reading the census consumes.
@@ -1425,11 +1578,29 @@ export const OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP = 5;
  *
  * @param {{ id?: number, body?: string }[]} commentRows — REST rows, NOT bodies:
  *   the row names the COMMENT, and an id is what a seat opens.
- * @returns {{ commentId: string|null, form: string, what: string, prefix: string }[]}
+ * ## The two channels (#18926), and why this is a SPLIT rather than a filter
+ *
+ * `releaseAnnouncementHeading` above names a line that looks like a refused
+ * release and is a delivery report. Such a line leaves `misses` and lands in
+ * `announcements`, with its card, its comment and its prefix intact, so the
+ * summary reports it under its OWN clause member. ⛔ Nothing is dropped: the two
+ * arrays partition exactly the lines the single array used to carry, which is
+ * what lets a reader reconstruct the old number from the new report and is the
+ * only honest shape for narrowing a census.
+ *
+ * `ownershipMarkerNearMisses` stays the near-miss half, and stays the name every
+ * caller and every fixture already uses.
+ *
+ * @param {{ id?: number, body?: string }[]} commentRows — REST rows, NOT bodies:
+ *   the row names the COMMENT, and an id is what a seat opens.
+ * @returns {{ misses: object[], announcements: object[] }} — each member a
+ *   `{ commentId, form, what, prefix }` row; an announcement also carries
+ *   `names` (which of `pr` / `transition` the line spells out).
  */
-export function ownershipMarkerNearMisses(commentRows) {
+export function ownershipMarkerNearMissCensus(commentRows) {
   const rows = Array.isArray(commentRows) ? commentRows : [];
-  const out = [];
+  const misses = [];
+  const announcements = [];
   for (const row of rows) {
     const body = String(row?.body ?? '');
     const seen = new Set();
@@ -1444,18 +1615,25 @@ export function ownershipMarkerNearMisses(commentRows) {
         const key = `${form.id}\u0001${prefix}`;
         if (!seen.has(key)) {
           seen.add(key);
-          out.push({
+          const named = {
             commentId: commentIdText(row?.id),
             form: form.id,
             what: form.what,
             prefix,
-          });
+          };
+          const announcement = releaseAnnouncementHeading(form.id, prefix, line);
+          if (announcement) announcements.push({ ...named, names: announcement });
+          else misses.push(named);
         }
         break;
       }
     }
   }
-  return out;
+  return { misses, announcements };
+}
+
+export function ownershipMarkerNearMisses(commentRows) {
+  return ownershipMarkerNearMissCensus(commentRows).misses;
 }
 
 /**
@@ -17257,6 +17435,46 @@ export const ISSUE_BODY_LIMIT = 262144;
 export const MARKDOWN_BODY_BUDGET = 60000;
 
 /**
+ * The largest COMMENT body the platform stores, in the same unit: UTF-8 BYTES.
+ *
+ * The sibling surface, bisected separately. `post-stamped.mjs` imports this to
+ * name the cap in a size refusal, and it is declared HERE rather than there
+ * because this file is already where this fleet's measured body caps live: five
+ * workflow comments send a reader to `ISSUE_BODY_LIMIT` in this file for the
+ * number, and the 65,536 folklore this pair replaces is the kind that grows back
+ * wherever one of two caps is kept somewhere else.
+ *
+ * Bisected on a throwaway probe opened for it (objectstack#18826, 2026-09-17),
+ * twelve measurement writes, every one read back byte-exact:
+ *
+ *   262,144 bytes  STORED   (read-back class `identical`)
+ *   262,145 bytes  REFUSED  (HTTP 422, nothing written)
+ *
+ * ⭐ The same value as `ISSUE_BODY_LIMIT`, reached by a SECOND, independent
+ * bisection — two surfaces, two brackets, one number: 256 KiB exactly. ⛔ And
+ * therefore two constants and not one: two measurements that agree is not one
+ * measurement, and the day the platform moves one surface a shared number would
+ * lie about the other.
+ *
+ * ⛔ The unit is measured here too. A comment of 262,145 bytes carrying only
+ * 222,145 characters (a run of 3-byte U+4E2D plus ASCII padding) was REFUSED —
+ * a cap counted in characters, or in UTF-16 code units, would have taken it with
+ * 40,000 to spare — and the same multi-byte shape at 262,144 bytes / 222,144
+ * characters STORED.
+ *
+ * ⚠️ What the two surfaces do NOT share is the SHAPE of the refusal. Over the
+ * cap, a comment create answers a real HTTP 422 and writes nothing, while an
+ * issue-body update refuses SILENTLY — 200, the old body kept, nothing reported
+ * (#18793). `post-stamped.mjs` carries one exit code for each.
+ *
+ * ⛔ And the platform's own 422 text says `maximum is 65536 characters`, which
+ * is false in unit AND value: write 3 of that probe stored a 65,537-character
+ * comment and write 4 a 262,144-byte one, four times the claimed maximum. ⛔
+ * Nothing here is derived from that sentence.
+ */
+export const COMMENT_BODY_LIMIT = 262144;
+
+/**
  * A body's size as the PLATFORM counts it: UTF-8 bytes.
  *
  * ⛔ Never `.length` for anything judged against `ISSUE_BODY_LIMIT` or
@@ -17663,6 +17881,19 @@ export const SWEEP_COUNT_KEYS = [
   'markerNearMissCards',
   'markerNearMissJudged',
   'markerNearMissNamed',
+  // The census POPULATION and the announcement CHANNEL (#18926). Both are
+  // EXCLUSIONS, so both ride this contract for one reason: an exclusion a report
+  // cannot print is indistinguishable from the over-reading it replaced.
+  // `markerNearMissSeatPosts` counts the `pm:seat` threads that left the
+  // population and `markerNearMissSeatLines` the near-miss lines they carried —
+  // the pair is what lets a reader reconstruct the pre-filter number.
+  // `markerNearMissAnnouncements` / `markerNearMissAnnounced` are the delivery
+  // reports, a count beside an ARRAY of names for `markerNearMissNamed`'s reason:
+  // a count alone tells a seat there is something to find and ⛔ not where.
+  'markerNearMissSeatPosts',
+  'markerNearMissSeatLines',
+  'markerNearMissAnnouncements',
+  'markerNearMissAnnounced',
   'refBeyond',
 ];
 
@@ -17794,6 +18025,14 @@ export function summaryLine(counts, findingCount) {
   const nearMissCards = counts.markerNearMissCards ?? 0;
   const nearMissJudged = counts.markerNearMissJudged ?? 0;
   const nearMissNamed = Array.isArray(counts.markerNearMissNamed) ? counts.markerNearMissNamed : [];
+  // The population and the announcement channel (#18926), defaulting for the
+  // reason every count here does, and the ARRAY defaulting to an array.
+  const nearMissSeatPosts = counts.markerNearMissSeatPosts ?? 0;
+  const nearMissSeatLines = counts.markerNearMissSeatLines ?? 0;
+  const nearMissAnnouncements = counts.markerNearMissAnnouncements ?? 0;
+  const nearMissAnnounced = Array.isArray(counts.markerNearMissAnnounced)
+    ? counts.markerNearMissAnnounced
+    : [];
   const refBeyond = counts.refBeyond ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
@@ -18259,6 +18498,27 @@ export function summaryLine(counts, findingCount) {
     'offending prefix so the next decoration is ADDED to the vocabulary instead of replaying this ' +
     'silently. ⚠️ A LOWER BOUND twice over: it reads only the threads other rows already bought, ' +
     'and only the forms the vocabulary names. ' +
+    // The two EXCLUSIONS (#18926), rendered UNCONDITIONALLY beside the census
+    // for the clause's own reason: a narrowing nobody can see is the
+    // over-reading it replaced, wearing a smaller number. Both members print
+    // their count even at zero, so a run where nothing was excluded and a run
+    // where the exclusions stopped being applied cannot print alike.
+    `${nearMissSeatPosts} \`pm:seat\` thread(s) are OUT of that population ` +
+    `(${nearMissSeatLines} near-miss line(s) not listed above): a seat post's ownership is its ` +
+    'BODY — the registration and the 🟢/⏳ title H5/H6 read — plus its AUDIT COMMENTS, and the ' +
+    'protocol never puts a `Claim:` comment on one, so what its comments carry is SHIFT NARRATION ' +
+    'in which a directive word opens a sentence. ⛔ COUNTED, never silently dropped: the two ' +
+    'numbers are what let a reader reconstruct what the unfiltered census printed. ' +
+    `${nearMissAnnouncements} further line(s) are release ANNOUNCEMENTS rather than refused ` +
+    'records — a heading whose word is the PARTICIPLE `Released`, whose remainder names the ' +
+    '`PR #n` that landed or the `pm:*` → `pm:*` transition it unblocked, and which names NO ' +
+    'session: a delivery report on a card nobody held, so no `Release:` is owed and there is no ' +
+    'unreadable record to normalise' +
+    `${nearMissAnnounced.length > 0 ? ` — ${nearMissAnnounced.join('; ')}` : ''}. ` +
+    'The reading is deliberately NARROW and every narrowing leaves the line in the census above: ' +
+    'HEADING forms only (`Release-landed: … (PR #n)` is a `separator` line and stays), the ' +
+    'PARTICIPLE only (`## Release: …` opens the directive and stays), and NO session token in ' +
+    'either spelling (a release that names its session is a record, readable or not, and stays). ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -19613,6 +19873,12 @@ export const EXIT_PREREQUISITE_NOT_MET = 3;
  * identically — both are read at process START, which is the whole reason this
  * is a re-exec rather than an assignment (header, "Routing node through the
  * session proxy").
+ *
+ * `PROXY_REARM_GUARD` is THIS file's OWN guard and the plan's DEFAULT — it is
+ * not a name every instrument shares (#18939). A consumer that sets its own
+ * variable on the child it spawns passes that name to `proxyRearmPlan` as
+ * `guard`; the consumers that instead map their own name ONTO this one before
+ * calling keep working through the default, unchanged.
  */
 export const PROXY_FLAG = '--use-env-proxy';
 export const PROXY_REARM_GUARD = 'OS_HALF_STATES_PROXY_REARMED';
@@ -19644,16 +19910,46 @@ export function proxyRoute({ env = {}, execArgv = [] } = {}) {
  * VERBATIM into a sibling repo (#11217): a GitHub Actions runner carries no
  * proxy env, so it never re-execs and behaves exactly as it did before.
  *
- * @param {{ env?: Record<string,string|undefined>, execArgv?: string[], flagSupported?: boolean }} [ctx]
- * @returns {{ rearm: boolean, hint: boolean, flag?: string, reason: string }}
+ * ## The guard is a NAME, and it belongs to the CALLER (#18939)
+ *
+ * Every consumer sets its OWN variable on the child it re-execs, but this plan
+ * read ONE hard-coded name — this file's. So ANY sibling instrument's guard,
+ * once inherited, answered "already re-armed" for a tool that had never
+ * re-armed; the suppressed run then took the bypassed route and answered 401
+ * Bad credentials on every endpoint, `/rate_limit` included. A uniform 401 is a
+ * self-consistent story — the credential is dead — and it was read as one for
+ * about an hour against a channel that was alive the whole time. `guard` is
+ * therefore a parameter: a caller passes the name it actually sets, and only
+ * its own guard can stop its own re-exec.
+ *
+ * And a suppressed run must not be a SILENT one. `rearm: false, hint: false`
+ * prints nothing at any consumer, so the suppression left no line anywhere in
+ * the run log, which is the whole cost of that chain. This branch therefore
+ * sets `hint: true` — the one branch every consumer already prints — and its
+ * reason names the variable, the route and the 401 it would be mistaken for.
+ * It can only fire on the anomaly: a real re-exec's child carries `PROXY_FLAG`
+ * in its `execArgv` and is answered by the `routed` branch above, never here.
+ *
+ * @param {{ env?: Record<string,string|undefined>, execArgv?: string[], flagSupported?: boolean, guard?: string }} [ctx]
+ * @returns {{ rearm: boolean, hint: boolean, flag?: string, guarded?: string, reason: string }}
  */
-export function proxyRearmPlan({ env = {}, execArgv = [], flagSupported = true } = {}) {
+export function proxyRearmPlan({ env = {}, execArgv = [], flagSupported = true, guard = PROXY_REARM_GUARD } = {}) {
   const { proxy, routed } = proxyRoute({ env, execArgv });
   if (!proxy) {
     return { rearm: false, hint: false, reason: 'no HTTPS_PROXY in the environment — node fetch reaches api.github.com directly' };
   }
   if (routed) return { rearm: false, hint: false, reason: `already routed through the proxy (${PROXY_FLAG} / NODE_USE_ENV_PROXY=1)` };
-  if (env[PROXY_REARM_GUARD] === '1') return { rearm: false, hint: false, reason: 'already re-armed once this run' };
+  if (env[guard] === '1') {
+    return {
+      rearm: false,
+      hint: true,
+      guarded: guard,
+      reason:
+        `${guard}=1 is set and this process is NOT routed through ${proxy}, so the one re-exec this run allows ` +
+        `was already spent and every request below bypasses the proxy — if they answer 401 Bad credentials, that ` +
+        `inherited guard is why, and unsetting ${guard} is the fix rather than a new token`,
+    };
+  }
   if (!flagSupported) {
     return { rearm: false, hint: true, reason: `this node does not accept ${PROXY_FLAG}; every request will bypass ${proxy}` };
   }
@@ -20504,6 +20800,12 @@ async function sweep(options = {}) {
     markerNearMissCards: 0,
     markerNearMissJudged: 0,
     markerNearMissNamed: [],
+    // The population and the announcement channel (#18926), initialised on the
+    // same grounds: an exclusion that renders `undefined` reads as no exclusion.
+    markerNearMissSeatPosts: 0,
+    markerNearMissSeatLines: 0,
+    markerNearMissAnnouncements: 0,
+    markerNearMissAnnounced: [],
     maintainerActionCandidates: 0,
     maintainerActionProbed: 0,
     // H56's census (#17314) — how many of the comments H44 already read carry
@@ -22716,14 +23018,30 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // is the denominator that says so. ⛔ It files no finding and proposes no
     // state either — a near miss is a line nobody read, never a half-state.
     //
-    // ⛔ Gated on NOTHING else: every population gate in this file exists to
-    // avoid buying a fetch, and this pass buys none. A near miss on a card no
-    // row speaks about is exactly the reading that would otherwise be lost.
+    // ⛔ Gated on NOTHING else that costs a fetch: every population gate in this
+    // file exists to avoid buying one, and this pass buys none. A near miss on a
+    // card no row speaks about is exactly the reading that would otherwise be
+    // lost.
+    //
+    // ⚠️ It IS gated on one thing that costs nothing — `ownershipCensusSpeaksAbout`
+    // (#18926), a read of the label page's own `labels` array. A `pm:seat` post is
+    // out of the POPULATION, not out of the report: it is counted, its lines are
+    // counted, and the clause says so. The reason is at the predicate, and the
+    // difference between the two exclusions matters — a seat post leaves the
+    // population (no record is owed on the THREAD), a release announcement leaves
+    // the near-miss CHANNEL (the LINE is not a refused record).
     {
       const nearMissRows = commentCache.get(issue.number);
-      if (nearMissRows !== undefined) {
+      if (nearMissRows !== undefined && !ownershipCensusSpeaksAbout(issue)) {
+        // ⛔ Counted, never silently dropped — and the LINES are counted too,
+        // because the population statement a reader can act on is the one that
+        // lets them reconstruct what the old census printed.
+        stats.markerNearMissSeatPosts = (stats.markerNearMissSeatPosts ?? 0) + 1;
+        stats.markerNearMissSeatLines =
+          (stats.markerNearMissSeatLines ?? 0) + ownershipMarkerNearMisses(nearMissRows).length;
+      } else if (nearMissRows !== undefined) {
         stats.markerNearMissJudged = (stats.markerNearMissJudged ?? 0) + 1;
-        const misses = ownershipMarkerNearMisses(nearMissRows);
+        const { misses, announcements } = ownershipMarkerNearMissCensus(nearMissRows);
         if (misses.length > 0) {
           stats.markerNearMissLines = (stats.markerNearMissLines ?? 0) + misses.length;
           stats.markerNearMissCards = (stats.markerNearMissCards ?? 0) + 1;
@@ -22731,6 +23049,20 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
             if (stats.markerNearMissNamed.length >= OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP) break;
             stats.markerNearMissNamed.push(
               `#${issue.number} comment ${miss.commentId ?? 'id UNREADABLE'} 「${miss.prefix}」 (${miss.form})`,
+            );
+          }
+        }
+        // The release-ANNOUNCEMENT channel (#18926) — its own count and its own
+        // names, under the same cap, so the excluded line stays as greppable as
+        // the ones that remain.
+        if (announcements.length > 0) {
+          stats.markerNearMissAnnouncements =
+            (stats.markerNearMissAnnouncements ?? 0) + announcements.length;
+          for (const shout of announcements) {
+            if (stats.markerNearMissAnnounced.length >= OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP) break;
+            stats.markerNearMissAnnounced.push(
+              `#${issue.number} comment ${shout.commentId ?? 'id UNREADABLE'} 「${shout.prefix}」 `
+                + `(${[shout.names.pr ? 'names a PR' : '', shout.names.transition ? 'names a `pm:*` transition' : ''].filter(Boolean).join(', ')})`,
             );
           }
         }
@@ -24361,7 +24693,20 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // one or silently dropped. A widening whose controls can drift out of the
   // suite is how a repair becomes a silencer, and a vocabulary nobody asserts
   // on is how the next decoration replays this card.
-  'H2/H47/H66 decorated ownership marker': 136,
+  //
+  // ⭐ RAISED 136 → 184 by #18926 (140 → 193 registered), which is the floor
+  // discipline working rather than a number being tidied: that card NARROWS the
+  // census — a `pm:seat` thread leaves the population, a release ANNOUNCEMENT
+  // heading leaves the near-miss channel — and a narrowing is the one direction
+  // in which a suite can go green by asserting less. So the cases it adds are
+  // the ones that would catch that: the five measured rows as fixtures, the
+  // three narrowings each pinned through the corpus line that forced it (a
+  // `separator` release, a bare-noun heading, a participle heading naming a
+  // session), the positive control that a real near miss on a non-seat card is
+  // still listed byte-identically, and the ablation pin proving the excluded
+  // line IS a near miss under the vocabulary alone. ⛔ Never lower it to
+  // accommodate a filter that swallowed more than it declared.
+  'H2/H47/H66 decorated ownership marker': 184,
   // Registered with the measured body cap (#18664); the pin sits just under
   // the count on its neighbours' grounds. What this battery floors is a
   // MEASUREMENT and its UNIT — `ISSUE_BODY_LIMIT` bisected to one byte on a
@@ -24375,7 +24720,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // docblock — unit, both sides of the bracket, the date and the probe issue —
   // because a number with no provenance is what got re-derived from memory the
   // first time.
-  'ISSUE_BODY_LIMIT measured cap': 37,
+  'ISSUE_BODY_LIMIT measured cap': 52,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28558,6 +28903,32 @@ async function selfTest() {
   b(BATTERY18664, '#18664 cap: …which is 256 KiB exactly, checkable by hand', ISSUE_BODY_LIMIT === 256 * 1024, true);
   b(BATTERY18664, '#18664 cap: ⛔ the retired 65,536 is gone', ISSUE_BODY_LIMIT === 65536, false);
   b(BATTERY18664, '#18664 cap: …and the measured cap is four times it', ISSUE_BODY_LIMIT === 65536 * 4, true);
+
+  // #18843: the COMMENT surface's cap, declared beside its sibling. Pinned in
+  // THIS battery because what the battery floors is a measurement and its unit,
+  // and the sibling is the same measurement on the other surface — ⛔ not in a
+  // battery of its own, which would leave the name-roster pin below describing
+  // a ledger it no longer covers.
+  const commentCapDocblock = (() => {
+    const at = selfSource.indexOf('\nexport const COMMENT_BODY_LIMIT =');
+    const open = at < 0 ? -1 : selfSource.lastIndexOf('/**', at);
+    return at < 0 || open < 0 ? '' : selfSource.slice(open, at);
+  })();
+  b(BATTERY18664, '#18843 provenance: ⭐ the extractor really found the comment cap\'s own docblock', commentCapDocblock.startsWith('/**') && commentCapDocblock.endsWith('*/'), true);
+  b(BATTERY18664, '#18843 provenance: ⛔ …and not the whole file, which would satisfy every pin below with its own text', commentCapDocblock.includes('export const'), false);
+  b(BATTERY18664, '#18843 provenance: the docblock names the UNIT', commentCapDocblock.includes('UTF-8 BYTES'), true);
+  b(BATTERY18664, '#18843 provenance: …the landed side of the bracket', commentCapDocblock.includes('262,144 bytes  STORED'), true);
+  b(BATTERY18664, '#18843 provenance: …the refused side, one byte up', commentCapDocblock.includes('262,145 bytes  REFUSED'), true);
+  b(BATTERY18664, '#18843 provenance: …the date it was taken', commentCapDocblock.includes('2026-09-17'), true);
+  b(BATTERY18664, '#18843 provenance: …the issue it was measured on', commentCapDocblock.includes('objectstack#18826'), true);
+  b(BATTERY18664, '#18843 provenance: …and that THIS surface refuses LOUDLY, which the issue body does not', commentCapDocblock.includes('HTTP 422'), true);
+  b(BATTERY18664, '#18843 cap: the comment cap is the bisected value', COMMENT_BODY_LIMIT, 262144);
+  b(BATTERY18664, '#18843 cap: …which is 256 KiB exactly, checkable by hand', COMMENT_BODY_LIMIT === 256 * 1024, true);
+  b(BATTERY18664, '#18843 cap: ⛔ the retired 65,536 is gone here too', COMMENT_BODY_LIMIT === 65536, false);
+  b(BATTERY18664, '#18843 cap: …and the measured cap is four times it', COMMENT_BODY_LIMIT === 65536 * 4, true);
+  b(BATTERY18664, '#18843 pair: ⭐ the two surfaces agree — two bisections, one number', COMMENT_BODY_LIMIT === ISSUE_BODY_LIMIT, true);
+  b(BATTERY18664, '#18843 pair: ⛔ …and each stands on its OWN probe, so neither provenance borrows the other\'s', capDocblock.includes('objectstack#18793') && capDocblock.includes('objectstack#18826') === false, true);
+  b(BATTERY18664, '#18843 pair: ⛔ …the comment one likewise cites only the probe that measured it', commentCapDocblock.includes('objectstack#18793') === false, true);
 
   // The unit, at the primitive the guard is built on.
   b(BATTERY18664, '#18664 unit: bodyBytes counts UTF-8 bytes', bodyBytes('\u4e2d'), 3);
@@ -35101,7 +35472,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // fixture. ⭐ The counterfactual pin: the roster is asserted EQUAL to a frozen
   // list of ids, so a form added without a fixture reds and a form silently
   // dropped reds. That is the failure mode that produced this card.
-  b(BATTERY68, 'vocabulary ⭐ the roster is EXACTLY the declared forms — an addition without a fixture reds, a silent drop reds', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(','), 'heading,list-item,underscore-emphasis,inflected-word,separator,heading-bare,bare-word');
+  b(BATTERY68, 'vocabulary ⭐ the roster is EXACTLY the declared forms — an addition without a fixture reds, a silent drop reds', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(','), 'heading,list-item,underscore-emphasis,inflected-word,separator,leading-sigil,heading-bare,bare-word');
   b(BATTERY68, 'vocabulary: the roster is FROZEN', Object.isFrozen(OWNERSHIP_MARKER_NEAR_MISS_FORMS), true);
   b(BATTERY68, 'vocabulary: …and so is every member', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => Object.isFrozen(f)), true);
   b(BATTERY68, 'vocabulary: every member carries an id, a printable name, a fixture and a pattern', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => typeof f.id === 'string' && typeof f.what === 'string' && typeof f.example === 'string' && f.re instanceof RegExp), true);
@@ -35153,6 +35524,30 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, '#18831 ordering: …and a dash-written claim is still `separator`, which is H34\'s row and ⛔ not this addition\'s', miss68('Claim — skills seat, session 019x').form, 'separator');
   b(BATTERY68, '#18831 ordering: …a `-` bulleted claim with no colon is named by NEITHER addition — a list is not a heading and not a line start', ownershipMarkerNearMisses(rows68('- Claiming the producer half, seat `domain:spec`')).length, 0);
 
+  // THE `leading-sigil` FORM (#18829 A) — the shape the sibling's retired
+  // retraction stripper used to swallow, NAMED here instead. The fixture is the
+  // #18373 retraction (`os-bill`, comment 5717333576) written in the act the
+  // protocol names, its own sigil and bold kept; the PROSE it was actually
+  // written as is pinned below as named by NO form, with the reason.
+  const SIGIL_RELEASE = '🚨 **Release:** session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者';
+  const SIGIL_18373_PROSE = '🚨 **撤回上一条认领(`5717315121`)—— 本卡已由 `os-litant` 在先认领,本席晚了 13 分钟。** `domain:spec` seat 2(`session_01JbZnqu8bt6YqfJsr9vaFb3`,座位贴 #18549)。⏱️ 本条读数取自同一动作:2026-09-17T15:54Z。';
+  b(BATTERY68, '#18829 ⭐ a sigil-led `Release:` is read by NEITHER marker — the stripper removes decoration, ⛔ never a sigil', markerMatches(RELEASE_COMMENT_MARKER, SIGIL_RELEASE) || markerMatches(CLAIM_COMMENT_MARKER, SIGIL_RELEASE), false);
+  b(BATTERY68, '#18829 ⭐ …and it is NAMED, as `leading-sigil`, with the sigil-and-decoration prefix a seat greps for', [miss68(SIGIL_RELEASE).form, miss68(SIGIL_RELEASE).prefix].join(' '), 'leading-sigil 🚨 **Release:');
+  b(BATTERY68, '#18829: the very line the sibling pinned as 「the SHARED reading does not strip a leading sigil」 is the same form on the claim side', miss68('🚨 Claim: PM loop round 1').form, 'leading-sigil');
+  b(BATTERY68, '#18829 control: take the sigil off by hand and the SAME line reads through `markerMatches` — the sigil was the only thing in the way', markerMatches(RELEASE_COMMENT_MARKER, SIGIL_RELEASE.replace('🚨 ', '')), true);
+  b(BATTERY68, '#18829 control: …and once read it is ⛔ not a near miss — reading and census stay complements', ownershipMarkerNearMisses(rows68(SIGIL_RELEASE.replace('🚨 ', ''))).length, 0);
+  b(BATTERY68, '#18829 control: the derived bare line really differs from the fixture', SIGIL_RELEASE === SIGIL_RELEASE.replace('🚨 ', ''), false);
+  b(BATTERY68, '#18829: the fleet\'s other openers — ⚠️ with its variation selector, ⇒, ⛔, ⭐ — are the same form, decorated or not', ['⚠️ Release: x', '⇒ Claim: x', '⛔ **Claimed:** x', '⭐ `Release:` x'].map((l) => miss68(l).form).join(','), 'leading-sigil,leading-sigil,leading-sigil,leading-sigil');
+  b(BATTERY68, '#18829: two sigils, a sigil under a bullet (「- ⚠️ 」, on #18373\'s own thread) and a sigil in a blockquote are named too', ['🚨 ⚠️ Release: x', '- ⚠️ Release: x', '> 🚨 Claim: x'].map((l) => miss68(l).form).join(','), 'leading-sigil,leading-sigil,leading-sigil');
+  b(BATTERY68, '#18829 control: a sigil AFTER the word is not in the way — the line reads, and is no near miss', [markerMatches(RELEASE_COMMENT_MARKER, 'Release: 🚨 session x'), ownershipMarkerNearMisses(rows68('Release: 🚨 session x')).length].join(','), 'true,0');
+  b(BATTERY68, '#18829 control: a sigil-led line WITHOUT the word is silent — 「⚠️ 本条读数…」 and 「⇒ …」 are prose', ownershipMarkerNearMisses(rows68('⚠️ 本条读数取自同一动作:2026-09-17T15:54Z。\n⇒ the next seat re-reads the card\n⭐ Claimed by nobody yet')).length, 0);
+  b(BATTERY68, '#18829 control: a sigil-led directive with NO record after it is silent — a census, ⛔ not a sigil count', ownershipMarkerNearMisses(rows68('🚨 Release:')).length, 0);
+  b(BATTERY68, '#18829 ⛔ the #18373 PROSE specimen itself — a sigil before 撤回, an act the protocol never declared — is named by NO form: reading the verb is the channel #18773 A retires (⛔ B), so here it is prose, and its thread is named by the cross-author row one file over', ownershipMarkerNearMisses(rows68(SIGIL_18373_PROSE)).length, 0);
+  b(BATTERY68, '#18829 ⛔ CONTROL: the specimen really opens with the sigil-and-bold the form reads — only the word is missing', SIGIL_18373_PROSE.startsWith('🚨 **') && SIGIL_RELEASE.startsWith('🚨 **'), true);
+  b(BATTERY68, '#18829 ordering: the form sits between `separator` and the two #18831 additions', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).slice(4, 7).join(','), 'separator,leading-sigil,heading-bare');
+  b(BATTERY68, '#18829 ordering: …and steals no older form\'s fixture — every earlier member is still named by ITSELF', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(0, 5).every((f) => miss68(f.example).form === f.id), true);
+  b(BATTERY68, '#18829 boundary: a heading AND a sigil is named by no form — unseen on any thread read, left unnamed rather than guessed', ownershipMarkerNearMisses(rows68('## 🚨 Release: x')).length, 0);
+
   // SILENCE CONTROLS — a census that names prose is a census nobody reads, and
   // every one of these is a line MEASURED on the open board.
   b(BATTERY68, '#18831 control: ⛔ a heading naming a FILE is not a near miss — the word must END where the heading text does', ownershipMarkerNearMisses(rows68('### release-aftercare.md — rows RA1–RA6 (58 lines, ceiling 58, headroom 0)')).length, 0);
@@ -35162,7 +35557,18 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, '#18831 control: ⛔ …nor the other three release-prose openings the corpus carries', ownershipMarkerNearMisses(rows68('**Release checklist, platform side:** #14599\n**Release board: 5 additions**, each against a named criterion\nRelease confirmed on two readings before acting')).length, 0);
   b(BATTERY68, '#18831 control: the canonical spellings the reader DOES read are ⛔ never near misses, decorated or not', [ownershipMarkerNearMisses(rows68('Claim: seat, session `session_x`')).length, ownershipMarkerNearMisses(rows68('Claimed: seat, session `session_x`')).length, ownershipMarkerNearMisses(rows68('**Claim:** seat, session `session_x`')).length].join(','), '0,0,0');
   b(BATTERY68, '#18831 control ⭐ the reading and this census are still COMPLEMENTS after the addition — the live #16529 record beside a canonical claim yields nothing', ownershipMarkerNearMisses(rows68(`${SPECIMEN_16529}\n**Claim:** seat, session \`session_x\``)).length, 0);
-  b(BATTERY68, '#18831: the release side of the HEADING form is named too, where the evidence is — a real release record written as a heading', miss68('## Released — **PR #17517 merged.** `pm:blocked` → `pm:queue`').form, 'heading-bare');
+  // ⚠️ RE-POINTED by #18926, ⛔ not deleted. This case's claim — the `heading-bare`
+  // form names the RELEASE side, not the claim side alone — is untouched and
+  // still floored. What moved is its FIXTURE: the line it used to carry was
+  // #17536's blocker-release heading, which #18926 rules is a delivery report and
+  // moves to the census's announcement channel, so a fixture left here would have
+  // pinned this branch through a line that no longer reaches it. The replacement
+  // is #16712 comment 5605768467, pasted from the REST read — a live release
+  // heading on a work card that is NOT an announcement (it names no PR and no
+  // transition), so it exercises the same form on the same side. Where the old
+  // fixture went is pinned in the #18926 block below, ⛔ never left implicit.
+  b(BATTERY68, '#18831: the release side of the HEADING form is named too, where the evidence is — a real release record written as a heading', miss68('## Release + seat ruling — the reported defect is DISPROVED; what survives is a different defect in a different lane').form, 'heading-bare');
+  b(BATTERY68, '#18831 ⭐ …and the fixture this case USED to carry is still named by the same form, on #18926\'s announcement channel', ownershipMarkerNearMissCensus(rows68('## Released — **PR #17517 merged.** `pm:blocked` → `pm:queue`')).announcements[0]?.form, 'heading-bare');
   b(BATTERY68, '#18831: …and a `+`-suffixed CLAIMED heading, the fourth heading shape the corpus carries', miss68('## CLAIMED + dispatch order — #13457').form, 'heading-bare');
 
   // THE READER — complements by construction, and the conservative half.
@@ -35200,6 +35606,103 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, 'H67: …it says the blind spot CLOSED, and names what replaced it', h67row(I16529, { number: 16529 }).includes('WAS a third way and is no longer'), true);
   b(BATTERY68, 'H67: …and the remaining two lower bounds are still declared', h67row(I16529, { number: 16529 }).includes('LOWER BOUND, two ways'), true);
   b(BATTERY68, 'H67 summary: the clause declares the closure too, ⛔ rather than keeping a stale loss', saidBy('h67QueueDelivery', summaryLine(NEAR_MISS_COUNTS, 0)).includes('WAS a second way and is no longer'), true);
+
+  // ⭐ THE CENSUS POPULATION AND THE ANNOUNCEMENT CHANNEL (#18926) -----------
+  //
+  // The card: five of #18914's sixteen 「no readable ownership record」 rows have
+  // NO record to normalise — four `pm:seat` posts whose comments are shift
+  // narration, and one blocker-release heading on a card nobody ever claimed.
+  //
+  // Every line below is PASTED from the REST read of its own comment
+  // (2026-09-18T12:5xZ–13:0xZ through the session proxy), ⛔ never retyped from
+  // the filing card's table. ⚠️ And the paste FALSIFIED the dispatch's
+  // assumption that the five rows' FIRST lines are the fixtures: on three of the
+  // five the census names a LATER narration line, and the heading the card's
+  // table quotes carries no near miss at all. The fixture is the line the census
+  // NAMES — pinned here — with the first lines beside them so the discrepancy is
+  // a reading rather than a silence.
+  const SEAT_6017 = 'Claimed and dispatched, batch refilled to 3:';
+  const SEAT_6017_FIRST = '## Seat correction — the lane stopped dispatching for ~4 hours and there was no gate holding it';
+  const SEAT_6021 = 'Claiming #15222 at 19:13Z I wrote, in the claim comment, a line-initial `Clause-②: yes` with its justification. The label write in the same claim was:';
+  const SEAT_6026 = '### Released clean';
+  const SEAT_6367 = '**Claimed and dispatched from this lane (round 1):**';
+  const RELEASE_17536 = '## Released — **PR #17517 merged.** `pm:blocked` → `pm:queue`; the blocker line is struck in the body.';
+  const SEAT_LINES = [SEAT_6017, SEAT_6021, SEAT_6026, SEAT_6367];
+
+  // The four seat lines ARE near misses as lines — the vocabulary is untouched,
+  // which is the ⛔ no-widening half of the ruling read from the other side.
+  for (const [where, line, form] of [
+    ['#6017 comment 5691995598', SEAT_6017, 'bare-word'],
+    ['#6021 comment 5625313119', SEAT_6021, 'bare-word'],
+    ['#6026 comment 5274500724', SEAT_6026, 'heading-bare'],
+    ['#6367 comment 5294956565', SEAT_6367, 'bare-word'],
+  ]) {
+    b(BATTERY68, `#18926 ${where}: the LINE is still named by the vocabulary — ⛔ nothing was widened or narrowed there`, miss68(line).form, form);
+  }
+  b(BATTERY68, '#18926 ⭐ …and the POPULATION is what excludes them: a `pm:seat` post is out of it', ownershipCensusSpeaksAbout(issue(['pm:seat'])), false);
+  b(BATTERY68, '#18926 ⭐ control: an ordinary work card is IN the population, so the filter is scoped to the carrier', ownershipCensusSpeaksAbout(issue(['pm:queue', 'domain:cli'])), true);
+  b(BATTERY68, '#18926: …a seat post carrying a LANE label too is still out — the sticker decides, ⛔ not the lane', ownershipCensusSpeaksAbout(issue(['pm:seat', 'domain:engine'])), false);
+  b(BATTERY68, '#18926: …and a card with no labels at all is IN, ⛔ never excluded by absence', ownershipCensusSpeaksAbout(issue([])), true);
+  b(BATTERY68, '#18926: the predicate reads a missing issue as IN rather than throwing', ownershipCensusSpeaksAbout(undefined), true);
+  b(BATTERY68, '#18926: …and tolerates the string-label REST shape `labelNames` accepts', ownershipCensusSpeaksAbout({ labels: ['pm:seat'] }), false);
+  b(BATTERY68, '#18926 ⭐ the paste FALSIFIED the first-line assumption: #6017\'s own first line carries NO near miss, so the fixture is the narration line', [ownershipMarkerNearMisses(rows68(SEAT_6017_FIRST)).length, miss68(SEAT_6017).prefix].join(','), '0,Claimed');
+  b(BATTERY68, '#18926: …and the four seat lines really differ from each other, so the roster is four fixtures and ⛔ not one repeated', new Set(SEAT_LINES).size, 4);
+
+  // THE ANNOUNCEMENT CHANNEL — the line leaves `misses` and lands in
+  // `announcements`, ⛔ counted rather than dropped.
+  b(BATTERY68, '#18926 ⭐ #17536 comment 5625672905: the blocker-release heading is ⛔ NO LONGER a near miss', ownershipMarkerNearMisses(rows68(RELEASE_17536)).length, 0);
+  b(BATTERY68, '#18926 ⭐ …it is COUNTED on the announcement channel instead, ⛔ never silently dropped', ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).announcements.length, 1);
+  b(BATTERY68, '#18926 …naming BOTH things the line spells out, which is what makes it a delivery report', JSON.stringify(ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).announcements[0]?.names), '{"pr":true,"transition":true}');
+  b(BATTERY68, '#18926 …and it keeps its card, comment and prefix, so a seat can still grep it', [ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).announcements[0]?.commentId, ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).announcements[0]?.prefix].join(' '), '5691473966 ## Released');
+  b(BATTERY68, '#18926 ⭐ the two channels PARTITION the line — it is on exactly one of them, so no number can be reconstructed wrong', [ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).misses.length, ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).announcements.length].join(','), '0,1');
+  b(BATTERY68, '#18926: the LINE is still read by NEITHER marker — the exclusion is the census\'s, ⛔ not the reader\'s', markerMatches(CLAIM_COMMENT_MARKER, RELEASE_17536) || markerMatches(RELEASE_COMMENT_MARKER, RELEASE_17536), false);
+  b(BATTERY68, '#18926 ⭐ ABLATION: under the vocabulary alone — the reading removed — the line IS a near miss, so this pin can FAIL', OWNERSHIP_MARKER_NEAR_MISS_FORMS.some((f) => { const h = f.re.exec(RELEASE_17536); return h !== null && RELEASE_17536.slice(h[0].length).trim() !== ''; }), true);
+  b(BATTERY68, '#18926: …and it was named `heading-bare` before the reading landed, which is the form the announcement rides', OWNERSHIP_MARKER_NEAR_MISS_FORMS.find((f) => { const h = f.re.exec(RELEASE_17536); return h !== null && RELEASE_17536.slice(h[0].length).trim() !== ''; })?.id, 'heading-bare');
+
+  // THE THREE NARROWINGS, each with the corpus line that forced it. Every one is
+  // a line that STAYS in the census: a narrowing whose controls can drift out of
+  // the suite is how a filter becomes a silencer.
+  b(BATTERY68, '#18926 narrowing ⭐ HEADING forms only: `Release-landed: … (PR #18852)` is a `separator` line and STAYS a near miss (#18740 comment 5723834336)', miss68('Release-landed: 八处(rest ×4 · spec ×4,含每包两份副本)= `18cc3b1df`(PR #18852)').form, 'separator');
+  b(BATTERY68, '#18926 narrowing: …and the roster of announcement-bearing forms is exactly the one heading form, FROZEN', [RELEASE_ANNOUNCEMENT_HEADING_FORMS.join(','), Object.isFrozen(RELEASE_ANNOUNCEMENT_HEADING_FORMS)].join(' '), 'heading-bare true');
+  b(BATTERY68, '#18926 narrowing: …every member of it is a DECLARED near-miss form, so the reading can never name a form the vocabulary dropped', RELEASE_ANNOUNCEMENT_HEADING_FORMS.every((id) => OWNERSHIP_MARKER_NEAR_MISS_FORMS.some((f) => f.id === id)), true);
+  b(BATTERY68, '#18926 narrowing ⭐ the PARTICIPLE only: `### Release: PR #18523 …` names a PR and STAYS a near miss (#16233 comment 5704218834)', miss68('### Release: PR #18523 落下了**普查与边界记录**;余下的是**路线选择**,⛔ 未落').form, 'heading');
+  b(BATTERY68, '#18926 narrowing: …and so does the bare-noun heading that names no PR at all (#16712 comment 5605768467)', miss68('## Release + seat ruling — the reported defect is DISPROVED; what survives is a different defect in a different lane').form, 'heading-bare');
+  b(BATTERY68, '#18926 narrowing: …`Releasing` is left UNNAMED — measured zero on the corpus, and a form arrives WITH its fixture', ownershipMarkerNearMissCensus(rows68('## Releasing — PR #17517 merged. `pm:blocked` → `pm:queue`')).announcements.length, 0);
+  b(BATTERY68, '#18926 narrowing ⭐ NO session token: #6023\'s participle heading names one and STAYS a near miss (comment 5552092492)', miss68('## Released tail — in flight under THIS session\'s process tree').form, 'heading-bare');
+  b(BATTERY68, '#18926 narrowing ⭐ …the assumption the dispatch asked to TEST: the SAME announcement line plus a session is ⛔ not swallowed', ownershipMarkerNearMissCensus(rows68(`${RELEASE_17536} session \`session_x\``)).announcements.length, 0);
+  b(BATTERY68, '#18926 narrowing: …and it stays a near miss on the other channel rather than vanishing between them', ownershipMarkerNearMisses(rows68(`${RELEASE_17536} session \`session_x\``)).length, 1);
+  b(BATTERY68, '#18926 narrowing: …the Chinese spelling 「会话」 holds the line back too, so a Chinese-written record is ⛔ never swallowed', ownershipMarkerNearMissCensus(rows68('## Released — **PR #17517 merged.** 会话 `session_x`')).announcements.length, 0);
+  b(BATTERY68, '#18926 narrowing: a participle heading naming NEITHER a PR nor a transition is an ordinary near miss', ownershipMarkerNearMissCensus(rows68('## Released — the lane is clear now')).announcements.length, 0);
+  b(BATTERY68, '#18926: …a transition ALONE is enough, which is the half the card\'s 「label transition」 names', ownershipMarkerNearMissCensus(rows68('## Released — `pm:blocked` → `pm:queue`')).announcements.length, 1);
+  b(BATTERY68, '#18926: …and a PR ALONE is too', ownershipMarkerNearMissCensus(rows68('## Released — **PR #17517 merged.**')).announcements.length, 1);
+  b(BATTERY68, '#18926: the predicate answers null for a form it does not carry, ⛔ never a truthy default', releaseAnnouncementHeading('bare-word', 'Released', RELEASE_17536), null);
+  b(BATTERY68, '#18926: …and for a prefix whose word is the bare noun', releaseAnnouncementHeading('heading-bare', '## Release', '## Release — PR #17517 merged. `pm:blocked` → `pm:queue`'), null);
+  b(BATTERY68, '#18926: …and it tolerates missing arguments rather than throwing', [releaseAnnouncementHeading(undefined, undefined, undefined), releaseAnnouncementHeading('heading-bare', '## Released', undefined)].join(','), ',');
+  b(BATTERY68, '#18926: a DECORATED participle heading reads too — the prefix is measured with its decoration stripped', ownershipMarkerNearMissCensus(rows68('## **Released** — **PR #17517 merged.**')).announcements.length, 1);
+  b(BATTERY68, '#18926: ⛔ no `g` flag on any of the three patterns — a shared regex carrying `lastIndex` is the state bug this file refuses', [RELEASE_ANNOUNCEMENT_PR_RE, RELEASE_ANNOUNCEMENT_TRANSITION_RE, OWNERSHIP_SESSION_TOKEN_RE].every((re) => re.global === false), true);
+
+  // ⭐ THE POSITIVE CONTROL — one of the OTHER ELEVEN, byte-identical. #14512's
+  // `Claiming` line is already a fixture in this battery (`M18831_14512`,
+  // pasted from comment 5523309738), so the control is the SAME bytes both
+  // halves read and ⛔ cannot drift from the thing it controls.
+  b(BATTERY68, '#18926 ⭐ control: a real near miss on a NON-seat card is still listed — #14512 comment 5523309738, unchanged', [miss68(M18831_14512).form, miss68(M18831_14512).prefix].join(' '), 'bare-word Claiming');
+  b(BATTERY68, '#18926 ⭐ control: …and it is on the NEAR-MISS channel, ⛔ not the announcement one', [ownershipMarkerNearMissCensus(rows68(M18831_14512)).misses.length, ownershipMarkerNearMissCensus(rows68(M18831_14512)).announcements.length].join(','), '1,0');
+  b(BATTERY68, '#18926 control: …and its card is IN the population', ownershipCensusSpeaksAbout(issue(['pm:queue', 'domain:spec'])), true);
+  b(BATTERY68, '#18926 control: the other three #18831 fixtures are untouched too, so the floor did not buy the filter with a survivor', M18831_ALL.every((line) => ownershipMarkerNearMisses(rows68(line)).length === 1), true);
+
+  // THE SUMMARY — both exclusions print UNCONDITIONALLY, because a narrowing
+  // nobody can see is the over-reading it replaced wearing a smaller number.
+  const EXCLUSION_COUNTS = { ...NEAR_MISS_COUNTS, markerNearMissSeatPosts: 5, markerNearMissSeatLines: 9, markerNearMissAnnouncements: 1, markerNearMissAnnounced: ['#17536 comment 5625672905 「## Released」 (names a PR, names a `pm:*` transition)'] };
+  b(BATTERY68, '#18926 summary ⭐ the population exclusion is stated with BOTH numbers, so the pre-filter census is reconstructible', saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes('5 `pm:seat` thread(s) are OUT of that population (9 near-miss line(s) not listed above)'), true);
+  b(BATTERY68, '#18926 summary: …and says WHY, in the protocol\'s own terms', saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes('a seat post\'s ownership is its BODY'), true);
+  b(BATTERY68, '#18926 summary: …and that it is counted rather than dropped, in as many words', saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes('⛔ COUNTED, never silently dropped'), true);
+  b(BATTERY68, '#18926 summary ⭐ the announcement channel is counted AND named', saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes('1 further line(s) are release ANNOUNCEMENTS') && saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes('#17536 comment 5625672905 「## Released」'), true);
+  b(BATTERY68, '#18926 summary: …and the three narrowings are declared on the line, so the next editor reads the scope rather than the code', ['HEADING forms only', 'PARTICIPLE only', 'NO session token'].every((phrase) => saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes(phrase)), true);
+  b(BATTERY68, '#18926 summary ⭐ both members render at ZERO too — a run with nothing excluded and a run where the exclusions stopped being applied must ⛔ not print alike', [saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('0 `pm:seat` thread(s) are OUT of that population (0 near-miss line(s) not listed above)'), saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('0 further line(s) are release ANNOUNCEMENTS')].join(','), 'true,true');
+  b(BATTERY68, '#18926 summary: an absent announcement list renders NO names clause', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('comment 5625672905'), false);
+  b(BATTERY68, '#18926 summary: a non-array `markerNearMissAnnounced` renders a sentence rather than throwing', saidBy('markerNearMiss', summaryLine({ repo: 'o/r', issues: 1, unscoped: 0, prs: 0, merged: 0, markerNearMissAnnounced: null }, 0)).includes('0 further line(s) are release ANNOUNCEMENTS'), true);
+  b(BATTERY68, '#18926 summary: ⛔ the bare shape renders numbers, ⛔ never the string `undefined`', saidBy('markerNearMiss', summaryLine({}, 0)).includes('undefined'), false);
+  b(BATTERY68, '#18926 summary: all four new count keys ride the enumerated forwarding contract', ['markerNearMissSeatPosts', 'markerNearMissSeatLines', 'markerNearMissAnnouncements', 'markerNearMissAnnounced'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
 
   // FLOOR — this battery is declared, pinned, and the roster grew with it.
   b(BATTERY68, 'floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY68), true);
@@ -35268,6 +35771,32 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('proxy: …in NODE_OPTIONS, likewise', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', NODE_OPTIONS: `--enable-source-maps ${PROXY_FLAG}` } }).rearm, false);
   t('proxy: …and the env spelling NODE_USE_ENV_PROXY=1, likewise', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', NODE_USE_ENV_PROXY: '1' } }).rearm, false);
   t('proxy: the guard env stops an infinite re-exec loop', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).rearm, false);
+  // -- #18939: the guard is a NAME, and the plan reads the CALLER's. A sibling
+  // -- instrument's inherited guard answering "already re-armed" for a tool
+  // -- that never re-armed is how one variable replays the recorded
+  // -- "the credential is dead" hour: the suppressed run bypasses the proxy and
+  // -- answers 401 on every endpoint, and nothing is printed to say why.
+  t('proxy: the default guard is still THIS file\'s own name, so its own re-exec is unchanged', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).guarded, PROXY_REARM_GUARD);
+  t('proxy: a caller that names its OWN guard is suppressed by that one', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', OS_SIBLING_PROXY_REARMED: '1' }, guard: 'OS_SIBLING_PROXY_REARMED' }).rearm, false);
+  t('proxy: …and this file\'s name does NOT suppress it — the cross-suppression is gone', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' }, guard: 'OS_SIBLING_PROXY_REARMED' }).rearm, true);
+  t('proxy: …reported machine-readably, so a caller can name the variable to unset', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', OS_SIBLING_PROXY_REARMED: '1' }, guard: 'OS_SIBLING_PROXY_REARMED' }).guarded, 'OS_SIBLING_PROXY_REARMED');
+  // The landed mapper shape (`check-single-claim-paths.mjs`, `check-expected-skips.mjs`,
+  // `check-prior-rulings.mjs`) folds its own name onto the default and passes no
+  // `guard`. Both of its directions are pinned here, because the DEFAULT is what
+  // it relies on.
+  t('proxy: a mapper that maps its own name onto the default still suppresses', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).rearm, false);
+  t('proxy: …and maps an UNSET own name to undefined, which suppresses nothing', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: undefined } }).rearm, true);
+  // Silence is the whole cost of this chain: `rearm:false, hint:false` prints
+  // nothing at any consumer. The guard branch HINTS, which every consumer
+  // already prints — the ones that pass no `guard` of their own included.
+  t('proxy: a guard that suppresses SPEAKS rather than closing the route silently', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).hint, true);
+  t('proxy: …the line names the variable a reader has to unset', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).reason.includes(PROXY_REARM_GUARD), true);
+  t('proxy: …and names the 401 the silence would otherwise be read as', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).reason.includes('401 Bad credentials'), true);
+  t('proxy: …and the proxy the request was supposed to take', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://127.0.0.1:40309', [PROXY_REARM_GUARD]: '1' } }).reason.includes('http://127.0.0.1:40309'), true);
+  // The runner leg, re-pinned ACROSS the new branch: a guard set where no proxy
+  // is configured must still spawn nothing, hint nothing and print nothing.
+  t('proxy: with no proxy configured the guard is inert (the Actions runner leg)', proxyRearmPlan({ env: { [PROXY_REARM_GUARD]: '1' } }).hint, false);
+  t('proxy: …and an already-routed run is answered by the ROUTE, not by the guard', Boolean(proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' }, execArgv: [PROXY_FLAG] }).guarded), false);
   // An older node gets a printed hint, never a bad-option crash.
   t('proxy: an unsupported flag hints instead of re-execing', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' }, flagSupported: false }).hint, true);
   t('proxy: …and does not re-exec', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' }, flagSupported: false }).rearm, false);

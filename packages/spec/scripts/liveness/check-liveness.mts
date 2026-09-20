@@ -217,7 +217,14 @@ import {
   type UnanchoredCitation,
 } from './key-mention.mts';
 import { buildProducerReport, type ProducerEntry, type ProducerReport } from './producer.mts';
-import { ORPHAN_GUIDANCE, findOrphanEntries, type Orphan } from './orphans.mts';
+import {
+  ORPHAN_GUIDANCE,
+  TOMBSTONE_STATUS_GUIDANCE,
+  findOrphanEntries,
+  scanTombstonedRows,
+  type GradedProperty,
+  type Orphan,
+} from './orphans.mts';
 import {
   STALE_UNDRILLED_GUIDANCE,
   UNDRILLED_GUIDANCE,
@@ -678,6 +685,8 @@ const report: any = {
   proofMissing: [] as string[], // a bound high-risk `live` entry with no proof at all
   orphanProofs: [] as string[], // a dogfood `@proof:` tag not registered in proof-registry.mts
   orphanEntries: [] as string[], // a ledger row whose property is gone from the schema (the reverse direction)
+  tombstonedLive: [] as string[], // a `retiredKey()` tombstone whose row still claims a forbidden status (#19062)
+  tombstones: [] as string[], // every `[REMOVED]` tombstone the walk reached — enumerated, not totalled, so the population is checkable (#18133's reason)
   authorable: [] as string[], // the governance DENOMINATOR itself — printed and emitted so "never looked" cannot pass for "nothing to report" (#18133)
   authorableRegistered: 0, // how many of it are registered KINDS (listMetadataTypeSchemaTypes)
   authorableUnregisteredKinds: [] as string[], // …and which are unregistered-kind stack collections (#6245/#6931)
@@ -971,6 +980,13 @@ const observedContainers: ContainerCoverage[] = [];
 // So every key below the cut is reported UNCLASSIFIED, which FAILS the gate.
 // A depth limit the instrument does not announce is prose wearing the shape of
 // data (#4956), and the boundary of a check is the last place that is affordable.
+// Every property the walk GRADES, with the description it graded it from —
+// the left-hand side of the tombstone join (#19062). Collected here rather than
+// asked of the schema a second time because the two readings must be the same
+// reading: a separate walk is a copy that can drift until it stops seeing
+// tombstones, and a scan that sees none reports a clean tree.
+const gradedProps: GradedProperty[] = [];
+
 const MAX_DRILL_DEPTH = 8;
 
 /**
@@ -1029,8 +1045,10 @@ function drillChildren(
       drillChildren(type, childPath, cs[ck], cled, cat, depth + 1);
       continue;
     }
-    const status = cled?.status || markerStatus(descOf(cs[ck])) || led.childrenDefault;
+    const childDescription = descOf(cs[ck]);
+    const status = cled?.status || markerStatus(childDescription) || led.childrenDefault;
     if (!status) { cat.unclassified++; report.unclassified.push(`${type}/${childPath}`); continue; }
+    gradedProps.push({ key: `${type}/${childPath}`, description: childDescription, status });
     // A drilled child that is ITSELF a container carries a blanket verdict over
     // its own subtree, exactly as a top-level one does — so it owes the same
     // declared disposition (drill / defer / record).
@@ -1070,13 +1088,18 @@ for (const type of GOVERNED) {
   for (const o of orphans) report.orphanEntries.push(o.key);
 
   for (const { key, node, description } of walked) {
-    if (FRAMEWORK_FIELDS.has(key)) { classify(type, key, 'live', null, cat); continue; }
+    if (FRAMEWORK_FIELDS.has(key)) {
+      gradedProps.push({ key: `${type}/${key}`, description, status: 'live' });
+      classify(type, key, 'live', null, cat);
+      continue;
+    }
     const led = props[key];
     if (led?.children) {
       drillChildren(type, key, node, led, cat, 1);
     } else {
       const status = led?.status || markerStatus(description);
       if (!status) { cat.unclassified++; report.unclassified.push(`${type}/${key}`); continue; }
+      gradedProps.push({ key: `${type}/${key}`, description, status });
       // One verdict standing in for a whole subtree. Legal, but it must be
       // declared rather than inherited by default — record it for the
       // post-walk reconcile (drill.mts, #4956).
@@ -1088,6 +1111,15 @@ for (const type of GOVERNED) {
 }
 
 scanOrphanProofs();
+
+// ── the tombstone join: what does the ledger claim about a key nobody can write? ──
+// The gate's FOURTH direction (#19062). Schema to ledger catches an undeclared
+// property; ledger to schema catches a row that outlived its property; container
+// coverage catches a row that silently covers a subtree nobody classified; this
+// catches a row that is present, classified, covered — and false.
+const tombstones = scanTombstonedRows(gradedProps);
+report.tombstones = tombstones.scanned;
+report.tombstonedLive = tombstones.findings.map((t) => `${t.key} -> "${t.status}"`);
 
 // ── container coverage: is every blanket verdict a DECLARED one? ──
 // The gate's third direction (#4956). Schema → ledger catches an undeclared
@@ -1353,6 +1385,15 @@ const failed =
   // the class, and for the zero-census that lets this start green.
   report.orphanProofs.length > 0 ||
   report.orphanEntries.length > 0 ||
+  // A tombstoned key whose row still claims a runtime consumer (#19062). Red
+  // rather than a warning, on the census that designed it: measured across all
+  // 39 governed types at the commit this landed against, the walk reached 79
+  // `[REMOVED]` tombstones and 78 already said `dead`. The single outlier is
+  // #18304's `agent/tools`, whose repair is in flight as its own card — so this
+  // starts from a population of one that is already being closed, and after it
+  // only a NEW false claim can red the gate. A check that starts at (nearly)
+  // zero can be red; that is why the census came first.
+  report.tombstonedLive.length > 0 ||
   report.verification.errors.length > 0 ||
   report.producers.errors.length > 0 ||
   report.producerMissing.length > 0 ||
@@ -1640,6 +1681,14 @@ if (asJson) {
     console.log('');
     ORPHAN_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
   }
+  if (report.tombstonedLive.length) {
+    console.log(
+      `\n✗ ${report.tombstonedLive.length} TOMBSTONED key(s) whose ledger row still claims a forbidden status:`,
+    );
+    report.tombstonedLive.forEach((s: string) => console.log(`    ${s}`));
+    console.log('');
+    TOMBSTONE_STATUS_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
   if (report.undrilledNew.length) {
     console.log(`\n✗ ${report.undrilledNew.length} UNDECLARED container inheritance — a blanket verdict covers keys nothing classified:`);
     report.undrilledNew.forEach((s: string) => console.log(`    ${s}`));
@@ -1797,6 +1846,16 @@ if (asJson) {
   } else if (pr.withoutProducer.length) {
     console.log('  run with --producer-gap for the producer-evidence worklist.');
   }
+  // ── tombstones: asked, and how many claim something the tombstone forbids ──
+  // Two numbers for the reason the evidence and citation lines above print two:
+  // "0 forbidden" alone reads identically whether every row is honest or the
+  // marker drifted and the scan reached nothing at all.
+  console.log(
+    `\ntombstoned keys: ${report.tombstones.length} \`[REMOVED]\` tombstone(s) reached by the walk, ` +
+    `${report.tombstones.length - report.tombstonedLive.length} graded with a status the tombstone allows` +
+    (report.tombstonedLive.length ? `, ${report.tombstonedLive.length} FORBIDDEN` : '') + '.',
+  );
+
   // ── container coverage: how much rides on inheritance? ──
   // Printed every run, pass or fail. The gate used to say "all properties are
   // classified" while hundreds of child keys had never been asked about; a
@@ -1853,7 +1912,8 @@ if (asJson) {
     console.log(
       '\n✓ every governed-type property, at every depth the ledger drills, is classified, every ' +
       'authorable type — registered kind or unregistered-kind stack collection — is governed or ' +
-      'explicitly pending, no ledger row outlives its property, ' +
+      'explicitly pending, no ledger row outlives its property, no tombstoned key\'s row claims a ' +
+      'status the tombstone forbids, ' +
       `every container inheritance is declared, every ${EVIDENCE_SCANNED_LABEL} entry's repo-local evidence path ` +
       'resolves, every `path:NNN` citation names a line that file actually has, every ' +
       '`path#symbol` anchor names a symbol its file contains, and every cited ' +

@@ -177,8 +177,8 @@ All trace to the same `positions==0 && permissions==0 && !userId → skip` predi
 | Site | Surface | Note |
 |:---|:---|:---|
 | `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter` | find/write middleware | the original seam (#2849) |
-| `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter` | `getReadFilter` (analytics / reports / raw-SQL RLS compile) | returns `undefined` = *no filter*; the analytics mirror of :626 |
-| `objectql/engine.ts` Layer-0 + `driver-sql` `applyTenantScope` (opt-in on `tenantId`) | tenant scoping | Layer-0 is computed **after** the :626 skip, and the driver scope is opt-in → a principal-less context gets **no tenant filter at either layer** (cross-tenant read/write) |
+| `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter` | `getReadFilter` (analytics / reports / raw-SQL RLS compile) | returns `undefined` = *no filter*; the analytics mirror of the middleware seam above |
+| `objectql/engine.ts` Layer-0 + `driver-sql` `applyTenantScope` (opt-in on `tenantId`) | tenant scoping | Layer-0 is computed **after** the `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter` skip, and the driver scope is opt-in → a principal-less context gets **no tenant filter at either layer** (cross-tenant read/write) |
 | `packages/rest/src/rest-server.ts#enforceAuth` (+ lookup) | guest / public-form routes | bypass `enforceAuth`; fall open when `guest_portal` unregistered (partly mitigated by the `publicFormGrant`) |
 | `packages/runtime/src/http-dispatcher.ts#executionContext` | custom `object_operation` API endpoints | **accidental** — `callData` invoked with no `executionContext` (every sibling threads it) |
 | `packages/runtime/src/sandbox/body-runner.ts` | authored action/hook **body** interior facade | the inside of #2849 — only the *invoke* is gated (#2964); the body's `api.object().find/insert/...` run context-less |
@@ -194,7 +194,7 @@ All trace to the same `positions==0 && permissions==0 && !userId → skip` predi
 | Scheduled reports (`packages/plugins/plugin-reports/src/report-service.ts#isSystem` `dispatchDue`) run `executeReport(..., {isSystem:true})` → a member-owned schedule emails the target object's **entire** table, RLS bypassed | CONFIRMED exploitable | #2980 |
 | Knowledge/RAG `applyPermissionFilter` (`packages/services/service-knowledge/src/knowledge-service.ts#applyPermissionFilter`) returns **all** hits when `ctx` is missing/system; `chatWithTools`'s `ToolExecutionContext.actor` is optional with a system fallback → agent retrieval escapes the data ceiling | CONFIRMED (framework); exposure gated on cloud impl | #2981 |
 
-These are *not* the :626 fall-open (they use an unconditional `SYSTEM_CTX`), but they are exactly what a D4 conformance row (`caller-scoped?` proof) + the D2 audit would have flagged. Fixed independently of the mechanism, tracked as the mechanism's motivating evidence.
+These are *not* the `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter` fall-open (they use an unconditional `SYSTEM_CTX`), but they are exactly what a D4 conformance row (`caller-scoped?` proof) + the D2 audit would have flagged. Fixed independently of the mechanism, tracked as the mechanism's motivating evidence.
 
 ### E3 — Structural: paths that never enter the security middleware (Class B)
 

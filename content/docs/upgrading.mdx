@@ -315,6 +315,90 @@ one checklist per major, which is what those rows link to.
 
 The [release notes overview](/docs/releases) summarizes what each major changed.
 
+### What the installed artifact tells you, without a second worktree
+
+The release pages are written for a human. The same delta ships **inside the
+package**, for your tooling: `@objectstack/spec` carries a `spec-changes.json`,
+and from the release that follows 17.4.0 on it carries a **`release`** section
+describing the release you actually installed — `from` → `to` at the package version, not at the protocol
+major.
+
+```bash
+# What did the release I just installed change?
+jq '.release | {fromVersion, toVersion,
+                added: (.added | length), removed: (.removed | length),
+                converted: (.converted | length), migrated: (.migrated | length)}' \
+  node_modules/@objectstack/spec/spec-changes.json
+```
+
+`added` and `removed` are the public exports that arrived and left, each one
+named — `"./ai: AgentSchema (const)"`, the entry point followed by the export
+and its kind. `converted` and `migrated` are the ADR-0087 conversions and
+semantic migrations first registered in that release. The same file's
+`perMajor` records are unchanged and still answer the major-boundary question,
+and so does `aggregate` — for its `converted` and `migrated`, which are derived
+from the ADR-0087 registries across the whole `from` → `to` range.
+
+⛔ **But not for `aggregate.added` / `aggregate.removed`.** Those come from the
+same one-release export diff as the section above, not from the major range the
+record is keyed by, so when they are filled the `aggregate` record carries a
+`surfaceScope` naming the exact pair they span:
+
+```bash
+jq '.aggregate | {from, to, surfaceScope,
+                  added: (.added | length), removed: (.removed | length)}' \
+  node_modules/@objectstack/spec/spec-changes.json
+```
+
+`surfaceScope` absent means that record claims no export diff at all and its
+`added` / `removed` are empty — the registry-only shape. ⛔ Read that as "this
+record does not say", never as "nothing was added between `from` and `to`",
+which is the same rule the `release` section states for itself below. A release
+whose `aggregate` arrays disagree with the two published tarballs, or carry no
+`surfaceScope`, does not publish.
+
+The `os` CLI reads the same section, so a CI job does not have to know the file
+exists:
+
+```bash
+os validate --json | jq .specReleaseChanges
+```
+
+Three properties worth relying on:
+
+- **The section describes a release, not a major.** Every entry in `added`
+  arrived in `toVersion` and every entry in `removed` left in it. That is the
+  one question the `perMajor` records cannot answer, and it is the question a
+  minor upgrade asks.
+- **A missing section is not an empty one.** The key is absent when the delta
+  could not be computed — a release published before this section existed, or
+  one whose predecessor shipped no export snapshot. `os validate --json` reports
+  `null` in exactly those cases. ⛔ Do not read an absent section as "nothing
+  changed"; read it as "this artifact does not say".
+- **It is verified against the artifacts before it ships.** The release lane
+  recomputes the delta from the previously published tarball and the one about
+  to be published, and a release whose section disagrees with them does not
+  publish. The numbers are as true as the two tarballs are.
+
+<Callout type="warn">
+**What it does not tell you.** The export surface is the shape of the API, not
+its behaviour: a release can narrow what a value is allowed to be, or start
+enforcing a constraint that was declared and inert, without adding or removing a
+single export. A delta of `0 added, 0 removed` is a real measurement of the
+export surface and says nothing about the accept-sets behind it — the release
+checklist above is still the record for those.
+
+**And it does not report withdrawals.** All four arrays report what a release
+**added**: `converted` and `migrated` list the ADR-0087 ids *first registered*
+in it. An id that **left** the published chain between the two releases is in
+none of them — `converted: []` means "this release registered none", never
+"none was withdrawn". ADR-0087 D4 names these four arrays and this section
+carries exactly those four; to see a withdrawal, compare the `aggregate`
+records of the two installed manifests (`.aggregate.converted[].conversionId`
+and `.aggregate.migrated[].migrationId`) — an id present in the older one and
+absent from the newer one was withdrawn.
+</Callout>
+
 ### The per-package changelogs are the exhaustive record
 
 The release pages above are **triaged**, deliberately: a change is written up

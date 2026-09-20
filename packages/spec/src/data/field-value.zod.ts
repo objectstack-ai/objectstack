@@ -398,9 +398,24 @@ export const LocationValueSchema = lazySchema(() => strictObject(
     history: 'Until this shape was closed, an undeclared key on a location value was silently '
       + 'dropped — the value parsed green with the key gone, so the mistake surfaced only as a '
       + 'blank on screen.',
-    // The retired spec-only spelling (see the module header). Edit distance
-    // cannot reach `latitude` → `lat`; the value contract has refused the pair
-    // since ADR-0104 D1, so the rename is the one an author actually needs.
+    // The retired spec-only spelling (see the module header). The two entries
+    // play DIFFERENT roles and neither is optional. The fallback budget is
+    // `Math.max(2, Math.floor(key.length / 3))` (`shared/suggestions.zod.ts`).
+    //
+    //  - `longitude` → `lng` is the unreachable case: 6 edits against a budget
+    //    of 3, and no other declared member is closer, so without this entry
+    //    the author gets no suggestion at all.
+    //  - `latitude` → `lat` is 5 edits against a budget of 2 — also past the
+    //    budget — but the fallback does NOT stay silent for it: `altitude` is
+    //    a declared member 2 edits away, inside the budget, so the bare
+    //    fallback answers `latitude` → `altitude`. This entry OVERRULES a
+    //    confident wrong answer rather than filling a gap, which is the other
+    //    job an alias does: `aliases[aliasProbe(key)] ?? findClosestMatches(…)`
+    //    consults the table first and wins outright.
+    //
+    // The value contract has refused the pair since ADR-0104 D1, so the rename
+    // is the one an author actually needs. `field-value.test.ts` pins both
+    // roles, including the negative half for `latitude`.
     aliases: { latitude: 'lat', longitude: 'lng' },
   },
   {

@@ -9,12 +9,14 @@
  *
  * ## Why this is a shared module and not a copy in each gate
  *
- * Two gates need this predicate and they need the SAME one:
+ * TWO gates needed this predicate and needed the SAME one. One of them is gone;
+ * the module is not, and the reason it exists is worth keeping in front of
+ * whoever considers folding it back in:
  *
  *   * `check-type-check-coverage.mjs` asks it to decide which programs
  *     ACCOUNT for a package's files -- a config no script invokes reads as
- *     coverage and delivers none (#5286).
- *   * `check-type-source-resolution.mjs` asks it to decide which programs are
+ *     coverage and delivers none (#5286). This is the ONE live consumer.
+ *   * `check-type-source-resolution.mjs` asked it to decide which programs were
  *     in its POPULATION at all. That gate read each package's `tsconfig.json`
  *     and only that one, so the sibling `tsconfig.test.json` this repo
  *     PRESCRIBES as the supported repair for a hidden test layer was a whole
@@ -22,11 +24,16 @@
  *     `packages/triggers/trigger-record-change`: the same 7 test files with the
  *     same four dist-resolved type imports were REPORTED when put through the
  *     build config and SILENT through the prescribed sibling -- so following
- *     the house pattern was what made the exposure invisible.
+ *     the house pattern was what made the exposure invisible. ⛔ RETIRED under
+ *     the maintainer ruling of 2026-09-18 on #18373; the measurement above is
+ *     why the predicate is shaped the way it is and outlives the gate.
  *
- * A second copy of the regex is how those two answers drift apart, and the
- * symptom of drift is a green gate on either side. One rule, one home, one set
- * of cases -- the shape `workspace-enumerator.mjs` and `invoked-as.mjs` use.
+ * A second copy of the regex is how two answers drift apart, and the symptom of
+ * drift is a green gate on either side. One rule, one home, one set of cases --
+ * the shape `workspace-enumerator.mjs` and `invoked-as.mjs` use. ⛔ Collapsing
+ * this back into its remaining caller is a decision of its own, not a
+ * consequence of the retirement: its cases are floored in THIS file's dispatch
+ * (PR #15327) and a fold-in does not inherit that floor.
  *
  * ## What the answer IS, and the one property a consumer must handle
  *
@@ -35,7 +42,7 @@
  * reference written with a directory (`-p ../shared/tsconfig.test.json`) is
  * credited under its BASENAME as though it named the package's own file.
  *
- * That is a property, not a bug to route around here: both consumers resolve
+ * That is a property, not a bug to route around here: the consumer resolves
  * the answer against the package directory, so a name with no file behind it
  * is dropped. It is stated out loud because the residual case is real -- a
  * package that BOTH reaches for a config in another directory AND carries a
@@ -43,8 +50,9 @@
  * while #11490 was implemented: 0 of the workspace's package.json files
  * reference any tsconfig with a directory prefix, so the case has no instance
  * today. Do not "fix" it by loosening the class to admit `/` without deciding
- * what a config OUTSIDE the package means to each caller -- the two callers do
- * not want the same thing there.
+ * what a config OUTSIDE the package means to the caller -- when there were two
+ * callers they did not want the same thing there, which is why this was never
+ * settled in passing.
  */
 
 import { isEntrypoint } from './invoked-as.mjs';
@@ -199,12 +207,12 @@ const CHAIN_CASES = [
 // This is the class-3 placement PR #15309 settled.
 //
 // ⚠️ This module is a LIBRARY: `check-type-check-coverage.mjs` folds this
-// `selfTest()` into its own, and `check-type-source-resolution.mjs` imports the
-// predicates. Those importers call `selfTest()`, which registers into the
-// ledger below — harmlessly, because the FLOOR is evaluated only in this file's
-// own `--self-test` dispatch, which an importer never reaches. Scoping the check
-// to the dispatch is what keeps a fold-in from inheriting a refusal it cannot
-// act on.
+// `selfTest()` into its own. (`check-type-source-resolution.mjs` imported the
+// predicates too, until it was retired on 2026-09-18 — #18373.) An importer
+// calls `selfTest()`, which registers into the ledger below — harmlessly,
+// because the FLOOR is evaluated only in this file's own `--self-test`
+// dispatch, which an importer never reaches. Scoping the check to the dispatch
+// is what keeps a fold-in from inheriting a refusal it cannot act on.
 //
 // ⛔ The floor is NOT placed at the end of `selfTest()` before its `return`: an
 // early return anywhere above that line would skip the check entirely — the

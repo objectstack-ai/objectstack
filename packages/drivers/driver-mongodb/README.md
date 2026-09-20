@@ -36,16 +36,19 @@ explicit override (recognised values: `mongodb`, `mongo`).
 
 ```typescript
 import { defineStack } from '@objectstack/spec';
+import { DriverPlugin } from '@objectstack/runtime';
 import { MongoDBDriver } from '@objectstack/driver-mongodb';
 
 export default defineStack({
-  driver: new MongoDBDriver({
-    url: 'mongodb://localhost:27017/myapp',
-    database: 'myapp',        // Optional: overrides URI database
-    maxPoolSize: 10,          // Optional: connection pool size (default: 10)
-    minPoolSize: 1,           // Optional: minimum pool (default: 1)
-    connectTimeoutMS: 10000,  // Optional: connection timeout
-  }),
+  plugins: [
+    new DriverPlugin(new MongoDBDriver({
+      url: 'mongodb://localhost:27017/myapp',
+      database: 'myapp',        // Optional: overrides URI database
+      maxPoolSize: 10,          // Optional: connection pool size (default: 10)
+      minPoolSize: 1,           // Optional: minimum pool (default: 1)
+      connectTimeoutMS: 10000,  // Optional: connection timeout
+    }), 'mongodb'),
+  ],
 });
 ```
 

@@ -54,13 +54,13 @@ import { z } from 'zod';
  * @example Programmatic Use
  * ```typescript
  * const query: ODataQuery = {
- *   select: ['name', 'email'],
- *   filter: "country eq 'US' and revenue gt 100000",
- *   orderby: 'revenue desc',
- *   top: 10,
- *   skip: 20,
- *   expand: ['orders'],
- *   count: true
+ *   $select: ['name', 'email'],
+ *   $filter: "country eq 'US' and revenue gt 100000",
+ *   $orderby: 'revenue desc',
+ *   $top: 10,
+ *   $skip: 20,
+ *   $expand: ['orders'],
+ *   $count: true
  * }
  * ```
  */
@@ -71,6 +71,47 @@ import { z } from 'zod';
  * System query options defined by OData v4 specification.
  * These are URL query parameters that control the query execution.
  * 
+ * ## [#18977] This schema grades no runtime door — and a SECOND declaration of
+ * the same parameter names does
+ *
+ * The declaration that grades a query bag is `QueryTransportParamsSchema`
+ * (`../data/data-engine.zod.ts`), reached from `FindDataRequestSchema.query`
+ * through `QueryWithTransportSchema`. This one is the OData v4 URL-convention
+ * VOCABULARY and nothing parses through it: measured on this tree, its only
+ * consumers are the `OData.buildUrl` helper at the foot of this file and this
+ * file's own unit test — no route, no ingress, no normalizer.
+ *
+ * ⚠️ On `$orderby` the two declarations are COMPLEMENTARY REFUSALS: each
+ * accepts exactly what the other rejects, so reading either one carefully and
+ * completely still produces the wrong answer about the other. Measured with
+ * `safeParse` on both, one tree:
+ *
+ * | `$orderby` value | here | `QueryTransportParamsSchema.$orderby` |
+ * |:---|:---|:---|
+ * | `'name desc'` / `'-created_at'` | accepted | REFUSED |
+ * | `['name desc', 'email asc']` | accepted | REFUSED |
+ * | `[{field, order}]` | REFUSED | accepted |
+ * | `{name: 'asc'}` / `{name: 1}` | REFUSED | accepted |
+ *
+ * Both halves are pinned in `odata-orderby-dual-declaration.test.ts`, which is
+ * the mechanical half of this cross-reference: widening or narrowing either
+ * side turns it red and lands the author here.
+ *
+ * ⛔ The gap is NOT closed by widening one side to match the other. #18704
+ * settled which spelling is canonical and why the transport schema refuses
+ * these two: lowering a sort EXPRESSION means PARSING, and a second parser
+ * beside the door's is how one rule gets two implementations that disagree
+ * (the paragraph above `QueryTransportParamsSchema` states it verbatim).
+ * Changing either accept set is a decision, not a tidy-up.
+ *
+ * ⭐ What the string forms are not is unserved. `normalizeSortNodes`
+ * (`@objectstack/metadata-protocol`) is the one shared ingress normalizer
+ * behind `GET /data/:object`, the export route and in-process `findData`, and
+ * it reads `'name desc'`, `'-created_at'` and the `string[]` form — so a
+ * querystring spelled the OData way works, while the same bag sent as a
+ * `POST /data/:object/query` body answers `400 VALIDATION_FAILED`. The
+ * difference is the DOOR, and neither door is this schema.
+ *
  * @see https://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part2-url-conventions.html#sec_SystemQueryOptions
  */
 import { lazySchema } from '../shared/lazy-schema';
@@ -115,6 +156,15 @@ export const ODataQuerySchema = lazySchema(() => z.object({
    * @example "name"
    * @example "revenue desc"
    * @example "country asc, revenue desc"
+   *
+   * ⛔ [#18977] These two shapes are exactly the ones
+   * `QueryTransportParamsSchema.$orderby` (`DataEngineSortSchema`,
+   * `../data/data-engine.zod.ts`) DELIBERATELY refuses, and that is the
+   * declaration a query bag is graded against. Sent as a
+   * `POST /data/:object/query` body this spelling answers
+   * `400 VALIDATION_FAILED`; sent on the querystring it is parsed by
+   * `normalizeSortNodes` at the ingress and works. See the cross-reference on
+   * the schema above before writing either shape into stored metadata.
    */
   $orderby: z.union([
     z.string(),           // "name desc"

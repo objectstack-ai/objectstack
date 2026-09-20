@@ -149,12 +149,18 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // `readsDist`: every path that would regenerate these refuses unless the
   // build is newer than the sources it claims to describe.
   { path: 'packages/spec/api-surface/**', gen: 'gen:api-surface', check: 'check:api-surface', readsDist: true },
-  // Deliberately NOT sharded (#5837): 1.3KB, one line per `defineX` factory —
-  // never the conflict surface its neighbour was.
+  // The SHAPE half of the same surface (#16045): the declaration TEXT of every
+  // export, per entry point. It replaced `api-surface-signatures.json`, a 27-row
+  // `sha256` sibling that was deliberately unsharded because it was 1.3KB — this
+  // one is 12 MiB across 17 shards, so it is sharded for exactly the reason its
+  // `api-surface/` neighbour is: the merge queue rebuilds server-side with no
+  // custom driver, and two PRs that share a generated file evict the second.
+  // `readsDist` for the same reason as the row above, sharpened by size: on a
+  // stale dist it writes declaration text describing a build nobody made.
   {
-    path: 'packages/spec/api-surface-signatures.json',
-    gen: 'gen:api-surface',
-    check: 'check:api-surface',
+    path: 'packages/spec/api-surface-declarations/**',
+    gen: 'gen:api-surface-declarations',
+    check: 'check:api-surface-declarations',
     readsDist: true,
   },
   // The #4796 declaration-origin baseline: which source declaration each entry
@@ -848,6 +854,33 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'Nothing merges it and no `check:` proves it current, so it has no place in either '
       + 'ledger — recorded so that "no disposition" is not confused with "not yet decided". Same '
       + 'expiry clause as the entry above: committing it turns this entry red.',
+  },
+  {
+    // ⚠️ NOT a directory of this repository, and by ruling never one. The
+    // generator's `--out <dir>` is a runner tempdir whose contents are pushed
+    // to the repository WIKI — a separate git repo that this driver, this
+    // ledger and the merge queue all sit outside of.
+    path: 'wiki/**',
+    gen: 'gen:checklist-status',
+    // The ROOT manifest defines this script, not `packages/spec` — and the
+    // accounting is keyed per (owner, script), so leaving this to the default
+    // owner records the disposition against a manifest that has no such script
+    // and leaves the real one unaccounted. Both halves red at once, which is
+    // the two-way reconciliation working.
+    owner: ROOT_OWNER,
+    untracked: true,
+    why:
+      'writes NOTHING into this repository. `gen:checklist-status` prints the per-area '
+      + 'active/planned census to stdout and, with `--out <dir>`, renders the wiki page set into '
+      + 'that directory; `.github/workflows/checklist-status.yml` publishes it to the repository '
+      + 'wiki on a schedule. So "discard both sides and re-run the generator" is not a question '
+      + 'that arises — git never merges these pages, and the wiki is regenerated wholesale every '
+      + 'run. Recorded rather than omitted because the ALTERNATIVE was considered and REFUSED on '
+      + 'the card: a `STATUS.md` committed to `docs/qa/platform-checklist/` paired with a '
+      + '`check:checklist-status` gate, which is exactly the routed-artifact shape this ledger is '
+      + 'full of, and which a reader may well assume happened here. Same expiry clause as the two '
+      + 'entries above: the day any of these pages is committed to this tree, this entry turns red '
+      + 'and a real disposition is owed.',
   },
   {
     path: 'docs/audits/**',

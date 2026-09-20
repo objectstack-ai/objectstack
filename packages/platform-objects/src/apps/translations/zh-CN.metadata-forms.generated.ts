@@ -249,6 +249,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "enable.clone": {
         label: "Clone"
       },
+      validations: {
+        label: "Validations",
+        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+      },
       datasource: {
         label: "数据源",
         helpText: "目标数据源 ID（默认：\"default\"）"
@@ -423,6 +427,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "删除行为",
         helpText: "被引用记录删除时的处理方式"
+      },
+      relatedListFilter: {
+        label: "Related List Filter",
+        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
       },
       expression: {
         label: "表达式",

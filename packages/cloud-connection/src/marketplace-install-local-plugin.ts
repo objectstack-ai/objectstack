@@ -175,7 +175,7 @@ export interface MarketplaceInstallLocalPluginConfig {
 }
 
 // Desired-state entry shape — owned by the LocalManifestSource ledger
-// (ADR-0007 step ⑤: the ledger is the named local desired-state owner;
+// (cloud ADR-0007 step ⑤: the ledger is the named local desired-state owner;
 // this plugin is its HTTP mutation surface).
 type InstalledEntry = InstalledManifestEntry;
 

@@ -128,6 +128,8 @@
     "DeployValidationIssueSchema": "system/DeployValidationIssue",
     "DeployValidationResult": "system/DeployValidationResult",
     "DeployValidationResultSchema": "system/DeployValidationResult",
+    "DevLogin": "system/DevLogin",
+    "DevLoginSchema": "system/DevLogin",
     "DisasterRecoveryPlan": "system/DisasterRecoveryPlan",
     "DisasterRecoveryPlanSchema": "system/DisasterRecoveryPlan",
     "DistributedCacheConfig": "system/DistributedCacheConfig",

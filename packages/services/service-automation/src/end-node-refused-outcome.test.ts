@@ -384,48 +384,70 @@ describe('#15788 — the region boundary, made loud', () => {
      * throw as the try region FAILING: the author's refusal would run the catch
      * handler and the run would still record `completed`.
      *
-     * ⛔ Nothing an author had is narrowed. Before #15788 an `end` inside a
-     * region was a no-op whatever its `outcome`, so this shape has never once
-     * been honoured; whether a refusal should instead propagate out of a region
-     * is a real question the #14945 ruling does not answer.
+     * ⚠️ #15646 moved that refusal one door EARLIER, and this case moved with
+     * it. `FlowSchema` now refuses an `end` node inside any ADR-0031 region
+     * body at parse, and `registerFlow` parses (`canonicalizeStoredFlow` →
+     * `FlowSchema.parse`), so the fixture below no longer registers at all and
+     * the run this case used to drive is unreachable. The fixture is
+     * deliberately unchanged, so this case still fails the day the shape
+     * becomes declarable again — a re-home, ⛔ not a deletion.
+     *
+     * ⚠️ What it no longer covers, stated rather than left to be discovered:
+     * `runRegion`'s own `isRefusalSignal` arm. `FlowRefusalSignal` is raised at
+     * exactly one site — an `end` node whose parsed `outcome` is `refused` —
+     * and the class is not exported, so with the parse refusal in place no
+     * authored flow reaches that arm except past `MAX_REGION_DEPTH` (32),
+     * where the spec's region walk stops. The engine code stays as the refusal
+     * for that one remaining seam, and nothing in this package exercises it.
+     *
+     * ⛔ Nothing an author had is narrowed by either door. Before #15788 an
+     * `end` inside a region was a no-op whatever its `outcome`, so this shape
+     * has never once been honoured; whether a refusal should instead propagate
+     * out of a region is a real question the #14945 ruling does not answer.
      */
-    it('a refusing `end` inside a `loop` body fails the run loudly instead of vanishing', async () => {
+    it('a refusing `end` inside a `loop` body is refused at REGISTRATION, before any run', () => {
         const { engine } = engineWithStore();
         installBuiltinNodes(engine, { logger: createTestLogger(), getService: () => undefined } as never);
-        engine.registerFlow('in_region', {
-            name: 'in_region', label: 'in_region', type: 'autolaunched',
-            successMessage: SUCCESS_TEXT,
-            nodes: [
-                { id: 'start', type: 'start', label: 'Start' },
-                {
-                    id: 'sweep', type: 'loop', label: 'Sweep',
-                    config: {
-                        collection: '{items}',
-                        iteratorVariable: 'item',
-                        body: {
-                            nodes: [{ id: 'nope', type: 'end', label: 'Nope', config: { outcome: 'refused', message: REFUSAL_TEMPLATE } }],
-                            edges: [],
+
+        let caught: unknown;
+        try {
+            engine.registerFlow('in_region', {
+                name: 'in_region', label: 'in_region', type: 'autolaunched',
+                successMessage: SUCCESS_TEXT,
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start' },
+                    {
+                        id: 'sweep', type: 'loop', label: 'Sweep',
+                        config: {
+                            collection: '{items}',
+                            iteratorVariable: 'item',
+                            body: {
+                                nodes: [{ id: 'nope', type: 'end', label: 'Nope', config: { outcome: 'refused', message: REFUSAL_TEMPLATE } }],
+                                edges: [],
+                            },
                         },
                     },
-                },
-            ],
-            edges: [{ id: 'e0', source: 'start', target: 'sweep' }],
-        } as never);
+                ],
+                edges: [{ id: 'e0', source: 'start', target: 'sweep' }],
+            } as never);
+        } catch (err) {
+            caught = err;
+        }
 
-        // `items` rides on the trigger record, which the engine flattens into
-        // the variable map — so `{items}` resolves without declaring an input.
-        const result = await engine.execute('in_region', {
-            event: 'manual', object: 'account', record: { ...ACME, items: [1] },
-        } as unknown as AutomationContext);
-
-        expect(result.success).toBe(false);
-        expect(result.status).toBe('failed');
+        // Refused, and refused by the REGION rule specifically — a bare "it
+        // threw" would be satisfied by any unrelated parse error.
+        const issues = (caught as { issues?: Array<{ path: Array<string | number>; message: string }> } | undefined)?.issues ?? [];
+        const refusal = issues.find((i) => i.message.includes('may not sit inside a structured region'));
+        expect(refusal, `no region refusal among ${JSON.stringify(issues)}`).toBeDefined();
+        // Anchored where the author wrote the node, not on the container.
+        expect(refusal!.path).toEqual(['nodes', 1, 'config', 'body', 'nodes', 0, 'type']);
         // The message names the shape and the one-line fix, per "absence must
         // be loud" — ⛔ not a bare stringified sentinel.
-        expect(result.error).toContain('structured region');
-        expect(result.error).toContain("outcome: 'refused'");
-        // ⛔ And it is NOT recorded as a refusal: the run did not refuse, the
-        // engine declined to honour a shape it cannot express.
-        expect(result.refusalMessage).toBeUndefined();
+        expect(refusal!.message).toContain('An `end` node may not sit inside a structured region');
+        expect(refusal!.message).toContain('Put the `end` on the top-level graph');
+
+        // …and the refusal is terminal: nothing was registered, so no later
+        // call can reach the shape by another door.
+        expect(engine.getFlowVersionHistory('in_region')).toEqual([]);
     });
 });

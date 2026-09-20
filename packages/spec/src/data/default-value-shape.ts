@@ -119,10 +119,27 @@ export interface LiteralDefaultValueVerdict {
  *     [0] invalid_type          street   Invalid input: expected string, received number
  *     [1] unrecognized_keys              ... Did you mean `postal_code` -> `postalCode`? ...
  *
- * The rename IS the prescription, and edit distance cannot reach it
- * (`latitude` -> `lat`), which is exactly why `LocationValueSchema` and
- * `AddressValueSchema` curate an `aliases` map. Reading positionally built that
- * hint and threw it away, handing the author a missing-member type error about
+ * The rename IS the prescription. Which channel produced it depends on the
+ * key, and the two cases this function is pinned against are one of each — so
+ * "the curated `aliases` map is what makes the rename possible" is true of only
+ * half of them. The fallback budget is `Math.max(2, Math.floor(key.length / 3))`
+ * (`shared/suggestions.zod.ts`), and the lookup is
+ * `aliases[aliasProbe(key)] ?? findClosestMatches(key, knownKeys, budget, 1)[0]`
+ * — the table is consulted first and wins outright.
+ *
+ *  - `postal_code` -> `postalCode`, the example rendered above, is the
+ *    FALLBACK's own answer: scoring folds case and separators on both sides, so
+ *    it is 1 edit against a budget of 3, and `AddressValueSchema`'s alias table
+ *    never sees the key.
+ *  - `latitude` -> `lat` is 5 edits against a budget of 2 and does come from
+ *    `LocationValueSchema`'s curated entry — but not because the fallback is
+ *    silent. `altitude` is a declared member 2 edits away, inside the budget,
+ *    so the bare fallback answers `latitude` -> `altitude` and this alias
+ *    OVERRULES a confident wrong answer. That is an alias's second job, and
+ *    `field-value.test.ts` pins both halves of it.
+ *
+ * Reading positionally built that hint and threw it away, handing the author a
+ * missing-member type error about
  * a member they never wrote — and which of the two they got depended on whether
  * some unrelated member happened to also be wrong, which nobody chose and
  * nobody can see.

@@ -23,16 +23,29 @@
 // What clause 2 actually rests on is that the helper is ADMIN-KEYED, not
 // first-registrant-keyed: it binds the account resolved by the config anchor
 // (a declared `OS_PLATFORM_OWNER_EMAIL` address whose stored row reads
-// VERIFIED) or by the legacy cross-tenant `admin_full_access` grant — and on a
-// walled deployment `bootstrap-platform-admin.ts` mints no such grant for
-// anybody. A self-registrant matches neither, so the trigger fires and the
+// VERIFIED). A self-registrant does not match it, so the trigger fires and the
 // helper answers `no_admin`.
+//
+// ⭐ [objectstack#11663 L5] That used to be a TWO-anchor sentence, and the
+// second anchor was the load-bearing weakness. The helper also fell back to the
+// legacy cross-tenant `admin_full_access` grant, on every posture, and clause 2
+// held on a walled box only because objectstack#11211 had stopped MINTING such
+// a row there — a premise about what is written, not about what is read. A rig
+// carrying a pre-migration row still had that fallback live. L5 retired the
+// walled half of that anchor at the derivation site and keyed this helper with
+// it, so clause 2 now rests on the KEYING itself: under a wall the grant is not
+// an anchor at all, whoever holds it. The case below that used to be a positive
+// control on that fallback is now the pin on its retirement.
 //
 // ⚠️ Therefore an outcome-only assertion would be worthless here: "no org was
 // created" is also what an empty fake store says when nothing is wired at all.
 // Every negative case below is paired with a POSITIVE control that flips
 // exactly one fact and makes the same middleware create the org — so a green
 // negative is evidence about the KEYING, not about the harness being inert.
+// ⛔ Since L5 that control is the OPERATOR case ("the same middleware DOES
+// bootstrap the operator once their declared address verifies"), which is the
+// one remaining fact that flips this middleware into writing. Deleting it would
+// leave every negative in this file unfalsifiable.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
@@ -273,14 +286,24 @@ describe('walled + invite-only: the multi-org default-org bootstrap never joins 
     expect(memberInserts[0]!.data.role).toBe('owner');
   });
 
-  it('POSITIVE CONTROL — a legacy cross-tenant grant still anchors the bootstrap, which is what makes case (a) a measurement', async () => {
-    // This is cloud#1509's reported defect reconstructed at the seam: give the
-    // first self-registrant the unscoped `admin_full_access` grant that walled
-    // deployments used to mint for her, and the SAME middleware creates the
-    // Default Organization and merges her into it — `positions: [… org_owner,
-    // platform_admin], activeOrganizationId: <default org>`, verbatim from the
-    // card. Case (a) is green only because objectstack#11211 stopped minting
-    // that row on a walled box, not because this path is inert.
+  it('⛔ [objectstack#11663 L5] a legacy cross-tenant grant NO LONGER anchors the bootstrap under a wall', async () => {
+    // RE-AUTHORED. This case used to be the positive control: it gave the first
+    // self-registrant the unscoped `admin_full_access` grant that walled
+    // deployments used to mint for her, and asserted that the SAME middleware
+    // created the Default Organization and merged her into it — cloud#1509's
+    // reported defect reconstructed at the seam, live on any rig that still
+    // carried a pre-migration row.
+    //
+    // L5 keyed that anchor off under a wall, at the derivation site and at this
+    // helper together, so the fixture below now answers `no_admin` and writes
+    // nothing. ⛔ The assertion is INVERTED rather than deleted, because the
+    // fixture is the exact shape cloud#1509 reported and it is the only place in
+    // this tree that pins what a walled rig does with a legacy row at this seam.
+    //
+    // ⚠️ The suite's method survives the inversion: this case stops being the
+    // control, and the OPERATOR case above carries that role — it flips exactly
+    // one fact (a declared address reading verified) and makes this same
+    // middleware create the org, so every negative here remains falsifiable.
     const store: Record<string, Row[]> = {
       sys_permission_set: seededPermissionSets(),
       sys_user_permission_set: [
@@ -299,9 +322,13 @@ describe('walled + invite-only: the multi-org default-org bootstrap never joins 
       data: { id: 'usr_alice', email: SELF_REGISTRANT_EMAIL },
     });
 
-    expect(orgInserts).toHaveLength(1);
-    expect(memberInserts).toHaveLength(1);
-    expect(memberInserts[0]!.data.user_id).toBe('usr_alice');
+    // The post-L5 answer: nothing is created and nobody is bound. Under a wall
+    // the account holding that row is not the platform admin — the derivation
+    // grades it MEMBER — so there is no administrator for this helper to give
+    // an organization to, and a self-registrant is never auto-merged whatever
+    // rows she carries.
+    expect(orgInserts).toHaveLength(0);
+    expect(memberInserts).toHaveLength(0);
   });
 
   it('the bootstrap really IS registration-triggered here — a `sys_user` insert reaches the helper', async () => {

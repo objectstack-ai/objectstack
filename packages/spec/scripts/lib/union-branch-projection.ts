@@ -60,7 +60,10 @@
  * fails the projection. Nothing is ever emitted with a `{}` standing in for a
  * type Zod refused.
  */
+import { isDeepStrictEqual } from 'node:util';
+
 import { z } from 'zod';
+import { projectPublishedJsonSchema } from './refinement-projection';
 
 /**
  * Temporary marker key written onto a node Zod could not project. It never
@@ -110,6 +113,14 @@ export interface BranchProjection {
   readonly io: 'output' | 'input';
   /** Every dropped branch, in document order. Never empty. */
   readonly pruned: readonly PrunedBranch[];
+  /**
+   * The same projection BEFORE a single branch was removed. Carried because it
+   * is the other half of the receipt `pruned` publishes as
+   * `x-unprojectable-branches`: the record states what is MISSING from
+   * `schema`, and the only tree that can answer whether it states it correctly
+   * is the one the branches were removed from.
+   */
+  readonly unpruned: Record<string, unknown>;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -249,6 +260,181 @@ export function findSurvivingMark(node: unknown, at = '#'): string | null {
 }
 
 /**
+ * The key `build-schemas.ts` publishes this projection's record under, and the
+ * one `auditUnprojectableBranchRecord` below reads back. Named here, beside the
+ * prune that produces the record, so the writer and the reader cannot drift to
+ * two spellings of one key — the state this record was filed in (#17107) was
+ * ONE writer, no reader, and the key spelled as a bare literal at the writer.
+ */
+export const UNPROJECTABLE_BRANCHES_KEY = 'x-unprojectable-branches';
+
+/** A branch pointer in the spelling `pruneMarkedUnionBranches` produces. */
+const BRANCH_POINTER = /^#(?:\/[^/]*)*\/(?:anyOf|oneOf)\/(?:0|[1-9][0-9]*)$/;
+
+/** JSON Pointer unescaping (RFC 6901) — the inverse of `escapeToken`. */
+const unescapeToken = (token: string): string => token.replace(/~1/g, '/').replace(/~0/g, '~');
+
+/** The tokens of a `#/…` pointer. `#` alone yields `[]`. */
+function pointerTokens(pointer: string): string[] {
+  return pointer.split('/').slice(1).map(unescapeToken);
+}
+
+/** The node a pointer names, or `undefined` when it names nothing. */
+function resolvePointer(root: unknown, pointer: string): unknown {
+  let node: unknown = root;
+  for (const token of pointerTokens(pointer)) {
+    if (Array.isArray(node)) node = node[Number(token)];
+    else if (isObject(node)) node = node[token];
+    else return undefined;
+    if (node === undefined) return undefined;
+  }
+  return node;
+}
+
+/**
+ * Every marked DIRECT union member of a tree, with the pointer it sits at —
+ * the population `pruneMarkedUnionBranches` drops, read off the tree it drops
+ * them from rather than off the record that claims to describe them.
+ */
+function markedUnionMembers(node: unknown, at: string, into: PrunedBranch[]): PrunedBranch[] {
+  if (Array.isArray(node)) {
+    node.forEach((item, index) => markedUnionMembers(item, `${at}/${index}`, into));
+    return into;
+  }
+  if (!isObject(node)) return into;
+  for (const [key, value] of Object.entries(node)) {
+    markedUnionMembers(value, `${at}/${escapeToken(key)}`, into);
+  }
+  for (const keyword of UNION_KEYWORDS) {
+    const branches = node[keyword];
+    if (!Array.isArray(branches)) continue;
+    branches.forEach((branch, index) => {
+      const mark = isObject(branch) ? branch[UNPROJECTABLE_MARK] : undefined;
+      if (typeof mark === 'string') into.push({ at: `${at}/${keyword}/${index}`, type: mark });
+    });
+  }
+  return into;
+}
+
+/** Deepest pointer first, and within one depth the LAST branch first, so each
+ *  removal leaves every pointer not yet applied still naming its own node. */
+function deepestBranchFirst(a: PrunedBranch, b: PrunedBranch): number {
+  const depth = pointerTokens(b.at).length - pointerTokens(a.at).length;
+  if (depth !== 0) return depth;
+  return Number(pointerTokens(b.at).at(-1)) - Number(pointerTokens(a.at).at(-1));
+}
+
+/**
+ * Read the published `x-unprojectable-branches` record off a projected schema
+ * and check it against the projection it annotates. Returns one message per
+ * disagreement; an empty array means the record is faithful.
+ *
+ * Two directions, because either one alone passes a record that lies:
+ *
+ *   - **Replay** — removing exactly the branches the record names from the
+ *     UNPRUNED projection must reproduce the published schema. This catches a
+ *     pointer whose index shifted (the hazard `pruneMarkedUnionBranches`
+ *     records the PRE-removal index to avoid), an entry for a branch that was
+ *     never dropped, and a missing entry for a union that collapsed whole.
+ *   - **Completeness** — every marked direct union member of the unpruned
+ *     projection must appear in the record under the type it was marked with.
+ *     The replay cannot see this on its own: a collapsed union is removed
+ *     wholesale, so the members inside it reproduce the published schema
+ *     whether the record names them or not.
+ *
+ * ⛔ This record is not prose. It is the only statement on the artifact that
+ * the Zod type accepts a shape this file does not, so a record that misdescribes
+ * the artifact is worse than no record: it is the same silence #16431 (a) was
+ * filed about, signed.
+ */
+export function auditUnprojectableBranchRecord(
+  published: Record<string, unknown>,
+  projection: BranchProjection,
+): string[] {
+  const raw = published[UNPROJECTABLE_BRANCHES_KEY];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return [
+      `${UNPROJECTABLE_BRANCHES_KEY} is ${JSON.stringify(raw) ?? 'undefined'}, ` +
+        `not the non-empty array of dropped branches this projection has`,
+    ];
+  }
+
+  const defects: string[] = [];
+  const record: PrunedBranch[] = [];
+  for (const [index, entry] of raw.entries()) {
+    const at = isObject(entry) ? entry.at : undefined;
+    const type = isObject(entry) ? entry.type : undefined;
+    if (typeof at !== 'string' || !BRANCH_POINTER.test(at) || typeof type !== 'string' || type === '') {
+      defects.push(`entry ${index} is not a { at: <union member pointer>, type } pair: ${JSON.stringify(entry)}`);
+    } else if (record.some((seen) => seen.at === at)) {
+      defects.push(`entry ${index} repeats the pointer ${at}`);
+    } else {
+      record.push({ at, type });
+    }
+  }
+  // A malformed record cannot be replayed, and every check below would report
+  // the same damage a second time in a less legible way.
+  if (defects.length > 0) return defects;
+
+  // Each pointer names a node of the tree the branches were removed FROM, and
+  // says what that node was: the mark Zod's override left on it, or `union`
+  // for a union this prune emptied — which carries no mark until it is emptied.
+  for (const { at, type } of record) {
+    const node = resolvePointer(projection.unpruned, at);
+    if (!isObject(node)) {
+      defects.push(`${at} names no node of the unpruned projection`);
+      continue;
+    }
+    const mark = node[UNPROJECTABLE_MARK];
+    if (typeof mark === 'string') {
+      if (mark !== type) {
+        defects.push(`${at} is marked ${JSON.stringify(mark)}, recorded as ${JSON.stringify(type)}`);
+      }
+    } else if (type !== 'union' || !UNION_KEYWORDS.some((keyword) => Array.isArray(node[keyword]))) {
+      defects.push(`${at} is neither a marked node nor a union, yet is recorded as ${JSON.stringify(type)}`);
+    }
+  }
+
+  for (const dropped of markedUnionMembers(projection.unpruned, '#', [])) {
+    if (!record.some((entry) => entry.at === dropped.at && entry.type === dropped.type)) {
+      defects.push(`${dropped.at} was dropped as ${JSON.stringify(dropped.type)} and the record does not say so`);
+    }
+  }
+
+  const replay = structuredClone(projection.unpruned);
+  for (const { at } of [...record].sort(deepestBranchFirst)) {
+    const container = resolvePointer(replay, at.slice(0, at.lastIndexOf('/')));
+    const index = Number(pointerTokens(at).at(-1));
+    if (!Array.isArray(container) || index >= container.length) {
+      defects.push(`${at} cannot be removed: it names position ${index} of ${JSON.stringify(container)}`);
+      continue;
+    }
+    container.splice(index, 1);
+  }
+  if (defects.length > 0) return defects;
+
+  // Compared against the PUBLISHED object, not against `projection.schema` —
+  // that field is the very object `build-schemas.ts` decorates in place, so
+  // auditing it would be auditing this module's own return value. What the
+  // generator is allowed to add on top of a projection is root-level
+  // ANNOTATION: `$id`, and `x-` keywords, which every JSON Schema validator
+  // ignores. Anything else it added is structural, stays in the comparison,
+  // and is a disagreement — the record has to account for every difference
+  // between the tree the branches came out of and the file that shipped.
+  const body: Record<string, unknown> = { ...published };
+  for (const key of Object.keys(body)) {
+    if (!(key in replay) && (key === '$id' || key.startsWith('x-'))) delete body[key];
+  }
+  if (!isDeepStrictEqual(replay, body)) {
+    defects.push(
+      `removing the ${record.length} recorded branch(es) from the unpruned projection does not ` +
+        `reproduce the published schema — the record does not account for what this projection dropped`,
+    );
+  }
+  return defects;
+}
+
+/**
  * Project `value` by dropping union branches Zod cannot represent.
  *
  * Returns `null` when that does not produce a faithful projection — a marked
@@ -267,20 +453,24 @@ export function findSurvivingMark(node: unknown, at = '#'): string | null {
  * Fewest drops is the most faithful projection available, and the `x-io` flag
  * already tells a reader which shape they are looking at (#2967 / #2978).
  */
-export function projectByPruningUnionBranches(
-  value: z.ZodType,
-  options: { readonly target: 'draft-2020-12' },
-): BranchProjection | null {
+export function projectByPruningUnionBranches(value: z.ZodType): BranchProjection | null {
   const candidates: BranchProjection[] = [];
 
   for (const io of ['output', 'input'] as const) {
     let schema: JsonObject;
     try {
-      schema = z.toJSONSchema(value, {
-        target: options.target,
+      // ⭐ Through `projectPublishedJsonSchema`, never `z.toJSONSchema` directly
+      // (#18670 third arm). This path owns the single `override` slot
+      // `toJSONSchema` provides, so the refinement projection used to be handed
+      // in by the caller — and an export reaching its published file through
+      // HERE was then one forgotten argument away from being the one artifact
+      // missing a narrowing the ledger records as closed (`data/Hook` is the
+      // live case). The helper composes this module's marker pass with the
+      // refinement pass itself, so there is no argument left to forget.
+      schema = projectPublishedJsonSchema(value, {
+        io,
         unrepresentable: 'any',
         override: markUnprojectableNodes(io),
-        ...(io === 'input' ? { io } : {}),
       }) as JsonObject;
     } catch {
       // `unrepresentable: 'any'` removes the unrepresentable-type throws, so
@@ -289,6 +479,8 @@ export function projectByPruningUnionBranches(
       continue;
     }
 
+    // Taken BEFORE the prune mutates `schema` in place — see `unpruned`.
+    const unpruned = structuredClone(schema);
     const pruned: PrunedBranch[] = [];
     pruneMarkedUnionBranches(schema, '#', pruned);
     // A mark that survived is a node with no JSON form OUTSIDE a union — an
@@ -298,7 +490,7 @@ export function projectByPruningUnionBranches(
     // Nothing to drop, yet a strict pass refused this schema: whatever that is,
     // it is not the case this module exists for. Leave the export as it was.
     if (pruned.length === 0) continue;
-    candidates.push({ schema, io, pruned });
+    candidates.push({ schema, io, pruned, unpruned });
   }
 
   if (candidates.length === 0) return null;

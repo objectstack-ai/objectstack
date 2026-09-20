@@ -42,7 +42,7 @@ The design intent is a **runtime guardrail**: declare which `status` transitions
 
 - `IWorkflowService` (`packages/spec/src/contracts/workflow-service.ts:58` <!-- anchor-exempt: HISTORICAL --> — unlinked: the contract file was deleted on 2026-08-01 by #4451 / #4473, which retired the `workflow` service slot outright, closing the follow-up this record left open below) has **no concrete implementation**.
 - There is **no XState interpreter** anywhere (no `createMachine` / `interpret` / transition engine).
-- The write-path validator [`validateRecord`](../../packages/objectql/src/validation/record-validator.ts#L198) reads only `objectSchema.fields` and validates **field data types** (string/number/date/…). It **never reads `objectSchema.validations`** at all — so *not one* of the nine validation-rule types (`state_machine`, `cross_field`, `script`, `unique`, `format`, `json_schema`, `async`, `custom`, `conditional`) is enforced by it.
+- The write-path validator [`validateRecord`](../../packages/objectql/src/validation/record-validator.ts) reads only `objectSchema.fields` and validates **field data types** (string/number/date/…). It **never reads `objectSchema.validations`** at all — so *not one* of the nine validation-rule types (`state_machine`, `cross_field`, `script`, `unique`, `format`, `json_schema`, `async`, `custom`, `conditional`) is enforced by it.
 - **Nothing reads `object.stateMachines`.**
 
 So the guardrail goal is currently unmet at runtime. The only artefacts that exist are declarations — e.g. `examples/app-crm/src/workflows/stale-opportunity.workflow.ts:19` <!-- anchor-exempt: HISTORICAL --> (`StateMachineConfig`; unlinked — this file describes the pre-ADR state and was itself removed by this record's own implementation, see the checklist below), which additionally **mixes orchestration into the machine** (it carries `email_alert` / `task_creation` actions that no engine executes — that orchestration belongs to a record-triggered Flow per ADR-0019).
@@ -58,7 +58,7 @@ Future automation is **AI-generated, human-previewed** (ADR-0010 / ADR-0011). Th
 - The audience for the *name* is the **model**, not a non-technical admin. The right heuristic is **"meet the model where its priors are"**: use the term that is densest in training data for this concept.
 - "**state machine**" is that term — Rails `state_machine`, AWS Step Functions "State Machine", XState, Spring Statemachine. An AI given a field named `state_machine` with a `{ from: [to] }` transition table hits its priors and produces correct code. A coined term (e.g. `lifecycle`) forces the model off its priors onto local docs alone.
 - `state_machine` also reads as **maximally distinct from `flow`** — eliminating the `flow` / `workflow` near-synonym ambiguity that makes an AI pick the wrong type.
-- `lifecycle` is additionally **already overloaded** in this codebase (managed-by buckets and toolbar "lifecycle actions" in [`object.zod.ts`](../../packages/spec/src/data/object.zod.ts) at L354/L371/L410/L765), so reusing it would create a *new* ambiguity.
+- `lifecycle` is additionally **already overloaded** in this codebase (managed-by buckets and toolbar "lifecycle actions" in [`object.zod.ts`](../../packages/spec/src/data/object.zod.ts)), so reusing it would create a *new* ambiguity.
 
 Corollary (a trap to avoid): if we name it `state_machine`, the **shape must also match the well-known shape**. A conventional name on a bespoke structure is the worst case — the model's priors fire on the name and mislead on the structure. Keep the shape textbook FSM.
 
@@ -105,7 +105,7 @@ The surviving guardrail is named **`state_machine`** (rule type, already so name
 
 Wire the `validations` union into the write path — today nothing evaluates it (see §prior-state plumbing gap). Concretely:
 
-1. **Plumb the prior/merged record in.** Extend the rule-evaluation entry point (today [`validateRecord(schema, data, mode)`](../../packages/objectql/src/validation/record-validator.ts#L198)) to receive the prior record on update — e.g. `validateRecord(schema, data, mode, previous?)`, or run the rule pass from a `beforeUpdate` step that already holds both old and new. This unblocks `state_machine` **and** the currently-crippled `cross_field` / `script` rules in one move; do it union-wide, not `state_machine`-only.
+1. **Plumb the prior/merged record in.** Extend the rule-evaluation entry point (today [`validateRecord(schema, data, mode)`](../../packages/objectql/src/validation/record-validator.ts)) to receive the prior record on update — e.g. `validateRecord(schema, data, mode, previous?)`, or run the rule pass from a `beforeUpdate` step that already holds both old and new. This unblocks `state_machine` **and** the currently-crippled `cross_field` / `script` rules in one move; do it union-wide, not `state_machine`-only.
 2. **Transition check.** On update: if `old[field] !== new[field]` and `new[field] ∉ transitions[old[field]]`, **reject** with the rule's `message`. On insert: validate `new[field]` is the declared initial state — derived from the `Field.select` option marked `default: true` (no separate `initial` key needed; showcase relies on this).
 3. **Introspection endpoint (follow-on).** Expose `legalNext(object, field, currentState)` so UI/Agents read the legal set instead of re-deriving it.
 

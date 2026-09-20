@@ -6,7 +6,9 @@
  * surfaces (#9495), across the five governed repos (#9619, #14867), plus the
  * pre-arm `--test` predicate every seat runs before flipping ready (#9550).
  * Enumerates the PRs that MERGED into `main` since a given date/ref whose diff
- * touched a governed surface, with merge attribution, for the PM round report
+ * touched a governed surface — and, since #19036, every landing over
+ * `HUMAN_MERGE_LINE_THRESHOLD` changed lines whatever its paths (the "SIZE
+ * predicate" section below) — with merge attribution, for the PM round report
  * and the report-only patrol family (the `check-half-states.mjs` precedent: a
  * completed sweep exits 0 whether it found 0 or 40 entries; non-zero exits
  * classify the ENVIRONMENT, not the tree).
@@ -22,6 +24,8 @@
  *   node scripts/pm/check-governed-merges.mjs --pr 16997       # same predicate, list DERIVED from the API
  *   node scripts/pm/check-governed-merges.mjs --pr objectstack-ai/objectui#42   # any governed repo
  *   node scripts/pm/check-governed-merges.mjs --branch claude/issue-17003-x     # DERIVED offline, merge-base
+ *   node scripts/pm/check-governed-merges.mjs --pr 18971       # --pr and --branch read the SIZE too (additions + deletions)
+ *   node scripts/pm/check-governed-merges.mjs --test src/x.ts --additions 238310 --deletions 119   # the size, passed in
  *   node scripts/pm/check-governed-merges.mjs --self-test      # offline, no network
  *
  * ## Exit codes — the refusal to read as clean, in one table
@@ -42,10 +46,23 @@
  * `--test` mode is a PREDICATE, so it answers on its own codes and shares only
  * the failure code with the sweep:
  *   0  the given paths are NOT governed — ordinary queue landing applies.
- *   3  the given paths ARE governed — human merge only. Deliberately NOT 1 or
+ *   3  the given paths ARE governed — landing per the TIER the verdict line and
+ *      `--json` name (Tier H: a human merge or an authorized approval; Tier S:
+ *      a review of record on the PR thread — "The two landing tiers" below).
+ *      ONE code for both tiers, deliberately: every reader of this status asks
+ *      "may a seat arm this on green alone?", and the answer is no for both;
+ *      the tier is a second fact and travels in the words and the JSON, never
+ *      in the status, so no `$?` reader learns a new number. Deliberately NOT 1 or
  *      2: a governed verdict must be impossible to confuse with the sweep's
  *      "could not sweep" / "incomplete", so `if cmd; then` and `$?` readings
  *      cannot silently turn a governed answer into an environment complaint.
+ *      ALSO the answer when the diff's SIZE crosses `HUMAN_MERGE_LINE_THRESHOLD`
+ *      (the "SIZE predicate" section below) — deliberately the SAME code, so
+ *      every caller that already routes GOVERNED to the human terminal routes
+ *      an oversized PR there without learning a new code. Which limb fired is
+ *      in the words and in `--json`: `governed` is the PATH limb, `humanMerge`
+ *      is either limb. Half a `--additions`/`--deletions` pair is bad args
+ *      (1, below): the size is their SUM, and half a pair is no reading.
  *   1  bad args — no paths given. ⛔ Silence never reads as "not governed":
  *      `--test` with an empty path list is a failure, never a green light.
  *   The register rows in `GENERATED_SURFACE_EXCEPTIONS` carry a provenance-
@@ -60,7 +77,10 @@
  * already means "could not answer":
  *   1  could not DERIVE the list — an unresolvable ref, a merge-base that
  *      cannot be computed, an unreachable API, a page walk that came back
- *      short. ⛔ A derivation that cannot be made is a REFUSAL, never a
+ *      short, a PR object missing its `additions`/`deletions` pair, a
+ *      `--numstat` that did not read (the size leg, below), or `--additions`/
+ *      `--deletions` handed to a mode that reads the number itself (two
+ *      readings of one number). ⛔ A derivation that cannot be made is a REFUSAL, never a
  *      quieter answer: see the section below for why the fallback everyone
  *      reaches for is the defect itself.
  *
@@ -134,6 +154,71 @@
  * is wrong on any exact multiple of 100, so the walk follows `Link` and then
  * proves itself against the PR's own `changed_files` count. A walk that cannot
  * prove it collected the whole list refuses instead of answering on part of it.
+ *
+ * ## The SIZE predicate (maintainer ruling, 2026-09-18)
+ *
+ * The maintainer, verbatim, in the same exchange as ruling C on PR #18971:
+ *
+ *   「还有应该完善skills，修改代码量超过某个行数（比如5000）就应该人工审核。」
+ *
+ * Read as: a pull request whose changed line count exceeds 5,000 lands only by
+ * a human merge — the same terminal as a governed diff (ACCEPT on the card,
+ * `needs-user-decision` on the PR, a final 维护者速读, review requested from
+ * `GOVERNED_APPROVERS`), whatever paths it touches. 「比如」 makes 5,000 the
+ * ruled DEFAULT, declared once as `HUMAN_MERGE_LINE_THRESHOLD` so it moves by
+ * one word from the maintainer and by one edit here.
+ *
+ * The count is GitHub's `additions + deletions` on the PR — the number the API
+ * and the size labeller report — and generated files are INCLUDED. The case
+ * that prompted the ruling was PR #18971: +238,310 / −119, of which 237,706
+ * lines were regenerated artefacts, landed through the queue on an AI review
+ * alone. An exemption for generated files would exempt exactly that PR, so
+ * there is none: no regen family, no docs build and no revert is carved out.
+ * `GENERATED_SURFACE_EXCEPTIONS` lifts a PATH off the governed predicate on
+ * proven provenance; it lifts nothing from the size predicate, and the
+ * self-test pins that a certified regeneration over the threshold still lands
+ * by a human merge. A label (`size/xl`) is not a gate — the gate reads the
+ * numbers.
+ *
+ * Where the number comes from, per mode:
+ *   `--pr <n>`        `additions` / `deletions` off the same `GET /pulls/{n}`
+ *                     read that gives the `changed_files` count — one read, one
+ *                     channel. A PR object without both numbers is a REFUSAL on
+ *                     the derivation code (exit 1): never a "not governed"
+ *                     answer and never a size of zero.
+ *   `--branch <ref>`  `git diff --numstat --no-renames <merge-base> <ref>` —
+ *                     the range the path list is taken from; a binary file
+ *                     counts 0 lines here as it does on GitHub.
+ *   `--test <paths>`  `--additions <n> --deletions <n>`, both or neither. With
+ *                     neither the size is NOT MEASURED and the verdict says so
+ *                     on STDOUT — the path answer is complete and exits on its
+ *                     own codes, but the words say a seat has not read the
+ *                     size and which mode reads it. Handing the flags to a mode
+ *                     that reads the number itself is two readings of one
+ *                     number and is refused, the way two mode flags are.
+ *   sweep (default)   `git diff-tree --numstat --no-renames -m --first-parent`
+ *                     on each mainline commit (#19036) — the LANDED diff, off
+ *                     the same call that lists the commit's paths, zero API. A
+ *                     landing over the line is a sweep ENTRY on the size limb
+ *                     alone, listed beside the governed merges with the same
+ *                     attribution column, so a PR that slipped through the
+ *                     queue is visible to the audit half too. GitHub's own pair,
+ *                     read off the attribution GET the row already pays for, is
+ *                     printed beside the landed number when the two differ; the
+ *                     LISTING is decided on the landed number, which counts a
+ *                     rename as a delete plus an add (`--no-renames`, the same
+ *                     two paths the API reports) and so never reads under
+ *                     GitHub's.
+ *
+ * What did NOT change: `testVerdict(paths)` with no size answers the PATH
+ * question exactly as before (the queue guard's governed leg imports it for
+ * that question; since #19036 its SIZE leg hands this file the pull object's
+ * pair through `testVerdict([], { size })` and judges `landsByHumanMerge`, so
+ * the queue and the seat-side pre-check read one predicate); the governed
+ * answer, its words and the exception register are untouched. The one
+ * addition to every rendering is the size line — measured, or NOT MEASURED
+ * with the remedy — because a verifier that silently skips a leg it could not
+ * run reports success it did not measure.
  *
  * ## The regime this audit belongs to (maintainer ruling, 2026-08-18)
  *
@@ -209,6 +294,52 @@
  * 3, carving `.claude/workflows/**` out of the register, was considered and
  * explicitly REJECTED by the same ruling. Removing this row NARROWS what the
  * exception machinery lifts; nothing that was governed became clear.
+ *
+ * ## The two landing tiers (#19133, ruled 2026-09-18)
+ *
+ * The maintainer, on the skills seat's proposal, verbatim 「同意改规则。」, then
+ * 「我觉得这些我也没必要确认:.claude/settings.json、.claude/hooks/**」. The
+ * proposal, verbatim: 「把『受管 = 人合』的范围缩到真正的法——`AGENTS.md`、
+ * `CLAUDE.md`、`docs/adr/**`、`docs/NORTH-STAR.md`、`.claude/settings.json`、
+ * `.claude/hooks/**`;而 `.claude/skills/**`、`.claude/agents/**` 这些舰队自己的
+ * 仪器,凭席内 `CONTRACT_REVIEW_TIER` 复核 PASS 就走队列,事后由总监席的受管合并
+ * 审计(职责四)抽查。」 — and the amendment moved settings and hooks over too.
+ *
+ * MEMBERSHIP did not move: every row below still governs exactly what it did,
+ * one hit still forks the whole PR, and `--test` still exits 3 on every one of
+ * them. What moved is the LANDING each row waits for, carried as `tier` on the
+ * row and derived per PR by `governedTierFor`:
+ *
+ *   H  人合 — `docs/adr/**`, `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`,
+ *      `CLAUDE.md`: the maintainer's hand, or an authorized APPROVED review by
+ *      `GOVERNED_APPROVERS` and then the owning seat lands it. Unchanged.
+ *   S  席内达档复核落地 — the whole `.claude/**` tree: the owning seat lands it
+ *      through the queue once the PR thread (or its card) carries a
+ *      `## Contract review` record for the PR's CURRENT head with
+ *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**`,
+ *      `check-clause2-carriers.mjs --pair N` reads 0 and every check is green.
+ *      Exactly the path the fact layer (`.claude/skills/pm-dispatch/references/`)
+ *      used since #17950, generalised to the tier; the post-merge audit (this
+ *      sweep) and the director seat's 职责四 are the compensating control, and a
+ *      Tier S merge without a PASS record is that audit's finding.
+ *
+ * ⭐ ALL, not ANY: a PR is Tier S only when EVERY governed path in it lies under
+ * a Tier S row — 「混合 diff 一条命中即整 PR 分叉」 one level down. One Tier H path
+ * and the whole PR is Tier H; an empty or ungoverned list answers H (fail
+ * closed — the tier of nothing is never the cheaper one), and the tier is
+ * recomputed on the LIFTED slice, since a certified regeneration under
+ * `skills/**` can be the only Tier H hit in a diff. `.claude/settings.json` is
+ * the permission set itself and lands under Tier S by the amendment; the
+ * auto-mode classifier still refuses AI writes to it, so the maintainer's hand
+ * stays its writer and the tier removes only the approval click.
+ *
+ * Published `skills/**` stays Tier H: the seat did not propose moving it.
+ * `check-governed-queue-guard.mjs` reads `tier` and `governedTierFor` from HERE
+ * (a module-scope import; the cycle that forces its mirrors is with
+ * `check-half-states.mjs`, not with this file), so there is ONE register and one
+ * tier function, and `check-governed-prose.mjs` keeps pinning the SET of globs
+ * the instruction prose names — the tier is an attribute the prose states in
+ * words, which that gate deliberately does not parse.
  *
  * ### The generator co-edit fence (#11084) — a NARROWING, not a widening
  *
@@ -752,8 +883,9 @@ import { isEntrypoint } from '../invoked-as.mjs';
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the governed predicate: the 2026-08-18 unified list, exactly': 8,
-  'the dispatch-gates declaration (#9979)': 8,
+  'the governed predicate: the 2026-08-18 unified list, exactly': 9,
+  'the dispatch-gates declaration (#9979)': 9,
+  '⚖️ the two landing tiers (#19133, ruled 2026-09-18)': 19,
   'since parsing': 4,
   'the window: landing order, not committer dates (#12633)': 15,
   'since-ref is topological (#12633 route B)': 7,
@@ -778,11 +910,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #15406: the sweep row names the register it does not recompute': 10,
   '⭐ #17003: the list is DERIVED three-dot, or refused': 43,
   '⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away': 11,
+  '⭐ the SIZE predicate: over the human-merge line threshold, whatever the paths': 30,
+  '⭐ #18989: the guard is the CALLER\'s name, and the mirror is pinned to its owner': 18,
+  '⭐ #19036: the sweep lists an OVERSIZED landing beside the governed ones': 20,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 25;
+const SELF_TEST_BATTERY_FLOOR = 30;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -858,19 +993,60 @@ export const EXIT_TEST_GOVERNED = 3;
 export const EXIT_TEST_NOT_GOVERNED = 0;
 
 /**
+ * The two landing tiers (header section "The two landing tiers"). Every register
+ * row carries one as `tier`; `governedTierFor` derives a PR's tier from the rows
+ * its governed paths hit. The VALUES are single letters on purpose — they render
+ * inside verdict lines and `--json`, and a reader greps `Tier H` / `Tier S`.
+ * `landing` is the sentence a verdict prints for the tier: what lifts the four
+ * prohibitions, and who lands after that.
+ */
+export const GOVERNED_TIER_H = 'H';
+export const GOVERNED_TIER_S = 'S';
+export const GOVERNED_TIERS = Object.freeze({
+  [GOVERNED_TIER_H]: Object.freeze({
+    id: GOVERNED_TIER_H,
+    name: 'Tier H(人合)',
+    landing: "the maintainer's hand, or an authorized APPROVED review (GOVERNED_APPROVERS) and then the owning seat lands it",
+  }),
+  [GOVERNED_TIER_S]: Object.freeze({
+    id: GOVERNED_TIER_S,
+    name: 'Tier S(席内达档复核落地)',
+    landing:
+      'the owning seat lands it through the queue on a `## Contract review` record for the CURRENT head ' +
+      '(`Served-tier: CONTRACT_REVIEW_TIER`, `**VERDICT: PASS**`), `check-clause2-carriers.mjs --pair N` at 0 and every check green',
+  }),
+});
+
+/**
+ * The human-merge line threshold — the maintainer's 2026-09-18 ruling, its
+ * 「比如5000」 taken as the ruled default (header: "The SIZE predicate"). ONE
+ * declaration: the predicate, the words it prints, `dispatch-gates.mjs`'s
+ * dispatch-time reading and the self-test's pins on both sides all read it
+ * from here, so moving it is one word from the maintainer and one edit.
+ * `additions + deletions` STRICTLY greater: 5,000 changed lines is under the
+ * threshold, 5,001 is over; the self-test pins the pair.
+ */
+export const HUMAN_MERGE_LINE_THRESHOLD = 5000;
+
+/**
  * The governed surfaces, in report order — the 2026-08-18 unified definition
- * (see header). `prefix` entries match path prefixes; `exact` entries match
- * one repo-relative path byte-for-byte (the repo-ROOT instruction files, not
- * `examples/AGENTS.md`, not template copies). One path hit governs a whole
- * PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is never a question.
- * The register is repo-agnostic: it applies in all of `GOVERNED_REPOS`.
+ * (see header), tiered by the 2026-09-18 ruling. `prefix` entries match path
+ * prefixes; `exact` entries match one repo-relative path byte-for-byte (the
+ * repo-ROOT instruction files, not `examples/AGENTS.md`, not template copies —
+ * and `docs/NORTH-STAR.md`, the maintainer's North Star, joined 2026-09-18 on
+ * his word as the law above `AGENTS.md`; the PM skill cites it by section). One
+ * path hit governs a whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is
+ * never a question, and `tier` decides only what the landing waits for, never
+ * whether the path is governed. The register is repo-agnostic: it applies in
+ * all of `GOVERNED_REPOS`.
  */
 export const GOVERNED_SURFACES = Object.freeze([
-  Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', what: 'architecture decision records' }),
-  Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
-  Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', what: 'the published skills catalog' }),
-  Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', what: 'the repo-root agent instruction file' }),
-  Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', what: 'the repo-root Claude instruction file' }),
+  Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, what: 'architecture decision records' }),
+  Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', tier: GOVERNED_TIER_S, what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
+  Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', tier: GOVERNED_TIER_H, what: 'the published skills catalog' }),
+  Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', tier: GOVERNED_TIER_H, what: 'the repo-root agent instruction file' }),
+  Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', tier: GOVERNED_TIER_H, what: 'the repo-root Claude instruction file' }),
+  Object.freeze({ id: 'north-star', exact: 'docs/NORTH-STAR.md', glob: 'docs/NORTH-STAR.md', tier: GOVERNED_TIER_H, what: "the maintainer's North Star — the law above AGENTS.md" }),
 ]);
 
 /**
@@ -881,10 +1057,12 @@ export const GOVERNED_SURFACES = Object.freeze([
  * own source, and "looks like a path" there means "carries a separator". The
  * three `prefix` rows above have one and reach dispatch-gates already — the
  * `skills/**` row is one of the three specimens that motivated reading a hint
- * AS WRITTEN. The two `exact` rows do not: a repo-root FILE carries no
- * separator, so an `AGENTS.md` or `CLAUDE.md` card derived this gate not at all
- * while the same card is GOVERNED by it (draft-only PR, maintainer merge) —
- * the loudest possible thing to learn late.
+ * AS WRITTEN. The two repo-ROOT `exact` rows do not: a repo-root FILE carries
+ * no separator, so an `AGENTS.md` or `CLAUDE.md` card derived this gate not at
+ * all while the same card is GOVERNED by it (draft-only PR, maintainer merge)
+ * — the loudest possible thing to learn late. The `docs/NORTH-STAR.md` row is
+ * `exact` WITH a separator: it reaches dispatch-gates as written and declares
+ * no hint (the self-test pins that an exact row with a separator has none).
  *
  * `<file>/**` is the form that reaches one: the extractor accepts it, and
  * `collapseHint` reduces it back to that single path. `examples/AGENTS.md` and
@@ -1046,6 +1224,13 @@ export function applyGeneratedExceptions(verdict, provenanceByPath = new Map()) 
     matched,
     hitPaths: verdict.hitPaths.filter((p) => !lifted.has(p)),
     governed: matched.length > 0,
+    // Recomputed on the LIFTED slice (#19133): the lifted path may have been
+    // the only Tier H hit, and a stale pre-lift `H` would send a Tier S diff to
+    // the maintainer's click the ruling removed.
+    tier: matched.length > 0 ? landingTierOf(matched) : null,
+    // A lift moves a PATH off the register and moves the SIZE not at all
+    // (the 2026-09-18 ruling has no exemption for generated files).
+    humanMerge: matched.length > 0 || verdict.size?.exceeds === true,
     exceptions,
   };
 }
@@ -1081,6 +1266,35 @@ export function governedPathsIn(paths) {
       typeof p === 'string' && (surface.prefix ? p.startsWith(surface.prefix) : p === surface.exact),
     ),
   })).filter((surface) => surface.files.length > 0);
+}
+
+/**
+ * The landing tier of an already-matched governed slice (`governedPathsIn`'s
+ * shape — post-lift callers hand in the lifted slice, so a certified
+ * regeneration that was the only Tier H hit no longer decides). Pure.
+ *
+ * ⭐ ALL, not ANY: `S` only when every matched row is Tier S. An EMPTY slice
+ * answers `H` — fail closed: a caller that reached a tier question with nothing
+ * governed has lost the fact the question rests on, and the tier of nothing is
+ * never the cheaper one. `testVerdict` reports `null` for that case itself,
+ * before asking here.
+ */
+export function landingTierOf(matched) {
+  const list = Array.isArray(matched) ? matched : [];
+  if (list.length === 0) return GOVERNED_TIER_H;
+  return list.every((s) => s?.tier === GOVERNED_TIER_S) ? GOVERNED_TIER_S : GOVERNED_TIER_H;
+}
+
+/**
+ * The landing tier of a PR with these paths — `H` or `S`, never anything else.
+ * Register-keyed: the rows the paths hit carry the answer, so no second copy of
+ * "which surfaces land on a record" exists anywhere (the queue guard imports
+ * THIS function). Ungoverned riders in the list are not consulted and cannot
+ * demote a Tier H list or promote a Tier S one; an empty or wholly ungoverned
+ * list answers `H` (see `landingTierOf`).
+ */
+export function governedTierFor(paths) {
+  return landingTierOf(governedPathsIn(paths));
 }
 
 /** `owner/name` out of any git remote spelling, or null. Pure. */
@@ -1183,12 +1397,21 @@ export function parseSince(arg, now = new Date()) {
 
 /**
  * One sweep entry from one mainline commit. Pure: the caller supplies the
- * commit row, its changed paths, and (multi-repo) which repo it came from;
- * attribution is stitched on later.
+ * commit row, its changed paths, (multi-repo) which repo it came from, and —
+ * since #19036 — the size of the landed diff; attribution is stitched on later.
+ *
+ * ⭐ ONE predicate, the same one `--test` / `--pr` / `--branch` and the queue
+ * guard answer with, reached through its front door: `testVerdict` reads the
+ * PATH register and the SIZE line, `landsByHumanMerge` reads either limb. A
+ * landing is an entry when EITHER fired — a governed merge exactly as before,
+ * and an oversized landing with no governed path at all, which used to be
+ * invisible to this audit. With no size handed in the size limb is NOT
+ * MEASURED and can fire nothing, so every pre-#19036 caller gets the entry it
+ * always got, now carrying `size.measured: false` rather than a phantom zero.
  */
-export function classifyCommit({ sha, date, subject }, changedPaths, repo = null) {
-  const surfaces = governedPathsIn(changedPaths);
-  if (surfaces.length === 0) return null;
+export function classifyCommit({ sha, date, subject }, changedPaths, repo = null, size = null) {
+  const verdict = testVerdict(changedPaths, { size });
+  if (!landsByHumanMerge(verdict)) return null;
   return {
     repoId: repo?.id ?? null,
     repoSlug: repo?.slug ?? null,
@@ -1196,7 +1419,9 @@ export function classifyCommit({ sha, date, subject }, changedPaths, repo = null
     date,
     subject,
     pr: pullNumberFromSubject(subject),
-    surfaces,
+    surfaces: verdict.matched,
+    size: verdict.size,
+    humanMerge: verdict.humanMerge,
   };
 }
 
@@ -1207,18 +1432,55 @@ export function classifyCommit({ sha, date, subject }, changedPaths, repo = null
  * same in all five governed repos, so a seat can run this from anywhere with
  * the file list of any PR in any of them.
  */
-export function testVerdict(paths) {
+export function testVerdict(paths, { size = null } = {}) {
   const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p !== '');
   const matched = governedPathsIn(list);
   const hit = new Set(matched.flatMap((s) => s.files));
+  const sized = sizeVerdict(size);
   return {
     governed: matched.length > 0,
+    // The landing tier (#19133): `H` / `S` while governed, `null` when nothing
+    // is — a `--json` reader never sees a tier for a diff that has none.
+    tier: matched.length > 0 ? landingTierOf(matched) : null,
     checked: list.length,
     surfacesChecked: GOVERNED_SURFACES.length,
     matched,
     hitPaths: [...hit],
     clearPaths: list.filter((p) => !hit.has(p)),
+    size: sized,
+    humanMerge: matched.length > 0 || sized.exceeds,
   };
+}
+
+/**
+ * The SIZE limb (maintainer ruling 2026-09-18, header section "The SIZE
+ * predicate"), as data. Pure. `size` is `{ additions, deletions, source? }` or
+ * null; anything that is not a pair of non-negative integers is NOT MEASURED —
+ * never a size of zero, which would read as under the threshold.
+ */
+export function sizeVerdict(size = null) {
+  const additions = size?.additions;
+  const deletions = size?.deletions;
+  const measured =
+    Number.isInteger(additions) && additions >= 0 && Number.isInteger(deletions) && deletions >= 0;
+  if (!measured) {
+    return { measured: false, additions: null, deletions: null, changedLines: null, threshold: HUMAN_MERGE_LINE_THRESHOLD, exceeds: false, source: null };
+  }
+  const changedLines = additions + deletions;
+  return {
+    measured: true,
+    additions,
+    deletions,
+    changedLines,
+    threshold: HUMAN_MERGE_LINE_THRESHOLD,
+    exceeds: changedLines > HUMAN_MERGE_LINE_THRESHOLD,
+    source: typeof size?.source === 'string' && size.source !== '' ? size.source : null,
+  };
+}
+
+/** Either limb: the PATH register or the SIZE threshold. The exit code reads this, never `governed` alone. */
+export function landsByHumanMerge(verdict) {
+  return verdict?.governed === true || verdict?.size?.exceeds === true;
 }
 
 /**
@@ -1260,12 +1522,24 @@ export function renderTestVerdict(verdict) {
     `governed-surface predicate: ${verdict.hitPaths.length} of ${verdict.checked} path(s) hit the register` +
     (liftedCount > 0 ? ` after ${liftedCount} generated-artifact lift(s)` : '') +
     ` (${verdict.surfacesChecked} surfaces, repo-agnostic).`;
+  const size = verdict.size ?? sizeVerdict(null);
   if (!verdict.governed) {
+    if (size.exceeds) {
+      // The PATH limb is clear and the SIZE limb is not: the "ordinary queue
+      // landing applies" sentence would be false here, so it is not printed.
+      return (
+        `${head}\n` +
+        `  paths: none on the register — the SIZE decides this PR:\n` +
+        `${renderSizeLines(size)}` +
+        renderExceptionLines(verdict)
+      );
+    }
     return (
       `${head}\n` +
       `  ✅  NOT governed — ordinary queue landing applies to a PR with exactly this file list.\n` +
       `      Derived from GOVERNED_SURFACES, not recalled. Re-run on the FINAL file list: the register\n` +
-      `      has grown several times in two days, and a reading taken earlier in the session is recall.` +
+      `      has grown several times in two days, and a reading taken earlier in the session is recall.\n` +
+      `${renderSizeLines(size)}` +
       renderExceptionLines(verdict)
     );
   }
@@ -1274,17 +1548,73 @@ export function renderTestVerdict(verdict) {
     return `      ${s.glob} ×${s.files.length} — ${s.what}\n${files}`;
   });
   const clear = verdict.clearPaths.length > 0 ? `\n  paths not on the register: ${verdict.clearPaths.slice(0, 8).join(', ')}` : '';
+  // The tier (#19133): Tier H keeps its wording word for word and gains one
+  // line naming its tier; Tier S prints its OWN verdict block naming the
+  // record-on-thread landing. Both say GOVERNED and the same three verbs, so
+  // every grep reader of this text keeps its answer; both exit 3.
+  const tier = verdict.tier ?? landingTierOf(verdict.matched);
+  if (tier === GOVERNED_TIER_S) {
+    return (
+      `${head}\n` +
+      `  ⛔  GOVERNED — Tier S(席内达档复核落地): every governed path here lies under a Tier S surface, so the OWNING\n` +
+      `      seat lands this PR through the queue once its thread (or its card) carries a \`## Contract review\` record\n` +
+      `      for the CURRENT head — \`Served-tier: CONTRACT_REVIEW_TIER\`, \`**VERDICT: PASS**\` — with\n` +
+      `      \`check-clause2-carriers.mjs --pair N\` at 0 and every check green (AGENTS.md Prime Directive #14).\n` +
+      `      Before that record no seat flips it ready, enqueues it, or arms auto-merge; ⛔ no seat approves it either,\n` +
+      `      and no maintainer click is waited for. One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」;\n` +
+      `      one Tier H path among the hits and the whole PR would be Tier H.\n` +
+      `${lines.join('\n')}${clear}\n` +
+      `${renderSizeLines(size)}` +
+      renderExceptionLines(verdict)
+    );
+  }
   return (
     `${head}\n` +
     `  ⛔  GOVERNED — a human merge is the review record for this PR (#9495 regime).\n` +
     `      No seat flips it ready, enqueues it, or arms auto-merge (AGENTS.md Prime Directive #14).\n` +
     `      One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.\n` +
-    `${lines.join('\n')}${clear}` +
+    `      ⚖️ landing tier: H(人合) — ${GOVERNED_TIERS[GOVERNED_TIER_H].landing}.\n` +
+    `${lines.join('\n')}${clear}\n` +
+    `${renderSizeLines(size)}` +
     renderExceptionLines(verdict)
   );
 }
 
+/**
+ * The SIZE limb's words (maintainer ruling 2026-09-18). Pure, so `--self-test`
+ * pins all three readings: over, under, and NOT MEASURED. Printed under every
+ * verdict — a reading that is silent about a leg it did not run reports a
+ * clearance it never measured.
+ */
+export function renderSizeLines(size) {
+  const s = size ?? sizeVerdict(null);
+  const t = s.threshold;
+  if (!s.measured) {
+    return (
+      `  ⚠️  size: NOT MEASURED — this verdict answers the PATH question only. A PR whose changed lines\n` +
+      `      (additions + deletions, generated files INCLUDED) exceed ${t} lands only by a human merge; read\n` +
+      `      the number with \`--pr <n>\` or \`--branch <ref>\`, or hand it to --test as \`--additions <n> --deletions <n>\`.`
+    );
+  }
+  // The provenance of the number is NOT in these words — it is on the
+  // derivation line (`--pr`, `--branch`) or the stderr note (`--test`), so the
+  // verdict stays byte-identical across modes on the same list and numbers.
+  const reading = `${s.changedLines} changed line(s) (+${s.additions} / -${s.deletions})`;
+  if (!s.exceeds) return `  size: ${reading} ≤ ${t} — under the human-merge threshold (generated files included in the count).`;
+  return (
+    `  ⛔  HUMAN MERGE — ${reading} > ${t}: this PR lands only by a human merge (maintainer ruling 2026-09-18;\n` +
+    `      generated files INCLUDED — no exemption for regen artefacts, docs builds or reverts). The same terminal\n` +
+    `      as a Tier H governed diff: no seat flips it ready, enqueues it, or arms auto-merge. ACCEPT on the card,\n` +
+    `      \`needs-user-decision\` on the PR, the final 维护者速读, review requested from GOVERNED_APPROVERS.`
+  );
+}
+
 // ── deriving the path list (#17003): three-dot, or a refusal ────────────────
+
+/** The size flags' counterpart of the note below — same stream, same reason. */
+export const CALLER_SIZED_NOTE =
+  'ℹ️  the size above came from the CALLER (--additions/--deletions) — this predicate cannot see how it was\n' +
+  '    counted. `--pr <n>` reads the pair off the PR object and `--branch <ref>` counts the merge-base range itself.';
 
 /**
  * What `--test` says about its own INPUT. Printed on STDERR, deliberately: this
@@ -1458,9 +1788,21 @@ export function deriveBranchPaths({ ref, base = 'origin/main', run }) {
     return refuse(`\`git diff\` failed against the merge base ${mergeBase.out.slice(0, 10)} (${diff.error}).`, null);
   }
   const paths = diff.out.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+  // The SIZE limb (2026-09-18 ruling) is read off the SAME range the list is:
+  // `--numstat` per file, summed, a binary row counting 0 as it does on GitHub.
+  const numstat = run(['diff', '--numstat', '--no-renames', mergeBase.out, refRead.out]);
+  if (!numstat.ok) {
+    return refuse(
+      `\`git diff --numstat\` failed against the merge base ${mergeBase.out.slice(0, 10)} (${numstat.error}) — ` +
+        `the size leg cannot be answered, and an unanswered size is never a size of zero.`,
+      null,
+    );
+  }
+  const size = { ...parseNumstat(numstat.out), source: 'git diff --numstat on the same merge-base range' };
   return {
     ok: true,
     paths,
+    size,
     derivation: {
       kind: 'branch',
       base,
@@ -1470,8 +1812,33 @@ export function deriveBranchPaths({ ref, base = 'origin/main', run }) {
       mergeBase: mergeBase.out,
       command: `git diff --name-only --no-renames ${mergeBase.out.slice(0, 10)} ${refRead.out.slice(0, 10)}`,
       count: paths.length,
+      size,
     },
   };
+}
+
+/**
+ * `git diff --numstat` → the pair the size predicate reads. Pure. A binary row
+ * (`-\t-\tpath`) is counted as a file and as 0 changed lines — GitHub reports
+ * 0/0 for a binary file too, so the local number matches the PR's.
+ */
+export function parseNumstat(text) {
+  let additions = 0;
+  let deletions = 0;
+  let files = 0;
+  let binaryFiles = 0;
+  for (const line of String(text ?? '').split('\n')) {
+    const m = /^(\d+|-)\t(\d+|-)\t/.exec(line);
+    if (!m) continue;
+    files += 1;
+    if (m[1] === '-' || m[2] === '-') {
+      binaryFiles += 1;
+      continue;
+    }
+    additions += Number(m[1]);
+    deletions += Number(m[2]);
+  }
+  return { additions, deletions, files, binaryFiles };
 }
 
 /** The self-describing line every derived reading prints above its verdict. Pure. */
@@ -1480,17 +1847,25 @@ export function renderDerivation(derivation) {
     const renameLines = (derivation.renames ?? []).map(
       (r) => `    renamed — BOTH paths read, the old one included: ${r.from} → ${r.to}`,
     );
+    const sizeLine = derivation.size
+      ? [`    size: +${derivation.size.additions} / -${derivation.size.deletions} — additions and deletions as GitHub reports them on the PR object.`]
+      : [];
     return [
       `derived from GET ${derivation.endpoint} (three-dot by construction): ${derivation.count} path(s) ` +
         `from ${derivation.entries} changed file(s), over ${derivation.pages} page(s).`,
       ...renameLines,
+      ...sizeLine,
     ].join('\n');
   }
   if (derivation?.kind === 'branch') {
+    const sizeLine = derivation.size
+      ? `\n    size: +${derivation.size.additions} / -${derivation.size.deletions} over ${derivation.size.files} file(s)` +
+        ` (${derivation.size.binaryFiles} binary, counted 0) — \`git diff --numstat --no-renames\` on the same range.`
+      : '';
     return (
       `derived from \`${derivation.command}\` (three-dot): ${derivation.count} path(s).\n` +
       `    ${derivation.base} = ${derivation.baseSha.slice(0, 10)}, ${derivation.ref} = ${derivation.refSha.slice(0, 10)}, ` +
-      `merge-base = ${derivation.mergeBase.slice(0, 10)}.`
+      `merge-base = ${derivation.mergeBase.slice(0, 10)}.${sizeLine}`
     );
   }
   return 'derived from an unnamed source — ⛔ do not act on this reading.';
@@ -2158,10 +2533,28 @@ export function mainlineCommitsInWindow(root, ref, window, { repoId = null, log 
   return { ...datedWindowCommits(root, ref, window, { log, isRoot }), mode: 'date', base: null, fellBack };
 }
 
-/** The paths a mainline commit changed, against its first parent. */
-export function commitPaths(root, sha) {
-  const out = git(root, ['diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', '-m', '--first-parent', sha]);
-  return out.split('\n').filter((p) => p !== '');
+/**
+ * The paths a mainline commit changed against its first parent, AND the size
+ * of that change — ONE `git diff-tree --numstat` per commit (#19036), where a
+ * `--name-only` used to read the paths alone. The path list is the same list
+ * byte for byte (the self-test pins it against `--name-only` on a real
+ * fixture); the size is the LANDED diff's, summed by `parseNumstat` exactly as
+ * `--branch` sums its range — a binary row counts 0 lines, as on GitHub. Zero
+ * API: the sweep can classify an oversized landing whose paths touch nothing
+ * governed without a pull read, which is what lets it list one at all.
+ *
+ * ⚠️ `-m --first-parent` on purpose, unchanged: a merge commit is read against
+ * its first parent, so the whole branch's change is one row, never the
+ * per-parent split `-m` alone would print.
+ */
+export function commitChanges(root, sha) {
+  const out = git(root, ['diff-tree', '-r', '--no-commit-id', '--no-renames', '--numstat', '-m', '--first-parent', sha]);
+  const paths = [];
+  for (const line of out.split('\n')) {
+    const m = /^(?:\d+|-)\t(?:\d+|-)\t(.+)$/.exec(line);
+    if (m) paths.push(m[1]);
+  }
+  return { paths, size: { ...parseNumstat(out), source: 'git diff-tree --numstat against the first parent' } };
 }
 
 /**
@@ -2259,7 +2652,15 @@ export function attributionChannels(env) {
   return channels;
 }
 
-/** The node flag that points fetch at the session proxy, and the re-exec guard. */
+/**
+ * The node flag that points fetch at the session proxy, and the re-exec guard
+ * THIS file sets on the child it re-execs.
+ *
+ * ⚠️ The guard is a NAME, and it is this file's own. Every instrument in this
+ * family sets its own variable, so a plan that reads one hard-coded name
+ * answers "already re-armed" for a tool that never re-armed — see the plan
+ * below, whose `guard` parameter is what keeps each name to its owner.
+ */
 export const PROXY_FLAG = '--use-env-proxy';
 export const PROXY_REARM_GUARD = 'OS_GOVERNED_MERGES_PROXY_REARMED';
 
@@ -2268,14 +2669,83 @@ export const PROXY_REARM_GUARD = 'OS_GOVERNED_MERGES_PROXY_REARMED';
  * GitHub at all? Pure, so every branch is offline-testable — and the branches
  * are the whole point: a proxied run without the flag reads 401/403 on every
  * channel and looks exactly like a credential problem (#9642).
+ *
+ * ## The guard is a NAME, and it belongs to the CALLER (#18939, #18989)
+ *
+ * This plan is imported by `ci-failure.mjs` as well as called here, and each of
+ * those two tools sets its OWN variable on the child it re-execs. While the
+ * guard was read from one hard-coded name — this file's — either tool's
+ * variable, once inherited by the other, answered "already re-armed" for a run
+ * that had never re-armed; the suppressed run then took the bypassed route and
+ * answered 401 Bad credentials on every endpoint, `/rate_limit` included. A
+ * uniform 401 is a self-consistent story — the credential is dead — and it was
+ * read as one for about an hour against a channel that was alive the whole
+ * time. `guard` is therefore a parameter: a caller passes the name it actually
+ * sets, and only its own guard can stop its own re-exec.
+ *
+ * And a suppressed run must not be a SILENT one. `rearm: false, hint: false`
+ * prints nothing at any consumer, so the suppression left no line anywhere in
+ * the run log, which is the whole cost of that chain. The guard branch
+ * therefore sets `hint: true` — the branch every consumer prints — and its
+ * reason names the variable, the route and the 401 it would be mistaken for. It
+ * can only fire on the anomaly: a real re-exec's child carries `PROXY_FLAG` in
+ * its `execArgv` and is answered by the branch above, never here.
+ *
+ * ## ⛔ This is a MIRROR of `check-half-states.mjs`'s plan, and it cannot be an
+ *    import — both directions measured
+ *
+ * The patrol OWNS this decision (that file's `proxyRearmPlan` carries the same
+ * branch set and the same `guard` contract). A second implementation forks every
+ * future invariant, so the copy is a debt, not a design — but the edge that
+ * would retire it deadlocks the process, measured on 2026-09-19 in a throwaway
+ * copy of `scripts/`:
+ *
+ *   + import { proxyRearmPlan } from './check-half-states.mjs';   // module scope
+ *     node scripts/pm/check-governed-merges.mjs --test AGENTS.md
+ *       -> exit 13, "Detected unsettled top-level await at
+ *          check-half-states.mjs:10044" (that file's `GOVERNED_REGISTER`)
+ *     control, same argv, no import                -> exit 3, the GOVERNED verdict
+ *
+ *   + const patrol = await import('./check-half-states.mjs');     // in selfTest()
+ *     node scripts/pm/check-governed-merges.mjs --self-test
+ *       -> exit 13, unsettled top-level await at THIS file's `await selfTest()`
+ *
+ * The cycle is real and short: that file resolves its H43 register at module
+ * scope with a top-level `await loadGovernedRegister()`, which awaits
+ * `import('./check-governed-queue-guard.mjs')`, which imports THIS file at
+ * module scope. The lazy door `check-governed-queue-guard.mjs`'s
+ * `CONTRACT_REVIEW_LABEL` describes is shut here too, because this file's own
+ * `--self-test` dispatch is a module-scope `await`. And the reverse edge is
+ * barred for a second, independent reason the patrol's own header records: that
+ * file TRAVELS — a sibling repo's `scripts/pm/` holds it alone — so it can
+ * never statically import the governed pair either.
+ *
+ * So the mirror stays, and the `--self-test` battery pins it to its OWNER the
+ * way `CONTRACT_REVIEW_LABEL` is pinned: by reading that file's SOURCE off disk,
+ * plus the REASON — when the patrol's module-scope `await` goes away, the case
+ * that fails says to make this a real import.
+ *
+ * @param {{ env?: Record<string,string|undefined>, execArgv?: string[],
+ *           flagSupported?: boolean, guard?: string }} [ctx]
+ * @returns {{ rearm: boolean, hint: boolean, flag?: string, guarded?: string, reason: string }}
  */
-export function proxyRearmPlan({ env = {}, execArgv = [], flagSupported = true }) {
+export function proxyRearmPlan({ env = {}, execArgv = [], flagSupported = true, guard = PROXY_REARM_GUARD } = {}) {
   const proxy = env.HTTPS_PROXY || env.https_proxy || null;
   if (!proxy) return { rearm: false, hint: false, reason: 'no HTTPS_PROXY in the environment — fetch reaches GitHub directly' };
   if (execArgv.includes(PROXY_FLAG) || (env.NODE_OPTIONS ?? '').includes(PROXY_FLAG)) {
     return { rearm: false, hint: false, reason: `already running with ${PROXY_FLAG}` };
   }
-  if (env[PROXY_REARM_GUARD] === '1') return { rearm: false, hint: false, reason: 'already re-armed once this run' };
+  if (env[guard] === '1') {
+    return {
+      rearm: false,
+      hint: true,
+      guarded: guard,
+      reason:
+        `${guard}=1 is set and this process is NOT running with ${PROXY_FLAG}, so the one re-exec this run ` +
+        `allows was already spent and every request below bypasses ${proxy} — if they answer 401 Bad credentials, ` +
+        `that inherited guard is why, and unsetting ${guard} is the fix rather than a new token`,
+    };
+  }
   if (!flagSupported) {
     return { rearm: false, hint: true, reason: `this node does not accept ${PROXY_FLAG}; fetch will bypass ${proxy}` };
   }
@@ -2302,7 +2772,15 @@ async function fetchPullAttribution({ apiUrl }, slug, pull, channels) {
     }
     const body = await res.json();
     return {
-      attribution: { mergedBy: body?.merged_by?.login ?? null, mergedAt: body?.merged_at ?? null, title: body?.title ?? null },
+      attribution: {
+        mergedBy: body?.merged_by?.login ?? null,
+        mergedAt: body?.merged_at ?? null,
+        title: body?.title ?? null,
+        // GitHub's own `additions` / `deletions` (#19036), off the read this row
+        // already pays for — printed beside the LANDED number when they differ,
+        // never the number the listing is decided on (that one is local).
+        size: pullSizeFrom(body),
+      },
       channel: channel.id,
     };
   }
@@ -2365,6 +2843,21 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
     };
   }
   const changedFiles = typeof head?.changed_files === 'number' ? head.changed_files : null;
+  // The SIZE limb (2026-09-18 ruling) rides the same read as the count. A PR
+  // object without the pair is a refusal here, before a page is spent: an
+  // unanswered size is never a size of zero and never a "not governed" answer.
+  const pair = pullSizeFrom(head);
+  if (pair === null) {
+    return {
+      ok: false,
+      reason:
+        `${slug}#${pull} reports no \`additions\` / \`deletions\` pair (got ${JSON.stringify(head?.additions ?? null)} / ` +
+        `${JSON.stringify(head?.deletions ?? null)}), so the size predicate cannot be answered — and an unanswered size ` +
+        `is a REFUSAL, never a size of zero and never a "not governed" answer.`,
+      remedy: 'Re-run; if the API keeps omitting the pair, read the branch locally: `--branch <ref>` counts the same range with `git diff --numstat`.',
+    };
+  }
+  const size = { ...pair, source: `GET /repos/${slug}/pulls/${pull}` };
 
   const files = [];
   let pages = 0;
@@ -2403,6 +2896,7 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
   return {
     ok: true,
     paths,
+    size,
     derivation: {
       kind: 'pull',
       slug,
@@ -2413,8 +2907,21 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
       entries,
       count: paths.length,
       renames,
+      size,
     },
   };
+}
+
+/**
+ * The `additions` / `deletions` pair off a PR object, or null when the object
+ * does not carry both as non-negative integers. Pure; null is the caller's
+ * refusal, never a zero.
+ */
+export function pullSizeFrom(head) {
+  const additions = head?.additions;
+  const deletions = head?.deletions;
+  if (!Number.isInteger(additions) || additions < 0 || !Number.isInteger(deletions) || deletions < 0) return null;
+  return { additions, deletions };
 }
 
 /**
@@ -2633,13 +3140,44 @@ export function nextRoundRefLine(repos) {
   ];
 }
 
+/**
+ * The SIZE cell of a sweep row (#19036). Pure. Empty for a row classified with
+ * no size — the pre-#19036 fixtures and callers render exactly as they did —
+ * a plain reading under the line, and the ⛔ form over it, which names the
+ * limb the row is listed on: alone (no governed path) or beside the register.
+ * GitHub's own pair, when the attribution read carried one and it differs
+ * from the landed number, is printed beside it; it never decides the listing.
+ */
+export function sizeCell(entry) {
+  const s = entry?.size;
+  if (s?.measured !== true) return '';
+  const local = `${s.changedLines} changed line(s) (+${s.additions} / -${s.deletions})`;
+  const gh = entry?.attribution?.size ?? null;
+  const ghNote =
+    gh && (gh.additions !== s.additions || gh.deletions !== s.deletions)
+      ? `; GitHub reports +${gh.additions} / -${gh.deletions} on the pull request`
+      : '';
+  if (!s.exceeds) return `\n      size: ${local}, at or under ${s.threshold}${ghNote}`;
+  const alone = (entry?.surfaces?.length ?? 0) === 0;
+  return (
+    `\n      ⛔ SIZE: ${local} EXCEEDS the human-merge line ${s.threshold} (additions + deletions, generated files INCLUDED)${ghNote} —` +
+    `\n          this landing was due a HUMAN MERGE (2026-09-18 ruling), whatever its paths; it is listed on that limb ` +
+    `${alone ? 'ALONE' : 'as well as on the register'}.`
+  );
+}
+
 /** The whole report as text — pure, so --self-test asserts on the words. */
 export function renderReport({ window, repos, scanned, entries, lookups, sweepCode = null }) {
   const audited = repos.filter((r) => r.status === 'audited');
   const unaudited = repos.filter((r) => r.status !== 'audited');
   const edged = audited.filter((r) => r.windowIncomplete);
+  // Counted APART (#19036): a row with no governed path is on the list for its
+  // SIZE, and "N governed merge(s)" must keep meaning the register's rows.
+  const oversizedOnly = entries.filter((e) => (e.surfaces?.length ?? 0) === 0);
   const head =
-    `governed-merges sweep: ${entries.length} governed merge(s) since ${window.requestedIso} ` +
+    `governed-merges sweep: ${entries.length - oversizedOnly.length} governed merge(s)` +
+    (oversizedOnly.length > 0 ? ` and ${oversizedOnly.length} oversized landing(s) with no governed path` : '') +
+    ` since ${window.requestedIso} ` +
     `across ${audited.length}/${repos.length} governed repo(s)\n` +
     `  scanned ${scanned} mainline commit(s); ${lookups} API lookup(s).\n` +
     (sweepCode ? `${describeSweepCode(sweepCode)}\n` : '') +
@@ -2660,13 +3198,16 @@ export function renderReport({ window, repos, scanned, entries, lookups, sweepCo
   const contract = [
     `  Every entry below should correspond to a merge the maintainer performed or ordered in person.`,
     `  An entry the maintainer does not recognise is the violation signal — file it as an incident (#9495 regime).`,
+    `  A landing over ${HUMAN_MERGE_LINE_THRESHOLD} changed lines (additions + deletions, generated files INCLUDED) is listed too, on SIZE`,
+    `  alone — it was due a human merge (2026-09-18 ruling), whatever its paths; the number is the LANDED diff's, read locally.`,
   ];
   const preamble = [head, ...auditedLines, ...unauditedLines, ...edgeLines, ...unauditedNote, ...nextRoundRefLine(repos), ...contract].join('\n');
 
   if (entries.length === 0) {
-    if (unaudited.length > 0) return `${preamble}\n  no governed surface was merged in the audited repo(s) — NOT a clean window; see UNAUDITED above.`;
-    if (edged.length > 0) return `${preamble}\n  no governed surface was merged inside the PROVEN part of the window — NOT a clean window; see WINDOW EDGE above.`;
-    return `${preamble}\n  ✅  clean window — no governed surface was merged in any governed repo.`;
+    const nothing = `no governed surface was merged, and no landing crossed ${HUMAN_MERGE_LINE_THRESHOLD} changed lines,`;
+    if (unaudited.length > 0) return `${preamble}\n  ${nothing} in the audited repo(s) — NOT a clean window; see UNAUDITED above.`;
+    if (edged.length > 0) return `${preamble}\n  ${nothing} inside the PROVEN part of the window — NOT a clean window; see WINDOW EDGE above.`;
+    return `${preamble}\n  ✅  clean window — ${nothing} in any governed repo.`;
   }
 
   const lines = entries.map((e) => {
@@ -2674,7 +3215,13 @@ export function renderReport({ window, repos, scanned, entries, lookups, sweepCo
     const who = attributionCell(e);
     const prName = e.pr != null ? `PR #${e.pr}` : '⚠️  NO PR NUMBER IN SUBJECT — direct push to main? investigate';
     const files = e.surfaces.flatMap((s) => s.files.slice(0, 6)).slice(0, 8);
-    return `  • ${e.repoSlug ? `${e.repoSlug} ` : ''}${prName} — ${e.subject}\n      commit ${e.sha.slice(0, 9)} @ ${e.date}; ${who}\n      surfaces: ${surfaces}\n${files.map((f) => `        - ${f}`).join('\n')}${registerCell(e)}`;
+    // A row on the list for its SIZE alone has no surface and no file to name;
+    // its size cell — printed right under the attribution — is the reason.
+    const surfaceBlock =
+      e.surfaces.length === 0
+        ? '      surfaces: (none — listed on SIZE alone)'
+        : `      surfaces: ${surfaces}\n${files.map((f) => `        - ${f}`).join('\n')}`;
+    return `  • ${e.repoSlug ? `${e.repoSlug} ` : ''}${prName} — ${e.subject}\n      commit ${e.sha.slice(0, 9)} @ ${e.date}; ${who}${sizeCell(e)}\n${surfaceBlock}${registerCell(e)}`;
   });
 
   const notes = summariseAttributionFailures(entries).map((l) => `  ${l}`);
@@ -2707,8 +3254,8 @@ function rootFromArgs(args) {
  * leave two readings of the same register in circulation, which is the shape
  * the card is about. `--self-test` pins the identity end to end.
  */
-async function emitVerdict(paths, args, derivation = null) {
-  let verdict = testVerdict(paths);
+async function emitVerdict(paths, args, derivation = null, size = null) {
+  let verdict = testVerdict(paths, { size });
   // The provenance-aware exceptions (#9866 + #11705): recompute only when a
   // registered path is actually among the hits, so every other run stays the
   // zero-git, zero-cost read it always was. The driver applies each row's
@@ -2723,7 +3270,53 @@ async function emitVerdict(paths, args, derivation = null) {
   }
   if (args.includes('--json')) console.log(JSON.stringify(derivation ? { ...verdict, derivation } : verdict, null, 2));
   else console.log(renderTestVerdict(verdict));
-  return verdict.governed ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
+  // Either limb exits on the GOVERNED code (header: the SIZE predicate) — one
+  // code, so every caller that routes 3 to the human terminal routes both.
+  return landsByHumanMerge(verdict) ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
+}
+
+/** The two flags the SIZE limb takes from a caller, and the words for a half pair. */
+export const SIZE_FLAGS = Object.freeze(['--additions', '--deletions']);
+
+/**
+ * `--additions <n> --deletions <n>` off argv: both (the pair), neither (no
+ * size — NOT MEASURED downstream), or a refusal. Pure. Half a pair is refused
+ * rather than read as a zero on the missing side: the count is their SUM, and
+ * a zero nobody typed would read as under the threshold.
+ */
+export function readSizeFlags(args) {
+  const read = (flag) => {
+    const i = args.indexOf(flag);
+    if (i === -1) return { present: false, raw: null, n: null };
+    const raw = args[i + 1];
+    const n = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : null;
+    return { present: true, raw: raw ?? null, n };
+  };
+  const a = read('--additions');
+  const d = read('--deletions');
+  if (!a.present && !d.present) return { ok: true, size: null };
+  if (!a.present || !d.present) {
+    return {
+      ok: false,
+      error:
+        `--additions and --deletions travel together (the count is their SUM; half a pair is no reading) — ` +
+        `got only ${a.present ? '--additions' : '--deletions'}.`,
+    };
+  }
+  if (a.n === null || d.n === null) {
+    return { ok: false, error: `--additions / --deletions want non-negative integers; got '${a.raw}' / '${d.raw}'.` };
+  }
+  return { ok: true, size: { additions: a.n, deletions: d.n, source: '--additions/--deletions, from the CALLER' } };
+}
+
+/** A derived mode handed the size flags is two readings of one number — refused, like two mode flags. */
+function refuseSizeFlagsIn(args, mode, reads) {
+  if (!SIZE_FLAGS.some((f) => args.includes(f))) return null;
+  console.error(
+    `❌  ${mode} reads the size itself (${reads}); --additions/--deletions beside it would be two readings of one ` +
+      `number, and this predicate answers on one. Drop the flags, or ask --test with them.`,
+  );
+  return EXIT_CANNOT_SWEEP;
 }
 
 async function runTestMode(args) {
@@ -2731,9 +3324,15 @@ async function runTestMode(args) {
   const paths = [];
   const tail = args.slice(i + 1);
   for (let j = 0; j < tail.length; j++) {
-    if (tail[j] === '--root') { j++; continue; } // `--root <path>`'s value is a flag argument, not a PR path
+    // `--root <path>`'s and the size flags' values are flag arguments, not PR paths.
+    if (tail[j] === '--root' || SIZE_FLAGS.includes(tail[j])) { j++; continue; }
     if (tail[j].startsWith('--')) continue;
     paths.push(tail[j]);
+  }
+  const flags = readSizeFlags(args);
+  if (!flags.ok) {
+    console.error(`❌  ${flags.error}`);
+    return EXIT_CANNOT_SWEEP;
   }
   if (paths.length === 0) {
     console.error(
@@ -2751,7 +3350,8 @@ async function runTestMode(args) {
   // machine-read surface). A predicate that changes what it hands its callers in
   // order to warn its humans has broken something in order to say something.
   console.error(CALLER_DERIVED_NOTE);
-  return await emitVerdict(paths, args);
+  if (flags.size) console.error(CALLER_SIZED_NOTE);
+  return await emitVerdict(paths, args, null, flags.size);
 }
 
 /** `--branch <ref>` (#17003): the three-dot list from a local checkout, or a refusal. */
@@ -2761,6 +3361,8 @@ async function runBranchMode(args) {
     console.error('❌  --branch wants a git ref (`--branch claude/issue-17003-x`); it got none.');
     return EXIT_CANNOT_SWEEP;
   }
+  const refusedFlags = refuseSizeFlagsIn(args, `--branch ${ref}`, '`git diff --numstat` on the merge-base range');
+  if (refusedFlags !== null) return refusedFlags;
   const root = rootFromArgs(args);
   const derived = deriveBranchPaths({ ref, run: (argv) => tryGit(root, argv) });
   if (!derived.ok) {
@@ -2775,12 +3377,14 @@ async function runBranchMode(args) {
     return EXIT_CANNOT_SWEEP;
   }
   if (!args.includes('--json')) console.log(renderDerivation(derived.derivation));
-  return await emitVerdict(derived.paths, args, derived.derivation);
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size);
 }
 
 /** `--pr <n>` (#17003): the API's changed-files list — three-dot by construction — or a refusal. */
 async function runPullMode(args) {
   const raw = args[args.indexOf('--pr') + 1];
+  const refusedFlags = refuseSizeFlagsIn(args, `--pr ${raw}`, 'the `additions` / `deletions` pair on the PR object');
+  if (refusedFlags !== null) return refusedFlags;
   const root = rootFromArgs(args);
   const origin = tryGit(root, ['config', '--get', 'remote.origin.url']);
   const selfSlug = origin.ok ? slugFromRemote(origin.out) : null;
@@ -2809,7 +3413,7 @@ async function runPullMode(args) {
     return EXIT_CANNOT_SWEEP;
   }
   if (!args.includes('--json')) console.log(renderDerivation(derived.derivation));
-  return await emitVerdict(derived.paths, args, derived.derivation);
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size);
 }
 
 /**
@@ -2824,7 +3428,18 @@ function rearmProxyOrNull(args, what, whatLower) {
     env: process.env,
     execArgv: process.execArgv,
     flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+    guard: PROXY_REARM_GUARD,
   });
+  // ⭐ A suppressed re-exec SPEAKS here (#18989). Both `hint` branches — an
+  // older node, and a guard already set — used to return through the
+  // `!rearm.rearm` line below without printing anything, so the only place the
+  // hint ever reached a reader was the sweep's INCOMPLETE banner, and only when
+  // the incompleteness was about attribution. Every other mode bypassed the
+  // proxy in silence and reported the resulting 401 as the container's verdict.
+  if (rearm.hint) {
+    console.error(`⚠️  ${rearm.reason}. ${what} below may be answered by the ROUTE, not by the credential.`);
+    return null;
+  }
   if (!rearm.rearm) return null;
   console.error(`ℹ️  re-exec with ${rearm.flag}: ${rearm.reason}. ${what} would otherwise fail on every channel.`);
   // The proxy agent is experimental and says so once per run; the operator
@@ -3036,7 +3651,10 @@ async function main() {
     repo.quiet = commits.length === 0;
     scanned += commits.length;
     for (const commit of commits) {
-      const entry = classifyCommit(commit, commitPaths(repo.path, commit.sha), repo);
+      // Paths AND size off one local read (#19036): the size limb has to be
+      // answered before a row is an entry, and only an entry is ever attributed.
+      const { paths, size } = commitChanges(repo.path, commit.sha);
+      const entry = classifyCommit(commit, paths, repo, size);
       if (entry) entries.push(entry);
     }
   }
@@ -3129,6 +3747,7 @@ async function main() {
       env: process.env,
       execArgv: process.execArgv,
       flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+      guard: PROXY_REARM_GUARD,
     });
     return reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm });
   }
@@ -3223,15 +3842,16 @@ async function selfTest() {
   // ── the governed predicate: the 2026-08-18 unified list, exactly ──────────
   battery('the governed predicate: the 2026-08-18 unified list, exactly');
   const ids = (paths) => governedPathsIn(paths).map((s) => s.id);
-  assert('all-five-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md', GOVERNED_SURFACES.map((s) => s.id).join(','));
+  assert('all-six-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star', GOVERNED_SURFACES.map((s) => s.id).join(','));
   assert('adr-prefix', ids(['docs/adr/0001-x.md']).join() === 'adr');
   assert('whole-claude-tree-not-only-skills', ids(['.claude/hooks/guard-main-checkout.sh', '.claude/agents/os-dev.md', '.claude/settings.json']).join() === 'claude-tree');
   assert('published-skills-catalog-is-governed', ids(['skills/objectstack-ui/SKILL.md']).join() === 'skills-catalog');
   assert('root-agents-md-exact', ids(['AGENTS.md']).join() === 'agents-md');
   assert('root-claude-md-exact', ids(['CLAUDE.md']).join() === 'claude-md');
+  assert('north-star-exact', ids(['docs/NORTH-STAR.md']).join() === 'north-star');
   // Near misses, each load-bearing: prefixes need their trailing slash; the
   // exact entries are the repo-root files only (see header).
-  assert('near-misses-stay-out', ids(['docs/adrs/z.md', '.claude-x/y.md', 'skillsx/a.md', 'examples/AGENTS.md', 'packages/create-objectstack/src/templates/AGENTS.md', 'apps/CLAUDE.md.bak']).length === 0, JSON.stringify(ids(['examples/AGENTS.md'])));
+  assert('near-misses-stay-out', ids(['docs/adrs/z.md', '.claude-x/y.md', 'skillsx/a.md', 'examples/AGENTS.md', 'packages/create-objectstack/src/templates/AGENTS.md', 'apps/CLAUDE.md.bak', 'docs/north-star.md', 'docs/NORTH-STAR.md.bak', 'examples/docs/NORTH-STAR.md', 'docs/NORTH-STAR.mdx', 'content/docs/concepts/north-star.mdx']).length === 0, JSON.stringify(ids(['examples/AGENTS.md'])));
   assert('a-mixed-diff-groups-by-surface', ids(['docs/adr/0001.md', 'AGENTS.md', 'package.json']).join() === 'adr,agents-md');
 
   // ── the dispatch-gates declaration (#9979) ───────────────────────────────
@@ -3241,7 +3861,10 @@ async function selfTest() {
   // shows up only as a dev dispatched on a root-file card who is not told that
   // the card is GOVERNED.
   battery('the dispatch-gates declaration (#9979)');
-  const rootExacts = GOVERNED_SURFACES.filter((s) => s.exact).map((s) => s.exact);
+  // Only the SEPARATOR-LESS exact rows need a hint; an exact row that carries a
+  // separator (`docs/NORTH-STAR.md`) reaches dispatch-gates as written.
+  const rootExacts = GOVERNED_SURFACES.filter((s) => s.exact && !s.exact.includes('/')).map((s) => s.exact);
+  assert('an-exact-row-with-a-separator-declares-no-hint', GOVERNED_SURFACES.filter((s) => s.exact && s.exact.includes('/')).every((s) => !ROOT_FILE_WATCH_HINTS.includes(`${s.exact}/**`)) && GOVERNED_SURFACES.some((s) => s.exact === 'docs/NORTH-STAR.md'));
   assert('every-exact-root-row-declares-a-watch-hint', rootExacts.every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)), JSON.stringify(rootExacts));
   assert('the-declaration-names-no-file-this-register-does-not-govern', ROOT_FILE_WATCH_HINTS.every((h) => rootExacts.includes(h.replace(/\/\*+$/, ''))), JSON.stringify(ROOT_FILE_WATCH_HINTS));
   assert('both-root-instruction-files-are-declared', ROOT_FILE_WATCH_HINTS.join(',') === 'AGENTS.md/**,CLAUDE.md/**', ROOT_FILE_WATCH_HINTS.join(','));
@@ -3256,6 +3879,47 @@ async function selfTest() {
   assert('merge-subject', pullNumberFromSubject('Merge pull request #123 from x/y') === 123);
   assert('mid-title-issue-citation-is-not-the-pr', pullNumberFromSubject('docs: checklist names the renamed check run (#9420) (#9490)') === 9490);
   assert('no-pr-in-subject', pullNumberFromSubject('chore: direct push') === null);
+
+  // ── the two landing tiers (#19133, ruled 2026-09-18) ─────────────────────
+  //
+  // Membership is pinned above and unchanged; what this battery pins is the
+  // LANDING attribute: which rows carry S, that a PR is S only when every
+  // governed path is S, that the verdict line and `--json` carry the tier while
+  // the exit stays shared, and that a lift recomputes it.
+  battery('⚖️ the two landing tiers (#19133, ruled 2026-09-18)');
+  const tierOf = (id) => GOVERNED_SURFACES.find((s) => s.id === id)?.tier;
+  assert('every-row-carries-a-tier-and-it-is-H-or-S', GOVERNED_SURFACES.every((s) => s.tier === GOVERNED_TIER_H || s.tier === GOVERNED_TIER_S), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.tier])));
+  assert('the-tier-values-are-distinct-single-letters-a-reader-greps', GOVERNED_TIER_H === 'H' && GOVERNED_TIER_S === 'S' && Object.keys(GOVERNED_TIERS).join() === 'H,S');
+  assert('Tier-S-is-exactly-the-whole-claude-tree-row', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_S).map((s) => s.id).join() === 'claude-tree');
+  assert('Tier-H-is-the-law-adr-north-star-skills-catalog-agents-md-claude-md', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_H).map((s) => s.id).join() === 'adr,skills-catalog,agents-md,claude-md,north-star');
+  assert('settings-and-hooks-are-Tier-S-by-the-amendment', governedTierFor(['.claude/settings.json', '.claude/hooks/guard-main-checkout.sh']) === GOVERNED_TIER_S);
+  assert('skills-agents-and-the-fact-layer-are-Tier-S', governedTierFor(['.claude/skills/pm-dispatch/SKILL.md', '.claude/agents/os-dev.md', '.claude/skills/pm-dispatch/references/contract-review.md']) === GOVERNED_TIER_S);
+  assert('each-Tier-H-surface-answers-H-alone', ['docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md', 'AGENTS.md', 'CLAUDE.md'].every((p) => governedTierFor([p]) === GOVERNED_TIER_H));
+  assert('ALL-not-ANY-one-Tier-H-path-makes-the-whole-list-Tier-H', governedTierFor(['.claude/agents/os-dev.md', '.claude/settings.json', 'AGENTS.md']) === GOVERNED_TIER_H);
+  assert('an-ungoverned-rider-neither-demotes-a-Tier-H-list-nor-promotes-a-Tier-S-one', governedTierFor(['README.md', 'AGENTS.md']) === GOVERNED_TIER_H && governedTierFor(['README.md', '.claude/agents/os-dev.md']) === GOVERNED_TIER_S);
+  assert('an-EMPTY-or-UNGOVERNED-list-answers-H-fail-closed', governedTierFor([]) === GOVERNED_TIER_H && governedTierFor(undefined) === GOVERNED_TIER_H && governedTierFor(['README.md']) === GOVERNED_TIER_H);
+  assert('the-published-skills-catalog-stays-Tier-H-the-seat-did-not-propose-moving-it', tierOf('skills-catalog') === GOVERNED_TIER_H);
+  assert('--test-carries-the-tier-and-null-when-nothing-is-governed', testVerdict(['.claude/agents/os-dev.md']).tier === GOVERNED_TIER_S && testVerdict(['AGENTS.md']).tier === GOVERNED_TIER_H && testVerdict(['README.md']).tier === null);
+  const tierSCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md']);
+  const tierHCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md', 'AGENTS.md']);
+  const tierSText = renderTestVerdict(tierSCase);
+  const tierHText = renderTestVerdict(tierHCase);
+  assert('a-Tier-S-verdict-renders-its-OWN-block-naming-the-record-on-thread-landing', /Tier S/.test(tierSText) && /## Contract review/.test(tierSText) && /CONTRACT_REVIEW_TIER/.test(tierSText) && /--pair/.test(tierSText), tierSText);
+  assert('and-still-says-GOVERNED-with-the-three-verbs-so-every-grep-reader-keeps-its-answer', /GOVERNED/.test(tierSText) && /arms auto-merge/.test(tierSText) && !/human merge is the review record/.test(tierSText), tierSText);
+  assert('a-Tier-H-verdict-keeps-its-wording-word-for-word-and-names-its-tier', /a human merge is the review record for this PR/.test(tierHText) && /landing tier: H/.test(tierHText) && !/Tier S/.test(tierHText), tierHText);
+  assert('a-mixed-list-renders-H-the-one-Tier-H-path-decides', tierHCase.tier === GOVERNED_TIER_H && tierHCase.hitPaths.join() === '.claude/agents/os-dev.md,AGENTS.md', JSON.stringify(tierHCase.hitPaths));
+  assert('exit-3-is-SHARED-by-both-tiers-the-tier-lives-in-the-words-and-the-json-never-the-status', runTestModeExitFor(['.claude/agents/os-dev.md']) === EXIT_TEST_GOVERNED && runTestModeExitFor(['AGENTS.md']) === EXIT_TEST_GOVERNED && runTestModeExitFor(['README.md']) === EXIT_TEST_NOT_GOVERNED);
+  // A lift can change the tier: a diff whose only Tier H hit is a certified
+  // regeneration under `skills/**` is, post-lift, a Tier S diff — the tier is
+  // recomputed on the lifted slice, never read off the pre-lift one.
+  const liftPath = 'skills/objectstack-ui/references/_index.md';
+  const lifted = new Map([[liftPath, { pureRegeneration: true, reason: 'byte-equal to the generator' }]]);
+  const preLift = testVerdict([liftPath, '.claude/agents/os-dev.md']);
+  const postLift = applyGeneratedExceptions(preLift, lifted);
+  assert('the-tier-is-recomputed-on-the-LIFTED-slice', preLift.tier === GOVERNED_TIER_H && postLift.tier === GOVERNED_TIER_S && postLift.governed === true, JSON.stringify([preLift.tier, postLift.tier]));
+  const allLifted = applyGeneratedExceptions(testVerdict([liftPath]), lifted);
+  assert('and-null-once-every-hit-is-lifted', allLifted.governed === false && allLifted.tier === null, JSON.stringify(allLifted.tier));
+  assert('the-tier-words-name-the-landing-each-waits-for', /GOVERNED_APPROVERS/.test(GOVERNED_TIERS.H.landing) && /Contract review/.test(GOVERNED_TIERS.S.landing) && /--pair/.test(GOVERNED_TIERS.S.landing));
 
   // ── --since parsing ───────────────────────────────────────────────────────
   battery('since parsing');
@@ -4021,6 +4685,85 @@ async function selfTest() {
   assert('a-resolved-column-carries-the-account-is-not-a-principal-caveat', resolvedReport.includes('names an ACCOUNT, not a principal'), resolvedReport);
   assert('the-caveat-is-absent-when-nothing-resolved', !unresolvedReport.includes('names an ACCOUNT, not a principal'));
 
+  // ── ⭐ #18989: the re-exec guard is the CALLER's name, and this copy is a
+  // ── MIRROR pinned to its OWNER ────────────────────────────────────────────
+  //
+  // Two facts, one battery, because the card is one mechanism seen twice. The
+  // guard the plan reads is the CALLER's, so no sibling instrument's inherited
+  // variable can silence a tool that never re-armed (#18939's chain, replayed in
+  // a second plan); and the plan itself is a mirror of `check-half-states.mjs`'s,
+  // kept only because both edges that would retire it are measured deadlocks —
+  // so the mirror is pinned to its owner's SOURCE, and so is the REASON.
+  battery('⭐ #18989: the guard is the CALLER\'s name, and the mirror is pinned to its owner');
+  const guardProxy = { HTTPS_PROXY: 'http://127.0.0.1:40309' };
+  const SIBLING_GUARD = 'OS_SIBLING_PROXY_REARMED';
+  const ownGuarded = proxyRearmPlan({ env: { ...guardProxy, [PROXY_REARM_GUARD]: '1' } });
+  assert('the-default-guard-is-still-THIS-files-own-name-so-its-own-re-exec-is-unchanged',
+    ownGuarded.rearm === false && ownGuarded.guarded === PROXY_REARM_GUARD, JSON.stringify(ownGuarded));
+  assert('a-caller-that-names-its-OWN-guard-is-suppressed-by-that-one',
+    proxyRearmPlan({ env: { ...guardProxy, [SIBLING_GUARD]: '1' }, guard: SIBLING_GUARD }).rearm === false);
+  assert('and-THIS-files-name-does-NOT-suppress-it-the-cross-suppression-is-gone',
+    proxyRearmPlan({ env: { ...guardProxy, [PROXY_REARM_GUARD]: '1' }, guard: SIBLING_GUARD }).rearm === true);
+  assert('and-the-suppressing-variable-is-reported-machine-readably',
+    proxyRearmPlan({ env: { ...guardProxy, [SIBLING_GUARD]: '1' }, guard: SIBLING_GUARD }).guarded === SIBLING_GUARD);
+  // Silence is the whole cost of this chain: `rearm:false, hint:false` prints
+  // nothing at any consumer. The guard branch HINTS, which every consumer prints.
+  assert('a-guard-that-suppresses-SPEAKS-rather-than-closing-the-route-silently', ownGuarded.hint === true, JSON.stringify(ownGuarded));
+  assert('the-line-names-the-variable-a-reader-has-to-unset', ownGuarded.reason.includes(PROXY_REARM_GUARD), ownGuarded.reason);
+  assert('and-names-the-401-the-silence-would-otherwise-be-read-as', ownGuarded.reason.includes('401 Bad credentials'), ownGuarded.reason);
+  assert('and-the-proxy-the-request-was-supposed-to-take', ownGuarded.reason.includes('http://127.0.0.1:40309'), ownGuarded.reason);
+  // The Actions-runner leg, re-pinned ACROSS the new branch: a guard set where
+  // no proxy is configured must still spawn nothing, hint nothing, print nothing.
+  assert('with-no-proxy-configured-the-guard-is-inert-the-Actions-runner-leg',
+    proxyRearmPlan({ env: { [PROXY_REARM_GUARD]: '1' } }).rearm === false && proxyRearmPlan({ env: { [PROXY_REARM_GUARD]: '1' } }).hint === false);
+  assert('and-an-already-flagged-run-is-answered-by-the-FLAG-not-by-the-guard',
+    Boolean(proxyRearmPlan({ env: { ...guardProxy, [PROXY_REARM_GUARD]: '1' }, execArgv: [PROXY_FLAG] }).guarded) === false);
+  // Structural: the DEFAULT is not the contract, because this plan is imported.
+  // Both live call sites hand it this file's own name.
+  const ownPlanSource = readFileSync(scriptPath, 'utf8');
+  assert('structural-both-live-call-sites-hand-the-plan-THIS-files-guard',
+    (ownPlanSource.match(/^\s+guard: PROXY_REARM_GUARD,$/gm) ?? []).length === 2,
+    String((ownPlanSource.match(/^\s+guard: PROXY_REARM_GUARD,$/gm) ?? []).length));
+  // ⭐ The other half of the pair, read from ITS source rather than typed from
+  // memory: `ci-failure.mjs` imports this plan and sets its OWN variable on the
+  // child it re-execs, so a rename on either side reds here.
+  const guardSpellingIn = (rel, decl) => {
+    try {
+      const source = readFileSync(join(repoRoot, rel), 'utf8');
+      return { source, guard: new RegExp(`^${decl} PROXY_REARM_GUARD = '([^']+)';$`, 'm').exec(source)?.[1] ?? null };
+    } catch (error) {
+      return { source: null, guard: null, error: String(error?.message ?? error).split('\n')[0] };
+    }
+  };
+  const consumer = guardSpellingIn('scripts/pm/ci-failure.mjs', 'const');
+  const patrol = guardSpellingIn('scripts/pm/check-half-states.mjs', 'export const');
+  assert('both-sibling-files-are-readable-so-these-mirrors-can-be-pinned-at-all',
+    typeof consumer.source === 'string' && typeof patrol.source === 'string', `${consumer.error ?? 'ok'} / ${patrol.error ?? 'ok'}`);
+  assert('the-importer-names-its-OWN-guard-so-the-pair-no-longer-shares-one',
+    typeof consumer.guard === 'string' && consumer.guard !== PROXY_REARM_GUARD, String(consumer.guard));
+  assert('and-the-importers-inherited-guard-does-NOT-suppress-THIS-files-re-exec',
+    consumer.guard !== null && proxyRearmPlan({ env: { ...guardProxy, [consumer.guard]: '1' } }).rearm === true, String(consumer.guard));
+  // ⭐ The MIRROR: the patrol OWNS this decision. Its spelling and its `guard`
+  // contract are read off disk — a constant asserting against itself proves
+  // nothing — and its name must not silence this file either.
+  assert('the-patrol-owns-an-equivalent-plan-whose-guard-is-its-OWN-name',
+    typeof patrol.guard === 'string' && patrol.guard !== PROXY_REARM_GUARD, String(patrol.guard));
+  assert('and-the-patrols-inherited-guard-does-NOT-suppress-THIS-files-re-exec',
+    patrol.guard !== null && proxyRearmPlan({ env: { ...guardProxy, [patrol.guard]: '1' } }).rearm === true, String(patrol.guard));
+  assert('the-owners-plan-takes-the-CALLERS-guard-too-so-the-two-mirrors-agree',
+    /export function proxyRearmPlan\(\{[^)]*guard = PROXY_REARM_GUARD/.test(patrol.source ?? ''), 'the owner no longer takes a `guard` parameter');
+  // ⭐ And the REASON the plan is mirrored instead of imported. Measured
+  // 2026-09-19 on a throwaway copy of `scripts/`: a module-scope import of the
+  // owner exits 13 ("Detected unsettled top-level await") against a control
+  // exit 3, and a lazy `await import(…)` inside this very function exits 13 too,
+  // because this file's `--self-test` dispatch is itself a module-scope await.
+  // When the line below goes away, the cycle may be gone with it — and then this
+  // mirror should become a real import.
+  assert('⭐-the-REASON-this-plan-is-a-mirror-and-not-an-import-is-still-true',
+    /^export const GOVERNED_REGISTER = await loadGovernedRegister\(\);$/m.test(patrol.source ?? ''),
+    'the owner no longer resolves its register with a module-scope await — re-measure the cycle and make this an import',
+  );
+
   // ── the attribution column's THIRD case (#12645) ──────────────────────────
   // The two fixtures above are cases 1 and 2; the PR-less mainline entry —
   // the loudest line the sweep prints — is case 3, and it used to render
@@ -4581,13 +5324,13 @@ async function selfTest() {
   const liftedHead = renderTestVerdict(liftedTest).split('\n')[0];
   assert(
     '⭐ the-test-head-no-longer-reports-a-post-lift-zero-as-if-nothing-had-hit-the-register',
-    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (5 surfaces, repo-agnostic).',
+    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (6 surfaces, repo-agnostic).',
     liftedHead,
   );
   const plainHead = renderTestVerdict(testVerdict(['packages/spec/src/ui/view.zod.ts'])).split('\n')[0];
   assert(
     'and-a-verdict-with-no-lift-keeps-its-head-line-byte-for-byte',
-    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (5 surfaces, repo-agnostic).',
+    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (6 surfaces, repo-agnostic).',
     plainHead,
   );
 
@@ -4692,9 +5435,21 @@ async function selfTest() {
     ['rev-parse --verify --quiet feature', ok40(B)],
     ['merge-base', ok40(M)],
     ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\nsrc/b.ts\n', error: '' }],
+    ['diff --numstat --no-renames', { ok: true, out: '3\t1\tsrc/a.ts\n10\t0\tsrc/b.ts\n', error: '' }],
   ]) });
   assert('a-derivable-branch-answers-the-three-dot-list-from-the-merge-base',
     derived.ok === true && derived.paths.join() === 'src/a.ts,src/b.ts' && derived.derivation.mergeBase === M, JSON.stringify(derived));
+  assert('and-the-size-off-the-same-range-rides-with-it',
+    derived.size.additions === 13 && derived.size.deletions === 1 && derived.derivation.size.files === 2, JSON.stringify(derived.size));
+  const noNumstat = deriveBranchPaths({ ref: 'feature', run: gitScript([
+    ['rev-parse --verify --quiet origin/main', ok40(A)],
+    ['rev-parse --verify --quiet feature', ok40(B)],
+    ['merge-base', ok40(M)],
+    ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\n', error: '' }],
+    ['diff --numstat --no-renames', { ok: false, out: '', error: 'fatal: numstat unavailable' }],
+  ]) });
+  assert('a---numstat-that-does-not-read-REFUSES-the-whole-derivation-never-a-size-of-zero',
+    noNumstat.ok === false && /numstat/.test(noNumstat.reason) && /never a size of zero/.test(noNumstat.reason) && noNumstat.paths === undefined, JSON.stringify(noNumstat));
   assert('⛔ the-diff-is-taken-with---no-renames-so-a-rename-out-of-a-governed-path-still-hits',
     derived.derivation.command.includes('--no-renames'), derived.derivation.command);
   const branchLine = renderDerivation(derived.derivation);
@@ -4728,7 +5483,7 @@ async function selfTest() {
     const one = [{ id: 'fixture', name: 'fixture channel', headers: {} }];
     const walk = await fetchPullFiles({
       apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: one,
-      fetchImpl: async (url) => (/\/files/.test(url) ? pageFor(url) : respond({ changed_files: 260 }, null)),
+      fetchImpl: async (url) => (/\/files/.test(url) ? pageFor(url) : respond({ changed_files: 260, additions: 260, deletions: 0 }, null)),
     });
     assert('⭐ the-walk-follows-Link-to-the-end-and-collects-every-page',
       walk.ok === true && walk.paths.length === 260 && walk.derivation.pages === 3 && walk.derivation.entries === 260,
@@ -4739,7 +5494,7 @@ async function selfTest() {
         renderDerivation(walk.derivation).includes('3 page(s)'), renderDerivation(walk.derivation));
     const short = await fetchPullFiles({
       apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: one,
-      fetchImpl: async (url) => (/\/files/.test(url) ? respond(rows(0, 100), null) : respond({ changed_files: 260 }, null)),
+      fetchImpl: async (url) => (/\/files/.test(url) ? respond(rows(0, 100), null) : respond({ changed_files: 260, additions: 260, deletions: 0 }, null)),
     });
     assert('⭐ a-walk-the-PRs-own-count-contradicts-REFUSES-rather-than-answering-on-a-subset',
       short.ok === false && /but the PR reports 260/.test(short.reason) && short.paths === undefined, JSON.stringify(short));
@@ -4750,7 +5505,7 @@ async function selfTest() {
     const pickSecond = await fetchPullFiles({
       apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: two,
       fetchImpl: async (url, init) => {
-        if (!/\/files/.test(url)) { seen += 1; return seen === 1 ? denied : respond({ changed_files: 1 }, null); }
+        if (!/\/files/.test(url)) { seen += 1; return seen === 1 ? denied : respond({ changed_files: 1, additions: 1, deletions: 0 }, null); }
         return respond([{ filename: 'a.ts' }], null);
       },
     });
@@ -4759,7 +5514,7 @@ async function selfTest() {
     const dropMidWalk = await fetchPullFiles({
       apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: two,
       fetchImpl: async (url) => {
-        if (!/\/files/.test(url)) return respond({ changed_files: 200 }, null);
+        if (!/\/files/.test(url)) return respond({ changed_files: 200, additions: 200, deletions: 0 }, null);
         if (/page=2/.test(url)) return denied; // the SECOND page, on the channel that served the first
         return respond(rows(0, 100), `${filesUrl(2)}; rel="next"`);
       },
@@ -4768,7 +5523,7 @@ async function selfTest() {
       dropMidWalk.ok === false && /did not read/.test(dropMidWalk.reason), JSON.stringify(dropMidWalk));
     const renamedPr = await fetchPullFiles({
       apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: one,
-      fetchImpl: async (url) => (/\/files/.test(url) ? respond(renamedOut, null) : respond({ changed_files: 1 }, null)),
+      fetchImpl: async (url) => (/\/files/.test(url) ? respond(renamedOut, null) : respond({ changed_files: 1, additions: 1, deletions: 0 }, null)),
     });
     assert('and-a-renamed-governed-file-reaches-the-predicate-as-BOTH-of-its-paths',
       renamedPr.ok === true && testVerdict(renamedPr.paths).governed === true &&
@@ -4839,7 +5594,9 @@ async function selfTest() {
     assert('while-the-two-dot-list-through---test-still-answers-GOVERNED-the-defect-is-the-INPUT',
       twoDotRun.status === EXIT_TEST_GOVERNED, `status=${twoDotRun.status} out=${twoDotRun.out.slice(0, 300)}`);
     // Zone (e)'s identity: one register, one answer, however the list was got.
-    const sameListRun = run('--test', ...threeDot.paths);
+    // The size `--branch` read off the range is handed to `--test` as the pair,
+    // so the two readings are of the same list AND the same number.
+    const sameListRun = run('--test', ...threeDot.paths, '--additions', String(threeDot.size.additions), '--deletions', String(threeDot.size.deletions));
     assert('⭐ the-verdict-is-BYTE-IDENTICAL-through---branch-and-through---test-on-the-same-list',
       branchRun.out.endsWith(sameListRun.out) && sameListRun.out !== '', JSON.stringify({ b: branchRun.out.slice(-120), t: sameListRun.out.slice(-120) }));
     assert('and---test-keeps-its-stdout-to-itself-the-three-dot-note-travels-on-stderr',
@@ -4874,6 +5631,343 @@ async function selfTest() {
       noRefRun.status === EXIT_CANNOT_SWEEP && noRefRun.err.includes('--branch wants a git ref'), noRefRun.err.slice(0, 200));
   } finally {
     rmSync(derFx, { recursive: true, force: true });
+  }
+
+  // ── ⭐ the SIZE predicate (maintainer ruling 2026-09-18) ──────────────────
+  //
+  // Header section "The SIZE predicate". Pinned on both sides of the threshold,
+  // on the number that prompted the ruling, on every mode's reading of the
+  // number, and on the one thing an exemption would have exempted: a
+  // generated-artifact lift moves a PATH off the register and moves the size
+  // not at all.
+  battery('⭐ the SIZE predicate: over the human-merge line threshold, whatever the paths');
+  assert('the-threshold-is-the-ruled-default-5000-declared-once', HUMAN_MERGE_LINE_THRESHOLD === 5000, String(HUMAN_MERGE_LINE_THRESHOLD));
+  const atThreshold = sizeVerdict({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 0 });
+  const overByOne = sizeVerdict({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 1 });
+  assert('⭐ exactly-5000-changed-lines-is-UNDER-the-threshold',
+    atThreshold.measured === true && atThreshold.changedLines === 5000 && atThreshold.exceeds === false, JSON.stringify(atThreshold));
+  assert('⭐ 5001-changed-lines-is-OVER-it-the-count-is-additions-PLUS-deletions',
+    overByOne.measured === true && overByOne.changedLines === 5001 && overByOne.exceeds === true, JSON.stringify(overByOne));
+  const prompting = sizeVerdict({ additions: 238310, deletions: 119 });
+  assert('the-PR-that-prompted-the-ruling-reads-238429-changed-lines-and-is-over',
+    prompting.changedLines === 238429 && prompting.exceeds === true, JSON.stringify(prompting));
+  assert('no-size-is-NOT-MEASURED-never-a-size-of-zero',
+    sizeVerdict(null).measured === false && sizeVerdict(null).exceeds === false && sizeVerdict(null).changedLines === null && sizeVerdict({}).measured === false);
+  assert('a-negative-or-non-integer-count-is-NOT-MEASURED-too',
+    sizeVerdict({ additions: -1, deletions: 0 }).measured === false && sizeVerdict({ additions: 1.5, deletions: 0 }).measured === false &&
+      sizeVerdict({ additions: '5001', deletions: 0 }).measured === false);
+  // Through the verdict: the exit code is the GOVERNED one, the words say SIZE.
+  const bigClean = testVerdict(['packages/spec/src/index.ts'], { size: { additions: 6000, deletions: 0, source: 'a fixture' } });
+  assert('⭐ an-oversized-PR-with-no-governed-path-is-NOT-governed-by-path-and-lands-by-HUMAN-MERGE',
+    bigClean.governed === false && bigClean.size.exceeds === true && bigClean.humanMerge === true, JSON.stringify(bigClean));
+  assert('and-it-exits-on-the-GOVERNED-code-so-every-existing-caller-routes-it-to-the-same-terminal',
+    runTestModeExitFor(['packages/spec/src/index.ts'], bigClean.size) === EXIT_TEST_GOVERNED);
+  const bigWords = renderTestVerdict(bigClean);
+  assert('the-words-say-HUMAN-MERGE-the-number-the-threshold-and-that-generated-files-are-INCLUDED',
+    bigWords.includes('HUMAN MERGE') && bigWords.includes('6000 changed line(s)') && bigWords.includes(`> ${HUMAN_MERGE_LINE_THRESHOLD}`) &&
+      bigWords.includes('generated files INCLUDED') && bigWords.includes('arms auto-merge') && !bigWords.includes('a fixture'), bigWords);
+  assert('and-the-provenance-of-the-number-stays-OFF-the-verdict-it-lives-on-the-derivation-line-or-the-stderr-note',
+    bigClean.size.source === 'a fixture' && !renderSizeLines(bigClean.size).includes('fixture') && CALLER_SIZED_NOTE.includes('--additions'), renderSizeLines(bigClean.size));
+  assert('and-they-never-say-ordinary-queue-landing-applies', !bigWords.includes('ordinary queue landing applies'), bigWords);
+  const smallClean = testVerdict(['packages/spec/src/index.ts'], { size: { additions: 10, deletions: 2 } });
+  assert('an-ordinary-sized-ordinary-diff-still-answers-NOT-governed-and-says-the-size-is-under',
+    smallClean.humanMerge === false && runTestModeExitFor(['packages/spec/src/index.ts'], smallClean.size) === EXIT_TEST_NOT_GOVERNED &&
+      renderTestVerdict(smallClean).includes('under the human-merge threshold') && renderTestVerdict(smallClean).includes('12 changed line(s)'),
+    renderTestVerdict(smallClean));
+  const unmeasured = testVerdict(['packages/spec/src/index.ts']);
+  assert('⭐ with-no-size-handed-in-the-verdict-says-NOT-MEASURED-on-stdout-and-names-the-modes-that-read-it',
+    unmeasured.size.measured === false && unmeasured.humanMerge === false && renderTestVerdict(unmeasured).includes('NOT MEASURED') &&
+      renderTestVerdict(unmeasured).includes('--pr') && renderTestVerdict(unmeasured).includes('--additions'), renderTestVerdict(unmeasured));
+  assert('and-testVerdict-with-no-size-keeps-its-PATH-answer-byte-for-byte-the-queue-guard-imports-it',
+    unmeasured.governed === false && JSON.stringify(unmeasured.hitPaths) === '[]' &&
+      JSON.stringify(unmeasured.clearPaths) === '["packages/spec/src/index.ts"]' && testVerdict(['AGENTS.md']).governed === true);
+  const bigGoverned = testVerdict(['AGENTS.md'], { size: { additions: 6000, deletions: 0 } });
+  assert('a-governed-path-AND-an-oversized-diff-renders-both-limbs-and-stays-on-the-governed-code',
+    bigGoverned.governed === true && bigGoverned.humanMerge === true && renderTestVerdict(bigGoverned).includes('GOVERNED') &&
+      renderTestVerdict(bigGoverned).includes('HUMAN MERGE'), renderTestVerdict(bigGoverned));
+  // ⛔ No exemption for generated files: the register lifts a PATH, never a line count.
+  const regenPath = REGISTER_SAMPLES['spec-skill-refs'];
+  const liftedBig = applyGeneratedExceptions(
+    testVerdict([regenPath], { size: { additions: 237706, deletions: 0 } }),
+    new Map([[regenPath, { pureRegeneration: true, reason: 'byte-equal to the generator (fixture)' }]]),
+  );
+  assert('⭐ a-certified-pure-regeneration-lifts-the-PATH-and-lifts-NOTHING-from-the-size',
+    liftedBig.governed === false && liftedBig.exceptions.some((e) => e.pureRegeneration) && liftedBig.humanMerge === true && liftedBig.size.exceeds === true,
+    JSON.stringify({ governed: liftedBig.governed, humanMerge: liftedBig.humanMerge }));
+  assert('and-the-rendering-carries-both-the-lift-and-the-HUMAN-MERGE',
+    renderTestVerdict(liftedBig).includes('PURE REGENERATION') && renderTestVerdict(liftedBig).includes('HUMAN MERGE'), renderTestVerdict(liftedBig));
+  // The number's sources. `--numstat`, parsed: text rows sum, a binary row counts 0 as on GitHub.
+  const numstat = parseNumstat('3\t1\tsrc/a.ts\n-\t-\timg/logo.png\n10\t0\tsrc/b.ts\n\n');
+  assert('numstat-sums-text-rows-and-counts-a-binary-row-as-zero-lines',
+    numstat.additions === 13 && numstat.deletions === 1 && numstat.files === 3 && numstat.binaryFiles === 1, JSON.stringify(numstat));
+  assert('and-an-empty-numstat-is-zero-of-everything-not-a-crash',
+    JSON.stringify(parseNumstat('')) === JSON.stringify({ additions: 0, deletions: 0, files: 0, binaryFiles: 0 }) && parseNumstat(null).files === 0);
+  // The PR object: the pair, or null for the caller to refuse on.
+  assert('a-PR-object-with-the-pair-yields-the-pair',
+    JSON.stringify(pullSizeFrom({ additions: 238310, deletions: 119 })) === JSON.stringify({ additions: 238310, deletions: 119 }));
+  assert('a-PR-object-without-the-pair-yields-null-never-zero',
+    pullSizeFrom({ changed_files: 3 }) === null && pullSizeFrom({ additions: 3 }) === null && pullSizeFrom({ additions: '3', deletions: 0 }) === null && pullSizeFrom(null) === null);
+  // The caller's flags: both, neither, or a refusal.
+  assert('no-size-flags-is-no-size', JSON.stringify(readSizeFlags(['--test', 'a.ts'])) === JSON.stringify({ ok: true, size: null }));
+  const bothFlags = readSizeFlags(['--test', 'a.ts', '--additions', '5000', '--deletions', '1']);
+  assert('both-flags-read-as-the-pair-and-name-the-caller-as-the-source',
+    bothFlags.ok === true && bothFlags.size.additions === 5000 && bothFlags.size.deletions === 1 && /CALLER/.test(bothFlags.size.source), JSON.stringify(bothFlags));
+  assert('one-flag-without-the-other-is-refused-the-count-is-their-SUM',
+    readSizeFlags(['--additions', '5']).ok === false && /travel together/.test(readSizeFlags(['--additions', '5']).error) && readSizeFlags(['--deletions', '5']).ok === false);
+  assert('a-non-integer-or-negative-value-is-refused',
+    readSizeFlags(['--additions', 'x', '--deletions', '1']).ok === false && readSizeFlags(['--additions', '-1', '--deletions', '1']).ok === false &&
+      readSizeFlags(['--additions', '--deletions', '1']).ok === false);
+  // `--pr`'s read, on the injected fetch: the pair rides the same GET as the count; its absence REFUSES.
+  {
+    const respond = (body, link) => ({ ok: true, status: 200, headers: { get: (k) => (String(k).toLowerCase() === 'link' ? link : null) }, json: async () => body });
+    const one = [{ id: 'fixture', name: 'fixture channel', headers: {} }];
+    const sized = await fetchPullFiles({
+      apiUrl: 'https://api', slug: 'o/r', pull: 18971, channels: one,
+      fetchImpl: async (url) => (/\/files/.test(url)
+        ? respond([{ filename: 'packages/spec/api-surface/x.json' }], null)
+        : respond({ changed_files: 1, additions: 238310, deletions: 119 }, null)),
+    });
+    assert('⭐ --pr-reads-additions-and-deletions-off-the-same-GET-that-gives-the-changed_files-count',
+      sized.ok === true && sized.size.additions === 238310 && sized.size.deletions === 119 && /GET \/repos\/o\/r\/pulls\/18971/.test(sized.size.source) &&
+        sized.derivation.size.additions === 238310, JSON.stringify(sized.size ?? sized));
+    assert('and-the-derivation-line-prints-the-pair',
+      renderDerivation(sized.derivation).includes('+238310 / -119'), renderDerivation(sized.derivation));
+    const unsized = await fetchPullFiles({
+      apiUrl: 'https://api', slug: 'o/r', pull: 2, channels: one,
+      fetchImpl: async (url) => (/\/files/.test(url) ? respond([{ filename: 'a.ts' }], null) : respond({ changed_files: 1, merged: false }, null)),
+    });
+    assert('⭐ a-PR-object-missing-the-pair-REFUSES-never-a-not-governed-answer-and-never-a-size-of-zero',
+      unsized.ok === false && /additions/.test(unsized.reason) && /never a size of zero/.test(unsized.reason) && unsized.paths === undefined, JSON.stringify(unsized));
+  }
+  // End to end, on a real repository: `--branch` counts the same range it lists,
+  // the flags reach `--test`, and the verdict is still ONE emitter.
+  const sizeFx = mkdtempSync(join(tmpdir(), 'governed-merges-size-'));
+  try {
+    const g3 = (cwd, ...rest) =>
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
+        { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const repo = join(sizeFx, 'repo');
+    g3(sizeFx, 'init', '-q', repo);
+    const put = (rel, data) => {
+      mkdirSync(dirname(join(repo, rel)), { recursive: true });
+      writeFileSync(join(repo, rel), data);
+    };
+    put('README.md', 'a\nb\nc\n');
+    g3(repo, 'add', '-A');
+    g3(repo, 'commit', '-qm', 'chore: seed');
+    g3(repo, 'update-ref', 'refs/remotes/origin/main', g3(repo, 'rev-parse', 'main').trim());
+    g3(repo, 'checkout', '-q', '-b', 'feature');
+    put('README.md', 'a\nc\n'); // -1
+    put('src/a.ts', 'l1\nl2\nl3\nl4\nl5\nl6\n'); // +6
+    put('img/blob.bin', Buffer.from([0, 1, 2, 3, 0])); // binary: 0 lines, as on GitHub
+    g3(repo, 'add', '-A');
+    g3(repo, 'commit', '-qm', 'feat: sized');
+    g3(repo, 'checkout', '-q', 'main');
+    const run = (...argv) => {
+      const r = spawnSync(process.execPath, [scriptPath, ...argv], { encoding: 'utf8', env: { ...process.env, [PROXY_REARM_GUARD]: '1' } });
+      return { status: r.status, out: r.stdout ?? '', err: r.stderr ?? '' };
+    };
+    const local = deriveBranchPaths({ ref: 'feature', run: (argv) => tryGit(repo, argv) });
+    assert('⭐ --branch-counts-the-range-it-lists-with---numstat-binary-files-at-zero',
+      local.ok === true && local.size.additions === 6 && local.size.deletions === 1 && local.size.binaryFiles === 1 && local.size.files === 3, JSON.stringify(local.size ?? local));
+    const branchRun = run('--branch', 'feature', '--root', repo);
+    assert('and-the-CLI-prints-the-reading-under-the-threshold-and-exits-NOT-governed',
+      branchRun.status === EXIT_TEST_NOT_GOVERNED && branchRun.out.includes('7 changed line(s)') && branchRun.out.includes('under the human-merge threshold'),
+      `status=${branchRun.status} out=${branchRun.out.slice(0, 500)}`);
+    const sameNumbers = run('--test', ...local.paths, '--additions', '6', '--deletions', '1');
+    assert('⭐ the-verdict-is-BYTE-IDENTICAL-through---branch-and-through---test-once-the-same-numbers-are-handed-in',
+      branchRun.out.endsWith(sameNumbers.out) && sameNumbers.out !== '', JSON.stringify({ b: branchRun.out.slice(-160), t: sameNumbers.out.slice(-160) }));
+    const overRun = run('--test', 'src/a.ts', '--additions', String(HUMAN_MERGE_LINE_THRESHOLD), '--deletions', '1');
+    assert('⭐ --test-with-5001-changed-lines-on-an-ordinary-path-exits-3-and-says-HUMAN-MERGE',
+      overRun.status === EXIT_TEST_GOVERNED && overRun.out.includes('HUMAN MERGE') && !overRun.out.includes('ordinary queue landing'),
+      `status=${overRun.status} out=${overRun.out.slice(0, 400)}`);
+    assert('and-the-flag-values-never-leak-into-the-path-list',
+      overRun.out.includes('0 of 1 path(s) hit the register'), overRun.out.slice(0, 200));
+    const atRun = run('--test', 'src/a.ts', '--additions', String(HUMAN_MERGE_LINE_THRESHOLD), '--deletions', '0');
+    assert('and-exactly-5000-exits-0-the-threshold-is-strictly-greater',
+      atRun.status === EXIT_TEST_NOT_GOVERNED && atRun.out.includes('under the human-merge threshold'), `status=${atRun.status} out=${atRun.out.slice(0, 300)}`);
+    const jsonRun = run('--test', 'src/a.ts', '--additions', '5001', '--deletions', '0', '--json');
+    let jsonBody = null;
+    try { jsonBody = JSON.parse(jsonRun.out); } catch { /* asserted below */ }
+    assert('--json-carries-governed-false-humanMerge-true-and-the-size-block',
+      jsonRun.status === EXIT_TEST_GOVERNED && jsonBody?.governed === false && jsonBody?.humanMerge === true && jsonBody?.size?.exceeds === true &&
+        jsonBody?.size?.changedLines === 5001, jsonRun.out.slice(0, 300));
+    const noneRun = run('--test', 'src/a.ts');
+    assert('--test-with-no-size-flags-still-answers-the-path-question-and-prints-NOT-MEASURED-on-stdout',
+      noneRun.status === EXIT_TEST_NOT_GOVERNED && noneRun.out.includes('NOT MEASURED'), `status=${noneRun.status} out=${noneRun.out.slice(0, 300)}`);
+    assert('and-the-caller-sized-note-travels-on-stderr-only-when-the-flags-were-given',
+      sameNumbers.err.includes('came from the CALLER (--additions') && !noneRun.err.includes('came from the CALLER (--additions') && !sameNumbers.out.includes('CALLER'),
+      sameNumbers.err.slice(0, 300));
+    const halfRun = run('--test', 'src/a.ts', '--additions', '5001');
+    assert('one-size-flag-is-bad-args-exit-1-and-no-verdict',
+      halfRun.status === EXIT_CANNOT_SWEEP && halfRun.err.includes('travel together') && !halfRun.out.includes('governed-surface predicate'),
+      `status=${halfRun.status} err=${halfRun.err.slice(0, 200)}`);
+    const twoReadings = run('--branch', 'feature', '--root', repo, '--additions', '1', '--deletions', '1');
+    assert('--branch-with-the-flags-is-two-readings-of-one-number-and-is-refused',
+      twoReadings.status === EXIT_CANNOT_SWEEP && twoReadings.err.includes('two readings') && !twoReadings.out.includes('governed-surface predicate'),
+      `status=${twoReadings.status} err=${twoReadings.err.slice(0, 200)}`);
+  } finally {
+    rmSync(sizeFx, { recursive: true, force: true });
+  }
+
+  // ── ⭐ #19036: the sweep lists an OVERSIZED landing beside the governed ones ─
+  //
+  // The queue half of #19036 lives in the guard; this is the audit half. Until
+  // now the sweep classified on the PATH register alone, so PR #18971's shape
+  // — over the line, nothing governed — was invisible to the after-the-fact
+  // list as well as to the queue. The size is read LOCALLY off the landed
+  // diff, on the same `git diff-tree` that lists the commit's paths: the
+  // attribution GET is paid only for a row that is already an entry, so no
+  // read of the API could ever have made one.
+  battery('⭐ #19036: the sweep lists an OVERSIZED landing beside the governed ones');
+  const LINE = HUMAN_MERGE_LINE_THRESHOLD;
+  const commitAt = (sha, subject) => ({ sha, date: '2026-09-19T00:00:00Z', subject });
+  const bigPlain = classifyCommit(commitAt('1'.repeat(40), 'chore(spec): regenerate (#18971)'), ['packages/spec/api-surface/x.json'], GOVERNED_REPOS[0], { additions: 238310, deletions: 119 });
+  assert('⭐ an-oversized-landing-with-NO-governed-path-is-a-sweep-ENTRY-on-the-size-limb-alone',
+    bigPlain !== null && bigPlain.surfaces.length === 0 && bigPlain.size.exceeds === true && bigPlain.size.changedLines === 238429 && bigPlain.humanMerge === true && bigPlain.pr === 18971,
+    JSON.stringify(bigPlain));
+  assert('⭐ exactly-the-threshold-is-NOT-listed-the-comparison-is-strictly-greater',
+    classifyCommit(commitAt('2'.repeat(40), 'x (#2)'), ['packages/x.ts'], GOVERNED_REPOS[0], { additions: LINE, deletions: 0 }) === null &&
+      classifyCommit(commitAt('2'.repeat(40), 'x (#2)'), ['packages/x.ts'], GOVERNED_REPOS[0], { additions: LINE - 1, deletions: 1 }) === null);
+  assert('threshold-plus-one-IS-listed-additions-PLUS-deletions',
+    classifyCommit(commitAt('3'.repeat(40), 'x (#3)'), ['packages/x.ts'], GOVERNED_REPOS[0], { additions: LINE, deletions: 1 })?.size.exceeds === true);
+  assert('an-ungoverned-landing-with-NO-size-reading-is-still-not-an-entry-unmeasured-never-lists',
+    classifyCommit(commitAt('4'.repeat(40), 'x (#4)'), ['packages/x.ts'], GOVERNED_REPOS[0]) === null);
+  const govSmall = classifyCommit(commitAt('5'.repeat(40), 'docs: a (#5)'), ['AGENTS.md'], GOVERNED_REPOS[0], { additions: 10, deletions: 2 });
+  assert('a-governed-merge-under-the-line-is-listed-as-before-and-now-carries-its-measured-size',
+    govSmall !== null && govSmall.surfaces.length === 1 && govSmall.size.measured === true && govSmall.size.exceeds === false && govSmall.size.changedLines === 12,
+    JSON.stringify(govSmall?.size));
+  const govLegacy = classifyCommit(commitAt('6'.repeat(40), 'docs: a (#6)'), ['AGENTS.md'], GOVERNED_REPOS[0]);
+  assert('a-governed-merge-classified-with-NO-size-keeps-its-entry-shape-and-says-NOT-MEASURED',
+    govLegacy !== null && govLegacy.surfaces[0].id === 'agents-md' && govLegacy.size.measured === false && govLegacy.humanMerge === true);
+  const govBig = classifyCommit(commitAt('7'.repeat(40), 'docs: b (#7)'), ['AGENTS.md', 'packages/x.ts'], GOVERNED_REPOS[0], { additions: LINE + 5, deletions: 0 });
+  assert('a-governed-AND-oversized-landing-is-ONE-entry-carrying-both-limbs', govBig.surfaces.length === 1 && govBig.size.exceeds === true);
+  // ⚠️ Every pin below that reads a classified entry guards the null first: under
+  // the landing PR's ablation (the comparison inverted in `sizeVerdict`) the
+  // oversized fixture classifies to NOTHING, and a pin that dereferenced it
+  // would abort the whole run with a TypeError — a self-test that crashes hides
+  // every other failure it had already collected. A red case must be a NAMED one.
+  assert('⭐ classifyCommit-IS-the-landed-predicate-landsByHumanMerge-on-testVerdict-never-a-restated-comparison',
+    [bigPlain, govSmall, govLegacy, govBig].every((e) => e !== null && landsByHumanMerge(testVerdict(e.surfaces.flatMap((s) => s.files), { size: e.size.measured ? e.size : null })) === true));
+  // The report an operator reads.
+  const bigEntry = bigPlain === null
+    ? null
+    : { ...bigPlain, attribution: { mergedBy: 'os-elon-musk', mergedAt: '2026-09-18T09:00:00Z', title: 'x', size: { additions: 238310, deletions: 119 } }, attributionChannel: 'rest' };
+  const bigReport = bigEntry === null ? '' : renderReport({ window: dateWindowFor('2026-09-18T00:00:00Z'), repos: allAudited, scanned: 3, entries: [bigEntry], lookups: 1 });
+  assert('⭐ the-head-counts-the-oversized-landing-APART-from-the-governed-merges',
+    bigReport.includes('governed-merges sweep: 0 governed merge(s) and 1 oversized landing(s) with no governed path since'), bigReport);
+  assert('and-the-row-names-the-PR-the-number-the-threshold-the-limb-and-the-HUMAN-MERGE-it-was-due',
+    bigReport.includes('PR #18971') && bigReport.includes('⛔ SIZE: 238429 changed line(s) (+238310 / -119)') && bigReport.includes(`EXCEEDS the human-merge line ${LINE}`) &&
+      bigReport.includes('generated files INCLUDED') && bigReport.includes('HUMAN MERGE') && bigReport.includes('listed on that limb ALONE') &&
+      bigReport.includes('surfaces: (none — listed on SIZE alone)'),
+    bigReport);
+  assert('and-still-carries-the-attribution-column-the-audit-asks-of-every-row', bigReport.includes('merged_by os-elon-musk'), bigReport);
+  assert('and-a-GitHub-pair-EQUAL-to-the-landed-number-prints-nothing-extra', !bigReport.includes('GitHub reports'), bigReport);
+  const skewed = bigEntry === null
+    ? ''
+    : renderReport({
+        window: dateWindowFor('2026-09-18T00:00:00Z'), repos: allAudited, scanned: 3, lookups: 1,
+        entries: [{ ...bigEntry, attribution: { ...bigEntry.attribution, size: { additions: 238000, deletions: 119 } } }],
+      });
+  assert('a-GitHub-pair-that-DIFFERS-from-the-landed-number-is-printed-beside-it-and-decides-nothing', skewed.includes('GitHub reports +238000 / -119') && skewed.includes('⛔ SIZE: 238429'), skewed);
+  const smallReport = renderReport({ window: dateWindowFor('2026-09-18T00:00:00Z'), repos: allAudited, scanned: 3, entries: [govSmall], lookups: 0 });
+  assert('a-governed-row-under-the-line-keeps-its-head-byte-for-byte-and-prints-its-size-as-a-plain-reading',
+    smallReport.includes('governed-merges sweep: 1 governed merge(s) since') && !smallReport.includes('oversized') &&
+      smallReport.includes(`size: 12 changed line(s) (+10 / -2), at or under ${LINE}`) && !smallReport.includes('⛔ SIZE'),
+    smallReport);
+  const bothReport = renderReport({ window: dateWindowFor('2026-09-18T00:00:00Z'), repos: allAudited, scanned: 3, entries: [govBig], lookups: 0 });
+  assert('a-governed-AND-oversized-row-counts-as-a-governed-merge-and-carries-the-SIZE-line-as-well-as-the-register',
+    bothReport.includes('governed-merges sweep: 1 governed merge(s) since') && bothReport.includes('⛔ SIZE') && bothReport.includes('as well as on the register') && bothReport.includes('AGENTS.md'),
+    bothReport);
+  const legacyReport = renderReport({ window: dateWindowFor('2026-09-18T00:00:00Z'), repos: allAudited, scanned: 1, entries: [govLegacy], lookups: 0 });
+  assert('a-row-classified-with-NO-size-prints-NO-size-line-so-the-pre-19036-fixtures-render-as-they-did',
+    sizeCell(govLegacy) === '' && !legacyReport.includes('\n      size:') && !legacyReport.includes('⛔ SIZE'), legacyReport);
+  assert('the-clean-window-line-now-says-the-size-was-checked-too', clean.includes(`no landing crossed ${LINE} changed lines`) && clean.includes('✅'), clean);
+  assert('and-the-contract-lines-state-the-size-limb-on-every-sweep', clean.includes('listed too, on SIZE') && bigReport.includes('listed too, on SIZE'));
+  // The LANDED diff, read locally: one `git diff-tree --numstat` per mainline
+  // commit — paths AND size, zero API — on a real repository, then the CLI end
+  // to end on a checkout that claims to be a governed repo (the banner
+  // fixture's own recipe), attribution offline.
+  const overFx = mkdtempSync(join(tmpdir(), 'governed-merges-oversized-'));
+  try {
+    const og = (cwd, ...rest) =>
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
+        { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const seed = join(overFx, 'seed');
+    og(overFx, 'init', '-q', seed);
+    for (const [msg, ago] of [['chore: forty days ago', 40], ['chore: thirty-five days ago', 35]]) {
+      const when = new Date(Date.now() - ago * 86_400_000).toISOString();
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', msg], {
+        cwd: seed, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, GIT_COMMITTER_DATE: when, GIT_AUTHOR_DATE: when },
+      });
+    }
+    const lines = (n) => `${Array.from({ length: n }, (_, i) => `line ${i}`).join('\n')}\n`;
+    mkdirSync(join(seed, 'packages'), { recursive: true });
+    writeFileSync(join(seed, 'README.md'), 'a\nb\nc\n');
+    og(seed, 'add', '-A');
+    og(seed, 'commit', '-qm', 'chore: seed (#1)');
+    writeFileSync(join(seed, 'packages', 'at.txt'), lines(LINE)); // exactly the line: NOT listed
+    og(seed, 'add', '-A');
+    og(seed, 'commit', '-qm', 'feat: exactly at the line (#5000)');
+    writeFileSync(join(seed, 'packages', 'over.txt'), lines(LINE + 1)); // one over, plus a binary at 0: LISTED
+    writeFileSync(join(seed, 'packages', 'blob.bin'), Buffer.from([0, 1, 2, 3, 0]));
+    og(seed, 'add', '-A');
+    og(seed, 'commit', '-qm', 'feat: one over the line (#5001)');
+    og(seed, 'checkout', '-q', '-b', 'topic'); // a MERGE commit: first-parent diff = the branch's whole change
+    writeFileSync(join(seed, 'README.md'), 'a\nc\n'); // -1
+    writeFileSync(join(seed, 'packages', 'topic.txt'), 'x\ny\n'); // +2
+    og(seed, 'add', '-A');
+    og(seed, 'commit', '-qm', 'feat: topic');
+    og(seed, 'checkout', '-q', 'main');
+    og(seed, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #7 from topic', 'topic');
+    const shaOf = (ref) => og(seed, 'rev-parse', ref).trim();
+    const overSha = shaOf('main~1');
+    const atSha = shaOf('main~2');
+    const mergeSha = shaOf('main');
+    const overRead = commitChanges(seed, overSha);
+    assert('⭐ commitChanges-reads-paths-AND-size-off-ONE-numstat-binary-at-zero',
+      overRead.paths.join() === 'packages/blob.bin,packages/over.txt' && overRead.size.additions === LINE + 1 && overRead.size.deletions === 0 &&
+        overRead.size.binaryFiles === 1 && overRead.size.files === 2,
+      JSON.stringify(overRead));
+    const nameOnly = og(seed, 'diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', '-m', '--first-parent', overSha).split('\n').filter((p) => p !== '');
+    assert('and-its-path-list-equals-the-pre-19036-name-only-reading-byte-for-byte', JSON.stringify(overRead.paths) === JSON.stringify(nameOnly), JSON.stringify(nameOnly));
+    const mergeRead = commitChanges(seed, mergeSha);
+    assert('a-MERGE-commit-is-read-against-its-FIRST-parent-the-whole-branch-change',
+      mergeRead.paths.join() === 'README.md,packages/topic.txt' && mergeRead.size.additions === 2 && mergeRead.size.deletions === 1, JSON.stringify(mergeRead));
+    const atRead = commitChanges(seed, atSha);
+    assert('the-at-threshold-commit-classifies-to-nothing-and-the-over-by-one-to-an-entry-on-the-LANDED-diff',
+      classifyCommit({ sha: atSha, date: 'd', subject: 'feat: exactly at the line (#5000)' }, atRead.paths, GOVERNED_REPOS[2], atRead.size) === null &&
+        classifyCommit({ sha: overSha, date: 'd', subject: 'feat: one over the line (#5001)' }, overRead.paths, GOVERNED_REPOS[2], overRead.size)?.size.exceeds === true,
+      JSON.stringify(atRead.size));
+    const bare = join(overFx, 'live.git');
+    og(overFx, 'clone', '-q', '--bare', seed, bare);
+    const co = join(overFx, 'co');
+    og(overFx, 'clone', '-q', bare, co);
+    og(co, 'remote', 'set-url', 'origin', 'https://github.com/objectstack-ai/cloud');
+    og(co, 'config', `url.${bare}.insteadOf`, 'https://github.com/objectstack-ai/cloud');
+    const overEnv = { ...process.env, [PROXY_REARM_GUARD]: '1', GITHUB_API_URL: 'http://127.0.0.1:1' };
+    const sweepRun = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${co}`], { encoding: 'utf8', env: overEnv });
+    const sweepOut = sweepRun.stdout ?? '';
+    assert('⭐ a-REAL-sweep-LISTS-the-over-by-one-landing-on-the-size-limb-and-NOT-the-at-threshold-one',
+      sweepOut.includes('PR #5001') && sweepOut.includes('⛔ SIZE') && sweepOut.includes(`${LINE + 1} changed line(s) (+${LINE + 1} / -0)`) &&
+        !sweepOut.includes('PR #5000') && !sweepOut.includes('PR #7') && sweepOut.includes('1 oversized landing(s) with no governed path'),
+      `status=${sweepRun.status} out=${sweepOut.slice(0, 900)} err=${(sweepRun.stderr ?? '').slice(0, 300)}`);
+    assert('and-attributes-it-like-any-row-so-an-offline-attribution-still-marks-the-sweep-INCOMPLETE',
+      sweepRun.status === EXIT_INCOMPLETE && sweepOut.includes('attribution unavailable'), `status=${sweepRun.status}`);
+    const jsonRun = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${co}`, '--json'], { encoding: 'utf8', env: overEnv });
+    let jsonBody = null;
+    try { jsonBody = JSON.parse(jsonRun.stdout); } catch { /* asserted below */ }
+    assert('and---json-carries-the-entry-with-its-size-block-and-an-empty-surface-list',
+      jsonBody?.entries?.length === 1 && jsonBody.entries[0].pr === 5001 && jsonBody.entries[0].surfaces.length === 0 &&
+        jsonBody.entries[0].size.exceeds === true && jsonBody.entries[0].size.changedLines === LINE + 1,
+      (jsonRun.stdout ?? '').slice(0, 400));
+  } catch (error) {
+    // ⛔ Never a silent skip: an environment that cannot run this leaves the
+    // audit half of #19036 unpinned, and that must read as red.
+    assert('the-oversized-sweep-fixture-could-be-built-and-run', false, String(error?.message ?? error).split('\n')[0]);
+  } finally {
+    rmSync(overFx, { recursive: true, force: true });
   }
 
   // ── ⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away ──────────
@@ -5012,15 +6106,15 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled 5,000 declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and neither the importer's name nor the patrol's silences this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the importer's own guard, the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
-function runTestModeExitFor(paths) {
+function runTestModeExitFor(paths, size = null) {
   if (paths.length === 0) return EXIT_CANNOT_SWEEP;
-  return testVerdict(paths).governed ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
+  return landsByHumanMerge(testVerdict(paths, { size })) ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
 }
 
 // `invokedDirectly` for the same reason the main-invocation guard above

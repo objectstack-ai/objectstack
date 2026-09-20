@@ -600,7 +600,7 @@ export const DatabaseLevelIsolationStrategySchema = lazySchema(() => z.object({
     /**
      * Backup frequency in hours
      */
-    frequencyHours: z.number().int().positive().default(24).describe('Backup frequency'),
+    frequencyHours: z.number().int().positive().default(24).describe('Backup frequency in hours'),
     
     /**
      * Retention period in days

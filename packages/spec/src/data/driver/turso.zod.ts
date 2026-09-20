@@ -80,7 +80,17 @@ export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 export const TursoConfigSchema = lazySchema(() => strictObject(
   {
     surface: "this turso datasource's config",
-    // Semantic near-misses only — the spellings edit distance cannot reach.
+    // Semantic near-misses — a different WORD for a declared key. FIVE of the
+    // six are the unreachable case: `connectionstring`, `dsn`, `database`,
+    // `databaseurl` and `syncinterval` all score past their budget against
+    // every declared key, so without the entry the author gets no suggestion
+    // at all. `uri` is NOT, and the entry is worth keeping for the opposite
+    // reason: the budget is `Math.max(2, Math.floor(key.length / 3))`
+    // (`shared/suggestions.zod.ts`), so a 3-character key gets 2, and `uri`
+    // differs from `url` by 1 — the bare fallback already answers `url`. That
+    // row is a PIN on an answer the fallback happens to get right, not a
+    // gap-filler, and it keeps answering `url` if this shape ever gains a key
+    // within 2 of `uri`. `turso.test.ts` pins the distinction.
     // Case and underscore variants of a DECLARED key (`encryption_key`,
     // `sync_url`) are deliberately absent: the unknown-key probe already
     // normalizes those onto the declared name, so entries for them would be

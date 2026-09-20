@@ -7,6 +7,7 @@ import dotenvFlow from 'dotenv-flow';
 import fs from 'fs';
 import path from 'path';
 import { normalizeStackInput } from '@objectstack/spec';
+import { referenceCarrierOf } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printWarning, printError, printStep, printInfo } from '../utils/format.js';
 import { loadConfig, configExists } from '../utils/config.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
@@ -273,10 +274,13 @@ export function scheduledWorkCheck(reading: DotenvReading): HealthCheckResult {
       ? `ON — packaged time-triggered flows and packaged \`defineJob\` cron jobs are armed (${SCHEDULED_WORK_ENV})`
       : `OFF (the default) — no packaged time-triggered flow and no packaged \`defineJob\` runs on this deployment`,
     fix: enabled
-      ? `Unset ${SCHEDULED_WORK_ENV} to turn it back off. While it is on, a time-triggered\n`
-        + '      flow under a WALLED tenancy posture (group/isolated) must declare\n'
-        + '      config.organization on its start node or it is not armed; under `single` it\n'
-        + '      needs no declaration and its runs carry no organization.\n'
+      ? `Unset ${SCHEDULED_WORK_ENV} to turn it back off. While it is on, what a\n`
+        + '      time-triggered flow owes depends on the tenancy posture: under `isolated` it\n'
+        + '      must declare config.organization on its start node or it is not armed; under\n'
+        + '      `group` the declaration is optional and an undeclared sweep acts as each\n'
+        + "      swept record's own organization (a record-less cron there carries none, and\n"
+        + '      its tenant-scoped writes are refused — declare one if it writes); under\n'
+        + '      `single` it needs no declaration and its runs carry no organization.\n'
         + `      ${envSourceSentence(reading, provenance)}`
       : `Set ${SCHEDULED_WORK_ENV}=true to run package-authored scheduled work here.\n`
         + '      OFF is the global default in every posture and every kernel: a clock-driven\n'
@@ -697,17 +701,37 @@ export function resolveTenancyPostureOrFinding(reading: DotenvReading): TenancyP
 
 // ─── Config-Aware Checks ────────────────────────────────────────────
 
-function detectCircularDependencies(objects: any[]): string[] {
+// Exported for the pin on its carrier reading below; `doctor` itself is the
+// only caller.
+export function detectCircularDependencies(objects: any[]): string[] {
   const issues: string[] = [];
   const graph = new Map<string, string[]>();
 
   for (const obj of objects) {
     const deps: string[] = [];
     if (obj.fields && typeof obj.fields === 'object') {
-      for (const field of Object.values(obj.fields) as any[]) {
-        if (field?.type === 'lookup' && field?.reference) {
-          deps.push(field.reference);
+      for (const [key, field] of Object.entries(obj.fields) as Array<[string, any]>) {
+        if (field?.type !== 'lookup') continue;
+        // The carrier is read through the ONE arbiter, the same narrowing
+        // `collectViewObjectRefs` below already performs — a truthiness gate
+        // admitted an object- or array-valued `reference` as a NODE of the
+        // dependency graph, where it can never match an object name and prints
+        // as `[object Object]` in a cycle message. Absence is the contract's
+        // answer; unreadability is reported, because this check's success line
+        // ("No circular references detected") asserts something positive that a
+        // silently missing edge cannot support. The throw is caught so `doctor`
+        // keeps reporting on exactly the broken metadata it exists to inspect.
+        let reference: string | undefined;
+        try {
+          reference = referenceCarrierOf(field, 'doctor.detectCircularDependencies');
+        } catch (err: any) {
+          issues.push(
+            `Object "${obj.name}" field "${key}": lookup target is unreadable, so this edge is absent `
+            + `from the dependency graph — ${err?.message ?? err}`,
+          );
+          continue;
         }
+        if (reference) deps.push(reference);
       }
     }
     graph.set(obj.name, deps);
@@ -887,13 +911,31 @@ export function findUnusedObjects(config: any): string[] {
   }
 
   // Lookup fields reference other objects
+  //
+  // The carrier is read through the ONE arbiter rather than a truthiness gate:
+  // an unreadable `reference` used to enter `referencedObjects` as a non-string
+  // member, where it marks nothing as referenced and so lets this function
+  // report the object it actually points at as unused. Unreadability is
+  // REPORTED rather than skipped, because "defined but not referenced" is a
+  // positive claim about the config and an edge nobody could read cannot
+  // support it. The throw is caught so `doctor` keeps reporting.
+  const unreadableCarriers: string[] = [];
   if (Array.isArray(config.objects)) {
     for (const obj of config.objects) {
       if (obj.fields && typeof obj.fields === 'object') {
-        for (const field of Object.values(obj.fields) as any[]) {
-          if (field?.type === 'lookup' && field?.reference) {
-            referencedObjects.add(field.reference);
+        for (const [key, field] of Object.entries(obj.fields) as Array<[string, any]>) {
+          if (field?.type !== 'lookup') continue;
+          let reference: string | undefined;
+          try {
+            reference = referenceCarrierOf(field, 'doctor.findUnusedObjects');
+          } catch (err: any) {
+            unreadableCarriers.push(
+              `Object "${obj.name}" field "${key}": lookup target is unreadable, so it marks no object `
+              + `as referenced — ${err?.message ?? err}`,
+            );
+            continue;
           }
+          if (reference) referencedObjects.add(reference);
         }
       }
     }
@@ -905,7 +947,7 @@ export function findUnusedObjects(config: any): string[] {
       unused.push(`Object "${name}" is defined but not referenced by any view, flow, app, or lookup field`);
     }
   }
-  return unused;
+  return [...unreadableCarriers, ...unused];
 }
 
 // ─── ADR-0120 D5e — `isolated`-posture unique-scope advisory ────────

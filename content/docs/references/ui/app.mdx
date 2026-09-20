@@ -28,12 +28,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -66,7 +66,7 @@ const result = ActionNavItemSchema.parse(data);
 | **isDefault** | `boolean` | optional (default: `false`) | Is default app |
 | **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead (navigation only — never an access gate) |
 | **_unpublished** | `boolean` | optional | Machine-managed publish gate (ADR-0045 §3) — true = unpublished, externally unobservable. Written by AI materialization, cleared by publish-drafts. Never authored. |
-| **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Full navigation tree for the app sidebar |
+| **navigation** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Full navigation tree for the app sidebar |
 | **areas** | `{ id: string; label: string \| Record<string, string>; icon?: string; description?: string \| Record<string, string>; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
 | **contextSelectors** | `{ id: string; label: string \| Record<string, string>; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
 | **homePageId** | `never` | optional | [REMOVED] `app.homePageId` was removed in @objectstack/spec 17.0.0 (ADR-0049). objectui's console did read it before v17 (`resolveLandingRoute`), so this key had a consumer — it was retired because the capability is better expressed on the navigation item itself than as an ID cross-reference that silently falls back when it dangles. An app's landing page IS its first navigation item (by `order`), and the root landing follows `isDefault` routing. Delete the key; to change where an app opens, reorder `navigation` so the intended entry is first, and set `isDefault` on the app that should own the root landing. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
@@ -101,12 +101,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -117,19 +117,19 @@ const result = ActionNavItemSchema.parse(data);
 | **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
 | **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
 | **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action"). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
-| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Child navigation items (e.g. specific views) |
+| **children** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Child navigation items (e.g. specific views) |
 
 ### Nested Shape: `App.navigation[number][type='dashboard']`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -141,12 +141,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -159,12 +159,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -177,12 +177,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -194,12 +194,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -211,12 +211,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -237,18 +237,18 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
 | **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
-| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Child navigation items |
+| **children** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Child navigation items |
 
 ### Nested Shape: `App.areas[number]`
 
@@ -258,7 +258,7 @@ const result = ActionNavItemSchema.parse(data);
 | **label** | `string \| Record<string, string>` | ✅ | Area display label |
 | **icon** | `string` | optional | Area icon name |
 | **description** | `string \| Record<string, string>` | optional | Area description |
-| **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items within this area |
+| **navigation** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items within this area |
 
 ### Nested Shape: `App.contextSelectors[number]`
 
@@ -328,12 +328,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -351,12 +351,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -373,12 +373,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -398,19 +398,19 @@ const result = ActionNavItemSchema.parse(data);
 | **label** | `string \| Record<string, string>` | ✅ | Area display label |
 | **icon** | `string` | optional | Area icon name |
 | **description** | `string \| Record<string, string>` | optional | Area description |
-| **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items within this area |
+| **navigation** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items within this area |
 
 ### Nested Shape: `NavigationArea.navigation[number][type='object']`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -421,19 +421,19 @@ const result = ActionNavItemSchema.parse(data);
 | **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
 | **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
 | **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action"). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
-| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Child navigation items (e.g. specific views) |
+| **children** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Child navigation items (e.g. specific views) |
 
 ### Nested Shape: `NavigationArea.navigation[number][type='dashboard']`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -445,12 +445,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -463,12 +463,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -481,12 +481,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -498,12 +498,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -515,12 +515,12 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -541,18 +541,18 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
 | **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
-| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Child navigation items |
+| **children** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Child navigation items |
 
 
 ---
@@ -568,19 +568,19 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **app** | `string` | ✅ | Target app name to contribute navigation into (e.g. "setup") |
 | **group** | `string` | optional | Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level. Naming a group the target app does not declare is not refused: the items are appended at the app top level anyway and a `nav_contribution_group_missing` diagnostic is emitted — by the runtime at `warn`, and by `os build` and `os validate` at compile time. |
 | **priority** | `integer` | optional (default: `200`) | Merge priority within the target group — lower applied first (matches object extender priority) |
-| **items** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items contributed into the target app/group |
+| **items** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items contributed into the target app/group |
 
 ### Nested Shape: `NavigationContribution.items[number][type='object']`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -591,19 +591,19 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
 | **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
 | **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action"). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
-| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Child navigation items (e.g. specific views) |
+| **children** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Child navigation items (e.g. specific views) |
 
 ### Nested Shape: `NavigationContribution.items[number][type='dashboard']`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -615,12 +615,12 @@ A navigation contribution: a package injecting nav items into an app it does not
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -633,12 +633,12 @@ A navigation contribution: a package injecting nav items into an app it does not
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -651,12 +651,12 @@ A navigation contribution: a package injecting nav items into an app it does not
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -668,12 +668,12 @@ A navigation contribution: a package injecting nav items into an app it does not
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -685,12 +685,12 @@ A navigation contribution: a package injecting nav items into an app it does not
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -711,18 +711,18 @@ A navigation contribution: a package injecting nav items into an app it does not
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
 | **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
-| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Child navigation items |
+| **children** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Child navigation items |
 
 
 ---
@@ -742,12 +742,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -771,12 +771,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -794,12 +794,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -818,12 +818,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -842,12 +842,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -865,12 +865,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -895,12 +895,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -933,12 +933,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -958,12 +958,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -985,12 +985,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -1008,12 +1008,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -1030,12 +1030,12 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | optional | Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render time — the view's label when it names a view and that view is labelled, else the object's / dashboard's label; a present label renders verbatim and is never overwritten. Every real destination must have identity and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is materialised for the absent case. |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |

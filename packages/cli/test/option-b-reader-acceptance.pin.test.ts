@@ -212,7 +212,10 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // than two empties agreeing.
     expect(PACKAGE_OWNED_COLLECTION_KEYS.length).toBeGreaterThan(30);
     expect(ARTIFACT_ENVELOPE_KEYS).toEqual(
-      ['api', 'devPlugins', 'i18n', 'manifest', 'onEnable', 'packages', 'plugins', 'runtimeModule', 'server'],
+      // #17556 added `devHint` / `devLogins`: what the DEVELOPMENT BOOT BANNER
+      // prints, read off the top level by the CLI and refused inside a package
+      // body — envelope keys by the same rule `devPlugins` is one.
+      ['api', 'devHint', 'devLogins', 'devPlugins', 'i18n', 'manifest', 'onEnable', 'packages', 'plugins', 'runtimeModule', 'server'],
     );
 
     // Every key option B drops is a package-owned collection, and every key it

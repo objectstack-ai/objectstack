@@ -133,3 +133,140 @@ export const ORPHAN_GUIDANCE = [
   '',
   'See .claude/skills/spec-property-retirement/SKILL.md §2.',
 ];
+
+// ── THE TOMBSTONE HALF OF THE SAME ASYMMETRY (#19062) ──
+//
+// The guidance above states one half of the tombstone rule and nothing enforced
+// the other. `retiredKey()` keeps the key in the walked shape, so the row must
+// STAY — that is the half written down, and deleting the row fails loudly as
+// UNCLASSIFIED. What the row is allowed to SAY was never constrained: the
+// forward pass reads `status` and is satisfied by any value, the orphan pass is
+// satisfied because the property is still there, and `markerStatus()` reads
+// `[experimental` and `[planned` markers with no reading of the tombstone marker
+// at all. So `tombstone + status: live` was a structurally permitted
+// combination, not an oversight, and a key nobody can author could be graded a
+// live capability indefinitely with CI green.
+//
+// That is measured, not hypothetical: `agent.tools` was tombstoned in the spec
+// and its only reader deleted in a sibling repo, while the ledger graded the row
+// `live` for three months and no gate objected (#18304).
+//
+// WHY `live` IS THE FORBIDDEN VALUE, AND WHY THE SET IS A CONSTANT. `live` is
+// defined in the ledger README as "has a runtime consumer". A tombstoned key
+// types as `never`, fails `tsc` at the authoring site and is refused at parse
+// with the retirement prescription — no author in any repo can put a value
+// behind it and no consumer can read one. So `live` is not a judgement call per
+// row, it is false by construction. The other verdicts are a separate question
+// with no census behind them yet (`planned` and `experimental` on a tombstone
+// are equally false, `live-elsewhere` too) and their population here is ZERO
+// today — widening this set is its own measurement, which is why it is a named
+// constant rather than an inlined comparison.
+//
+// WHY IT LIVES HERE. This module already owns the ledger-versus-schema
+// direction and already carries the prose that states the rule's other half; a
+// rule and its guidance drifting apart is the failure this file was written to
+// end. And it stays PURE for the reason `findOrphanEntries` does: the Zod
+// walking stays in the gate, so the judgement can be tested without one.
+
+/**
+ * The marker `retiredKey()` writes at the head of a tombstoned key's
+ * description — `packages/spec/src/shared/retired-key.ts`.
+ *
+ * Held equal to the real producer by `orphans.test.ts`, which reads an actual
+ * `retiredKey()` description rather than restating the literal: a marker that
+ * drifts would leave this scan matching nothing and reporting a clean tree,
+ * which is the vacuous-pass shape the scanned/forbidden two-number report below
+ * exists to make visible.
+ */
+export const TOMBSTONE_MARKER = '[REMOVED]';
+
+/**
+ * The statuses a tombstoned key's row may not claim. One entry, deliberately —
+ * see the block above for why widening it is a separate measurement.
+ */
+export const TOMBSTONE_FORBIDDEN_STATUSES: readonly string[] = ['live'];
+
+/** One property the gate's walk graded, with the description it graded it from. */
+export interface GradedProperty {
+  /** `<type>/<propPath>` — the coordinate the gate classified. */
+  key: string;
+  /** The property's resolved Zod description; the tombstone marker lives in it. */
+  description: string;
+  /** The status the walk resolved — from the ledger row, a marker, or `childrenDefault`. */
+  status: string;
+}
+
+/** A tombstoned key whose ledger row claims a status the tombstone forbids. */
+export interface TombstonedRow {
+  /** `<type>/<propPath>` — the ledger coordinate making the claim. */
+  key: string;
+  /** The forbidden status it claims. */
+  status: string;
+}
+
+/**
+ * Two readings, because one cannot carry both facts — the same discipline the
+ * gate's evidence and citation lines already print. `scanned` is the
+ * extraction-health signal; `findings` is the verdict. Reporting only the
+ * verdict would read as a pass on a run where the marker had drifted and the
+ * scan saw no tombstones at all.
+ *
+ * `scanned` ENUMERATES rather than counts, for `report.authorable`'s reason
+ * (#18133): a population that is only totalled cannot be checked by anything
+ * downstream, and "never looked" then passes for "nothing to report". The
+ * enumeration is what lets the gate's own self-test derive a sample from the
+ * live tombstone set instead of naming one row and rotting when that row's
+ * verdict moves.
+ */
+export interface TombstoneScan {
+  /** Every `[REMOVED]` tombstone the walk reached, by `<type>/<propPath>`. */
+  scanned: string[];
+  /** The ones whose row claims a forbidden status. */
+  findings: TombstonedRow[];
+}
+
+/**
+ * Ask every tombstone the walk reached what its ledger row claims.
+ *
+ * This is the join the gate lacked: the tombstone lives in the SCHEMA
+ * (a description), the claim lives in the LEDGER (a status), and until they were
+ * read together neither side could be wrong on its own.
+ */
+export function scanTombstonedRows(graded: readonly GradedProperty[]): TombstoneScan {
+  const forbidden = new Set(TOMBSTONE_FORBIDDEN_STATUSES);
+  const findings: TombstonedRow[] = [];
+  const scanned: string[] = [];
+  for (const prop of graded) {
+    if (!prop.description.includes(TOMBSTONE_MARKER)) continue;
+    scanned.push(prop.key);
+    if (forbidden.has(prop.status)) findings.push({ key: prop.key, status: prop.status });
+  }
+  return { scanned, findings };
+}
+
+/**
+ * The prescription printed under the tombstoned-row list. The wrong fix is the
+ * tempting one — deleting the row — so name it and rule it out in the same
+ * breath, exactly as {@link ORPHAN_GUIDANCE} does for the opposite direction.
+ */
+export const TOMBSTONE_STATUS_GUIDANCE = [
+  'A `retiredKey()` tombstone declares the key REMOVED: it types as `never`, so',
+  'writing it is a tsc error, and a value reaching the parse is refused with the',
+  'retirement prescription. No author can write it and no consumer in any repo',
+  'can read one — so `live` ("has a runtime consumer") is false by construction,',
+  'whatever evidence the row still carries.',
+  '',
+  'Fix the ROW: grade it `dead` and move the retirement story (which sweep, which',
+  'ADR, which tombstone refuses the key now) into `note`. A `dead` row carries no',
+  'evidence pointer by convention — the prose is the record.',
+  '',
+  '⛔ Do NOT delete the row. The tombstone KEEPS the key in the walked shape, so',
+  'a deleted row reports UNCLASSIFIED instead — the asymmetry ORPHAN_GUIDANCE',
+  'above states. Route decides disposition; here the route is the tombstone.',
+  '',
+  'If the key is genuinely still readable somewhere, then the SCHEMA is wrong and',
+  'the tombstone is the thing to remove — a retirement that left a live consumer',
+  'behind is a bigger finding than this row.',
+  '',
+  'See .claude/skills/spec-property-retirement/SKILL.md §2.',
+];

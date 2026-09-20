@@ -317,6 +317,15 @@ export interface IDataDriver {
 
   /**
    * Begin a new database transaction.
+   *
+   * ⛔ Implementing this method is NOT by itself a claim that the transport
+   * honours transactions, because a subclass inherits it. A transport that
+   * cannot carry a handle — one whose data methods never receive
+   * `options.transaction` — declares `supports.transactionsUnsupported: true`
+   * and the engine takes the declared non-transactional path (ADR-0119 D1)
+   * instead of calling this. `driverSupportsTransactions()` in
+   * `data/driver.zod.ts` is the one predicate that answers the question.
+   *
    * @returns A transaction handle to pass via `options.transaction`.
    */
   beginTransaction(options?: { isolationLevel?: string }): Promise<unknown>;

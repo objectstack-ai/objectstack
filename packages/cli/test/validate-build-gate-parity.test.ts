@@ -234,6 +234,26 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
     'cleanupOldRuntimeBundles',
     'warningsSoFar',
   ],
+  // [#17080] Reads a fact about the TOOLCHAIN, not about the input. The
+  // ADR-0087 D4 `release` section is computed at publish time from the two
+  // tarballs and shipped inside the installed `@objectstack/spec`; this reader
+  // opens that file and counts its entries. It takes nothing from the stack, so
+  // its answer is the same for every stack on the machine — it can reach no
+  // verdict, raise no finding and refuse nothing, and `os validate` exits
+  // identically whether it returns a delta or `null`.
+  //
+  // ⛔ NOT the `checkProtocolVersionGap` row in SHARED_NON_REGISTRY_GATES
+  // above, which this sits next to in `validate.ts` and is easy to mistake for
+  // a sibling. That one JUDGES THE INPUT — it reads `engines.protocol` off the
+  // stack manifest and reports when the installed platform falls outside the
+  // range the author declared — which is why it is a gate, why it must be wired
+  // into both commands, and why parity applies to it. Nothing here reads the
+  // stack at all. If this ever grows a comparison against something the author
+  // wrote, it becomes a gate that day and moves up to
+  // SHARED_NON_REGISTRY_GATES, wired into `compile.ts` too.
+  'Reports a property of the installed platform, derived from no part of the stack — judges no input': [
+    'readSpecReleaseChanges',
+  ],
   'Not ours — a Node builtin, a global, an oclif base or a third-party namespace': [
     'dirname',
     'String',

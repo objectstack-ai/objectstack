@@ -668,8 +668,11 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     //     ⛔ What did NOT move: the BIND-time near-miss diagnostic. The
     //     `describeMissingScheduleOrganization` sentence and its `organizationId`
     //     / `tenantId` / … scan still fire at the one door where the key really
-    //     is required — a walled posture with the switch on — and that door
-    //     knows both facts. Authoring-time silence here is not a loss of the
+    //     is required — posture `isolated` with the switch on (#18378 narrowed
+    //     that from "a walled posture": under `group` an undeclared flow is a
+    //     legal armed shape, so a near-miss there cannot be told apart from a
+    //     deliberate omission) — and that door knows both facts.
+    //     Authoring-time silence here is not a loss of the
     //     diagnostic, it is the diagnostic moving to where the question is
     //     answerable.
 

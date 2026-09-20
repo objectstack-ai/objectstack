@@ -255,8 +255,9 @@ This package contains **only types**. Never import implementation details:
 // ✅ Good - type-only import
 import type { RuntimePlugin } from '@objectstack/types';
 
-// ❌ Bad - trying to import implementation
-import { RuntimePlugin } from '@objectstack/types'; // Won't work
+// ❌ Bad - trying to import the implementation. There is none, so a value
+// import does not work:
+//   import { RuntimePlugin } from '@objectstack/types';
 ```
 
 ### 3. Extend Interfaces When Needed
