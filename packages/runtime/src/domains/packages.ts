@@ -71,6 +71,15 @@ import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
 // that already call it — the dataset query in `rest-server.ts`, the cold-boot
 // flow bind in `service-automation`, and `saveMetaItem`'s verbatim persist.
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+// [#19120] The DECLARED grammar of one manifest key, asked BY REFERENCE at the
+// install door below. `ManifestSchema.shape.version` is the very field schema
+// `PackageInstallRequestSchema` binds through `manifest: ManifestSchema` — not
+// a copy of it. ⛔ A hand-written semver regex here would be the THIRD judgment
+// of this one key on this one surface (the `PATCH /packages/:id` door further
+// down already keeps its own copy), and the version-grammar canon is an open
+// question on its own card: asking the declaration means whatever that canon
+// decides reaches this door with no edit to this file.
+import { ManifestSchema } from '@objectstack/spec/kernel';
 // [#17672] The repo's ONE message for a single-valued query parameter supplied
 // more than once, from the module whose header is the authority on the rule
 // (`packages/rest/src/query-multiplicity.ts`). Imported, never restated: this
@@ -748,6 +757,60 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // A package id is mandatory — without one the install cannot be keyed.
             if (!pkgId) {
                 return { handled: true, response: deps.error('Package id is required', 400) };
+            }
+            // [#19120] ⭐ THE DOOR PARSES THE `version` LEG — the declaration,
+            // by reference.
+            //
+            // `PackageInstallRequestSchema` binds `manifest: ManifestSchema`,
+            // and `ManifestSchema` declares `version` REQUIRED with a semantic
+            // grammar. This door parsed nothing at all: a manifest with no
+            // `version` installed and answered `201`. That is «declared ≠
+            // enforced» on a PUBLISHED API contract — the shape Prime Directive
+            // #10 refuses outright — and it is the failure 北极星 clause 4 names
+            // in as many words: 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+            // So the refusal is loud and carries the prescription.
+            //
+            // The ruling that authorises it is 基本裁决原则 —
+            // 「声明而未兑现是实现缺口,补实现或退役,⛔ 不在消费端收窄」 — and by
+            // the mechanical boundary test, making a door parse what its schema
+            // ALREADY declares is 拉回已声明契约, ⛔ not 扩大接受集. Nothing in
+            // `packages/spec` moves for this; the declaration was already right.
+            //
+            // ⛔ SCOPE — THE `version` LEG ALONE. The declaration's own residual
+            // docblock records FIVE classes this door answers `201` to. The
+            // other four — a missing `type`, unknown keys on either body form,
+            // a string-typed `enableOnInstall`/`overwrite`, install options
+            // spelled on the bare form — are each their own reading and are
+            // deliberately LEFT STANDING. They are separable, not entangled:
+            // closing them is the ONE call this code pointedly does not make,
+            // `PackageInstallBodySchema.safeParse(body)`. The five are produced
+            // at three different levels — a per-key field schema (this leg), the
+            // union arms' `.strict()` close (unknown keys, bare-form options),
+            // and this handler's own `=== true` / `=== 'true'` comparisons
+            // (the string-typed options) — and only the first is asked here.
+            //
+            // ⛔ HTTP-DOOR-ONLY BY CONSTRUCTION. Boot-time and in-process
+            // installs reach `SchemaRegistry.installPackage` / `registerApp`
+            // directly and never pass through this branch, so what tightens is
+            // the published wire contract and nothing else.
+            //
+            // ⭐ ORDERED BEFORE THE 409, DELIBERATELY. A request-shape refusal
+            // must not depend on server state: placed after the duplicate check,
+            // one and the same under-specified body would answer `400` or `409`
+            // according to whether that id happened to be installed already —
+            // two different answers to one authoring mistake. The id gate above
+            // still wins, because without an id there is nothing to name in the
+            // sentence this gate prints.
+            const declaredVersion = ManifestSchema.shape.version.safeParse((manifest as any)?.version);
+            if (!declaredVersion.success) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `manifest.version is required and must be semantic (major.minor.patch, e.g. "1.0.0") — `
+                        + `add it to the manifest for '${pkgId}' and retry`,
+                        400,
+                    ),
+                };
             }
             // Duplicate-detection: POST /packages CREATES a package. If one with
             // this id already exists, silently overwriting it destroys the existing
