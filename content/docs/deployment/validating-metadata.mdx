@@ -607,10 +607,17 @@ matrix answers the first question only.
    each package's body re-read as the stack it was assembled from, handed the
    artifact's own `packages[]` as **resolution context** so a sibling package's
    object still resolves, while the collections being judged stay that package's
-   alone. It is de-duplicated against the union run, so what it reports is exactly
-   the set the union could not see, and every finding it raises carries a
-   `package '<id>' —` prefix in its `where`. A project with no `packages[]` skips
-   it: one package by definition, already judged whole by the union run.
+   alone. It is de-duplicated against the union run, so what it reports is the
+   set of per-package findings no union finding already carried under the same
+   rule, `where`, message and non-top-level position — the leading
+   `collection[N]` index is neutralised, because a package body re-bases its
+   collections from 0 and one finding would otherwise get two keys. Every
+   finding it raises carries a `package '<id>' —` prefix in its `where`. That
+   key is position-insensitive, not collision-proof: two entries that render the
+   same `where` share one, so the bound is what the key can tell apart and no
+   wider — `packages/cli/src/utils/artifact-packages.ts` states it, and why. A
+   project with no `packages[]` skips it: one package by definition, already
+   judged whole by the union run.
 
 The second pass is not the first one in a stricter mood — it is a different
 question. A rule asking *"does this stack's app navigation point at an object
