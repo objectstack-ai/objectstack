@@ -20,6 +20,12 @@ import { omitInternalFieldsFromWriteResponse } from './write-response-internal-f
 // `{ not: {} }` — is dropped from it. See the module header for the channels
 // that keep carrying the retirement's prescription.
 import { stripUnauthorableProperties } from './unauthorable-nodes.js';
+// [#19295] The output derivation of a `ZodPipe` erases the arm's own input
+// type, so an authoring arm that accepts a bare string is served as the
+// anonymous `{}`. This annotates that husk — and only that husk — so a
+// consumer can tell an ERASED authoring type from a member that genuinely
+// admits anything. See the module header for the predicate and its controls.
+import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
     evaluateRuntimeAuthoringGate,
     CLOSURE_CONTEXT_KEY_BY_TYPE,
@@ -466,6 +472,21 @@ const _warnedDegenerateDerivation = new Set<string>();
  * documented for and it returns `undefined` as it always did — no retry. Not
  * one type's conversion throws today, so retrying there would move no payload
  * while widening the change past the ruling.
+ *
+ * ## [#19295] Why both derivations carry the erased-authoring `override`
+ *
+ * The degeneracy above is a WHOLE-TYPE husk. The same erasure also happens one
+ * level down, per MEMBER: a predicate slot's string arm is a `ZodPipe`, so the
+ * output derivation describes the transform's result and the arm itself is
+ * served as `{}` — indistinguishable from a member that admits anything.
+ * {@link markErasedAuthoringInput} annotates exactly those arms; it adds a
+ * vendor keyword and changes no keyword zod emitted, so what each document
+ * ACCEPTS is untouched and the refused `io: 'input'` widening stays refused.
+ *
+ * It is passed to BOTH calls on purpose. On the authoring retry a pipe derives
+ * from its input side, nothing is erased, and the hook marks nothing — so a
+ * type served from the retry (`action`) carries a real authoring arm instead
+ * of a marked husk, which is the honest answer rather than a gap.
  */
 const _jsonSchemaCache = new WeakMap<z.ZodTypeAny, Record<string, unknown> | null>();
 function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<string, unknown> | undefined {
@@ -474,7 +495,10 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
 
     let output: Record<string, unknown>;
     try {
-        output = z.toJSONSchema(schema, { unrepresentable: 'any' }) as Record<string, unknown>;
+        output = z.toJSONSchema(schema, {
+            unrepresentable: 'any',
+            override: markErasedAuthoringInput,
+        }) as Record<string, unknown>;
     } catch {
         // Conversion failed outright — the original hand-crafted-fallback case.
         _jsonSchemaCache.set(schema, null);
@@ -491,7 +515,11 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
     // before giving up — for a `ZodPipe` this is the derivation that can see
     // the object at all.
     try {
-        const authoring = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as Record<string, unknown>;
+        const authoring = z.toJSONSchema(schema, {
+            unrepresentable: 'any',
+            io: 'input',
+            override: markErasedAuthoringInput,
+        }) as Record<string, unknown>;
         if (!isDegenerateDerivation(authoring)) {
             const authorable = stripUnauthorableProperties(authoring);
             _jsonSchemaCache.set(schema, authorable);
