@@ -424,6 +424,169 @@ describe('[#5088] batchData delete — the driver`s return decides, as in delete
     });
 });
 
+describe('[#19433] batchData delete — a row that MATCHED and was deliberately NOT removed', () => {
+    /**
+     * The THIRD by-id delete door, and the last one still pushing the literal.
+     * The single-record face (#19306) and `deleteManyData` (#19412) both learned
+     * to read the engine's answer; this branch — "the OTHER by-id bulk delete,
+     * ten lines from it", as its own comment calls it — kept `success: true` for
+     * every result that was not the driver contract's `false`.
+     *
+     * `IDataEngine.delete` declares `Promise<boolean | number>`
+     * (`packages/spec/src/contracts/data-engine.ts`), and `isDeleteResultShape`
+     * admits the number arm at the ADR-0112 hook gate, so an `afterDelete`
+     * handler — or a non-ObjectQL engine — may legally answer `0` today. A
+     * numeric zero is the one value that positively means "the row is still
+     * there", which is what a package-declared `sys_permission_set` delete is:
+     * an ADR-0005 RESET, where the overlay tombstones and the record re-projects
+     * to the declared body instead of vanishing.
+     *
+     * Measured on the unfixed base for this door, one record:
+     *
+     *   `true` / `1` / `0` / `undefined` -> `success: true`, `succeeded: 1`
+     *   `false` -> `success: false` + `RECORD_NOT_FOUND` (#5088, unchanged)
+     *
+     * The `0` column is the lie: the row matched, the write ran, the record
+     * survived, and the envelope was byte-identical to a real deletion.
+     */
+
+    /**
+     * A `makeStoreEngine` whose delete speaks the COUNT arm instead of the
+     * harness's `{ deleted: 1 }`: an unknown id keeps the contract's `false`,
+     * `survivor` matches and is deliberately kept (`0`), everything else really
+     * goes (`1`). Same store, so `atomic` rollback is still observed on rows.
+     */
+    function makeCountingEngine(survivor: string) {
+        const t = makeStoreEngine();
+        t.engine.delete = vi.fn(async (_object: string, options?: any) => {
+            assertEngineDeleteDispatch(options);
+            const id = options?.where?.id;
+            if (!t.rows.has(id)) return false;
+            if (id === survivor) return 0;
+            t.rows.delete(id);
+            return 1;
+        });
+        return t;
+    }
+
+    it('the row is NOT reported as a deletion, and gets no `errors[]` entry', async () => {
+        const t = makeCountingEngine('t1');
+        const p = new ObjectStackProtocolImplementation(t.engine);
+
+        const res: any = await p.batchData({
+            object: 'showcase_task',
+            request: { operation: 'delete', records: [{ id: 't1' }] },
+        } as any);
+
+        // Pre-#19433: { success: true, succeeded: 1, failed: 0, results: [{ success: true }] }.
+        expect(res).toMatchObject({ success: false, operation: 'delete', total: 1, succeeded: 0, failed: 1 });
+        expect(res.results).toHaveLength(1);
+        expect(res.results[0]).toMatchObject({ id: 't1', success: false, index: 0 });
+        // NOT the not-found row. A surviving record and a record that never
+        // existed are opposite facts about the same id, and a caller branching
+        // on `errors[0].code` must not read one as the other. A surviving row
+        // is an OUTCOME, not a fault; this envelope's two per-row codes
+        // (`ROLLED_BACK`, `NOT_ATTEMPTED`) both describe a row that never ran.
+        expect(res.results[0].errors).toBeUndefined();
+        // And the record really is still there — that is what `0` asserted.
+        expect(t.rows.has('t1')).toBe(true);
+        expect(t.engine.delete).toHaveBeenCalledTimes(1);
+    });
+
+    it('CONTROL: a positive count still reports a deletion', async () => {
+        // Without this leg the pin above can pass vacuously — `deleted !== 0`
+        // must not collapse into "a number is never a deletion".
+        const t = makeCountingEngine('none_of_them');
+        const p = new ObjectStackProtocolImplementation(t.engine);
+
+        const res: any = await p.batchData({
+            object: 'showcase_task',
+            request: { operation: 'delete', records: [{ id: 't1' }] },
+        } as any);
+
+        expect(res).toMatchObject({ success: true, operation: 'delete', total: 1, succeeded: 1, failed: 0 });
+        expect(res.results[0]).toMatchObject({ id: 't1', success: true });
+        expect(t.rows.has('t1')).toBe(false);
+    });
+
+    it('a mixed batch separates the rows that went from the row that stayed', async () => {
+        // Both directions in ONE run, so neither a blanket `true` nor a blanket
+        // `false` can pass, and the counters still PARTITION `results` (#7539).
+        const t = makeCountingEngine('t2');
+        const p = new ObjectStackProtocolImplementation(t.engine);
+
+        const res: any = await p.batchData({
+            object: 'showcase_task',
+            request: { operation: 'delete', records: [{ id: 't1' }, { id: 't2' }, { id: 't3' }] },
+        } as any);
+
+        expect(res.results.map((r: any) => [r.id, r.success])).toEqual([
+            ['t1', true], ['t2', false], ['t3', true],
+        ]);
+        expect(res).toMatchObject({ success: false, total: 3, succeeded: 2, failed: 1 });
+        expect(res.succeeded + res.failed).toBe(res.total);
+        // A surviving row is not a THROW, so the `continueOnError` stop in the
+        // catch never fires: `t3` was still attempted and really went, without
+        // the flag being set. Measured, not inherited from `deleteMany`.
+        expect(t.engine.delete).toHaveBeenCalledTimes(3);
+        expect(t.rows.has('t2')).toBe(true);
+        expect(t.rows.has('t3')).toBe(false);
+    });
+
+    it('atomic: a surviving row aborts the batch, and the earlier delete is undone', async () => {
+        // This one is FORCED by the partition, and it is a real change of
+        // ending: `runAtomicBatch` aborts on `outcome.failed > 0`, so an atomic
+        // batch holding a package-declared set no longer commits under a
+        // response that called every row deleted. Before: committed,
+        // `succeeded: 3`, `t2` silently still present.
+        const t = makeCountingEngine('t2');
+        const p = new ObjectStackProtocolImplementation(t.engine);
+
+        const res: any = await p.batchData({
+            object: 'showcase_task',
+            request: {
+                operation: 'delete',
+                records: [{ id: 't1' }, { id: 't2' }, { id: 't3' }],
+                options: { atomic: true },
+            },
+        } as any);
+
+        expect(res).toMatchObject({ success: false, total: 3, succeeded: 0, failed: 3 });
+        expect(res.results.map((r: any) => r.errors?.[0]?.code)).toEqual([
+            'ROLLED_BACK', undefined, 'ROLLED_BACK',
+        ]);
+        // Still no `errors[]` on the surviving row, on this arm too.
+        expect(res.results[1]).toMatchObject({ id: 't2', success: false });
+        expect(res.results[1].errors).toBeUndefined();
+        // Rolled back for real: every row is back.
+        expect(t.rows.has('t1')).toBe(true);
+        expect(t.rows.has('t2')).toBe(true);
+        expect(t.rows.has('t3')).toBe(true);
+    });
+
+    it('`returnRecords: false` still carries the honest per-row `success`', async () => {
+        // `batchData`'s envelope is its own: `deleteManyData` has no such flag.
+        // The projection drops `data` and keeps `success`/`index`, so the value
+        // this card moves is the one key that survives it.
+        const t = makeCountingEngine('t1');
+        const p = new ObjectStackProtocolImplementation(t.engine);
+
+        const res: any = await p.batchData({
+            object: 'showcase_task',
+            request: {
+                operation: 'delete',
+                records: [{ id: 't1' }],
+                options: { returnRecords: false },
+            },
+        } as any);
+
+        expect(res).toMatchObject({ success: false, succeeded: 0, failed: 1 });
+        expect(res.results[0]).toMatchObject({ id: 't1', success: false, index: 0 });
+        expect(res.results[0].errors).toBeUndefined();
+    });
+});
+
+
 describe('[#5100] an id-less row is a CALLER error on both by-id update faces', () => {
     it('updateMany: VALIDATION_FAILED/400 before any engine read or write', async () => {
         const t = makeStoreEngine();
