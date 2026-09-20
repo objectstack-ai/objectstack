@@ -1223,6 +1223,199 @@ describe('validateTranslationReferences — an app a package contributes into wi
   });
 });
 
+/**
+ * ⭐ #19064 — the OBJECT rung of the same rule, on the same per-package leg.
+ *
+ * `os build` judges each package body as its own stack
+ * (`packageBodyAsStack(body, entries)`, `compile.ts` step 3b-ii), where the
+ * universe's object collection holds what THIS package declares and nothing
+ * else. So a package that translates an object a SIBLING package of the same
+ * artifact declares had its object key reported `translation-target-unknown`
+ * at `error` — "which no object in this stack defines", remedy "Rename the key
+ * to the object it was written for, drop it" — in the same words a genuine
+ * typo gets, and the run FAILS on it.
+ *
+ * ⛔ Not a new resolution-context decision. `validateObjectReferences` took it
+ * on this exact carrier for object NAMES (#16611 — `artifactProvidedObjectNames`
+ * folded into its `resolvable` set), ADR-0130 makes the release artifact the
+ * co-ownership boundary, and this rule's own docblock already declared the same
+ * reach for this rung while the rung read `stack.objects` alone.
+ *
+ * What differs from the precedent is the RETURN, and two cases below are what
+ * pin it: this universe is keyed by FACTS, not names, so the sibling's fields,
+ * options, views, sections and rules are folded WITH the name. A name-only fold
+ * would resolve the object key and then judge the owner's own field keys
+ * against an empty fact set — the trap `objectExtensionsByTarget` records one
+ * level up — and a wholesale subtree SKIP (rung 2b's answer, for a target whose
+ * declaration is genuinely invisible from here) would leave this leg unable to
+ * see a typo the union leg reports.
+ */
+describe('validateTranslationReferences — an object a SIBLING package of the artifact declares (#19064)', () => {
+  /**
+   * `examples/app-multi-package`'s shape — the same corpus
+   * `validateObjectReferences`' #16611 block models: `core` owns `crm_account`
+   * and `orders` reads it, and here `orders` also TRANSLATES it.
+   */
+  const CORE_BODY = {
+    id: 'com.example.multi.core',
+    objects: [
+      {
+        name: 'crm_account',
+        label: 'Account',
+        fields: {
+          name: { type: 'text', label: 'Name' },
+          industry: { type: 'select', label: 'Industry', options: [{ value: 'tech', label: 'Tech' }] },
+        },
+        validations: [
+          {
+            name: 'industry_required',
+            type: 'cross_field',
+            message: 'An industry is required',
+            condition: 'record.industry != null',
+            fields: ['industry'],
+          },
+        ],
+      },
+    ],
+  };
+  const ordersBody = (bundleObjects: Record<string, unknown>) => ({
+    id: 'com.example.multi.orders',
+    objects: [{ name: 'crm_order', fields: { number: { type: 'text' } } }],
+    translations: [{ 'zh-CN': { objects: bundleObjects } }],
+  });
+  /** `packageBodyAsStack(body, entries)` — the body IS its own manifest. */
+  const asPerPackageLeg = (body: Record<string, unknown>, entries: unknown[]) => ({
+    ...body,
+    manifest: body,
+    packages: entries,
+  });
+  const perPackageLeg = (bundleObjects: Record<string, unknown>) => {
+    const body = ordersBody(bundleObjects);
+    return validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }, { manifest: CORE_BODY }]));
+  };
+
+  /**
+   * ⭐ The reproduction, kept as the control: judged with its own entry alone,
+   * the very same bundle still errors. Without this leg "no findings" above is
+   * indistinguishable from the rung having gone quiet.
+   */
+  it('CONTROL — the same package judged ALONE still errors, so the context is what does the work', () => {
+    const body = ordersBody({ crm_account: { label: '客户' } });
+    const findings = validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].objects.crm_account',
+    });
+  });
+
+  it('accepts the object key when a sibling package of the same artifact declares it', () => {
+    expect(perPackageLeg({ crm_account: { label: '客户' } })).toEqual([]);
+  });
+
+  it("judges the subtree against the SIBLING's declaration — its field, option and rule keys resolve", () => {
+    expect(
+      perPackageLeg({
+        crm_account: {
+          label: '客户',
+          fields: { industry: { label: '行业', options: { tech: '科技' } } },
+          _validations: { industry_required: { message: '行业为必填' } },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  /**
+   * ⭐ The false-NEGATIVE control. Widening a universe trades a false positive
+   * for a blind spot unless every genuine orphan still reports, so a name no
+   * entry of the artifact declares stays an `error` with its rule id intact.
+   */
+  it('NON-DEGENERACY — a name NO package of the artifact declares still errors', () => {
+    const findings = perPackageLeg({ zzz_not_an_object: { label: '没了' } });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].objects.zzz_not_an_object',
+    });
+    // The remedy enumerates what the ARTIFACT provides, not this package's own
+    // objects alone — the same reading `validateObjectReferences` pins for the
+    // same widening, and the evidence the fold reached this run at all.
+    expect(findings[0].hint).toContain('Defined objects: crm_account, crm_order.');
+  });
+
+  /** ⭐ The second false-negative control, one rung down: the subtree stays judged. */
+  it('NON-DEGENERACY — a field the sibling does not declare is still an `error` under the resolved object', () => {
+    const findings = perPackageLeg({ crm_account: { fields: { zzz_gone: { label: '没了' } } } });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].objects.crm_account.fields.zzz_gone',
+    });
+    expect(findings[0].hint).toContain('Declared fields: industry, name.');
+  });
+
+  it('separates the two directions on ONE bundle — the sibling key is silent, the typo is not', () => {
+    const findings = perPackageLeg({
+      crm_account: { fields: { industry: { label: '行业' }, zzz_gone: { label: '没了' } } },
+      zzz_not_an_object: { label: '没了' },
+    });
+    expect(findings.map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.crm_account.fields.zzz_gone',
+      'translations[0]["zh-CN"].objects.zzz_not_an_object',
+    ]);
+  });
+
+  /**
+   * ⛔ Only the ADR-0130 D4 entry shape is read. A segment reference carries no
+   * manifest content, and inventing a name for one would be the one mistake
+   * this context must not make — a name in here SILENCES the ladder.
+   */
+  it('an entry with no readable body makes nothing addressable', () => {
+    const body = ordersBody({ crm_account: { label: '客户' } });
+    const findings = validateTranslationReferences(
+      asPerPackageLeg(body, [{ manifest: body }, { ref: 'com.example.multi.core@1.0.0', integrity: 'sha512-zzz' }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_account');
+  });
+
+  /**
+   * Which layer's `options` a merged field ends up carrying is the registry's
+   * precedence question, and `checkOptionKeys` is the only consumer of the
+   * stored definition here — so the declaration this leg is JUDGING keeps the
+   * slot, exactly as the `objectExtensions` fold decided one collection over.
+   */
+  it("keeps the stack's OWN declaration when a sibling declares the same object name", () => {
+    const body = {
+      id: 'com.example.multi.orders',
+      objects: [{ name: 'crm_account', fields: { industry: { type: 'select', options: [{ value: 'retail' }] } } }],
+      translations: [
+        { 'zh-CN': { objects: { crm_account: { fields: { industry: { options: { retail: '零售' } } } } } } },
+      ],
+    };
+    expect(
+      validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }, { manifest: CORE_BODY }])),
+    ).toEqual([]);
+  });
+
+  /**
+   * The single-`defineStack` shape is untouched: `objects` is a STACK
+   * collection, not a manifest key, so there is no `stack.manifest.objects`
+   * form to read and a bundle keyed to a name nothing declares still errors.
+   */
+  it('leaves the single-stack shape alone — no `packages[]`, no widening', () => {
+    const findings = validateTranslationReferences({
+      objects: [{ name: 'crm_order', fields: { number: { type: 'text' } } }],
+      translations: [{ 'zh-CN': { objects: { crm_account: { label: '客户' } } } }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_account');
+  });
+});
+
 describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
   /**
    * One stack, shared by every case below — the clean run and the three
