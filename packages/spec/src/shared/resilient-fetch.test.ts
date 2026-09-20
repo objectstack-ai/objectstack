@@ -24,6 +24,14 @@ function scripted(statuses: Array<number | Record<string, string> | [number, Rec
 
 const noSleep = async () => {};
 
+/**
+ * A sleep spy whose ARGUMENT is typed, so `mock.calls` is a tuple of one number
+ * and the delay sequence can be read off it. `vi.fn(noSleep)` cannot: `noSleep`
+ * declares no parameter, so its calls type as `[]` and every index read is a
+ * type error.
+ */
+const sleepSpy = () => vi.fn(async (_ms: number): Promise<void> => {});
+
 describe('resilientFetch', () => {
     it('returns a successful response without retrying', async () => {
         const fetchImpl = scripted([200]);
@@ -103,7 +111,7 @@ describe('resilientFetch', () => {
 
     it('linear_backoff grows the delay by one base per attempt', async () => {
         const fetchImpl = scripted([500, 500, 500, 200]);
-        const sleep = vi.fn(noSleep);
+        const sleep = sleepSpy();
         await resilientFetch('http://x', {}, {
             fetchImpl, sleep, retries: 4,
             strategy: 'linear_backoff', backoffBaseMs: 100, jitter: false,
@@ -113,7 +121,7 @@ describe('resilientFetch', () => {
 
     it('fixed_delay keeps every delay at the base', async () => {
         const fetchImpl = scripted([500, 500, 200]);
-        const sleep = vi.fn(noSleep);
+        const sleep = sleepSpy();
         await resilientFetch('http://x', {}, {
             fetchImpl, sleep, retries: 3,
             strategy: 'fixed_delay', backoffBaseMs: 250, jitter: false,
@@ -134,7 +142,7 @@ describe('resilientFetch', () => {
 
     it('backoffMultiplier drives exponential growth (not a hardcoded 2)', async () => {
         const fetchImpl = scripted([500, 500, 500, 200]);
-        const sleep = vi.fn(noSleep);
+        const sleep = sleepSpy();
         await resilientFetch('http://x', {}, {
             fetchImpl, sleep, retries: 4,
             backoffBaseMs: 100, backoffMultiplier: 3, jitter: false,
@@ -144,14 +152,14 @@ describe('resilientFetch', () => {
 
     it('maxDelayMs caps the delay — and caps it AFTER jitter, so it is a real maximum', async () => {
         const fetchImpl = scripted([500, 500, 500, 200]);
-        const sleep = vi.fn(noSleep);
+        const sleep = sleepSpy();
         await resilientFetch('http://x', {}, {
             fetchImpl, sleep, retries: 4,
             backoffBaseMs: 100, backoffMultiplier: 10, maxDelayMs: 500, jitter: true,
         });
         // Jitter is on, so only the ceiling is assertable — which is the point:
         // every delay must be <= the declared maximum, jitter included.
-        const delays = sleep.mock.calls.map((c) => c[0] as number);
+        const delays = sleep.mock.calls.map((c) => c[0]);
         expect(delays).toHaveLength(3);
         for (const d of delays) expect(d).toBeLessThanOrEqual(500);
         expect(delays[2]).toBe(500);

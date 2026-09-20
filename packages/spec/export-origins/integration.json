@@ -15,6 +15,7 @@
     "ConnectorConflictResolution": "src/integration/connector.zod.ts#ConnectorConflictResolution (type)",
     "ConnectorConflictResolutionSchema": "src/integration/connector.zod.ts#ConnectorConflictResolutionSchema (const)",
     "ConnectorDescriptor": "src/integration/connector-descriptor.ts#ConnectorDescriptor (interface)",
+    "ConnectorFetchPolicy": "src/integration/connector-fetch-policy.ts#ConnectorFetchPolicy (interface)",
     "ConnectorFieldMapping": "src/integration/connector.zod.ts#ConnectorFieldMapping (type)",
     "ConnectorFieldMappingParsed": "src/integration/connector.zod.ts#ConnectorFieldMappingParsed (type)",
     "ConnectorFieldMappingSchema": "src/integration/connector.zod.ts#ConnectorFieldMappingSchema (const)",
@@ -70,6 +71,7 @@
     "WebhookEventSchema": "src/integration/connector.zod.ts#WebhookEventSchema (const)",
     "WebhookSignatureAlgorithm": "src/integration/connector.zod.ts#WebhookSignatureAlgorithm (type)",
     "WebhookSignatureAlgorithmSchema": "src/integration/connector.zod.ts#WebhookSignatureAlgorithmSchema (const)",
+    "connectorFetchOptions": "src/integration/connector-fetch-policy.ts#connectorFetchOptions (function)",
     "defineConnector": "src/integration/connector.zod.ts#defineConnector (function)",
     "isConnectorUpstreamUnavailable": "src/integration/connector-provider-errors.ts#isConnectorUpstreamUnavailable (function)"
   }

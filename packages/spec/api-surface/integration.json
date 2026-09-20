@@ -15,6 +15,7 @@
     "ConnectorConflictResolution (type)",
     "ConnectorConflictResolutionSchema (const)",
     "ConnectorDescriptor (interface)",
+    "ConnectorFetchPolicy (interface)",
     "ConnectorFieldMapping (type)",
     "ConnectorFieldMappingParsed (type)",
     "ConnectorFieldMappingSchema (const)",
@@ -70,6 +71,7 @@
     "WebhookEventSchema (const)",
     "WebhookSignatureAlgorithm (type)",
     "WebhookSignatureAlgorithmSchema (const)",
+    "connectorFetchOptions (function)",
     "defineConnector (function)",
     "isConnectorUpstreamUnavailable (function)"
   ]
