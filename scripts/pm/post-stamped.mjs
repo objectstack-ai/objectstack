@@ -361,6 +361,13 @@
  * The line now says which verdict it is standing on and what was quoted, so it
  * is true of every body that reaches it.
  *
+ * ## A claim's keyed lines are refused BEFORE the write (#19152)
+ *
+ * A claim's three exact-value fields — `Seat:`, `Thread-read:`, `Clause-②:` — are read HERE through the functions that
+ * own them, so a line those functions cannot read is `EXIT_REFUSED` before any request instead of a half-state row on
+ * someone else's board hours later (five such rows off three keys in one seat's shift, the measurement behind this
+ * rule). `claimKeyedLineRefusals` carries the four decisions that keep it a mirror and not a fourth dialect.
+ *
  * ## ⚖️ Why this ACTS by default, where `sweep-closed-cards.mjs` dry-runs
  *
  * Its sibling next door defaults to a dry run and needs `--write`, because it
@@ -740,18 +747,23 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
+  CLAIM_COMMENT_MARKER,
   COMMENT_BODY_LIMIT,
   EXIT_PREREQUISITE_NOT_MET,
   H56_STAMP_TOLERANCE_MIN,
   ISSUE_BODY_LIMIT,
   PROXY_FLAG,
+  claimSeatNumber,
   h56StampedReadings,
+  markerMatches,
   protocolStamps,
   proxyRearmPlan,
   resolveSweepRepo,
   stampDriftMinutes,
   stampSpan,
+  threadReadField,
 } from './check-half-states.mjs';
+import { readClause2Line } from './check-clause2-carriers.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const API = 'https://api.github.com';
@@ -1598,6 +1610,76 @@ export function substitutionSummary({ substituted = 0, quoted = 0, verbatim = 0 
     `${substituted} ${STAMP_TOKEN}, ${quoted} quoted` +
     ` · verbatim: ${verbatim} opener(s) inside a quoted span, left exactly as written` +
     (verbatim === 0 ? ' (none)' : '')
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The claim's keyed lines — refused before the write (#19152)
+// ---------------------------------------------------------------------------
+
+/** What each owning reader accepts, printed BY the refusal so the fix is one line away. */
+export const CLAIM_KEY_SPELLINGS = Object.freeze({
+  Seat: '`Seat: domain:LANE#N` at the START of a line, lane and number both — e.g. `Seat: domain:skills#2`',
+  'Thread-read': '`Thread-read: ID` at the START of a line — ONE comment id, or `none`, and nothing after it',
+  'Clause-②': '`Clause-②: yes` or `Clause-②: no` at the START of a line — reasoning after the value is fine, a quotation around it is not',
+});
+
+/** PRESENCE only, `CLAIM_SEAT_DECLARATION_ANYWHERE`'s calibration one key along: case-SENSITIVE and demanding the whole
+ *  payload, because off the line start no position tells a declaration from prose. Consulted solely when `threadReadField` saw none. */
+const THREAD_READ_DECLARATION_ANYWHERE = /(?:\*\*)?`?Thread-read`?(?:\*\*)?[ \t]*:[ \t]*`?(?:[1-9]\d*|none)\b/;
+
+/** The ONLY values H50's equality can ever accept: `commentIdText`'s id pattern, and the `none` it answers for a claim that
+ *  opened the thread. Neither is exported from `check-half-states.mjs`, so the self-test pins this spelling against its source. */
+const THREAD_READ_VALUE = /^(?:[1-9]\d*|none)$/;
+
+/** The first line naming a key — a LOCATOR for the writer's eye, ⛔ never the judgement. */
+function keyLine(text, key) {
+  const hit = text.split(/\r?\n/).find((line) => line.includes(key));
+  return hit === undefined ? '(no single line carries the key)' : offendingSpan(hit.trim(), 160);
+}
+
+/**
+ * The keyed-line problems in a body about to be written, judged by the readers that OWN each key — ⛔ never by a rule
+ * spelled here. Four decisions:
+ *   IMPORTED     `claimSeatNumber` answers `null` exactly for a `Seat:` line it cannot read; `readClause2Line` answers
+ *                `declared` for the shape its own control case calls correct, `Clause-②: yes — reasoning` included, so
+ *                ⛔ nothing is tightened here. `Thread-read:` alone exports a FIELD and not a verdict, H50's other half
+ *                being the thread this act has not fetched; what IS decidable is that a value which is neither an id
+ *                nor `none` can never equal the id H50 compares it against.
+ *   SCOPED       the fleet's own claim marker, ⛔ not a first-line rule — `newestLaneClaim`'s header refuses that
+ *                narrowing by name — and `--comment` alone, since a claim IS a comment and a seat POST's body carries
+ *                a `Seat:` line no claim reader judges.
+ *   QUOTE-BLIND  all three owners read raw text, so masking a quotation here would store exactly the row the patrol
+ *                then files: quoting changes what is RENDERED, never what was AUTHORED.
+ *   FIRST MATCH  each reader stops at its first readable declaration — that is what a duplicate key gets.
+ * @param {string} body — the bytes this act is about to send.
+ * @returns {{ key: string, why: string, line: string }[]} — empty when the body is not a claim, or when every key reads.
+ */
+export function claimKeyedLineRefusals(body) {
+  const text = String(body ?? '');
+  if (!markerMatches(CLAIM_COMMENT_MARKER, text)) return [];
+  const rows = [];
+  if (claimSeatNumber(text) === null)
+    rows.push({ key: 'Seat', line: keyLine(text, 'Seat'), why: '`claimSeatNumber` reads `null` here — the declaration is present and names no seat. The claim lands on NO seat, and H38 rows another seat\'s post over it.' });
+  const thread = threadReadField(text);
+  if (!thread.present && THREAD_READ_DECLARATION_ANYWHERE.test(text))
+    rows.push({ key: 'Thread-read', line: keyLine(text, 'Thread-read'), why: '`threadReadField` sees NO line: the key is off the line start, so H50 reads this claim as carrying no `Thread-read:` at all.' });
+  else if (thread.present && !THREAD_READ_VALUE.test(thread.value))
+    rows.push({ key: 'Thread-read', line: keyLine(text, 'Thread-read'), why: `the value reads \`${offendingSpan(thread.value)}\`, which is neither one comment id nor \`none\` — H50 compares it for EQUALITY against one id, so no thread makes this match.` });
+  const clause = readClause2Line(text);
+  if (clause !== null && clause.kind !== 'declared')
+    rows.push({ key: 'Clause-②', line: clause.line, why: clause.kind === 'malformed' ? 'the value slot holds something `readClause2Line` cannot grade — the two spellings are the closed set.' : `\`readClause2Line\` reads this as a NEAR MISS (${clause.reason}), ⛔ not a declaration — \`check-clause2-carriers.mjs --pair\` answers exit 4 on it.` });
+  return rows;
+}
+
+/** The refusal a caller reads, from `claimKeyedLineRefusals`' rows. */
+export function keyedLineRefusalText(rows) {
+  return (
+    `post-stamped: REFUSED — ${rows.length} keyed line(s) in this \`Claim:\` cannot be read by the checker that owns them. Nothing was written.\n` +
+    rows.map((r, i) => `  ${i + 1}. [${r.key}] ${r.why}\n      line:  ${r.line}\n      write: ${CLAIM_KEY_SPELLINGS[r.key]}`).join('\n') +
+    '\n\n  `claimSeatNumber` and `h50ThreadReadMismatch` (`check-half-states.mjs`) and `readClause2Line` (`check-clause2-carriers.mjs`)\n' +
+    '  are imported HERE, so this IS the row they would file — hours earlier, and on your own claim rather than on someone\n' +
+    '  else\'s post. ⛔ No flag turns it off: a line those readers cannot read is a half-state, not a formatting preference.'
   );
 }
 
@@ -2587,6 +2669,8 @@ const USAGE = [
   '  no token at all is unchanged.',
   '  A body refresh is REFUSED while comments newer than the body\'s last write stamp exist and',
   '  --ack-through=ID does not name the newest of them — a refresh must not void an unread knock.',
+  '  A `Claim:` comment\'s `Seat:`, `Thread-read:` and `Clause-②:` lines are read here by the checkers that OWN them,',
+  '  and the comment is REFUSED when one cannot be read — the refusal prints the spelling that can.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
   '',
   `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
@@ -2629,6 +2713,13 @@ async function main(argv) {
   const rendered = renderBody(input);
   if (!rendered.ok) {
     console.error(rendered.error);
+    return EXIT_REFUSED;
+  }
+
+  // ⛔ Comments only: a claim IS a comment, and a seat POST's body carries a `Seat:` line of its own that no claim reader judges.
+  const keyed = options.mode === 'comment' ? claimKeyedLineRefusals(rendered.body) : [];
+  if (keyed.length > 0) {
+    console.error(keyedLineRefusalText(keyed));
     return EXIT_REFUSED;
   }
 
@@ -2779,6 +2870,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the size refusal: a 422 the platform answered is not a route that never existed': 53,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
+  'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 20,
 });
 const SELF_TEST_BATTERY_FLOOR = 15;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -3695,6 +3787,34 @@ export function selfTest() {
   t('a stamp this tool substitutes is zero-drift against its own write instant', stampDriftMinutes(stampNow(NOW_MS), '2026-09-10T06:37:48Z') === 0);
   t('…and an estimate is beyond the tolerance by the same arithmetic', stampDriftMinutes('2026-09-10T05:27Z', '2026-09-10T06:37:48Z') > H56_STAMP_TOLERANCE_MIN);
   t('the exit register keeps a contract refusal apart from a transport failure', EXIT_REFUSED !== EXIT_PREREQUISITE_NOT_MET);
+
+  battery('the keyed lines: a claim\'s exact-value fields, judged by the readers that own them');
+  {
+    const CLAIM = (...lines) => ['Claim: PM loop round 1', 'Session: `session_x`', ...lines].join('\n');
+    const keys = (body) => claimKeyedLineRefusals(body).map((r) => r.key).join();
+    const MISLAID_SEAT = 'Claim: PM loop round 1 — dispatched. Seat: domain:skills#2 — R1.';
+    let ownerSource = ''; try { ownerSource = readFileSync(new URL('./check-half-states.mjs', import.meta.url), 'utf8'); } catch { ownerSource = ''; }
+    t('⭐ a well-formed claim passes — every key reads', keys(CLAIM('Seat: `domain:skills#2`', 'Thread-read: 5747819898', 'Clause-②: no')) === '');
+    t('⭐ the measured `Seat:` shape — declared inside the opening sentence — is REFUSED, on the OWNER\'s verdict and ⛔ no rule spelled here', keys(MISLAID_SEAT) === 'Seat' && claimSeatNumber(MISLAID_SEAT) === null);
+    t('…and the refusal prints the spelling that reads', keyedLineRefusalText(claimKeyedLineRefusals(MISLAID_SEAT)).includes(CLAIM_KEY_SPELLINGS.Seat));
+    t('a line-initial `Seat:` naming no number is refused too — the reader\'s other `null`', keys(CLAIM('Seat: domain:skills')) === 'Seat');
+    t('⭐ the measured `Thread-read:` shape — a list of ids — is refused, named as a value H50\'s EQUALITY can never match', keys(CLAIM('Thread-read: 5747819898, 5752364802, 5747819899')) === 'Thread-read' && keyedLineRefusalText(claimKeyedLineRefusals(CLAIM('Thread-read: 1, 2'))).includes('EQUALITY'));
+    t('`none` reads, and so does a backticked id the field reader unwraps', keys(CLAIM('Thread-read: none')) === '' && keys(CLAIM('Thread-read: `5747819898`')) === '');
+    t('an id with the reason glued on, an EMPTY value and the UNFILLED placeholder are all refused', ['Thread-read: 5747819898 — the lane grading', 'Thread-read:', 'Thread-read: id of the newest comment, or none'].every((line) => keys(CLAIM(line)) === 'Thread-read'));
+    t('a `Thread-read:` declared off the line start is refused, though the field reader calls it absent', keys(`Claim: x. Thread-read: 5747819898 was the tail.`) === 'Thread-read' && threadReadField('Claim: x. Thread-read: 5747819898 was the tail.').present === false);
+    t('⛔ prose naming the key with no id behind it is not a declaration', keys('Claim: x. The Thread-read: line goes last.') === '');
+    t('⭐ `Clause-②: yes — reasoning` is ACCEPTED — its reader\'s own control shape, ⛔ not tightened here', keys(CLAIM('Clause-②: yes — the ruling states it outright')) === '');
+    t('⭐ …while the quoted-and-continued spelling that reader calls `describing` IS refused', keys(CLAIM('`Clause-②: yes` — the ruling states it outright')) === 'Clause-②');
+    t('a value the clause reader cannot grade is refused', keys(CLAIM('Clause-②: YES')) === 'Clause-②' && keys(CLAIM('Clause-②: yes|no')) === 'Clause-②');
+    t('⛔ ABSENCE is nobody\'s row here: no `Seat:` line is seat 1 by the owner\'s own default, and no clause line is no declaration to grade', keys(CLAIM('Thread-read: none')) === '' && keys(CLAIM('Seat: `domain:skills#2`')) === '');
+    t('⛔ NOT a claim: a report carrying the same mislaid declaration is untouched', keys('os-dev-report\n\nThe claim declared Seat: domain:skills#2 mid-sentence.') === '');
+    t('⭐ SCOPED by the fleet\'s marker, ⛔ not by the first line: a `Claim:` further down is judged', keys('Round report\n\nClaim: x. Seat: domain:skills#2 taken.') === 'Seat');
+    t('⭐ QUOTE-BLIND: backticks round a mid-sentence declaration buy no exemption, while a line-initial one inside a FENCE still reads as the declaration the owner reads there — masking either way would store the row', keys('Claim: x, `Seat: domain:skills#2`, R1.') === 'Seat' && keys(CLAIM('```', 'Seat: domain:skills#2', '```')) === '');
+    t('FIRST MATCH: a readable declaration followed by a malformed duplicate passes, exactly as the owner reads it', keys(CLAIM('Seat: `domain:skills#2`', 'Thread-read: 5747819898', 'Seat: domain:skills')) === '');
+    t('↔ owner coupling: the id pattern and the `none` are `check-half-states.mjs`\'s own spellings, read off its source', ownerSource.includes('/^[1-9]\\d*$/') && ownerSource.includes("'none'") && THREAD_READ_VALUE.source.includes('[1-9]\\d*') && THREAD_READ_VALUE.test('none'));
+    t('structural: the CLI runs this on `--comment` only, ⛔ never on a card body, and every reader is imported, ⛔ none restated', /const keyed = options\.mode === 'comment' \? claimKeyedLineRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && new RegExp('function\\s+(claimSeatNumber|threadReadField|readClause2Line)\\b').test(stampSource) === false);
+    t('the refusal names all three readers, and that no flag turns it off', ['claimSeatNumber', 'h50ThreadReadMismatch', 'readClause2Line', 'No flag turns it off'].every((s) => keyedLineRefusalText(claimKeyedLineRefusals(MISLAID_SEAT)).includes(s)));
+  }
 
   // The floor, evaluated last: a battery that stops running names itself here.
   const failed = cases.filter((c) => !c.ok);
