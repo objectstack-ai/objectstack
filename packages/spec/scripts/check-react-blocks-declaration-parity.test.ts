@@ -18,7 +18,7 @@
 // declarations agreed and neither was lying. Only the renderer was, and the
 // renderer is not in scope here.
 //
-// So these tests assert four things in one process run:
+// So these tests assert five things in one process run:
 //   1. the signals it CAN see, in both directions (spec-only / registry-only);
 //   2. the scope caveat rides along with EVERY report, success included —
 //      whoever forms a belief from this gate is reading a CI log, not a header;
@@ -35,6 +35,14 @@
 //      registry-only input and a vanished block must each exit non-zero naming
 //      themselves, an absent/unusable manifest must exit non-zero as "did not
 //      run", and an accepted state must still exit 0 so the red is discriminating.
+//   5. IT CAN GO RED ON `missing` TOO, AND THE BASELINE CANNOT BUY IT OFF (#18407).
+//      Point 4's reds are all reachable only for a block the baseline already has
+//      a row for. A block with NO baseline row was suppressed on the `missing`
+//      axis entirely — `state.missing && base && !base.missing` cannot fire
+//      without a `base` — so a spec row the public registry does not carry
+//      arrived pre-accepted, printed its `✗` line, and exited 0. The last
+//      describe block pins the red, pins that a `missing: true` row does not
+//      silence it, and pins that `--update` refuses to mint one.
 
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -61,6 +69,63 @@ type Manifest = { components: Record<string, { type: string; inputs: ManifestInp
 const manifestFor = (type: string, inputs: string[]): Manifest => ({
   components: { [type]: { type, inputs: inputs.map((name) => ({ name })) } },
 });
+
+/**
+ * The blocks this gate evaluates — read off the gate's OWN report, never restated.
+ *
+ * Fed a manifest naming a block that does not exist, every evaluated block reports
+ * `NO component in the manifest`, so the report enumerates the roster for us. A
+ * literal list here would rot the day a `ComponentPropsMap` row lands, and would rot
+ * SILENTLY in the one direction that matters: the fixtures below would keep declaring
+ * a manifest that is missing the new block, and the tests asserting exit 0 would fail
+ * for a reason that has nothing to do with what they pin.
+ */
+let evaluatedTypesMemo: string[] | undefined;
+function evaluatedBlockTypes(): string[] {
+  if (evaluatedTypesMemo) return evaluatedTypesMemo;
+  const out = run(manifestFor('zzz-no-block-answers-to-this-name', []));
+  const types = new Set<string>();
+  for (const line of out.split('\n')) {
+    const reactHalf = /^✗ <[^>]+> \(([^)]+)\): NO component in the manifest/.exec(line);
+    if (reactHalf) {
+      types.add(reactHalf[1]);
+      continue;
+    }
+    const objectHalf = /^✗ ([a-z][a-z0-9:_-]*): NO component in the manifest/.exec(line);
+    if (objectHalf) types.add(objectHalf[1]);
+  }
+  // Lit control on the derivation itself: if the report format moves, this throws
+  // here rather than silently handing every fixture a one-component manifest —
+  // which would make the exit-0 pins fail with an unrelated diagnosis.
+  for (const control of ['object-form', 'list-view', 'object-grid']) {
+    if (!types.has(control)) {
+      throw new Error(
+        `could not read the evaluated-block roster off the gate's report — '${control}' missing. Report was:\n${out}`,
+      );
+    }
+  }
+  evaluatedTypesMemo = [...types];
+  return evaluatedTypesMemo;
+}
+
+/**
+ * A manifest carrying EVERY evaluated block, with `type` overridden.
+ *
+ * The exit-code fixtures need this since #18407: a block absent from the manifest is
+ * a regression on its own now, so a one-component manifest would red for twelve
+ * reasons that are not the one under test. It is also what those fixtures always
+ * meant — "the accepted state, plus exactly one fabricated divergence". `omit`
+ * removes a block deliberately, for the tests whose subject IS an absence.
+ */
+const fullManifestFor = (type: string, inputs: string[], opts: { omit?: string[] } = {}): Manifest => {
+  const omit = new Set(opts.omit ?? []);
+  const components: Manifest['components'] = {};
+  for (const t of evaluatedBlockTypes()) {
+    if (!omit.has(t)) components[t] = { type: t, inputs: [] };
+  }
+  if (!omit.has(type)) components[type] = { type, inputs: inputs.map((name) => ({ name })) };
+  return { components };
+};
 
 /**
  * Every `run()` spawns a fresh tsx process that loads the whole spec schema
@@ -186,29 +251,14 @@ describe('check:react-declaration-parity — the blind spot is stated, every run
 
   it('carries the caveat on a clean baseline ratchet too, where it is easiest to over-read', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const baseline = path.join(PKG, 'react-declaration-parity.baseline.json');
-    // Every baselined block must be present, or the run reports them vanished
-    // instead of clean. Each declares only spec props, so registry-only is empty
-    // — the committed baseline's accepted state. Since #9392's `--update` the
-    // committed baseline also carries the SDUI `object-*` blocks (#7751 put
-    // them in `current`, so an accept snapshots them too), hence the derived
-    // tail: a future baselined block is covered here the day it lands instead
-    // of reporting as vanished.
-    const committed: BaselineFile = JSON.parse(fs.readFileSync(baseline, 'utf8'));
-    const manifest: Manifest = {
-      components: {
-        // The react blocks are keyed by PascalCase tag in the baseline but by
-        // schemaType in the manifest — spell those three out.
-        ...manifestFor('object-form', [SCHEMA_PROP]).components,
-        ...manifestFor('list-view', []).components,
-        ...manifestFor('object-chart', []).components,
-        ...Object.fromEntries(
-          Object.keys(committed.blocks)
-            .filter((k) => k.startsWith('object-') && k !== 'object-form')
-            .map((type) => Object.entries(manifestFor(type, []).components)[0]),
-        ),
-      },
-    };
-    const out = run(manifest, ['--baseline', baseline]);
+    // EVERY EVALUATED block must be present, or the run reports a divergence
+    // instead of a clean ratchet — and since #18407 that is true of blocks the
+    // committed baseline has no row for as well, which is the whole point of the
+    // fix: an absent block no longer needs a baseline row to be reported. Each
+    // block declares only spec props here, so registry-only is empty — the
+    // committed baseline's accepted state. The roster is derived, so a future
+    // `ComponentPropsMap` row is covered the day it lands.
+    const out = run(fullManifestFor('object-form', [SCHEMA_PROP]), ['--baseline', baseline]);
     expect(out).toMatch(/no new DECLARATION divergence/);
     expect(out).toMatch(/compares two DECLARATIONS/);
   });
@@ -258,7 +308,7 @@ describe('check:react-declaration-parity — the gate CAN go red (#4690)', () =>
    */
   it('exits non-zero naming a fabricated registry-only input', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const { status, output } = runExit({
-      manifest: manifestFor('object-form', [SCHEMA_PROP, FABRICATED]),
+      manifest: fullManifestFor('object-form', [SCHEMA_PROP, FABRICATED]),
       baseline: ACCEPTED,
       args: ['--strict'],
     });
@@ -268,7 +318,11 @@ describe('check:react-declaration-parity — the gate CAN go red (#4690)', () =>
 
   it('exits non-zero naming a block that vanished from the manifest', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const { status, output } = runExit({
-      manifest: manifestFor('something-else', []),
+      // Precisely one absence: the block the baseline records as PRESENT. Every
+      // other evaluated block stays in the manifest, so the red below is the
+      // vanished-block arm and nothing else (since #18407 an absent block reds on
+      // its own, so a one-component fixture would be red twelve times over).
+      manifest: fullManifestFor('object-form', [], { omit: ['object-form'] }),
       baseline: ACCEPTED,
       args: ['--strict'],
     });
@@ -282,7 +336,7 @@ describe('check:react-declaration-parity — the gate CAN go red (#4690)', () =>
    */
   it('exits 0 when the manifest matches the accepted baseline', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const { status, output } = runExit({
-      manifest: manifestFor('object-form', [SCHEMA_PROP]),
+      manifest: fullManifestFor('object-form', [SCHEMA_PROP]),
       baseline: ACCEPTED,
       args: ['--strict'],
     });
@@ -362,7 +416,7 @@ describe('check:react-declaration-parity — SDUI object-* blocks (#7751)', () =
 
   it('ratchets a fabricated registry-only input on an object-* block — non-zero, named', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const { status, output } = runExit({
-      manifest: manifestFor('object-kanban', ['groupBy', 'zzzFabricatedKanbanInput']),
+      manifest: fullManifestFor('object-kanban', ['groupBy', 'zzzFabricatedKanbanInput']),
       baseline: { blocks: { 'object-kanban': { registryOnly: [], missing: false } } },
       args: ['--strict'],
     });
@@ -373,12 +427,120 @@ describe('check:react-declaration-parity — SDUI object-* blocks (#7751)', () =
   it('a block not yet in the baseline is additive, not a regression (pin-bump onboarding path)', { timeout: SPAWN_TIMEOUT_MS }, () => {
     // The committed baseline predates #7751's blocks; the first pin-bump run
     // must not go red because coverage GREW. (`--update` then records them.)
+    //
+    // ⚠ What "grew" means is now pinned: a newly-evaluated block that the REGISTRY
+    // CARRIES is additive. A newly-evaluated block the registry does NOT carry is
+    // not onboarding slack — it is the divergence, and the describe block below
+    // pins it red. Before #18407 this fixture conflated the two, because every
+    // block but `object-grid` was absent from its one-component manifest and the
+    // ratchet said nothing about any of them.
     const { status, output } = runExit({
-      manifest: manifestFor('object-grid', ['objectName', 'columns', 'filter']),
-      baseline: { blocks: { ObjectForm: { registryOnly: [], missing: true } } },
+      manifest: fullManifestFor('object-grid', ['objectName', 'columns', 'filter']),
+      baseline: { blocks: { ObjectForm: { registryOnly: [], missing: false } } },
       args: ['--strict'],
     });
     expect(output).toMatch(/no new DECLARATION divergence/);
+    expect(status, output).toBe(0);
+  });
+});
+
+/**
+ * A MISSING BLOCK IS NEVER RATCHETED AWAY (#18407).
+ *
+ * `missing` — "NO component in the manifest — not registered, or not public" — is
+ * the loudest thing this gate can observe, and it was the one signal the ratchet
+ * could not act on. The suppressed shape was `state.missing && base && !base.missing`:
+ * with no baseline row there is no `base`, so a spec row whose block the public
+ * registry does not carry arrived PRE-ACCEPTED. The gate printed its `✗` line and
+ * exited 0, and would have gone on doing so for as long as nobody regenerated the
+ * baseline. Measured on the tree that filed this: `object-tree` gained a
+ * `ComponentPropsMap` row in #18403, the committed baseline predates it, and the
+ * per-PR `--baseline … --strict` run reported the absence and exited 0.
+ *
+ * ⭐ THE CURE IS NOT A BASELINE ROW. A `missing: true` row would ACCEPT the
+ * divergence, and an accepted row is indistinguishable from a reviewed decision to
+ * every reader after — so these pins assert BOTH halves: the red fires without a
+ * baseline row, and the baseline cannot be made to buy silence, neither by carrying
+ * a `missing: true` row nor by re-running `--update` to mint one.
+ *
+ * The asymmetry that made this a bug rather than a policy: `registryOnly` was
+ * ALREADY ratcheted against an absent baseline row — `baseRO` falls back to the
+ * empty set, so every registry-only input on an unbaselined block reports as new.
+ * Only `missing` carried the extra conjunct.
+ */
+describe('check:react-declaration-parity — a missing block is never ratcheted away (#18407)', () => {
+  const ABSENT = 'object-grid';
+  const PRESENT_BASELINE: BaselineFile = { blocks: { ObjectForm: { registryOnly: [], missing: false } } };
+
+  it('a block absent from the manifest with NO baseline row is a regression, named', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { status, output } = runExit({
+      manifest: fullManifestFor('object-form', [SCHEMA_PROP], { omit: [ABSENT] }),
+      baseline: PRESENT_BASELINE,
+      args: ['--strict'],
+    });
+    expect(output).toContain(`<${ABSENT}>: declared in the spec, NO component in the manifest, and NO baseline row`);
+    expect(status, output).toBe(1);
+  });
+
+  it('the failure text sends the reader upstream and rules the baseline out', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { output } = runExit({
+      manifest: fullManifestFor('object-form', [SCHEMA_PROP], { omit: [ABSENT] }),
+      baseline: PRESENT_BASELINE,
+      args: ['--strict'],
+    });
+    expect(output).toMatch(/NO COMPONENT IN THE MANIFEST is a different class and has NO --update escape/);
+    expect(output).toMatch(/PUBLIC_BLOCKS/);
+    expect(output).toMatch(/gen-sdui-manifest-node\.mjs/);
+    expect(output).toMatch(/Never a\n?\s*baseline row/);
+  });
+
+  it('a `missing: true` baseline row does not buy silence either', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { status, output } = runExit({
+      manifest: fullManifestFor('object-form', [SCHEMA_PROP], { omit: [ABSENT] }),
+      baseline: { blocks: { ...PRESENT_BASELINE.blocks, [ABSENT]: { registryOnly: [], missing: true } } },
+      args: ['--strict'],
+    });
+    expect(output).toContain(`<${ABSENT}>: NO component in the manifest.`);
+    expect(output).toContain('does NOT accept this');
+    expect(status, output).toBe(1);
+  });
+
+  it('--update refuses to mint the acceptance, naming the block and the upstream cure', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { status, output } = runExit({
+      manifest: fullManifestFor('object-form', [SCHEMA_PROP], { omit: [ABSENT] }),
+      baseline: PRESENT_BASELINE,
+      args: ['--update'],
+    });
+    expect(output).toMatch(/refusing to write a baseline while \d+ block\(s\) have NO component in the manifest/);
+    expect(output).toContain(`    - ${ABSENT}`);
+    expect(output).toMatch(/would ACCEPT the divergence instead of reporting it/);
+    expect(output).not.toMatch(/wrote declaration-parity baseline/);
+    expect(status, output).toBe(1);
+  });
+
+  /**
+   * The controls. Without them every red above could be red for any reason — a bad
+   * spawn, a roster that came back empty — and the refusal could be unconditional.
+   */
+  it('CONTROL: the same run with the block PRESENT is clean and exits 0', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { status, output } = runExit({
+      manifest: fullManifestFor('object-form', [SCHEMA_PROP]),
+      baseline: PRESENT_BASELINE,
+      args: ['--strict'],
+    });
+    expect(output).toMatch(/no new DECLARATION divergence/);
+    expect(output).not.toMatch(/NO component in the manifest/);
+    expect(status, output).toBe(0);
+  });
+
+  it('CONTROL: --update still writes when nothing is missing', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { status, output } = runExit({
+      manifest: fullManifestFor('object-form', [SCHEMA_PROP]),
+      baseline: PRESENT_BASELINE,
+      args: ['--update'],
+    });
+    expect(output).toMatch(/wrote declaration-parity baseline/);
+    expect(output).not.toMatch(/refusing to write a baseline/);
     expect(status, output).toBe(0);
   });
 });
@@ -444,7 +606,7 @@ describe('check:react-declaration-parity — the node contract, and its calibrat
 
   it('accepts a node-level key the block\'s own props schema does not declare (dataSource)', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const { status, output } = runExit({
-      manifest: manifestFor('object-grid', [BLOCK_PROP, 'dataSource']),
+      manifest: fullManifestFor('object-grid', [BLOCK_PROP, 'dataSource']),
       baseline: CLEAN,
       args: ['--strict'],
     });
@@ -457,7 +619,7 @@ describe('check:react-declaration-parity — the node contract, and its calibrat
 
   it('accepts the other node-level key the card checked (className)', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const { status, output } = runExit({
-      manifest: manifestFor('object-grid', [BLOCK_PROP, 'className']),
+      manifest: fullManifestFor('object-grid', [BLOCK_PROP, 'className']),
       baseline: CLEAN,
       args: ['--strict'],
     });
@@ -476,7 +638,7 @@ describe('check:react-declaration-parity — the node contract, and its calibrat
     ['zzzInventedRegistryInput', 'an outright invented input'],
   ])('still refuses %s (%s) while accepting dataSource in the same run', (key, _why) => {
     const { status, output } = runExit({
-      manifest: manifestFor('object-grid', [BLOCK_PROP, 'dataSource', key]),
+      manifest: fullManifestFor('object-grid', [BLOCK_PROP, 'dataSource', key]),
       baseline: CLEAN,
       args: ['--strict'],
     });
@@ -493,7 +655,7 @@ describe('check:react-declaration-parity — the node contract, and its calibrat
    */
   it('applies to the react-block half too, not only the SDUI object-* half', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const { status, output } = runExit({
-      manifest: manifestFor('list-view', ['dataSource']),
+      manifest: fullManifestFor('list-view', ['dataSource']),
       baseline: { blocks: { ListView: { registryOnly: [], missing: false } } },
       args: ['--strict'],
     });
