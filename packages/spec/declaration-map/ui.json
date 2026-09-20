@@ -183,6 +183,8 @@
     "ObjectMetricPropsSchema": "ui/ObjectMetricProps",
     "ObjectNavItem": "ui/ObjectNavItem",
     "ObjectNavItemSchema": "ui/ObjectNavItem",
+    "ObjectTimelineProps": "ui/ObjectTimelineProps",
+    "ObjectTimelinePropsSchema": "ui/ObjectTimelineProps",
     "ObjectTreeProps": "ui/ObjectTreeProps",
     "ObjectTreePropsSchema": "ui/ObjectTreeProps",
     "ObjectUserFiltersSchema": "ui/ObjectUserFilters",

@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   CronScheduleSchema,
   IntervalScheduleSchema,
@@ -773,5 +776,79 @@ describe('retired job.id (#4667)', () => {
     const job = JobSchema.parse(base);
     expect(job).not.toHaveProperty('id');
     expect(job.name).toBe('nightly_sync');
+  });
+});
+
+// ── The schema's own `@example`, held to the schema (#19184) ────────────────
+/**
+ * `JobSchema`'s TSDoc `@example` opened with `id` — the key retired in 17.0.0
+ * (#4667) and tombstoned a dozen lines below the very block that wrote it — so
+ * the example the schema publishes was refused BY that schema on a verbatim
+ * copy, with the retirement prescription as the error text. An `@example`
+ * exists for the reader who copies it first and reads the key table second (an
+ * author, and every agent writing job metadata from this schema), so a retired
+ * key is the one thing it must not open with.
+ *
+ * The pin reads the block out of the source rather than restating it: a
+ * restated copy is a second declaration of the example, and it rots in the
+ * direction that keeps this test green while the published block goes bad —
+ * exactly the failure this card is.
+ *
+ * It is deliberately scoped to the block the refusal was measured on. The
+ * file's other `@example` (on `defineJob`) carries no retired key, and the
+ * package-wide `@example` question is its own card — ⛔ do not grow this into a
+ * family sweep here.
+ */
+describe("JobSchema's own @example (#19184)", () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const SOURCE = readFileSync(resolve(HERE, './job.zod.ts'), 'utf8');
+  const ANCHOR = '@example Metadata Sync Job (Cron)';
+
+  /** The example block, verbatim, with the TSDoc ` * ` gutter stripped. */
+  const exampleLiteral = (): string => {
+    const match = SOURCE.match(/@example Metadata Sync Job \(Cron\)\n([\s\S]*?)\n \*\//);
+    if (!match) return '';
+    return match[1].split('\n').map(line => line.replace(/^\s*\*\s?/, '')).join('\n');
+  };
+
+  const exampleValue = (): Record<string, unknown> =>
+    new Function(`return (${exampleLiteral()});`)() as Record<string, unknown>;
+
+  it('is still where this pin reads it — an unextractable block fails loudly, never vacuously', () => {
+    // Without this the regex could quietly stop matching and every assertion
+    // below would pass over an empty string.
+    expect(SOURCE).toContain(ANCHOR);
+    expect(exampleLiteral()).toMatch(/^\{[\s\S]*\}$/);
+    expect(Object.keys(exampleValue())).toContain('name');
+  });
+
+  it('parses as written — the schema does not refuse its own example', () => {
+    const result = JobSchema.safeParse(exampleValue());
+    const verdict = result.success ? 'accepted' : JSON.stringify(result.error.issues, null, 2);
+    expect(verdict).toBe('accepted');
+  });
+
+  it('opens with `name` — the identity key, not the retired `id`', () => {
+    expect(Object.keys(exampleValue())[0]).toBe('name');
+    expect(exampleLiteral()).not.toMatch(/^\s*id\s*:/m);
+  });
+
+  /**
+   * The firing control: the same instrument, fed the shape the block used to
+   * carry, must still refuse it. Without this leg a pin that accepts anything
+   * — a schema that stopped being strict, an example that shrank to `{}` —
+   * would read as green.
+   */
+  it('the instrument fires — re-adding the retired key is refused, with the prescription', () => {
+    const refused = JobSchema.safeParse({ ...exampleValue(), id: 'job_sync_meta' });
+    expect(refused.success).toBe(false);
+    const issues = refused.success ? [] : refused.error.issues;
+    expect(issues.map(i => i.code)).toContain('unrecognized_keys');
+    const issue = issues.find(i => i.code === 'unrecognized_keys');
+    expect((issue as { keys?: string[] } | undefined)?.keys).toEqual(['id']);
+    // The rejection has to carry the upgrade, not just the key: version and
+    // the replacement identity, the two halves the tombstone exists for.
+    expect(issue!.message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
+    expect(issue!.message).toMatch(/`name`/);
   });
 });

@@ -71,6 +71,15 @@ import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
 // that already call it — the dataset query in `rest-server.ts`, the cold-boot
 // flow bind in `service-automation`, and `saveMetaItem`'s verbatim persist.
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+// [#19120] The DECLARED grammar of one manifest key, asked BY REFERENCE at the
+// install door below. `ManifestSchema.shape.version` is the very field schema
+// `PackageInstallRequestSchema` binds through `manifest: ManifestSchema` — not
+// a copy of it. ⛔ A hand-written semver regex here would be the THIRD judgment
+// of this one key on this one surface (the `PATCH /packages/:id` door further
+// down already keeps its own copy), and the version-grammar canon is an open
+// question on its own card: asking the declaration means whatever that canon
+// decides reaches this door with no edit to this file.
+import { ManifestSchema } from '@objectstack/spec/kernel';
 // [#17672] The repo's ONE message for a single-valued query parameter supplied
 // more than once, from the module whose header is the authority on the rule
 // (`packages/rest/src/query-multiplicity.ts`). Imported, never restated: this
@@ -749,6 +758,60 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (!pkgId) {
                 return { handled: true, response: deps.error('Package id is required', 400) };
             }
+            // [#19120] ⭐ THE DOOR PARSES THE `version` LEG — the declaration,
+            // by reference.
+            //
+            // `PackageInstallRequestSchema` binds `manifest: ManifestSchema`,
+            // and `ManifestSchema` declares `version` REQUIRED with a semantic
+            // grammar. This door parsed nothing at all: a manifest with no
+            // `version` installed and answered `201`. That is «declared ≠
+            // enforced» on a PUBLISHED API contract — the shape Prime Directive
+            // #10 refuses outright — and it is the failure 北极星 clause 4 names
+            // in as many words: 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+            // So the refusal is loud and carries the prescription.
+            //
+            // The ruling that authorises it is 基本裁决原则 —
+            // 「声明而未兑现是实现缺口,补实现或退役,⛔ 不在消费端收窄」 — and by
+            // the mechanical boundary test, making a door parse what its schema
+            // ALREADY declares is 拉回已声明契约, ⛔ not 扩大接受集. Nothing in
+            // `packages/spec` moves for this; the declaration was already right.
+            //
+            // ⛔ SCOPE — THE `version` LEG ALONE. The declaration's own residual
+            // docblock records FIVE classes this door answers `201` to. The
+            // other four — a missing `type`, unknown keys on either body form,
+            // a string-typed `enableOnInstall`/`overwrite`, install options
+            // spelled on the bare form — are each their own reading and are
+            // deliberately LEFT STANDING. They are separable, not entangled:
+            // closing them is the ONE call this code pointedly does not make,
+            // `PackageInstallBodySchema.safeParse(body)`. The five are produced
+            // at three different levels — a per-key field schema (this leg), the
+            // union arms' `.strict()` close (unknown keys, bare-form options),
+            // and this handler's own `=== true` / `=== 'true'` comparisons
+            // (the string-typed options) — and only the first is asked here.
+            //
+            // ⛔ HTTP-DOOR-ONLY BY CONSTRUCTION. Boot-time and in-process
+            // installs reach `SchemaRegistry.installPackage` / `registerApp`
+            // directly and never pass through this branch, so what tightens is
+            // the published wire contract and nothing else.
+            //
+            // ⭐ ORDERED BEFORE THE 409, DELIBERATELY. A request-shape refusal
+            // must not depend on server state: placed after the duplicate check,
+            // one and the same under-specified body would answer `400` or `409`
+            // according to whether that id happened to be installed already —
+            // two different answers to one authoring mistake. The id gate above
+            // still wins, because without an id there is nothing to name in the
+            // sentence this gate prints.
+            const declaredVersion = ManifestSchema.shape.version.safeParse((manifest as any)?.version);
+            if (!declaredVersion.success) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `manifest.version is required and must be semantic (major.minor.patch, e.g. "1.0.0") — `
+                        + `add it to the manifest for '${pkgId}' and retry`,
+                        400,
+                    ),
+                };
+            }
             // Duplicate-detection: POST /packages CREATES a package. If one with
             // this id already exists, silently overwriting it destroys the existing
             // manifest (name/version/…) with no warning — a data-loss footgun
@@ -771,30 +834,56 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             } else {
                 pkg = registry.installPackage(manifest, body.settings);
             }
-            // [#18058] HONOUR `enableOnInstall`, which this door declared and
-            // ignored. `PackageInstallRequestSchema` has carried
-            // `enableOnInstall: z.boolean().default(true)` since it was written,
-            // the first-party SDK SENDS it (`client.packages.install(m, {
-            // enableOnInstall: false })`, pinned in `client.test.ts`), and NO
-            // server-side handler read the key — an author switched it off and
-            // the runtime installed the package enabled anyway, silently. That
-            // is «declared ≠ enforced» on a published option, the exact shape
-            // Prime Directive #10 refuses.
+            // [#18058 → #18877] HONOUR `enableOnInstall`, which this door declared
+            // and ignored. `PackageInstallRequestSchema` has carried
+            // `enableOnInstall` since it was written, the first-party SDK SENDS
+            // it (`client.packages.install(m, { enableOnInstall: false })`,
+            // pinned in `client.test.ts`), and NO server-side handler read the
+            // key — an author switched it off and the runtime installed the
+            // package enabled anyway, silently. That is «declared ≠ enforced» on
+            // a published option, the exact shape Prime Directive #10 refuses.
             //
-            // Only `false` moves the REGISTRY: the declared default is `true`
-            // and `installPackage` already lands a package enabled, so the true
-            // case needs no flip. The disable goes through the SAME call
-            // `PATCH /packages/:id/disable` uses.
+            // ⭐ [#18877] 「缺省 = 保持，有旗 = 设置」 — the install contract, ruled
+            // in maintainer batch #157 item 5 letter C. BOTH arms of the flag
+            // now move the registry, through the SAME calls
+            // `PATCH /packages/:id/enable` and `PATCH /packages/:id/disable`
+            // use, and an ABSENT flag makes NO lifecycle call at all:
+            //
+            //   true    ⇒ enablePackage    (the flag is the author's request,
+            //                               and on an existing row nothing else
+            //                               will enable it any more —
+            //                               `installPackage` preserves the row's
+            //                               state since #18877)
+            //   false   ⇒ disablePackage
+            //   absent  ⇒ nothing; the row the registry returned stands
+            //
+            // ⚠️ The `true` arm is not decoration. Before #18877 it needed no
+            // flip because `installPackage` restamped every row `enabled` on
+            // overwrite; now that the row's own lifecycle state is carried over,
+            // dropping this arm would silently stop honouring `true` on exactly
+            // the path an upgrade takes — the same «declared ≠ enforced» defect
+            // #18058 closed, pointing the other way.
             //
             // ⚠️ Read from the WRAPPED body alone. `manifest !== body` is this
             // handler's own test for which of the two declared body forms
             // arrived (`PackageInstallBodySchema`); in the BARE form the key
             // would be a manifest key, which `ManifestSchema`'s strict close
             // refuses by name — honouring it there would enforce something no
-            // schema declares. So a bare body always installs at the default.
+            // schema declares. So a bare body is always 「缺省」: it preserves.
+            //
+            // ⚠️ `=== true` / `=== false`, never a truthiness test and never a
+            // `??` default: the THREE states of this key are the contract, and
+            // collapsing absent into either one is the defect this card fixed.
+            // The declaration's own `.default(true)` never reaches here — this
+            // handler reads the raw body and nothing parses the install request
+            // through `PackageInstallRequestSchema` on the serving path — so
+            // absence arrives intact and is read as absence.
             const wrapped = manifest !== body;
-            const installDisabled = wrapped && body?.enableOnInstall === false;
-            if (installDisabled) {
+            const requestedEnabled = wrapped ? body?.enableOnInstall : undefined;
+            if (requestedEnabled === true) {
+                const enabled = registry.enablePackage(pkgId);
+                if (enabled) pkg = enabled;
+            } else if (requestedEnabled === false) {
                 const disabled = registry.disablePackage(pkgId);
                 if (disabled) pkg = disabled;
             }
@@ -811,31 +900,29 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             //
             //   ① answered `enabled: true`, disk still says disabled. `POST
             //     /packages` is a CREATE an already-installed id reaches
-            //     through `overwrite`, and `DELETE /packages/:id` never clears
-            //     this record either, so the id may already be listed from an
+            //     through `overwrite`, so the id may already be listed from an
             //     earlier install. The next boot re-installs it DISABLED.
-            //   ② answered `enabled: false`, disk cleared. `installPackage`
-            //     lands an id that is in the boot-seeded
-            //     `initialDisabledPackageIds` DISABLED WHATEVER THE REQUEST
-            //     SAYS, so a flag-absent install of a package an operator
-            //     disabled before a restart returns `enabled: false` while the
-            //     request's own intent (`true`, the declared default) erases
-            //     the disable from disk. The next boot brings it back ENABLED.
+            //     (`DELETE /packages/:id` did not clear this record either,
+            //     until #18877's item 3 below made the delete arm do it.)
+            //   ② answered `enabled: false`, disk cleared. A flag-absent install
+            //     of a package an operator disabled before a restart returned
+            //     `enabled: false` while the request's presumed intent erased
+            //     the disable from disk. The next boot brought it back ENABLED.
             //
             // `pkg.enabled` is the one value that cannot be out of step with
             // either, because it IS the row being served. It is read AFTER the
-            // flip above, and on both install arms it is the registry's own
+            // flag arms above, and on both install arms it is the registry's own
             // `InstalledPackage` (the protocol service returns `{ package }`
             // straight out of `registry.installPackage`), so `=== false` is
             // `!pkg.enabled` on every reachable row — the spelling only keeps a
             // degenerate rowless return from writing a disable nobody asked for.
             //
-            // ⛔ Deliberately NOT "enable first, so the declared default wins":
-            // that would make a flag-absent install RE-ENABLE a package an
-            // operator disabled in an earlier boot, which is a new behaviour no
-            // ruling authorises. What a seeded id does with `enableOnInstall:
-            // true` is therefore unchanged; what is fixed is that memory and
-            // disk no longer disagree about it.
+            // ⭐ [#18877] This is also why the 「缺省 = 保持」 rule needs no second
+            // durable rule. The row now carries the preserved state, and the
+            // disk follows the row, so 「保持」 reaches disk for free — a
+            // flag-absent overwrite re-writes the same value the operator's last
+            // explicit action left there. #18058's «每一次 install 都持久化它返回
+            // 的状态» is unchanged; what changed is which state that is.
             //
             // Same best-effort try/catch as `PATCH /packages/:id/enable` below:
             // the in-memory install already succeeded, so a state-file failure
@@ -1503,6 +1590,31 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the next restart.
             const readOnly = requireWritablePackage(deps, qlService, id, 'delete'); if (readOnly) return readOnly;
             const registryRemoved = registry.uninstallPackage(id);
+
+            // ⭐ [#18877 ruling item 3] A package that no longer exists has no
+            // lifecycle state — so the DURABLE disable record goes with the row,
+            // and the next install of this id is a FRESH install that lands at
+            // the declared default. The registry half of the same sentence is
+            // inside `uninstallPackage`, which forgets the id from the boot seed
+            // set; this is the half that outlives the process.
+            //
+            // Without it the record was immortal: `DELETE` removed the row and
+            // left the id listed on disk, the next boot seeded it back, and a
+            // reinstalled package came up disabled with nothing anywhere saying
+            // why — a disable the operator could no longer even see to undo,
+            // since the package it named was gone. Written only when the
+            // registry really removed the row, so a 404 changes no state.
+            //
+            // Same best-effort try/catch as the install and PATCH arms above:
+            // the uninstall itself already happened, so a state-file failure
+            // must not turn it into a 500.
+            if (registryRemoved) {
+                try {
+                    setPackageDisabled(_context?.environmentId, id, false);
+                } catch (err) {
+                    console.warn('[handlePackages] failed to clear persisted disable state on delete', { id, error: (err as Error)?.message });
+                }
+            }
 
             // Persisted removal (AI/runtime packages live in sys_metadata, not
             // just the in-memory registry — the registry uninstall alone would

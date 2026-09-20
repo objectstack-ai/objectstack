@@ -38,11 +38,18 @@
  *
  * ## Why the pre-existing ordered pin is not enough
  *
- * It asserts the order of the NAME-KEYED subset, which drops `datasets` (no
- * write type maps into it). So swapping `datasets` with either neighbour left
- * it green while genuinely reordering the set the snapshot is built from. The
- * first test below closes exactly that gap, and is the reason ordering could be
- * reported as load-bearing rather than assumed either way.
+ * It asserts the order of the NAME-KEYED subset, which at the time dropped
+ * `datasets` (no write type mapped into it). So swapping `datasets` with either
+ * neighbour left it green while genuinely reordering the set the snapshot is
+ * built from. The first test below closes exactly that gap, and is the reason
+ * ordering could be reported as load-bearing rather than assumed either way.
+ *
+ * [#19143] Mapping the `dataset` type pulled `datasets` INTO the name-keyed
+ * subset, so the two pins agree on membership today. That is a coincidence of
+ * the current table and not a reason to retire this one: the name-keyed set is
+ * an INTERSECTION, so the next context-only collection — one carried for
+ * resolution that no write type lands in — restores the gap immediately, and
+ * this file is the only place the whole carried set's order is stated.
  */
 
 import { describe, expect, it } from 'vitest';

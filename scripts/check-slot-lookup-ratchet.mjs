@@ -147,9 +147,17 @@ const BASELINE_PATH = 'scripts/slot-lookup-baseline.json';
  * a lead it does not need. That trade is the one `CHANGE_KIND_GATES` already
  * decided for the three structurally identical whole-tree ratchets in
  * `dispatch-gates.mjs`, and it is decided the same way here — by what the gate
- * costs to run needlessly. Measured on this tree: 46s, no build required, and a
- * failure names the offending file and line. A seat that runs it needlessly
- * loses seconds; a seat that is never prompted loses a CI round.
+ * costs to run needlessly. Measured at 46s when this was recorded
+ * (`99ca6623f`, 2026-08-19), with no build required, and a failure names the
+ * offending file and line. A seat that runs it needlessly loses seconds; a seat
+ * that is never prompted loses a CI round.
+ *
+ * ⛔ The duration is deliberately left at that commit and NOT refreshed in
+ * place. A wall-clock reading is a reading of one BOX as much as of one tree —
+ * this repo's own agent containers read several times the figures recorded for
+ * them — so a fresh number written here would decay without the tree moving at
+ * all. Time it on the box you are deciding for; what the trade needs is the
+ * ORDER (seconds against a CI round), and that is what is stated.
  *
  * Two things a seat prompted by this declaration needs to know, and neither is
  * visible from a green `pnpm lint`:
