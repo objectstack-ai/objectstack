@@ -813,13 +813,29 @@ describe('[#18091] the three remaining capability refusals reach the author', ()
     }
 
     expect(out.unreadable).toBe(2);
-    expect(cap.seen).toHaveLength(1);
-    expect(cap.seen[0]!.startsWith('warn: ')).toBe(true);
-    expect(cap.seen[0]).toContain(CAPABILITY_ROWS_UNREADABLE);
+
+    // [#18570] TWO lines now, and the second one is the point of that card.
+    // This assertion used to read `toHaveLength(1)`, and that ONE was the
+    // measurement #18570 was filed on: the same unreadable pass, with no logger
+    // injected, printed this seeder's summary while the batched existence read
+    // that failed FIRST — `seed-name-lookup.ts`, a doubly-optional
+    // `logger?.warn?.(…)` — said nothing at all. Both sites now deliver through
+    // `reportThroughSink`, so both reach an author who injected nothing.
+    //
+    // ⛔ Selected by CONTENT, never by index: the read fails before the pass
+    // summarises, so the #18570 line arrives first.
+    expect(cap.seen).toHaveLength(2);
+    const summary = cap.seen.find((l) => l.includes(CAPABILITY_ROWS_UNREADABLE));
+    const batchedRead = cap.seen.find((l) => l.includes('batched seed existence read failed'));
+    expect(batchedRead).toBeDefined();
+    expect(batchedRead!.startsWith('warn: ')).toBe(true);
+
+    expect(summary).toBeDefined();
+    expect(summary!.startsWith('warn: ')).toBe(true);
     // The count, and the consequence "unreadable" alone does not state.
-    expect(cap.seen[0]).toContain('2 of 2');
-    expect(cap.seen[0]).toContain('keeps the stale value');
-    expect(cap.seen[0]).toContain('nothing is lost');
+    expect(summary).toContain('2 of 2');
+    expect(summary).toContain('keeps the stale value');
+    expect(summary).toContain('nothing is lost');
     // ⛔ Unchanged: a name whose row could not be read is left ENTIRELY alone,
     // and stays out of `materializedNames` so the derivation gets its attempt.
     expect(ql.rows).toHaveLength(0);
