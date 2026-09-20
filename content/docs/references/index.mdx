@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1530 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1532 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -31,9 +31,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 5 | 30 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 33 | 272 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
-| [UI Protocol](/docs/references/ui) | 16 | 156 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **194** | **1530** | 14 protocol modules |
+| [System Protocol](/docs/references/system) | 34 | 273 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [UI Protocol](/docs/references/ui) | 16 | 157 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| **Total** | **195** | **1532** | 14 protocol modules |
 
 ---
 
@@ -316,7 +316,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **33 pages, 272 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **34 pages, 273 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -329,6 +329,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`collaboration.zod.ts`](/docs/references/system/collaboration) | `AwarenessEvent`, `AwarenessSession`, `AwarenessUpdate`, `AwarenessUserState`, `CRDTMergeResult`, `CRDTState`, `CRDTType`, `CollaborationMode`, `CollaborationSession`, `CollaborationSessionConfig`, `CollaborativeCursor`, `CounterOperation`, `CursorColorPreset`, `CursorSelection`, `CursorStyle`, `CursorUpdate`, `GCounter`, `LWWRegister`, `ORSet`, `ORSetElement`, `OTComponent`, `OTOperation`, `OTOperationType`, `OTTransformResult`, `PNCounter`, `TextCRDTOperation`, `TextCRDTState`, `UserActivityStatus`, `VectorClock` |
 | [`core-services.zod.ts`](/docs/references/system/core-services) | `CoreServiceName`, `KernelServiceMap`, `KernelServiceStatus`, `ServiceConfig`, `ServiceCriticality` |
 | [`deploy-bundle.zod.ts`](/docs/references/system/deploy-bundle) | `DeployBundle`, `DeployDiff`, `DeployManifest`, `DeployStatusEnum`, `DeployValidationIssue`, `DeployValidationResult`, `MigrationPlan`, `MigrationStatement`, `SchemaChange` |
+| [`dev-login.zod.ts`](/docs/references/system/dev-login) | `DevLogin` |
 | [`disaster-recovery.zod.ts`](/docs/references/system/disaster-recovery) | `BackupConfig`, `BackupRetention`, `BackupStrategy`, `DisasterRecoveryPlan`, `FailoverConfig`, `FailoverMode`, `RPO`, `RTO` |
 | [`doc.zod.ts`](/docs/references/system/doc) | `Doc` |
 | [`email-config.zod.ts`](/docs/references/system/email-config) | `EmailAddressConfig`, `EmailProvider`, `EmailServiceConfig` |
@@ -360,7 +361,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 
 ## UI Protocol
 
-**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 156 schemas**
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 157 schemas**
 
 Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
 
@@ -371,7 +372,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`app.zod.ts`](/docs/references/ui/app) | `ActionNavItem`, `App`, `AppBranding`, `AppContextSelector`, `ComponentNavItem`, `DashboardNavItem`, `GroupNavItem`, `NavigationArea`, `NavigationContribution`, `NavigationItem`, `ObjectNavItem`, `PageNavItem`, `ReportNavItem`, `UrlNavItem` |
 | [`bulk-action.zod.ts`](/docs/references/ui/bulk-action) | `BulkActionDef`, `BulkActionExecution`, `BulkActionOperation`, `BulkActionParam` |
 | [`chart.zod.ts`](/docs/references/ui/chart) | `ChartAggregate`, `ChartAggregateFunction`, `ChartAnnotation`, `ChartAxis`, `ChartConfig`, `ChartDrillDown`, `ChartGroupBy`, `ChartInteraction`, `ChartSeries`, `ChartType` |
-| [`component.zod.ts`](/docs/references/ui/component) | `AIChatWindowProps`, `ElementButtonProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementTextInputProps`, `ElementTextProps`, `ObjectCalendarProps`, `ObjectFormProps`, `ObjectGanttProps`, `ObjectGridProps`, `ObjectKanbanProps`, `ObjectMapProps`, `ObjectMasterDetailFormProps`, `ObjectMetricProps`, `ObjectTreeProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordAlertAction`, `RecordAlertProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordHistoryProps`, `RecordPathProps`, `RecordQuickActionsProps`, `RecordReferenceRailProps`, `RecordRelatedListProps`, `ReferenceRailEntry` |
+| [`component.zod.ts`](/docs/references/ui/component) | `AIChatWindowProps`, `ElementButtonProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementTextInputProps`, `ElementTextProps`, `ObjectCalendarProps`, `ObjectFormProps`, `ObjectGanttProps`, `ObjectGridProps`, `ObjectKanbanProps`, `ObjectMapProps`, `ObjectMasterDetailFormProps`, `ObjectMetricProps`, `ObjectTimelineProps`, `ObjectTreeProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordAlertAction`, `RecordAlertProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordHistoryProps`, `RecordPathProps`, `RecordQuickActionsProps`, `RecordReferenceRailProps`, `RecordRelatedListProps`, `ReferenceRailEntry` |
 | [`dashboard.zod.ts`](/docs/references/ui/dashboard) | `Dashboard`, `DashboardHeader`, `DashboardHeaderAction`, `DashboardWidget`, `DashboardWidgetOptions`, `GlobalFilter`, `GlobalFilterOptionsFrom`, `WidgetActionType`, `WidgetColorVariant` |
 | [`dataset.zod.ts`](/docs/references/ui/dataset) | `Dataset`, `DatasetDimension`, `DatasetMeasure`, `DerivedMeasureOp` |
 | [`expression-bindable-text-keys.zod.ts`](/docs/references/ui/expression-bindable-text-keys) | `ExpressionBindableTextKey` |

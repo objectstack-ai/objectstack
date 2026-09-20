@@ -4587,13 +4587,16 @@ const step17: MigrationStep = {
       surface: 'ai.tool.requiresConfirmation',
       replacement:
         'put the operation behind an ACTION and set `ai.requiresConfirmation: true` there — the '
-        + 'flag the platform confirmation CONTRACT is written against. That contract DECLARES '
-        + 'that an AI-facing call on an action declaring the flag must carry an explicit '
-        + 'confirmation member on the request and is to be refused without it with '
-        + '`ACTION_CONFIRMATION_REQUIRED`, the refusal naming the action and the exact member to '
-        + 'set. A gate, not a queue: nothing is parked. ⚠ The refusal is DECLARED, not yet '
-        + 'performed — the runtime door lands in #15942, so until then the flag stops nothing on '
-        + 'its own and the human in the loop is still yours to arrange',
+        + 'flag the platform confirmation CONTRACT is written against, and that contract is '
+        + 'ENFORCED. An AI-facing call on an action declaring the flag must carry the '
+        + 'confirmation member `confirm: true` on the request and is REFUSED without it with '
+        + '`ACTION_CONFIRMATION_REQUIRED` (428), the refusal naming the action and the exact '
+        + 'member to set. A gate, not a queue: nothing is parked, and a refused call did not '
+        + 'run — no record was read and none was written. ⚠ Two bounds: the enforced set is the '
+        + 'doors that enforce the author\'s `ai.exposed` opt-in, today the action door reached '
+        + 'from the MCP `run_action` tool, while REST `/actions` is not `ai.exposed`-gated and '
+        + 'sits outside the gate; and `confirm: true` is an unverifiable caller claim, so the '
+        + 'gate makes forgetting loud without proving a human approved',
       reason:
         '`ToolSchema.requiresConfirmation` accepted `true` and no execution path ever read it: '
         + 'not the LLM tool set (a tool reaches the model as name / description / parameters '
@@ -4626,13 +4629,18 @@ const step17: MigrationStep = {
         + 'load-bearing half is what happens NEXT, and no gate can check it for you: for every '
         + 'tool that carried the flag, decide whether that operation genuinely needs a human in '
         + 'the loop. If it does, move it behind an action carrying `ai.requiresConfirmation: '
-        + 'true`, which is what the confirmation contract (#16293) gates on. ⛔ Do NOT try to '
-        + '"prove the gate" by invoking the operation without the confirmation member: the '
-        + 'runtime door that refuses lands in #15942, so before that ships the call is not '
-        + 'refused, it RUNS the destructive operation. Until then the declaration is a contract '
-        + 'and the human in the loop is still yours to arrange — which is the decision this '
-        + 'criterion is asking you to make, not a test to run. If the operation does not need '
-        + 'a human, delete the key knowingly. '
+        + 'true`, which is what the confirmation contract (#16293) gates on — and that gate is '
+        + 'PERFORMED: invoking the operation over an AI-exposed door without the confirmation '
+        + 'member is REFUSED with `ACTION_CONFIRMATION_REQUIRED` (428) and nothing runs, so '
+        + 'that call is a real check you can make rather than a destructive experiment. ⚠ Two '
+        + 'bounds on what it proves: the enforced set is the doors that enforce the author\'s '
+        + '`ai.exposed` opt-in — today the action door reached from the MCP `run_action` tool '
+        + '— while REST `/actions` is not `ai.exposed`-gated and sits outside the gate, so an '
+        + 'agent holding an API key on that route is still yours to put a human in front of; '
+        + 'and `confirm: true` is an unverifiable caller claim, so the gate makes forgetting '
+        + 'loud without proving a human approved. The decision above is still the one this '
+        + 'criterion asks you to make. If the operation does not need a human, delete the key '
+        + 'knowingly. '
         + 'Deleting it without that decision leaves exactly the state the retirement exists to '
         + 'end: a destructive tool nobody is approving, now without even the false flag to show '
         + 'that somebody once meant to.',
@@ -5581,6 +5589,49 @@ const step18: MigrationStep = {
         + 'button once per declared action against a multi-row selection and confirm the number of '
         + 'dispatches matches the declaration (N for per-record, one for aggregate) — a mismatch that '
         + 'used to be silent is what this key exists to surface.',
+    },
+    // The action facade's `find` took the `where` HALF of a query while every other
+    // `find` on the platform took the whole envelope. The rewrite is mechanical and
+    // lossless, but it lives in an action HANDLER's source — a TypeScript function
+    // body, not a keyed metadata document — so `objectstack migrate meta` cannot
+    // reach it and it is a semantic entry rather than a D2 conversion.
+    {
+      id: 'action-engine-facade-find-query-envelope',
+      surface: 'Action handler body — `ctx.engine.find(object, filter)` '
+        + '(`ActionEngineFacade.find`, `@objectstack/spec/ui`)',
+      replacement: '`ctx.engine.find(object, { where: filter })` — the engine\'s own query envelope '
+        + '(`EngineQueryOptions`), the same options bag `IDataEngine.find` takes. The filter moves under '
+        + '`where` verbatim: `find(\'task\', { status: \'open\' })` → '
+        + '`find(\'task\', { where: { status: \'open\' } })`. An unfiltered `find(object, {})` is unchanged, '
+        + 'and the rest of the envelope — `fields`, `orderBy`, `limit`, `offset`, `expand` — becomes '
+        + 'reachable from a handler for the first time. A caller-supplied `context` is ignored: the '
+        + 'facade is trusted and stamps its own elevated one.',
+      reason:
+        'The rewrite itself is lossless and mechanical, but it is not automatable here: an action handler '
+        + 'is authored TypeScript, and the chain rewrites stored metadata by key, so no `os migrate meta` '
+        + 'step can reach a call expression inside a function body. The change is a WITHDRAWAL of the '
+        + 'parameter shape #14175 chose, ruled by the director seat (decision batch #123 item 3, '
+        + '2026-09-12, 「同意」) on the long-term axis 「one platform, one query shape」. The facade had been '
+        + 'given a shape different from the engine\'s — the `where` half alone — which made the most '
+        + 'natural spelling the wrong one: an author who passed the engine\'s envelope got '
+        + '`{ where: { where: … } }`, matching no row and resolving to `[]` with no error, while an '
+        + 'unfiltered `{}` kept working under either belief so a dead handler looked partially alive. The '
+        + 'alternative — refusing `where` at the top level with an intersection — was rejected because it '
+        + 'asserts a vocabulary fact the spec declares nowhere, reserving the field name `where` across '
+        + 'every customer\'s data model to buy one parameter\'s compile-time check.',
+      acceptanceCriteria:
+        'Every `ctx.engine.find(...)` in the app\'s action handlers passes an envelope. Where the handler '
+        + 'is annotated with the PUBLISHED `ActionHandlerContext`, `tsc --noEmit` finds every unmigrated '
+        + 'call on its own — a bare filter is a compile error there, an object literal failing the '
+        + 'excess-property check and a `FilterCondition` variable failing TS2559. ⚠️ Where it is NOT — a '
+        + 'handler in an `objectstack.config.js` / `.mjs`, one annotated with a local copy of the context '
+        + 'type, or a `(ctx: any)` handler — the type reaches nothing and a type-check alone proves '
+        + 'nothing: those callers are refused at RUNTIME by the facade arm, with the same prescription, so '
+        + 'the migration is complete for them only once each such handler has actually been RUN. Then '
+        + 'confirm the reads that were already SILENTLY EMPTY: any handler that had been passing the '
+        + 'envelope was resolving to `[]` on every call, so a suite written against the mistake passed and '
+        + 'the row count is the only witness — re-run each migrated handler against seeded data and assert '
+        + 'it now returns the rows its filter selects, rather than asserting it still resolves.',
     },
     {
       id: 'address-location-value-unknown-keys-refused',

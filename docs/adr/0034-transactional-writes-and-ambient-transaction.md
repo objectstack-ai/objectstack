@@ -40,7 +40,7 @@ better-sqlite3** with a **single-connection pool** (SQLite is single-writer).
 
 `engine.transaction()` threads the open transaction into the driver options of
 the *top-level* write via `buildDriverOptions` (`engine.ts`, which even warns
-about this deadlock around L1811). But internal reads/writes performed **during**
+about this deadlock). But internal reads/writes performed **during**
 a write — FK / reference checks, hook `api` calls, any helper query — do **not**
 all reuse the transaction's connection. Such a query asks the pool for a
 connection, the pool is exhausted (the transaction holds the only one), and it
@@ -54,11 +54,11 @@ that transaction's connection.
 
 - `driver-sql` already has the right *local* pattern for nested work:
   `getNextSequenceValue` uses `runner = parentTrx ?? this.knex` and opens a
-  savepoint on the parent transaction (`sql-driver.ts` L561-563). The gap is
+  savepoint on the parent transaction (`sql-driver.ts`). The gap is
   that this discipline isn't applied *globally* to every engine→driver call.
 - `driver-sql` already implements a **persistent, atomic sequence**
-  (`SEQUENCES_TABLE` + `getNextSequenceValue` with `forUpdate` + seed-from-max,
-  L548-600). See "Autonumber (#1603)" below — this is mostly already solved at
+  (`SEQUENCES_TABLE` + `getNextSequenceValue` with `forUpdate` + seed-from-max).
+  See "Autonumber (#1603)" below — this is mostly already solved at
   the driver level.
 
 ---

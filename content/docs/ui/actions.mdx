@@ -170,19 +170,36 @@ already `completed` — is not stamped, so nothing overwrites the handler's valu
 and nothing strips it either, and the action silently replaces the real
 completion timestamp with "now". That is why the snippet sends `status` alone.
 
-<Callout type="warn">
-**`ctx.engine.find(object, filter)` takes a filter, not a query.** The second
-argument is the `where` half only — `{ status: 'completed' }`, operators
-(`{ amount: { $gt: 100 } }`), `$and` / `$or` / `$not` — and the runtime wraps
-it in `where` itself. Passing an ObjectQL envelope
-(`{ where: { status: 'completed' } }`) raises no error: it becomes
-`{ where: { where: … } }`, matches no row, and returns `[]`. An empty filter
-(`{}`) is passed through unwrapped, so the one unfiltered read works under
-either reading and a handler can look partially alive. The parameter is typed
-`FilterCondition` (`ActionEngineFacade` in `@objectstack/spec/ui`), which
-refuses a primitive or a mistyped `$and` / `$or` / `$not` but still admits
-`where` as a key — the sentence above is the contract, and a hand-written test
-double must honour it too.
+<Callout type="info">
+**`ctx.engine.find(object, query)` takes the engine's query envelope.** The
+second argument is the same options bag `engine.find` takes everywhere else —
+the filter goes under `where`, and `fields`, `orderBy`, `limit`, `offset` and
+`expand` mean what they mean on the engine. One platform, one query shape.
+
+```typescript
+await ctx.engine.find('todo_task', { where: { status: 'completed' } });
+await ctx.engine.find('todo_task', { where: { amount: { $gt: 100 } }, fields: ['id', 'subject'], limit: 50 });
+await ctx.engine.find('todo_task', {});   // the unfiltered read
+```
+
+The parameter is typed `EngineQueryOptions` (`ActionEngineFacade` in
+`@objectstack/spec/ui`), so if you annotate `ctx` with the published
+`ActionHandlerContext` a bare filter is a **compile error** at the call site —
+`{ status: 'completed' }` has nowhere to land, and neither does a filter held in
+a `FilterCondition` variable. A hand-written test double must honour the envelope
+too.
+
+If you do **not** annotate it — a handler in an `objectstack.config.js` /
+`.mjs`, your own copy of the context type, or `(ctx: any)` — the facade refuses
+the bare filter at **runtime** instead, naming the stray key and prescribing the
+same fix. That runtime refusal is what stops `{ deleted_at: null }` from being
+dropped unexecuted and quietly widening the read to every row.
+
+**Upgrading?** This parameter used to be the `where` half on its own, and the
+runtime wrapped it. `find(o, f)` becomes `find(o, { where: f })`; an unfiltered
+`find(o, {})` is unchanged. The old shape had the trap the other way round:
+writing the engine's own envelope produced `{ where: { where: … } }`, which
+matched no row and returned `[]` with no error at all.
 </Callout>
 
 <Callout type="info">

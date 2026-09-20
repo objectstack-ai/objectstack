@@ -421,8 +421,8 @@ declare const ConnectorSchema: z.ZodObject<{
             append_only: "append_only";
         }>>>;
         direction: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-            import: "import";
             export: "export";
+            import: "import";
             bidirectional: "bidirectional";
         }>>>;
         realtimeSync: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
@@ -659,8 +659,8 @@ declare const DataSyncConfigSchema: z.ZodObject<{
         append_only: "append_only";
     }>>>;
     direction: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        import: "import";
         export: "export";
+        import: "import";
         bidirectional: "bidirectional";
     }>>>;
     realtimeSync: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
@@ -792,8 +792,8 @@ declare const DeclarativeConnectorEntrySchema: z.ZodObject<{
             append_only: "append_only";
         }>>>;
         direction: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-            import: "import";
             export: "export";
+            import: "import";
             bidirectional: "bidirectional";
         }>>>;
         realtimeSync: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;

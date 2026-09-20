@@ -48,7 +48,7 @@ Sources: `packages/triggers/trigger-record-change/src/record-change-trigger.ts` 
 ObjectQL has an ambient-transaction store (ADR-0034, `AsyncLocalStorage` in `objectql/src/engine.ts`). Within an unbroken async chain on the same engine, internal data ops *inherit* the open transaction. One might therefore hope a before-flow's CRUD nodes join the triggering write's transaction. They do not, for two compounding reasons:
 
 1. **Errors are swallowed before they can roll anything back.** The trigger's `try/catch` is the outermost frame around the flow; a failing flow write never propagates to the transaction boundary, so rollback is structurally impossible — independent of ALS.
-2. **The flow path does not thread the transaction explicitly**, and ALS is fragile here: it does **not** survive `setImmediate`/deferred-promise boundaries (the documented sandbox-runner limitation in `engine.ts`, ~L3217). Any atomicity would be *accidental* (inline before-path only) and *untested* — not a guarantee an author may rely on.
+2. **The flow path does not thread the transaction explicitly**, and ALS is fragile here: it does **not** survive `setImmediate`/deferred-promise boundaries (the documented sandbox-runner limitation in `engine.ts`). Any atomicity would be *accidental* (inline before-path only) and *untested* — not a guarantee an author may rely on.
 
 The net is a **silent** contract violation: an author who writes a before-flow to normalize a field or block a save gets a flow that runs, changes nothing on the triggering record, cannot stop the write, and reports success. Nothing fails; the wrong thing just quietly happens.
 

@@ -179,8 +179,38 @@ export const SysAuditLog = ObjectSchema.create({
     // record-detail views on per-object opt-in, batched off the request path —
     // so a deployment that opts nothing in never writes one, and the value is
     // narrow rather than absent (审计面宁窄勿谎).
+    // [#18412, maintainer ruling 2026-09-18 — director batch #153 item 2]
+    // `platform_admin_standing_change` joins the enum WRITER-FIRST, the only
+    // way a value is allowed onto this surface. Its writer is
+    // `plugin-security/src/bootstrap-platform-admin.ts`
+    // (`recordPlatformAdminStandingChange`, row shape in
+    // `platform-admin-standing-audit.ts`), which records WHO holds
+    // platform-administrator standing and from when — the property lost when
+    // standing moved from a stored grant row to config-derived, request-time
+    // resolution (#11663, ADR-0131). One entry per CHANGE of standing plus a
+    // first-boot baseline, so a frequently restarted rig writes nothing.
+    //
+    // Its shipped surfaces are the unfiltered `recent` and `all_events` views
+    // above: the rows are visible on both, so this value is not the empty
+    // widget the 2026-08-12 ruling named (审计面宁窄勿谎). ⛔ It is deliberately
+    // NOT added to the `config_changes` filter — that view's label and columns
+    // answer 「which setting changed」, and standing is not a `sys_setting`.
+    //
+    // ⛔ Dotless `snake_case`, per Prime Directive #3 and every incumbent value
+    // here; the ruling's illustrative `platform_admin_standing.changed` carried
+    // a dot and was written 「e.g.」.
     action: Field.select(
-      ['create', 'read', 'update', 'delete', 'login', 'logout', 'config_change', 'import'],
+      [
+        'create',
+        'read',
+        'update',
+        'delete',
+        'login',
+        'logout',
+        'config_change',
+        'import',
+        'platform_admin_standing_change',
+      ],
       {
         label: 'Action',
         required: true,

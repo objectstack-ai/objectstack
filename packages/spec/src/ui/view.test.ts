@@ -44,6 +44,8 @@ import {
   ViewItemSchema,
   ViewMetadataSchema,
   VIEW_METADATA_MEMBERS,
+  TreeConfigSchema,
+  DEFAULT_VIEW_ROW_LIMIT,
 } from './view.zod';
 
 import {
@@ -4658,5 +4660,120 @@ describe('ListViewSchema — `viewType` is not a spelling of `type` (#16577)', (
     expect(r.success).toBe(true);
     expect((r as { data: Record<string, unknown> }).data).not.toHaveProperty('viewType');
     expect((r as { data: { type?: unknown } }).data.type).toBe('grid');
+  });
+});
+
+
+// ============================================================================
+// [#17393] The author-settable row ceiling on the page-shaped view configs.
+//
+// A protocol-first card: objectui caps kanban and timeline by author choice off
+// a key `@objectstack/spec` never declared (`$top: schema.limit ?? DEFAULT_*_LIMIT`),
+// and the gallery — the third page-shaped view — caps not at all. These pins
+// hold the new declaration to the three things a ceiling has to be: APPLIED
+// (the default the prose states is the default the parse produces), BOUNDED
+// (a value that could not cap a fetch is refused by name), and SCOPED (the
+// non-grid four keep objectui#7210's platform ceiling and do not gain an
+// authorable one).
+// ============================================================================
+
+describe('view row ceiling — `limit` on the page-shaped view configs (#17393)', () => {
+  /**
+   * One minimal, parse-clean block per page-shaped config, so every verdict
+   * below is about `limit` alone rather than about a missing sibling key.
+   */
+  const PAGE_SHAPED = [
+    ['gallery', GalleryConfigSchema as unknown as z.ZodTypeAny, {}],
+    ['kanban', KanbanConfigSchema as unknown as z.ZodTypeAny, { groupByField: 'status', columns: ['name'] }],
+    ['timeline', TimelineConfigSchema as unknown as z.ZodTypeAny, { startDateField: 'start_date', titleField: 'name' }],
+  ] as const;
+
+  /** The `limit` member's own `.describe()` text, off the built shape. */
+  const describeOf = (schema: z.ZodTypeAny): string =>
+    (schema as unknown as { shape: Record<string, { description?: string }> }).shape.limit?.description ?? '';
+
+  it('applies the ceiling it declares when the author writes none', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      const parsed = schema.parse({ ...minimal }) as { limit?: unknown };
+      expect(parsed.limit, label).toBe(DEFAULT_VIEW_ROW_LIMIT);
+    }
+  });
+
+  it('accepts an authored ceiling as a MEMBER, with both controls firing on the same shape', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      // CONTROL-1 — this surface CAN refuse a key, so acceptance below means something.
+      const control = schema.safeParse({ ...minimal, zzUnlikelyBogusKey__: 7 });
+      expect(control.success, label).toBe(false);
+      expect(JSON.stringify((control as { error?: z.ZodError }).error?.issues), label)
+        .toContain('unrecognized_keys');
+
+      // CONTROL-2 — the refusal is about the NAME: the same block without it parses.
+      expect(schema.safeParse({ ...minimal }).success, label).toBe(true);
+
+      // PROBE — the authored value SURVIVES the parse; it is not merely tolerated.
+      const probe = schema.safeParse({ ...minimal, limit: 25 });
+      expect(probe.success, label).toBe(true);
+      expect(((probe as { data?: { limit?: unknown } }).data)?.limit, label).toBe(25);
+    }
+  });
+
+  it('refuses a value that could not bound a fetch — and refuses it BY NAME', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      for (const bad of [0, -1, 2.5, '100', null] as const) {
+        const at = `${label} limit=${JSON.stringify(bad)}`;
+        const result = schema.safeParse({ ...minimal, limit: bad });
+        expect(result.success, at).toBe(false);
+        const issues = (result as { error?: z.ZodError }).error?.issues ?? [];
+        expect(issues.some((issue) => issue.path[0] === 'limit'), `${at}: ${JSON.stringify(issues)}`)
+          .toBe(true);
+      }
+    }
+  });
+
+  it('states the default it ACTUALLY applies — prose and schema pinned to each other', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      const description = describeOf(schema);
+      const stated = /default (\d+)/.exec(description);
+      expect(stated, `${label}: ${description}`).not.toBeNull();
+      const applied = (schema.parse({ ...minimal }) as { limit: number }).limit;
+      expect(Number(stated?.[1]), `${label}: ${description}`).toBe(applied);
+    }
+  });
+
+  it('tells the author the renderer owes a VISIBLE truncation signal', () => {
+    // ⛔ The signal itself is the renderer's half and cannot be enforced from a
+    // schema. What the protocol can do — and what objectui#7390's ruling turns
+    // on — is say the cap is owed a signal, so that "bounded and silent" is
+    // never read as the finished job.
+    for (const [label, schema] of PAGE_SHAPED) {
+      expect(describeOf(schema), label).toContain('visible truncation signal');
+    }
+  });
+
+  it('leaves the non-grid four WITHOUT an authorable ceiling (objectui#7210 keeps theirs)', () => {
+    // The card scopes those four out by name: their rows are capped by a
+    // platform constant the renderer owns, because a gantt range, a map camera
+    // fit and a tree parent chain are computed over the whole set. An
+    // authorable ceiling there would be surface no renderer reads.
+    const NON_GRID_FOUR = [
+      ['gantt', GanttConfigSchema as unknown as z.ZodTypeAny],
+      ['calendar', CalendarConfigSchema as unknown as z.ZodTypeAny],
+      ['map', ListMapConfigSchema as unknown as z.ZodTypeAny],
+      ['tree', TreeConfigSchema as unknown as z.ZodTypeAny],
+    ] as const;
+
+    for (const [label, schema] of NON_GRID_FOUR) {
+      const result = schema.safeParse({ limit: 10 });
+      expect(result.success, label).toBe(false);
+      // Asserted on the REFUSED KEY LIST rather than on a stringified issue:
+      // when the key is accepted there is no issue to stringify, and the red
+      // then reads as an argument-type complaint instead of as a statement
+      // about this view type. Measured — it is how this case first reddened.
+      const refused = ((result as { error?: z.ZodError }).error?.issues ?? [])
+        .filter((issue) => issue.code === 'unrecognized_keys')
+        .flatMap((issue) => (issue as unknown as { keys?: string[] }).keys ?? []);
+      expect(refused, `${label} accepts an authorable row ceiling it should not declare`)
+        .toContain('limit');
+    }
   });
 });

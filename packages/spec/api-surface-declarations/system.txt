@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./system
-# exported names: 805
-# declarations: 844
+# exported names: 808
+# declarations: 847
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -2850,8 +2850,8 @@ declare const ChangeSetSchema: z.ZodObject<{
                 sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                     field: z.ZodString;
                     order: z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>;
                 }, z.core.$strict>>>;
                 filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -2947,6 +2947,13 @@ declare const ChangeSetSchema: z.ZodObject<{
                     titleField: z.ZodOptional<z.ZodString>;
                     colorField: z.ZodOptional<z.ZodString>;
                     allDayField: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
+                sharing: z.ZodOptional<z.ZodObject<{
+                    type: z.ZodDefault<z.ZodEnum<{
+                        personal: "personal";
+                        collaborative: "collaborative";
+                    }>>;
+                    lockedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>;
                 aria: z.ZodOptional<z.ZodObject<{
                     ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -3076,6 +3083,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -3156,6 +3164,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -3170,6 +3179,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -3257,19 +3267,12 @@ declare const ChangeSetSchema: z.ZodObject<{
                     pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
                 }, z.core.$strict>>;
                 pageName: z.ZodOptional<z.ZodNever>;
-                sharing: z.ZodOptional<z.ZodObject<{
-                    type: z.ZodDefault<z.ZodEnum<{
-                        personal: "personal";
-                        collaborative: "collaborative";
-                    }>>;
-                    lockedBy: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
                 grouping: z.ZodOptional<z.ZodObject<{
                     fields: z.ZodArray<z.ZodObject<{
                         field: z.ZodString;
                         order: z.ZodDefault<z.ZodEnum<{
-                            desc: "desc";
                             asc: "asc";
+                            desc: "desc";
                         }>>;
                         collapsed: z.ZodDefault<z.ZodBoolean>;
                     }, z.core.$strict>>;
@@ -5207,7 +5210,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -5261,6 +5264,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -5285,6 +5292,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -5348,6 +5356,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -5355,6 +5364,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -5399,14 +5409,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -6361,7 +6367,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -6415,6 +6421,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -6439,6 +6449,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -6502,6 +6513,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -6509,6 +6521,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -6553,14 +6566,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -7516,7 +7525,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -7570,6 +7579,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -7594,6 +7607,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -7657,6 +7671,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -7664,6 +7679,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -7708,14 +7724,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -8670,7 +8682,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -8724,6 +8736,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -8748,6 +8764,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -8811,6 +8828,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -8818,6 +8836,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -8862,14 +8881,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -10043,8 +10058,8 @@ declare const ChangeSetSchema: z.ZodObject<{
                     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                         field: z.ZodString;
                         order: z.ZodEnum<{
-                            desc: "desc";
                             asc: "asc";
+                            desc: "desc";
                         }>;
                     }, z.core.$strict>>>;
                     filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -10140,6 +10155,13 @@ declare const ChangeSetSchema: z.ZodObject<{
                         titleField: z.ZodOptional<z.ZodString>;
                         colorField: z.ZodOptional<z.ZodString>;
                         allDayField: z.ZodOptional<z.ZodString>;
+                    }, z.core.$strict>>;
+                    sharing: z.ZodOptional<z.ZodObject<{
+                        type: z.ZodDefault<z.ZodEnum<{
+                            personal: "personal";
+                            collaborative: "collaborative";
+                        }>>;
+                        lockedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strict>>;
                     aria: z.ZodOptional<z.ZodObject<{
                         ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -10269,6 +10291,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         summarizeField: z.ZodOptional<z.ZodString>;
                         titleField: z.ZodOptional<z.ZodString>;
                         columns: z.ZodArray<z.ZodString>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gantt: z.ZodOptional<z.ZodObject<{
                         startDateField: z.ZodString;
@@ -10349,6 +10372,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                             week: "week";
                             quarter: "quarter";
                         }>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gallery: z.ZodOptional<z.ZodObject<{
                         coverField: z.ZodOptional<z.ZodString>;
@@ -10363,6 +10387,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         }>>;
                         titleField: z.ZodOptional<z.ZodString>;
                         visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     chart: z.ZodOptional<z.ZodObject<{
                         chartType: z.ZodDefault<z.ZodEnum<{
@@ -10450,19 +10475,12 @@ declare const ChangeSetSchema: z.ZodObject<{
                         pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
                     }, z.core.$strict>>;
                     pageName: z.ZodOptional<z.ZodNever>;
-                    sharing: z.ZodOptional<z.ZodObject<{
-                        type: z.ZodDefault<z.ZodEnum<{
-                            personal: "personal";
-                            collaborative: "collaborative";
-                        }>>;
-                        lockedBy: z.ZodOptional<z.ZodString>;
-                    }, z.core.$strict>>;
                     grouping: z.ZodOptional<z.ZodObject<{
                         fields: z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodDefault<z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>>;
                             collapsed: z.ZodDefault<z.ZodBoolean>;
                         }, z.core.$strict>>;
@@ -11826,7 +11844,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     reason: z.ZodString;
                     docsUrl: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>;
-            }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "description" | "external" | "name" | "label" | "fields" | "indexes" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "enable" | "requiredPermissions" | "icon" | "fieldGroups" | "searchableFields" | "userActions" | "listViews" | "protection" | "sharingModel" | "datasource" | "pluralLabel" | "isSystem" | "managedBy" | "ownership" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "validations" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "highlightFields" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing" | "actions">, never> & (T extends {
+            }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "description" | "external" | "name" | "label" | "fields" | "indexes" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "enable" | "requiredPermissions" | "ownership" | "sharingModel" | "isSystem" | "icon" | "fieldGroups" | "searchableFields" | "userActions" | "listViews" | "protection" | "datasource" | "pluralLabel" | "managedBy" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "validations" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "highlightFields" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing" | "actions">, never> & (T extends {
                 actions: infer As extends readonly unknown[];
             } ? {
                 actions: { [I in keyof As]: As[I] extends infer T_1 ? T_1 extends As[I] ? T_1 extends {
@@ -13042,8 +13060,8 @@ declare const ChangeSetSchema: z.ZodObject<{
                 sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                     field: z.ZodString;
                     order: z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>;
                 }, z.core.$strict>>>;
                 filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -13139,6 +13157,13 @@ declare const ChangeSetSchema: z.ZodObject<{
                     titleField: z.ZodOptional<z.ZodString>;
                     colorField: z.ZodOptional<z.ZodString>;
                     allDayField: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
+                sharing: z.ZodOptional<z.ZodObject<{
+                    type: z.ZodDefault<z.ZodEnum<{
+                        personal: "personal";
+                        collaborative: "collaborative";
+                    }>>;
+                    lockedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>;
                 aria: z.ZodOptional<z.ZodObject<{
                     ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -13268,6 +13293,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -13348,6 +13374,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -13362,6 +13389,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -13449,19 +13477,12 @@ declare const ChangeSetSchema: z.ZodObject<{
                     pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
                 }, z.core.$strict>>;
                 pageName: z.ZodOptional<z.ZodNever>;
-                sharing: z.ZodOptional<z.ZodObject<{
-                    type: z.ZodDefault<z.ZodEnum<{
-                        personal: "personal";
-                        collaborative: "collaborative";
-                    }>>;
-                    lockedBy: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
                 grouping: z.ZodOptional<z.ZodObject<{
                     fields: z.ZodArray<z.ZodObject<{
                         field: z.ZodString;
                         order: z.ZodDefault<z.ZodEnum<{
-                            desc: "desc";
                             asc: "asc";
+                            desc: "desc";
                         }>>;
                         collapsed: z.ZodDefault<z.ZodBoolean>;
                     }, z.core.$strict>>;
@@ -15399,7 +15420,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -15453,6 +15474,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -15477,6 +15502,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -15540,6 +15566,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -15547,6 +15574,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -15591,14 +15619,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -16553,7 +16577,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -16607,6 +16631,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -16631,6 +16659,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -16694,6 +16723,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -16701,6 +16731,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -16745,14 +16776,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -17708,7 +17735,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -17762,6 +17789,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -17786,6 +17817,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -17849,6 +17881,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -17856,6 +17889,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -17900,14 +17934,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -18862,7 +18892,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -18916,6 +18946,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -18940,6 +18974,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -19003,6 +19038,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -19010,6 +19046,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -19054,14 +19091,10 @@ declare const ChangeSetSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -20235,8 +20268,8 @@ declare const ChangeSetSchema: z.ZodObject<{
                     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                         field: z.ZodString;
                         order: z.ZodEnum<{
-                            desc: "desc";
                             asc: "asc";
+                            desc: "desc";
                         }>;
                     }, z.core.$strict>>>;
                     filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -20332,6 +20365,13 @@ declare const ChangeSetSchema: z.ZodObject<{
                         titleField: z.ZodOptional<z.ZodString>;
                         colorField: z.ZodOptional<z.ZodString>;
                         allDayField: z.ZodOptional<z.ZodString>;
+                    }, z.core.$strict>>;
+                    sharing: z.ZodOptional<z.ZodObject<{
+                        type: z.ZodDefault<z.ZodEnum<{
+                            personal: "personal";
+                            collaborative: "collaborative";
+                        }>>;
+                        lockedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strict>>;
                     aria: z.ZodOptional<z.ZodObject<{
                         ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -20461,6 +20501,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         summarizeField: z.ZodOptional<z.ZodString>;
                         titleField: z.ZodOptional<z.ZodString>;
                         columns: z.ZodArray<z.ZodString>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gantt: z.ZodOptional<z.ZodObject<{
                         startDateField: z.ZodString;
@@ -20541,6 +20582,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                             week: "week";
                             quarter: "quarter";
                         }>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gallery: z.ZodOptional<z.ZodObject<{
                         coverField: z.ZodOptional<z.ZodString>;
@@ -20555,6 +20597,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                         }>>;
                         titleField: z.ZodOptional<z.ZodString>;
                         visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     chart: z.ZodOptional<z.ZodObject<{
                         chartType: z.ZodDefault<z.ZodEnum<{
@@ -20642,19 +20685,12 @@ declare const ChangeSetSchema: z.ZodObject<{
                         pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
                     }, z.core.$strict>>;
                     pageName: z.ZodOptional<z.ZodNever>;
-                    sharing: z.ZodOptional<z.ZodObject<{
-                        type: z.ZodDefault<z.ZodEnum<{
-                            personal: "personal";
-                            collaborative: "collaborative";
-                        }>>;
-                        lockedBy: z.ZodOptional<z.ZodString>;
-                    }, z.core.$strict>>;
                     grouping: z.ZodOptional<z.ZodObject<{
                         fields: z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodDefault<z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>>;
                             collapsed: z.ZodDefault<z.ZodBoolean>;
                         }, z.core.$strict>>;
@@ -22018,7 +22054,7 @@ declare const ChangeSetSchema: z.ZodObject<{
                     reason: z.ZodString;
                     docsUrl: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>;
-            }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "description" | "external" | "name" | "label" | "fields" | "indexes" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "enable" | "requiredPermissions" | "icon" | "fieldGroups" | "searchableFields" | "userActions" | "listViews" | "protection" | "sharingModel" | "datasource" | "pluralLabel" | "isSystem" | "managedBy" | "ownership" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "validations" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "highlightFields" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing" | "actions">, never> & (T extends {
+            }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "description" | "external" | "name" | "label" | "fields" | "indexes" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "enable" | "requiredPermissions" | "ownership" | "sharingModel" | "isSystem" | "icon" | "fieldGroups" | "searchableFields" | "userActions" | "listViews" | "protection" | "datasource" | "pluralLabel" | "managedBy" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "validations" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "highlightFields" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing" | "actions">, never> & (T extends {
                 actions: infer As extends readonly unknown[];
             } ? {
                 actions: { [I in keyof As]: As[I] extends infer T_1 ? T_1 extends As[I] ? T_1 extends {
@@ -23197,8 +23233,8 @@ declare const CreateObjectOperation: z.ZodObject<{
             sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 field: z.ZodString;
                 order: z.ZodEnum<{
-                    desc: "desc";
                     asc: "asc";
+                    desc: "desc";
                 }>;
             }, z.core.$strict>>>;
             filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -23294,6 +23330,13 @@ declare const CreateObjectOperation: z.ZodObject<{
                 titleField: z.ZodOptional<z.ZodString>;
                 colorField: z.ZodOptional<z.ZodString>;
                 allDayField: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            sharing: z.ZodOptional<z.ZodObject<{
+                type: z.ZodDefault<z.ZodEnum<{
+                    personal: "personal";
+                    collaborative: "collaborative";
+                }>>;
+                lockedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
             aria: z.ZodOptional<z.ZodObject<{
                 ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -23423,6 +23466,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 summarizeField: z.ZodOptional<z.ZodString>;
                 titleField: z.ZodOptional<z.ZodString>;
                 columns: z.ZodArray<z.ZodString>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gantt: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -23503,6 +23547,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     week: "week";
                     quarter: "quarter";
                 }>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gallery: z.ZodOptional<z.ZodObject<{
                 coverField: z.ZodOptional<z.ZodString>;
@@ -23517,6 +23562,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 }>>;
                 titleField: z.ZodOptional<z.ZodString>;
                 visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             chart: z.ZodOptional<z.ZodObject<{
                 chartType: z.ZodDefault<z.ZodEnum<{
@@ -23604,19 +23650,12 @@ declare const CreateObjectOperation: z.ZodObject<{
                 pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
             }, z.core.$strict>>;
             pageName: z.ZodOptional<z.ZodNever>;
-            sharing: z.ZodOptional<z.ZodObject<{
-                type: z.ZodDefault<z.ZodEnum<{
-                    personal: "personal";
-                    collaborative: "collaborative";
-                }>>;
-                lockedBy: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
             grouping: z.ZodOptional<z.ZodObject<{
                 fields: z.ZodArray<z.ZodObject<{
                     field: z.ZodString;
                     order: z.ZodDefault<z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>>;
                     collapsed: z.ZodDefault<z.ZodBoolean>;
                 }, z.core.$strict>>;
@@ -25554,7 +25593,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 } | undefined;
                 sort?: {
                     field: string;
-                    order: "desc" | "asc";
+                    order: "asc" | "desc";
                 }[] | undefined;
                 filter?: {
                     field: string;
@@ -25608,6 +25647,10 @@ declare const CreateObjectOperation: z.ZodObject<{
                     colorField?: string | undefined;
                     allDayField?: string | undefined;
                 } | undefined;
+                sharing?: {
+                    type: "personal" | "collaborative";
+                    lockedBy?: string | undefined;
+                } | undefined;
                 aria?: {
                     ariaLabel?: string | (Record<string, string> & {
                         key?: never;
@@ -25632,6 +25675,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -25695,6 +25739,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -25702,6 +25747,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -25746,14 +25792,10 @@ declare const CreateObjectOperation: z.ZodObject<{
                     pageSizeOptions?: number[] | undefined;
                 } | undefined;
                 pageName?: undefined;
-                sharing?: {
-                    type: "personal" | "collaborative";
-                    lockedBy?: string | undefined;
-                } | undefined;
                 grouping?: {
                     fields: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                         collapsed: boolean;
                     }[];
                 } | undefined;
@@ -26708,7 +26750,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 } | undefined;
                 sort?: {
                     field: string;
-                    order: "desc" | "asc";
+                    order: "asc" | "desc";
                 }[] | undefined;
                 filter?: {
                     field: string;
@@ -26762,6 +26804,10 @@ declare const CreateObjectOperation: z.ZodObject<{
                     colorField?: string | undefined;
                     allDayField?: string | undefined;
                 } | undefined;
+                sharing?: {
+                    type: "personal" | "collaborative";
+                    lockedBy?: string | undefined;
+                } | undefined;
                 aria?: {
                     ariaLabel?: string | (Record<string, string> & {
                         key?: never;
@@ -26786,6 +26832,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -26849,6 +26896,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -26856,6 +26904,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -26900,14 +26949,10 @@ declare const CreateObjectOperation: z.ZodObject<{
                     pageSizeOptions?: number[] | undefined;
                 } | undefined;
                 pageName?: undefined;
-                sharing?: {
-                    type: "personal" | "collaborative";
-                    lockedBy?: string | undefined;
-                } | undefined;
                 grouping?: {
                     fields: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                         collapsed: boolean;
                     }[];
                 } | undefined;
@@ -27863,7 +27908,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 } | undefined;
                 sort?: {
                     field: string;
-                    order: "desc" | "asc";
+                    order: "asc" | "desc";
                 }[] | undefined;
                 filter?: {
                     field: string;
@@ -27917,6 +27962,10 @@ declare const CreateObjectOperation: z.ZodObject<{
                     colorField?: string | undefined;
                     allDayField?: string | undefined;
                 } | undefined;
+                sharing?: {
+                    type: "personal" | "collaborative";
+                    lockedBy?: string | undefined;
+                } | undefined;
                 aria?: {
                     ariaLabel?: string | (Record<string, string> & {
                         key?: never;
@@ -27941,6 +27990,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -28004,6 +28054,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -28011,6 +28062,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -28055,14 +28107,10 @@ declare const CreateObjectOperation: z.ZodObject<{
                     pageSizeOptions?: number[] | undefined;
                 } | undefined;
                 pageName?: undefined;
-                sharing?: {
-                    type: "personal" | "collaborative";
-                    lockedBy?: string | undefined;
-                } | undefined;
                 grouping?: {
                     fields: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                         collapsed: boolean;
                     }[];
                 } | undefined;
@@ -29017,7 +29065,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 } | undefined;
                 sort?: {
                     field: string;
-                    order: "desc" | "asc";
+                    order: "asc" | "desc";
                 }[] | undefined;
                 filter?: {
                     field: string;
@@ -29071,6 +29119,10 @@ declare const CreateObjectOperation: z.ZodObject<{
                     colorField?: string | undefined;
                     allDayField?: string | undefined;
                 } | undefined;
+                sharing?: {
+                    type: "personal" | "collaborative";
+                    lockedBy?: string | undefined;
+                } | undefined;
                 aria?: {
                     ariaLabel?: string | (Record<string, string> & {
                         key?: never;
@@ -29095,6 +29147,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -29158,6 +29211,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -29165,6 +29219,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -29209,14 +29264,10 @@ declare const CreateObjectOperation: z.ZodObject<{
                     pageSizeOptions?: number[] | undefined;
                 } | undefined;
                 pageName?: undefined;
-                sharing?: {
-                    type: "personal" | "collaborative";
-                    lockedBy?: string | undefined;
-                } | undefined;
                 grouping?: {
                     fields: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                         collapsed: boolean;
                     }[];
                 } | undefined;
@@ -30390,8 +30441,8 @@ declare const CreateObjectOperation: z.ZodObject<{
                 sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                     field: z.ZodString;
                     order: z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>;
                 }, z.core.$strict>>>;
                 filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -30487,6 +30538,13 @@ declare const CreateObjectOperation: z.ZodObject<{
                     titleField: z.ZodOptional<z.ZodString>;
                     colorField: z.ZodOptional<z.ZodString>;
                     allDayField: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
+                sharing: z.ZodOptional<z.ZodObject<{
+                    type: z.ZodDefault<z.ZodEnum<{
+                        personal: "personal";
+                        collaborative: "collaborative";
+                    }>>;
+                    lockedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>;
                 aria: z.ZodOptional<z.ZodObject<{
                     ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -30616,6 +30674,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -30696,6 +30755,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -30710,6 +30770,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -30797,19 +30858,12 @@ declare const CreateObjectOperation: z.ZodObject<{
                     pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
                 }, z.core.$strict>>;
                 pageName: z.ZodOptional<z.ZodNever>;
-                sharing: z.ZodOptional<z.ZodObject<{
-                    type: z.ZodDefault<z.ZodEnum<{
-                        personal: "personal";
-                        collaborative: "collaborative";
-                    }>>;
-                    lockedBy: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
                 grouping: z.ZodOptional<z.ZodObject<{
                     fields: z.ZodArray<z.ZodObject<{
                         field: z.ZodString;
                         order: z.ZodDefault<z.ZodEnum<{
-                            desc: "desc";
                             asc: "asc";
+                            desc: "desc";
                         }>>;
                         collapsed: z.ZodDefault<z.ZodBoolean>;
                     }, z.core.$strict>>;
@@ -32173,7 +32227,7 @@ declare const CreateObjectOperation: z.ZodObject<{
                 reason: z.ZodString;
                 docsUrl: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
-        }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "description" | "external" | "name" | "label" | "fields" | "indexes" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "enable" | "requiredPermissions" | "icon" | "fieldGroups" | "searchableFields" | "userActions" | "listViews" | "protection" | "sharingModel" | "datasource" | "pluralLabel" | "isSystem" | "managedBy" | "ownership" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "validations" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "highlightFields" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing" | "actions">, never> & (T extends {
+        }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "description" | "external" | "name" | "label" | "fields" | "indexes" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "enable" | "requiredPermissions" | "ownership" | "sharingModel" | "isSystem" | "icon" | "fieldGroups" | "searchableFields" | "userActions" | "listViews" | "protection" | "datasource" | "pluralLabel" | "managedBy" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "validations" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "highlightFields" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing" | "actions">, never> & (T extends {
             actions: infer As extends readonly unknown[];
         } ? {
             actions: { [I in keyof As]: As[I] extends infer T_1 ? T_1 extends As[I] ? T_1 extends {
@@ -32578,6 +32632,19 @@ declare const DeployValidationResultSchema: z.ZodObject<{
     errorCount: z.ZodDefault<z.ZodNumber>;
     warningCount: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strip>;
+
+// ── DevLogin (type) ──
+type DevLogin = z.input<typeof DevLoginSchema>;
+
+// ── DevLoginParsed (type) ──
+type DevLoginParsed = z.infer<typeof DevLoginSchema>;
+
+// ── DevLoginSchema (const) ──
+declare const DevLoginSchema: z.ZodObject<{
+    email: z.ZodString;
+    password: z.ZodOptional<z.ZodString>;
+    label: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
 
 // ── DisasterRecoveryPlan (type) ──
 type DisasterRecoveryPlan = z.input<typeof DisasterRecoveryPlanSchema>;
@@ -34123,8 +34190,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                 sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                     field: z.ZodString;
                     order: z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>;
                 }, z.core.$strict>>>;
                 filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -34220,6 +34287,13 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     titleField: z.ZodOptional<z.ZodString>;
                     colorField: z.ZodOptional<z.ZodString>;
                     allDayField: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
+                sharing: z.ZodOptional<z.ZodObject<{
+                    type: z.ZodDefault<z.ZodEnum<{
+                        personal: "personal";
+                        collaborative: "collaborative";
+                    }>>;
+                    lockedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>;
                 aria: z.ZodOptional<z.ZodObject<{
                     ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -34349,6 +34423,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -34429,6 +34504,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -34443,6 +34519,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -34530,19 +34607,12 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
                 }, z.core.$strict>>;
                 pageName: z.ZodOptional<z.ZodNever>;
-                sharing: z.ZodOptional<z.ZodObject<{
-                    type: z.ZodDefault<z.ZodEnum<{
-                        personal: "personal";
-                        collaborative: "collaborative";
-                    }>>;
-                    lockedBy: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
                 grouping: z.ZodOptional<z.ZodObject<{
                     fields: z.ZodArray<z.ZodObject<{
                         field: z.ZodString;
                         order: z.ZodDefault<z.ZodEnum<{
-                            desc: "desc";
                             asc: "asc";
+                            desc: "desc";
                         }>>;
                         collapsed: z.ZodDefault<z.ZodBoolean>;
                     }, z.core.$strict>>;
@@ -36480,7 +36550,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -36534,6 +36604,10 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -36558,6 +36632,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -36621,6 +36696,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -36628,6 +36704,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -36672,14 +36749,10 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -37634,7 +37707,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -37688,6 +37761,10 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -37712,6 +37789,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -37775,6 +37853,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -37782,6 +37861,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -37826,14 +37906,10 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -38789,7 +38865,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -38843,6 +38919,10 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -38867,6 +38947,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -38930,6 +39011,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -38937,6 +39019,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -38981,14 +39064,10 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -39943,7 +40022,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     } | undefined;
                     sort?: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                     }[] | undefined;
                     filter?: {
                         field: string;
@@ -39997,6 +40076,10 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         colorField?: string | undefined;
                         allDayField?: string | undefined;
                     } | undefined;
+                    sharing?: {
+                        type: "personal" | "collaborative";
+                        lockedBy?: string | undefined;
+                    } | undefined;
                     aria?: {
                         ariaLabel?: string | (Record<string, string> & {
                             key?: never;
@@ -40021,6 +40104,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     kanban?: {
                         groupByField: string;
                         columns: string[];
+                        limit: number;
                         summarizeField?: string | undefined;
                         titleField?: string | undefined;
                     } | undefined;
@@ -40084,6 +40168,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         startDateField: string;
                         titleField: string;
                         scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                        limit: number;
                         endDateField?: string | undefined;
                         groupByField?: string | undefined;
                         colorField?: string | undefined;
@@ -40091,6 +40176,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     gallery?: {
                         coverFit: "cover" | "contain";
                         cardSize: "small" | "medium" | "large";
+                        limit: number;
                         coverField?: string | undefined;
                         titleField?: string | undefined;
                         visibleFields?: string[] | undefined;
@@ -40135,14 +40221,10 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         pageSizeOptions?: number[] | undefined;
                     } | undefined;
                     pageName?: undefined;
-                    sharing?: {
-                        type: "personal" | "collaborative";
-                        lockedBy?: string | undefined;
-                    } | undefined;
                     grouping?: {
                         fields: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                             collapsed: boolean;
                         }[];
                     } | undefined;
@@ -41316,8 +41398,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                         field: z.ZodString;
                         order: z.ZodEnum<{
-                            desc: "desc";
                             asc: "asc";
+                            desc: "desc";
                         }>;
                     }, z.core.$strict>>>;
                     filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -41413,6 +41495,13 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         titleField: z.ZodOptional<z.ZodString>;
                         colorField: z.ZodOptional<z.ZodString>;
                         allDayField: z.ZodOptional<z.ZodString>;
+                    }, z.core.$strict>>;
+                    sharing: z.ZodOptional<z.ZodObject<{
+                        type: z.ZodDefault<z.ZodEnum<{
+                            personal: "personal";
+                            collaborative: "collaborative";
+                        }>>;
+                        lockedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strict>>;
                     aria: z.ZodOptional<z.ZodObject<{
                         ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -41542,6 +41631,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         summarizeField: z.ZodOptional<z.ZodString>;
                         titleField: z.ZodOptional<z.ZodString>;
                         columns: z.ZodArray<z.ZodString>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gantt: z.ZodOptional<z.ZodObject<{
                         startDateField: z.ZodString;
@@ -41622,6 +41712,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                             week: "week";
                             quarter: "quarter";
                         }>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     gallery: z.ZodOptional<z.ZodObject<{
                         coverField: z.ZodOptional<z.ZodString>;
@@ -41636,6 +41727,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }>>;
                         titleField: z.ZodOptional<z.ZodString>;
                         visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                        limit: z.ZodDefault<z.ZodNumber>;
                     }, z.core.$strict>>;
                     chart: z.ZodOptional<z.ZodObject<{
                         chartType: z.ZodDefault<z.ZodEnum<{
@@ -41723,19 +41815,12 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
                     }, z.core.$strict>>;
                     pageName: z.ZodOptional<z.ZodNever>;
-                    sharing: z.ZodOptional<z.ZodObject<{
-                        type: z.ZodDefault<z.ZodEnum<{
-                            personal: "personal";
-                            collaborative: "collaborative";
-                        }>>;
-                        lockedBy: z.ZodOptional<z.ZodString>;
-                    }, z.core.$strict>>;
                     grouping: z.ZodOptional<z.ZodObject<{
                         fields: z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodDefault<z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>>;
                             collapsed: z.ZodDefault<z.ZodBoolean>;
                         }, z.core.$strict>>;
@@ -43099,7 +43184,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     reason: z.ZodString;
                     docsUrl: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>;
-            }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "description" | "external" | "name" | "label" | "fields" | "indexes" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "enable" | "requiredPermissions" | "icon" | "fieldGroups" | "searchableFields" | "userActions" | "listViews" | "protection" | "sharingModel" | "datasource" | "pluralLabel" | "isSystem" | "managedBy" | "ownership" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "validations" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "highlightFields" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing" | "actions">, never> & (T extends {
+            }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "description" | "external" | "name" | "label" | "fields" | "indexes" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "enable" | "requiredPermissions" | "ownership" | "sharingModel" | "isSystem" | "icon" | "fieldGroups" | "searchableFields" | "userActions" | "listViews" | "protection" | "datasource" | "pluralLabel" | "managedBy" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "validations" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "highlightFields" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing" | "actions">, never> & (T extends {
                 actions: infer As extends readonly unknown[];
             } ? {
                 actions: { [I in keyof As]: As[I] extends infer T_1 ? T_1 extends As[I] ? T_1 extends {
@@ -43736,8 +43821,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                 sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                     field: z.ZodString;
                     order: z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>;
                 }, z.core.$strict>>>;
                 filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -43833,6 +43918,13 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     titleField: z.ZodOptional<z.ZodString>;
                     colorField: z.ZodOptional<z.ZodString>;
                     allDayField: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
+                sharing: z.ZodOptional<z.ZodObject<{
+                    type: z.ZodDefault<z.ZodEnum<{
+                        personal: "personal";
+                        collaborative: "collaborative";
+                    }>>;
+                    lockedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>;
                 aria: z.ZodOptional<z.ZodObject<{
                     ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -43962,6 +44054,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -44042,6 +44135,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -44056,6 +44150,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -44143,19 +44238,12 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
                 }, z.core.$strict>>;
                 pageName: z.ZodOptional<z.ZodNever>;
-                sharing: z.ZodOptional<z.ZodObject<{
-                    type: z.ZodDefault<z.ZodEnum<{
-                        personal: "personal";
-                        collaborative: "collaborative";
-                    }>>;
-                    lockedBy: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
                 grouping: z.ZodOptional<z.ZodObject<{
                     fields: z.ZodArray<z.ZodObject<{
                         field: z.ZodString;
                         order: z.ZodDefault<z.ZodEnum<{
-                            desc: "desc";
                             asc: "asc";
+                            desc: "desc";
                         }>>;
                         collapsed: z.ZodDefault<z.ZodBoolean>;
                     }, z.core.$strict>>;
@@ -44450,9 +44538,9 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                 description: z.ZodOptional<z.ZodString>;
                 defaultTab: z.ZodOptional<z.ZodString>;
                 tabPosition: z.ZodOptional<z.ZodEnum<{
+                    top: "top";
                     left: "left";
                     right: "right";
-                    top: "top";
                     bottom: "bottom";
                 }>>;
                 allowSkip: z.ZodOptional<z.ZodBoolean>;
@@ -44464,9 +44552,9 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                 splitSize: z.ZodOptional<z.ZodNumber>;
                 splitResizable: z.ZodOptional<z.ZodBoolean>;
                 drawerSide: z.ZodOptional<z.ZodEnum<{
+                    top: "top";
                     left: "left";
                     right: "right";
-                    top: "top";
                     bottom: "bottom";
                 }>>;
                 drawerWidth: z.ZodOptional<z.ZodString>;
@@ -44974,8 +45062,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                 sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                     field: z.ZodString;
                     order: z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>;
                 }, z.core.$strict>>>;
                 filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -45071,6 +45159,13 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     titleField: z.ZodOptional<z.ZodString>;
                     colorField: z.ZodOptional<z.ZodString>;
                     allDayField: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
+                sharing: z.ZodOptional<z.ZodObject<{
+                    type: z.ZodDefault<z.ZodEnum<{
+                        personal: "personal";
+                        collaborative: "collaborative";
+                    }>>;
+                    lockedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>;
                 aria: z.ZodOptional<z.ZodObject<{
                     ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -45200,6 +45295,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -45280,6 +45376,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -45294,6 +45391,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -45381,19 +45479,12 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
                 }, z.core.$strict>>;
                 pageName: z.ZodOptional<z.ZodNever>;
-                sharing: z.ZodOptional<z.ZodObject<{
-                    type: z.ZodDefault<z.ZodEnum<{
-                        personal: "personal";
-                        collaborative: "collaborative";
-                    }>>;
-                    lockedBy: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
                 grouping: z.ZodOptional<z.ZodObject<{
                     fields: z.ZodArray<z.ZodObject<{
                         field: z.ZodString;
                         order: z.ZodDefault<z.ZodEnum<{
-                            desc: "desc";
                             asc: "asc";
+                            desc: "desc";
                         }>>;
                         collapsed: z.ZodDefault<z.ZodBoolean>;
                     }, z.core.$strict>>;
@@ -45688,9 +45779,9 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                 description: z.ZodOptional<z.ZodString>;
                 defaultTab: z.ZodOptional<z.ZodString>;
                 tabPosition: z.ZodOptional<z.ZodEnum<{
+                    top: "top";
                     left: "left";
                     right: "right";
-                    top: "top";
                     bottom: "bottom";
                 }>>;
                 allowSkip: z.ZodOptional<z.ZodBoolean>;
@@ -45702,9 +45793,9 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                 splitSize: z.ZodOptional<z.ZodNumber>;
                 splitResizable: z.ZodOptional<z.ZodBoolean>;
                 drawerSide: z.ZodOptional<z.ZodEnum<{
+                    top: "top";
                     left: "left";
                     right: "right";
-                    top: "top";
                     bottom: "bottom";
                 }>>;
                 drawerWidth: z.ZodOptional<z.ZodString>;
@@ -46398,8 +46489,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -46483,7 +46574,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -46557,7 +46648,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -46647,8 +46738,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                 sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                     field: z.ZodString;
                     order: z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>;
                 }, z.core.$strip>>>;
                 filterBy: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -46987,8 +47078,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -47072,7 +47163,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -47146,7 +47237,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -47292,8 +47383,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -47377,7 +47468,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -47451,7 +47542,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -47598,8 +47689,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -47683,7 +47774,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -47757,7 +47848,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -47903,8 +47994,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -47988,7 +48079,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -48062,7 +48153,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -48209,8 +48300,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -48294,7 +48385,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -48368,7 +48459,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -48514,8 +48605,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -48599,7 +48690,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -48673,7 +48764,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -48820,8 +48911,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -48905,7 +48996,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -48979,7 +49070,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -49125,8 +49216,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -49210,7 +49301,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -49284,7 +49375,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -49431,8 +49522,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -49516,7 +49607,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -49590,7 +49681,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -49736,8 +49827,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -49821,7 +49912,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -49895,7 +49986,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -50042,8 +50133,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -50127,7 +50218,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -50201,7 +50292,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -50347,8 +50438,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -50432,7 +50523,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -50506,7 +50597,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -50653,8 +50744,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -50738,7 +50829,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -50812,7 +50903,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -50958,8 +51049,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                             field: z.ZodString;
                             order: z.ZodEnum<{
-                                desc: "desc";
                                 asc: "asc";
+                                desc: "desc";
                             }>;
                         }, z.core.$strip>>>;
                         limit: z.ZodOptional<z.ZodNumber>;
@@ -51043,7 +51134,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -51117,7 +51208,7 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         }[] | undefined;
                         sort?: {
                             field: string;
-                            order: "desc" | "asc";
+                            order: "asc" | "desc";
                         }[] | undefined;
                         limit?: number | undefined;
                     } | undefined;
@@ -51345,9 +51436,9 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         stepSize: z.ZodOptional<z.ZodNumber>;
                         showGridLines: z.ZodDefault<z.ZodBoolean>;
                         position: z.ZodOptional<z.ZodEnum<{
+                            top: "top";
                             left: "left";
                             right: "right";
-                            top: "top";
                             bottom: "bottom";
                         }>>;
                         logarithmic: z.ZodDefault<z.ZodBoolean>;
@@ -51373,9 +51464,9 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                         stepSize: z.ZodOptional<z.ZodNumber>;
                         showGridLines: z.ZodDefault<z.ZodBoolean>;
                         position: z.ZodOptional<z.ZodEnum<{
+                            top: "top";
                             left: "left";
                             right: "right";
-                            top: "top";
                             bottom: "bottom";
                         }>>;
                         logarithmic: z.ZodDefault<z.ZodBoolean>;
@@ -51513,8 +51604,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     }>>;
                     sortBy: z.ZodOptional<z.ZodString>;
                     sortOrder: z.ZodOptional<z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>>;
                     limit: z.ZodOptional<z.ZodNumber>;
                     stageOrder: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean]>>>;
@@ -51676,8 +51767,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
             order: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 by: z.ZodString;
                 direction: z.ZodDefault<z.ZodEnum<{
-                    desc: "desc";
                     asc: "asc";
+                    desc: "desc";
                 }>>;
             }, z.core.$strict>>>;
             drilldown: z.ZodDefault<z.ZodBoolean>;
@@ -53716,16 +53807,16 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
             object: z.ZodString;
             active: z.ZodDefault<z.ZodBoolean>;
             accessLevel: z.ZodDefault<z.ZodEnum<{
-                edit: "edit";
                 read: "read";
+                edit: "edit";
             }>>;
             sharedWith: z.ZodObject<{
                 type: z.ZodEnum<{
                     user: "user";
                     field: "field";
                     position: "position";
-                    business_unit: "business_unit";
                     team: "team";
+                    business_unit: "business_unit";
                     unit_and_subordinates: "unit_and_subordinates";
                 }>;
                 value: z.ZodString;
@@ -54471,8 +54562,8 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
                     append_only: "append_only";
                 }>>>;
                 direction: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-                    import: "import";
                     export: "export";
+                    import: "import";
                     bidirectional: "bidirectional";
                 }>>>;
                 realtimeSync: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
@@ -54799,6 +54890,12 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
             main: z.ZodOptional<z.ZodString>;
             integrity: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         }, z.core.$strict>, z.ZodString]>>>;
+        devHint: z.ZodOptional<z.ZodString>;
+        devLogins: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            email: z.ZodString;
+            password: z.ZodOptional<z.ZodString>;
+            label: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>>;
         runtimeModule: z.ZodOptional<z.ZodString>;
         manifest: z.ZodOptional<z.ZodObject<{
             id: z.ZodString;
@@ -58385,8 +58482,8 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 field: z.ZodString;
                 order: z.ZodEnum<{
-                    desc: "desc";
                     asc: "asc";
+                    desc: "desc";
                 }>;
             }, z.core.$strict>>>;
             filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -58482,6 +58579,13 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 titleField: z.ZodOptional<z.ZodString>;
                 colorField: z.ZodOptional<z.ZodString>;
                 allDayField: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            sharing: z.ZodOptional<z.ZodObject<{
+                type: z.ZodDefault<z.ZodEnum<{
+                    personal: "personal";
+                    collaborative: "collaborative";
+                }>>;
+                lockedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
             aria: z.ZodOptional<z.ZodObject<{
                 ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -58611,6 +58715,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 summarizeField: z.ZodOptional<z.ZodString>;
                 titleField: z.ZodOptional<z.ZodString>;
                 columns: z.ZodArray<z.ZodString>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gantt: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -58691,6 +58796,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     week: "week";
                     quarter: "quarter";
                 }>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gallery: z.ZodOptional<z.ZodObject<{
                 coverField: z.ZodOptional<z.ZodString>;
@@ -58705,6 +58811,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 }>>;
                 titleField: z.ZodOptional<z.ZodString>;
                 visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             chart: z.ZodOptional<z.ZodObject<{
                 chartType: z.ZodDefault<z.ZodEnum<{
@@ -58792,19 +58899,12 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
             }, z.core.$strict>>;
             pageName: z.ZodOptional<z.ZodNever>;
-            sharing: z.ZodOptional<z.ZodObject<{
-                type: z.ZodDefault<z.ZodEnum<{
-                    personal: "personal";
-                    collaborative: "collaborative";
-                }>>;
-                lockedBy: z.ZodOptional<z.ZodString>;
-            }, z.core.$strict>>;
             grouping: z.ZodOptional<z.ZodObject<{
                 fields: z.ZodArray<z.ZodObject<{
                     field: z.ZodString;
                     order: z.ZodDefault<z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>>;
                     collapsed: z.ZodDefault<z.ZodBoolean>;
                 }, z.core.$strict>>;
@@ -60742,7 +60842,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 } | undefined;
                 sort?: {
                     field: string;
-                    order: "desc" | "asc";
+                    order: "asc" | "desc";
                 }[] | undefined;
                 filter?: {
                     field: string;
@@ -60796,6 +60896,10 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     colorField?: string | undefined;
                     allDayField?: string | undefined;
                 } | undefined;
+                sharing?: {
+                    type: "personal" | "collaborative";
+                    lockedBy?: string | undefined;
+                } | undefined;
                 aria?: {
                     ariaLabel?: string | (Record<string, string> & {
                         key?: never;
@@ -60820,6 +60924,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -60883,6 +60988,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -60890,6 +60996,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -60934,14 +61041,10 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     pageSizeOptions?: number[] | undefined;
                 } | undefined;
                 pageName?: undefined;
-                sharing?: {
-                    type: "personal" | "collaborative";
-                    lockedBy?: string | undefined;
-                } | undefined;
                 grouping?: {
                     fields: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                         collapsed: boolean;
                     }[];
                 } | undefined;
@@ -61896,7 +61999,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 } | undefined;
                 sort?: {
                     field: string;
-                    order: "desc" | "asc";
+                    order: "asc" | "desc";
                 }[] | undefined;
                 filter?: {
                     field: string;
@@ -61950,6 +62053,10 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     colorField?: string | undefined;
                     allDayField?: string | undefined;
                 } | undefined;
+                sharing?: {
+                    type: "personal" | "collaborative";
+                    lockedBy?: string | undefined;
+                } | undefined;
                 aria?: {
                     ariaLabel?: string | (Record<string, string> & {
                         key?: never;
@@ -61974,6 +62081,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -62037,6 +62145,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -62044,6 +62153,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -62088,14 +62198,10 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     pageSizeOptions?: number[] | undefined;
                 } | undefined;
                 pageName?: undefined;
-                sharing?: {
-                    type: "personal" | "collaborative";
-                    lockedBy?: string | undefined;
-                } | undefined;
                 grouping?: {
                     fields: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                         collapsed: boolean;
                     }[];
                 } | undefined;
@@ -63051,7 +63157,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 } | undefined;
                 sort?: {
                     field: string;
-                    order: "desc" | "asc";
+                    order: "asc" | "desc";
                 }[] | undefined;
                 filter?: {
                     field: string;
@@ -63105,6 +63211,10 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     colorField?: string | undefined;
                     allDayField?: string | undefined;
                 } | undefined;
+                sharing?: {
+                    type: "personal" | "collaborative";
+                    lockedBy?: string | undefined;
+                } | undefined;
                 aria?: {
                     ariaLabel?: string | (Record<string, string> & {
                         key?: never;
@@ -63129,6 +63239,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -63192,6 +63303,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -63199,6 +63311,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -63243,14 +63356,10 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     pageSizeOptions?: number[] | undefined;
                 } | undefined;
                 pageName?: undefined;
-                sharing?: {
-                    type: "personal" | "collaborative";
-                    lockedBy?: string | undefined;
-                } | undefined;
                 grouping?: {
                     fields: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                         collapsed: boolean;
                     }[];
                 } | undefined;
@@ -64205,7 +64314,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 } | undefined;
                 sort?: {
                     field: string;
-                    order: "desc" | "asc";
+                    order: "asc" | "desc";
                 }[] | undefined;
                 filter?: {
                     field: string;
@@ -64259,6 +64368,10 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     colorField?: string | undefined;
                     allDayField?: string | undefined;
                 } | undefined;
+                sharing?: {
+                    type: "personal" | "collaborative";
+                    lockedBy?: string | undefined;
+                } | undefined;
                 aria?: {
                     ariaLabel?: string | (Record<string, string> & {
                         key?: never;
@@ -64283,6 +64396,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 kanban?: {
                     groupByField: string;
                     columns: string[];
+                    limit: number;
                     summarizeField?: string | undefined;
                     titleField?: string | undefined;
                 } | undefined;
@@ -64346,6 +64460,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     startDateField: string;
                     titleField: string;
                     scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                    limit: number;
                     endDateField?: string | undefined;
                     groupByField?: string | undefined;
                     colorField?: string | undefined;
@@ -64353,6 +64468,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 gallery?: {
                     coverFit: "cover" | "contain";
                     cardSize: "small" | "medium" | "large";
+                    limit: number;
                     coverField?: string | undefined;
                     titleField?: string | undefined;
                     visibleFields?: string[] | undefined;
@@ -64397,14 +64513,10 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     pageSizeOptions?: number[] | undefined;
                 } | undefined;
                 pageName?: undefined;
-                sharing?: {
-                    type: "personal" | "collaborative";
-                    lockedBy?: string | undefined;
-                } | undefined;
                 grouping?: {
                     fields: {
                         field: string;
-                        order: "desc" | "asc";
+                        order: "asc" | "desc";
                         collapsed: boolean;
                     }[];
                 } | undefined;
@@ -65578,8 +65690,8 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
                     field: z.ZodString;
                     order: z.ZodEnum<{
-                        desc: "desc";
                         asc: "asc";
+                        desc: "desc";
                     }>;
                 }, z.core.$strict>>>;
                 filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -65675,6 +65787,13 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     titleField: z.ZodOptional<z.ZodString>;
                     colorField: z.ZodOptional<z.ZodString>;
                     allDayField: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>>;
+                sharing: z.ZodOptional<z.ZodObject<{
+                    type: z.ZodDefault<z.ZodEnum<{
+                        personal: "personal";
+                        collaborative: "collaborative";
+                    }>>;
+                    lockedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>;
                 aria: z.ZodOptional<z.ZodObject<{
                     ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -65804,6 +65923,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     summarizeField: z.ZodOptional<z.ZodString>;
                     titleField: z.ZodOptional<z.ZodString>;
                     columns: z.ZodArray<z.ZodString>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gantt: z.ZodOptional<z.ZodObject<{
                     startDateField: z.ZodString;
@@ -65884,6 +66004,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                         week: "week";
                         quarter: "quarter";
                     }>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 gallery: z.ZodOptional<z.ZodObject<{
                     coverField: z.ZodOptional<z.ZodString>;
@@ -65898,6 +66019,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     }>>;
                     titleField: z.ZodOptional<z.ZodString>;
                     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    limit: z.ZodDefault<z.ZodNumber>;
                 }, z.core.$strict>>;
                 chart: z.ZodOptional<z.ZodObject<{
                     chartType: z.ZodDefault<z.ZodEnum<{
@@ -65985,19 +66107,12 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
                 }, z.core.$strict>>;
                 pageName: z.ZodOptional<z.ZodNever>;
-                sharing: z.ZodOptional<z.ZodObject<{
-                    type: z.ZodDefault<z.ZodEnum<{
-                        personal: "personal";
-                        collaborative: "collaborative";
-                    }>>;
-                    lockedBy: z.ZodOptional<z.ZodString>;
-                }, z.core.$strict>>;
                 grouping: z.ZodOptional<z.ZodObject<{
                     fields: z.ZodArray<z.ZodObject<{
                         field: z.ZodString;
                         order: z.ZodDefault<z.ZodEnum<{
-                            desc: "desc";
                             asc: "asc";
+                            desc: "desc";
                         }>>;
                         collapsed: z.ZodDefault<z.ZodBoolean>;
                     }, z.core.$strict>>;
@@ -67361,7 +67476,7 @@ declare const MigrationOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 reason: z.ZodString;
                 docsUrl: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
-        }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "description" | "external" | "name" | "label" | "fields" | "indexes" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "enable" | "requiredPermissions" | "icon" | "fieldGroups" | "searchableFields" | "userActions" | "listViews" | "protection" | "sharingModel" | "datasource" | "pluralLabel" | "isSystem" | "managedBy" | "ownership" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "validations" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "highlightFields" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing" | "actions">, never> & (T extends {
+        }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "description" | "external" | "name" | "label" | "fields" | "indexes" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "enable" | "requiredPermissions" | "ownership" | "sharingModel" | "isSystem" | "icon" | "fieldGroups" | "searchableFields" | "userActions" | "listViews" | "protection" | "datasource" | "pluralLabel" | "managedBy" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "validations" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "highlightFields" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing" | "actions">, never> & (T extends {
             actions: infer As extends readonly unknown[];
         } ? {
             actions: { [I in keyof As]: As[I] extends infer T_1 ? T_1 extends As[I] ? T_1 extends {
@@ -70477,8 +70592,8 @@ type SupplierAssessmentStatus = z.input<typeof SupplierAssessmentStatusSchema>;
 
 // ── SupplierAssessmentStatusSchema (const) ──
 declare const SupplierAssessmentStatusSchema: z.ZodEnum<{
-    failed: "failed";
     expired: "expired";
+    failed: "failed";
     completed: "completed";
     pending: "pending";
     in_progress: "in_progress";
@@ -70512,8 +70627,8 @@ declare const SupplierSecurityAssessmentSchema: z.ZodObject<{
         high: "high";
     }>;
     status: z.ZodEnum<{
-        failed: "failed";
         expired: "expired";
+        failed: "failed";
         completed: "completed";
         pending: "pending";
         in_progress: "in_progress";
@@ -72558,13 +72673,13 @@ declare const emailTemplateForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {

@@ -442,8 +442,8 @@ declare const ApiOperationSchema: z.ZodEnum<{
     create: "create";
     restore: "restore";
     purge: "purge";
-    import: "import";
     export: "export";
+    import: "import";
 }>;
 
 // ── ApiPrimitive (type) ──
@@ -521,9 +521,9 @@ declare const BaseEngineOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -544,9 +544,9 @@ declare const BaseEngineOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -1174,9 +1174,9 @@ declare const DataEngineAggregateOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -1197,9 +1197,9 @@ declare const DataEngineAggregateOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -1262,9 +1262,9 @@ declare const DataEngineAggregateRequestSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -1285,9 +1285,9 @@ declare const DataEngineAggregateRequestSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -1356,7 +1356,7 @@ declare const DataEngineAggregateRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -1365,7 +1365,7 @@ declare const DataEngineAggregateRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -1415,7 +1415,7 @@ declare const DataEngineAggregateRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -1424,7 +1424,7 @@ declare const DataEngineAggregateRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -1482,9 +1482,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -1505,9 +1505,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -1580,9 +1580,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -1603,9 +1603,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -1678,9 +1678,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -1701,9 +1701,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -1748,9 +1748,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -1771,9 +1771,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -1821,9 +1821,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -1844,9 +1844,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -1892,9 +1892,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -1915,9 +1915,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -1962,9 +1962,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -1985,9 +1985,9 @@ declare const DataEngineContractSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -2065,9 +2065,9 @@ declare const DataEngineCountOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -2088,9 +2088,9 @@ declare const DataEngineCountOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -2140,9 +2140,9 @@ declare const DataEngineCountRequestSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -2163,9 +2163,9 @@ declare const DataEngineCountRequestSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -2207,7 +2207,7 @@ declare const DataEngineCountRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -2216,7 +2216,7 @@ declare const DataEngineCountRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -2252,7 +2252,7 @@ declare const DataEngineCountRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -2261,7 +2261,7 @@ declare const DataEngineCountRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -2307,9 +2307,9 @@ declare const DataEngineDeleteOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -2330,9 +2330,9 @@ declare const DataEngineDeleteOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -2384,9 +2384,9 @@ declare const DataEngineDeleteRequestSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -2407,9 +2407,9 @@ declare const DataEngineDeleteRequestSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -2452,7 +2452,7 @@ declare const DataEngineDeleteRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -2461,7 +2461,7 @@ declare const DataEngineDeleteRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -2498,7 +2498,7 @@ declare const DataEngineDeleteRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -2507,7 +2507,7 @@ declare const DataEngineDeleteRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -2570,9 +2570,9 @@ declare const DataEngineFindOneRequestSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -2593,9 +2593,9 @@ declare const DataEngineFindOneRequestSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -2678,7 +2678,7 @@ declare const DataEngineFindOneRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -2687,7 +2687,7 @@ declare const DataEngineFindOneRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -2744,7 +2744,7 @@ declare const DataEngineFindOneRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -2753,7 +2753,7 @@ declare const DataEngineFindOneRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -2828,9 +2828,9 @@ declare const DataEngineFindRequestSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -2851,9 +2851,9 @@ declare const DataEngineFindRequestSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -2936,7 +2936,7 @@ declare const DataEngineFindRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -2945,7 +2945,7 @@ declare const DataEngineFindRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -3002,7 +3002,7 @@ declare const DataEngineFindRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -3011,7 +3011,7 @@ declare const DataEngineFindRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -3086,9 +3086,9 @@ declare const DataEngineInsertOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -3109,9 +3109,9 @@ declare const DataEngineInsertOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -3165,9 +3165,9 @@ declare const DataEngineInsertRequestSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -3188,9 +3188,9 @@ declare const DataEngineInsertRequestSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -3244,9 +3244,9 @@ declare const DataEngineQueryOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -3267,9 +3267,9 @@ declare const DataEngineQueryOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -3340,9 +3340,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -3363,9 +3363,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -3448,7 +3448,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -3457,7 +3457,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -3514,7 +3514,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -3523,7 +3523,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -3595,9 +3595,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -3618,9 +3618,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -3703,7 +3703,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -3712,7 +3712,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -3769,7 +3769,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -3778,7 +3778,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -3851,9 +3851,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -3874,9 +3874,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -3926,9 +3926,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -3949,9 +3949,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -3996,7 +3996,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -4005,7 +4005,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -4044,7 +4044,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -4053,7 +4053,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -4100,9 +4100,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -4123,9 +4123,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -4168,7 +4168,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -4177,7 +4177,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -4214,7 +4214,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -4223,7 +4223,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -4267,9 +4267,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -4290,9 +4290,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -4334,7 +4334,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -4343,7 +4343,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -4379,7 +4379,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -4388,7 +4388,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -4431,9 +4431,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -4454,9 +4454,9 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -4525,7 +4525,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -4534,7 +4534,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -4584,7 +4584,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -4593,7 +4593,7 @@ declare const DataEngineRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -4683,9 +4683,9 @@ declare const DataEngineUpdateOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -4706,9 +4706,9 @@ declare const DataEngineUpdateOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -4763,9 +4763,9 @@ declare const DataEngineUpdateRequestSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>>;
             audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
                 external: "external";
@@ -4786,9 +4786,9 @@ declare const DataEngineUpdateRequestSchema: z.ZodObject<{
                 principalKind: z.ZodOptional<z.ZodEnum<{
                     agent: "agent";
                     system: "system";
-                    guest: "guest";
                     human: "human";
                     service: "service";
+                    guest: "guest";
                 }>>;
             }, z.core.$strip>>>;
             performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -4833,7 +4833,7 @@ declare const DataEngineUpdateRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -4842,7 +4842,7 @@ declare const DataEngineUpdateRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -4881,7 +4881,7 @@ declare const DataEngineUpdateRequestSchema: z.ZodObject<{
             locale?: string | undefined;
             currency?: string | undefined;
             positions?: string[] | undefined;
-            principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+            principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             audience?: "external" | "internal" | undefined;
             posture?: "MEMBER" | "PLATFORM_ADMIN" | "TENANT_ADMIN" | "EXTERNAL" | undefined;
             authGate?: {
@@ -4890,7 +4890,7 @@ declare const DataEngineUpdateRequestSchema: z.ZodObject<{
             } | undefined;
             onBehalfOf?: {
                 userId: string;
-                principalKind?: "agent" | "system" | "guest" | "human" | "service" | undefined;
+                principalKind?: "agent" | "system" | "human" | "service" | "guest" | undefined;
             } | undefined;
             performedBy?: {
                 clientId: string;
@@ -5826,9 +5826,9 @@ declare const EngineAggregateOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -5849,9 +5849,9 @@ declare const EngineAggregateOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -5928,9 +5928,9 @@ declare const EngineCountOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -5951,9 +5951,9 @@ declare const EngineCountOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -6003,9 +6003,9 @@ declare const EngineDeleteOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -6026,9 +6026,9 @@ declare const EngineDeleteOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -6082,9 +6082,9 @@ declare const EngineQueryOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -6105,9 +6105,9 @@ declare const EngineQueryOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -6225,9 +6225,9 @@ declare const EngineUpdateOptionsSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>>;
         audience: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
             external: "external";
@@ -6248,9 +6248,9 @@ declare const EngineUpdateOptionsSchema: z.ZodObject<{
             principalKind: z.ZodOptional<z.ZodEnum<{
                 agent: "agent";
                 system: "system";
-                guest: "guest";
                 human: "human";
                 service: "service";
+                guest: "guest";
             }>>;
         }, z.core.$strip>>>;
         performedBy: z.ZodOptional<z.ZodOptional<z.ZodObject<{
@@ -6468,11 +6468,11 @@ declare const FeedItemType: z.ZodEnum<{
     email: "email";
     system: "system";
     sharing: "sharing";
+    note: "note";
     task: "task";
     approval: "approval";
     event: "event";
     comment: "comment";
-    note: "note";
     field_change: "field_change";
     call: "call";
     record_create: "record_create";
@@ -17319,6 +17319,7 @@ declare const ObjectSchema: z.ZodObject<{
             }>>;
             titleField: z.ZodOptional<z.ZodString>;
             visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         chart: z.ZodOptional<z.ZodObject<{
             chartType: z.ZodDefault<z.ZodEnum<{
@@ -17369,6 +17370,7 @@ declare const ObjectSchema: z.ZodObject<{
             summarizeField: z.ZodOptional<z.ZodString>;
             titleField: z.ZodOptional<z.ZodString>;
             columns: z.ZodArray<z.ZodString>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         gantt: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -17449,6 +17451,7 @@ declare const ObjectSchema: z.ZodObject<{
                 week: "week";
                 quarter: "quarter";
             }>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         calendar: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -19419,6 +19422,7 @@ declare const ObjectSchema: z.ZodObject<{
             gallery?: {
                 coverFit: "cover" | "contain";
                 cardSize: "small" | "medium" | "large";
+                limit: number;
                 coverField?: string | undefined;
                 titleField?: string | undefined;
                 visibleFields?: string[] | undefined;
@@ -19446,6 +19450,7 @@ declare const ObjectSchema: z.ZodObject<{
             kanban?: {
                 groupByField: string;
                 columns: string[];
+                limit: number;
                 summarizeField?: string | undefined;
                 titleField?: string | undefined;
             } | undefined;
@@ -19509,6 +19514,7 @@ declare const ObjectSchema: z.ZodObject<{
                 startDateField: string;
                 titleField: string;
                 scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                limit: number;
                 endDateField?: string | undefined;
                 groupByField?: string | undefined;
                 colorField?: string | undefined;
@@ -20574,6 +20580,7 @@ declare const ObjectSchema: z.ZodObject<{
             gallery?: {
                 coverFit: "cover" | "contain";
                 cardSize: "small" | "medium" | "large";
+                limit: number;
                 coverField?: string | undefined;
                 titleField?: string | undefined;
                 visibleFields?: string[] | undefined;
@@ -20601,6 +20608,7 @@ declare const ObjectSchema: z.ZodObject<{
             kanban?: {
                 groupByField: string;
                 columns: string[];
+                limit: number;
                 summarizeField?: string | undefined;
                 titleField?: string | undefined;
             } | undefined;
@@ -20664,6 +20672,7 @@ declare const ObjectSchema: z.ZodObject<{
                 startDateField: string;
                 titleField: string;
                 scale: "year" | "month" | "day" | "hour" | "week" | "quarter";
+                limit: number;
                 endDateField?: string | undefined;
                 groupByField?: string | undefined;
                 colorField?: string | undefined;

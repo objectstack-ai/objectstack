@@ -837,6 +837,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18828: a SECOND `Claim:` by ONE seat — the writer-side prohibition, finally READ': 52,
   '#18536: the lane-keyed owed population — spec and skills owe the record on EVERY round, other lanes owe none, a `yes` outside them is spec-lane work': 30,
   '#18862: cross-author LIVE claims with no `Release:` between — the hand-over the protocol never wrote, named; judged only after its effective instant': 52,
+  '#16770: the exit-0 line says which carriers agreed — LABEL carriers — and that the PR body was not read': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -849,8 +850,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
 // by the one #16833 adds, and by the one #18456 adds, and by the one #18719
 // adds, and by the one #18683 adds, and by the one #18764 adds, and by the one
-// #18828 adds, and by the one #18536 adds, and by the one #18862 adds.
-const SELF_TEST_BATTERY_FLOOR = 34;
+// #18828 adds, and by the one #18536 adds, and by the one #18862 adds, and by
+// the one #16770 adds.
+const SELF_TEST_BATTERY_FLOOR = 35;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -6435,6 +6437,74 @@ function renderSweep({ repo, pulls, pairs, inputs = null }, { json = false } = {
   return unjudged.length > 0 ? EXIT_INCOMPLETE : EXIT_OK;
 }
 
+// -- What the exit-0 line is allowed to claim (#16770) ----------------------
+//
+// The green line used to end with a bare three-word clause -- 「and both …
+// carriers … agree」, written out nowhere in this file on purpose, because the
+// #16770 pin scans this source for it -- in all three of its branches. In THIS
+// file 「carrier」 means a LABEL carrier -- `gated()` asks
+// "Did this carrier's labels come back readable?", C1 compares the
+// `needs:contract-review` label on the card against the same label on the PR,
+// and the docblock's limb ③ imports the maintainer's 2026-08-22 dual-carrier
+// ruling for exactly that. So the clause was TRUE, about labels.
+//
+// ⚠️ But 「carrier」 is also this tree's word for the DOCUMENTS that carry the
+// clause-② declaration (the card's claim comment; the PR body), and the clause
+// sat one comma away from 「the clause-② declaration is …」. Read at landing
+// time on a real pair it takes a careful reader as a denial that the two
+// DECLARATIONS diverge -- a denial this gate has never been in a position to
+// make: it reads the declaration from the CARD and has no reader for the PR
+// body at all (`declarationFromPullRequest` lives in
+// `scripts/check-changeset-no-major.mjs` and is never imported here). Two live
+// pairs were measured in that state, each costing hand repair after landing.
+//
+// ⛔ The fix is the SENTENCE, not a join: naming one document authoritative, or
+// teaching this gate to read the PR body and refuse on a disagreement, both
+// need the ruling #16303 is still waiting for. Until it lands the line states
+// what it COMPARED and says plainly what it did NOT read.
+const LABEL_CARRIERS_AGREE =
+  `and the \`${CONTRACT_REVIEW_LABEL}\` LABEL is in the same state on both LABEL carriers (this ` +
+  'card and this PR)';
+
+// Appended to the whole green line rather than folded into the clause above,
+// so it survives whichever optional clauses follow it and lands as its own
+// sentence. ⛔ It must never be phrased as a verdict ON the PR body: this run
+// did not read that document, so it can report the non-read and nothing else.
+const PR_BODY_NOT_READ =
+  '⚠️ The clause above compares LABELS, ⛔ never two declarations: this run read the clause-② ' +
+  'declaration from the CARD only and did NOT read the PR body, so a PR body declaring the ' +
+  'opposite of this card is neither compared nor denied here (#16770).';
+
+/**
+ * The exit-0 line for one pair, built apart from `renderPair` so the self-test
+ * pins the sentence the run actually prints rather than a copy of it.
+ *
+ * @param {{ pr: number, card: number, sibling?: boolean, corrected?: boolean,
+ *   record?: boolean, wideningClean?: boolean }} parts
+ * @returns {string}
+ */
+export function greenPairLine({ pr, card, sibling = false, corrected = false, record = false, wideningClean = false }) {
+  return (
+    `✓ check-clause2-carriers: PR #${pr} / card #${card} — the clause-② declaration is ` +
+    (sibling
+      ? 'readable in the fixed spelling on a SIBLING card this same PR delivers rather than on ' +
+        `this card (the reading above names which, and what it says), ${LABEL_CARRIERS_AGREE}`
+      : corrected
+        ? 'readable in the fixed spelling on a CORRECTION comment superseding the claim\'s own ' +
+          'line (the reading above names which comment, and says the claim was not edited), ' +
+          LABEL_CARRIERS_AGREE
+        : `readable in the fixed spelling, ${LABEL_CARRIERS_AGREE}`) +
+    (record
+      ? ', and a review of record names this head (the note above says which comment it is, and ' +
+        'whether this pair owes anything about it; existence, not the verdict)'
+      : '') +
+    (wideningClean
+      ? ', and its diff carries no widening tell. ⚠️ A tell is not a proof and its absence is not one either.'
+      : '.') +
+    ` ${PR_BODY_NOT_READ}`
+  );
+}
+
 function renderPair(pair, repo, pairs = null) {
   const gap = pairUnjudged(pair);
   if (gap) {
@@ -6470,24 +6540,14 @@ function renderPair(pair, repo, pairs = null) {
     const sibling = notes.some((n) => n.code === 'C2-SIBLING');
     const record = notes.some((n) => n.code === 'C6-RECORD');
     const corrected = notes.some((n) => n.code === 'C2-CORRECTION');
-    console.log(
-      `✓ check-clause2-carriers: PR #${pair.pr} / card #${pair.card} — the clause-② declaration is ` +
-        (sibling
-          ? 'readable in the fixed spelling on a SIBLING card this same PR delivers rather than on ' +
-            'this card (the reading above names which, and what it says), and both carriers agree'
-          : corrected
-            ? 'readable in the fixed spelling on a CORRECTION comment superseding the claim\'s own ' +
-              'line (the reading above names which comment, and says the claim was not edited), and ' +
-              'both carriers agree'
-            : 'readable in the fixed spelling and both carriers agree') +
-        (record
-          ? ', and a review of record names this head (the note above says which comment it is, and ' +
-            'whether this pair owes anything about it; existence, not the verdict)'
-          : '') +
-        (widening.state === 'clean'
-          ? ', and its diff carries no widening tell. ⚠️ A tell is not a proof and its absence is not one either.'
-          : '.'),
-    );
+    console.log(greenPairLine({
+      pr: pair.pr,
+      card: pair.card,
+      sibling,
+      corrected,
+      record,
+      wideningClean: widening.state === 'clean',
+    }));
     return EXIT_OK;
   }
   for (const row of rows) console.error(`✗ ${row.code} — ${row.text}`);
@@ -9309,6 +9369,58 @@ export async function selfTest() {
   t('⛔ the informational note is not in the FINDING family and the record carries no verdict word for it', !says(X62_FIELD([X62_HOLDER, X62_TAKER_BEFORE], 'claim.handover'), 'exit 4') && says(X62_FIELD([X62_HOLDER, X62_TAKER_BEFORE], 'claim.handover'), 'LISTED'));
   t('⛔ C8\'s rule text still says the cross-author shape is not its state — and now names the row that reads it', CLAIM_REPEAT_RULE.includes('DIFFERENT authors are not this state') && CLAIM_REPEAT_RULE.includes('row C9'));
   t('the row is REPORT-ONLY, in the words every row prints', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), NEVER_WRITES));
+
+  // -- #16770: the exit-0 line claims a LABEL comparison, never a declaration one --
+  //
+  // ⭐ A reworded sentence drifts back unless something holds it, and the thing
+  // that has to be held is a NEGATIVE: the old bare clause -- 「and both …
+  // carriers … agree」, assembled below as `G_BARE` rather than spelled out --
+  // must not return to a green line. So this battery drives BOTH directions.
+  //
+  //   positive — the line NAMES what it compared (the label, both carriers) and
+  //              STATES the non-read (the PR body), in all three of its branches
+  //   negative — the bare phrase is absent, pinned on the SOURCE so a revert
+  //              anywhere in the green line's construction reds, ⛔ not only a
+  //              revert of the constant the positive cases read
+  //
+  // ⛔ The forbidden phrase is ASSEMBLED at runtime, never written out here: a
+  // literal in the pin would be a hit in the very scan the pin performs, and
+  // the case would fail on the day it was written. The idiom is this file's
+  // own (the #18773 source-absence pin above), including its firing control —
+  // a scan that finds nothing proves nothing until the same scan is shown to
+  // find something.
+  battery('#16770: the exit-0 line says which carriers agreed — LABEL carriers — and that the PR body was not read');
+  const G_BARE = ['both', 'carriers', 'agree'].join(' ');
+  const G_BRANCHES = [
+    ['plain', greenPairLine({ pr: 16761, card: 16568 })],
+    ['sibling', greenPairLine({ pr: 16761, card: 16568, sibling: true })],
+    ['correction', greenPairLine({ pr: 16761, card: 16568, corrected: true })],
+  ];
+  const G_ALL = [
+    ...G_BRANCHES.map(([, line]) => line),
+    greenPairLine({ pr: 16761, card: 16568, record: true, wideningClean: true }),
+    greenPairLine({ pr: 16761, card: 16568, sibling: true, record: true, wideningClean: true }),
+    greenPairLine({ pr: 16761, card: 16568, corrected: true, record: true, wideningClean: true }),
+  ];
+  for (const [name, line] of G_BRANCHES) {
+    t(`the ${name} branch names the LABEL as what agreed, ⛔ not "carriers" unqualified`, says(line, `the \`${CONTRACT_REVIEW_LABEL}\` LABEL is in the same state on both LABEL carriers (this card and this PR)`), line);
+  }
+  t('⛔ NEGATIVE, every branch and every optional clause: the bare phrase is gone from the printed line', G_ALL.every((line) => !line.includes(G_BARE)), G_ALL.find((line) => line.includes(G_BARE)));
+  t('⛔ NEGATIVE, on the SOURCE: the bare phrase appears nowhere in this file, so a revert in the green line\'s construction reds even if these constants are bypassed', !readFileSync(SELF_PATH, 'utf8').includes(G_BARE));
+  // ⛔ The control asserts the READ, ⛔ never the wording — the wording is held
+  // by the branch cases above, which drive the builder rather than grep for its
+  // text. A control that scanned for the new phrase would be satisfied by this
+  // battery's own assertion strings, which is the shape `#16304`'s note at the
+  // head of this self-test names: a pin written from the thing it pins.
+  t('⛔ CONTROL — the source read is not empty or misdirected: the SAME read reaches this file\'s green-line builder', readFileSync(SELF_PATH, 'utf8').includes('export function greenPairLine('));
+  t('every branch states the non-read in the same words, ⛔ never a per-branch paraphrase', G_ALL.every((line) => says(line, PR_BODY_NOT_READ)));
+  t('the non-read names the DOCUMENT that was not read — the PR body — and the one that was', says(PR_BODY_NOT_READ, 'did NOT read the PR body') && says(PR_BODY_NOT_READ, 'from the CARD only'));
+  t('…and it reports a NON-READ, ⛔ never a verdict about that document', says(PR_BODY_NOT_READ, 'neither compared nor denied here'));
+  t('the non-read sentence is LAST, so the optional record and widening clauses cannot bury it', G_ALL.every((line) => line.endsWith(PR_BODY_NOT_READ)));
+  t('the widening clause still reads as it did — this card reworded the agreement clause, ⛔ nothing else', says(greenPairLine({ pr: 1, card: 2, wideningClean: true }), 'its diff carries no widening tell. ⚠️ A tell is not a proof and its absence is not one either.'));
+  t('…and so does the review-of-record clause', says(greenPairLine({ pr: 1, card: 2, record: true }), 'a review of record names this head'));
+  t('⛔ CONTROL: the label the line names is the constant C1 compares, ⛔ not a second spelling of it', says(LABEL_CARRIERS_AGREE, CONTRACT_REVIEW_LABEL) && CONTRACT_REVIEW_LABEL === 'needs:contract-review');
+  t('the pair is still identified in the line, in the spelling the round reports paste', says(G_BRANCHES[0][1], '✓ check-clause2-carriers: PR #16761 / card #16568 — the clause-② declaration is readable in the fixed spelling'));
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //

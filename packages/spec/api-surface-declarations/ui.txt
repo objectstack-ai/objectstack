@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./ui
-# exported names: 471
-# declarations: 485
+# exported names: 476
+# declarations: 490
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -132,39 +132,90 @@ interface ActionEngineFacade {
      */
     delete(object: string, idOrIds: string | string[]): Promise<void>;
     /**
-     * Read the rows of `object` that match `filter`.
+     * Read the rows of `object` that `query` selects.
      *
-     * `filter` is a FILTER — the `where` HALF of an ObjectQL query, the same
-     * {@link FilterCondition} that `QueryAST.where` carries: implicit equality
-     * `{ field: value }`, explicit operators `{ field: { $in: [...] } }`,
-     * `$and` / `$or` / `$not`. It is NOT the query ENVELOPE
-     * (`{ where, fields, orderBy, limit }`) that `DataEngine.find` and ObjectQL's
-     * own `engine.find` take — the shape this parameter's former name, `query`,
-     * invited. The runtime builds the envelope itself: `buildActionEngineFacade`'s
-     * `find` arm (`packages/runtime/src/action-execution.ts`, `:1183` on
-     * `369da918`) wraps a non-empty filter as `{ where: filter }` and passes an
-     * EMPTY filter (`{}`) through unwrapped — the unfiltered read.
+     * ## One platform, one query shape
      *
-     * Two consequences, both silent (#14175):
+     * `query` is the ENGINE's query envelope — {@link EngineQueryOptions}, the
+     * very type `IDataEngine.find` and ObjectQL's own `engine.find` take, named
+     * here by identity rather than restated. The filter goes under `where`, and
+     * the rest of the envelope (`fields`, `orderBy`, `limit`, `offset`,
+     * `expand`, `search`, …) means exactly what it means on the engine:
      *
-     * - An envelope passed here becomes `{ where: { where: … } }`. No object has
-     *   a field named `where`, so the read matches nothing and resolves to `[]`
-     *   with no error. A handler that made this mistake ran to completion over
-     *   zero rows for as long as it shipped, and its own hand-written test
-     *   double — written to the same belief, reading `query.where` — passed
-     *   every assertion.
-     * - Because `{}` skips the wrap, an unfiltered call works under EITHER
-     *   reading, so a handler mixing one unfiltered read with envelope-shaped
-     *   ones looks partially alive rather than uniformly dead.
+     * ```ts
+     * await ctx.engine.find('todo_task', { where: { status: 'completed' } });
+     * await ctx.engine.find('todo_task', { where: { status: 'open' }, fields: ['id', 'subject'], limit: 50 });
+     * await ctx.engine.find('todo_task', {});   // the unfiltered read
+     * ```
      *
-     * What the type buys, exactly: `FilterCondition` refuses a primitive and a
-     * mistyped logical operator (`$and` / `$or` not arrays, `$not` not a
-     * filter). It does NOT refuse `{ where: … }` — its string index signature is
-     * what lets any field name stand as a key, and `where` is a string — so the
-     * envelope mistake still compiles, and this doc comment, not the type, is
-     * the contract of record. Both halves are pinned in `action-params.test.ts`.
+     * ## What changed, and why it is a WITHDRAWAL rather than a narrowing
+     *
+     * Until #15124 this slot took a bare `FilterCondition` — the `where`
+     * half alone — and the runtime's `find` arm wrapped it
+     * (`packages/runtime/src/action-execution.ts`, `:1183` on `369da918`; that
+     * wrap is gone as of this card). That parameter shape differed from the
+     * engine's for no reason a caller could see, and the cost was
+     * silent: an author who wrote the engine's own envelope got
+     * `{ where: { where: … } }`, which matches no row (no object has a field
+     * named `where`) and resolves to `[]` with no error. A handler that made
+     * that mistake ran to completion over zero rows for as long as it shipped,
+     * and its hand-written test double — written to the same belief — passed
+     * every assertion. `{}` skipped the wrap, so one unfiltered read kept
+     * working under either belief and a dead handler looked partially alive.
+     *
+     * #14175 declared the bare filter and pinned the gap; #15124 withdraws the
+     * shape instead. Closing the gap the other way would have had to assert a
+     * vocabulary fact the spec declares nowhere — that no object may carry a
+     * field named `where` — and that is a word taken from every customer's data
+     * model to buy one parameter's compile-time check. Aligning the parameter
+     * removes the ambiguity at its root: the most natural spelling is now the
+     * correct one, and nothing is reserved.
+     *
+     * Migration is lossless and mechanical: `find(o, f)` → `find(o, { where: f })`
+     * (ADR-0087 semantic migration `action-engine-facade-find-query-envelope`).
+     * An unfiltered `find(o, {})` is unchanged.
+     *
+     * ## What the type refuses, measured
+     *
+     * A bare filter no longer type-checks, on BOTH paths a TYPED caller can
+     * reach it by: an object literal (`{ status: 'completed' }`) fails the
+     * excess-property check, because a field name is not an envelope key; and a
+     * filter held in a variable typed `FilterCondition` fails TS2559 —
+     * `EngineQueryOptions` is a weak type, every key optional, and a filter of
+     * field names has no property in common with it. The envelope's own keys are
+     * typed, so `where: 'a = b'`, `fields: 'id,subject'` and `limit: '50'` are
+     * refused too.
+     *
+     * ## …and what refuses it for a caller the TYPE never reached
+     *
+     * `buildActionEngineFacade` returns `any`, so a handler in a JS config, one
+     * annotated with a local copy of this context, or a `(ctx: any)` handler is
+     * bound by nothing here. For those the runtime arm refuses the withdrawn
+     * shape itself, before the engine, carrying the same prescription
+     * (`ACTION_ENGINE_FIND_ENVELOPE_PRESCRIPTION`,
+     * `packages/runtime/src/action-execution.ts`) and reading its key set off
+     * THIS schema so the two channels cannot drift apart.
+     *
+     * ⚠️ That arm is load-bearing rather than belt-and-braces, and the reason is
+     * a `null`: the engine's own unknown-option refusal (#4371) exempts a
+     * `null`-VALUED key, because on an option bag a `null` is a withdrawal. On a
+     * FILTER it is the "rows with no X" idiom — so `{ deleted_at: null }` passed
+     * straight through would be dropped unexecuted and the read would widen to
+     * EVERY row, silently, to a caller whose next line is often a delete.
+     *
+     * ## `context` is the caller's to pass and NOT the caller's to choose
+     *
+     * The envelope carries `context` because every engine option bag does. This
+     * facade is TRUSTED and context-less by design (#2849, ADR-0096): the
+     * runtime stamps its own elevated `ExecutionContext` last, so a
+     * caller-supplied `context` is overridden rather than honoured. Do not write
+     * one — it reads as authorization and is none.
+     *
+     * Every clause above is pinned in `action-params.test.ts`, and the
+     * pass-through is pinned against the runtime in
+     * `packages/runtime/src/action-engine-facade-find-envelope.test.ts`.
      */
-    find(object: string, filter: FilterCondition): Promise<Array<Record<string, unknown>>>;
+    find(object: string, query: EngineQueryOptions): Promise<Array<Record<string, unknown>>>;
 }
 
 // ── ActionHandler (type) ──
@@ -2878,8 +2929,8 @@ declare const ComponentPropsMap: {
         }>>;
         type: z.ZodOptional<z.ZodNever>;
         position: z.ZodDefault<z.ZodEnum<{
-            left: "left";
             top: "top";
+            left: "left";
         }>>;
         alwaysShowStrip: z.ZodOptional<z.ZodBoolean>;
         items: z.ZodArray<z.ZodObject<{
@@ -3073,6 +3124,8 @@ declare const ComponentPropsMap: {
         hideFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
         inlineEdit: z.ZodOptional<z.ZodBoolean>;
         showHeader: z.ZodOptional<z.ZodBoolean>;
+        enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+        redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
         aria: z.ZodOptional<z.ZodObject<{
             ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                 key?: never;
@@ -3095,12 +3148,79 @@ declare const ComponentPropsMap: {
         objectName: z.ZodString;
         relationshipField: z.ZodString;
         relationshipValueField: z.ZodDefault<z.ZodString>;
-        columns: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        columns: z.ZodOptional<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodArray<z.ZodObject<{
+            field: z.ZodString;
+            label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }, Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }, z.core.$ZodTypeInternals<Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }, Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }>>]>>;
+            width: z.ZodOptional<z.ZodNumber>;
+            align: z.ZodOptional<z.ZodEnum<{
+                left: "left";
+                right: "right";
+                center: "center";
+            }>>;
+            hidden: z.ZodOptional<z.ZodBoolean>;
+            sortable: z.ZodOptional<z.ZodBoolean>;
+            resizable: z.ZodOptional<z.ZodBoolean>;
+            wrap: z.ZodOptional<z.ZodBoolean>;
+            type: z.ZodOptional<z.ZodString>;
+            pinned: z.ZodOptional<z.ZodEnum<{
+                left: "left";
+                right: "right";
+            }>>;
+            summary: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
+                count: "count";
+                none: "none";
+                min: "min";
+                max: "max";
+                sum: "sum";
+                avg: "avg";
+                count_empty: "count_empty";
+                count_filled: "count_filled";
+                count_unique: "count_unique";
+                percent_empty: "percent_empty";
+                percent_filled: "percent_filled";
+            }>, z.ZodObject<{
+                type: z.ZodEnum<{
+                    count: "count";
+                    none: "none";
+                    min: "min";
+                    max: "max";
+                    sum: "sum";
+                    avg: "avg";
+                    count_empty: "count_empty";
+                    count_filled: "count_filled";
+                    count_unique: "count_unique";
+                    percent_empty: "percent_empty";
+                    percent_filled: "percent_filled";
+                }>;
+                field: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>]>>;
+            prefix: z.ZodOptional<z.ZodObject<{
+                field: z.ZodString;
+                type: z.ZodDefault<z.ZodEnum<{
+                    text: "text";
+                    badge: "badge";
+                }>>;
+            }, z.core.$strict>>;
+            link: z.ZodOptional<z.ZodBoolean>;
+            action: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>]>>;
         sort: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strict>>]>>;
         limit: z.ZodDefault<z.ZodNumber>;
@@ -3192,6 +3312,8 @@ declare const ComponentPropsMap: {
                 defaultValue?: never;
             }>>]>>;
         }, z.core.$strict>>;
+        enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+        redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
         aria: z.ZodOptional<z.ZodObject<{
             ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                 key?: never;
@@ -3221,6 +3343,8 @@ declare const ComponentPropsMap: {
             vertical: "vertical";
             horizontal: "horizontal";
         }>>;
+        enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+        redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
         aria: z.ZodOptional<z.ZodObject<{
             ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                 key?: never;
@@ -3244,11 +3368,11 @@ declare const ComponentPropsMap: {
             file: "file";
             email: "email";
             system: "system";
-            approval: "approval";
+            note: "note";
             sharing: "sharing";
+            approval: "approval";
             event: "event";
             comment: "comment";
-            note: "note";
             field_change: "field_change";
             task: "task";
             call: "call";
@@ -3302,11 +3426,11 @@ declare const ComponentPropsMap: {
                 file: "file";
                 email: "email";
                 system: "system";
-                approval: "approval";
+                note: "note";
                 sharing: "sharing";
+                approval: "approval";
                 event: "event";
                 comment: "comment";
-                note: "note";
                 field_change: "field_change";
                 task: "task";
                 call: "call";
@@ -3378,11 +3502,11 @@ declare const ComponentPropsMap: {
                 file: "file";
                 email: "email";
                 system: "system";
-                approval: "approval";
+                note: "note";
                 sharing: "sharing";
+                approval: "approval";
                 event: "event";
                 comment: "comment";
-                note: "note";
                 field_change: "field_change";
                 task: "task";
                 call: "call";
@@ -4282,8 +4406,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         limit: z.ZodOptional<z.ZodNumber>;
@@ -4465,8 +4589,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         defaultSort: z.ZodOptional<z.ZodNever>;
@@ -4673,6 +4797,29 @@ declare const ComponentPropsMap: {
         quickAdd: z.ZodOptional<z.ZodNever>;
         coverImageField: z.ZodOptional<z.ZodString>;
         conditionalFormatting: z.ZodOptional<z.ZodUnknown>;
+        navigation: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodDefault<z.ZodEnum<{
+                split: "split";
+                none: "none";
+                modal: "modal";
+                drawer: "drawer";
+                page: "page";
+                popover: "popover";
+                new_window: "new_window";
+            }>>;
+            view: z.ZodOptional<z.ZodNever>;
+            preventNavigation: z.ZodDefault<z.ZodBoolean>;
+            openNewTab: z.ZodDefault<z.ZodBoolean>;
+            size: z.ZodDefault<z.ZodEnum<{
+                full: "full";
+                md: "md";
+                auto: "auto";
+                sm: "sm";
+                lg: "lg";
+                xl: "xl";
+            }>>;
+            width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     readonly 'object-calendar': z.ZodObject<{
         objectName: z.ZodOptional<z.ZodString>;
@@ -4711,14 +4858,37 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         data: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
         staticData: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
         locale: z.ZodOptional<z.ZodString>;
         loading: z.ZodOptional<z.ZodBoolean>;
+        navigation: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodDefault<z.ZodEnum<{
+                split: "split";
+                none: "none";
+                modal: "modal";
+                drawer: "drawer";
+                page: "page";
+                popover: "popover";
+                new_window: "new_window";
+            }>>;
+            view: z.ZodOptional<z.ZodNever>;
+            preventNavigation: z.ZodDefault<z.ZodBoolean>;
+            openNewTab: z.ZodDefault<z.ZodBoolean>;
+            size: z.ZodDefault<z.ZodEnum<{
+                full: "full";
+                md: "md";
+                auto: "auto";
+                sm: "sm";
+                lg: "lg";
+                xl: "xl";
+            }>>;
+            width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     readonly 'object-form': z.ZodObject<{
         objectName: z.ZodOptional<z.ZodString>;
@@ -4774,9 +4944,9 @@ declare const ComponentPropsMap: {
         }>>]>>;
         defaultTab: z.ZodOptional<z.ZodString>;
         tabPosition: z.ZodOptional<z.ZodEnum<{
+            top: "top";
             left: "left";
             right: "right";
-            top: "top";
             bottom: "bottom";
         }>>;
         allowSkip: z.ZodOptional<z.ZodBoolean>;
@@ -4788,9 +4958,9 @@ declare const ComponentPropsMap: {
         splitSize: z.ZodOptional<z.ZodNumber>;
         splitResizable: z.ZodOptional<z.ZodBoolean>;
         drawerSide: z.ZodOptional<z.ZodEnum<{
+            top: "top";
             left: "left";
             right: "right";
-            top: "top";
             bottom: "bottom";
         }>>;
         drawerWidth: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -5009,8 +5179,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         map: z.ZodOptional<z.ZodObject<{
@@ -5098,8 +5268,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         gantt: z.ZodOptional<z.ZodObject<{
@@ -5267,6 +5437,99 @@ declare const ComponentPropsMap: {
         }, z.core.$strict>>;
         navigation: z.ZodOptional<z.ZodUnknown>;
     }, z.core.$strict>;
+    readonly 'object-timeline': z.ZodObject<{
+        objectName: z.ZodOptional<z.ZodString>;
+        timeline: z.ZodOptional<z.ZodObject<{
+            startDateField: z.ZodString;
+            endDateField: z.ZodOptional<z.ZodString>;
+            titleField: z.ZodString;
+            groupByField: z.ZodOptional<z.ZodString>;
+            colorField: z.ZodOptional<z.ZodString>;
+            scale: z.ZodDefault<z.ZodEnum<{
+                year: "year";
+                month: "month";
+                day: "day";
+                hour: "hour";
+                week: "week";
+                quarter: "quarter";
+            }>>;
+            limit: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
+        filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            field: z.ZodString;
+            operator: z.ZodPreprocess<z.ZodEnum<{
+                in: "in";
+                starts_with: "starts_with";
+                ends_with: "ends_with";
+                not_in: "not_in";
+                between: "between";
+                greater_than: "greater_than";
+                after: "after";
+                greater_than_or_equal: "greater_than_or_equal";
+                less_than: "less_than";
+                before: "before";
+                less_than_or_equal: "less_than_or_equal";
+                equals: "equals";
+                not_equals: "not_equals";
+                contains: "contains";
+                not_contains: "not_contains";
+                icontains: "icontains";
+                is_null: "is_null";
+                is_not_null: "is_not_null";
+                is_empty: "is_empty";
+                is_not_empty: "is_not_empty";
+            }>>;
+            value: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean, z.ZodNull, z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>]>>;
+        }, z.core.$strict>>>;
+        sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            field: z.ZodString;
+            order: z.ZodEnum<{
+                asc: "asc";
+                desc: "desc";
+            }>;
+        }, z.core.$strip>>>;
+        limit: z.ZodOptional<z.ZodNumber>;
+        data: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
+        items: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
+        variant: z.ZodOptional<z.ZodEnum<{
+            gantt: "gantt";
+            vertical: "vertical";
+            horizontal: "horizontal";
+        }>>;
+        dateFormat: z.ZodOptional<z.ZodEnum<{
+            long: "long";
+            short: "short";
+            iso: "iso";
+        }>>;
+        rowLabel: z.ZodOptional<z.ZodString>;
+        minDate: z.ZodOptional<z.ZodString>;
+        maxDate: z.ZodOptional<z.ZodString>;
+        descriptionField: z.ZodOptional<z.ZodString>;
+        mapping: z.ZodOptional<z.ZodUnknown>;
+        navigation: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodDefault<z.ZodEnum<{
+                split: "split";
+                none: "none";
+                modal: "modal";
+                drawer: "drawer";
+                page: "page";
+                popover: "popover";
+                new_window: "new_window";
+            }>>;
+            view: z.ZodOptional<z.ZodNever>;
+            preventNavigation: z.ZodDefault<z.ZodBoolean>;
+            openNewTab: z.ZodDefault<z.ZodBoolean>;
+            size: z.ZodDefault<z.ZodEnum<{
+                full: "full";
+                md: "md";
+                auto: "auto";
+                sm: "sm";
+                lg: "lg";
+                xl: "xl";
+            }>>;
+            width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
 };
 
 // ── DATE_RANGE_DEFAULT_RANGES (const) ──
@@ -5274,6 +5537,9 @@ declare const DATE_RANGE_DEFAULT_RANGES: readonly ["today", "yesterday", "this_w
 
 // ── DATE_RANGE_PRESETS (const) ──
 declare const DATE_RANGE_PRESETS: readonly ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_quarter", "last_quarter", "this_year", "last_year", "last_7_days", "last_30_days", "last_90_days"];
+
+// ── DEFAULT_VIEW_ROW_LIMIT (const) ──
+declare const DEFAULT_VIEW_ROW_LIMIT = 100;
 
 // ── Dashboard (const) ──
 declare const Dashboard: {
@@ -7129,8 +7395,8 @@ declare const ElementRecordPickerPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     limit: z.ZodOptional<z.ZodNumber>;
@@ -8600,6 +8866,7 @@ declare const GalleryConfigSchema: z.ZodObject<{
     }>>;
     titleField: z.ZodOptional<z.ZodString>;
     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    limit: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strict>;
 
 // ── GanttConfig (type) ──
@@ -9543,12 +9810,16 @@ declare const KNOWN_COMPONENT_TYPE_CANDIDATES: readonly string[];
 // ── KanbanConfig (type) ──
 type KanbanConfig = z.input<typeof KanbanConfigSchema>;
 
+// ── KanbanConfigParsed (type) ──
+type KanbanConfigParsed = z.infer<typeof KanbanConfigSchema>;
+
 // ── KanbanConfigSchema (const) ──
 declare const KanbanConfigSchema: z.ZodObject<{
     groupByField: z.ZodString;
     summarizeField: z.ZodOptional<z.ZodString>;
     titleField: z.ZodOptional<z.ZodString>;
     columns: z.ZodArray<z.ZodString>;
+    limit: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strict>;
 
 // ── LIST_VIEW_GROUP_COUNT_ALIAS (const) ──
@@ -10009,6 +10280,7 @@ declare const ListViewSchema: z.ZodObject<{
         summarizeField: z.ZodOptional<z.ZodString>;
         titleField: z.ZodOptional<z.ZodString>;
         columns: z.ZodArray<z.ZodString>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     calendar: z.ZodOptional<z.ZodObject<{
         startDateField: z.ZodString;
@@ -10095,6 +10367,7 @@ declare const ListViewSchema: z.ZodObject<{
         }>>;
         titleField: z.ZodOptional<z.ZodString>;
         visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     timeline: z.ZodOptional<z.ZodObject<{
         startDateField: z.ZodString;
@@ -10110,6 +10383,7 @@ declare const ListViewSchema: z.ZodObject<{
             week: "week";
             quarter: "quarter";
         }>>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     chart: z.ZodOptional<z.ZodObject<{
         chartType: z.ZodDefault<z.ZodEnum<{
@@ -10678,14 +10952,37 @@ declare const ObjectCalendarPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     data: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     staticData: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     locale: z.ZodOptional<z.ZodString>;
     loading: z.ZodOptional<z.ZodBoolean>;
+    navigation: z.ZodOptional<z.ZodObject<{
+        mode: z.ZodDefault<z.ZodEnum<{
+            split: "split";
+            none: "none";
+            modal: "modal";
+            drawer: "drawer";
+            page: "page";
+            popover: "popover";
+            new_window: "new_window";
+        }>>;
+        view: z.ZodOptional<z.ZodNever>;
+        preventNavigation: z.ZodDefault<z.ZodBoolean>;
+        openNewTab: z.ZodDefault<z.ZodBoolean>;
+        size: z.ZodDefault<z.ZodEnum<{
+            full: "full";
+            md: "md";
+            auto: "auto";
+            sm: "sm";
+            lg: "lg";
+            xl: "xl";
+        }>>;
+        width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 
 // ── ObjectFormProps (type) ──
@@ -10746,9 +11043,9 @@ declare const ObjectFormPropsSchema: z.ZodObject<{
     }>>]>>;
     defaultTab: z.ZodOptional<z.ZodString>;
     tabPosition: z.ZodOptional<z.ZodEnum<{
+        top: "top";
         left: "left";
         right: "right";
-        top: "top";
         bottom: "bottom";
     }>>;
     allowSkip: z.ZodOptional<z.ZodBoolean>;
@@ -10760,9 +11057,9 @@ declare const ObjectFormPropsSchema: z.ZodObject<{
     splitSize: z.ZodOptional<z.ZodNumber>;
     splitResizable: z.ZodOptional<z.ZodBoolean>;
     drawerSide: z.ZodOptional<z.ZodEnum<{
+        top: "top";
         left: "left";
         right: "right";
-        top: "top";
         bottom: "bottom";
     }>>;
     drawerWidth: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -10931,8 +11228,8 @@ declare const ObjectGanttPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     gantt: z.ZodOptional<z.ZodObject<{
@@ -11092,8 +11389,8 @@ declare const ObjectGridPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     defaultSort: z.ZodOptional<z.ZodNever>;
@@ -11215,6 +11512,29 @@ declare const ObjectKanbanPropsSchema: z.ZodObject<{
     quickAdd: z.ZodOptional<z.ZodNever>;
     coverImageField: z.ZodOptional<z.ZodString>;
     conditionalFormatting: z.ZodOptional<z.ZodUnknown>;
+    navigation: z.ZodOptional<z.ZodObject<{
+        mode: z.ZodDefault<z.ZodEnum<{
+            split: "split";
+            none: "none";
+            modal: "modal";
+            drawer: "drawer";
+            page: "page";
+            popover: "popover";
+            new_window: "new_window";
+        }>>;
+        view: z.ZodOptional<z.ZodNever>;
+        preventNavigation: z.ZodDefault<z.ZodBoolean>;
+        openNewTab: z.ZodDefault<z.ZodBoolean>;
+        size: z.ZodDefault<z.ZodEnum<{
+            full: "full";
+            md: "md";
+            auto: "auto";
+            sm: "sm";
+            lg: "lg";
+            xl: "xl";
+        }>>;
+        width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 
 // ── ObjectListViewSchema (const) ──
@@ -11686,6 +12006,7 @@ declare const ObjectListViewSchema: z.ZodObject<{
         }>>;
         titleField: z.ZodOptional<z.ZodString>;
         visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     chart: z.ZodOptional<z.ZodObject<{
         chartType: z.ZodDefault<z.ZodEnum<{
@@ -11736,6 +12057,7 @@ declare const ObjectListViewSchema: z.ZodObject<{
         summarizeField: z.ZodOptional<z.ZodString>;
         titleField: z.ZodOptional<z.ZodString>;
         columns: z.ZodArray<z.ZodString>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     gantt: z.ZodOptional<z.ZodObject<{
         startDateField: z.ZodString;
@@ -11816,6 +12138,7 @@ declare const ObjectListViewSchema: z.ZodObject<{
             week: "week";
             quarter: "quarter";
         }>>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     calendar: z.ZodOptional<z.ZodObject<{
         startDateField: z.ZodString;
@@ -12029,8 +12352,8 @@ declare const ObjectMapPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     map: z.ZodOptional<z.ZodObject<{
@@ -12277,6 +12600,107 @@ declare const ObjectNavItemSchema: z.ZodObject<{
     requiredPermissions: z.ZodOptional<z.ZodArray<z.ZodString>>;
     requiresObject: z.ZodOptional<z.ZodString>;
     requiresService: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+
+// ── ObjectTimelineProps (type) ──
+type ObjectTimelineProps = z.input<typeof ObjectTimelinePropsSchema>;
+
+// ── ObjectTimelinePropsParsed (type) ──
+type ObjectTimelinePropsParsed = z.infer<typeof ObjectTimelinePropsSchema>;
+
+// ── ObjectTimelinePropsSchema (const) ──
+declare const ObjectTimelinePropsSchema: z.ZodObject<{
+    objectName: z.ZodOptional<z.ZodString>;
+    timeline: z.ZodOptional<z.ZodObject<{
+        startDateField: z.ZodString;
+        endDateField: z.ZodOptional<z.ZodString>;
+        titleField: z.ZodString;
+        groupByField: z.ZodOptional<z.ZodString>;
+        colorField: z.ZodOptional<z.ZodString>;
+        scale: z.ZodDefault<z.ZodEnum<{
+            year: "year";
+            month: "month";
+            day: "day";
+            hour: "hour";
+            week: "week";
+            quarter: "quarter";
+        }>>;
+        limit: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
+    filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        field: z.ZodString;
+        operator: z.ZodPreprocess<z.ZodEnum<{
+            in: "in";
+            starts_with: "starts_with";
+            ends_with: "ends_with";
+            not_in: "not_in";
+            between: "between";
+            greater_than: "greater_than";
+            after: "after";
+            greater_than_or_equal: "greater_than_or_equal";
+            less_than: "less_than";
+            before: "before";
+            less_than_or_equal: "less_than_or_equal";
+            equals: "equals";
+            not_equals: "not_equals";
+            contains: "contains";
+            not_contains: "not_contains";
+            icontains: "icontains";
+            is_null: "is_null";
+            is_not_null: "is_not_null";
+            is_empty: "is_empty";
+            is_not_empty: "is_not_empty";
+        }>>;
+        value: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean, z.ZodNull, z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>]>>;
+    }, z.core.$strict>>>;
+    sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        field: z.ZodString;
+        order: z.ZodEnum<{
+            asc: "asc";
+            desc: "desc";
+        }>;
+    }, z.core.$strip>>>;
+    limit: z.ZodOptional<z.ZodNumber>;
+    data: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
+    items: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
+    variant: z.ZodOptional<z.ZodEnum<{
+        gantt: "gantt";
+        vertical: "vertical";
+        horizontal: "horizontal";
+    }>>;
+    dateFormat: z.ZodOptional<z.ZodEnum<{
+        long: "long";
+        short: "short";
+        iso: "iso";
+    }>>;
+    rowLabel: z.ZodOptional<z.ZodString>;
+    minDate: z.ZodOptional<z.ZodString>;
+    maxDate: z.ZodOptional<z.ZodString>;
+    descriptionField: z.ZodOptional<z.ZodString>;
+    mapping: z.ZodOptional<z.ZodUnknown>;
+    navigation: z.ZodOptional<z.ZodObject<{
+        mode: z.ZodDefault<z.ZodEnum<{
+            split: "split";
+            none: "none";
+            modal: "modal";
+            drawer: "drawer";
+            page: "page";
+            popover: "popover";
+            new_window: "new_window";
+        }>>;
+        view: z.ZodOptional<z.ZodNever>;
+        preventNavigation: z.ZodDefault<z.ZodBoolean>;
+        openNewTab: z.ZodDefault<z.ZodBoolean>;
+        size: z.ZodDefault<z.ZodEnum<{
+            full: "full";
+            md: "md";
+            auto: "auto";
+            sm: "sm";
+            lg: "lg";
+            xl: "xl";
+        }>>;
+        width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 
 // ── ObjectTreeProps (type) ──
@@ -18264,8 +18688,8 @@ declare const PageTabsProps: z.ZodObject<{
     }>>;
     type: z.ZodOptional<z.ZodNever>;
     position: z.ZodDefault<z.ZodEnum<{
-        left: "left";
         top: "top";
+        left: "left";
     }>>;
     alwaysShowStrip: z.ZodOptional<z.ZodBoolean>;
     items: z.ZodArray<z.ZodObject<{
@@ -18465,11 +18889,11 @@ declare const RecordActivityProps: z.ZodObject<{
         file: "file";
         email: "email";
         system: "system";
-        approval: "approval";
+        note: "note";
         sharing: "sharing";
+        approval: "approval";
         event: "event";
         comment: "comment";
-        note: "note";
         field_change: "field_change";
         task: "task";
         call: "call";
@@ -18644,11 +19068,11 @@ declare const RecordChatterProps: z.ZodObject<{
             file: "file";
             email: "email";
             system: "system";
-            approval: "approval";
+            note: "note";
             sharing: "sharing";
+            approval: "approval";
             event: "event";
             comment: "comment";
-            note: "note";
             field_change: "field_change";
             task: "task";
             call: "call";
@@ -18753,6 +19177,8 @@ declare const RecordDetailsProps: z.ZodObject<{
     hideFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
     inlineEdit: z.ZodOptional<z.ZodBoolean>;
     showHeader: z.ZodOptional<z.ZodBoolean>;
+    enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+    redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
     aria: z.ZodOptional<z.ZodObject<{
         ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
             key?: never;
@@ -18795,6 +19221,8 @@ declare const RecordHighlightsProps: z.ZodObject<{
         vertical: "vertical";
         horizontal: "horizontal";
     }>>;
+    enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+    redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
     aria: z.ZodOptional<z.ZodObject<{
         ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
             key?: never;
@@ -18926,12 +19354,79 @@ declare const RecordRelatedListProps: z.ZodObject<{
     objectName: z.ZodString;
     relationshipField: z.ZodString;
     relationshipValueField: z.ZodDefault<z.ZodString>;
-    columns: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    columns: z.ZodOptional<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodArray<z.ZodObject<{
+        field: z.ZodString;
+        label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }, Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }, z.core.$ZodTypeInternals<Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }, Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }>>]>>;
+        width: z.ZodOptional<z.ZodNumber>;
+        align: z.ZodOptional<z.ZodEnum<{
+            left: "left";
+            right: "right";
+            center: "center";
+        }>>;
+        hidden: z.ZodOptional<z.ZodBoolean>;
+        sortable: z.ZodOptional<z.ZodBoolean>;
+        resizable: z.ZodOptional<z.ZodBoolean>;
+        wrap: z.ZodOptional<z.ZodBoolean>;
+        type: z.ZodOptional<z.ZodString>;
+        pinned: z.ZodOptional<z.ZodEnum<{
+            left: "left";
+            right: "right";
+        }>>;
+        summary: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
+            count: "count";
+            none: "none";
+            min: "min";
+            max: "max";
+            sum: "sum";
+            avg: "avg";
+            count_empty: "count_empty";
+            count_filled: "count_filled";
+            count_unique: "count_unique";
+            percent_empty: "percent_empty";
+            percent_filled: "percent_filled";
+        }>, z.ZodObject<{
+            type: z.ZodEnum<{
+                count: "count";
+                none: "none";
+                min: "min";
+                max: "max";
+                sum: "sum";
+                avg: "avg";
+                count_empty: "count_empty";
+                count_filled: "count_filled";
+                count_unique: "count_unique";
+                percent_empty: "percent_empty";
+                percent_filled: "percent_filled";
+            }>;
+            field: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>]>>;
+        prefix: z.ZodOptional<z.ZodObject<{
+            field: z.ZodString;
+            type: z.ZodDefault<z.ZodEnum<{
+                text: "text";
+                badge: "badge";
+            }>>;
+        }, z.core.$strict>>;
+        link: z.ZodOptional<z.ZodBoolean>;
+        action: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>]>>;
     sort: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strict>>]>>;
     limit: z.ZodDefault<z.ZodNumber>;
@@ -19023,6 +19518,8 @@ declare const RecordRelatedListProps: z.ZodObject<{
             defaultValue?: never;
         }>>]>>;
     }, z.core.$strict>>;
+    enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+    redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
     aria: z.ZodOptional<z.ZodObject<{
         ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
             key?: never;
@@ -19658,6 +20155,7 @@ declare const TimelineConfigSchema: z.ZodObject<{
         week: "week";
         quarter: "quarter";
     }>>;
+    limit: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strict>;
 
 // ── TreeConfig (type) ──
@@ -20563,6 +21061,7 @@ declare const VIEW_METADATA_MEMBERS: {
                 }>>;
                 titleField: z.ZodOptional<z.ZodString>;
                 visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             chart: z.ZodOptional<z.ZodObject<{
                 chartType: z.ZodDefault<z.ZodEnum<{
@@ -20613,6 +21112,7 @@ declare const VIEW_METADATA_MEMBERS: {
                 summarizeField: z.ZodOptional<z.ZodString>;
                 titleField: z.ZodOptional<z.ZodString>;
                 columns: z.ZodArray<z.ZodString>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gantt: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -20693,6 +21193,7 @@ declare const VIEW_METADATA_MEMBERS: {
                     week: "week";
                     quarter: "quarter";
                 }>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             calendar: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -21801,6 +22302,7 @@ declare const VIEW_METADATA_MEMBERS: {
                 }>>;
                 titleField: z.ZodOptional<z.ZodString>;
                 visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             chart: z.ZodOptional<z.ZodObject<{
                 chartType: z.ZodDefault<z.ZodEnum<{
@@ -21851,6 +22353,7 @@ declare const VIEW_METADATA_MEMBERS: {
                 summarizeField: z.ZodOptional<z.ZodString>;
                 titleField: z.ZodOptional<z.ZodString>;
                 columns: z.ZodArray<z.ZodString>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gantt: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -21931,6 +22434,7 @@ declare const VIEW_METADATA_MEMBERS: {
                     week: "week";
                     quarter: "quarter";
                 }>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             calendar: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -22876,6 +23380,7 @@ declare const VIEW_METADATA_MEMBERS: {
             summarizeField: z.ZodOptional<z.ZodString>;
             titleField: z.ZodOptional<z.ZodString>;
             columns: z.ZodArray<z.ZodString>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         calendar: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -22962,6 +23467,7 @@ declare const VIEW_METADATA_MEMBERS: {
             }>>;
             titleField: z.ZodOptional<z.ZodString>;
             visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         timeline: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -22977,6 +23483,7 @@ declare const VIEW_METADATA_MEMBERS: {
                 week: "week";
                 quarter: "quarter";
             }>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         chart: z.ZodOptional<z.ZodObject<{
             chartType: z.ZodDefault<z.ZodEnum<{
@@ -24893,6 +25400,7 @@ declare const ViewSchema: z.ZodObject<{
             }>>;
             titleField: z.ZodOptional<z.ZodString>;
             visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         chart: z.ZodOptional<z.ZodObject<{
             chartType: z.ZodDefault<z.ZodEnum<{
@@ -24943,6 +25451,7 @@ declare const ViewSchema: z.ZodObject<{
             summarizeField: z.ZodOptional<z.ZodString>;
             titleField: z.ZodOptional<z.ZodString>;
             columns: z.ZodArray<z.ZodString>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         gantt: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -25023,6 +25532,7 @@ declare const ViewSchema: z.ZodObject<{
                 week: "week";
                 quarter: "quarter";
             }>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         calendar: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -26131,6 +26641,7 @@ declare const ViewSchema: z.ZodObject<{
             }>>;
             titleField: z.ZodOptional<z.ZodString>;
             visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         chart: z.ZodOptional<z.ZodObject<{
             chartType: z.ZodDefault<z.ZodEnum<{
@@ -26181,6 +26692,7 @@ declare const ViewSchema: z.ZodObject<{
             summarizeField: z.ZodOptional<z.ZodString>;
             titleField: z.ZodOptional<z.ZodString>;
             columns: z.ZodArray<z.ZodString>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         gantt: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -26261,6 +26773,7 @@ declare const ViewSchema: z.ZodObject<{
                 week: "week";
                 quarter: "quarter";
             }>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         calendar: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -27046,13 +27559,13 @@ declare const actionForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -27246,13 +27759,13 @@ declare const appForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -27503,13 +28016,13 @@ declare const dashboardForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -27703,13 +28216,13 @@ declare const datasetForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -27982,13 +28495,13 @@ declare const pageForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -28188,13 +28701,13 @@ declare const reportForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -28408,13 +28921,13 @@ declare const viewForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {

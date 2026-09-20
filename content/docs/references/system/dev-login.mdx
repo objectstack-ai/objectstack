@@ -1,0 +1,36 @@
+---
+title: Dev Login
+description: Dev Login protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/system/dev-login.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { DevLoginSchema } from '@objectstack/spec/system';
+import type { DevLogin } from '@objectstack/spec/system';
+
+// Validate data
+const result = DevLoginSchema.parse(data);
+```
+
+---
+
+## DevLogin
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **email** | `string` | ✅ | Email of an account this application seeds — printed by the development boot banner |
+| **password** | `string` | optional | Development-fixture password printed beside the address; omit when the account signs in another way |
+| **label** | `string` | optional | The audience this account belongs to (e.g. `Hiring admin`) — printed before the address |
+
+
+---
+

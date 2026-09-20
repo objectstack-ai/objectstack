@@ -1867,11 +1867,12 @@ const CORPUS = defineCorpus({
 //   string-substring   the symbol survives only INSIDE a longer string token:
 //                      `saveItem` in `client: 'meta.saveItem'`, `:shareId` in a
 //                      route pattern, a name inside an `it(...)` title or a
-//                      `.describe(...)` sentence. 29 rows, the largest class.
+//                      `.describe(...)` sentence. 12 rows, still the largest
+//                      class.
 //   import-only        the cited file IMPORTS the symbol; the declaration is in
-//                      another file. 9 rows.
+//                      another file. 6 rows.
 //   member-access      the symbol survives only as `x.symbol` on some other
-//                      object — `manifest.objectExtensions`. 3 rows.
+//                      object — `manifest.objectExtensions`. 2 rows.
 //   json-value-not-key the `.json` target carries the symbol as a VALUE; the
 //                      shared rule reads JSON KEYS. 3 rows.
 //   regex-literal      the symbol survives only inside a regex literal. 1 row.
@@ -1881,13 +1882,63 @@ const CORPUS = defineCorpus({
 //                      truncated an item-id reference at its first hyphen and
 //                      produced a phantom `#access`, which the permissive rule
 //                      then resolved against the spelling `access-security`.
-//                      1 row — the sharpest single illustration of what a
-//                      looser second resolver buys.
+//                      the sharpest single illustration of what a looser second
+//                      resolver buys. 0 rows — DRAINED by the second slice, and
+//                      the reading is kept because the shape is not: its one row
+//                      was `bad-citation` BY VERDICT, and `shape` only ever said
+//                      why the withdrawn rule used to resolve it. ⚠️ A reader who
+//                      takes the shape for the disposition is sent at the
+//                      DETECTOR, which since #18107 is `scripts/symbol-anchors.mjs`
+//                      — the file this card forbids by name. Repaired
+//                      citation-side like the other twelve: the truncation was
+//                      not even happening any more — the citation's fragment
+//                      was followed by a SPACE — so the symbol it named was
+//                      simply a key `areas/access-security.json` does not
+//                      declare. ⚠️ That fragment is spelled in WORDS here and
+//                      not in a code span: a lone fragment span is a
+//                      CONTINUATION anchor, so writing it would file this
+//                      comment as the citation the row was.
+//
+// ⭐ THE DRAIN (#18104). The `bad-citation` half is a population with an owner,
+// and it leaves this ledger ONE WAY: the citation is re-pointed at what the
+// cited file actually declares, the row goes, and the ceiling below comes down
+// by the same number in the same edit. ⛔ Never by raising the ceiling, ⛔ never
+// by widening `scripts/symbol-anchors.mjs`, ⛔ never by lowering a file floor —
+// a repair moves an anchor from `residual` to `resolved` and leaves the floor
+// population untouched, which is why draining costs no floor headroom at all.
+//
+// ⚠️ The binding measurement above (56 of 633, at #16898) is a DATED READING of
+// the tree it was taken against and is left standing as one. It is not this
+// ledger's current size: the drain lands per area file, so read the live count
+// off `SHARED_RESOLVER_RESIDUAL.length` and the console line, never off that
+// paragraph. First slice landed (#18104): `areas/access-security.json`,
+// `areas/api-backend.json` and `areas/automation.json` — 9 rows, all of them
+// citations naming a route table's client-method names or route path
+// parameters where the declaration the item means is the ledger export itself.
+// Second slice landed (#18104): `areas/identity-auth.json` — 13 rows, the
+// largest single-file block, the same reading applied plus three of its own: an
+// import-only persona whose constant had MOVED to another file (the path was
+// re-pointed, not the symbol), a `.json` cross-area citation re-pointed at the
+// `items` block it means, and the `detector-artifact` row above. ⚠️ That file
+// still carries its 2 `accept-set` rows and that is CORRECT, not half-done:
+// they are #18101's, and reaching them means widening the shared core.
+// Third slice landed (#18104): `areas/cli.json`, `areas/platform-core.json`
+// and `areas/records-forms.json` — 15 rows, the three largest remaining
+// `bad-citation` blocks taken together. Two classes recur from the slices
+// above (a route PATH PARAMETER re-pointed at the ledger export, a symbol the
+// cited file only IMPORTS re-pointed at what it declares) and three are this
+// slice's own: an error code cited in the LOWER-CASE spelling where the test
+// pins the ADR-0112 SCREAMING_SNAKE one, a manifest VALUE re-pointed at the
+// `scripts.dev` key pair that carries it, and a member read off a manifest or
+// a capability re-pointed at the function whose body does the reading.
+// ⚠️ `areas/records-forms.json` still carries its 2 `accept-set` rows, for
+// the same reason `areas/identity-auth.json` does: that file mixes both
+// verdicts, so a slice judges it ROW BY ROW BY VERDICT, never by file.
 //
 // `verdict` is the classification #16898's acceptance asks for, and there are
 // exactly two:
 //
-//   bad-citation  (47 rows) the anchor names a symbol the cited file does not
+//   bad-citation  (10 rows) the anchor names a symbol the cited file does not
 //                 declare. The repair is in the LEDGER: re-point the anchor at
 //                 what the file carries, or drop to a bare citation. ⚠️ Dropping
 //                 costs the file an anchor and most floors have no headroom, so
@@ -1902,57 +1953,20 @@ const CORPUS = defineCorpus({
 //                 the core to reach them: it is shared with four other corpora
 //                 and widening it would export this defect to all of them.
 const SHARED_RESOLVER_RESIDUAL = Object.freeze([
-  { doc: 'areas/access-security.json', anchor: 'packages/rest/src/rest-route-ledger.ts#saveItem', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/access-security.json', anchor: 'packages/rest/src/rest-route-ledger.ts#shareId', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/ai.json', anchor: 'packages/mcp/src/plugin.ts#OS_MCP_SERVER_ENABLED', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/ai.json', anchor: 'packages/runtime/src/domains/ai.ts#capabilityUnavailable', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/rest/src/rest-route-ledger.ts#REST', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/runtime/src/route-ledger.ts#getLegalNextStates', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/triggers/trigger-api/src/trigger-api-route-ledger.ts#flowName', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/approvals.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#AUDITOR_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/attachments-storage.json', anchor: 'packages/spec/liveness/field.json#live', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'examples/app-showcase/objectstack.config.ts#ConnectorRestPlugin', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#getRuntimeStatus', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#getScreen', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#runId', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/cli/src/commands/compile.ts#emitJson', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts#Doctor', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/cli/src/utils/format.exit-code.test.ts#emitJson', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/create-objectstack/src/templates/blank/package.json#objectstack', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/verify/src/verify.ts#VALIDATION_FAILED', shape: 'regex-literal', verdict: 'bad-citation' },
   { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#sales_region', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#signed_on', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/identity-auth.json', anchor: 'docs/qa/platform-checklist/areas/access-security.json#access', shape: 'detector-artifact', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#PHONE_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/platform-objects/src/identity/sys-member.object.ts#BUILTIN_MEMBERSHIP_ROLE_OPTIONS', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/platform-objects/src/identity/sys-oauth-application.object.ts#OAuth', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#bootstrapStatus', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#linkSocial', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#revokeOthers', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#sendVerificationEmail', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#setActive', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#updateUser', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-security/src/security-plugin.ts#__referentialFieldClear', shape: 'member-access', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts#PermissionSet', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/rest/src/rest-route-ledger.ts#describeDelegableScope', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_invitation', shape: 'dotted-string-head', verdict: 'accept-set' },
   { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_user', shape: 'dotted-string-head', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/objectstack.config.ts#declarativeStdio', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/src/system/datasources/showcase-external.datasource.ts#onMismatch', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'packages/services/service-messaging/src/messaging-service.ts#PreferenceResolver', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/integration-system.json', anchor: 'packages/spec/liveness/email_template.json#requireVars', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/objectql/src/engine.ts#objectExtensions', shape: 'member-access', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/plugins/plugin-auth/src/auth-plugin.ts#Providers', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts#writable_package_required', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/runtime/src/domains/notifications.ts#markRead', shape: 'member-access', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/runtime/src/route-ledger.ts#commitId', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/data/objects/business-unit.object.ts#allowCreate', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#Specimen', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/ui/actions/index.ts#maxSize', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/lint/src/validate-action-locations.ts#action', shape: 'local-binding', verdict: 'bad-citation' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/rest/src/rest-route-ledger.ts#jobId', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/spec/src/data/object.zod.ts#FEEDS_DISABLED', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/spec/src/data/object.zod.ts#query', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/objectql/src/overlay-precedence.test.ts#not_overridable', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/meta-write-actor-identity.test.ts#Actor', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/rest-route-ledger.ts#getHistory', shape: 'string-substring', verdict: 'bad-citation' },
@@ -1963,7 +1977,7 @@ const SHARED_RESOLVER_RESIDUAL = Object.freeze([
 // fail), so this is the belt on the braces: a silent append — the one edit that
 // would turn a closed ledger back into a permissive rule, one row at a time —
 // refuses here rather than validating.
-const SHARED_RESOLVER_RESIDUAL_CEILING = 55;
+const SHARED_RESOLVER_RESIDUAL_CEILING = 18;
 
 const residualKey = (doc, anchor) => `${doc}::${anchor}`;
 const SHARED_RESOLVER_RESIDUAL_INDEX = new Map(

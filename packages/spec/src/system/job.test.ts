@@ -6,6 +6,7 @@ import {
   ScheduleSchema,
   RetryPolicySchema,
   JobSchema,
+  defineJob,
   JobExecutionStatus,
   JobExecutionSchema,
   type Schedule,
@@ -16,6 +17,7 @@ import {
   type Job,
   type JobExecution,
 } from './job.zod';
+import { isValueDomainMember } from '../shared/value-domain.zod';
 
 describe('CronScheduleSchema', () => {
   it('should accept valid cron schedule', () => {
@@ -60,6 +62,83 @@ describe('CronScheduleSchema', () => {
       const schedule = { type: 'cron' as const, expression };
       expect(() => CronScheduleSchema.parse(schedule)).not.toThrow();
     });
+  });
+});
+
+/**
+ * `CronSchedule.timezone` is judged by the package's own `iana_time_zone`
+ * membership predicate (#16292) — the authoring door for the value the
+ * scheduler actually honours, which the `sys_job.timezone` column cannot judge
+ * because it is a write-only mirror.
+ *
+ * ⚠️ **No pinned zone list here, deliberately.** Membership is the
+ * `Intl.DateTimeFormat` probe, so the accept set is a function of the host's
+ * ICU. A test enumerating zones would be a verdict about this container's tz
+ * database; the invariant that actually belongs to this schema is that its
+ * verdict EQUALS `isValueDomainMember('iana_time_zone', …)` for every input, on
+ * whatever host runs it. The zone-by-zone traps (`UTC` and `Asia/Kolkata` are
+ * members although `Intl.supportedValuesOf` omits both, `Europe/Munich` is not)
+ * are pinned once, where the predicate lives:
+ * `packages/spec/src/shared/value-domain.test.ts`.
+ *
+ * The two ends asserted absolutely are the two this contract cannot survive
+ * without, and both are ICU-independent: `'UTC'` — the schema's own declared
+ * default, which ECMA-402 requires every runtime to carry, so the narrowing can
+ * never refuse an omitted key — and `'UTC+8'`, an offset that names no zone.
+ */
+describe('CronScheduleSchema.timezone — iana_time_zone membership (#16292)', () => {
+  const parseTz = (timezone: string) =>
+    CronScheduleSchema.safeParse({ type: 'cron', expression: '0 0 * * *', timezone });
+
+  /** Shapes an author plausibly writes, both sides of the line. */
+  const CORPUS = [
+    'UTC', 'Asia/Shanghai', 'America/New_York', 'Asia/Kolkata', 'Europe/Kyiv',
+    'US/Eastern', 'GMT', 'America/Argentina/Buenos_Aires', 'europe/zurich',
+    'UTC+8', 'GMT+8', 'Europe/Munich', 'Mars/Olympus', 'China Standard Time',
+    '+08:00', 'Asia/Shanghai ', '', 'not a zone',
+  ];
+
+  it('agrees with the shared predicate on every input — the schema adds no second definition', () => {
+    for (const value of CORPUS) {
+      expect(parseTz(value).success, value).toBe(isValueDomainMember('iana_time_zone', value));
+    }
+  });
+
+  it('admits `UTC`, so the declared default still parses and an omitted key is untouched', () => {
+    expect(parseTz('UTC').success).toBe(true);
+    expect(CronScheduleSchema.parse({ type: 'cron', expression: '0 0 * * *' }).timezone).toBe('UTC');
+  });
+
+  it('refuses `UTC+8` with a located issue instead of carrying it to the scheduler', () => {
+    const result = parseTz('UTC+8');
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.path.join('.') === 'timezone');
+    expect(issue, 'the refusal must be located on `timezone`, not on the object').toBeDefined();
+    expect(issue?.code).toBe('custom');
+    // Not a wording pin: the refusal is an author's only prescription here, and a
+    // message that names neither the standard nor the offending value leaves them
+    // with "invalid input" for a value that looks like a time zone.
+    expect(issue?.message).toContain('IANA');
+    expect(issue?.message).toContain('UTC+8');
+  });
+
+  it('refuses through `defineJob`, located at `schedule.timezone`', () => {
+    const config = {
+      name: 'sync_metadata_nightly',
+      schedule: { type: 'cron' as const, expression: '0 0 * * *', timezone: 'UTC+8' },
+      handler: 'syncMetadata',
+    };
+    expect(() => defineJob(config)).toThrow();
+    const result = JobSchema.safeParse(config);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.some((i) => i.path.join('.') === 'schedule.timezone')).toBe(true);
+  });
+
+  it('leaves the zoneless branches alone — only the cron variant carries a timezone', () => {
+    expect(ScheduleSchema.safeParse({ type: 'interval', intervalMs: 60000 }).success).toBe(true);
+    expect(ScheduleSchema.safeParse({ type: 'once', at: '2026-01-01T00:00:00Z' }).success).toBe(true);
   });
 });
 

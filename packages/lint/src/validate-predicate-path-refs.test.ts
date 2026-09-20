@@ -556,7 +556,22 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `data.type == 'page'` — went with the key it configured. A form input for
     // an unwritable key is the false-compliant UI half of a retirement, so the
     // census falls by exactly one.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(52);
+    // It is 53 today, and this one is an ADDITION: #19085 gave
+    // `field.relatedListFilter` the form row its declaration always implied —
+    // the served schema declared the key while no form offered it, so an
+    // author's only door was the Source tab's free-text JSON. The row is gated
+    // `data.type in ['lookup','master_detail']`, mirroring the key's own
+    // contract text ("meaningful on a child's `master_detail`/`lookup` field")
+    // and the `reference` row beside it in the same form; `FieldSchema` accepts
+    // the key on every type, so that gate is a meaningfulness gate, not a parse
+    // gate — the same shape as the `valueDomain` entry above.
+    // Measured rather than inferred from the delta: the corpus was enumerated
+    // on this tree and on the merge base `eeaa882459`, and differenced by
+    // `<form>::<field>::<source>`. Exactly one entry was added —
+    // `field :: relatedListFilter :: data.type in ['lookup','master_detail']`
+    // — and NONE was removed. The same card's second row, `object.validations`,
+    // carries no predicate at all, so it does not enter this census.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(53);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);

@@ -1137,9 +1137,10 @@ export function selfTest() {
 
     // ⭐⭐ THE FOURTH DOOR. The fixtures are the census's own round trip, spelled
     // the way the census spells it: a receiver type authored across lines, put
-    // through `.replace(/\s+/g, ' ')` -- the collapse at
-    // `tenant-audit-census.mjs:459` -- and wrapped in the synthetic alias its
-    // `:723` builds. Measured 2026-09-18 on TypeScript 6.0.3: the AUTHORED
+    // through `.replace(/\s+/g, ' ')` -- the collapse in
+    // `scripts/tenant-audit-census.mjs` (line 459 as measured) -- and wrapped
+    // in the synthetic alias its line 723 (as measured) builds. Measured
+    // 2026-09-18 on TypeScript 6.0.3: the AUTHORED
     // spelling is legal TypeScript (0 diagnostics), the COLLAPSED one is not
     // (1: "';' expected"), and the SEMICOLON spelling is the card's lit control.
     // All three are held here, because only the set of them says the defect is

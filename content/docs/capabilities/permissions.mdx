@@ -1,6 +1,6 @@
 ---
 title: Permissions — Who Sees What
-description: Four layers from object capability to per-field visibility, five data-depth scopes, sharing rules, audit, and an explain facility
+description: Four layers from object capability to per-field visibility, five data-depth scopes, sharing rules, audit, and an explain API
 ---
 
 
@@ -21,7 +21,14 @@ People sit in a **business-unit tree** and hold **positions**; reporting lines d
 
 - Every object must declare its sharing posture explicitly — "forgot to configure, so everyone can see it" cannot happen.
 - **Audit** records who changed what, when, with old and new values; tracked objects expose a history timeline on the record. Record *views* can be recorded too, opt-in per object, so "who opened this customer record, and when?" has an answer ([Record-View Auditing](/docs/permissions/record-view-auditing)).
-- **Explain** answers "why can this person see this record?" layer by layer — permission questions get diagnosed, not guessed at.
+- **Explain** answers "why can this person see this record?" layer by layer — permission questions get diagnosed, not guessed at. It is an **API capability**, not a screen: there is no built-in panel today, and an administrator reaches it by calling the endpoint.
+
+  ```bash
+  curl -H "Authorization: Bearer $TOKEN" \
+    "https://your-host/api/v1/security/explain?object=opportunity&operation=read&userId=USER_ID"
+  ```
+
+  The response names the deciding rule at each layer. An object name that is not declared on the runtime answers `404 OBJECT_NOT_FOUND` — a typo is never reported as a permission decision.
 - Sign-in hardening for the enterprise tier: SSO, enforced MFA, password policy and breach checks, lockout throttling.
 
 > **In HotCRM**: six ready-made permission profiles — system admin, sales manager, sales rep, marketing, service agent, and a guest portal profile that can only submit the public form — plus sharing rules on accounts, opportunities, and cases, and a sales position ladder. Start from these and adjust.

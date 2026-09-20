@@ -236,8 +236,8 @@ declare const EffectiveObjectPermissionSchema: z.ZodType<Record<string, unknown>
             create: "create";
             restore: "restore";
             purge: "purge";
-            import: "import";
             export: "export";
+            import: "import";
         }>>>;
     };
 };
@@ -257,10 +257,10 @@ declare const ExplainDecisionSchema: z.ZodObject<{
         update: "update";
         read: "read";
         create: "create";
+        transfer: "transfer";
         restore: "restore";
         purge: "purge";
         export: "export";
-        transfer: "transfer";
     }>;
     principal: z.ZodObject<{
         userId: z.ZodNullable<z.ZodString>;
@@ -269,9 +269,9 @@ declare const ExplainDecisionSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>;
         onBehalfOf: z.ZodOptional<z.ZodObject<{
             userId: z.ZodString;
@@ -286,15 +286,15 @@ declare const ExplainDecisionSchema: z.ZodObject<{
     layers: z.ZodArray<z.ZodObject<{
         layer: z.ZodEnum<{
             sharing: "sharing";
-            fls: "fls";
-            rls: "rls";
             owd_baseline: "owd_baseline";
             tenant_isolation: "tenant_isolation";
             principal: "principal";
             required_permissions: "required_permissions";
             object_crud: "object_crud";
+            fls: "fls";
             depth: "depth";
             vama_bypass: "vama_bypass";
+            rls: "rls";
         }>;
         kernelTier: z.ZodOptional<z.ZodEnum<{
             layer_0_tenant: "layer_0_tenant";
@@ -334,11 +334,11 @@ declare const ExplainDecisionSchema: z.ZodObject<{
             rules: z.ZodDefault<z.ZodArray<z.ZodObject<{
                 kind: z.ZodEnum<{
                     sharing_rule: "sharing_rule";
-                    ownership: "ownership";
-                    team: "team";
                     tenant_filter: "tenant_filter";
                     owd_baseline: "owd_baseline";
+                    ownership: "ownership";
                     record_share: "record_share";
+                    team: "team";
                     territory: "territory";
                     rls_policy: "rls_policy";
                 }>;
@@ -365,15 +365,15 @@ declare const ExplainDecisionSchema: z.ZodObject<{
         visible: z.ZodBoolean;
         decidedBy: z.ZodOptional<z.ZodEnum<{
             sharing: "sharing";
-            fls: "fls";
-            rls: "rls";
             owd_baseline: "owd_baseline";
             tenant_isolation: "tenant_isolation";
             principal: "principal";
             required_permissions: "required_permissions";
             object_crud: "object_crud";
+            fls: "fls";
             depth: "depth";
             vama_bypass: "vama_bypass";
+            rls: "rls";
         }>>;
     }, z.core.$strip>>;
     records: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -381,15 +381,15 @@ declare const ExplainDecisionSchema: z.ZodObject<{
         visible: z.ZodBoolean;
         decidedBy: z.ZodOptional<z.ZodEnum<{
             sharing: "sharing";
-            fls: "fls";
-            rls: "rls";
             owd_baseline: "owd_baseline";
             tenant_isolation: "tenant_isolation";
             principal: "principal";
             required_permissions: "required_permissions";
             object_crud: "object_crud";
+            fls: "fls";
             depth: "depth";
             vama_bypass: "vama_bypass";
+            rls: "rls";
         }>>;
     }, z.core.$strip>>>;
 }, z.core.$strip>;
@@ -404,15 +404,15 @@ type ExplainLayerParsed = z.infer<typeof ExplainLayerSchema>;
 declare const ExplainLayerSchema: z.ZodObject<{
     layer: z.ZodEnum<{
         sharing: "sharing";
-        fls: "fls";
-        rls: "rls";
         owd_baseline: "owd_baseline";
         tenant_isolation: "tenant_isolation";
         principal: "principal";
         required_permissions: "required_permissions";
         object_crud: "object_crud";
+        fls: "fls";
         depth: "depth";
         vama_bypass: "vama_bypass";
+        rls: "rls";
     }>;
     kernelTier: z.ZodOptional<z.ZodEnum<{
         layer_0_tenant: "layer_0_tenant";
@@ -452,11 +452,11 @@ declare const ExplainLayerSchema: z.ZodObject<{
         rules: z.ZodDefault<z.ZodArray<z.ZodObject<{
             kind: z.ZodEnum<{
                 sharing_rule: "sharing_rule";
-                ownership: "ownership";
-                team: "team";
                 tenant_filter: "tenant_filter";
                 owd_baseline: "owd_baseline";
+                ownership: "ownership";
                 record_share: "record_share";
+                team: "team";
                 territory: "territory";
                 rls_policy: "rls_policy";
             }>;
@@ -485,11 +485,11 @@ type ExplainMatchedRule = z.input<typeof ExplainMatchedRuleSchema>;
 declare const ExplainMatchedRuleSchema: z.ZodObject<{
     kind: z.ZodEnum<{
         sharing_rule: "sharing_rule";
-        ownership: "ownership";
-        team: "team";
         tenant_filter: "tenant_filter";
         owd_baseline: "owd_baseline";
+        ownership: "ownership";
         record_share: "record_share";
+        team: "team";
         territory: "territory";
         rls_policy: "rls_policy";
     }>;
@@ -517,10 +517,10 @@ declare const ExplainOperationSchema: z.ZodEnum<{
     update: "update";
     read: "read";
     create: "create";
+    transfer: "transfer";
     restore: "restore";
     purge: "purge";
     export: "export";
-    transfer: "transfer";
 }>;
 
 // ── ExplainRecordAttribution (type) ──
@@ -541,11 +541,11 @@ declare const ExplainRecordAttributionSchema: z.ZodObject<{
     rules: z.ZodDefault<z.ZodArray<z.ZodObject<{
         kind: z.ZodEnum<{
             sharing_rule: "sharing_rule";
-            ownership: "ownership";
-            team: "team";
             tenant_filter: "tenant_filter";
             owd_baseline: "owd_baseline";
+            ownership: "ownership";
             record_share: "record_share";
+            team: "team";
             territory: "territory";
             rls_policy: "rls_policy";
         }>;
@@ -577,10 +577,10 @@ declare const ExplainRequestSchema: z.ZodObject<{
         update: "update";
         read: "read";
         create: "create";
+        transfer: "transfer";
         restore: "restore";
         purge: "purge";
         export: "export";
-        transfer: "transfer";
     }>;
     recordId: z.ZodOptional<z.ZodString>;
     recordIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -1213,13 +1213,13 @@ declare const permissionForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
