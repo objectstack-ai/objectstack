@@ -534,8 +534,46 @@ export const ChartDrillDownSchema = lazySchema(() => strictObject(
 ));
 
 /**
+ * The sentence every STRUCTURE key on {@link ChartConfigSchema} carries, so the
+ * three carriers' different answers are readable from the key itself and not
+ * only from the schema docblock above it.
+ */
+const STRUCTURE_KEY_NOTE =
+  ' Structure, not appearance: on a dataset-bound dashboard widget the dataset decides this and'
+  + ' the key is refused by name (ADR-0021) — select `dimensions` / `values` on the widget'
+  + ' instead. It stays authorable on an inline-data react `<ObjectChart>`.';
+
+/**
  * Chart Configuration Base
  * Common configuration for all chart types
+ *
+ * ## Who owns STRUCTURE and who owns APPEARANCE (ADR-0021; maintainer ruling
+ * 2026-09-12, decision batch #121 item 1)
+ *
+ * This shape has two kinds of key and the protocol answers them separately,
+ * because the answer depends on how the chart gets its rows:
+ *
+ *  - **Appearance — always the author's.** `title`, `subtitle`, `description`,
+ *    `colors`, `height`, `showLegend`, `showDataLabels`, `annotations` and
+ *    `interaction` say how the chart LOOKS. Nothing derives them, on any
+ *    carrier.
+ *  - **Structure — the DATA SOURCE's, wherever there is one.** `type`,
+ *    `xAxis`, `yAxis` and `series` say which series exist and which column
+ *    each one reads. On a DATASET-BOUND widget the dataset already decides
+ *    that (ADR-0021: the widget selects the dataset's `dimensions` and
+ *    `values` by name, and the widget's own `type` is the chart family), so
+ *    those four keys are refused by name there —
+ *    {@link DashboardWidgetChartConfigSchema} in `dashboard.zod.ts` is the
+ *    per-carrier shape that tombstones them, and each refusal points at the
+ *    dataset selection the intent belongs in. On an INLINE-DATA chart — the
+ *    react `<ObjectChart data={…}>` tier, whose `dataProps` publish all four —
+ *    there is no dataset to derive anything from and the author's axes apply
+ *    as they always have. `ReportChartSchema` narrows `xAxis`/`yAxis` to its
+ *    own bound dataset's dimension/measure names, the third answer.
+ *
+ * ⛔ This base shape is deliberately NOT the place the refusal lives: it is
+ * shared by all three carriers, and a tombstone here would take the keys from
+ * the inline tier the ruling leaves untouched.
  */
 export const ChartConfigSchema = lazySchema(() => strictObject(
   {
@@ -604,7 +642,15 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
     },
   },
   {
-  /** Chart Type */
+  /**
+    * Chart family.
+    *
+    * Structure, not appearance. On a dataset-bound dashboard widget the
+    * WIDGET's own `type` is the family and this key is refused by name
+    * ({@link DashboardWidgetChartConfigSchema}); on an inline-data react
+    * `<ObjectChart>` it is the author's, and it is that tier's SDUI
+    * component discriminator.
+    */
   type: ChartTypeSchema,
 
   /** Titles */
@@ -613,11 +659,14 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
   description: I18nLabelSchema.optional().describe('Accessibility description — announced to screen readers as the chart’s label'),
   
   /** Axes Mapping */
-  xAxis: ChartAxisSchema.optional().describe('X-Axis configuration'),
-  yAxis: z.array(ChartAxisSchema).optional().describe('Y-Axis configuration (support dual axis)'),
+  xAxis: ChartAxisSchema.optional()
+    .describe('X-Axis configuration.' + STRUCTURE_KEY_NOTE),
+  yAxis: z.array(ChartAxisSchema).optional()
+    .describe('Y-Axis configuration (support dual axis).' + STRUCTURE_KEY_NOTE),
   
   /** Series Configuration */
-  series: z.array(ChartSeriesSchema).optional().describe('Defined series configuration'),
+  series: z.array(ChartSeriesSchema).optional()
+    .describe('Defined series configuration.' + STRUCTURE_KEY_NOTE),
   
   /** Appearance. Either a positional palette (string[]) applied per category in
    *  order, or a value→color map ({ value: color }, kanban-style). A value→color

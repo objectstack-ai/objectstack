@@ -675,6 +675,121 @@ export function checkDashboardWidgetMetricMeasureArity(
 }
 
 /**
+ * The prescription each structural `chartConfig` key carries on a dashboard
+ * widget. One builder rather than four literals, because all four refusals say
+ * the same thing and differ only in the key and in where the intent belongs —
+ * and because `retired-key-migrate-sentence.test.ts` pins the closing sentence
+ * class-wide, so one spelling is one thing to keep right.
+ *
+ * ⚠️ The version sentence names the **npm release** this ships in, never the
+ * protocol major (ADR-0087, 「Amended 2026-09-13 (#18003) — the level half」):
+ * the migration entries below are numbered at protocol 18 while
+ * `@objectstack/spec` is on the 17.x line, and the two differ by construction
+ * while the launch window holds.
+ */
+const WIDGET_CHART_STRUCTURE_RETIRED = (key: string, carried: string, instead: string): string =>
+  '`dashboard.widgets[].chartConfig.' + key + '` was removed in @objectstack/spec 17.5.0 '
+  + '(ADR-0021 · ADR-0049 D2) — on a dataset-bound widget the dataset already decides ' + carried
+  + ', so the authored value could only agree with the dataset selection or silently '
+  + 'disagree with it. Delete the key. ' + instead
+  + ' The key is NOT gone from the chart config itself: it stays authorable on the react '
+  + '`<ObjectChart>` tier, where the chart is bound to inline `data` and there is no dataset '
+  + 'to derive it from. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
+ * `dashboard.widgets[].chartConfig` — the chart config as a DATASET-BOUND
+ * widget may author it (maintainer ruling 2026-09-12, decision batch #121
+ * item 1, verbatim 「同意」).
+ *
+ * ## The ownership split this shape encodes
+ *
+ * ADR-0021 made the dataset the single author-facing analytics shape on this
+ * face: `DashboardWidgetSchema.dataset` is REQUIRED, so **every** dashboard
+ * widget is dataset-bound and the dataset owns the structure — which series
+ * exist, and which column each one reads. What is left for `chartConfig` is
+ * APPEARANCE: `title`, `subtitle`, `description`, `colors`, `height`,
+ * `showLegend`, `showDataLabels`, `annotations`, `interaction`. That is the
+ * division every mainstream BI product draws between its field well and its
+ * format pane, and this shape is where the protocol states it.
+ *
+ * So the four structural keys are tombstoned HERE and only here:
+ *
+ * | key | what the dataset owns instead |
+ * |---|---|
+ * | `type` | the widget's own `type` — the SDUI family discriminator |
+ * | `xAxis` | `dimensions` — the dataset dimension the category axis plots |
+ * | `yAxis` | `values` — the dataset measures the value axis plots |
+ * | `series` | `values` (+ `dimensions` for a split) — series MEMBERSHIP |
+ *
+ * ## Why a per-carrier shape and not a tombstone on `ChartConfigSchema`
+ *
+ * The base shape has three carriers and the answer is not the same on all
+ * three. A react `<ObjectChart data={…}>` has no dataset to derive anything
+ * from, so its axes are the author's and stay exactly as they are — ruling
+ * item 1 says so in as many words ("On an inline-data chart the author's axes
+ * apply as today"), and `react-blocks.ts` publishes all four keys in that
+ * block's `dataProps`. A tombstone on the base shape would take them from that
+ * tier too. `ReportChartSchema` is the precedent for the spelling: it is a
+ * `.extend()` of the same base that re-declares `xAxis`/`yAxis` for ITS
+ * carrier, and strictness rides the extend.
+ *
+ * ## What this costs, stated rather than discovered
+ *
+ * `xAxis`/`yAxis`/`series` carried presentation as well as binding —
+ * `ChartAxis.title`/`format`/`min`/`max`/`showGridLines`, `ChartSeries.label`/
+ * `color`/`type`/`stack`. objectui merged that presentation onto the derived
+ * bindings (`mergeAuthoredPresentation`), dropping `ChartAxis.field` and
+ * `ChartSeries.name` — the two binding keys — on the way through. Refusing the
+ * keys by name takes the presentation with the binding, and the combo chart a
+ * dataset-bound widget could author through `series[].type` goes with it. The
+ * ruling weighed that against a live silent-column-switch hole (an authored
+ * `yAxis[].field` synthesised a series and could re-point a dataset-bound
+ * series at another column, with the chart still drawing) and chose the
+ * refusal. The D3 semantic entry
+ * `dashboard-widget-chart-config-structure-refused` is the structured TODO
+ * that names what each key carried, so an operator can move the intent into
+ * the dataset selection.
+ */
+export const DashboardWidgetChartConfigSchema = lazySchema(() => ChartConfigSchema.extend({
+  type: retiredKey(WIDGET_CHART_STRUCTURE_RETIRED(
+    'type',
+    'nothing about the chart family — the WIDGET\'s own `type` does, and it always won: '
+    + 'the dashboard renderer maps the widget type to the chart family and never reads this key',
+    'Write the family on the widget instead: `type: \'line\'` beside `dataset`, not inside '
+    + '`chartConfig`.',
+  )),
+  xAxis: retiredKey(WIDGET_CHART_STRUCTURE_RETIRED(
+    'xAxis',
+    'which column the category axis plots — it is the dataset DIMENSION the widget selects',
+    'Select the dimension instead: `dimensions: [\'stage\']` on the widget. Axis APPEARANCE '
+    + '(title, number format, min/max, grid lines, log scale) has no home on a dataset-bound '
+    + 'widget — the dataset\'s dimension declaration is what labels and formats the axis.',
+  )),
+  yAxis: retiredKey(WIDGET_CHART_STRUCTURE_RETIRED(
+    'yAxis',
+    'which columns the value axis plots — they are the dataset MEASURES the widget selects',
+    'Select the measures instead: `values: [\'amount\']` on the widget, one entry per mark. '
+    + 'A second axis is a second measure, not a second axis declaration.',
+  )),
+  series: retiredKey(WIDGET_CHART_STRUCTURE_RETIRED(
+    'series',
+    'which series exist and which column each one reads — series membership follows from the '
+    + 'measures in `values` and the split in `dimensions`',
+    'Select the measures and the split instead: `values` declares one series per measure and a '
+    + 'second `dimensions` entry splits them. Per-series appearance (label, colour, mark type, '
+    + 'stacking) is not authorable on a dataset-bound widget; `colors` on this same chart config '
+    + 'is the palette channel that remains.',
+  )),
+}).describe(
+  'Chart APPEARANCE for a dataset-bound widget (ADR-0021): title, subtitle, description, '
+  + 'colors, height, legend, data labels, annotations and interaction. The dataset decides '
+  + 'which series exist and which column each one reads, so `type`, `xAxis`, `yAxis` and '
+  + '`series` are refused here — write them as the widget\'s own `type` and its `dimensions` / '
+  + '`values` selection.',
+));
+
+/**
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
  *
@@ -702,8 +817,23 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   /** Visualization Type */
   type: ChartTypeSchema.default(WIDGET_TYPE_DEFAULT).describe('Visualization type').meta({ title: 'Visualization Type' }),
   
-  /** Chart Configuration */
-  chartConfig: ChartConfigSchema.optional().describe('Chart visualization configuration').meta({ title: 'Chart Configuration' }),
+  /**
+   * Chart APPEARANCE — the author's half of a dataset-bound chart (ADR-0021;
+   * maintainer ruling 2026-09-12, decision batch #121 item 1).
+   *
+   * The dataset decides which series exist and which column each one reads;
+   * this bag carries how they LOOK. `type`, `xAxis`, `yAxis` and `series` are
+   * refused here by name and each refusal points at the dataset selection that
+   * owns it — see {@link DashboardWidgetChartConfigSchema}.
+   */
+  chartConfig: DashboardWidgetChartConfigSchema.optional()
+    .describe(
+      'Chart appearance: title, subtitle, description, colors, height, legend, data labels, '
+      + 'annotations, interaction. The bound dataset decides which series exist and which '
+      + 'column each one reads (ADR-0021), so `type` (the widget\'s own `type` wins), `xAxis`, '
+      + '`yAxis` and `series` are refused here — select `dimensions` / `values` instead.',
+    )
+    .meta({ title: 'Chart Configuration' }),
 
   /** Color variant for the widget (e.g., KPI card accent color) */
   colorVariant: WidgetColorVariantSchema.optional().describe('Widget color variant for theming').meta({ title: 'Color Variant' }),
@@ -1396,6 +1526,8 @@ export type DashboardWidget = z.input<typeof DashboardWidgetSchema>;
 /** Post-parse shape of {@link DashboardWidget} — defaults applied, transforms run (ADR-0122). */
 export type DashboardWidgetParsed = z.infer<typeof DashboardWidgetSchema>;
 export type DashboardWidgetOptions = z.input<typeof DashboardWidgetOptionsSchema>;
+export type DashboardWidgetChartConfig = z.input<typeof DashboardWidgetChartConfigSchema>;
+export type DashboardWidgetChartConfigParsed = z.infer<typeof DashboardWidgetChartConfigSchema>;
 export type DashboardHeader = z.input<typeof DashboardHeaderSchema>;
 /** Post-parse shape of {@link DashboardHeader} — defaults applied, transforms run (ADR-0122). */
 export type DashboardHeaderParsed = z.infer<typeof DashboardHeaderSchema>;
