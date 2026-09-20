@@ -1398,16 +1398,16 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Tipo de informe: tabular/summary/matrix/joined"
       },
       dataset: {
-        label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        label: "Conjunto de datos",
+        helpText: "Conjunto de datos a vincular (las medidas/dimensiones provienen de su capa semántica)"
       },
       values: {
-        label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        label: "Medidas",
+        helpText: "Nombres de medida (del conjunto de datos) que se mostrarán"
       },
       rows: {
-        label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        label: "Filas",
+        helpText: "Nombres de dimensión (del conjunto de datos) por los que agrupar las filas"
       },
       columns: {
         label: "Columnas",
@@ -1540,7 +1540,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Granularidad de fecha"
       },
       measures: {
-        label: "Measures",
+        label: "Medidas",
         helpText: "Cada medida: nombre, agregación, campo (opcional para count) y formato de visualización/moneda"
       },
       "measures.name": {
