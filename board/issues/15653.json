@@ -1,0 +1,36 @@
+{
+  "number": 15653,
+  "kind": "issue",
+  "title": "Three more `packages/cli` e2e files probe a spawned `os serve` over HTTP with no child-lifecycle attribution — a dead child reports only `TypeError: fetch failed`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T01:46:40Z",
+  "updated_at": "2026-09-06T01:58:27Z",
+  "closed_at": "2026-09-05T20:29:07Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15653",
+  "body": "Filed by the implementing agent for #15545, session `session_01D47qPfEWVPmhguWgBZCi5N`, from a measurement made while repairing that card. Filed bare on purpose: `domain:*`, type and priority are triage's.\n\n## The class, as measured on #15545\n\n#15545 was one `TypeError: fetch failed` / `SocketError: other side closed` / `bytesRead: 0` in a merge-group run, and it could not be attributed at all — because the probe that produced it discarded the two artefacts that decide what happened: the spawned child's exit status, and everything the child printed. The `child.on('exit')` handler in that file fed the READINESS promise only, so once readiness had settled a later death was invisible and the rejection reached vitest as a bare `TypeError: fetch failed` with no exit code, no stdout and no stderr.\n\nThat was reproduced deterministically on this tree, on that file, with the pre-repair code: injecting a peer that accepts the whole request and then FINs produced\n\n```\nTypeError: fetch failed\nCaused by: SocketError: other side closed\nSerialized Error: { code: 'UND_ERR_SOCKET', socket: { ... bytesWritten: 349, bytesRead: +0 } }\n```\n\nbyte-identical in shape to the merge-group report, with nothing in the message to say whether the child had died or was still running.\n\n## The other three files with the same shape\n\n`packages/cli/test/` holds four files that `fetch` a spawned `os serve` over HTTP. #15545's PR repairs one of them, deliberately in that file only (its scope was one card). The other three still have the unguarded shape — a `fetch` inside a `try` whose `finally` stops the child, with no read of the child's fate on the failing path:\n\n- `packages/cli/test/serve-process-child-env.e2e.test.ts` — 1 probe (the `sign-in/email` origin-posture probe)\n- `packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts` — 2 probes (`auth/sign-in/email`, `keys`)\n- `packages/cli/test/serve-mcp-capability-collision.e2e.test.ts` — 3 probes (`auth/sign-in/email`, `keys`, `mcp/skill`)\n\n`serve-port-drift-notice.e2e.test.ts` also calls `fetch`, but against the neighbour fixture it holds itself rather than against a spawned `os serve` — ⛔ it is NOT in this population and should not be swept in.\n\n## Why it is worth a card rather than a shrug\n\nEach of these runs on `Test Core`, a required shard, so any occurrence is a merge-queue eviction that costs every lane a queue cycle — and under the one-re-run rule a second unlucky roll is recorded as a real red. The cost of the missing attribution is that the FIRST occurrence teaches nothing: #15545 has exactly one observation and it still cannot say which lifecycle event caused it.\n\nAlso relevant to the whole class: there is no `process.on('uncaughtException')` and no `process.on('unhandledRejection')` handler in this repo's product source, so a late async throw inside a spawned child takes the process down with no HTTP answer and exactly this client-side signature.\n\n⛔ Whatever the repair is, it is not skipping, quarantining or bumping a timeout — same fence as #15545.\n\n## Re-check\n\n```\ngrep -rn \"await fetch(\" packages/cli/test/serve-process-child-env.e2e.test.ts packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts packages/cli/test/serve-mcp-capability-collision.e2e.test.ts\n```\n\nThen read each call's enclosing `try` and confirm the `catch`/`finally` never consults `child.exitCode` or `child.signalCode`, and never attaches the captured child output to the thrown error.\n\n## Dedup\n\n`search_issues` on this session, twice, with a live positive control (both queries returned #15545 itself, so the search was not in the silently-zeroed mode). Nearest neighbours are all closed and about a different property: #12548 (which port that probe asserts against), #12526, #12525, #12441. Open #15273 is a different finding in a different file (a port-pick race in `serve-publishes-bound-port`).\n\nRefs: #15545 and its PR.\n"
+}

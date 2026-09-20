@@ -1,0 +1,35 @@
+{
+  "number": 15757,
+  "kind": "issue",
+  "title": "i18n: the validation-message bridge matches the locale EXACTLY while every document translator does variant fallback — `accept-language: zh` refuses in English on the same response whose dataset labels are Chinese",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "i18n",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T06:18:45Z",
+  "updated_at": "2026-09-06T03:38:27Z",
+  "closed_at": "2026-09-06T03:25:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15757",
+  "body": "Found on **17.3.0** while wiring the newly-shipped `objects.<o>._validations.<r>.message` key (from #14381) into a downstream app (objectstack-ai/duly#106). The key itself works — this is about which locales reach it.\n\n## The asymmetry, in one server, from one bundle\n\nThe app ships exactly one non-source locale, `zh-CN`. Same running server, same session, only `accept-language` varying.\n\n**Authored validation message** — `PATCH /api/v1/data/duly_duty/<id>` tripping `returned_needs_note`:\n\n```\naccept-language: zh-CN            -> \"请写明打回的原因——负责人需要据此知道该改什么。\"   ✅\naccept-language: zh-CN,zh;q=0.9   -> \"请写明打回的原因——负责人需要据此知道该改什么。\"   ✅\naccept-language: zh               -> \"Say why the duty is being returned — …\"        ❌\naccept-language: en               -> \"Say why the duty is being returned — …\"        ✅ correct\n```\n\n**Dataset labels** — `POST /api/v1/analytics/dataset/query`, the same `zh`:\n\n```\naccept-language: zh    -> field labels: ['形式', '清单内职责']     ✅ translated\naccept-language: en    -> field labels: ['Form', 'Duties on the register']\n```\n\nSo a client sending `zh` gets a screen whose dataset/view/object labels are Chinese and whose refusals are English.\n\n## Mechanism\n\n`@objectstack/spec` already implements the negotiation, in `resolveBundleLocale`:\n\n```js\nconst base = lower.split(\"-\")[0];\nconst baseMatch = available.find((code) => code.toLowerCase() === base);\nif (baseMatch) return baseMatch;\nconst variantMatch = available.find((code) => code.toLowerCase().split(\"-\")[0] === base);\nif (variantMatch) return variantMatch;          // <- 'zh' resolves to 'zh-CN' here\n```\n\n`pickData` calls it, and every document translator (`translateObject`, `translateView`, `translateDataset`, …) goes through `pickData` — which is why the labels above translate on bare `zh`.\n\nThe authored-validation path does not. `authoredRuleMessage` (`@objectstack/objectql` 17.3.0) asks the bridged i18n service directly:\n\n```js\nconst key = objectValidationMessageKey(messages.objectName, rule.name);\nconst translated = messages.translate(key, messages.locale);\nif (typeof translated === \"string\" && translated.length > 0 && translated !== key) return translated;\nreturn rule.message;\n```\n\n`messages.locale` is whatever `preferredLocaleFromHeader` returned — and that helper deliberately returns the header's first tag verbatim (`zh`), doing no region expansion of its own:\n\n```js\nconst top = header.split(\",\")[0]?.split(\";\")[0]?.trim();\nreturn top && top !== \"*\" ? top : void 0;\n```\n\nWith no `zh` bundle present the service lookup misses and the English `rule.message` is returned. Nothing on this path consults `resolveBundleLocale`.\n\n## Why it is worth closing rather than living with\n\n- `Accept-Language: zh` is ordinary — Playwright's Chromium sends exactly that for `locale: 'zh-CN'`, which is how this was found; plenty of non-browser clients send a bare language tag too.\n- The failure is the half-translated screen the i18n gates exist to prevent, and it is *invisible to an app*: the bundle key is present and correct, the coverage gate is green, and the app cannot tell that one consumer negotiates differently from the others.\n- It is a one-line-shaped fix in a place the platform already owns: route the validation-message lookup through the same `resolveBundleLocale`/`pickData` seam the document translators use, so there is one negotiation rule rather than two.\n\nAdjacent but distinct: #14882 is about `localeChain`'s `fallbackChain` defaulting to `['en']` and ignoring `i18n.fallbackLocale` — that is about which locale wins *after* a miss; this is about a path that never attempts variant matching at all.\n\nDownstream evidence: objectstack-ai/duly#106."
+}

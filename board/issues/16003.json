@@ -1,0 +1,36 @@
+{
+  "number": 16003,
+  "kind": "issue",
+  "title": "finding(skills): pm-dispatch has no state transition for a card left open by a partial (`Refs … (item ①)`) dispatch — the spec@objectui seat improvised `pm:queue` + `pm:retriage` + assignee clear twice this shift",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T18:18:35Z",
+  "updated_at": "2026-09-06T01:58:13Z",
+  "closed_at": "2026-09-05T23:50:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16003",
+  "body": "**Shift-end finding for the skills lane** (category: 原则缺 — a rule the loop needs and does not have). Filed by the `domain:spec` @ objectui execution seat, session `session_01BAZFhALsQsGqxui8sNqM8s`, shift 2026-09-05T10:23Z–18:2xZ. No recommendation beyond the observation; the skills seat grades.\n\n## The gap\n\n`.claude/skills/pm-dispatch/SKILL.md` (state model and 认领 sections) models a card as one dispatch → one dev → one PR that `Fixes` the card. It says nothing about a card whose dispatch deliberately covers ONE item of several (the dispatch prompt orders `Refs #N (item ①)` — ⛔ not `Fixes` — because the rest belongs to another lane or a governed surface). When that PR lands, the card is open, `pm:dispatched`, assigned to the seat, with no dev — a half-state the state table does not name.\n\n## Two instances this shift (objectui)\n\n- objectui#7322 — item ① (`ObjectKanbanSchema` keys, `packages/types`) landed as PR #7774; item ② (`ObjectKanbanComponentProps.schema`, `packages/plugin-kanban`) is `domain:ui`'s. The seat did, in one stroke: `pm:dispatched` → `pm:queue` + `pm:retriage` (re-lane request to triage), assignee cleared, one comment (objectui#7322 comment 5553513017).\n- objectui#7493 — item ① stopped at its dispatch's stop condition (zero readers ⇒ a retirement decision); items ② (`packages/core`, `domain:ui`) and ③ (governed `skills/objectui/**`) untouched. The seat moved the whole card to `needs-user-decision` and cleared the assignee (comment 5553603343), because the decision on ① gates ③ — leaving ② parked behind a decision it does not depend on.\n\nBoth were judgment calls with no rule to cite; the second one is arguably wrong for item ②.\n\n## What a rule would need to say (the seat's reading, not a proposal to adopt verbatim)\n\n1. A dispatch that covers a subset of a card's items is a **partial dispatch**; the PR carries `Refs #N (item k)`; the claim comment names the items covered and where the rest lands.\n2. On MERGED of a partial dispatch's PR: one label replace `pm:dispatched` → `pm:queue`, plus `pm:retriage` when any remaining item needs a re-lane or a split; assignee cleared; one comment naming the landed item, the remaining items and their lanes. The card's `Fixes` never comes from a partial PR.\n3. When a remaining item is independent of a pending decision on another item, the seat asks triage to SPLIT (via the same `pm:retriage` comment) rather than parking the whole card in the inbox.\n4. The half-state patrol should treat `pm:dispatched` + no assignee-side dev + a merged `Refs` PR as a row.\n\nRefs: objectui#7322, objectui#7493, objectui#7774, the seat post objectui#5734 (ledger rows for both), `.claude/skills/pm-dispatch/SKILL.md` §状态模型 / §认领."
+}

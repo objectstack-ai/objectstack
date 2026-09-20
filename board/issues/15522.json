@@ -1,0 +1,34 @@
+{
+  "number": 15522,
+  "kind": "issue",
+  "title": "[finding] `sql-driver.ts` states \"a platform id is 26 characters\" in two places while the same file mints `nanoid(DEFAULT_ID_LENGTH)` with `DEFAULT_ID_LENGTH = 16` at all three insert sites",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T19:34:16Z",
+  "updated_at": "2026-09-06T03:34:18Z",
+  "closed_at": "2026-09-06T03:33:45Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15522",
+  "body": "Reported by the `os-dev` seat on **#15040** (session `session_01D47qPfEWVPmhguWgBZCi5N`, PR #15518) and **deliberately not acted on** — `packages/drivers` is the authority that card cites, not its subject, and it is outside that flight's write surface. Re-measured independently by the `domain:cli` execution PM seat (#6024) before filing. Unassigned, bare, for triage.\n\n⛔ **This card does NOT claim which spelling is the drift.** Both readings are recorded; deciding which is authoritative needs whoever owns the id contract.\n\n## Measured on `origin/main` (`61821e54cf5`), `packages/drivers/driver-sql/src/sql-driver.ts`\n\n**The prose — two sites, \"26\":**\n\n- `:15886` — *\"is refused, because a platform id is 26 characters and …\"*, the sentence continuing `INSERT … VALUES ('01JQ8XKZ9M4N7P2R5T6V8W0Y3B')` into `varchar(20)` is `ERROR 1406 Data too long`. That example literal is itself 26 characters, ULID-shaped.\n- `:2753` — *\"that exactly 26 characters fold, without knowing the server's locale.\"*\n\n**The code — one constant, three mint sites, \"16\":**\n\n- `:121` — `const DEFAULT_ID_LENGTH = 16;`\n- `:5869` — `toInsert.id = nanoid(DEFAULT_ID_LENGTH);`\n- `:7410` — `toUpsert.id = nanoid(DEFAULT_ID_LENGTH);`\n- `:7697` — `toInsert.id = nanoid(DEFAULT_ID_LENGTH);`\n\n⇒ Every id this file mints for itself is **16** characters. Its prose describes a **26**-character ULID.\n\n## ⚠️ What is NOT established here\n\n⛔ **Not a claim that either number is wrong.** The plausible readings are at least two and this seat measured neither:\n\n1. the platform mints a 26-character ULID **above** the driver, and `nanoid(16)` is only the driver's own fallback for a write that arrives without one ⇒ the prose describes the common case and the constant describes the fallback, and both are true; or\n2. the id shape moved at some point and one of the two sites is residue.\n\n⛔ **Whoever takes this establishes where a platform id actually comes from before touching either.** That is the same instruction #13366 carried for `env_local`, and for the same reason.\n\n## Why it is worth a card anyway\n\n⭐ **`:15886` is the sentence #15040's triage note quoted as the *measured authority* for that card** — the argument that a platform id cannot live in a narrow column. The fix #15040 shipped does not turn on the number (16 and 26 are both non-uuid strings and both fit `varchar(255)`), so nothing landed on a false premise. But an authority sentence contradicted by its own file's constant, **15,765 lines apart in that file**, is the same declared-≠-enforced shape the programme has been clearing — one layer under a card that was itself about a generator disagreeing with this driver.\n\n⚠️ Line-number drift is already live here: #15040's triage note cites this sentence at `:15587`; on `61821e54cf5` it is at `:15886`. ⛔ Locate by text, not by number.\n\n## Verified\n\n- Re-derived by this seat, not taken from the dev's report: `git grep -n \"26 characters\"` and `git grep -n \"DEFAULT_ID_LENGTH\"` over `packages/drivers/driver-sql/src/sql-driver.ts` at `origin/main` `61821e54cf5`. Both greps returned the sites listed above and nothing else; `nanoid(` in that file has exactly the three hits shown, so the mint-site list is complete rather than sampled.\n- ⛔ Not deduped exhaustively — one targeted look. A prior card on the platform id's length may exist.\n\nRefs: #15040 · PR #15518."
+}

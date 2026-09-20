@@ -1,0 +1,36 @@
+{
+  "number": 15325,
+  "kind": "issue",
+  "title": "17.3.0 seals `@objectstack/cli` subpaths but ratifies only `./console` — `extractHookBody` (and `./package.json`) have no public entry, and an app's hook-body fidelity harness breaks with no replacement",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T11:34:33Z",
+  "updated_at": "2026-09-06T01:59:30Z",
+  "closed_at": "2026-09-05T03:10:29Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15325",
+  "body": "Found while upgrading `objectstack-ai/hotcrm` from 17.2.0 to 17.3.0 (hotcrm#1576). Filing rather than working around, per that card.\n\n## What changed\n\n`@objectstack/cli@17.2.0` published **no `exports` field at all** — every deep path was reachable. `17.3.0` introduces one, and it admits exactly two subpaths:\n\n```json\n{\n  \".\":        { \"types\": \"./dist/index.d.ts\",         \"default\": \"./dist/index.js\" },\n  \"./console\":{ \"types\": \"./dist/utils/console.d.ts\", \"default\": \"./dist/utils/console.js\" }\n}\n```\n\nMeasured, same tree, Node v22.22.2:\n\n```\nnpm view @objectstack/cli@17.2.0 --json  ->  has exports field: false   (main: dist/index.js)\nnpm view @objectstack/cli@17.3.0 --json  ->  has exports field: true\n```\n\nThe sealing itself is deliberate and I am not asking for it to be reverted — `@objectstack/cli`'s own `CHANGELOG.md` for 17.3.0 explains it (entry `8c82289`), and states the intended remedy for a consumer outside the repo:\n\n> Ratify `./console` as a public subpath export — `resolveConsolePath`, `hasConsoleDist`, `createConsoleStaticPlugin` and the drift-guard helpers were reachable as a deep `dist/` import until #13123 sealed the surface, and cloud's `objectos-runtime` node server consumes them to mount the Console SPA. The #13123 body names exactly this remedy for an out-of-repo consumer: **ratify the subpath as public surface rather than read `dist/` paths.**\n\nThat remedy was applied for cloud's consumer. It was not applied for the other out-of-repo consumer of this package's internals.\n\n## What broke\n\n`hotcrm/test/helpers/action-sandbox.ts` — the harness that runs hook and action bodies through the real `QuickJSScriptRunner` + `hookBodyRunnerFactory`/`actionBodyRunnerFactory`, so that a test sees the same body-only lowering the CLI build ships:\n\n```\ntest/helpers/action-sandbox.ts(4,33): error TS2307: Cannot find module\n  '@objectstack/cli/dist/utils/extract-hook-body.js' or its corresponding type declarations.\n```\n\nIt is not only a type error — the specifier is dead at runtime too:\n\n```\nrequire.resolve('@objectstack/cli/dist/utils/extract-hook-body.js')  ->  ERR_PACKAGE_PATH_NOT_EXPORTED\nrequire.resolve('@objectstack/cli/package.json')                     ->  ERR_PACKAGE_PATH_NOT_EXPORTED\nrequire.resolve('@objectstack/cli')                                  ->  .../@objectstack/cli/dist/index.js\n```\n\nThe file is still shipped in the tarball (`dist/utils/extract-hook-body.js`, 382 lines, with its `.d.ts`). Only the door is gone.\n\n## Why a local reimplementation is the wrong answer\n\n`extractHookBody` is what decides whether a hook is still shippable **body-only**: it peels the function to its statements, rejects the forbidden tokens, infers capabilities, and throws `HookBodyExtractionError` with `kind` / `freeIdentifiers` / `nodeOnlyIdentifiers`. hotcrm has 15+ source and test sites whose comments are written against that exact refusal behaviour, and the harness's own header states the contract it was built to:\n\n> `extractHookBody` is reached by a deep import because the CLI publishes no export map for it. Both packages are pinned to an exact version in `package.json`, and if a platform upgrade moves the file the import fails at load — loudly, on every test in this harness — **rather than degrading to a lookalike check**.\n\nA hand-rolled copy of the extractor is precisely the lookalike that comment exists to prevent: it would pass while diverging from the rule the build actually applies, which is the failure mode `#13651` was filed about in the first place.\n\n## What I ask for\n\nRatify a public entry for the hook-body extractor, the same way `./console` was ratified — e.g. `@objectstack/cli/hook-body` exposing `extractHookBody`, `HookBodyExtractionError`, `HookBodyRefusalKind` and `ExtractedBody`. Any app that wants to assert \"my hooks are still metadata-only\" needs the platform's own extractor to do it; `os lint`'s new `hook-body/not-lowerable` rule answers the pass/fail question but does not hand a test the lowered `source` to run.\n\nSecondary, and cheap: `\"./package.json\": \"./package.json\"` in the exports map. Sealing it breaks the ordinary tooling idiom of reading a dependency's own manifest, and there is no upside to withholding it.\n\n## Interim measure in hotcrm\n\nDocumented, not silent: the harness now resolves the package root (`require.resolve('@objectstack/cli')`, which the exports map allows) and reaches the extractor by file URL relative to it, so the platform's own implementation is still what runs. It is a stopgap that points at this issue, and it is exactly the \"read `dist/` paths\" shape the changelog entry above says a consumer should not have to adopt — which is the argument for ratifying the subpath.\n\n## Also worth a look while here\n\n`os migrate meta --from 17` on a 17.3.0 runtime reports `Chain: protocol 17 → 17 (runtime 17.0.0)`. The `runtime 17.0.0` there is the protocol major padded to a semver, but printed next to real package versions it reads as \"your runtime is 17.0.0\" on a 17.3.0 install.\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 14477,
+  "kind": "issue",
+  "title": "spec: hour/minute/day-shaped deadline keys in incident-response, training, change-management and ESignature schemas have zero readers and no EXPERIMENTAL tag (ADR-0049 shape)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T08:40:57Z",
+  "updated_at": "2026-09-05T22:52:02Z",
+  "closed_at": "2026-09-05T22:51:12Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 18,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14477",
+  "body": "Found while measuring #13801 (duration-shaped declarations in `packages/spec`). Not addressed there — #13801 is scoped to the wall-clock/business-hours misread on live declarations; this card is the enforce-or-remove question on declarations nothing reads.\n\n## What was measured\n\nFour `packages/spec` schema files declare hour/minute/day-shaped deadline and SLA keys that **no package outside `packages/spec` reads** (`git grep` over `packages/**` excluding `packages/spec`, tests and changelogs: zero hits for every key below), and none of the four carries the ADR-0049 `[EXPERIMENTAL — not enforced]` tag (`grep -c EXPERIMENTAL` = 0 in each file):\n\n| schema file | keys (all bare numbers, unit in `.describe()` prose only) |\n|:--|:--|\n| `packages/spec/src/system/incident-response.zod.ts` | `IncidentResponsePhase.targetHours` (:97), `IncidentNotificationRule.withinMinutes` (:142), regulatory deadline hours (:154), auto-escalation minutes (:177), `IncidentResponsePolicy.triageDeadlineHours` (:346), `retentionDays` (:363) |\n| `packages/spec/src/system/training.zod.ts` | `TrainingCourse.durationMinutes` (:89), `validityDays` (:104), recertification interval days (:185), grace-period days (:197), reminder lead days (:209) |\n| `packages/spec/src/system/change-management.zod.ts` | `durationMinutes` (:97), `estimatedMinutes` (:150, :285) |\n| `packages/spec/src/data/document.zod.ts` | `ESignatureConfig.expirationDays` (:218), `reminderDays` (:224) |\n\nAll of them are on the published authorable surface (`packages/spec/authorable-surface/system.json:508-521`, `:1308-1314`; `data.json` for `ESignatureConfig`) and in the exported API surface (`packages/spec/api-surface/system.json`), so an author can write `triageDeadlineHours: 4` today and nothing on the platform will ever act on it — the same declared-but-inert shape ADR-0049 names, here on SLA-shaped numbers rather than security bits. The schemas are exported from `packages/spec/src/system/index.ts:68` but mounted by no stack key (`stack.zod.ts` does not reference them) and registered as no metadata type.\n\n## Why it is filed rather than fixed in #13801\n\n#13801's ruling is about making the clock semantics of *live* duration declarations un-misreadable. An inert declaration has no clock to misread — its disposition is enforce-or-remove (ADR-0049 / the `spec-property-retirement` playbook), which is a separate decision per schema family (ISO-27001 compliance shapes vs the e-signature config). The 2026-06 liveness ledgers under `docs/audits/` have no mention of incident-response, training or change-management, so this family appears to have missed the audit.\n\n## Suggested disposition (for triage, not decided here)\n\nPer family: tag `[EXPERIMENTAL — not enforced]` in the describe text if a consumer is roadmapped, or retire via ADR-0087 conversion if none is. Either way the JSON-schema/reference-docs output (`content/docs/references/**`, generated from `.describe()`) stops advertising a deadline the platform does not keep.\n\nRefs #13801.\n\n---\n\n## Triage — graded\n\nSpot-checked at `origin/main` `4a37870`: `grep -c EXPERIMENTAL` is **0** in all four files, and the sampled keys (`triageDeadlineHours`, `expirationDays`, `validityDays`) have **zero** readers anywhere in `packages/**` outside `packages/spec`. The measurement holds.\n\nThe card is right that this is enforce-or-remove and right that it is a per-family question. Graded as a decision: retiring keys that sit on the published authorable surface is an ADR-0087 conversion each, and \"is a consumer roadmapped\" is product knowledge the seat does not have. Whoever executes after the ruling should run the `spec-property-retirement` playbook rather than improvising the route.\n\n&lt;!-- os-decision-facets --&gt;\n\n- **① 项目长远合理性(权重 ≥50%,领起推荐)** —— 平台今天在**公开的可编写面**上摆着一批期限键:事故triage 几小时、证书多少天过期、电子签名多少天失效。作者可以写,写完平台**永远不会照做**。这不是「还没实现」,而是一份**平台没打算守的承诺**印在了参考文档里(那些文档正是从这些 describe 生成的)。ADR-0049 的 enforce-or-remove 就是为这个形状立的。长远终态:公开面上的每一个键,要么被执行,要么被标注为未执行,要么不存在 —— 三者之外没有第四种。①指向**收窄**:没有路线图的整族退役。\n- **② 实际业务拉动** —— 零。四个文件、十五个键,全仓没有一个读取方,也没有客户在报。⇒ 按分歧推荐序,零拉动 ⇒ 荐④不扩散,而④在这里正好也指向退役。\n- **③ 防 AI 犯错** —— 出错时谁看到什么:一个 AI 作者读参考文档,看到 `triageDeadlineHours`,合理地认为写上 `4` 平台就会在 4 小时后升级事故。它不会。**没有报错、没有告警、没有任何反馈** —— 只有一条永远不会触发的 SLA,而这恰恰是合规场景里最不能静默失败的东西(ISO-27001 形状的键尤其如此)。`[EXPERIMENTAL — not enforced]` 标注是最低限度的响亮;退役是彻底的响亮。\n- **④ 创业阶段不扩散** —— 每一个已声明的键都是永久义务:向后兼容、迁移路径、文档、以及「将来真要实现时得按这个形状实现」的约束。十五个没有消费者的键,是十五条白背的义务。remove 优于 declare-and-maintain,这一条在本卡上是字面意义的。\n\n**推荐:A —— 按族分别处置,默认退役。** 对 `incident-response` / `training` / `change-management` 三族(合规形状、无消费者、连 2026-06 的 liveness 台账都没收录),走 ADR-0087 转换退役,执行时按 `spec-property-retirement` playbook 走,⛔ 不要自创路线。对 `ESignatureConfig`(`document.zod.ts`)单独判:它与已在跑的文档子系统同族,最可能是四族里唯一有路线图的,若确有,给它 `[EXPERIMENTAL — not enforced]` 标注而不是退役。①④同向,②零拉动不构成保留理由。\n**回退:B —— 四族全部只加 `[EXPERIMENTAL — not enforced]` 标注,不退役。** 若维护者判定这批合规形状是有意留下的路线图占位(ISO-27001 是可预期的商业需求),那就把「未执行」这件事说清楚,并把它们补进 liveness 台账,以免下一轮审计再次漏掉。代价:十五条永久义务原地保留。\n**置信缺口(本分析看不见什么):** 看不见路线图 —— 这四族到底有没有计划中的消费者,是**唯一**能把 A 翻成 B 的变量,而它不在代码里。另外本席只抽验了三个键的读取方(`triageDeadlineHours` / `expirationDays` / `validityDays`),不是全部十五个;执行前应把卡面那张表整表重跑一遍,因为「零读取方」是整个推荐的地基。\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

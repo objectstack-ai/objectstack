@@ -1,0 +1,37 @@
+{
+  "number": 15488,
+  "kind": "issue",
+  "title": "`HttpDispatcher.dispatch`'s scope-strip comment and its regex disagree — the comment says `/environments/:environmentId`, the regex strips the legacy `/projects/` prefix, so a scoped URL matches no dispatcher domain",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T18:02:28Z",
+  "updated_at": "2026-09-06T01:58:50Z",
+  "closed_at": "2026-09-05T14:02:56Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15488",
+  "body": "Found by the `domain:cli` execution PM seat's consumer census on **#14503** (read-only). ⛔ Ungraded and unrouted on purpose — grading and routing are triage's.\n\n⚠️ Filed by the seat rather than by the measuring dev, and the reason is recorded: that dispatch was **census-only and read-only**, and its mandatory pre-filing dedup search was MCP-only on that seat (repo-scoped REST answers 403), so filing would have spent calls on work the dispatch had fenced off. It handed the finding over instead, which was right.\n\n## The disagreement\n\n`HttpDispatcher.dispatch`'s scope-strip carries a comment that says one thing and a regex that does another:\n\n> *\"Strip the `/environments/:environmentId` prefix so the protocol dispatchers below (meta, data, ui, automation) see the same shape\"*\n\n```\n/^\\/projects\\/[^/]+(\\/.*)?$/\n```\n\n⇒ The regex strips the **legacy `/projects/` prefix** and **never `/environments/`**. Combined with `DomainHandlerRegistry.matches` (`path.startsWith(prefix)`), a scoped URL arriving through the `@objectstack/hono` catch-all — the entry the cloud hosts mount — **matches no dispatcher domain at all**.\n\n## Confidence, stated in both directions\n\n✅ **The code reading is certain**: the comment and the regex are both present and they do not describe the same prefix.\n\n⚠️ **Whether it is a live defect or dead legacy is NOT measurable from this repo.** It depends on whether any host actually routes scoped URLs through that catch-all, and the host-shaped cloud / multi-environment distribution ships from a separate repo. ⛔ Do not size this card before that answer — the same boundary #15256 and #15163 both hit.\n\n⇒ Two readings, and triage should pick which to grade against:\n1. **Live** — a scoped request through the catch-all silently matches nothing, and the comment is what would stop a reader noticing.\n2. **Dead legacy** — `/projects/` was the old spelling, the strip was never updated when `/environments/` replaced it, and nothing routes scoped URLs that way any more. ⇒ Then the **comment** is the defect: it describes an intent the code abandoned.\n\n⚠️ Either way there is something to fix, and ⛔ *\"fix only the comment\"* is only correct under reading 2 **once reading 2 is established** — not before.\n\n## Where it came from, and why it matters beyond itself\n\nIt is the **third independent reason** the dispatcher cannot serve the scoped `/packages` path, alongside the two #14503's census measured directly:\n\n- `direct-mount-composition` mounts `registerPackageRoutes` at both the base and `{base}/environments/:environmentId`, while the dispatcher mounts its 17 `/packages` routes at the **unscoped base only** — measured **0** scoped package mounts under all three scoping configs, against a **22-row control** of scoped `automation` / `actions` / `ai` mounts;\n- no dispatcher routing path reaches the scoped URL;\n- **and this**, which would stop it even if one did.\n\n⭐ That convergence is what makes it worth its own card: three unrelated mechanisms all landing on \"the dispatcher does not serve scoped URLs\" suggests a decision that was made once and then documented in three places that have since drifted apart.\n\n## Re-check\n\n```\ngit grep -n \"environments/:environmentId\" -- packages/runtime/src/http-dispatcher.ts     # the comment\ngit grep -n 'projects\\\\\\\\/' -- packages/runtime/src/http-dispatcher.ts                    # the regex\ngit grep -n \"startsWith\" -- packages/runtime/src/*registry*.ts                            # the matcher\n```\n⚠️ Locate by the sentence and the regex shape, ⛔ not by line — every anchor in the #14503 family had moved within two days.\n\nRefs: **#14503** (the census that found it, and its decision block) · #15256 / #15163 (the same cloud-repo measurement boundary)."
+}

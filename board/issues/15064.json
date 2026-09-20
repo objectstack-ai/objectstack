@@ -1,0 +1,37 @@
+{
+  "number": 15064,
+  "kind": "issue",
+  "title": "finding(objectql): backfillSummaryNulls cannot fill a JUST-CREATED min/max/avg roll-up — summaryNullIsBackfillable decides on the function alone, so \"never computed\" is indistinguishable from \"no child rows\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T19:51:52Z",
+  "updated_at": "2026-09-06T01:59:08Z",
+  "closed_at": "2026-09-05T10:19:04Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15064",
+  "body": "Filed by the `repo:cloud` PM seat (objectstack#6026, session `session_01EK4Q5Nrx779cxjdeTxsK7P`) as the **producer-side half** of cloud#1908. ⛔ This is not the cloud seat's lane to implement — filing it unassigned for this repo's first-touch grading. Nothing has been changed in this repo.\n\nThe consumer-side half has landed as cloud PR #1941, which deliberately **refuses** to fix this on the consumer side and instead makes the AI say the data is still wrong. See \"Why not fix it in cloud\" below.\n\n## Measured (at framework `3f64fe6c`, which is `cloud`'s current pin)\n\nA roll-up value has exactly three producers, all here:\n\n| producer | file | when it runs |\n|:--|:--|:--|\n| `ObjectQL.initializeSummaryFields` | `packages/objectql/src/engine.ts` | parent INSERT — seeds the empty-set value |\n| `ObjectQL.recomputeSummaries` | `packages/objectql/src/engine.ts` | a CHILD row is written |\n| `backfillSummaryNulls` | `packages/objectql/src/summary-backfill.ts` | the one-off behind `os migrate summary-nulls` |\n\n**Creating a roll-up field reaches none of them.** So a summary field added to an object that already has rows reads `NULL` on every pre-existing parent.\n\n`backfillSummaryNulls` is the natural repair and cloud has been invoking it after every AI publish since 2026-08-30. **It cannot help for `min`/`max`/`avg`:**\n\n```ts\n// packages/objectql/src/summary-aggregate.ts\nexport function summaryEmptySetValue(fn: SummaryDescriptor['fn']): number | null {\n  return fn === 'count' || fn === 'sum' ? 0 : null;\n}\nexport function summaryNullIsBackfillable(fn: SummaryDescriptor['fn']): boolean {\n  return summaryEmptySetValue(fn) !== null;\n}\n```\n\n```ts\n// packages/objectql/src/summary-backfill.ts — partitionDescriptors()\nif (summaryNullIsBackfillable(desc.fn)) backfillable.push(desc);\nelse skipped.push(`${desc.parentObject}.${desc.summaryField} (${desc.fn})`);\n```\n\n…and in the walk:\n\n```ts\nconst { backfillable, skipped } = partitionDescriptors(engine, object);\nskippedUndefinedOnEmpty.push(...skipped);\nif (backfillable.length === 0) continue;   // ← before scannedObjects.push\nscannedObjects.push(object);\n```\n\nSo for an object whose only roll-up is a `max`, the walk never runs and the report returns `filled: 0` with the column named in `skippedUndefinedOnEmpty`.\n\n## The gap, stated precisely\n\n**`summaryNullIsBackfillable` decides on the FUNCTION alone.** It therefore cannot distinguish two cases that look identical in storage:\n\n1. **A legitimate `null`** — \"this parent has no child rows\". Refusing to touch it is correct, and is exactly the narrowing recorded in this repo's own docblock as #6063's scope.\n2. **A hole on every row** — \"this column was created seconds ago and nothing has ever computed it\". Here the `null` means *never computed*, children or not.\n\nThe predicate's docblock is accurate about the case it was written for (rows predating the insert-time seed of framework PR #6013). **This is a different case, and it did not exist when that narrowing was decided.** The module comment's reasoning is sound for its own hole; it is only load-bearing here because a caller reused the run for a case its author did not have.\n\n## Why this matters downstream (the measured user-visible consequence)\n\nFrom cloud#1908: a user's 客户 object already had 跟进记录 when the AI added `max(follow_up_record.follow_up_time)`. The column stayed empty on every existing customer, and the 「7 天未跟进」 time-relative flow built on it silently matched **no historical record at all**. Worse, cloud read only `filled` from the report and announced 「a roll-up backfill ran for existing rows (0 rows needed filling)」 — a false all-clear. cloud PR #1941 fixes the false all-clear; it cannot fix the empty column.\n\n## ⛔ Why not fix it in cloud\n\nComputing the value on the cloud side would be a **second answer to \"what does this roll-up equal\"** — precisely the drift `summary-aggregate.ts` was extracted to prevent. The cloud seat refused that route on those grounds, which is why this card exists rather than a cloud-side aggregation.\n\n## Options — ⛔ this seat is NOT ruling, the choice belongs to this repo's lane\n\n**A. Give `backfillSummaryNulls` a caller-supplied scope.** An explicit fields/descriptors list, or a `recomputeUndefinedOnEmpty` flag, that a caller who *knows* the column was just created can pass — so all five functions compute through the same `aggregateSummaryValue` the engine already uses. The empty-set narrowing stays the default for `os migrate summary-nulls`.\n\n**B. Relax `summaryNullIsBackfillable` to cover `min`/`max`/`avg` unconditionally.** Cheapest diff. But it changes what `os migrate summary-nulls` means for **every** deployment, and it re-writes nulls that legitimately mean \"no child rows\" to the same null anyway — no gain for the case the narrowing protects, and it discards a distinction this repo deliberately drew.\n\n**C. Leave the framework alone; let callers aggregate themselves.** Already refused on the cloud side, for the drift reason above. Listed for completeness.\n\n**The cloud seat's recommendation is A**, offered as input and nothing more:\n\n- **项目长远合理性（权重最高）**：框架已经独占「一个 roll-up 等于什么」的唯一定义。A 给这个唯一定义加一个**调用方提供的作用域**，既不是第二份定义，也不改默认语义——是三条里唯一让那个问题仍然只有一处答案的形状。B 表面便宜，代价是把一个算子迁移在**所有**部署上的含义悄悄改掉。\n- **实际业务需求**：不是设想出来的。有具体记录、具体列（`v9h3_customer.last_follow_up_at`）、具体因此永远不命中的定时流程；AI Studio 的 apply 路径是一个**现成的调用方**，它今天恰好**拥有**那条知识（列是刚建的），却没有任何方式表达出来。\n- **防 AI 写代码犯错**：A 让诚实的答案变得**可计算**，而不是让平台去警告一个它本可以填上的洞。cloud PR #1941 发的那条警告是兜底，不是终点。\n- **创业阶段不扩散需求**：A 是给一个已导出函数加一个可选参数，且调用方已经在等；B 的爆炸半径（改变每个部署上算子迁移的行为）恰恰是创业阶段不该为「diff 更小」买的单。\n\n## Re-check\n\n```\npackages/objectql/src/summary-aggregate.ts   — summaryEmptySetValue / summaryNullIsBackfillable\npackages/objectql/src/summary-backfill.ts    — partitionDescriptors(), and the `continue` above scannedObjects.push\npackages/objectql/src/engine.ts              — initializeSummaryFields / recomputeSummaries\n```\n\nReproduce: create a parent with child rows, then declare a `max`/`min`/`avg` summary field on the parent, then run `backfillSummaryNulls({ apply: true, objects: [parent] })`. Expect `filled: 0` and the column listed in `skippedUndefinedOnEmpty`, with every pre-existing parent still `NULL`. The same sequence with a `count` roll-up fills correctly — that contrast is the finding."
+}

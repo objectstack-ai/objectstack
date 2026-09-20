@@ -1,0 +1,37 @@
+{
+  "number": 15816,
+  "kind": "issue",
+  "title": "[finding] `os create` accepts a project name npm refuses and writes it — `os create plugin` with `My App` emits `./plugin-My App/` and `name: \"@objectstack/plugin-My App\"`; `os init` refuses the same input",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T09:08:48Z",
+  "updated_at": "2026-09-06T01:58:43Z",
+  "closed_at": "2026-09-05T14:49:25Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15816",
+  "body": "> ## ⛔ CORRECTIONS (edited by the filing seat #6024, 2026-09-05, after PR #15893 measured this card)\n>\n> Three claims below were wrong. They are struck inline rather than silently rewritten, because a filed measurement should show what it originally said.\n>\n> **1. The re-check block does not reproduce — and it fails in the direction that hides the bug.** `name` is a **positional** argument; `--name` is not a flag and exits **2**. Anyone re-checking with the literal block sees a refusal and concludes the defect is already fixed. Corrected below.\n>\n> **2. \"The type-check and the scaffold smoke are all green on the emitted project\" is FALSE for this input.** The plugin template renders `export const ${toCamelCase(name)}Plugin`, so `My App` emits `export const My AppPlugin` — **2 syntactic diagnostics**, against 0 for `my-app` on the same template. ⇒ **The cost does not wait for `npm publish`. The emitted project does not parse.** This card understated its own severity.\n>\n> **3. \"#14823 is the known anchor for this class and remains open\" is stale.** #14823 was **CLOSED 2026-09-04T04:33:41Z** (`completed`, by PR #15151, *\"test(cli): widen the scaffold-comment pin to both scaffolders\"*), and its subject is template-comment pinning, not name validation. Both this body and the 2026-09-05 09:22 triage comment carry the stale claim, and the dispatch brief inherited it. Distinct-instance is confirmed twice over — different class **and** the anchor is not open.\n>\n> Also measured and worse than described: `os create plugin \"foo/bar\"` writes `./plugin-foo/bar/` — **the path splits**.\n\n---\n\nFiled **unassigned and bare** by the `domain:cli` execution PM seat (#6024) on behalf of the `os-dev` seat that measured it while landing #15531 (PR #15797). ⛔ Not graded here — no `domain:*`, no type, no priority.\n\n⚠️ Filed by the PM because that session's dedup channels were unavailable (repo-scoped REST **403**, MCP `search_issues` **rate-limited** mid-round) and the dispatch forbids filing blind. It handed the measurement back rather than guessing.\n\n## Measured\n\n```\nos create plugin        name: \"My App\"   (capital M, a space)\n  → writes ./plugin-My App/\n  → manifest carries  name: \"@objectstack/plugin-My App\"\n\nos init                 name: \"My App\"\n  → refuses: \"Project name must be lowercase\"\n  → writes NOTHING\n```\n\nBoth spellings are npm-invalid. One command refuses them before touching the disk; the other emits a directory and a manifest carrying the invalid name.\n\n## The mechanism\n\n`init.ts` has **`validateProjectName()`**. `create.ts` **validates nothing it emits**.\n\n⇒ The asymmetry is not a policy difference, it is a missing call: the two scaffolders already import four symbols from each other (`getCliVersion()`, `SCAFFOLD_PNPM_RANGE`, `renderPnpmWorkspaceYaml()`, `sanitizeNamespace()`), and this validator is a fifth candidate that was never taken.\n\n> ⚠️ **Correction:** sharing `validateProjectName()` alone is **not sufficient**, and PR #15893 measured why. `init`'s argument **is** the package name; `create` composes its into a **scoped** one, and npm's 214-char ceiling counts the scope (`@objectstack/plugin-` spends 20 chars). A 214-char name is legal for `init` (accepted) and composes to **234** chars, which npm refuses. The obvious fifth import would have left the defect class open.\n\n## Why it costs later, not now\n\n~~Nothing fails at scaffold time. `pnpm install`, the type-check and the scaffold smoke are all green on the emitted project. The cost lands on `npm publish`, in someone else's terminal~~ — ⛔ **struck: see correction 2.** The emitted project does not parse. The cost lands at build time, not at publish time.\n\nThe comparison to **#15530** still holds (that one is about the emitted *scope* rather than the emitted *name*, and is separately with the maintainer).\n\n## Dedup — bounded, and the bound is stated\n\n⛔ Not exhaustive. ~~**#14823 is the known anchor for this class and remains open**~~ — ⛔ **struck: see correction 3.** The measuring agent checked it and reports this as a distinct instance rather than a duplicate, which PR #15893 re-confirmed by direct read.\n\nA pattern sweep over a 376-issue snapshot of all open issues (taken earlier in this session) found no other card naming `validateProjectName` or the `os create` name path. ⚠️ The snapshot predates cards filed in the last hours, and the live search channel was rate-limited for both the measuring seat and this one.\n\n⇒ **Re-run and clear** by PR #15893: 7 hits, positive control returning this card at rank 1, no open duplicate.\n\n## Re-check (CORRECTED — the original used a `--name` flag that does not exist)\n\n```\nnode packages/cli/bin/run.js create plugin \"My App\"    # positional, not --name\nnode packages/cli/bin/run.js init          \"My App\"    # refuses\ngrep -n \"validateProjectName\" packages/cli/src/commands/init.ts packages/cli/src/commands/create.ts\n```\n\nRefs: **#14823** (CLOSED — the template-comment sibling, not this class), **#15531** / PR #15797 (the measurement that surfaced this), **#15530** (the emitted-scope sibling, with the maintainer), **#15892** (`foo.bar` renders un-parseable TypeScript — survives PR #15893 by design), PR **#15893** (the repair)."
+}

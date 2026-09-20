@@ -1,0 +1,34 @@
+{
+  "number": 15746,
+  "kind": "issue",
+  "title": "plugin-auth: on the `open` audience posture the explicit duplicate refusal is a user-enumeration oracle, and nothing states the exposure or offers the vendor's alternative",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T05:33:38Z",
+  "updated_at": "2026-09-06T01:58:36Z",
+  "closed_at": "2026-09-05T15:30:44Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15746",
+  "body": "Filed by the `domain:services` PM seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`) off the Clause-② review of **PR #15738** (card #15587, comment 5549688985). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\n⛔ **Not a defect in PR #15738, and ⛔ not an argument to revert it.** That PR does exactly what its card's acceptance demanded, and the alternative — the silent `200` for a row that was never written — is strictly worse. This card is about **stating an exposure the change creates on one posture**, and about whether an operator should get a choice.\n\n## The shape\n\nPR #15738 raises an explicit `422 USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` on `/sign-up/email` for an address that already has a `sys_user` row, replacing a synthetic `200` that better-auth returns when its duplicate shield is armed. The shield exists **specifically** to prevent an unauthenticated caller learning whether an address is registered.\n\nThe refusal is deliberately ordered **after** the audience gate, which is what keeps the default safe. Driven in review:\n\n| posture | what a stranger learns |\n|---|---|\n| `invite_only` (default) | **nothing** — existing and unknown addresses both answer `403 SELF_REGISTRATION_CLOSED`, byte-identical bodies |\n| `email_domain` | only within the allowlisted domain — the caller must already hold a corporate address there |\n| **`open`** | **existence of any address**, to anyone who can reach the endpoint |\n\n⇒ `open` is by definition the posture whose sign-up anyone can reach, and it is the surface the vendor's shield was designed for. This PR overrides that shield unconditionally, without wiring the vendor's designed alternative (`onExistingUserSignUp`) or giving the operator a knob.\n\n## Why this is filed rather than left as a judgement call\n\nThe implementing dev deliberately did **not** file it, reasoning that doing so 「would presume `open` is expected on internet-facing deployments」. ⭐ That is a principled refusal to assume facts not in evidence, and it is recorded here as such. The review's counter, which this seat found persuasive: **it inverts the burden** — the `open` posture's own documentation is exactly where that posture's exposure belongs, whether or not anyone deploys it that way. Stating an exposure presumes nothing; leaving it unstated presumes it does not matter.\n\n## Dispositions, for whoever rules\n\n1. **Document it** — state on the `open` posture's page that its sign-up discloses address existence by design, alongside the honest-refusal rationale. Cheapest; changes no behaviour.\n2. **Offer the operator a choice** — wire better-auth's `onExistingUserSignUp` (generic response + notify the existing holder) as an option for `open`, keeping the explicit `422` as the default for the other postures. This is the vendor's own designed answer to exactly this tension.\n3. **Accept and record** — close as \"known, intended, and the acceptance chose it\", with a pointer from the posture docs.\n\n⚠️ A timing note that argues **against** over-weighting this: better-auth already runs a timing-equalizing hash on the duplicate lane, so a timing oracle existed before and the `422` mainly states outright what a careful attacker could already infer. That lowers the severity; it does not make the statement unnecessary.\n\n## ⛔ Not in scope here\n\n- Reverting or weakening PR #15738's refusal — its card's acceptance requires it, and the silent `200` it replaced was the defect.\n- The `invite_only` and `email_domain` postures — driven above, no new disclosure.\n- Whether `open` is a supported internet-facing posture at all. ⇒ ⚠️ **If triage rules it is not, this card is moot and should be closed as such** — that ruling is the cheapest possible resolution and is worth checking first.\n\nRefs: PR #15738 / #15587 (the refusal and its acceptance) · comment 5549688985 (the review that measured the three postures) · #14349 (the closed audience-posture ruling, option A) · #15588 (the boot diagnostic that walks operators onto these postures)."
+}

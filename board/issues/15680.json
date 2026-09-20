@@ -1,0 +1,36 @@
+{
+  "number": 15680,
+  "kind": "issue",
+  "title": "[#14478 stack 5/6] `data/` · `ui/` · `ai/` · `integration/`: the 7 remaining duration keys carry their unit in the key name — ADR-0087 conversions with readers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T02:55:13Z",
+  "updated_at": "2026-09-06T03:19:23Z",
+  "closed_at": "2026-09-06T03:19:23Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15680",
+  "body": "Part of #14478 — follow-on card 5 of 6, filed by the `domain:spec` seat (`session_01M59rPZZFzqhfMUPFqqZTkf`, 2026-09-05T02:55Z) under the maintainer ruling **B** on #14478 (`5548763981`, batch #43, 「同意」). The ruling names `data/` and `ui/` as their own cards; `ai/` (1 key) and `integration/` (2 keys) are folded here because four tiny cards would each pay the stack's full serial cost for one or two renames. Dispatched after stack cards 1/6–4/6 have PRs to stack on.\n\n## Ruling text this card executes (verbatim)\n\n> Convert the ~30 authored config durations and the ~16 runtime-emitted measurements […].\n\n> (1) **the gate's own predicate is the population's definition** […]; write the predicate into the follow-on cards so nobody recounts by another rule.\n\n## The predicate\n\nRun `pnpm --filter @objectstack/spec check:duration-unit-keys` on the stacked head; a property whose value is a `z.number()` / `z.int()` / `z.coerce.number()` chain and whose `.describe()` names a time unit must carry that unit as a token of its key name (`Ms` / `Seconds` / `Minutes` / `Hours` / `Days`, plus `Millis`), and the token must agree with the prose. ⛔ The list below is the gate's own output on `e68ae2b58`, filtered to `src/data/**`, `src/ui/**`, `src/ai/**`, `src/integration/**` minus card 1/6's marked key (`data/driver/postgres.zod.ts:265 statementTimeout`); re-derive on the stacked head before editing.\n\n| site (`e68ae2b58`) | key | describe unit | gate's suggested name | class |\n|:--|:--|:--|:--|:--|\n| `src/data/driver-nosql.zod.ts:310` | `timeout` | ms | `timeoutMs` | authored |\n| `src/data/driver/memory.zod.ts:112` | `autoSaveInterval` | ms | `autoSaveIntervalMs` | authored |\n| `src/data/driver/turso.zod.ts:215` | `timeout` | ms | `timeoutMs` | authored — ⚠️ distinct from `packages/drivers/driver-turso/src/spec/turso.zod.ts:104` (the driver's own schema, outside `packages/spec`, handled by card 6/6) |\n| `src/ui/dashboard.zod.ts:906` | `refreshInterval` | seconds | `refreshIntervalSeconds` | authored — ⚠️ objectui reads dashboard config; the rename crosses the pin boundary, so the PR body records the objectui reader sites and the seat files the objectui follow-up card |\n| `src/ai/conversation.zod.ts:308` | `duration` | seconds | `durationSeconds` | emitted |\n| `src/integration/connector.zod.ts:541` | `monitoringWindow` | ms | `monitoringWindowMs` | authored |\n| `src/integration/connector.zod.ts:675` | `interval` | seconds | `intervalSeconds` | authored |\n\n## Execution notes\n\n- Per key: authored ⇒ D2 conversion with a `retiredKey()` tombstone and a `RETIRED_KEYS_BY_MAJOR` row where on the authorable surface; emitted ⇒ semantic ADR-0087 entry, emitter and every reader renamed in the same PR at the same magnitude. Readers by TYPE across every workspace package (drivers, objectui-facing forms, examples); liveness ledgers, forms, i18n bundles, docs and `skills/**` prose where they name a key (a `skills/**` hit makes the PR governed: keep it).\n- **Stacked** on card 4/6's head; draft PR, base = that branch; body first line `Part of #14478`, this card named without a closing keyword. ⛔ Never `Fixes #14478`.\n- **`Clause-②: yes`** ⇒ `needs:contract-review` on PR and card at creation. Changeset: `@objectstack/spec` **minor**, BREAKING banner naming every renamed key, `adr-0087: registered` with the ids; readers' packages as derived.\n- `packages/spec/src/migrations/registry.ts` is written by this stack only; serial order 2 → 3 → 4 → 5 → 6.\n\nRelated: #14478 · PR #15626 · stack 1/6 · #15642 (card 6/6)."
+}

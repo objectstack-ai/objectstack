@@ -1,0 +1,37 @@
+{
+  "number": 15676,
+  "kind": "issue",
+  "title": "[#14478 stack 1/6] declare the two exemption classes ON THE SCHEMA — a shared `EpochMs` for the 6 epoch instants and a `.meta({ externalVocabulary })` marker on the 13 external-standard keys, honoured by `check:duration-unit-keys` and printed by the docs generator",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "needs:contract-review",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T02:54:01Z",
+  "updated_at": "2026-09-06T03:18:43Z",
+  "closed_at": "2026-09-06T03:18:43Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15676",
+  "body": "Part of #14478 — follow-on card 1 of 6, filed by the `domain:spec` seat (`session_01M59rPZZFzqhfMUPFqqZTkf`, 2026-09-05T02:55Z) under the maintainer ruling **B** recorded on #14478 (`5548763981`, decision batch #43, 「同意」). This is the FIRST card of the stack: every directory card (2–5) applies the rule to what remains after these two classes are declared, so they wait for this one's PR to exist.\n\n## The ruling (verbatim, the parts this card executes)\n\n> the rule (a `z.number()` duration key carries its unit in its name) governs every authored duration and every runtime-emitted duration, minus two structural classes declared ON THE SCHEMA, never in a gate ledger: (i) epoch instants move to a shared `EpochMs` schema; (ii) keys mirroring an external standard carry a `.meta({ externalVocabulary: '…' })` marker the gate honours and the docs generator publishes.\n\n> Exempt by declaration, not by list: the 6 epoch instants (a different confusion; one shared `EpochMs` schema and a rename to `*At`/`*Ms` where the name is bare) and the ~12 external-vocabulary keys (marker on the key; the reference page prints \"unit per the named standard\").\n\n> (1) **the gate's own predicate is the population's definition** — the 70/65 reading is authoritative, the seat's regex census is corroboration only; write the predicate into the follow-on cards so nobody recounts by another rule. (2) **sequencing**: PR #15626 stays a draft (governed — `skills/**` — human merge) and is ⛔ not landed with the gate red or unwired; the remainder is dispatched as follow-on cards per directory […], branches stacked on #15626's; the set lands together when `check:duration-unit-keys` is green on the stacked head.\n\n## The predicate (the gate's, from `packages/spec/scripts/check-duration-unit-keys.ts` on PR #15626's head `e68ae2b58`; run `pnpm --filter @objectstack/spec check:duration-unit-keys` on the stacked head — ⛔ never recount by another rule)\n\nA property whose value is a `z.number()` / `z.int()` / `z.coerce.number()` chain and whose `.describe()` names a time unit must carry that unit as a token of its key name (`Ms` / `Seconds` / `Minutes` / `Hours` / `Days`, plus the knex-inherited `Millis`), and the token must agree with the prose. `{ value, unit }` pairs are recognised structurally by the sibling `unit` key; duration literals are strings and outside the population. Calendar positions and rates are skipped. Declared population today: `packages/spec/src/**` (card 6/6 widens it).\n\n## What this card changes\n\n1. **`EpochMs`** — one shared schema (a `z.number()` epoch-milliseconds instant, described as such, exported from the shared layer beside the other primitive schemas) and the gate learns to recognise a key whose value IS that schema as an instant, not a duration. The six instants the gate lists on `e68ae2b58` move onto it; where the key name is bare the ruling renames it to `*At` / `*Ms` (ADR-0087 conversion where the key is authorable; a semantic entry where it is runtime-emitted):\n   | site (line numbers from `e68ae2b58`) | key |\n   |:--|:--|\n   | `src/api/websocket.zod.ts:473` | `timestamp` |\n   | `src/api/websocket.zod.ts:502` | `lastSeen` |\n   | `src/kernel/context.zod.ts:106` | `startTime` |\n   | `src/kernel/service-registry.zod.ts:69` | `registeredAt` |\n   | `src/kernel/service-registry.zod.ts:266` | `createdAt` |\n   | `src/kernel/startup-orchestrator.zod.ts:98` | `timestamp` |\n2. **`.meta({ externalVocabulary: '…' })`** — the marker convention (a `.meta()` key the gate reads: a marked key is exempt from the rename rule; the describe still states the unit) and its docs-generator half (the reference page prints the unit as \"per the named standard\"). Applied to the thirteen external-standard keys the gate lists on `e68ae2b58`:\n   | site | key | standard |\n   |:--|:--|:--|\n   | `src/api/auth-endpoints.zod.ts:287` | `interval` | OAuth 2.0 device authorization (RFC 8628) |\n   | `src/api/http-cache.zod.ts:71` / `:72` / `:73` | `maxAge` / `staleWhileRevalidate` / `staleIfError` | HTTP Cache-Control (RFC 9111) |\n   | `src/shared/http.zod.ts:139` | `maxAge` | CORS `Access-Control-Max-Age` |\n   | `src/system/object-storage.zod.ts:258` | `maxAge` | CORS on bucket rules |\n   | `src/system/auth-config.zod.ts:308` / `:330` / `:550` | `resetPasswordTokenExpiresIn` / `expiresIn` / `expiresIn` | better-auth option names |\n   | `src/api/storage.zod.ts:44` | `expiresIn` | S3 presigned-URL option |\n   | `src/system/object-storage.zod.ts:197` | `expiresIn` | S3 presigned-URL option |\n   | `src/data/driver/postgres.zod.ts:265` | `statementTimeout` | PostgreSQL `statement_timeout` |\n   | `src/system/disaster-recovery.zod.ts:127` | `ttl` | DNS record TTL |\n   ⚠️ The standard named beside each key is the seat's reading of PR #15626's body; the dev verifies each against the schema's own docblock and corrects the attribution where the schema says otherwise (a key that turns out NOT to mirror a standard is a rename for its directory card, ⛔ not a marker).\n3. Gate + self-test cases for both classes (a marked key is exempt; a bare `EpochMs` key is exempt; a marked key whose describe contradicts its own stated unit is still refused); docs generator test for the printed phrase; `check:generated` followers regenerated.\n\n## Execution notes\n\n- **Stacked**: branch off `claude/issue-14478-duration-unit-in-key-name` (PR #15626, head `e68ae2b58` at filing time), PR base = that branch, draft, body first line `Part of #14478` and a second line naming this card without a closing keyword. ⛔ Never `Fixes #14478`. The set lands together (human merge on #15626 after the stacked head greens the gate).\n- **`Clause-②: yes`** (renames on published keys; a new exported schema) ⇒ `needs:contract-review` on the PR and on this card at PR creation (dual carrier, one stroke).\n- Changeset: `@objectstack/spec` **minor** with a BREAKING banner for the renamed instants and `adr-0087: registered` naming every conversion id; `adr-0087` disposition per `scripts/check-adr-0087-registration.mjs`.\n- `packages/spec/src/migrations/registry.ts` is written by this stack only (held for it; see the seat post §3).\n- Expected offender count after this card on the stacked head: 65 − 6 − 13 = **46** (corroboration; the gate's number is the reading).\n\nRelated: #14478 · PR #15626 · #15642 (folded into card 6/6) · #14519 (rides with #15626)."
+}

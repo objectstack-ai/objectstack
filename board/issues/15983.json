@@ -1,0 +1,38 @@
+{
+  "number": 15983,
+  "kind": "issue",
+  "title": "[finding] `service-cluster-redis`'s KV contract suite never exercises the WATCH/MULTI abort-retry path nor the versioned-delete MULTI branch — measured by instrumenting the shipped test",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T17:18:51Z",
+  "updated_at": "2026-09-06T05:53:51Z",
+  "closed_at": "2026-09-06T05:28:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15983",
+  "body": "Recording + measurement only — no severity asserted, no fix chosen. Found while measuring the ioredis-mock major-version gap in #15467; it is a different defect class (coverage of a code path, not the version of the double), so it is filed rather than folded into that PR.\n\n## Method\n\nThe double handed to the driver in `packages/services/service-cluster-redis/src/redis.contract.test.ts` was temporarily wrapped in a recording `Proxy` (the `client`, and separately the `client.duplicate()` the pub/sub adapter makes), the **shipped** suite was run unmodified otherwise, and the set of methods actually invoked was dumped. All 28 tests passed under instrumentation, and the file was restored to a state proved byte-identical to HEAD (`git diff HEAD` empty, blob hash back at HEAD's).\n\nPopulation of this census: exactly the methods the shipped contract test causes to be called on the injected client and its pub/sub duplicate. It says nothing about any other suite.\n\n## The reading\n\nExercised on the injected client:\n`del`, `duplicate`, `eval`, `get`, `incr`, `incrby`, `multi`, `multi().exec`, `multi().set`, `pttl`, `publish`, `set`, `unwatch`, `watch`\n\nExercised on the pub/sub duplicate:\n`on`, `quit`, `subscribe`, `unsubscribe`\n\n**`multi().del` never appears.** That is the only call site in `RedisKV.delete(key, opts)`'s versioned branch — the `opts.ifVersion !== undefined` path at `kv.ts`. Every `delete` the contract suite performs goes through the unversioned fast path (`client.del`), because `runKVContract` only ever calls `kv.delete('k')` with no options.\n\n## The second gap, in the same code\n\n`RedisKV.set` and the versioned `delete` both loop:\n\n```\nconst result = await multi.exec();\n// exec() returns null when WATCH detected a concurrent change.\nif (result === null) continue;\n```\n\nNothing in the suite ever produces `result === null` — that requires a competing writer to touch the key between `WATCH` and `EXEC`, and no contract test creates concurrent writers. So the retry limb, and with it the whole optimistic-concurrency claim the class header makes, is executed zero times.\n\nThe `ifVersion` mismatch cases that DO pass (`ifVersion=0n requires absent key`, `cas succeeds on match, fails on mismatch`) return **before** `MULTI` — they compare a version in JavaScript after a plain `GET`. They establish the driver's own comparison logic, not Redis's transactional abort semantics.\n\n## Why it is worth writing down\n\nWATCH/MULTI/EXEC abort behaviour is the single surface on which an in-memory double is most likely to diverge from a real server, and it is exactly the surface with no assertion behind it. A green suite here is consistent with a double that implements `watch()` as a no-op.\n\n## Scope of the claim\n\n- ⛔ No claim that `RedisKV` is wrong. The unexercised limbs read correctly; they are simply unexecuted.\n- ⛔ No claim about how to close it. A concurrency test against a double whose WATCH fidelity is itself unmeasured may not be worth much — establishing what `ioredis-mock` does with WATCH is arguably the prior step, and that may point at a real-Redis integration path, which is a cost decision rather than a lane call.\n- ⛔ Nothing about pub/sub, lock, or counter coverage; only these two KV limbs.\n\n## Dedup\n\nMCP `search_issues`, one targeted query for this shape ⇒ **0 results**. A control query in the same session (the `tsconfig` test-exclusion genre) returned **36**, so the channel answers and the zero is a reading rather than a silent empty. A first attempt at the targeted query returned HTTP 422 on punctuation in the query string; that was a channel error, not a zero, and it was re-run."
+}

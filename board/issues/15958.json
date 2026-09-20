@@ -1,0 +1,35 @@
+{
+  "number": 15958,
+  "kind": "pull_request",
+  "title": "docs(pm): add the triage seat's lane reference and its ratchet rows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T16:17:46Z",
+  "updated_at": "2026-09-06T06:15:44Z",
+  "closed_at": "2026-09-06T06:15:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T06:15:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15958",
+  "body": "Fixes #15671\n\n## What this lands\n\nTwo files, exactly as the card rules them.\n\n**New `.claude/skills/pm-dispatch/references/lanes/triage.md`** — 7 lines: the H1 the sibling lane files open with, the pointer line naming the SKILL.md section it details (〈分诊座位职责〉), then the three ruled rules, one per line. Nothing else lives in the file today. `SKILL.md` and the eight existing lane files are untouched.\n\n**`scripts/pm/check-skill-line-ratchet.mjs`** — two added rows and nothing else: `CEILINGS` gains `lanes/triage.md` at 7, the landed line count read from the gate's own run (headroom 0, the map's convention for a new file), and `MAX_TABLE_ROW_BYTES` gains it at 0, the file carrying no table row. No other row of either map moves; the diff on this file is 8 added lines and 0 removed.\n\n## Byte widths\n\nMeasured with `LC_ALL=C awk`. The widest line is line 3, the pointer line, at **119 bytes** against the 120-byte budget; the three rule lines are 113 / 110 / 101 bytes.\n\nThat pointer line takes the seat wording of `lanes/director.md` with the shorter tail the six domain lane files use (`⛔ 不迁入本文。`): director's own spelling with 〈分诊座位职责〉 substituted measures 122 bytes and would have been red.\n\n## Gates\n\nUnion re-run on head `32945f93f1`, after the final commit.\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived **36** commands from the 2-path change set. All 36 were run; the reconcile agrees: `✓ dispatch-gates --ran: 36 derived famil(ies) accounted for — 36 run, 0 NOT-MEASURED.`\n- `✓ check-skill-line-ratchet self-test: 155 cases pass.` (155 on `main` too — no case added or removed.)\n- `✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/lanes/triage.md is 7 lines (ceiling 7; headroom 0).`\n- `✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/lanes/triage.md: widest table row is 0 bytes (pin 0; headroom 0).` Every other ceiling line in that run is unchanged.\n- `✓ check-skill-id-lint: 25 file(s) clean (pattern /#[0-9]{3,}/g).` — the new file is one of the 25; it carries no card number and no date.\n- `check-skill-frame-sync`: `binding sentence present in all 2; 4 count mention(s) agree; 74 markdown files scanned for undeclared copies.` The decision frame does not appear in the new file, and its anti-dormancy scan agrees.\n- `✓ check-governed-prose: 2 instruction surface(s) name all 5 registered governed surfaces … and claim no others.`\n- `check-nul-bytes: OK (scanned 7694 text file(s) … no raw ASCII control bytes).`\n- Whole-repo `pnpm lint` (`eslint . --no-inline-config`) green through `scripts/pm/os-verify-lock.sh`, slot `issue-15671`: `VERDICT command-exit 0 · held the lock 82s`.\n- One derived command first returned **exit 3 — PREREQUISITE NOT MET, nothing measured, not a finding**: `pnpm --filter @objectstack/lint run check:doc-formula-expressions`. Built `@objectstack/formula` and `@objectstack/lint` through the same lock, re-ran it, green.\n- `node scripts/pm/check-governed-merges.mjs --test` on the two paths exits **3 — GOVERNED** (`.claude/**` hit). Draft PR, human merge; no seat flips it ready, enqueues it, or arms auto-merge. `skip-changeset` applies: nothing here publishes from a package.\n\n## One roster note — reported, not taken\n\nThe ratchet's self-test case labelled `all eight lane/seat job descriptions are covered` enumerates the eight pre-existing lane files and is an `.every` over that list, so a ninth file keeps it green. This file's coverage is therefore pinned by its two map rows and by the map-wide `every ceilinged file carries a pin` case, but not by that roster. Extending the roster would also rename a label pinned in the self-test's expectation table — beyond the two map rows this card rules, so it is reported to the seat rather than taken here.\n\n## 维护者速读(草稿)\n\n**改了什么** — 新增一个分诊席的岗位说明文件,把已裁定的取卡纪律写成三条规则:每轮只取一个仓、两仓轮替、仓内最旧优先;任一仓最旧未路由卡超过 4 小时时该仓插队;不回退到跨仓全局最旧优先,也不因积压加席或改频率。同时在行数棘轮里给这个新文件登记一行上限。不动任何既有指令文件。\n\n**为什么改** — 这套纪律此前只存在于一次裁决记录里,分诊席每轮开工靠记忆执行,偏离了没人指得出来。写进版本化的岗位说明后,规则跟着仓库走。原本设想的落点(SKILL.md 的分诊座位职责一节)已经顶到行数上限,且有两张卡在它上面串行,所以按卡的判断另起一个车道文件。\n\n**风险与代价(含回滚)** — 纯文档增量,不改任何可执行行为;派生的 36 个门禁族与全仓 lint 全绿。代价是常读指令面多了 7 行,且棘轮上限钉死在 7、没有余量:以后要往这个文件加规则,得先删同等行数或走裁决。回滚就是 revert 这一个提交,无残留。\n\n**席位意见** —\n\n**你要做的(一个动作)** — 读一遍文件里那三条规则,确认就是你要的分诊取卡纪律;是的话合并这个 PR。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

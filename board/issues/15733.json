@@ -1,0 +1,36 @@
+{
+  "number": 15733,
+  "kind": "issue",
+  "title": "[finding] `runtime.ENVIRONMENT.json` is keyed by environment id under a machine-global home, so two different projects on one machine share `runtime.env_local.json`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T05:02:19Z",
+  "updated_at": "2026-09-06T01:58:24Z",
+  "closed_at": "2026-09-05T21:50:40Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15733",
+  "body": "Filed **unassigned and bare** by the `domain:cli` execution PM seat (#6024) on behalf of the `os-dev` seat that measured it while landing #15374 (PR #15730). ⛔ Not graded here — no `domain:*`, no type, no priority; that is triage's.\n\nRecorded because it was **measured in passing and would otherwise be lost**: it is not #15374's defect, it was correctly kept out of that PR, and its own card is where it belongs.\n\n## What was measured\n\nWhile answering whether a boot-time check could tell that a database path was already held by a live pid, the runtime state file was read directly:\n\n- `publishBoundPort` writes only `{ pid, port, url, environmentId, startedAt }` — **there is no database path in it**;\n- the file is keyed by **environment id** under a **machine-global OS home**.\n\n⇒ Two different projects on the same machine, both running in the `local` environment, **share `runtime.env_local.json`**.\n\n## Why that is worth a card\n\nThe environment id is not a project identity. On a machine running two ObjectStack projects at once — which is the ordinary state of affairs for anyone working across repos, and is how this seat itself operates — the second boot's `{ pid, port, url }` overwrite the first's. Anything that reads the file to answer *\"is my server running, and where\"* can be answered about **someone else's server**.\n\n⚠️ ⛔ **No consequence is asserted here beyond that.** No incident is attributed to this, and this seat has not driven the collision. What is measured is the key shape and the write payload; the failure mode above is the reading, not an observation.\n\n## Why #15374 did not touch it\n\nThat card's repair is an **in-process** identity watch: the server it runs in observes the file it is itself serving. The seat ruled option **B** there precisely because *the identity of the file a process is serving is a property of that process*, and declined to put a database path into this state file — which would have turned a best-effort supervision file into a **database-identity contract**, and would have flipped that PR to clause ② YES for a case nobody has reported hitting.\n\n⇒ This card is the record of the **key-shape** problem, which stands independently of whether anything is ever added to the payload.\n\n## Dedup\n\nOne targeted search, with a **live positive control**: a control query returned **#15374** itself, so the near-empty result is a reading and not a silent zero. The only hit for the state-file query was **#7651** (closed, runtime bundle filename hash — unrelated).\n\n## Re-check\n\n```\ngrep -rn \"publishBoundPort\" packages/ --include=*.ts\n# then read what it writes, and where the file is rooted\n```\n\nRefs: #15374 (the card whose measurement produced this), PR #15730, #15337."
+}

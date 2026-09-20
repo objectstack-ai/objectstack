@@ -1,0 +1,36 @@
+{
+  "number": 15103,
+  "kind": "issue",
+  "title": "[finding] The ruling's own offset shape `completed_at <= due_date + duty.grace_days` is refused on SQL push-down — a cross-field reference (and its `addDays` offset) may not name a relation column, so the `duly` dataset needs `grace_days` on the task or a join-aware push-down ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T22:36:33Z",
+  "updated_at": "2026-09-06T01:59:17Z",
+  "closed_at": "2026-09-05T08:34:43Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15103",
+  "body": "Recorded by the `domain:spec` seat (session_0174WZTU6XcFcS7g2kykC53i, seat post #6017) at the contract-review ACCEPT of PR #15102 (#14104, maintainer ruling A 5507665791), from the dev's open question in report 5532978940. Bare `finding` for triage's first-touch; the answer is a ruling, not a queue position.\n\n## What is measured (PR #15102 head `b45c0785`, 2026-09-03T22:35Z)\n\n- The memory evaluator (`@objectstack/formula` `matchesFilter`) resolves a dotted `$field` and a dotted `addDays` reference by walking the record (`duty.grace_days` answers when the row carries the relation).\n- SQL push-down (`driver-sql`, `driver-sqlite-wasm`) refuses a dotted reference — bare or as the offset — with `INVALID_FILTER` (HTTP 400), under the maintainer's 2026-08-06 same-table ruling on the cross-field arm (#5222: no JOIN planning, no alias contract). PR #15102 makes the offset inherit that rule rather than reopen it, pins the asymmetry in the shared conformance corpus (a loud refusal, never a wrong count) and documents it in `content/docs/protocol/objectql/query-syntax.mdx`.\n- The ruling on #14104 names the driving shape literally as `completed_at <= due_date + duty.grace_days` — a relation path — and requires the dataset pin on both paths. The PR's dataset pin uses the same-table spelling (`grace_days` on the task row); the dotted spelling answers in memory and refuses on SQL.\n\n## Why it is worth recording\n\nThe reporting application (`objectstack-ai/duly`) authors `grace_days` on `duly_catalog_item`, propagates it to `duly_duty`, and the task carries `duty` as a relation. On a SQL deployment its on-time measure, spelled as the ruling spells it, is a loud 400 — honest, but the measure still cannot ship unless `grace_days` is propagated one more hop onto the task (a second writer that drifts when the duty's grace is edited — the very workaround the card refused) or unless push-down learns the dataset's own join chain: a dataset already compiles joins for its `include`d dimensions (ADR-0071, ≤3 hops), so a cross-field reference naming a column of an `include`d relation is conceivable through the same chain.\n\n## Not a decision\n\nWhether the 2026-08-06 same-table ruling is widened to `include`d relations for cross-field comparands (and their offsets), or `duly` carries `grace_days` on the task, is the maintainer's. Dedup (22:36Z): `search_issues` on the same-table / join push-down question — no open card; positive control returned #5222 (closed) and the FK-introspection family.\n\nRefs: #14104 · PR #15102 · #5222 (PR #7582, the same-table rulings) · ADR-0071 (dataset joins) · #5146 (`$not` NULL shape)"
+}

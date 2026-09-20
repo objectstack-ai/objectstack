@@ -1,0 +1,36 @@
+{
+  "number": 15904,
+  "kind": "issue",
+  "title": "`check:llms-txt` and `check:quick-reference-counts` are red on the #14478 stack — `shared/epoch.zod.ts` landed without moving its two hand-kept count claims",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "domain:spec",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T13:45:30Z",
+  "updated_at": "2026-09-06T05:55:48Z",
+  "closed_at": "2026-09-06T05:55:47Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15904",
+  "body": "Found while verifying stack card 3/6 of #14478 (branch `claude/issue-15678-kernel-duration-unit-in-key-name`, head `8f2b8f389`). Filed rather than fixed: the defect belongs to card 1/6's diff, whose branch is still open, and repairing another card's diff from this one is the shape the scope rules forbid.\n\n## The two reds\n\nBoth measured on the stacked head, exit code captured before any pipe:\n\n```\n$ pnpm --filter @objectstack/spec check:llms-txt   # EXIT=1\n✗ packages/spec/llms.txt — the file advertises things this package does not have:\n\n  packages/spec/llms.txt:94  [count] domain `shared` declares 13 schemas; src/shared/ holds 14\n  packages/spec/llms.txt:80  [count] heading declares 207 schemas; packages/spec/src/ holds 208\n```\n\n```\n$ pnpm check:quick-reference-counts   # EXIT=1\n✗ content/docs/getting-started/quick-reference.mdx — the declared sections do not match the page or the reference tree:\n\n  content/docs/getting-started/quick-reference.mdx:209  [total] section \"Shared Protocol\" declares \"of 8 schemas\" but content/docs/references/shared/ publishes 9 page(s)\n```\n\n## One cause, two gates\n\nBoth counts moved by the same commit. `3f9544447` (card 1/6 of #14478, branch `claude/issue-15676-epoch-ms-and-external-vocabulary-exemptions`) added:\n\n- `packages/spec/src/shared/epoch.zod.ts` — the shared `EpochMs` schema, which took `src/shared/` from 13 to 14 and the tree from 207 to 208;\n- `content/docs/references/shared/epoch.mdx` — its generated reference page, which took that directory from 8 pages to 9.\n\nNeither count is generated. `llms.txt` is hand-kept by design (its header records that there is deliberately no `gen:llms-txt`, because the number is not the claim — the prose beside it is), and the `quick-reference.mdx` section headings are hand-written too. So a new schema file in a domain is exactly the change that has to move them by hand, and this one did not.\n\n## Attribution evidence\n\nBoth gates read files that card 3/6's branch does not touch:\n\n```\n$ git diff --name-only b4633903b..HEAD -- packages/spec/src/shared        # 0 files\n$ git diff --name-only b4633903b..HEAD -- content/docs/references/shared  # 0 files\n$ git log --oneline -1 -- packages/spec/src/shared/epoch.zod.ts\n3f9544447 feat(spec): publish the externalVocabulary standard on the reference page (#15676)\n$ git log --oneline -1 -- content/docs/references/shared/epoch.mdx\n3f9544447 feat(spec): publish the externalVocabulary standard on the reference page (#15676)\n```\n\nCard 3/6 adds no schema file at all — its only new sources are ADR-0087 registry entries under `packages/spec/src/migrations/entries/`, which neither gate counts.\n\n## Why this is worth a card rather than a note\n\nHeavy CI does not run on a stacked PR: both `lint.yml` and `ci.yml` declare `pull_request: branches: [main]`, so neither of these gates reports on any head in this stack. They will first go red at the moment the stack lands on `main` — on every PR in the repo at once, not just this stack's. Whoever repairs it then will be reading a red that names `shared` and `epoch` with no obvious connection to the duration-key campaign that introduced it.\n\n## The fix\n\nCorrect the numbers **and** re-read the prose beside each one, per the `check:llms-txt` header: rewriting a count without re-reading its row turns a loud staleness into a silent lie. Three edits:\n\n- `packages/spec/llms.txt:94` — `shared` domain, 13 → 14;\n- `packages/spec/llms.txt:80` — heading total, 207 → 208;\n- `content/docs/getting-started/quick-reference.mdx:209` — \"Shared Protocol\", 8 → 9.\n\nBest landed on card 1/6's own branch so the stack is green as one unit; the alternative is a follow-up lap after the stack merges, which is strictly worse because the red is then on `main`.\n\nRelated: #14478 · #15676 · #15678. No assignee — for triage.\n"
+}

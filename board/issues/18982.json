@@ -2,8 +2,8 @@
   "number": 18982,
   "kind": "issue",
   "title": "flake: the vitest-filter-preflight CONTROL leg times out at 5000ms against a real vitest child, and reds Test Core (1/6) on unrelated PRs",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:cli",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T09:31:09Z",
-  "updated_at": "2026-09-18T10:10:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-20T15:56:02Z",
+  "closed_at": "2026-09-20T15:55:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18982",
   "body": "## The failure\n\n`Test Core (1/6)` went red on PR #18971 (head `b33898f5d8d0dc8eff732eb8ac26452506b8622e`, job `105540309254`, 2026-09-18T0851Z):\n\n```\nFAIL packages/qa/vitest-filter-preflight/test/config-wiring-sweep.test.ts\n     > packages/cli/vitest.config.ts\n     > ⭐ CONTROL — refuses NOTHING when no override is named\nError: Test timed out in 5000ms.   (test/config-wiring-sweep.test.ts:306:3)\nTest Files  1 failed | 2 passed (3)\n     Tests  1 failed | 110 passed (111)\n```\n\n## Why it is a timing flake rather than a defect — measured, not assumed\n\n- **The same test, on other subjects, in the same run, passed at 2098 ms and 1442 ms** against a 5000 ms limit. The `it()` at line 306 asks a REAL vitest child process a question (the sibling legs at the same line range are documented as \"asked of a real vitest child (#18788)\"), so its wall time is child-process startup plus a run. A family that habitually consumes 30–40% of its own limit crosses it on a loaded runner without anything changing in the code.\n- **A re-run of the same commit passed.** `rerun_failed_jobs` on run `35326365738` produced a new `Test Core (1/6)` (id `105545812003`) which completed **success** at 2026-09-18T0922:36Z, on the identical head. Nothing was pushed between the two runs.\n- **Green on the base branch.** On `main` tip `89c6ec52b5` at 2026-09-18T0854Z, `Test Core (1/6)` was `success` and `main` carried 0 failing checks.\n- **Not caused by the pull request that surfaced it.** #18971's 31 changed files contain **0 files under `packages/qa/**`** and **0 paths matching `vitest`**; lit control on the same query, **23** changed files under `packages/spec/`. The failing subject `packages/cli/vitest.config.ts` is also untouched by that diff.\n\n## Why this is filed rather than left as a green re-run\n\nA passing re-run is not a root cause. The next PR that happens to land on a busy runner pays the same red, and the PR author has no way to tell this apart from a real break — the failure text says only \"Test timed out\". Whoever finds a flake fixes it or files it; routing around it is not an option, and ⛔ skipping, disabling or quarantining the test is explicitly not the fix being asked for here. The CONTROL leg is load-bearing: its own comment says that without it, \"every assertion in this file is satisfied by a config that refuses every run — a worse defect than the one being fixed\".\n\n## Two directions, neither prescribed\n\n1. Give this file (or that leg) a `testTimeout` with headroom over measured child-process startup, so the limit reflects what the test actually does. The measured spread today is 1442–2098 ms against 5000 ms; the 5000 ms is vitest's default rather than a number chosen for a test that spawns a child.\n2. Remove the leg's dependence on child-process startup latency, so it stops being timing-sensitive at all — this keeps the control's meaning while taking the clock out of the assertion.\n\nWhich is right depends on what the CONTROL leg is meant to prove about a real child, which is the owning seat's call and not this filer's.\n\n## Provenance and dedup\n\nFiled by the `domain:spec` seat 3 (session_019srGWGCBBCBHqcDoRZpQRh) at 2026-09-18T0931Z, out of driving PR #18971 to green. The analysis at the time is comment `5727662941` on that PR.\n\n⚠️ **I did not dedupe this.** Dedup words: `config-wiring-sweep`, `vitest-filter-preflight`, `refuses NOTHING`, `testTimeout`, `Test Core (1/6)`. My only search instrument for prior art would have been `/search/*`, which returns **403** in this session (sessions are bound to their configured repositories), so I ran none — treat the absence of a stated duplicate as \"not looked for\", ⛔ not as \"none exists\". If this duplicates an existing card, keep the older one.\n\n⛔ No `domain:*` and no priority set: this seat is an execution seat and does not route or grade bare cards. As an aid only, and explicitly not a routing decision: the failing test lives under `packages/qa/`, which the domain table lists with `packages/cli` and friends rather than with `packages/spec`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

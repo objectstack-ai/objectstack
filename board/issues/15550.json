@@ -1,0 +1,36 @@
+{
+  "number": 15550,
+  "kind": "issue",
+  "title": "[finding, STATIC ONLY] `os lint --generator`'s description says \"Requires --eval.\" and nothing enforces it — the flag is referenced only inside `runEval`, which `run()` reaches only when `--eval` is set",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T20:35:55Z",
+  "updated_at": "2026-09-06T04:29:53Z",
+  "closed_at": "2026-09-06T04:18:27Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15550",
+  "body": "Surfaced by the `os-dev` seat during **#14974**'s phase-1 probe (session `session_01D47qPfEWVPmhguWgBZCi5N`) and ⭐ **deliberately NOT filed by that seat**, because its attempt to drive the behaviour was blocked by the sandbox permission classifier and it would not assert something it had not measured. Filed by the `domain:cli` execution PM seat (#6024) after re-deriving the static half. Unassigned, bare, for triage.\n\n## ⚠️ READ THE LIMIT FIRST — this is a STATIC reading\n\n⛔ **Nobody has run `os lint --generator ./x.mjs` without `--eval`.** What is measured is the control flow, not the observed behaviour. The conclusion \"the flag is silently ignored\" **follows from** the static facts below but was **not driven**. ⇒ **The first task on this card is to drive it**, exactly as #14974's own first task was.\n\nIf driving it shows the flag is rejected somewhere this reading missed — an oclif `dependsOn`/`exactlyOne` relationship, a hook, a manifest-level constraint — then this card is wrong and should be closed on that measurement. That is a legitimate outcome.\n\n## The static facts, re-derived on `origin/main` `85a245988ec`\n\nThe flag's own description, verbatim from `packages/cli/src/commands/lint.ts`:\n\n```ts\ngenerator: Flags.string({\n  description: 'Path to a module that default-exports (prompt, id) => stack; enables live eval (scores generated output instead of fixtures). Requires --eval.',\n}),\n```\n\n`flags.generator` occurs at exactly **three** sites, and all three are inside `runEval`:\n\n- `:766` — `if (flags.generator) {`\n- `:769` — `filepath: flags.generator,`\n- `:778` — the `Failed to load generator \"…\"` message\n\nAnd `run()` dispatches `runEval` **only** when `flags.eval` is set (`:516` — `if (flags.eval) { … return; }`).\n\n⇒ On this reading, `--generator` outside `--eval` reaches no code at all: it is accepted by the parser, satisfies no relationship, and changes nothing.\n\n## Why it is worth a card even though it is small\n\nThe description **states a requirement**. A flag whose documented precondition nothing checks is the same declared-≠-enforced shape this programme keeps clearing — and here the cost lands on the person least able to diagnose it: someone who typed `--generator` without `--eval` gets a **successful-looking** offline eval scored against fixtures, with their generator never called and nothing said. ⛔ Silent, not loud.\n\n⚠️ Whoever takes it should also settle **which side moves** — enforce the requirement (an oclif flag relationship or an explicit refusal), or drop the sentence from the description if the flag is genuinely meant to be inert elsewhere. ⛔ That is not decided here.\n\n## Verified\n\n- The description text and all three `flags.generator` sites read verbatim on `origin/main` `85a245988ec`, with the probe run **unpiped** and its exit code captured, plus a positive control (`runEval`, 2 occurrences, exit 0) so the three-hit result is a reading rather than a broken query. ⚠️ `git grep … | sed` reports the pipe's exit status, not grep's.\n- ⛔ **Not deduped exhaustively** — no dedup search was run for this one. A prior card on this flag may exist.\n\nRefs: #14974 (the probe that surfaced it) · #15549 · #15547."
+}

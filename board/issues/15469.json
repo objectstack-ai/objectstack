@@ -1,0 +1,34 @@
+{
+  "number": 15469,
+  "kind": "issue",
+  "title": "spec: `GanttConfigSchema` is `strictObject(...).passthrough()`, so a mistyped gantt key is silently accepted — the only one of the three view config schemas that does not refuse it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T17:09:52Z",
+  "updated_at": "2026-09-05T23:59:19Z",
+  "closed_at": "2026-09-05T23:53:17Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15469",
+  "body": "Found while doing #14471 (prose on `colorField` for timeline / calendar / gantt). Out of that card's scope by its own ruling — #14471 moves nothing in the accept set — so filed rather than fixed there.\n\n## The measurement\n\n`packages/spec/src/ui/view.zod.ts` builds all three view config schemas with the same `strictObject(...)` helper. Two of them refuse an undeclared key. The gantt does not:\n\n```\nzod 4.4.3\nCONTROL inline z.object({...}).strict() rejects unknown = true\nCONTROL z.strictObject({...})          rejects unknown = true\nGantt     rejects unknown = false\nCalendar  rejects unknown = true\nTimeline  rejects unknown = true\n```\n\nRun against the built `packages/spec/dist/ui/index.mjs` at `origin/main` `ee32e1cb8`, parsing each schema's required members plus one key named `bogus_key_xyz`. Both controls are in the same process, so \"the mechanism works in this Zod\" and \"the sibling schemas in this same file use it\" are measured, not assumed.\n\n## The cause is declared in the source, not accidental\n\n`GanttConfigSchema` ends with an explicit, commented `.passthrough()`:\n\n```ts\n// Forward-compatible: the gantt renderer (objectui plugin-gantt) keeps adding\n// config knobs (e.g. lockField / defaultCollapsedDepth) ahead of this schema.\n// Passthrough lets those extra fields reach the renderer instead of being\n// stripped here, so a renderer release no longer has to wait on a spec release.\n}).passthrough());\n```\n\nIt is the only `.passthrough()` in `view.zod.ts`. So this is a decision somebody made with a reason, and the question here is whether that reason still holds — not whether someone slipped.\n\n## Why it is worth a triage decision\n\n1. **`strictObject` is applied and then undone at that one site.** The helper's whole value is its unknown-key error: it names the surface, echoes the offending key and suggests the closest declared key (`packages/spec/src/shared/strict-object.ts`). `.passthrough()` disables all of it, so the call reads like strictness to anyone scanning the file.\n2. **Same key, same ladder, two behaviours.** `colorField` is declared on all three. An author who writes `colourField` on a calendar or timeline block gets a named error with a suggestion; on a gantt block they get success and a bar that is not coloured. That is the exact failure shape #14110 / objectui#7243 just closed one layer down — declaring the key was worse than omitting it — reappearing as a typo the contract will not catch.\n3. **The stated rationale is the \"second de-facto contract\" shape Prime Directive #12 names.** \"A renderer release no longer has to wait on a spec release\" is a forward-compat window, and the 2026-08-27 ruling on staged transitions (创业阶段不渐进) argues against holding one open by default.\n4. **It may be invisible to the strictness campaign.** The ledger (`docs/audits/2026-07-unknown-key-strictness-ledger.md`) classifies `view.zod.ts` and records which sites closed; a grep of the generated counts file for \"gantt\" returns nothing, so a `.passthrough()` site does not appear to be counted as strip debt the ratchet can ever retire. Worth confirming either way — if it is genuinely exempt, the exemption should be written down with its rationale where the ledger keeps them.\n\n## The keys the window exists for\n\nobjectui declares ten `GanttConfig` members the spec does not model — `borderColorField`, `lockField`, `objectField`, `summaryExtent`, `defaultCollapsedDepth`, `dependencyTypes`, `timeZone`, `exportFileName`, `interactions`, `timeSegments` (`GANTT_CONFIG_EXTENSION_KEYS` in `packages/plugin-gantt/src/ObjectGantt.tsx` at pin `00d3f09c`). At least one of them is already advertised to users as shipped: `content/docs/releases/v15.mdx:151` names `borderColorField`. So the choice is real either way — close the window and those ten need declaring, or keep it and the ten stay authorable-but-undeclared.\n\n## Decision, not a patch\n\nBoth directions are accept-set changes, so this needs triage rather than an implementer:\n\n- **A — declare the ten and drop `.passthrough()`.** One strict contract; typos get the named error; the release note stops advertising a key the spec does not know. Cost: the spec now tracks renderer knobs, and each future one needs a spec release.\n- **B — keep the window, write it down.** Cheapest today. Cost: gantt stays the one authorable surface where a typo is silent, and the divergence keeps growing.\n- **C — declare the ten, keep `.passthrough()` for the next ones.** Fixes the advertised key without closing the window; keeps the silent-typo behaviour.\n\nNo recommendation offered here — the four-axis frame belongs to whoever triages this, and 实际业务需求 (who is actually authoring these ten keys, in which app) is the axis I did not measure.\n\nRefs: #14471 (the card this was found under) · #14110 and objectui#7243 (the consumer-side ladder) · Prime Directive #12 · `docs/audits/2026-07-unknown-key-strictness-ledger.md`"
+}

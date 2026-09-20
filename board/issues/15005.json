@@ -1,0 +1,35 @@
+{
+  "number": 15005,
+  "kind": "issue",
+  "title": "reader program 2/4 — `@objectstack/runtime`: every top-level collection read gains a `packages[]` path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T17:08:18Z",
+  "updated_at": "2026-09-06T02:00:27Z",
+  "closed_at": "2026-09-04T12:52:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15005",
+  "body": "Part of #14122 · blocks #14512 · **Blocked-by: #15004** (the acceptance probe — this card does not land before that pin can go red).\n\nReader half of the program ruled on #14512 (comment 5528589044, maintainer 2026-09-03, batch #23): the artifact **stays additive** through this card. Nothing here changes what is emitted; each reader simply learns to find its collections under `packages[]` as well as at the top level.\n\n## The sites\n\nFrom the enumeration (5523603341) and the boundary measurement (5523741937), all `origin/main` at the time of measurement:\n\n| Reader | `file:line` | Measured when the top level is removed |\n|:--|:--|:--|\n| `collectBundleActions` | `packages/runtime/src/app-plugin.ts:1878-1905` | 4 → **0**. Reads exactly `bundle.actions`, `bundle.manifest.actions`, `bundle.objects[].actions`, `bundle.manifest.objects[].actions` — no `packages[]` path. Every declarative action 404s at dispatch, including object-embedded ones |\n| `collectBundleHooks` | `packages/runtime/src/app-plugin.ts:1843` | 1 → 0 |\n| `collectBundleFunctionEntries` | `packages/runtime/src/app-plugin.ts:1921`, consumed `:868`, `:987` | — |\n| `AppPlugin` jobs | `packages/runtime/src/app-plugin.ts:972-975` | 1 → 0 |\n| `AppPlugin` seed data | `packages/runtime/src/app-plugin.ts:1110-1111` | 1 → 0 |\n| `AppPlugin` translations / i18n | `packages/runtime/src/app-plugin.ts:1701-1705`, `:1749` | 1 → 0 |\n| `AppPlugin` datasources / objects | `packages/runtime/src/app-plugin.ts:536-541`, `:559`, `:577`, `:619`, `:646` | datasources 1 → 0, datasourceMapping 1 → 0, objects 2 → 0 |\n| `AppPlugin` `SECURITY_FIELDS` | `packages/runtime/src/app-plugin.ts:723-800` | — |\n| `createStandaloneStack` surfaced keys | `packages/runtime/src/standalone-stack.ts:780-795` (`requires`, `objects`, `permissions`, `positions`, `i18n`) | permissions 1 → 0, positions 1 → 0 |\n| `resolve-project-database` project-DB tier | `packages/runtime/src/resolve-project-database.ts:202`, `:208` | — |\n\n## Two things that are not obvious and cost a cycle if missed\n\n1. **`resolve-project-database` opens the artifact itself.** `:193` is its own `readFileSync` + `JSON.parse` with a **copy** of `loadArtifactBundle`'s envelope unwrap at `:195`, not a call to it. Inside `createStandaloneStack` it runs at `:574`, **112 lines before** `loadArtifactBundle` at `:686`, and it is also reached independently from `os dev` (`dev.ts:56`), `os start` (`start.ts:557`) and `os db clean` (`db/clean.ts:46`) before any stack exists. Teaching only the bundle path leaves it blind.\n2. **`createStandaloneStack`'s ADR-0056 D7 permission surface is fed from two boundaries** — from B1 here, and from the config path via `appSecurityPluginOptions(config)` in `@objectstack/cli` (card 3/4). Fixing one side leaves the other silently empty; the probe pin covers both, which is why it lands first.\n\n⚠️ `standalone-stack.ts:785` **omits the `objects` key entirely** when the array is absent (rather than setting it to `[]`), and `mergeBootConfig` is a plain spread (`packages/cli/src/utils/merge-boot-config.ts:42`). That interacts with card 3/4's engine and driver auto-registration gates — check the two cards' behaviour together on the probe before either is called done.\n\n## Acceptance\n\n- The option-B leg of #15004's probe goes green for every runtime-side subsystem above; the additive leg stays green.\n- Where a reader gains a `packages[]` path, the **order** is the artifact's package order (`resolveArtifactPackageOrder`, already in `@objectstack/core` since #14643) — not object-key order, and not re-derived here.\n- ⛔ Do not change `composeStacks`, `packages/spec/src/stack.zod.ts`, or what any command emits. Artifact stays additive.\n- ⛔ Do not weaken or edit the probe pin to make this card pass. A subsystem still red is a subsystem still missing.\n\nSibling cards: #15004 (probe, blocks this), 3/4 `@objectstack/cli`, 4/4 `@objectstack/plugin-security`. Emitter half: #14512."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14193,
+  "kind": "issue",
+  "title": "ADR-0113's Context row now states the INVERSE of the shipped mechanism — the NOT NULL constraint keys off storage.notNull at sql-driver.ts:15565, not field.required",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T11:27:06Z",
+  "updated_at": "2026-09-06T01:58:54Z",
+  "closed_at": "2026-09-05T13:46:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14193",
+  "body": "Filed by the `domain:devx` execution seat (session `session_01WLJQhde67SeTccsmnBVarV`) from the #13556 ADR-anchor census (dev measurement, 2026-09-01, at `origin/main 83be4601`). ⛔ Unassigned, ungraded — routing is triage's. Split out of #13556 deliberately: that card is about anchor ROT (line numbers pointing at unrelated code); this one is about ADR CONTENT that is now factually inverted, which no citation refresh can repair.\n\n## Measured\n\nADR-0113's rotted anchor (`sql-driver.ts:4901`) does not merely point at unrelated code — re-locating the mechanism it names found that **the ADR's own decision shipped and inverted the predicate**:\n\n- The NOT NULL column-constraint mechanism now lives at `packages/drivers/driver-sql/src/sql-driver.ts:15565` (position dated to `83be4601` — re-derive before use).\n- It keys off **`storage.notNull`**, NOT `field.required`.\n- ADR-0113 states the claim twice (`:19` table row, `:47` prose: \"the column is created `NOT NULL` (sql-driver.ts:4901)\"), and its Context row reads as a description of TODAY while saying the opposite of what the code does.\n\n## Why a separate card\n\nA reader consulting ADR-0113 to answer \"does `field.required` make the column NOT NULL?\" gets a confident wrong answer from the durable record of the decision itself. #13556's repair (anchor spelling) cannot fix this; the ADR text needs a factual amendment, and `docs/adr/**` is a governed surface (draft PR + human merge).\n\n## Re-check\n\n```\ngit grep -n \"notNull\" origin/main -- packages/drivers/driver-sql/src/sql-driver.ts | head\ngit grep -n \"sql-driver.ts:4901\" origin/main -- docs/adr/\n```\n\nReverse-control any zero with a term known present in the same file.\n\n## Dedup\n\n#13556 (anchor rot census — the parent measurement, explicitly excludes content correctness); #13516 / PR #13555 (comment-text repairs where the rot surfaced). No open card names ADR-0113's content inversion."
+}

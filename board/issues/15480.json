@@ -1,0 +1,35 @@
+{
+  "number": 15480,
+  "kind": "issue",
+  "title": "[finding] driver-memory's `$eq`-exemption comment still calls `$in: [null]` / `$nin: [null]` \"#13357's cells, `needs-user-decision`, held for the maintainer\" — they were ruled and refused at the door on 2026-08-31, and the sibling test header in the same package was corrected while this one was left behind",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T17:29:02Z",
+  "updated_at": "2026-09-06T02:44:05Z",
+  "closed_at": "2026-09-06T02:43:24Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15480",
+  "body": "Filed by the `domain:spec` PM seat, session `session_01G4138K1EG7kQ81FNba5Kp4`, as condition **C1** of the isolated contract-tier review of PR #15464 (card #14426). Filed unassigned, for triage. ⛔ Not folded into #14426 — that card's fence is explicit (\"the #13553 guard's **comment** only\", three named prose sites), the text below is a fourth site outside it, and it is present at that PR's merge-base, so it is not that PR's defect.\n\nNot a duplicate: #13357, #13494, #13495 and #13549 are all closed (they are the rulings and the behaviour fixes); none of them is \"the comment recording the decision state is now false\". Searched before filing.\n\n## The text, measured on `origin/main` (`e8c7956c4`), `packages/drivers/driver-memory/src/memory-matcher.ts:309-313`\n\n```\n// ⚠️ `$eq` ONLY, deliberately. The exemption is written over the\n// OPERATOR and not over \"the comparand is null\", because the latter\n// spelling would have moved `$in: [null]` / `$nin: [null]` with it —\n// and those are #13357's cells, `needs-user-decision`, held for the\n// maintainer. They are measured byte-identical across this change.\n```\n\n## Why it is false on the same tree\n\nThree independent records on `origin/main` say those cells were decided:\n\n- `packages/spec/src/data/filter-comparand-shape.ts:92` — `## Refused BY RULING, 2026-08-31: a null list member (#13357)`, with `:314` pointing the `nullListMemberError` door back at it and `:502` naming \"the null-member carve-out (2026-08-31 ruling, #13357)\".\n- `packages/spec/CHANGELOG.md:2973` — `e398863: feat(spec): refuse null in list-comparand positions — $in / $nin members and $between bounds (#13357, #13495)`.\n- The sibling header **in this very package**, `packages/drivers/driver-memory/src/memory-matcher-null-value-and-comparand.test.ts:56`, already reads in the past tense: *\"They **were** `needs-user-decision` when #13494/#13495/#13549 landed\"*.\n\nSo the package states the decision state two ways, thirty lines apart, and the stale one is the one an author reading the guard arrives at first.\n\n## Why it is worth a card rather than a silent fix\n\n`needs-user-decision` is a live protocol state with a named reader (the maintainer's inbox). A source comment that asserts a cell is sitting in that state, when the door two packages over refuses the shape by ruling, is the shape that produces a second escalation of a settled question — the failure mode the enforce-or-remove policy exists to prevent. It is also exactly the class of drift a comment-only re-pointing card (#14426) is meant to close, one site short.\n\n## Shape of the fix\n\nComment-only, in the same file: re-point the parenthetical at the 2026-08-31 ruling the way `memory-matcher-null-value-and-comparand.test.ts:56` and `filter-comparand-shape.ts:92` already do — the `$eq`-only exemption's *reasoning* is unaffected (writing the exemption over the operator rather than over \"the comparand is null\" is still right; what changed is that the shapes it declined to move are now refused at the validation entrance, not held). ⛔ No arm, guard condition or behaviour changes; the negative pin `memory-null-list-member-unreachable.test.ts` already covers the door.\n\nWhether it is folded into a later comment-repair card in this package or fixed on its own is triage's to decide.\n\nRefs: #14426 (the sibling prose-repoint card whose review found this) · PR #15464 · #13357 · #13495 · #13494 · #13549 · #13553 (the guard this comment sits above) · #14080 (the 2026-09-01 ordering ruling)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 15832,
+  "kind": "issue",
+  "title": "service-automation: two loose ends on the #14333 claim path — the loser's hot-cache entry is never evicted, and the `'unsupported'` branch answers only after its conditional delete has already been issued",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T09:57:26Z",
+  "updated_at": "2026-09-06T04:58:38Z",
+  "closed_at": "2026-09-06T04:58:10Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15832",
+  "body": "Filed bare (no labels, no assignee) — routing is the PM's.\n\nThis is the grouped follow-up the #14333 review's §5 promised for its notes 1 and 5. #14956 asked whoever took it to **check whether the card exists and file it if not, rather than assuming either way**. I checked: a targeted issue search returned #14956 itself, #15222 (`restoreConsumedSuspension` / nested runs — a different finding), and #9315 (unrelated, `domain:skills`); a local grep over `packages/services/service-automation/src/**` and `docs/` for the notes' own wording found nothing. **It did not exist.** Both notes below are re-verified against `origin/main` `d4f9b2a9d`, not carried over on the review's word.\n\nNeither is a regression from #14333 — both are seams that PR created and left open.\n\n## Note 1 — the loser's hot-cache entry is never evicted\n\n`AutomationEngine` has exactly **one** eviction site for `this.suspendedRuns`, and it is inside `forgetSuspendedRun`:\n\n- `packages/services/service-automation/src/engine.ts:2037` — the only `suspendedRuns.set`\n- `packages/services/service-automation/src/engine.ts:2107` — the only `suspendedRuns.delete`\n\nThe `claim.kind === 'lost'` branch in `resumeInternal` (around `engine.ts:5358`) returns `RESUME_IN_PROGRESS` **before** reaching `forgetSuspendedRun`, so the losing replica keeps its entry. Nothing else evicts it: the winner's `forgetSuspendedRun` runs in the *other* process, and there is no sweep over that map.\n\n**Severity, stated honestly.** This is not a correctness bug on the read path. `loadSuspendedRunStrict` is store-first when a store is attached (`engine.ts:4988-4999`), so the stale entry is not read back — and the one case that *does* fall back to the cache, `cacheOnlySuspensions`, is short-circuited to `unguarded` in `claimAdvance` and never reaches the `'lost'` branch at all. What is left is an **unbounded per-process leak**: one retained `SuspendedRun` snapshot (variables, context, screen) per lost claim, for the life of the process. On a busy any-of approval level — the very shape #14333 is about — every loser leaks one, forever.\n\n## Note 2 — the non-count `'unsupported'` branch answers after the delete has already gone out\n\n`packages/services/service-automation/src/suspended-run-store.ts`, `ObjectStoreSuspendedRunStore.claimSuspension` (~`:388`):\n\n```ts\nconst affected = await this.engine.delete(TABLE, { where, multi: true, context: SYSTEM_CTX });\nif (typeof affected !== 'number') {\n  this.warnClaimUnsupported(...);\n  return 'unsupported';\n}\n```\n\nThe refusal is decided on the **shape of the return value**, which is only known once the delete has already been issued against the shared row. So on a driver whose multi-delete resolves to something other than a number, the compare-and-set **has been performed and its verdict thrown away**. The engine then reads `'unsupported'` as `unguarded` (`claimAdvance`), and `forgetSuspendedRun` issues a *second*, unconditional delete of the same row.\n\nTwo costs, and the second is the one worth a card:\n\n1. a redundant delete round-trip per resume, for the life of the process;\n2. the store announces \"no cross-replica advance guarantee is offered by this store\" while having just executed the guarded delete — so a replica that **actually lost** the compare-and-set (0 rows affected) is nonetheless told it is unguarded and resumes. That is the doubled side effect #14333 exists to prevent, on the one composition that declares itself unable to prevent it.\n\nA store that cannot express the condition should determine that **before** mutating, e.g. by capability-probing the engine once (the `typeof this.engine.delete !== 'function'` check directly above already sets that precedent) rather than by inspecting the result of a write it has already committed.\n\n## Not in scope of the PR that found this\n\nFound while implementing #14956 (the correlation-less node-comparison pin). That PR is test-only and changes no behaviour here; #14956 remains open on its own terms and is not addressed by this card.\n\nRefs: #14333 / PR #14712 (merged) · #14956"
+}

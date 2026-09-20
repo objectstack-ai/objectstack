@@ -1,0 +1,34 @@
+{
+  "number": 16144,
+  "kind": "pull_request",
+  "title": "docs: the client SDK examples read the resolved payload",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:08:27Z",
+  "updated_at": "2026-09-06T04:25:50Z",
+  "closed_at": "2026-09-06T04:25:48Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T04:25:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16144",
+  "body": "Fixes #14546\n\n`analytics.query` / `analytics.meta` / `analytics.explain` and `automation.trigger` stopped handing back the dispatcher's `{ success, data }` envelope in #13079 (landed by PR #14526): each resolves to the payload itself. The three places a reader first meets the SDK showed those calls with nothing reading the resolved value — so none of them was wrong about the shape, and none of them taught it either. This adds the one read that makes the convention visible, on all three sites together, because the card's value is that a reader meeting the SDK anywhere sees the same convention.\n\n## What changed\n\n- **`content/docs/api/client-sdk.mdx`** — one payload read after each of the four calls: `result.rows.length, result.fields[0].name`, `meta[0].name, meta[0].measures.length`, `explained.sql, explained.params`, and `welcome.status` (the `automation.trigger` call was not even assigned before). Voice matches the neighbouring blocks on the same page, which read their results with `console.log(x.member)` plus a trailing comment.\n- **`packages/client/README.md`** — the same treatment for the three calls in its namespace tour (`query`, `meta`, `trigger`; the README never showed `explain`).\n- **`content/docs/api/data-api.mdx`** — prose, not code: `GET /analytics/meta` is an HTTP endpoint section, and the paragraph already states the wire envelope. It now adds that the envelope is the wire shape only and that `client.analytics.meta(cube)` resolves to the cube array itself, with a pointer to the Client SDK page. The surrounding paragraph supports a clause, not an example.\n\nNo `.data.` read of an SDK result is written anywhere, on any of the three files — the old shape appears in neither code nor prose. The migration table stays where it already lives, in the v17 release notes.\n\n## The member names are read from the declarations, not from the card\n\nThe card guessed `result.rows` / `run.status`; the declarations were re-read on this branch and they agree, with two refinements the card did not state:\n\n| call | resolves to | declared in |\n| :--- | :--- | :--- |\n| `analytics.query` | `AnalyticsResult` — `rows`, `fields[]` (`name`, `type`, optional `label` / `format` / `currency` / `percentScale`) | `packages/spec/src/contracts/analytics-service.ts` |\n| `analytics.meta` | the bare `CubeMeta[]` — `name`, `title?`, `measures[]`, `dimensions[]` | same file, via `AnalyticsMetadataResponse['data']` |\n| `analytics.explain` | `{ sql, params }` | `AnalyticsSqlResponse['data']` |\n| `automation.trigger` | `AutomationResult` — `status?`, `runId?`, `screen?`, `success`, ... | `packages/spec/src/contracts/automation-service.ts` |\n\n## Changeset\n\nA `patch` changeset for `@objectstack/client` rather than the `skip-changeset` label. `packages/client/package.json` is public and declares `files: [\"dist\", \"README.md\", \"CHANGELOG.md\"]`, so the README edit ships inside the released package — AGENTS.md reserves the label for \"a diff that publishes nothing from any released package\", which this is not. The docs-site files publish nothing on their own and ride along.\n\n## Verification\n\n- The card's own executable criterion, re-run on this branch: every hit of `analytics.query` / `analytics.meta` / `analytics.explain` / `automation.trigger` that assigns the awaited value (`:312`, `:322`, `:326`, `:436`) is followed within a few lines by a read of a payload member (`:319`, `:323`, `:330`, `:437`), and a grep for `result.data` / `meta.data` / `explained.data` / `welcome.data` / `report.data` / `cubes.data` / `run.data` across all three files returns nothing.\n- **The edited examples type-check.** These fences are deliberately unmarked for `check:skill-examples` (the page's own contributor note explains why: they continue Quick Start's implied `client`, so a marker reds with TS2304), so the seven edited bodies were transcribed into one file with that `client` declared and compiled under `strict` against the BUILT `@objectstack/client` declarations: 0 errors. Control leg: replacing one read with a deliberately wrong annotation reds with `TS2322: Type 'Record<string, unknown>[]' is not assignable to type 'string'` — so tsc really resolved `AnalyticsResult` and the green is a measurement, not an `any` passthrough.\n- **Gates**: the 73 commands `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derives for this change set were run at this head. 71 exit 0, including `check:empty-changeset --base origin/main`, `check:adr-0087-registration`, `check:changeset-no-major`, `check:docs`, `check:skill-examples`, `check:doc-anchors`, `check:doc-authoring`, `check:docs-single-h1`, `check:docs-transcript-drift`, `check:published-files`, `check:published-readme-links` and `check:nul-bytes`. The remaining two — `check:dts-closure` and `check:dual-build-cjs-loads` — both refuse with `PREREQUISITE NOT MET` (exit 3) without a full `pnpm build`; they are declared to CI. This diff contains no source file, so no `dist` it reads can move.\n- **Repo-wide `pnpm lint` is CI's, and the narrowing is measured**: eslint's only broad population is `**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}` (`eslint.config.mjs:971`), and `eslint --no-inline-config --format json` over all four changed paths reports 4 results, each a single warning \"File ignored because no matching configuration was supplied\", 0 errors. No rule here is type-aware over Markdown, so this diff cannot move the verdict on any untouched file.\n\n## Not addressed here\n\nTwo defects found on these same files while working this card are recorded separately and left untouched by this PR: the Data API page's `fields[]` callout is stale (#16141), and the client README still documents the `ai.nlq` / `ai.suggest` / `ai.insights` methods that v17 removed (#16142). Neither is in this card's class.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AhooRxUmvwYwcnQ5LATTB7)_"
+}

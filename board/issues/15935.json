@@ -1,0 +1,34 @@
+{
+  "number": 15935,
+  "kind": "issue",
+  "title": "cli: `os lint --strict` — a flag that makes warning-severity findings fail the run, so an app can rely on the 119 warning-level rules instead of re-implementing them locally (epic hotcrm#1579, step 1)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:epic"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:13:18Z",
+  "updated_at": "2026-09-05T20:13:54Z",
+  "closed_at": "2026-09-05T20:03:55Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15935",
+  "body": "Sub-issue of the epic **hotcrm#1579** (maintainer 2026-09-05, verbatim 「同意你的建议，你把卡片写好」 on the director seat's A′ plan). Filed by the director seat (objectstack#12708, summon #15); `pm:epic` marks it reserved for the epic PM — ⛔ not `pm:queue`, domain seats do not take it. `domain:*` / type / priority are triage's.\n\n**Governing text.** hotcrm `AGENTS.md` § \"Scope — a pure metadata application (2026-08-31 ruling)\", rule 3: *\"Lint, validation, gates and diagnostics belong to the platform, uniformly … ⛔ Do not grow a gate farm.\"* Protocol baseline (maintainer 2026-09-05, verbatim): 「本项目以协议为基准。所以开发应该对其协议，协议有问题应该立卡修改协议」— this card changes the platform on purpose, as its own card; it does not ask any app to route around it.\n\n## Measured (objectstack `origin/main` `6c439f2`; hotcrm pin `@objectstack/lint@17.3.0`)\n\n- `packages/lint` ships ≈250 authoring rules: **161 `error` · 119 `warning` · 5 `info` · 6 `suggestion`** (`git grep -h -oE \"severity: '(error|warning|info|suggestion)'\" -- packages/lint/src | sort | uniq -c`).\n- `packages/cli/src/commands/lint.ts:719` — `if (errors.length > 0) process.exit(1);` — **only `error` fails the run**; warnings and suggestions are printed and the exit code is 0.\n- `os lint` flags today: `--json`, `--fix` (dry-run), `--score`, `--eval`, `--generator` (`lint.ts:479-487`). No `--strict`, no `--max-warnings`, no per-rule severity override; `objectstack.config` has no lint section (grep over `packages/spec/src/kernel/*.zod.ts` empty).\n- Consequence, measured on the exemplar: hotcrm's `pnpm lint` (= `objectstack lint`) reads **90 warnings / 12 suggestions, exit 0**, and the repo carries ~30 test files that re-implement shipped rules at error level — the census on hotcrm#1579 (comment 5552607309, § \"Tests that re-implement a rule the platform already enforces\") maps each local file to the rule ids it duplicates (`flow-inert-node-condition`, `list-view-field-unknown`, `nav-target-unresolved`, `chart-field-unknown`, `security-owd-unset`, `sharing-rule-unlowerable-condition`, `flow-update-readonly-field`, `hook-body-write-unknown-field`, …). `scripts/check-lint-i18n-gate.mjs` exists **only** to promote the `i18n/missing-*` family to failing; its header says the fix is a `packages/lint` severity change.\n\n## The ask\n\nAdd **`os lint --strict`**: when set, a run with one or more `warning`-severity findings exits 1 exactly as an `error` does today; `info` / `suggestion` stay advisory. Default behaviour **unchanged** (⛔ do not flip the default — that is every app's behaviour and a separate decision). `--json` output carries the flag's effect (e.g. `strict: true` and the failing count) so a gate can read it. Document the flag where `os lint`'s other flags are documented; the published skill text that teaches `os lint` (`skills/**`, generated) follows through the generator, never by hand.\n\nNot in this card: per-rule severity configuration (a contract-surface table — rejected by the plan under 创业阶段不扩散); changing any rule's severity; the i18n gate's own retirement (hotcrm's side, epic step 2/3).\n\n## Acceptance\n\n- `os lint --strict` on a stack with ≥1 warning and 0 errors exits 1 and says why (names the count and the flag); without the flag the same stack exits 0 — both pinned as tests in `packages/cli`.\n- `os lint --strict --json` includes the strict verdict.\n- No existing `os lint` test changes its expectation.\n- Changeset: `@objectstack/cli` minor (new public flag). Clause-② provisional reading: a new public CLI flag widens the CLI's public surface — the dispatching seat judges the tier from this content; the spec is untouched.\n\n## Downstream (this card's consumers)\n\nhotcrm epic step 2 (\"enable strict, zero the 90 warnings\") is `Blocked-by` this card **and** by the consumability criterion of the lane charter: the fix must be in a **published** `@objectstack/cli` that hotcrm pins, not merely merged.\n\nRefs: hotcrm#1579 (epic) · hotcrm#1543 (ruling F, first retirement) · objectstack#15922 (field-consumer diagnostic, a sibling platform gap) · objectstack#13848 (the 2026-08-31 hotcrm rulings)."
+}

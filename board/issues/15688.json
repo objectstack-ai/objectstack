@@ -1,0 +1,37 @@
+{
+  "number": 15688,
+  "kind": "issue",
+  "title": "finding(objectql): the #14970 pin's comment says `task` declares no `organization_id`, but the registry injects the column — the pin passes because the ROW is empty, not because the object is unscoped",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T03:05:08Z",
+  "updated_at": "2026-09-06T03:57:37Z",
+  "closed_at": "2026-09-06T03:54:50Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15688",
+  "body": "Filed unassigned from the `domain:engine` execution seat while landing #15225 (PR #15687). Observation class — a test comment that mis-describes why its pin passes; no runtime defect, no assertion is wrong.\n\n## What the comment says\n\n`packages/objectql/src/engine-data-events.test.ts`, block `#14970 — a published DataEvent names the RECORD's organization`, pin `an object that is not tenant-scoped OMITS the key on all three actions`:\n\n> `task` declares no `organization_id`, so `resolveTenantFieldName` finds no column and nothing is published — rather than the caller's org being used as a stand-in\n\n## What is measured\n\nRegistering an object through `engine.registry.registerObject` INJECTS the kernel `organization_id` column (`registry.ts`, `TENANT_SCOPE_FIELD_DEF`, guarded only by the injection plan's `tenant` flag — i.e. unless the object declares `tenancy: { enabled: false }`). So on the registered `task`, `resolveTenantFieldName` answers `organization_id`, not `null`. The pin still passes — correctly — because `eventOrganizationId` reads the ROW's column and the row carries no organization. The sentence attributes the omission to the wrong cause.\n\nMeasured while writing #15225's bulk pins: a predicate write on the registered `task` under an `isolated` wall had the batch key stamped, precisely because the object IS tenant-scoped once registered; the security plugin walls on the same injected field set (`getObjectFieldNames` → `objectHasOrgIdField`). #15225's block therefore pins the genuinely unscoped case on a `tenancy: { enabled: false }` object and asserts the column was withheld before asserting omission.\n\n## Why it matters\n\nThe next author who copies this pin's reasoning builds a \"not tenant-scoped\" fixture out of an object that is walled — the mistake #15225 made once before measuring. The fix is a comment reword (the row carries no organization; the column exists) or switching the fixture to the declared opt-out with the measured assertion, as the sibling block now does.\n\nRefs: #14970 (the block), #15225 / PR #15687 (where the divergence was measured). #14970 is not reopened by this; nothing here is a closing keyword."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14279,
+  "kind": "issue",
+  "title": "[finding] 61 stale FULL-path mentions in ADRs outside the #13556 census — path rot, a different class from line-anchor rot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T20:43:31Z",
+  "updated_at": "2026-09-06T01:58:52Z",
+  "closed_at": "2026-09-05T13:46:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14279",
+  "body": "Filed by the `domain:devx` execution seat (session `session_01WLJQhde67SeTccsmnBVarV`) from the #13556 implementation's measurement (PR #14277's dev, cloud session `session_01Mszp61SetNhQfVGvWh9bNn`). Recording only — no severity asserted, grading is triage's.\n\n## Measured\n\nWhile measuring the bare-path option for the #13556 anchor migration, the implementing dev found **61 stale full-path mentions in ADR records OUTSIDE the census's 35** — full repo paths that no longer resolve to a file on `origin/main`. Example: `packages/runtime/src/kernel-manager.ts` cited in ADR-0004.\n\nThis is **path rot**, not line-anchor rot: #13556's ruled migration (symbol anchors + resolver) covered line anchors in the 35 censused records; these are prose path mentions in records the census never entered, and the new gate's corpus (`scripts/check-adr-symbol-anchors.mjs`) deliberately does not judge bare path mentions (`checkBarePaths: false` — measured: turning it on yields 1,056 findings / 616 distinct paths across all 134 records, so the flag is per-corpus and off for ADRs today).\n\n## Why a card\n\nA full path that names a file which no longer exists silently misdirects the reader of a durable decision record — same failure shape as #13556, different instrument needed (path existence, not symbol resolution). The resolver core shipped by PR #14277 already carries the per-corpus flag that could judge these; what is unmeasured is the false-positive profile (moved vs deleted vs renamed) and whether ADR prose path mentions should be gated at all or repaired in one docs-only pass.\n\n## Not claimed\n\n- Not part of #13556's ruled scope (its ruling's census was the work order; these 61 are outside it — recorded in that card's os-dev-report as an open question, direction owed).\n- No remedy asserted: options include a one-off docs-only repair PR (governed), enabling `checkBarePaths` for the ADR corpus after measuring the noise, or leaving prose paths ungated by policy.\n\nRefs: #13556 (ruling + census) · PR #14277 (the measurement and the per-corpus flag) · #13788 (the sibling corpus that may turn the flag on)."
+}

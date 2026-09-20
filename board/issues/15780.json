@@ -1,0 +1,36 @@
+{
+  "number": 15780,
+  "kind": "issue",
+  "title": "service-analytics: the three SQL compilers emit `translate()` for `$icontains`, a function SQLite does not have — the statement fails to parse instead of answering wrong rows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T07:37:25Z",
+  "updated_at": "2026-09-06T01:04:42Z",
+  "closed_at": "2026-09-06T00:45:10Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15780",
+  "body": "Found while landing #15684 (the case-EXACTNESS half of the same family). Filed unassigned, recording only — no severity asserted, routing is triage's. Dedup: one targeted MCP `search_issues` (2026-09-05, the repo-scoped REST channel answers 403 on this seat) returned #15684, #15683 and #5567 and nothing on this cell; #15684 itself came back as the control that proves the search was live.\n\n## Measured\n\n`asciiLowerSqlExpr` (`packages/services/service-analytics/src/like-pattern.ts`) compiles `$icontains` to\n\n```\ntranslate(col, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') LIKE translate(?, …) ESCAPE ?\n```\n\non **every** dialect, and `translate()` is a PostgreSQL/Oracle function. SQLite does not have it. Measured on sql.js 1.14.1 (SQLite 3.49.1), the same engine `driver-sqlite-wasm` runs:\n\n| statement | answer |\n|:--|:--|\n| `SELECT translate('ABC','ABC','abc')` | `no such function: translate` |\n| `SELECT ('acme' GLOB 'ac*')` | `1` |\n| `SELECT lower('CAFÉ')` | `cafÉ` |\n\nAll three of this package's compilers carry that expression — `NativeSQLStrategy.buildFilterClause`, `compileScopedFilterToSql` (`read-scope-sql.ts`, the ADR-0021 D-C read scope) and the `ObjectQLStrategy` echo — so on a SQLite datasource an analytics `where` carrying `$icontains`, and an RLS read scope carrying it, compile a statement that cannot parse. `plugin.ts`'s raw-SQL auto-bridge hands these statements to whichever driver owns the object, so this is reachable, not theoretical.\n\n## Why this is a separate card from #15684\n\nDifferent failure mode and different half of the family. #15684 was the case-**EXACT** four answering the wrong ROWS (a plain `LIKE` folds ASCII case on SQLite) and its scope was explicitly bounded to those four, with the `$icontains` fold declared correct and out of scope. This is the case-**INSENSITIVE** operator failing to run at all — a query-time error, not a row set. #15684 changed nothing about this arm, and its suite pins the `translate()` text as the control that must stay unchanged.\n\n## Why it is now cheap\n\n`like-pattern.ts` already predicted it word for word (\"if these compilers ever emit for SQLite or MySQL, this expression does not merely over-match, it fails to parse\"), and #15684 built the thing that was missing: a dialect input reaching all three compilers (`DatasetScopedStrategyContext.sqlDialect`, answered by the driver that will execute the statement) and a per-dialect construct table in this package (`text-match-sql.ts`). The remedy is one more arm on that table — `driver-sql`'s `textMatchPredicate` already carries the shapes: `lower(col) GLOB lower(?)` on SQLite (measured ASCII-only there: `lower('CAFÉ')` is `cafÉ`, so the #4706 Q1 = A boundary holds) and the nested-`REPLACE` binary fold on MySQL.\n\n## Not asserted here\n\nWhether any shipped app hits it today (that needs a `$icontains` in an analytics `where` or an RLS policy on a SQLite datasource), and whether the resulting error reaches the client inside the ADR-0112 envelope or as a 500.\n\n## Related\n\n#15684 (the case-exact half, landed with the dialect input this needs) · #6520 (`$icontains` on the JS faces) · #6518 (the driver family's per-dialect table) · #4706 Q1 = A (the ASCII-only fold)."
+}

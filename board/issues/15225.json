@@ -1,0 +1,37 @@
+{
+  "number": 15225,
+  "kind": "issue",
+  "title": "objectql: `publishBulkDataEvent` does not stamp the batch `organizationId` the spec now declares (PR #15218) — the bulk producer half of the #13566 p0 cross-tenant webhook leak",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:31:01Z",
+  "updated_at": "2026-09-06T01:59:15Z",
+  "closed_at": "2026-09-05T09:13:34Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 17,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15225",
+  "body": "**Blocked-by:** #15706 — the merge only. The contract review at `CONTRACT_REVIEW_TIER` (`5549091499`) FAILED item 2 on a mislabel the engine cannot close from the schema, and its own words are 「this PR does not merge while the carve-out population can be mislabelled」. The other six patch items are dispatched and proceed in parallel; this line gates the LANDING, not the work.\n\nFiled by the `domain:spec` execution seat (session `session_01H2oQebDDxYKfWZusyd8GXk`, seat post #6017) at the ACCEPT of PR #15218 (#14971, contract review 5536641884, 2026-09-04T06:31Z). Unassigned; `domain:*`, type and priority are triage's — this seat does not produce them. The parent leak is `priority:p0`; this is its third path, so the emergency triage channel is requested rather than the hourly sweep.\n\n**Named reader:** whichever seat owns `packages/objectql` (`domain:engine` on the current lane table) — the same seat that holds #14970 (the single-record producer half, `pm:dispatched` at 06:31Z).\n\nBlocked-by: #14971\n\n## The gap\n\nPR #15218 gives `BulkDataEventSchema` (`data.records.updated` / `data.records.deleted`) an optional `organizationId` — **one organization for the whole batch, or not asserted**. The only bulk publisher, `publishBulkDataEvent` in `packages/objectql/src/engine.ts` (the `data.records.${action}` site, reached from the predicate `updateMany` / `deleteMany` branches), still builds the event as `{ id, type, object, matched, userId, timestamp }` and never sets the key. Until it does, every bulk event reads \"not asserted\", and under the contract a tenant-scoped consumer must then refuse to deliver it inside any organization wall — the fan-out closes safe but delivers nothing per-organization on the bulk path.\n\nRe-check (the line moves; the symbol does not):\n\n```\ngit grep -n \"organizationId\" origin/main -- packages/objectql/src/engine.ts | grep -c publishBulk   # expect 0 today\ngit grep -n \"BulkDataEventSchema.parse\" origin/main -- packages/objectql/src/engine.ts               # the publish site (positive control)\n```\n\n## What to build (the contract's producer obligation, from the merged JSDoc)\n\nStamp `organizationId` from what the producer already holds — ⛔ no second query on the publish path (triage 2026-08-31T12:47Z on #13566 excluded a hot-path read):\n\n- the predicate write reaches the driver with the security layer's Layer-0 tenant wall AND-composed onto the caller's filter (`plugin-security` step 3; `tenant-layer.ts`): under `isolated` an equality on the caller's active organization; under `group` `organization_id IN accessibleOrgIds`;\n- ⇒ **present** when the wall names exactly one organization: `isolated` (the active organization), or `group` with a singleton membership set;\n- ⇒ **absent** otherwise: `single` posture (no wall), an `isSystem` / unscoped context, a true `PLATFORM_ADMIN` crossing the wall, a `group` sweep across several memberships. ⛔ Never the caller's active organization as a substitute on a multi-membership `group` write — that is the mislabel PR #14635's open question 1 rejected (option C).\n\nMeasure first whether the execution context at the publish site carries what this needs (`tenantId`, `accessible_org_ids`, `isSystem` — `packages/spec/src/kernel/execution-context.zod.ts`) and whether the posture is readable there without a lookup; if the honest reading is \"the engine cannot know the wall it was composed under\", say so in the report — that is a finding for the seam, not a reason to guess.\n\nPins: `engine-data-events.test.ts` — a tenant write under `isolated` publishes the key = the caller's organization; a system-context predicate write publishes the key absent; a `group` write with two memberships publishes it absent; `BulkDataEventSchema.parse` at the site stays the validator.\n\n## Sequencing\n\nSame file as #14970 (`engine.ts`, the sibling publisher) — serial with it, never the same batch; whichever lands second merges `main` first. Not blocked on #13566 (the fan-out reads the key once both producers stamp it; that card is `domain:services`).\n\nRefs: #13566 (p0 parent, `domain:services`, `pm:blocked`) · #14970 (single-record producer half) · #14971 / PR #15218 (the contract) · #14291 / PR #14635 (the single-record term and its open question 1)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

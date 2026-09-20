@@ -1,0 +1,38 @@
+{
+  "number": 15500,
+  "kind": "issue",
+  "title": "ADR-0058 D7 expression ledger: the ratchet key is `file:field`, so two DIFFERENT surfaces declaring the same key in one file collapse into one row — `field.zod.ts:requiredWhen` classifies a server-enforced gate and a \"nothing reads it\" grid cell together",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T18:49:20Z",
+  "updated_at": "2026-09-06T01:59:06Z",
+  "closed_at": "2026-09-05T10:43:34Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15500",
+  "body": "Recorded by the os-dev seat on #15027 (session `session_01D47qPfEWVPmhguWgBZCi5N`, branch `claude/issue-15027-expression-ledger-cron-template`), measured while deriving why widening the roster by 12 declaring POSITIONS moved the ratchet by only 10. Unassigned, bare, for triage. Out of #15027's scope: that card is about which schema NAMES are discovered; this is about the KEY GRANULARITY of what discovery returns, and fixing it would re-shape every existing row's `covers`.\n\n## What\n\n`packages/qa/dogfood/test/expression-conformance.test.ts` `discoverSurfaces()` keys every hit as `` `${rel}:${m[1]}` `` — relative file path plus the matched field name — into a `Set`. So **two distinct declarations of the same key name in the same file are one ratchet key**, and one ledger row classifies both. The ledger cannot represent that they differ, and the ratchet cannot notice that it never asked.\n\nMeasured at `origin/main` `61821e54cf5`, replicating the test's own regex verbatim:\n\n- current 2-name roster: **32 declaring positions collapse to 24 distinct keys** (+2 hard-added RLS = the 26 `discoverSurfaces()` returns)\n- **8 keys already collapse two positions each**, today, on the `cel` population\n\n| ratchet key | positions | are they the same surface? |\n|---|---|---|\n| `data/field.zod.ts:requiredWhen` | 845, 1513 | **NO** |\n| `data/field.zod.ts:readonlyWhen` | 844, 1512 | **NO** |\n| `data/field.zod.ts:visibleWhen` | 347, 1511 | **NO** |\n| `data/validation.zod.ts:condition` | 180, 294 | different schemas (`ScriptValidation`, `CrossFieldValidation`) |\n| `data/object.zod.ts:visibleWhen` | 1194, 1387 | unmeasured |\n| `system/settings-manifest.zod.ts:visible` | 424, 686 | unmeasured |\n| `ui/view.zod.ts:visibleWhen` | 2468, 2675 | unmeasured |\n| `ui/view.zod.ts:visibleOn` | 2470, 2677 | unmeasured |\n\n## Why it matters — the three measured ones are not near-duplicates, they are opposite\n\n**`data/field.zod.ts:requiredWhen`** is one ledger key covering two declarations whose own `describe` text contradicts each other on enforcement:\n\n- `:1513` `FieldSchema.requiredWhen` — *\"A TRANSITION GATE ... the write is refused ... Enforced by `evaluateValidationRules`\"* — server-enforced.\n- `:845` `InlineGridColumnSchema.requiredWhen` — *\"PRESENTATION ONLY: this flags the cell inline-invalid in the grid; **nothing on the write path reads it** ... declaring the requirement here alone enforces nothing.\"*\n\nBoth are covered by the single row `cel-field-rule`, whose `enforcement` describes only the field-level story. A declared-but-unwired predicate that says so **in its own describe string** is invisible to the ledger built to surface exactly that class.\n\n**`data/field.zod.ts:visibleWhen`** collapses `SelectOptionSchema.visibleWhen` (`:347`, the per-OPTION predicate, which its describe calls *\"The one VISIBILITY predicate the SERVER also enforces\"*) with `FieldSchema.visibleWhen` (`:1511`, UI gating). ⭐ The ledger already knows these are different surfaces — it split the **action-param** analogue into its own row, `cel-action-param-option-visible`, with the reason stated in the row: *\"It is a SEPARATE row from `cel-ui` because the evaluator differs.\"* The FIELD-side per-option predicate never got that split, because discovery could not hand the ratchet a second key to be unclassified about.\n\n**`data/field.zod.ts:readonlyWhen`** collapses `InlineGridColumnSchema.readonlyWhen` (`:844`, per-row `record` + `parent` scope in the grid) with `FieldSchema.readonlyWhen` (`:1512`).\n\nSo the failure mode is not \"a row is slightly imprecise\". It is: **classifying one declaration silently classifies every same-named sibling in that file, and the ratchet reports the file green.** That is the same defect class the ledger header claims to prevent — \"A NEW expression surface that nobody classified ... breaks the build\" — reached through granularity rather than through roster membership.\n\n## Not a regression, and not what #15027 changes\n\nThis is the discovery contract's behaviour since the ledger was written; it is not introduced by widening the roster. It is only visible now because the widened roster made the position count and the key count disagree out loud (12 new positions, 10 new keys: `api/export.zod.ts:cronExpression` at `:576`/`:706` and `system/disaster-recovery.zod.ts:schedule` at `:57`/`:238` each collapse). #15027 documents that arithmetic in the test's docblock and classifies the 10 keys; it deliberately does not change the key shape, because doing so re-points every `covers` entry in the ledger and is its own decision.\n\n## Likely resolution, not a decision\n\nProbably `file:field` becomes `file:Schema.field` or `file:field@line`-free equivalent (a line number is not an identity). ⚠️ Either way it is a breaking change to every `covers` entry and wants deciding, not guessing — and the three measured pairs above should each get their own honest row as part of it, since two of them are the declared-but-unwired shape.\n\n## Verified\n\n- Dedup (2026-09-04, `search_issues`, control satisfied in-session: an earlier query in the same session returned #15027 and #15028 as known-certain hits, so the empty result here is a reading): `total_count` 0 for the key-granularity query. Nearest live neighbours are #15027 (roster membership, in flight) and #15028 (the dialect union's envelope arm) — neither covers key granularity.\n- Positive control for the scan: replicating the regex with the current 2-name roster reproduces the 24 keys / 26 surfaces the ledger covers exactly, with zero UNCLASSIFIED and zero STALE.\n\nRelated: #15027 is not addressed by this card and remains open on its own scope. Refs: ADR-0058 D7 · ADR-0060 · ADR-0049.\n"
+}

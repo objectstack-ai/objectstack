@@ -2,8 +2,8 @@
   "number": 7070,
   "kind": "issue",
   "title": "finding: consumer half of #6523 — three plugin implementations still annotate `SharingExecutionContext`, so `(context as any).posture` is still needed to read a field the contract now declares",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-zhuang",
@@ -17,9 +17,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-09T13:39:07Z",
-  "updated_at": "2026-09-12T17:04:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-20T15:48:46Z",
+  "closed_at": "2026-09-20T15:48:46Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

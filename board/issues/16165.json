@@ -1,0 +1,38 @@
+{
+  "number": 16165,
+  "kind": "issue",
+  "title": "platform-objects(i18n): the es-ES and ja-JP dashboard `gap` helpText leaves went stale on the same source edit as the zh-CN one — same class, two more locales",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "i18n",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:46:01Z",
+  "updated_at": "2026-09-06T06:36:52Z",
+  "closed_at": "2026-09-06T06:36:20Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16165",
+  "body": "Filed as an out-of-scope finding by the dev on #15511, which was scoped to the **zh-CN** leaf only. Unassigned and unlabelled, for triage.\n\nRelated: #15511 (the zh-CN leaf, fixed in #16163), #14586 (the source edit), #14931 (the general class).\n\n## What is stale\n\nThe same source edit that turned the zh-CN `gap` help text stale turned two more locale leaves stale in the same bundle family, and for exactly the same reason. Measured on `origin/main` `932acc3df`, located by text:\n\n| file | line | leaf |\n|---|---|---|\n| `packages/spec/src/ui/dashboard.form.ts` (source) | 25 | `Space between widgets, in steps of 0.25rem (4 = 1rem)` |\n| `packages/platform-objects/src/apps/translations/en.metadata-forms.generated.ts` | 943 | `Space between widgets, in steps of 0.25rem (4 = 1rem)` — current |\n| `packages/platform-objects/src/apps/translations/es-ES.metadata-forms.generated.ts` | 943 | `Separación de cuadrícula (unidades Tailwind)` — **stale** |\n| `packages/platform-objects/src/apps/translations/ja-JP.metadata-forms.generated.ts` | 943 | 「グリッド間隔（Tailwind 単位）」 — **stale** |\n\nBoth still carry the CSS framework unit the English deliberately stopped carrying, and neither gained the magnitude the English gained. Both are faithful translations of `Grid gap (Tailwind units)`, the sentence the source used to say.\n\n## Why it was not swept into #16163\n\n#15511's dispatch bound that PR to one leaf and forbade widening — deliberately, because the card's value is that it is one dated, fully-provenanced specimen. Correcting es-ES and ja-JP is a separate wording judgement in two languages this seat did not make.\n\n## Same instrument blindness, re-measured\n\nThe gates are green over all three stale leaves and stayed green after the zh-CN one was corrected, with byte-identical numbers either side:\n\n```\npnpm check:i18n              exit 0   platform-objects in sync (11 bundle(s))\npnpm check:i18n-stale-fill   exit 0   10 bundle set(s), 0 stale-fill leaves, 0 baselined\n```\n\n- Regeneration cannot correct these: bundle merge **fills gaps only**, and a present-but-stale leaf is not a gap.\n- `check:i18n-stale-fill` infers a stale fill from **cross-locale agreement**; these are real translations, not copies of the English, so they are invisible to that predicate by construction.\n- No provenance fallback: `es-ES.source-hashes.generated.ts` and `ja-JP.source-hashes.generated.ts` would need a `dashboard` entry, and the zh-CN companion carries none at all (verified case-insensitively, exit 1 and zero lines, with a firing control on the same file). Worth confirming per locale during triage.\n\n## Why this is worth its own card\n\nIt doubles the evidence for the mechanism #14931 names, from a different angle: not 613 legacy-trusted leaves of unknown provenance, but **three locales going stale simultaneously on one dated source edit**, all three invisible to every instrument. The prior sweep of this subtree on 2026-09-03 explicitly checked es-ES and ja-JP and found them correct at all five leaves it touched — so these two, like the zh-CN one, have a known moment of going stale.\n\n## Bounded\n\n`columns` is unchanged upstream, so its es-ES and ja-JP leaves stay accurate. No other `dashboard` leaf moved. Two leaves."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16205,
+  "kind": "pull_request",
+  "title": "fix(core): PHASE2_IMPLEMENTATION.md imports from the root barrel, not an undeclared subpath",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T05:57:08Z",
+  "updated_at": "2026-09-06T07:31:52Z",
+  "closed_at": "2026-09-06T07:31:51Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T07:31:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16205",
+  "body": "Fixes #15931\n\nRoute (2) of the two the card names, as ruled at dispatch: **repoint the document at the root barrel**. `packages/core/package.json` is untouched — no `./security` `exports` entry, no `files` change. Widening the published surface to make a document true stays the maintainer's call and this PR does not foreclose it.\n\n## The defect, measured live at this head\n\n`packages/core/PHASE2_IMPLEMENTATION.md` sections 4 and 5 told readers to write `from '@objectstack/core/security'`. That subpath is declared in no `exports` entry, so it is refused outright rather than merely untyped:\n\n```\nREFUSED: ERR_PACKAGE_PATH_NOT_EXPORTED - Package subpath './security' is not defined\n         by \"exports\" in packages/core/package.json\nCONTROL: import('@objectstack/core/logger') -> RESOLVED, exports: ObjectLogger,createLogger\n```\n\nThe control fires on the same command and scope, so the refusal is a reading and not a broken probe. `exports` keys re-derived on this tree: exactly `['.', './logger']`, no wildcard. `files`: `['dist','README.md','CHANGELOG.md']`.\n\n## The repair, and the proof it is true\n\nBoth lines now name `@objectstack/core`. Both classes are exported from the root barrel via `export * from './security/index.js'` in `packages/core/src/index.ts`, and the repaired specifier was checked against the **built** root entry rather than against the source:\n\n| surface | `PluginPermissionManager` | `PluginSandboxRuntime` | control: `PluginSecurityScanner` (retired) | control: `PluginHealthMonitor` |\n| --- | --- | --- | --- | --- |\n| `dist/index.d.ts` (the `.` `types` target) | `declare class` @ 1577 | `declare class` @ 1680 | 0 occurrences | present |\n| `dist/index.cjs` (the `.` `require` target) | `function` | `function` | `undefined` | `function` |\n\nBoth controls fire in the direction they should, so neither column is a vacuous read.\n\n## Counted, not eyeballed\n\nOccurrences of the bad specifier over the **whole** document before editing: **2**, at lines 161 and 219 — the card's arithmetic holds and its line numbers are exact, not stale. Firing control on the same command and file: `@objectstack/core` without the `/security` tail counted **5**. After the edit: **0** bad, and the two repaired lines join the four that already named the root barrel.\n\nRepo-wide, the import-statement shape `from '@objectstack/core/security'` existed in exactly these 2 places plus one prose row in `docs/qa/platform-checklist/FOLLOW-UPS.md` that describes this very defect (control on the same command and scope: the same shape on the real `./logger` subpath returns 2 files). The other 14 files carrying the string carry it as prose, changelog history, or a `@module` tag — none is an import instruction. Every `from '@objectstack/...'` specifier in this document was swept: only two distinct ones exist, `@objectstack/core` (now 6) and the repaired subpath (now 0).\n\n## Two prose notes that this PR makes stale — flagged, deliberately not edited\n\nBoth describe the residue as still present, and both stop being true when this lands. They are named here rather than fixed, because neither repair is mechanically pinned and one of them sits in a test file whose suite this diff otherwise does not touch:\n\n- `docs/qa/platform-checklist/FOLLOW-UPS.md` — \"sections 4 and 5 **still** tell readers to `import … from '@objectstack/core/security'` … Deliberately left\".\n- `packages/core/src/security/security-scanner-retirement.pin.test.ts` — a comment reading \"`PHASE2_IMPLEMENTATION.md` sections 4 and 5 **still** teach it; filed separately\". No assertion in that file reads the document, so nothing there goes red.\n\n## Contract and publishing\n\n**Clause-②: no** — re-derived from this diff, not predicted. The diff is one markdown file that reaches **no** published artefact: untouched text from the document appears in **0** files under `packages/core/dist/`, while three firing controls on the same command and scope reach 6, 6 and 4 dist files — the third taken from a source **comment**, which proves sourcemap `sourcesContent` was inside the compared set and the zero is not a scope artefact. `npm pack --dry-run` over `packages/core` lists 16 files; `PHASE2_IMPLEMENTATION.md` is not among them, while the controls `README.md` and `dist/index.d.ts` are. No accept set moves, no exported symbol moves.\n\n**No changeset, `skip-changeset` label instead** — measured by that same `npm pack` reading rather than assumed: this diff publishes nothing from any released package.\n\n## Gates\n\nAll **36** families derived by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (derived from the real change set, not from a hand-written list) were run, **36/36 green**, on the final commit `9b833a084` against a clean tree — exit codes captured by redirect-then-read, never through a pipe. The family was not narrowed for being markdown: `check:system-context-census` and the other anchor/census families were run in full, and separately no `PHASE2_IMPLEMENTATION.md:LINE` anchor exists anywhere in the tree (0 hits, with a firing control proving 45 files under `docs/` do carry `PATH:LINE` anchors). The diff changes no line count regardless: 375 lines before and after.\n\nTwo of the 36 first returned `PREREQUISITE NOT MET` (exit 3, which is not a red and not a pass); a full `pnpm build` — 72/72 tasks — was run under the shared verify lock and both were re-run to a real green: `check:dual-build-cjs-loads` over 103 entries / 66 packages / 619 CJS files, and `check:dts-closure` over 72 built packages with `@objectstack/core` in the swept set.\n\n`check:published-readme-exports` was also run to a real green over its full population — **60 published documents across 79 workspace packages** — and confirms the card's account of why no gate saw this: `PHASE2_IMPLEMENTATION.md` is not one of the 60, because `packages/core` does not publish it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ARYe3yQTQCUFm5qPYNgKaJ)_"
+}

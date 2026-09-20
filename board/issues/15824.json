@@ -1,0 +1,35 @@
+{
+  "number": 15824,
+  "kind": "issue",
+  "title": "`HistoryCleanupManager` mixes two calendars on the retention cutoff — the age-based delete window slips one hour across a DST transition",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T09:21:48Z",
+  "updated_at": "2026-09-06T00:21:45Z",
+  "closed_at": "2026-09-06T00:21:19Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15824",
+  "body": "Found while fixing #14852 (`service-automation`'s `resolveToken()` offset branch). ⛔ Deliberately NOT fixed there — different package, different domain, outside that card's fence. Refs #14852.\n\n## The shape\n\n`packages/metadata/src/utils/history-cleanup.ts`, twice — line 96 (the delete path) and line 259 (the count/preview path):\n\n    const cutoffDate = new Date();\n    cutoffDate.setDate(cutoffDate.getDate() - this.policy.maxAgeDays);\n    const cutoffISO = cutoffDate.toISOString();\n\n    const filter = { recorded_at: { $lt: cutoffISO } };\n\n`new Date()`, `getDate()` and `setDate()` read and write the **local** calendar; `toISOString()` renders **UTC**. This is the same two-calendar mix as #14852.\n\n## Why it is almost always harmless, and when it is not\n\n`setDate(getDate() - n)` moves the *instant* by exactly n x 24h whenever every local day in the window is 24 hours long, so the mixed spelling is accidentally equivalent to UTC arithmetic on ordinary days. Across a DST transition it is not: `setDate` preserves wall-clock time, so the window is 23 hours (spring-forward) or 25 (fall-back), and the computed cutoff instant is off by exactly one hour.\n\n⇒ Unlike #14852 the rendering here is a full ISO instant, not a date slice, so the error is **one hour, not one day**. The consequence is bounded but real, and it is on a **deletion** path: for the transition window, history rows within one hour of the retention boundary are deleted an hour early (or retained an hour too long). Twice a year, per DST-observing deployment.\n\nNote the two call sites compute the cutoff independently, so the previewed count and the executed delete can also disagree across the boundary for the ordinary reason (two `new Date()` reads); that part is inherent, not this defect.\n\n## Blast radius\n\n`HistoryCleanupManager` is public API — exported from `packages/metadata/src/index.ts:33`.\n\n## Suggested repair\n\nSpell it on one calendar, as #14852 did: `cutoffDate.setUTCDate(cutoffDate.getUTCDate() - this.policy.maxAgeDays)`. Both sites. ⛔ Not a proposal to make retention timezone-aware — only to stop the arithmetic and the rendering disagreeing about which calendar they are on.\n\n## Guard note (carried over from #14852, it applies verbatim)\n\n⛔ A regression test for this **cannot** be written to run only at `TZ=UTC` — the two spellings are behaviourally indistinguishable there, which is exactly why nothing has ever gone red on it. It needs a DST-observing zone AND an instant whose day shift straddles that zone's transition. The pin added for #14852, `packages/services/service-automation/src/builtin/template-date-offset-dst.test.ts`, is a working model of that harness: measured red cells, each carrying an inline control that asserts the old spelling disagrees there, so a green run cannot be mistaken for a fix when it really means the instants were not in a transition window.\n\nUnlabelled beyond `pm:queue` on purpose: routing, `domain:*`, type and priority belong to triage."
+}

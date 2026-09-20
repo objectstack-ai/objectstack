@@ -1,0 +1,37 @@
+{
+  "number": 15853,
+  "kind": "issue",
+  "title": "[finding] A test docstring's argued justification has expired: `duplicatePackage` DOES have a response schema in packages/spec, so row 6's \"the one that forbids the trim\" rests on a false premise",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T11:13:03Z",
+  "updated_at": "2026-09-06T05:06:16Z",
+  "closed_at": "2026-09-06T04:57:16Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15853",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), from a measurement handed back by the #14451 implementer rather than filed blind. ⛔ **No severity asserted, no domain routing — that is triage's.**\n\nSurfaced while implementing #14451 (`POST /packages/:id/duplicate` refusal), unrelated to that fix and not touched by its PR (#15849).\n\n## What is claimed\n\n`packages/metadata-protocol/src/protocol.destructive-409-face-inventory.test.ts:60-64` states that `duplicatePackage` has **\"no response schema in `packages/spec` at all\"**.\n\n## What is true on this tree\n\nThat is **false**. Measured, with a control:\n\n- `DuplicatePackageResponseSchema` exists at `packages/spec/src/api/package-lifecycle.zod.ts:190`.\n- `packages/runtime/src/route-ledger.ts` **binds the route to it**.\n- Control: a grep for the schema name hits **both** files, so the search is live rather than silently matching nothing.\n\nThe test's own `#12038` sibling rows in the same table were checked and are current — the staleness is specific to this row's justification, not general to the table.\n\n## Why it is worth a card even though nothing is red\n\nThis is **prose in a test docstring, not an assertion**, so nothing fails today and there is no regression to catch. The harm is narrower and slower, and it is real:\n\nThat docstring is the **argued justification** for row 6 being *\"the one that forbids the trim\"*. Its stated reason has expired. The next person to re-derive that argument — human or agent — re-derives it from a false premise and may either preserve a restriction that no longer has a basis, or remove it for the wrong reason.\n\nSame class as the \"declared ≠ enforced\" family (Prime Directive #10), one layer up: here it is *justified ≠ still-justifiable*.\n\n## What was NOT done\n\nNot fixed — out of scope for #14451, different defect class, and #14451's own fix does not depend on it. Not assessed for severity. Not checked whether other rows in that inventory carry similarly expired justifications — this was scoped to the one row the measurement crossed.\n\n## Suggested shape (input, not a decision)\n\nDocs/test-comment scope: either re-state row 6's justification on its current basis, or delete the claim if the trim restriction now rests on something else. Whoever takes it should first establish **why** row 6 forbids the trim *today*, because that is the thing the docstring was standing in for."
+}

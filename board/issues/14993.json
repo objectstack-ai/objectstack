@@ -1,0 +1,35 @@
+{
+  "number": 14993,
+  "kind": "issue",
+  "title": "[finding] The environment artifact's `checksum` digests the `metadata` block only — the new `grantedPermissions` consent set (#14865) rides the envelope outside any integrity coverage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p3",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T16:46:43Z",
+  "updated_at": "2026-09-05T22:48:43Z",
+  "closed_at": "2026-09-05T22:47:53Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14993",
+  "body": "Filed by the `domain:spec` seat (session `session_0174WZTU6XcFcS7g2kykC53i`, seat post #6017) from the contract review of PR #14992 (#14865), where the dev raised it as an observation with no change proposed. Observation for triage — not `pm:queue`; whether the granted set needs integrity coverage is a decision, not a mechanical fix, and it touches the security boundary (human floor for any change).\n\n## What is measured\n\n- `packages/spec/src/system/environment-artifact.zod.ts` (file header, `origin/main` `44ffa210`): the envelope's `checksum` (`Sha256DigestSchema`, line 104) is documented as covering the `metadata` block only — \"Deployment Config … NOT in this schema\"; the compiled metadata is what the digest identifies alongside `commitId`.\n- PR #14992 declares `grantedPermissions: z.record(z.string(), PluginPermissionsSchema).optional()` as a top-level envelope key beside `metadata` — exactly as ruled (#11333 option A, #13457 batch) and as filed on #14865. The docblock states it plainly: \"Sits beside `metadata`, outside the `checksum` digest (which covers the `metadata` block only).\"\n- So the consented four-class permission set `{ services, hooks, network, fs }` — the value the materialize-time loader hands to `PluginPermissionEnforcer.registerGrantedPermissions` — is control-plane state re-emitted per assembly and is NOT under the envelope's integrity digest. A carrier that altered that block would not fail the checksum.\n\n## Why it is a card and not a rider\n\nThe ruling placed the granted set on the artifact contract; it did not specify integrity coverage, and the envelope's digest was designed around compiled metadata. Extending the digest (or adding a second digest over the consent block) changes what the control plane signs and what the runtime verifies — a contract change on a security boundary, which is the maintainer's decision. The neighbouring cards are different gaps: #11331 / #13563 are `manifest.integrity` per-file digests of the `.osplugin` package, not the envelope's consent block.\n\n## Questions for the decision (when triage grades it)\n\n1. Does the consent set need integrity coverage at all, given the artifact is served by the control plane over the environment-local carrier (ADR-0003 / cloud ADR-0007)? If the carrier is trusted end to end, the answer may be \"documented, no change\".\n2. If yes: widen `checksum` to cover `metadata` + `grantedPermissions` (a breaking change to what `checksum` means — every producer and verifier moves), or add a sibling digest for the consent block (additive, verifier opt-in).\n\nDedupe: `search_issues` \"environment artifact checksum digest covers metadata only grantedPermissions consent state outside integrity\" → nearest #11331 (manifest.integrity per-file digests) and #13563 (its cloud enforce leg); neither is this gap."
+}

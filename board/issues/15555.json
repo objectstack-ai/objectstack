@@ -1,0 +1,36 @@
+{
+  "number": 15555,
+  "kind": "issue",
+  "title": "service-automation: a throw between `journalConsumedSuspension` and the `status: 'stranded'` stamp makes a REPAIRABLE strand report `repairable: false` — the operator is told not to attempt a repair that works",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T21:06:55Z",
+  "updated_at": "2026-09-05T16:57:26Z",
+  "closed_at": "2026-09-05T16:42:01Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15555",
+  "body": "Found by the Clause-② contract review of **PR #15436** (card #13807), at `CONTRACT_REVIEW_TIER`, and **driven rather than reasoned about**. Filed by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\n⛔ **Not a defect in PR #15436, and deliberately not fixed there.** That PR relays the engine's discriminator exactly as the maintainer's batch #37 ruling requires, and `repairable: false` is the ruling's own honest default when the engine says nothing. The hole is upstream, in the engine's own catch arm.\n\n## The mechanism\n\n`journalConsumedSuspension` has exactly **one** call site — `packages/services/service-automation/src/engine.ts:5508` — inside the catch arm that ends by returning `status: 'stranded'` at `:5561`. Between the journal and the stamp sit two statements that can throw:\n\n- `this.recordLog(...)` at **`:5509`** — synchronous and unguarded. Its `store.recordTerminal` is called with no `try` (`:6626`), and the logger runs on **every** terminal run (`:6571-6572`).\n- `await this.failAncestors(...)` at **`:5525`**.\n\nSo \"a repair snapshot was journalled\" and \"the engine said `stranded`\" are **not one fact**. If the arm throws after `:5508` and before `:5561`, the snapshot exists but the verdict never ships.\n\n## Measured, in a real engine\n\nA `recordLog` made to throw on the `failed` entry:\n\n| | |\n|---|---|\n| `resume()` | **throws** instead of returning `{ status: 'stranded' }` |\n| the approvals decision door | reports **`repairable: false`** — correctly, from its own point of view: no status was reported |\n| `restoreConsumedSuspension(runId)` | **`restored: true`** — the repair works |\n\n⇒ The envelope tells an operator not to attempt a repair that would have succeeded. That is the *opposite* direction from the one everybody checks: the usual worry is a false `true`, and this is a false `false`.\n\n**Controls the same run carried**, so the reading is not an artefact: the forward direction was driven too (a normal strand → `repairable: true` → `restoreConsumedSuspension` → `restored: true`, `hasSuspendedRun` true again), and a genuinely non-repairable case (run cancelled between pre-flight and resume → engine `RUN_NOT_FOUND`, no status → `repairable: false` → the verb refuses `RUN_CANCELLED`). So the verb can answer both ways, and the false `false` above is a reading.\n\n⚠️ **Cascade-failed ancestors are NOT this bug** and must not be \"fixed\" along with it: they go through `failSuspendedRun` (`:5766`), which journals nothing, so `repairable: false` there is correct — the verb would rightly refuse with `NO_CONSUMED_SUSPENSION` (`:6252-6258`).\n\n## Trigger width\n\nNarrow: a logger that throws, or a store whose `recordTerminal` throws synchronously. Not reachable through ordinary configuration as far as this review went — ⚠️ but that is **NOT MEASURED**, not established: nobody enumerated the store implementations to see whether any can throw there.\n\n## Suggested direction (advisory — the disposition is the lane's)\n\nGuard the window so the journal and the verdict cannot separate: either wrap `:5509`–`:5525` so a throw still reaches the `status: 'stranded'` return, or move the journal to immediately precede the stamp. ⛔ Do not \"fix\" it by making the door assume `repairable: true` on an unknown failure — that inverts the ruling's honest default and would promise a repair for a lost run.\n\n## A residual the same review recorded, stated so it is not mistaken for this bug\n\n`repairable` is a **point-in-time** fact even when correct. The verb can still refuse later: in-memory journal eviction past `MAX_CONSUMED_SUSPENSIONS` (`:5919-5923`), a row-budget drop (`:6187`, `:6213`), an unlanded persist after a restart (`:6194-6198`), or another replica holding it. PR #15436 carries a doc nit for this (its field doc says \"can **still** be repaired\", which over-promises by one word); that is a wording fix on that PR, not this card.\n\nRefs: PR #15436 / #13807 (the ruled card whose review found this) · #13937 / PR #15237 (the shape-4 ruling that made `'stranded'` the discriminator) · #15221 (the generic resume door drops the same status) · #15389 (a restored run can be abandoned, never completed — the first consumer of the repairable flag)."
+}

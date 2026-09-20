@@ -1,0 +1,35 @@
+{
+  "number": 15715,
+  "kind": "issue",
+  "title": "Decide option B of #15589: should introducing an `exports` map require a minor changeset with a consumer note? Measured, B as worded fires on 51 commits to catch a class that lives in 7",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T03:59:21Z",
+  "updated_at": "2026-09-06T01:24:26Z",
+  "closed_at": "2026-09-06T01:22:26Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15715",
+  "body": "Filed out of #15589. That card proposed three options; option A (a consumer-specifier ledger, held against the `exports` maps) is implemented on branch `claude/issue-15589-consumer-specifier-ledger`. This is option B, deliberately split off rather than landed with it. Unassigned; it needs a maintainer decision, not an implementation.\n\n## The proposal, as #15589 words it\n\n> **B. `check:published-files` GATED, one step further.** That gate already asserts every publishable package declares an `exports` map. It could additionally refuse a PR that *introduces* a map (or removes a subpath from one) unless the changeset for that package is at least `minor` and carries a `BREAKING`-style consumer note naming the deep paths that stop resolving.\n\n## What B would have refused — measured\n\nMeasured on `a4421eb89`, over every `package.json` this repo publishes:\n\n| reading | count |\n| --- | --- |\n| publishable packages that declare an `exports` map today | 69 |\n| distinct commits that introduced one | 51 |\n| packages **born** with the map (it is present in the commit that created the `package.json`) | 56 |\n| packages **retrofitted** with a map (added to an already-existing `package.json`) | 13 |\n| distinct commits behind those 13 retrofits | 7 |\n\nMethod, so the numbers are re-derivable: for each publishable `package.json` declaring `exports`, the introducing commit is the oldest from `git log -S'\"exports\"' -- PATH`; the package counts as born-sealed when that commit equals the oldest `--diff-filter=A` commit for the same path. Non-shallow checkout (`git rev-parse --is-shallow-repository` = false).\n\n## Why that split IS the decision\n\nA package **born** with an `exports` map seals nobody — there is no published predecessor whose consumers could be deep-importing it. Every incident this class has produced came from the 13 retrofits, and in fact from one of the 7 commits: `6a571d3f7` (#13123), the seal that broke cloud's `objectos-runtime` (#13662) and hotcrm's hook-body harness (#15325).\n\nSo B as worded fires on 51 commits to catch a class that lives in 7. For 44 of the 51 it would demand a `minor` bump and a `BREAKING`-style consumer note naming the deep paths that stop resolving — for a package that had no consumers and no deep paths that stopped resolving, because it had never been published without the map. That is roughly 7:1 against, and the false positives are not evenly spread: they land on new-package PRs, which is exactly where a \"declare who this breaks\" demand is least likely to be read closely and most likely to be discharged with boilerplate. A gate answered by boilerplate 44 times out of 51 stops being read by the 7th time it matters.\n\nThe 7 retrofit commits are also not uniformly the dangerous shape. `818e02700` is titled `fix(cli): print init's \"Created files\" summary after install, not before` — an `exports` change riding along on a commit about something else. That one is an argument **for** B: a discriminating gate would have made that rider announce itself.\n\n## Options\n\n- **B1 — take B with a born-vs-retrofit discriminator.** Gate only when the map is added to a `package.json` that already existed in the merge base (and on subpath removal from an existing map). Cost: the discriminator is a second git query inside the gate, and it is history-dependent, which no other `check:published-files` clause is. Catches all 7, waves through all 44.\n- **B2 — take B as worded.** Mechanical, no history, one rule. Cost: the 7:1 false-positive ratio above, paid on every new-package PR forever.\n- **B3 — narrow B to subpath REMOVAL only, and drop the introduction half.** Removal from an existing map is unambiguously a break with an existing consumer; introduction is the ambiguous half. Cheapest correct-by-construction rule, but it would NOT have fired on #13123, which introduced rather than removed.\n- **B4 — decline B.** Option A already reds on the PR that seals a *ledgered* specifier, naming the consumer. B's distinct value is only over consumers nobody has ledgered yet.\n\n## Recommendation\n\n**B1**, and if the history dependence is judged too costly for `check:published-files`, **B3** over B2 — a rule that is silent on the ambiguous half beats one that cries wolf 44 times. B2 as literally worded should not be taken.\n\nNote what A does and does not already cover, since it changes B's value: A reds on the PR that seals a specifier a **named, cited** out-of-repo consumer imports. It is silent about a consumer nobody has written down. B is the half that does not depend on the ledger being complete, which is why declining it (B4) is a real position and not merely inaction.\n\n## Boundary\n\n⛔ Not a request to widen any `exports` map, and not a request to weaken `check:published-files`'s existing GATED invariant. Sealing was correct in both incidents; the gap is visibility, not policy.\n\n⛔ This card is not blocked on option A, and option A is not blocked on it.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

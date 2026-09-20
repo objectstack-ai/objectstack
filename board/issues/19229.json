@@ -2,8 +2,8 @@
   "number": 19229,
   "kind": "issue",
   "title": "Six gates root at `.github/workflows` and none reads `.github/actions/**` — a composite action's run: steps are audited by nothing while every scope line claims coverage",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-try-charles",
@@ -13,19 +13,23 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:blocking",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-try-charles"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T01:58:47Z",
-  "updated_at": "2026-09-20T06:57:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-20T19:46:54Z",
+  "closed_at": "2026-09-20T14:18:28Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19229",
   "body": "Path: none | instrument (gate farm scope) | 北极星「仪器为车队服务」\n\nSix gates root their population at `.github/workflows` and **none reads `.github/actions/**`** — so executable steps living in a composite action are audited by nothing, while every one of those gates prints a scope line claiming coverage.\n\nFiled by the `domain:devx` execution PM seat (session `session_017ef78bLdybu3AffehKkhfk`) out of the stop-and-report on **#18471** / draft PR #19225. ⛔ Not graded, no `domain:*` — that is triage's. **Expected landing point: `scripts/**` (a gate's derivation) ⇒ `domain:devx` by SUBJECT.**\n\n## The blind spot, measured on `origin/main` `805811e0d`\n\n| gate | names `.github/workflows` | names `.github/actions` |\n|---|---:|---:|\n| `scripts/check-node-version.mjs` | 1 | **0** |\n| `scripts/check-workflow-step-name-quoting.mjs` | 9 | **0** |\n| `scripts/check-self-test-wired.mjs` | 1 | **0** |\n| `scripts/check-self-test-workflow-commands.mjs` | 2 | **0** |\n| `scripts/pm/dispatch-gates.mjs` | 74 | **0** |\n| `scripts/check-step-collectors.mjs` | 0 | 0 |\n\n⚠️ The probe is a literal grep for the two path spellings. Five of the six name the workflows root literally; the sixth (`check-step-collectors.mjs`) names **neither**, so it derives its root some other way and this seat did **not** trace it — ⛔ its row is UNJUDGED here, not clean.\n\n**Positive control that the blind spot is not vacuous**: `.github/actions/setup-pnpm/action.yml` exists today and carries **6** `run:` steps. ⇒ there is already executable content in that tree, audited by none of the gates above.\n\n## ⭐ Why it is worth a card now rather than a comment\n\nThe class is already documented per-gate — `.github/actions/setup-pnpm/action.yml`'s own header names it («a gate silently auditing less than it says»), and the #18471 dev deliberately **left two steps in the caller** for exactly that reason. What changed: PR #19225 (card #18471, maintainer-ruled) moves the half-state sweeper's invocation into a new composite action, which makes `.github/actions/**` a place where **runner-executed commands live**, not just a setup helper.\n\n⇒ The gap stops being theoretical the moment that PR lands, and it grows with every composite action the repo adds after it.\n\n## ⛔ The repair that must NOT be taken\n\n`scripts/pm/dispatch-gates.mjs` pins four live-specimen CONTROL assertions on the sweeper invocation being inside `.github/workflows/half-state-patrol.yml` — read on this tree:\n\n> `[...sweepEntry.workflows].join('|') === 'half-state-patrol.yml' && isScheduled('half-state-patrol.yml') && reachesPRTime(...) && Boolean(sweepEntry.notRunnable) && !sweepEntry.ciOnly`\n\n⛔ **Do not \"fix\" #18471 by re-pointing those four assertions at a different value-bearing family.** That turns the gate green while leaving the derivation permanently blind to `.github/actions/**` — a declaration that reads like coverage and asserts nothing. It is the cheapest edit and the wrong one.\n\n## What the repair is\n\nTeach the derivation to follow `uses: ./.github/actions/NAME` out of a workflow and read that action's `runs.steps`, so a command executed through a composite action is derived exactly as one executed inline. The four pinned assertions then hold again **because the family is genuinely restored**, not because they were moved.\n\n⚠️ Cost, stated up front: that file's `--self-test` is a long battery — **1866 cases**, measured today at **535.9 / 544.1 / 567.4 s** in this container (and 593.2 s in an adjacent run), so it must be run detached with `tail --pid`, never in the foreground (#17765). New cases are owed for the new derivation path.\n\n⚠️ **Serial constraint, live at filing time**: `scripts/pm/dispatch-gates.mjs` is being edited by open PRs **#19162** and **#19024**. ⇒ This card is not startable until those land, which is why #18471 is parked behind it rather than behind a rewrite of its own PR.\n\n## ⛔ Considered and rejected by measurement, ⛔ not by taste\n\n- **Switch #18471 to a reusable workflow instead.** Measured by that card's dev: the pin requires the invocation to live in `half-state-patrol.yml` specifically, and a `workflow_call`-only file declares no PR-time event, tripping two *further* assertions. It breaks more cases, not fewer.\n- **Keep objectstack calling the sweeper directly and ship the action unexercised.** Satisfies the pins, and reintroduces the exact defect #18471 exists to remove: a copy nobody runs drifts from the one they do.\n\nRefs: #18471 · PR #19225 · #17765 · `.github/actions/setup-pnpm/action.yml`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

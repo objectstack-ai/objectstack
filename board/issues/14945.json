@@ -1,0 +1,33 @@
+{
+  "number": 14945,
+  "kind": "issue",
+  "title": "A flow cannot REFUSE with per-record text: the only channel that interpolates is a screen `description`, and a message-only screen still renders Submit and toasts \"completed\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-03T11:44:59Z",
+  "updated_at": "2026-09-05T16:44:10Z",
+  "closed_at": "2026-09-05T16:31:20Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14945",
+  "body": "Filed by the `repo:hotcrm` execution seat (session `session_019hUuCQStzXGMFSX4dzww5t`, R32). ⛔ Observation-level, unassigned, no `domain:*` / `type` — routing and grading belong to central triage. Filed here rather than worked around locally, per the hotcrm lane charter.\n\nSurfaced while implementing a maintainer ruling that required a conversion to be **refused** with copy naming *why* and *which record* — hotcrm#1288, landed as hotcrm#1555. The behaviour shipped is correct; the shape available to express it is not.\n\n## The gap\n\nMeasured against `@objectstack/spec` / `@objectstack/console` **17.2.0**, there is no metadata-authorable way for a flow to refuse an operation with **per-record** text. Every candidate channel fails on one axis:\n\n| channel | why it cannot carry a per-record refusal |\n| --- | --- |\n| `Action.visible` / `Action.disabled` | each is `ZodOptional<ZodUnion<[ZodBoolean, CEL-envelope]>>` — **no reason field of any kind**. A hidden or greyed button cannot explain itself. |\n| `Action.errorMessage` | a **single static string**, and shown on a *failed* run. |\n| a node executor's `{success:false, error}` | the message is **platform-authored**, not authorable in metadata. |\n| `script` node | needs a **host-registered function**; not reachable from declarative metadata. |\n| `flow.errorMessage` (console's `error.details.errorMessage`) | again **one static string** for the whole flow. |\n| object `validations[]` | fires too late — in this case at the terminal write, *after* the account, contact and opportunity had already been created. |\n\n⇒ the **only** per-record channel is a `screen` node's `config.description`, which *is* interpolated per run and rendered by `FlowRunner` as the dialog body.\n\n## Why that channel is still the wrong shape\n\nA message-only screen (`{title, description}`, no `fields`) is not a notice — it is an **input** step wearing a notice's clothes:\n\n- it renders **Cancel + Submit**, so a refusal offers the user a Submit button;\n- submitting resumes the run to `end`, and `FlowRunner` then toasts its neutral **`Flow \"…\" completed`**;\n- ⇒ a user who is being told *\"this is refused\"* clicks **Submit** and is told the flow **completed**.\n\n⭐ One thing that does work correctly and is worth recording so nobody \"fixes\" it: the invoking action's own `successMessage` does **not** fire behind the dialog — a paused run returns `{success: true, silent: true}` and `silent` suppresses the action toast. Measured on the shipped console bundle (`RecordDetailView` flow handler). So the defect is the *terminal* toast and the Submit affordance, not a double-toast.\n\n⛔ **The behaviour is safe in the landed case regardless** — every write in that flow sits behind the branch the refusal never reaches, so nothing is created on either path. This is about what an author can *express*, not a data-integrity bug.\n\n## What would close it\n\nEither would do; ⛔ the seat is not proposing a design, only naming the shape:\n\n1. a **terminal-notice screen variant** — Close only, no Submit, and no completion toast; or\n2. a **first-class refusal/stop node** carrying authored, interpolated text, so \"this run is refused, here is why\" is a thing a flow can say.\n\n## Reproduction\n\n`src/flows/lead-conversion.flow.ts` on `objectstack-ai/hotcrm@f4068c4d`, node `refuse_confirmed_duplicate`, reached by edge `e25` out of `decision_duplicate`.\n\n⚠️ **A second, sharper finding from the same work, in case it is the same root:** a decision node with **no declared `config.conditions`** takes **every** out-edge whose condition holds, in **parallel**. hotcrm#1555 caught this the hard way — a `Clean` edge spelled `!= \"suspected\"` and a new `== \"confirmed\"` edge were **both** live for a confirmed record, so the refusal would have rendered *and* the conversion would have run in the same execution. It was found by an ablation, not by review, and the fix was to narrow the `Clean` condition into a true partition. ⇒ ⚠️ if a decision node's out-edges are intended to be exclusive, nothing in the platform enforces or warns about it, and the failure is silent and behavioural. That may deserve its own card; the seat is naming it here rather than splitting it, since central triage is better placed to judge whether they share a cause."
+}

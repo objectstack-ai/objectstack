@@ -1,0 +1,36 @@
+{
+  "number": 15366,
+  "kind": "issue",
+  "title": "runtime: the tenancy posture seam in `resolve-execution-context` swallows EVERY failure, so a tenancy service that failed to build reads as \"no wall\" — #13906 decision 1 option A, at the runtime door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T13:00:52Z",
+  "updated_at": "2026-09-06T01:58:45Z",
+  "closed_at": "2026-09-05T14:41:31Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15366",
+  "body": "Found while censusing the `resolveAuthzContext` callers under #15256 (ruling item 5). This is **not** that card's hole — the runtime door does supply a `tenancyPosture`, and it is one of only two callers that do. It is the ADJACENT defect, at the same seam, in the same permissive direction.\n\n## The site\n\n`packages/runtime/src/security/resolve-execution-context.ts:172`\n\n    let tenancyPosture;\n    try {\n      tenancyPosture = effectiveTenancyPosture(await opts.getService('tenancy'));\n    } catch {\n      tenancyPosture = undefined;\n    }\n\nA bare catch. Every rejection resolves to \"no posture\", and no posture means both posture-conditional API-key refusals (`organization_required`, `organization_membership_ended`) are skipped.\n\n## Why that is the shape #13906 already ruled on\n\n#13906 decision 1 option A separated exactly these two facts at the REST seam, because collapsing them made a FAILURE read as \"this check does not apply\":\n\n- **never registered** — branded (`isServiceNotRegisteredError`), quiet `undefined`. The supported no-tenancy composition; refusing there would break every single-org embedder.\n- **registered and FAILED to build** — unbranded, and must be re-raised so the door answers `AuthzStoreUnavailableError` (503). A posture that could not be READ is not a posture that is ABSENT.\n\n`rest-server.ts` carries that discrimination on both of its wirings (the second one added by #15256). This site carries neither half: the comment above it says only \"Absent service ⇒ undefined\", which describes the first case and silently covers the second.\n\n## Consequence, stated carefully\n\nUnder a wall-enforcing posture, on the runtime dispatcher door, a `tenancy` service that was registered and whose factory threw would admit an organization-less key and an ex-member's organization-stamped key — the #15256 outcome, reached through a service outage rather than through a missing provider. I have **not** measured this end-to-end; the reading here is of the source and of the two guards it feeds. Sizing it should start with the same kind of measurement #15163 ran for REST.\n\n⛔ Note the repair is not \"wrap it the way REST does\" without checking `opts.getService`'s rejection contract at this call site — REST splits on the kernel's async accessor being present for reasons that may not transfer.\n\nRefs: #15256 (the census this came from) · #13906 (decision 1 option A) · #15163 · ADR-0105 D2/D3."
+}

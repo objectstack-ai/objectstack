@@ -1,0 +1,33 @@
+{
+  "number": 16214,
+  "kind": "pull_request",
+  "title": "fix(scripts): the ADR-0087 gate's own header stops hand-enumerating CATEGORIES",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T06:05:24Z",
+  "updated_at": "2026-09-06T06:56:24Z",
+  "closed_at": "2026-09-06T06:56:23Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T06:56:23Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16214",
+  "body": "Fixes #15915\n\n## What changed\n\n`check-adr-0087-registration.mjs`'s header docblock hand-enumerated the five `not-required (<category> ...)` marker forms plus `registered`, and omitted `type-surface-only` -- the sixth. Per the #14378 precedent for this exact defect class, the enumeration is **deleted**, not patched:\n\n```\n-  <!-- adr-0087: registered <id>[, <id>...] -->\n-  <!-- adr-0087: not-required (unpublished) <why> -->\n-  <!-- adr-0087: not-required (already-registered <id>[, <id>...]) <why> -->\n-  <!-- adr-0087: not-required (no-migration-prescription) <why> -->\n-  <!-- adr-0087: not-required (runtime-interface-only <path>#<Symbol>[, ...]) <why> -->\n+  <!-- adr-0087: registered <id>[, <id>...] -->\n+  <!-- adr-0087: not-required (<category> ...) <why> -->\n+\n+ `<category>` is one of `CATEGORIES` below -- not enumerated here...\n```\n\nThe header now shows the marker grammar once, generically, and points readers at `export const CATEGORIES` (already pinned against ADR-0087's addendum in both directions, #8299) instead of restating its members. A restatement that must be kept in step with a real list is the same defect twice over -- adding a category updates the const and the ADR, and the header would still drift, forever, no matter how many members exist.\n\nThe prose at `:2274` (\"The sixth category: `type-surface-only`\") already agreed with reality; only the header disagreed. It is left as-is (historical, not a running count) and is now consistent with the header, which no longer asserts a count of its own.\n\n## Anti-drift pin\n\nAdded one self-test battery, **H1 (#15915)**, that reads the gate's own source at self-test time and refuses if the header ever names a `CATEGORIES` member again as `(name` inside the rule section. Reverse-verified by hand before commit:\n\n- Mutated the header back to include a `not-required (type-surface-only ...)` line → `--self-test` went **red** with the H1 message naming the exact category.\n- Restored → `--self-test` green again, byte-identical to the pre-mutation file (diffed).\n\n`SELF_TEST_BATTERIES` gained the `H1` entry (floor 7: 1 anchor-sanity assert + 1 generic-line assert + 5 `CATEGORIES` members) and `SELF_TEST_BATTERY_FLOOR` moved 49 → 50.\n\n## Why the file's own #8299 pin couldn't see this (context, not new work)\n\n`assertInputs` pins `CATEGORIES` against ADR-0087's addendum in both directions, so the const and the ADR cannot disagree. The header prose was a **third**, unchecked copy of the same set -- invisible to that pin by construction, since the pin only ever compares the const and the ADR to each other. This PR does not touch that pin; it removes the third copy instead of teaching the pin to read a fourth thing.\n\n## Scope\n\nFile surface is exactly `scripts/check-adr-0087-registration.mjs` (header docblock + its own self-test, for the new pin). No other file touched. No changeset: this script ships nothing under `packages/**` -- `skip-changeset` applied.\n\nThe optional sweep triage suggested (\"how many other gate headers under `scripts/**` restate their own consts\") was not run: a trustworthy positively-controlled measurement of that shape needs its own designed grep, and a low-confidence number would be worse than none. Left for a separate finding if someone wants to build that measurement.\n\n## Tests\n\n- `node scripts/check-adr-0087-registration.mjs --self-test` -- green, 332 assertions (up from 325 pre-change; H1 added 7).\n- `node scripts/check-adr-0087-registration.mjs --base origin/main` -- green (this PR adds no declared-breaking changeset).\n- `node scripts/check-scripts-symbol-anchors.mjs` (+ `--self-test`) -- green, no anchor pins this file's line numbers.\n- `node scripts/check-declaration-mirrors.mjs` (+ `--self-test`) -- green (unrelated to this file; this file has no `.d.mts` mirror).\n- Full PM-derived gate list for this diff (`node scripts/pm/dispatch-gates.mjs --commands`, re-derived after rebasing onto fresh `origin/main`) -- all 34 commands run, all green. `check:pm-dispatch-gates` run under the shared verify lock (`OS_VERIFY_LOCK_SLOT=issue-15915`).\n- Reverse-verification of the new H1 pin: on-disk mutation → red → restore → green (see above; byte-diffed clean).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8)_"
+}

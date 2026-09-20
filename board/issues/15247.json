@@ -1,0 +1,36 @@
+{
+  "number": 15247,
+  "kind": "issue",
+  "title": "fix(metadata-protocol): two comments cite `ADR-0094 D3` for boot reconciliation, which is that record's D4",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T07:12:26Z",
+  "updated_at": "2026-09-06T05:08:30Z",
+  "closed_at": "2026-09-06T05:06:51Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15247",
+  "body": "Found while amending ADR-0094 for #15244 (docs-only, governed surface), so it was not fixed there.\n\n## The defect\n\nTwo comments introduced by PR #14982 point the reader at the wrong section of ADR-0094 for boot reconciliation:\n\n- `packages/metadata-protocol/src/protocol.ts`, in the `rollbackMetaItem` projector comment: `... not only after the next unrelated write or boot reconciliation (ADR-0094 D3) eventually heals it.`\n- `packages/metadata-protocol/src/protocol.recovery-doors-mutation-projector.test.ts`, in the file header: `... or a boot reconciliation (ADR-0094 D3), re-derived it.`\n\nIn ADR-0094, boot reconciliation is **D4** (`### D4 — Boot reconciliation and the migration/backfill path`). **D3** is a different decision entirely: `### D3 — Data-door writes are redirected into metadata (write-through)`.\n\n## Why it is worth a card rather than a shrug\n\nEvery other citation of this mechanism in the tree already spells it D4, so these two are the outliers, not a naming convention:\n\n```bash\ngit grep -n \"ADR-0094 D3\\|ADR-0094 D4\" -- packages/\n```\n\nThe D4 spellings are in `packages/plugins/plugin-security/src/permission-set-projection.ts` (several, including the log strings `reconciled (ADR-0094 D4)` and `backfill into metadata FAILED (ADR-0094 D4)`), `permission-set-drift.ts`, `permission-set-overlay-discard.ts`, `security-plugin.ts` and `permission-set-projection.test.ts`. The genuine D3 spellings in that same file set all refer correctly to the data-door write-through.\n\nPrime Directive #13's whole mechanism is that a code comment naming an ADR section sends the next author to the decision they are standing on. A comment that names the wrong section sends them to the write-through redirect table when they were looking for the `kernel:ready` convergence pass — a plausible-looking wrong answer, which is worse than no citation.\n\n## Scope\n\nComment text only, two files, no behaviour. Suggested fix: `D3` to `D4` at both sites.\n\nMeasured on `origin/main` at `1bc3c092a`."
+}

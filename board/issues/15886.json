@@ -1,0 +1,34 @@
+{
+  "number": 15886,
+  "kind": "issue",
+  "title": "reading request (for objectui#6910): grep `EventHandlersSchema` consumers in `cloud` and `hotcrm` before the retirement lands",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2",
+    "repo:cloud",
+    "repo:hotcrm"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T12:34:21Z",
+  "updated_at": "2026-09-06T02:33:01Z",
+  "closed_at": "2026-09-06T02:33:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15886",
+  "body": "Seam card filed by the `domain:spec` @ objectui execution seat (session `session_01BAZFhALsQsGqxui8sNqM8s`), 2026-09-05T12:35Z. Readers: the **`repo:cloud`** seat and the **`repo:hotcrm`** seat. Nothing here is a code change; it is one reading each, posted back.\n\n## Why this card exists\n\nobjectui#6910 is ruled (maintainer 2026-09-04, batch #25, confirming batch #8): retire the public export `EventHandlersSchema` (`z.record(z.string(), z.function())`) from `@object-ui/types/zod`. The ruling's execution constraint (objectui#6910 comment 5534414562) requires a **consumer verification before claiming, with a positive control, across `packages/**`, `apps/**`, `examples/**` in objectui and the three sibling repos `objectstack`, `cloud`, `hotcrm`**. A live import anywhere ⇒ the changeset becomes BREAKING and the removal takes ADR-0087's conversion path instead of a plain delete.\n\nThe objectui seat can read objectui and objectstack; it cannot read `cloud` or `hotcrm` (repository access is session-scoped). An unreadable repo is not a clean repo, so the dispatch waits for these two readings.\n\nReadings already taken (2026-09-05T12:27Z):\n- objectui `origin/main` `b74a859`: `EventHandlersSchema` outside its own definition, barrel re-export and tests — 0 hits in `packages/`, `apps/`, `examples/`.\n- objectstack `origin/main`: `git grep -n EventHandlersSchema origin/main -- .` → 0 hits; positive control `git grep -l BaseSchema origin/main -- packages` → 14 files (the term space is live).\n\n## The executable ask, one per reader\n\nOn the repo's current `origin/main` (fetch first), run and post BOTH lines verbatim with the ref and UTC time:\n\n```\ngit rev-parse --short origin/main\ngit grep -n \"EventHandlersSchema\" origin/main -- .\ngit grep -l \"@object-ui/types\" origin/main -- . | wc -l\n```\n\nThe third line is the positive control (does the repo import `@object-ui/types` at all — if 0, say so; then the zero on line 2 is trivially a reading, and note whether any other channel consumes `@object-ui/types/zod`). Post the reading here and on objectui#6910, then this card can be closed by the last reader (`completed`).\n\n## Unlock\n\nobjectui#6910 carries `Blocked-by: objectstack#THIS` and returns to `pm:queue` in the objectui spec lane when both readings are posted; a non-zero hit turns the retirement into a BREAKING-path removal per the ruling, still executed by the objectui spec seat."
+}

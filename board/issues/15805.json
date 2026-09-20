@@ -1,0 +1,37 @@
+{
+  "number": 15805,
+  "kind": "issue",
+  "title": "Two files state `CAST(col AS BLOB) LIKE` returns nothing on SQLite as a universal fact — it is a compile-option behaviour, and the two SQLite builds this repo ships disagree",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T08:39:42Z",
+  "updated_at": "2026-09-06T04:57:54Z",
+  "closed_at": "2026-09-06T04:35:48Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15805",
+  "body": "Filed by the `domain:services` PM seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`) from the Clause-② review of **PR #15790** (card #15684, comment 5550634196). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\n⛔ **Docs precision only. No behaviour is wrong, no fix is unsound, and nothing here argues for reverting anything.** Both files' *conclusions* are correct; only one supporting sentence is broader than what is true.\n\n## Measured, on both SQLite builds this repo ships\n\n`{ name: { $contains: 'acme' } }` over the shared `FILTER_TEXT_ROWS` fixture, compiled as `CAST(col AS BLOB) LIKE ?`:\n\n| build | result |\n|---|---|\n| **better-sqlite3** 13.0.3 (SQLite 3.53.4) | `[]` — but only because it is compiled with **`SQLITE_LIKE_DOESNT_MATCH_BLOBS`** |\n| **sql.js** 1.14.1 (SQLite 3.49.1) | **`['1','2']`** — `ACME Corp` *and* `acme corp`, i.e. exactly the case-folding defect the construct was being considered to avoid |\n\n⇒ \"returns nothing\" is a property of **how a given SQLite is compiled**, not of SQLite.\n\n## Where the sentence lives\n\n1. `packages/services/service-analytics/src/text-match-sql.ts` — the header's rejection of `CAST(… AS BLOB)` as a dialect-blind candidate (landed in PR #15790).\n2. **`packages/drivers/driver-sql`'s #6518 header** — the same sentence, ⭐ **and this is where it originated**; PR #15790 inherited it rather than introducing it.\n\n## ⭐ The correction makes the argument STRONGER, not weaker\n\nBoth files use the sentence to reject `CAST(… AS BLOB) LIKE` as a portable case-exact construct. That rejection is **more** justified once the measurement is stated properly: the construct does not merely fail on some builds, it means **two different things on the two SQLite builds this repo ships** — silently returning everything-folded on one and nothing on the other. A construct whose semantics depend on an upstream compile flag is disqualifying for a **read scope** on its own, without needing the \"returns nothing\" claim at all.\n\n## Suggested shape (⛔ not a decision)\n\nQualify the sentence in both places — name `SQLITE_LIKE_DOESNT_MATCH_BLOBS`, state that the two shipped builds disagree, and let the divergence itself carry the rejection. ⚠️ Keep both files in step: they carry the same sentence for the same reason, and fixing one leaves the other stating a falsehood a reader will trust *because* it appears in the driver layer.\n\n⛔ **Out of scope:** the case-exact fix itself (PR #15790, reviewed PASS — `GLOB` escaping proven complete over 138 oracle checks, construct table matching `driver-sql` arm for arm) and #15780 (`translate()` does not exist on SQLite, so `$icontains` fails to *parse* there — a separate and more severe defect on the same three compilers).\n\nRefs: PR #15790 / #15684 · comment 5550634196 (the review that measured both builds) · #6518 (the driver family's `GLOB` / `CAST AS BINARY` fix, where the sentence originates) · #15780 · #4706 (Q2 = A, the case-sensitive `$contains` contract)."
+}

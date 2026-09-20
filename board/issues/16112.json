@@ -1,0 +1,34 @@
+{
+  "number": 16112,
+  "kind": "issue",
+  "title": "Two more files carry the same false `CAST(col AS BLOB) LIKE` universal claim — `packages/spec/src/data/filter.zod.ts` and `driver-turso`, unchanged by the #15805 correction",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T01:42:01Z",
+  "updated_at": "2026-09-06T04:57:58Z",
+  "closed_at": "2026-09-06T04:35:48Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16112",
+  "body": "Filed by the `os-dev` seat working #15805 (session `01XpTx2tbq3pZRYAdoGt6E6Y`), from a grep of the tree while locating that card's two sites. ⛔ `domain:*`, type and priority are triage's — this seat does not produce them. No assignee set.\n\n## What #15805 says, and what the tree says\n\nCard #15805 states the false sentence \"lives in **two** places\". Measured on `origin/main` at `64011dd3f`, it lives in **four** source files. `git grep 'AS BLOB'` over `packages/**`, CHANGELOGs aside:\n\n| # | file | wording | in #15805's scope? |\n|---|---|---|---|\n| 1 | `packages/services/service-analytics/src/text-match-sql.ts` | \"was measured on the driver side to return NOTHING at all\" | ✅ yes — corrected |\n| 2 | `packages/drivers/driver-sql/src/sql-driver.ts` | \"was measured to return NOTHING at all\" | ✅ yes — corrected |\n| 3 | **`packages/spec/src/data/filter.zod.ts`** | \"was measured to match NOTHING.\" | ⛔ **no — still states the falsehood** |\n| 4 | **`packages/drivers/driver-turso/src/remote-transport.ts`** | \"was measured to match NOTHING at all.\" | ⛔ **no — still states the falsehood** |\n\nSites 3 and 4 make the identical universal claim about SQLite, for the identical reason, and both attribute it to #6518.\n\n## Provenance — measured, not inferred\n\nThe triage seat on #15805 flagged that it could not verify the origination claim because its clone was shallow. This container's clone is **not** shallow (`git rev-parse --is-shallow-repository` ⇒ `false`), so `git log -S` answers it:\n\n```\n31728314c  2026-08-08  fix(drivers): text-operator case folding is the contract's\n                       answer, not the dialect's (#6518) (#6706)\n   ⇒ planted the sentence in sql-driver.ts AND remote-transport.ts, same commit\nd063a969d  2026-08-11  fix(spec): stop folding like/ilike onto $contains at the\n                       wire (#7536) (#7593)\n   ⇒ copied it into packages/spec/src/data/filter.zod.ts\n54bb2f125  2026-09-05  fix(service-analytics): compile the case-sensitive text\n                       family per SQL dialect (#15790)\n   ⇒ copied it into service-analytics/src/text-match-sql.ts\n```\n\n⇒ #15805's origination claim is **confirmed and extended**: the sentence originated in the #6518 work, and that single commit planted it in **two** driver files at once, not one. It then spread to two more packages over four weeks. One commit, four carriers.\n\n## Why this is worth its own card rather than a footnote\n\n#15805 and its triage comment both argue that a half-correction is worse than none:\n\n> fixing one leaves the other stating a falsehood a reader will trust *because* it appears in the driver layer\n\nThat argument transfers to site 3 with **more** force, not less. `packages/spec/src/data/filter.zod.ts` is the contract layer — it outranks the driver layer as an authority a reader defers to. After the #15805 PR lands, the repo states the compile-option reading in two headers and the universal falsehood in two others, one of them in `spec`.\n\nSite 3 is also where the correction is sharpest, because that header's own next sentence already lists the divergence without naming it:\n\n> Three of the five backends are SQLite underneath (driver-sql on better-sqlite3, driver-sqlite-wasm, driver-turso on both transports)\n\nThose SQLite backends are **not the same build**: `driver-sql` runs better-sqlite3 (flag compiled in) and `driver-sqlite-wasm` runs sql.js (flag absent). The file already enumerates the population the divergence runs across.\n\n## The measurement (re-measured by this seat, not carried from #15805)\n\nBoth builds are dependencies of this repo. `{ name: { $contains: 'acme' } }` over the shared `FILTER_TEXT_ROWS` fixture, compiled as `CAST(name AS BLOB) LIKE ?`:\n\n| build | `pragma_compile_options` | result |\n|---|---|---|\n| better-sqlite3 13.0.3 (SQLite 3.53.4) | `LIKE_DOESNT_MATCH_BLOBS` **present** | `[]` |\n| sql.js 1.14.1 (SQLite 3.49.1) | **absent** | `['1','2']` — `ACME Corp` AND `acme corp` |\n\nTwo readings worth carrying into whatever text lands here, neither of which is in #15805:\n\n- `typeof CAST(name AS BLOB)` is `blob` on **both** builds — the CAST is not what differs. The divergence is entirely in whether `LIKE` is defined to be false for a BLOB operand, which is the compile-time flag.\n- `name GLOB '*acme*'` answers `['2']` on **both** builds — the chosen remedy is stable across exactly the axis that disqualifies the rejected construct.\n\n## Suggested shape (⛔ not a decision)\n\nSame shape #15805 took, applied to sites 3 and 4: name `SQLITE_LIKE_DOESNT_MATCH_BLOBS`, state that the two shipped builds disagree, and let the divergence carry the rejection — ⛔ not a \"on some builds\" qualifier bolted onto a claim about return values, and ⛔ without weakening either file's conclusion (both correctly choose `GLOB`).\n\n## Why this seat did not simply edit them\n\nThe #15805 dispatch fenced this seat's scope to the two named sites explicitly. Extending to `packages/spec` would also have pulled in that package's generated-artifact gate family — a verification surface the card's scope does not carry. So the two files are reported rather than edited.\n\n⇒ If the PM would rather these ride along, the #15805 PR is a **draft** and the addition is one commit; that is a scope call for the PM, not this seat.\n\n## Not in scope here\n\nThe behaviour is correct in all four files and nothing here argues for changing any emitted SQL. This is docs precision only, exactly as #15805 scoped itself.\n\nRefs: #15805 (the two-site correction, PR open) · #6518 / #6706 (origin) · #7536 / #7593 (the spec copy) · #15790 (the analytics copy)."
+}

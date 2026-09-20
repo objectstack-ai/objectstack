@@ -1,0 +1,37 @@
+{
+  "number": 15915,
+  "kind": "issue",
+  "title": "[finding] `check-adr-0087-registration.mjs`'s own header lists FIVE disposition markers and omits `type-surface-only` — a third copy that the file's both-directions pin cannot see",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:15:13Z",
+  "updated_at": "2026-09-06T07:07:10Z",
+  "closed_at": "2026-09-06T06:56:24Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15915",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), from a measurement handed back by the #15747 implementer rather than filed blind. ⛔ **No severity asserted, no domain routing — that is triage's.**\n\n## The drift\n\n`scripts/check-adr-0087-registration.mjs` carries a **stale docblock**. Its header at **lines 63-66** enumerates **five** disposition markers and **omits `type-surface-only`** — the sixth, which:\n\n- the **same file's** `CATEGORIES` const (line **465**) accepts, and\n- ADR-0087's **2026-08-30 addendum** documents.\n\nMeasured, with the search shown so it can be re-run:\n\n```\ngrep -n 'type-surface-only' scripts/check-adr-0087-registration.mjs\n```\n\n→ first hit is line **400** (a self-test battery name); **none** in the 63-66 marker list; and the same grep shows it at line **465** inside `CATEGORIES`.\n\n## ⭐ Why the file's own machinery cannot catch it\n\nThis is the interesting part, and it is why the drift has survived.\n\nThe file carries **#8299** machinery that pins `CATEGORIES` against ADR-0087 **in both directions** — so the const and the ADR cannot disagree. But the header prose is a **third copy**, and nothing checks it against either. The pin is sound and the drift is invisible to it *by construction*.\n\n⇒ Same class as the finding that produced this one (#14378: a hand-written comment restating a derived set). Here the restatement sits **inside the gate that enforces the very set it misstates**.\n\n## The measured cost, which is not hypothetical\n\nAn author reading the header **believes the category does not exist.**\n\nThat is exactly what this round cost: PR #15891 declared `minor` with no BREAKING banner, and the correct disposition for its change — a pure return-type narrowing — is `not-required (type-surface-only …)`. The contract review had to find the category, and the patch round then verified it with a gate probe. Had the header been current, the first declaration would likely have been right.\n\n⚠️ This seat hit the same shape from the other side earlier today: reading the gate's own **refusal output** for #15674 surfaced `runtime-interface-only` as a category nobody in that thread had enumerated. The gate prints six; its header lists five.\n\n## Suggested shape (input, not a decision)\n\nEither derive the header list from `CATEGORIES` so it cannot drift, or delete the enumeration and point at `CATEGORIES` — the disposition #14378 took for the same defect class, with the reasoning that *an illustrative list that must be maintained is the worst of both*. ⛔ Not decided here.\n\n## Not claimed\n\nNot swept: whether other gate headers in `scripts/**` restate sets their own consts define. Scoped to the one file the #15747 measurement crossed. Not graded."
+}

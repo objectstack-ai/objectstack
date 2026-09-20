@@ -1,0 +1,35 @@
+{
+  "number": 15825,
+  "kind": "issue",
+  "title": "`driver-memory` analytics `parseDateRangeString()` builds its window on the LOCAL calendar and renders it as UTC — 'today' and 'last N days' are offset by the process timezone in every non-UTC zone",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T09:22:09Z",
+  "updated_at": "2026-09-05T22:43:51Z",
+  "closed_at": "2026-09-05T22:40:11Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15825",
+  "body": "Found while fixing #14852 (`service-automation`'s `resolveToken()` offset branch). ⛔ Deliberately NOT fixed there — different package, different domain, outside that card's fence. Refs #14852.\n\n## The shape\n\n`packages/drivers/driver-memory/src/memory-analytics.ts:1415` `parseDateRangeString()`, reached from the analytics query path at line 742 (`: this.parseDateRangeString(timeDim.dateRange)`):\n\n    const now = new Date();\n    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());\n\n    if (range === 'today') {\n      return [today.toISOString(), new Date(today.getTime() + 86400000).toISOString()];\n    } else if (range.startsWith('last ')) {\n      ...\n      const start = new Date(today);\n      if (unit.startsWith('day'))  start.setDate(start.getDate() - num);\n      else if (unit.startsWith('week')) start.setDate(start.getDate() - num * 7);\n      ...\n      return [start.toISOString(), now.toISOString()];\n    }\n\n## Two defects, and the first is the larger one\n\n**1. The window boundary is LOCAL midnight, rendered as UTC — wrong all year, not only across DST.** `new Date(y, m, d)` constructs local midnight; `toISOString()` then renders that instant in UTC. So in any process not sitting at UTC, the `'today'` window is the local day expressed as a UTC range — shifted by the zone's offset. At `Asia/Shanghai` the \"today\" bucket runs from the previous 16:00Z; at `America/Los_Angeles` it starts at 08:00Z. This disagrees with the rest of the platform, where a bare date resolves to the **UTC** day (`@objectstack/core`'s `{today}` macro falls back to UTC parts when the context carries no timezone, and `{TODAY()}` in flow templates resolves to the UTC day — see #14852). ⇒ The same analytics question answered through this path and through a flow token can select different rows.\n\n**2. The `last N days` / `last N weeks` legs additionally mix two calendars,** exactly as #14852 did: `setDate(getDate() - n)` is local arithmetic and `toISOString()` is a UTC rendering, so across a DST transition the window start slips an hour. (The `month` / `year` legs use `setMonth` / `setFullYear`, same class.)\n\n⚠️ Defect 1 subsumes defect 2 in magnitude, but they are independent: fixing only the `setDate` spelling leaves the local-midnight boundary in place.\n\n## Provenance / status caveat\n\nThe function carries its own disclaimer — `// Simple parser for common date range strings` / `// In production, this would use a proper date range parser` — so this may be known scaffolding rather than a surprise. It is nevertheless **reachable**, not dead: the call at line 742 is on the live analytics query path. Whether the right repair is a spelling fix or replacing the parser is a call for triage; the reachability is the part worth recording.\n\n## Guard note (carried over from #14852)\n\n⛔ A regression test for the DST half **cannot** be written to run only at `TZ=UTC` — the two spellings are indistinguishable there. Defect 1, by contrast, is visible at any non-UTC zone without needing a transition instant, so it is the cheaper of the two to pin. `packages/services/service-automation/src/builtin/template-date-offset-dst.test.ts` (added for #14852) is a working model for the DST half.\n\nUnlabelled beyond `pm:queue` on purpose: routing, `domain:*`, type and priority belong to triage."
+}

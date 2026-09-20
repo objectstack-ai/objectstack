@@ -1,0 +1,35 @@
+{
+  "number": 15941,
+  "kind": "pull_request",
+  "title": "docs(spec): the element-number D3 entries name the route hop — arrays are lowered by parseFilterAST before the analytics wire (#15828)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:30:18Z",
+  "updated_at": "2026-09-05T16:44:58Z",
+  "closed_at": "2026-09-05T16:44:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-05T16:44:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15941",
+  "body": "Fixes #15828\n\nThe narrowed, spec-side DOCUMENTATION half of #15828, per the director ruling comment (maintainer, 2026-09-05, verbatim 「15828 按前端缺陷处理」). The user-visible adapter fix is objectui#7752 and is not in this PR.\n\nProse only. `FilterArraySchema`, `FilterConditionSchema` and `AnalyticsQuerySchema`'s type are untouched; no accept-set, runtime or test-behaviour change. `AnalyticsQuerySchema.where` is still `FilterConditionSchema` and still refuses an array — which is the protocol working, not a defect.\n\n## Why the old text was wrong\n\n`packages/spec/src/data/filter.zod.ts`, the `FilterArray` docblock (#5158 ruling C): a `FilterArray` is input-only authoring sugar, \"lowered to a `FilterCondition` at the single sink `parseFilterAST` (`@objectstack/spec/data`) the moment it arrives, and only the lowered `FilterCondition` travels any further\". A POST body's `where` is transport, not a door.\n\nThe `element-number-filter-rule-array` D3 entry recorded its runtime prerequisite one hop too late — \"authored array → adapter lowering → filter AST → accepted by `lowerAnalyticsWhere`\". `lowerAnalyticsWhere` (`service-analytics`) is the in-process door (#5334) for callers reaching `analyticsService.query` directly. The wire's door is the runtime route `POST /analytics/query`, which parses `where` with `AnalyticsQueryRequestSchema` before any service code runs, so an un-lowered array is refused there. objectui#6302's gate measured the service function, not the route, and the entry inherited that hop.\n\n## Changes\n\n| File | Change |\n|:---|:---|\n| `packages/spec/src/migrations/entries/semantic/18.element-number-filter-rule-array.ts` | The reason clause now names the real path and the deciding hop: `translateFilterArray` yields AST tuples that are still a `FilterArray`, so the adapter must lower with `parseFilterAST` BEFORE the wire; the route parses `where` as a `FilterCondition` only; `lowerAnalyticsWhere` is the in-process door. Cites #15828 and objectui#7752. Every other sentence and the whole `acceptanceCriteria` are byte-identical. |\n| `packages/spec/src/data/analytics.zod.ts` | The `where` `.describe()` gains one sentence pointing array authors at the `parseFilterAST` lowering. Type unchanged. |\n| `packages/spec/src/migrations/registry.ts` | **GENERATED** — `pnpm --filter @objectstack/spec gen:migration-registry`, never hand-edited. Diff is exactly the entry clause above. |\n| `content/docs/references/api/analytics.mdx`, `content/docs/references/data/analytics.mdx` | **GENERATED** — `pnpm --filter @objectstack/spec gen:docs`, the one artifact `check:generated` proved stale. Diff is exactly the new `.describe()` sentence in the two prop tables. |\n| `.changeset/analytics-where-names-the-route-hop.md` | `@objectstack/spec` patch — a published package's describe text changed. |\n\n`18.element-record-picker-filter-rule-array.ts` was read for the same claim and **does not make it**: its measured path is the record picker's `find()` / `convertQueryParams` hop, and it names neither the analytics wire nor `lowerAnalyticsWhere` (`grep -i 'analytics|lowerAnalytics|wire'` returns nothing in that file). Left unchanged, as the dispatch directed.\n\n## Verification\n\n- `pnpm --filter @objectstack/spec check:generated` — 15 artifacts, 1 stale (`content/docs/references/**`), regenerated with `gen:docs`; re-run green. The migration-registry gate was already green after `gen:migration-registry`. No `skills/**` file moved, so no landing path changed.\n- **Gate family, `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands`** at `9b431caf`: 93 derived commands, all 93 run, each exit code captured by redirect before any pipe. Reconciled with `--ran`: `93 derived famil(ies) accounted for — 93 run, 0 NOT-MEASURED`. Six first answered PREREQUISITE NOT MET rather than a finding (five `exit 3` for unbuilt `@objectstack/lint` / `@objectstack/formula` / `@objectstack/client-react`, one shallow-clone pinned fixture); all cleared and re-run green except the one below.\n- `pnpm --filter @objectstack/spec typecheck` green; `pnpm --filter @objectstack/spec test` — **476 test files, 12787 tests, all passed** (272s).\n- **Declared narrowing, CI's to close:** `pnpm check:dual-build-cjs-loads` still reports PREREQUISITE NOT MET — it reads emitted bytes for 86 packages and needs a whole-monorepo `pnpm build`, which is a repo-level scan CI owns. Nothing was measured there; it is not a green. This diff changes no `package.json`, no `exports` and no build config, so it cannot move that gate. `turbo ls --affected` lists 75 packages, because nearly everything depends on `@objectstack/spec`; the changed package's own suite is run above and the remaining 74 are CI's full run.\n- One derivation caveat: `origin/main` advanced to `ea03c7c16` while this branch was being deepened, and `dispatch-gates` flags the tree as one commit stale on `scripts/engine-double-contract.pinned.json`. That roster belongs to `check:engine-double-contract`, which is outside this card's derived 93, and this branch touches none of its inputs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01TezFG8ZMrNH6n5VTNpPpdH)_"
+}

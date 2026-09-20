@@ -1,0 +1,35 @@
+{
+  "number": 15994,
+  "kind": "issue",
+  "title": "main is RED on the merge-driver gate — `check-regen-pending --self-test` fails since aa6ba0623, and the queue kicks every PR while it stands",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T17:54:42Z",
+  "updated_at": "2026-09-05T19:14:40Z",
+  "closed_at": "2026-09-05T19:14:40Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15994",
+  "body": "**`main` is RED and the merge queue is blocked for everyone.** Two consecutive commits fail the same gate; a PR that is green on its own head was kicked from the queue for this, not for its own content.\n\n## The failure, quoted from CI\n\nJob `Lint & Repo Gates`, step **Merge-driver wiring gate** = `node scripts/git-merge-regen.mjs --self-test && node scripts/check-regen-pending.mjs --self-test`.\n\nThe **first** half passes completely (17 ✓ lines, ending `✓ merge driver wiring is consistent (24 path(s) deliberately excluded)`). The **second** half fails:\n\n```\n✗ a gate that cannot LOAD is PREREQUISITE NOT MET, not `stale`\n✗   …and never calls the artifact stale, which is the false claim\n✗   …carrying the load-bearing half: that nothing was measured\n✗   …naming the package node could not find, not the artifact\n✗ a gate whose RUNNER is not installed refuses the same way\n✗   …naming the command the shell could not find, in the diagnosis\n✗ a gate that ALREADY refused with an unmet prerequisite is propagated, not relabelled\n✗   …quoting the gate's own words rather than a second opinion\n✗ self-test failed -- 1 failure(s) (cases and floor).\n##[error]Process completed with exit code 1.\n```\n\n## Bisected on `main`, and it clears the obvious suspect\n\n| commit | time | Lint & Repo Gates |\n|---|---|---|\n| `fc20f7bda` — *check-regen-pending refuses on an unmet prerequisite…* (introduced these very cases) | 09-05 08:15 | — |\n| **`cc00df2f7`** — retire PluginSecurityScanner | 09-05 16:12 | **success** |\n| **`aa6ba0623`** — H48 governed-PR ACCEPT verdict | 09-05 16:36 | **failure** |\n| `f7db8f4fd` — defineStack cross-reference refusal | 09-05 17:00 | **failure** |\n\n⇒ ⛔ **`fc20f7bda` is not the cause** — `cc00df2f7` is a descendant of it and was green. The transition is `cc00df2f7` → `aa6ba0623`, and everything between is `cancelled` (superseded pushes), so those two are the tightest bracket CI gives.\n\n⭐ **`aa6ba0623` changed exactly one file**: `scripts/pm/check-half-states.mjs`, **+415 / −0**. It touches neither half of what this gate reconciles (`.gitattributes`, `scripts/regen-artifacts.mjs` — verified absent from its file list).\n\n## Hypothesis to verify, ⛔ not a conclusion\n\nThe failing assertions are the **PREREQUISITE NOT MET** family, and the summary reads *\"1 failure(s) (**cases and floor**)\"* — a floor was added to this very script by `f158daf78` (*batch 10d — floor check-regen-pending on its three named callees*). So the self-test appears to **enumerate callees/gates** and assert a floor over them.\n\nA newly added `scripts/pm/check-half-states.mjs` could move that population — and that script is independently known to answer **exit 3 / PREREQUISITE NOT MET** in environments without repo-scoped board reads (observed twice this week in dev reports). A self-test case that picks a gate by enumeration and asserts on how a *refusal* is reported would flip the moment the enumeration reaches a script that genuinely refuses.\n\n⚠️ That is a hypothesis with a mechanism, not a measurement. **Verify it before fixing**: reproduce at `aa6ba0623`, then re-run with that one file removed. If the failure persists without it, the bracket is wrong and the cause is elsewhere.\n\n## Why this is urgent beyond one PR\n\nThe merge queue re-tests every entry against `main`. While this is red, **every** queued PR is kicked regardless of its own state — PR #15235 already was (green on its own head, contract-reviewed PASS, kicked at 17:07). Cards will accumulate looking individually broken when the damage is shared.\n\n## ⛔ Not to be done\n\n⛔ Do not fix this by weakening or deleting the failing cases. They pin the distinction between *\"nothing was measured\"* and *\"the artifact is stale\"* — the false-claim direction the script was written to close (`fc20f7bda`). If the right answer is that the enumeration should exclude a genuinely-refusing gate, that is a change to the **enumeration**, not to the assertions.\n\nRefs: main `aa6ba0623` / `f7db8f4fd` (red), `cc00df2f7` (last green) · `scripts/check-regen-pending.mjs` · `fc20f7bda`, `f158daf78` · PR #15235 / #15072 (kicked by this).\n"
+}

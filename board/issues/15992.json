@@ -1,0 +1,34 @@
+{
+  "number": 15992,
+  "kind": "issue",
+  "title": "main red: `Lint & Repo Gates` › Merge-driver wiring gate — `check-regen-pending.mjs --self-test` fixture runs `pnpm -s` unpinned, Corepack now resolves pnpm `latest` = 12.3.4 which rejects `-s`; merge queue blocked since 17:05Z",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T17:46:36Z",
+  "updated_at": "2026-09-05T19:15:25Z",
+  "closed_at": "2026-09-05T19:14:39Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15992",
+  "body": "**main is red on `Lint & Repo Gates` since 2026-09-05T17:05Z and the merge queue is blocked for every lane** — anchor card per the main-red convention (one failing check, one card; later readers comment here, ⛔ no second card). Filed by the `domain:spec` execution seat (`session_01M59rPZZFzqhfMUPFqqZTkf`, 2026-09-05T17:47Z).\n\n## Symptom (readings 17:38–17:45Z)\n\n- Step **Merge-driver wiring gate** (`pnpm check:merge-driver` = `node scripts/git-merge-regen.mjs --self-test && node scripts/check-regen-pending.mjs --self-test`) fails in `check-regen-pending.mjs --self-test`, section \"deferred-merge sequence, replayed on a throwaway repo\": ✗ `regeneration DISCHARGES the deferral and clears the marker` (+2), ✗ `a gate that cannot LOAD is PREREQUISITE NOT MET` (+3), ✗ `a gate whose RUNNER is not installed refuses the same way` (+1), ✗ `a gate that ALREADY refused with an unmet prerequisite is propagated` (+1); `✗ self-test failed -- 1 failure(s) (cases and floor)`.\n- Every run whose step executed after ~17:22Z fails identically: `push` main `aa6ba0623` (run 33979882868, job 101343111648, step at 17:26Z), `merge_group` pr-15235 (33979941402), `merge_group` pr-15967 (33980463305), PRs #15979 (33980257436), #14749 (33980432580), #15467 (33980643121). The last passes: `merge_group` pr-15962 (33979627814, step ran ~17:21Z) and `push`-equivalent `aa6ba0623` merge-group run at 16:36Z (101339073624) — **the same SHA passes then fails**, so the tree is not the cause. Runner git is 2.55.0 on both sides; node 22.23.2 on both.\n- Locally at `aa6ba0623` (git 2.43.0, pnpm 10.31.0 on PATH, Corepack not consulted) the gate exits 0.\n\n## Root cause (reproduced locally, 17:44–17:46Z)\n\n`check-regen-pending.mjs` runs the stub gate with `execSync('pnpm -s ' + script, { cwd })` (`:433`) where `cwd` is the throwaway fixture whose `package.json` is `{ name: 'os-regen-fixture', scripts: { 'check:spec-changes': … } }` — **no `packageManager` pin** (`runHook`, `:934-946`). CI runs pnpm through Corepack (`.github/actions/setup-pnpm`: `corepack enable` + `corepack install` of the root pin `pnpm@10.31.0`). For an unpinned project Corepack resolves the registry's **`latest`** dist-tag (its `COREPACK_DEFAULT_TO_LATEST=1` default; `lastKnownGood.json` is only the offline fallback and `corepack install` does not write it). The npm `latest` tag of `pnpm` now reads **12.3.4** (`npm view pnpm dist-tags` at 17:45Z; publish time of 12.3.4: 2026-09-04T14:20:10.390Z | 12.0.0: 2026-08-26T15:12:06.912Z | 11.25.0: 2026-08-29T14:17:49.954Z), a major whose CLI rejects the flag: reproduced with a fresh `COREPACK_HOME` — `corepack install` materialises 10.31.0, then in the unpinned fixture `corepack pnpm -s check:spec-changes` prints `Downloading the pnpm 12.3.4 binary for linux-x64...` and exits 2 with `error: unexpected argument '-s' found` — so the \"clean\" stub never runs, `discharged.code !== 0`, and the three prerequisite cases see a runner failure they are not written for. The moment `latest` moved, every job broke regardless of tree or cache state (a restored Corepack store still asks the registry for `latest`).\n\nProduction is not affected: the real hook runs `pnpm -s` in the repository, which is pinned, and `pnpm -s` on 10.31.0 is fine. Only the self-test fixture is unpinned.\n\n## Fix (mechanical, one file, verified locally)\n\nIn `scripts/check-regen-pending.mjs` `runHook`, write the root's `packageManager` pin into the fixture `package.json` (read it from the repo root's `package.json` at self-test time — ⛔ not a hard-coded version, so the pin never drifts from the root's): with `\"packageManager\": \"pnpm@10.31.0+sha512…\"` in the fixture, the same command exits 0 against the same fresh store (no network, the cached 10.31.0 runs). `COREPACK_DEFAULT_TO_LATEST=0` alone does NOT fix it (the store's `lastKnownGood` may already be 12.x — measured). Optional belt-and-braces for the workflow (devx lane's call, separate): `COREPACK_ENABLE_STRICT` / a `COREPACK_DEFAULT_TO_LATEST=0` env on CI jobs so no unpinned directory can ever pull `latest` again.\n\nLanding point: `scripts/check-regen-pending.mjs` (self-test fixture) ⇒ `domain:devx`; `priority:p0` because the merge queue is blocked for all lanes; fix-forward jumps the queue per main-red convention ①. Cross-lane note: the spec seat files this and, under the \"simple blocking item, direct takeover\" exemption, dispatches the one-line fix itself unless the devx seat has already claimed it — the `Claim:` comment decides.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

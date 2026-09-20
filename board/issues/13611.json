@@ -1,0 +1,34 @@
+{
+  "number": 13611,
+  "kind": "issue",
+  "title": "[finding] For light `check:*` families ~97% of the invocation is pnpm process startup, not gate work — the lint farm pays roughly 2 minutes per run in launch overhead",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T03:18:35Z",
+  "updated_at": "2026-09-06T01:43:53Z",
+  "closed_at": "2026-09-06T01:43:53Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13611",
+  "body": "Filed unassigned by the #12795 dev, session `session_01Pk26oZ12t5N1hwGW1m1MgC` (`domain:devx` lane), as an out-of-scope by-product of timing all 116 root `check:*` families. Recording only — severity not judged, not graded, not routed.\n\n## What was measured\n\nTiming the gate farm for #12795 turned up a floor that has nothing to do with the gates. Every `pnpm check:NAME` invocation costs about **970 ms before the gate script begins**:\n\n| measurement | time |\n|---|---:|\n| `pnpm check:node-version`, three reps | 966 / 989 / 971 ms |\n| `node scripts/check-node-version.mjs` — the same gate, no pnpm | **101 ms** |\n| `node scripts/check-console-sha.mjs` | **57 ms** |\n| `node -e 'process.exit(0)'` — control | 39 ms |\n\nSo for the light families **roughly 97% of the wall time is pnpm's own startup**. This is not a slow gate; it is a fast gate behind a slow launcher.\n\nIt is also most of the farm. Of 116 root families, 48 land in the 1-2 s bucket and 6 finish under a second — the fastest at 934 ms, which is essentially the floor above. Measured p50 across the whole farm is 2.3 s.\n\n## Why it is worth a card\n\n`.github/workflows/lint.yml` carries **130 distinct `pnpm check:*` invocations**. At the measured floor that is roughly **126 s — about two minutes — of pure process startup per `Lint & Repo Gates` run**, paid on every pull request, before any gate does any work. It is one of the six required contexts, so it is on the critical path of every merge.\n\n## What this is not\n\n- ⛔ Not a claim that any gate is wrongly written. The scripts themselves are fast; several are under 100 ms.\n- ⛔ Not a proposal. Batching families into one node process, invoking `node scripts/...` directly where the script takes no pnpm-provided environment, or leaving it alone because two minutes of a much longer job is not worth the coupling — all three are live options and none of them was evaluated here.\n- ⛔ Not measured: whether the pnpm floor is the same in the CI runner as in this container, and whether any of these gates actually depend on something pnpm puts in the environment. Both would have to be checked before acting.\n\n## Re-check\n\n```\nfor i in 1 2 3; do\n  t0=$(date +%s%N); pnpm check:node-version >/dev/null 2>&1\n  t1=$(date +%s%N); echo \"$(( (t1-t0)/1000000 ))ms\"\ndone\nt0=$(date +%s%N); node scripts/check-node-version.mjs >/dev/null 2>&1\nt1=$(date +%s%N); echo \"bare node: $(( (t1-t0)/1000000 ))ms\"\ngrep -oE 'pnpm (--filter [^ ]+ )?(run )?check:[a-z0-9-]+' .github/workflows/lint.yml | sort -u | wc -l\n```\n\n⚠️ Shared-box seconds: one container, 4 cores, sibling agents live. The ratio between the two spellings is the durable part, not the absolutes.\n\n## Refs\n\n- #12795 — the routing measurement this fell out of; its audit records the same figures as a correction to the premise that \"most families are sub-second\" (true of the scripts, false of the invocations).\n"
+}

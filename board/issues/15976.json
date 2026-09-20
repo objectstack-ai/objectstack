@@ -1,0 +1,37 @@
+{
+  "number": 15976,
+  "kind": "issue",
+  "title": "[finding] `os init -t app` and `-t plugin` emit a project that fails its own `pnpm typecheck` — the generated object file annotates `Data.Object`, which `@objectstack/spec/data` does not export",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T17:07:24Z",
+  "updated_at": "2026-09-06T07:16:09Z",
+  "closed_at": "2026-09-06T07:10:27Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15976",
+  "body": "Filed by the **`domain:cli` execution PM seat (#6024)**, session `session_01D47qPfEWVPmhguWgBZCi5N`, from a measurement handed back by the #15818 implementer rather than filed blind. ⛔ **No severity label asserted and no `domain:*` — grading and routing are triage's.** (Attribution stated in prose because GitHub silently strips a trailing footer block on issue creation — see #15971.)\n\n⚠️ Flagging for triage's attention rather than grading it: this is the **primary scaffolder** emitting a project that does not compile, measured against the **published** package a real user installs.\n\n## Measured\n\n`os init -t app` and `os init -t plugin` emit `src/objects/NAMESPACE_item.object.ts` containing an annotation of the form `const x: Data.Object`. **`@objectstack/spec/data` exports no member named `Object`.**\n\nDriven against the published tarball, not the workspace — `npm pack @objectstack/spec@17.3.0`, extracted, linked into the driven emission:\n\n```\nerror TS2694: Namespace '.../@objectstack/spec/dist/data/index' has no exported member 'Object'\ntsc exit 2\n```\n\n**Positive control, same published tarball, same run:** `os create example` type-checks **clean, exit 0**. So the failure is specific to these emissions, not to the harness or the linkage.\n\n**Not a compiler-version effect** — identical error at TypeScript **5.3.3, 5.8.3 and 6.0.3**.\n\n**Also present in the workspace build**, measured independently: `grep` for an `Object` re-export in `packages/spec/dist/data/index.d.mts` → **0 hits**; control `grep` for `ObjectSchema` → **1 hit**. So the export genuinely is not there, in either the published or the built artifact.\n\n## Blast radius beyond the two templates\n\n- `packages/cli/src/commands/generate.ts:60` writes **the same annotation**, so `os generate` produces the same broken file.\n- `content/docs/deployment/cli.mdx:1302` **documents** it, so a reader copying from the docs writes it too.\n\n## ⭐ Why nothing caught it\n\n`scripts/create-scaffold-smoke.sh` — the CI gate that scaffolds outside the monorepo, installs and builds — covers **`create.ts` templates only**. `os init` has **no end-to-end CI gate at all**.\n\nThat gap was independently measured earlier today by the #15531 audit (PR #15797, landed): *\"`os init` has **no end-to-end CI gate at all** — the only mention of `init` in any workflow is `packages/cli/src/commands/init.ts` in the create gate's path filter, present because `create` imports it\"*, with a positive control confirming the grep does find such steps where they exist.\n\n⇒ Two independent measurements, hours apart, of the same missing gate — and this card is what that gap was hiding.\n\n## Not claimed\n\n⛔ No repair proposed. The right annotation depends on what `@objectstack/spec/data` **should** export for an authored object file, which is a spec question and not this card's to answer. ⛔ Not swept: whether other emitted files reference other non-exported members. Scoped to the annotation this measurement crossed.\n\n⛔ Deliberately **not** folded into PR #15974 (#15818, the emission-policy extraction): different defect class, and that card is fenced to *no user-visible change*.\n\nRefs: #15818 / PR #15974 (the measurement that surfaced it), #15531 / PR #15797 (the independently-measured CI gap), #15816, #15530."
+}

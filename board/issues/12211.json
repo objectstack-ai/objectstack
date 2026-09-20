@@ -1,0 +1,32 @@
+{
+  "number": 12211,
+  "kind": "issue",
+  "title": "[finding] Merge-queue check-set parity for tree-global ratchets — measure which lint.yml jobs actually run on merge_group, then close the gap the stale-ledger outage rode through",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T13:29:13Z",
+  "updated_at": "2026-09-05T23:04:37Z",
+  "closed_at": "2026-09-05T23:04:37Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12211",
+  "body": "Blocked-by: #12343\n\nFiled by the spec PM seat (`session_01NDGG54XF5gbTLdQzCtnaVV`) after the 2026-08-25 stale-ledger outage (~70 min of fleet-wide red; incident cards: the p0 card, its two sibling filings, fix PRs #12186/#12192). Dedup: the incident cards asked triage to consider \"the class fix\" but no dedicated card exists; #4897 (closed) is the historical precedent that first wired `merge_group` into workflows.\n\n> **⚠️ STATUS (PM seat #6023, 2026-08-25).** **Step 1 is done and it is a NEGATIVE result: step 2's premise is false.** PR #12338 (`9fffd327c7`, `Part of` — deliberately not `Fixes`) landed the measurement. **No tree-global ratchet is missing `merge_group` coverage**, and adding a trigger anywhere would not have prevented the outage. Exactly four workflows carry `merge_group` as an `on:` trigger — `ci.yml`, `governed-surface-guard.yml`, `lint.yml`, `spec-liveness-check.yml` — all six required contexts live in `ci.yml` + `lint.yml`, and no gate job or step inside them is event-gated. The two contradictory observations are resolved below. **The residual is two repository SETTINGS facts, both maintainer-only**, now in the decision box as **#12343**. This card is blocked on that ruling, not on any further measurement.\n\n## The mechanism this card closes\n\nThe gate that went red (`check:exported-any-returns`) is a **tree-global ratchet**: it judges the whole tree's consistency (ledger vs built dist), not the diff. For that gate class, PR-level green is a **snapshot** — a PR branched before a new gate lands (or before main's state changes) carries stale green. The only place that sees the REAL merge state is the merge queue. The outage happened because the closing PR (#12062, branched before the gate-adding #12115) **passed the queue with an inconsistent tree** and landed it on main.\n\n## Contradictory observations — which is why step 1 is a measurement, not a fix\n\n- 11:50Z: #12062 passes the merge queue carrying (binding + stale entry) — suggests the consumer-gates job does NOT run on `merge_group`.\n- 12:26–13:05Z: five queue entries mass-dequeued without landing while main was red — CONSISTENT with the gate (or the same shared job) failing IN the queue.\n\nBoth cannot be true of a static check set. Possibilities to distinguish: the job runs on merge_group but #12062's queue run predates a required-status association; the kicks came from a different shared failure; queue batching semantics. ⛔ Do not wire anything until this is measured.\n\n> **⚠️ RESOLVED by PR #12338 — and one of the two was not an observation.**\n> - **11:50Z was a misreading.** #12062 produced **no `merge_group` build at all** (no `gh-readonly-queue/main/pr-12062-*` run in either workflow across 09:15–18:49Z). Positive control: the same listings carry builds for `pr-12063`, `pr-12091`, `pr-12093`, `pr-12096`, `pr-12120`, `pr-12129` and ~100 more. It never faced the queue. Its six PR-level required contexts were green at 07:20–07:35Z — about **three hours before** #12115 added the gate at 10:21:58Z.\n> - **12:26–13:05Z was real and is positively identified.** In merge_group run `32847794799`, `Type Check · consumer gates` **ran and failed** on `check:exported-any-returns`, and the required `TypeScript Type Check` aggregate carried that red into the queue. CI was green on those same merge groups, ruling out \"a different shared failure\".\n> - The third candidate — a required-status association postdating the queue run — is ruled out: the Required-Set Patrol reported registry-vs-live agreement in both directions at **04:35Z** (before) and **16:35Z** (after).\n> - **The residual**: four of the 29 PRs landing 09:20–12:10Z produced no `merge_group` build (#12062, #12072, #12079, #12097), and `strict_required_status_checks_policy: false` on the main ruleset (#9642).\n\n## Steps\n\n1. **Measure**: enumerate which jobs/checks actually execute on `merge_group` events today (workflow triggers + a real queue run's check list), and diff that against the set of tree-global ratchets that run at PR level (consumer gates, spec-liveness family, the shrink-only ledgers). Also pull the queue's own logs for the 12:26–13:05 mass-dequeue to name what failed. — ✅ **DONE, PR #12338.**\n2. **Close the gap**: any tree-global ratchet missing from the queue's set gets `merge_group` coverage (the #4897 pattern). After that, a #12062-shaped race is KICKED in the queue instead of landing red on main. — ⛔ **PREMISE FALSE: none is missing.** The gap is settings; see #12343.\n3. Explicitly out of scope: making ratchets diff-scoped (blinds them — their whole point is global invariants), and auto-re-running checks on all open PRs when a gate lands (expensive; queue parity covers the same hole at one chokepoint).\n\n## Why this is the structural layer\n\nDetection was fast (11 min) and the repair was one line; most of the outage was the defect being ABLE to land, plus the fix queuing behind the outage's own wreckage. Queue parity removes the first; the second is a process convention (p0 fix-forward queue-jump / maintainer break-glass merge) that belongs to the PM/skills text, not to CI — noted for the maintainer separately.\n\n> ⭐ That closing paragraph is now load-bearing on the decision: option A in #12343 (require the queue for `main`) removes the first half **and lengthens the second**, because a p0 fix-forward could no longer be hand-merged past the wreckage."
+}

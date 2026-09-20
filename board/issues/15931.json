@@ -1,0 +1,37 @@
+{
+  "number": 15931,
+  "kind": "issue",
+  "title": "core: `PHASE2_IMPLEMENTATION.md` teaches `@objectstack/core/security`, a subpath the package exports in no entry",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:engine",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:58:20Z",
+  "updated_at": "2026-09-06T07:33:12Z",
+  "closed_at": "2026-09-06T07:31:52Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15931",
+  "body": "Found while retiring `PluginSecurityScanner` (#14919, PR #15930). Out of scope there: the two repairs differ in whether they widen the published contract, which is not an implementing lane's call.\n\n## The reading\n\n`packages/core/package.json` declares exactly two `exports` entries:\n\n```json\n\"exports\": {\n  \".\":        { \"types\": \"./dist/index.d.ts\",  \"import\": \"./dist/index.js\",  \"require\": \"./dist/index.cjs\" },\n  \"./logger\": { \"types\": \"./dist/logger.d.ts\", \"import\": \"./dist/logger.js\", \"require\": \"./dist/logger.cjs\" }\n}\n```\n\nThere is no `./security` entry and no wildcard, so under Node's `exports` resolution the specifier `@objectstack/core/security` resolves for **no consumer of the published package** — it is refused outright, not merely untyped.\n\n`packages/core/PHASE2_IMPLEMENTATION.md` nevertheless tells readers to import from it, twice, in the two sections that survive #14919:\n\n| line | section | statement |\n| --- | --- | --- |\n| 161 | 4. Permission Manager | `import { PluginPermissionManager } from '@objectstack/core/security';` |\n| 219 | 5. Sandbox Runtime | `import { PluginSandboxRuntime } from '@objectstack/core/security';` |\n\nBoth classes are real and both are exported — from the **root** barrel, reached by `export * from './security/index.js'` in `packages/core/src/index.ts`. So the symbols exist and only the path is wrong, which is the failure mode that reads as working code right up to the resolution error.\n\nA third occurrence, in the retired scanner section, was removed by #14919. This issue is the residue: that PR deleted the section it owned and deliberately did not touch these two.\n\n## Why it is not caught today\n\n`check:published-readme-exports` is the gate that reads documented imports against a package's built type surface, and it is green. `PHASE2_IMPLEMENTATION.md` is not among the 60 documents it reads, because `packages/core/package.json` sets `files: [\"dist\", \"README.md\", \"CHANGELOG.md\"]` — the document ships in the git repository but not in the npm tarball, so it is outside that gate's published-document population. The claims are therefore visible to every reader browsing the repo and invisible to every gate.\n\n## Two repairs, and why the choice is not mechanical\n\n1. **Declare the subpath.** Add a `./security` entry to `exports` (and a `dist/security.*` build target). This *widens the published contract*: it makes `@objectstack/core/security` a supported entry point that must then be kept stable, and it publishes the whole security barrel as a named surface.\n2. **Repoint the document at the root barrel.** Rewrite both import lines to `from '@objectstack/core'`. No contract change; the document becomes true immediately.\n\n(2) is the smaller and probably correct move — nothing in the tree imports the subpath, so there is no evidence of demand for (1). But (1) is a real option if the security surface is meant to be separately importable, and choosing between them is a maintainer decision about the published surface.\n\n## Acceptance\n\nWhichever route: no shipped document names an import specifier that `packages/core/package.json` cannot resolve. Worth considering as part of the fix — a gate that reads documented `@objectstack/*` import specifiers against the target package's own `exports` map, which is a different question from the one `check:published-readme-exports` asks (it checks the *symbol* against the built types, not the *specifier* against the `exports` map) and would have caught all three occurrences."
+}

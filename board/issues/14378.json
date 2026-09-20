@@ -1,0 +1,35 @@
+{
+  "number": 14378,
+  "kind": "issue",
+  "title": "`translateMetaItem`'s comment restates the translatable-type set by hand, so it goes stale every time the dispatch table grows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T03:32:47Z",
+  "updated_at": "2026-09-06T01:58:56Z",
+  "closed_at": "2026-09-05T13:41:14Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14378",
+  "body": "Observation, filed rather than fixed. Found while implementing #14253; left alone deliberately — `rest-server.ts` is one of the hottest files in the repo and a one-word comment edit is not worth the conflict risk on a diff that already touches it elsewhere.\n\n### What\n\n`packages/rest/src/rest-server.ts:2963`, inside `translateMetaItem`, explains the #6349 singular/plural normalization and illustrates it with a hand-written enumeration of the set:\n\n> …those are singular-only (`view`/`action`/`object`/`app`/`dashboard`/`page`), matching `translateMetadataDocument`'s \"Canonical metadata type string\".\n\n#14253 registers `translateDataset` in `METADATA_DOCUMENT_TRANSLATORS`, so the real set is now seven, and this parenthetical is six.\n\n### Why it is worth a card at all\n\nNothing breaks — the code reads `TRANSLATABLE_METADATA_TYPES`, which is *derived*, and the derivation is exactly what makes registering a translator a one-edit change (#3786). The enumeration is illustrative.\n\nBut it is a hand-maintained copy of a derived set sitting next to the code that reads the derived set, and this repo's own record is that a reader who trusts a restated list cannot see what it is missing — the reason `TRANSLATABLE_META_TYPES` stopped being hand-copied here in the first place, and the reason the skills catalog is browsed rather than listed. The comment's actual point is \"these spellings are SINGULAR\", which does not need the full set to make.\n\n### Two ways to close it\n\n1. Drop the enumeration and keep the point: \"…those are singular-only, matching `translateMetadataDocument`'s 'Canonical metadata type string'\". No list, nothing to rot.\n2. Keep an example and mark it as one (`e.g. \\`view\\` not \\`views\\``).\n\nPreference is (1) — an illustrative list that must be maintained is the worst of both.\n\n### Not in scope here\n\n`packages/spec/src/conversions/registry.ts:3039` carries a similar sentence, and it should be **left as it is**: it is the recorded historical rationale for the 17.0.0 `book.translations` retirement, describing the state at the time of that removal. Rewriting a retirement's justification to match today's set would be the opposite mistake."
+}

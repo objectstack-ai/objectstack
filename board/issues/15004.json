@@ -1,0 +1,33 @@
+{
+  "number": 15004,
+  "kind": "issue",
+  "title": "reader program 1/4 — the option-B acceptance probe: a two-package fixture booted through every entry path with the flattened collections absent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T17:07:53Z",
+  "updated_at": "2026-09-06T02:00:44Z",
+  "closed_at": "2026-09-04T05:08:02Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15004",
+  "body": "Part of #14122 · blocks #14512 · **first card of the reader program** ruled on #14512 (comment 5528589044, maintainer 2026-09-03, decision batch #23).\n\nThe ruling: a multi-package artifact carries each definition once under `packages[]`; the **reader half lands first** with the artifact staying additive, the emitter half last. And, in the ruling's own words, *\"the reader half does not land without it\"* — **it** being this pin.\n\n## Why this card exists before any reader is touched\n\nOption B's failure mode is a reader nobody enumerated. That is not hypothetical here: the enumeration missed sites **twice** (comments 5523603341 and 5523741937), the second time including a reader in `@objectstack/plugin-security`, a package nobody had scoped. And the symptom is **silent** — nothing throws, the collection is simply absent, so a multi-package artifact boots clean while having lost its declarative actions, its engine registration, its seed data or its default permission set.\n\nA pin that goes red when a reader is missed is the only thing that converts that silent loss into a build failure. Every other card in this program is unsafe to land without it, which is why it is 1/4 and why it carries `priority:p2` while the rest carry p3.\n\n## What to build\n\n**A two-package fixture carrying one member of every collection family** — objects (with embedded actions), global actions, hooks, functions, jobs, seed data, translations, datasources, datasourceMapping, permissions, positions. One package declares the app; the other contributes.\n\n**Boot it through every entry path, twice**: once in today's additive shape, and once with an **option-B-shaped artifact** (the top-level collections removed, `packages[]` carrying everything). Every subsystem must see its collections in **both** shapes. The entry paths, from the boundary measurement in 5523741937:\n\n| Boundary | `file:line` |\n|:--|:--|\n| B1 `loadArtifactBundle` — compiled-artifact load | `packages/runtime/src/load-artifact-bundle.ts:76`, sole production caller `standalone-stack.ts:686` |\n| B2 `os serve` / `os dev` config-module load | `packages/cli/src/commands/serve.ts:2170-2172` |\n| B3 `os build` config-module load | `packages/cli/src/commands/compile.ts:211` |\n| B4 `os migrate` — its own second, independent `loadConfig` | `packages/cli/src/utils/schema-migration-plugins.ts:1083` |\n| B5 `resolve-project-database` — its own `readFileSync` + `JSON.parse`, a COPY of B1's envelope unwrap | `packages/runtime/src/resolve-project-database.ts:193` |\n\n⚠️ **B5 is upstream of every candidate fold** — inside `createStandaloneStack` it runs at `:574`, 112 lines before `loadArtifactBundle` at `:686`, and it is reached independently from `os dev` (`dev.ts:56`), `os start` (`start.ts:557`) and `os db clean` (`db/clean.ts:46`) before any stack exists. A probe that only covers B1 proves nothing about it.\n\n⚠️ **The two entry paths share no seam.** `composeStacks` has exactly one call site in this repo and it is user config (`examples/app-multi-package/objectstack.config.ts:51`); the CLI receives the config already composed at `serve.ts:2172`, which the artifact never passes through. So the fixture must be driven from **both** the compiled artifact and from source — covering one is half a pin.\n\n## Acceptance\n\n- The pin is **green today** on the additive shape (it must not require the reader work to pass its baseline).\n- The pin is **RED today** on the option-B shape, and its failure names which subsystem lost which collection. ⛔ A pin that is green on the option-B shape before any reader work has landed is a broken pin, not a passing one — reverse-verify this explicitly and record the red output in the PR.\n- As each of cards 2/4, 3/4 and 4/4 lands, the option-B leg goes green one subsystem at a time. The program is done when it is fully green.\n- The probe the dev seat already wrote for the enumeration (comment 5523603341: a two-package artifact run through each reader twice, 10 of 12 reader paths non-zero → zero) is the **starting point** — this card turns that throwaway measurement into a committed pin.\n\n## Not in scope\n\n⛔ Do not change any reader. ⛔ Do not change `composeStacks` or the artifact format. This card adds a fixture and a test only; every production file it touches should be zero.\n\nBlocks: #14512 (the emitter half), and cards 2/4 `@objectstack/runtime`, 3/4 `@objectstack/cli`, 4/4 `@objectstack/plugin-security`.\n\nRelated: #14877 exports the artifact envelope's declared top-level key set — if it lands first, the fixture should derive its collection list from that export rather than hand-listing it."
+}

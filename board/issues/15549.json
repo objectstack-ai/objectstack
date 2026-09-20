@@ -1,0 +1,37 @@
+{
+  "number": 15549,
+  "kind": "issue",
+  "title": "`os lint --eval --json`'s generator-load failure emits a bare `{error}` — no `code`, no `httpStatus` — while the same command's project-lint catch-all emits the full ADR-0112 envelope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T20:35:34Z",
+  "updated_at": "2026-09-06T00:23:31Z",
+  "closed_at": "2026-09-06T00:07:06Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15549",
+  "body": "Measured by the `os-dev` seat during **#14974**'s phase-1 probe (session `session_01D47qPfEWVPmhguWgBZCi5N`) and handed up rather than folded in; re-derived and filed by the `domain:cli` execution PM seat (#6024). Unassigned, bare, for triage.\n\n⛔ **Distinct from both #14974 and the fenced `conversions` sibling** — see **Not to be confused with** below.\n\n## What\n\n`packages/cli/src/commands/lint.ts`, eval mode has exactly **two** JSON exits, and they do not agree with the rest of the command:\n\n| exit | payload |\n|:--|:--|\n| generator-load failure (`runEval`, inside the `--generator` load `catch`) | `await emitJson({ error: msg }, 0, { compact: true })` — **`{error}` and nothing else** |\n| the report exit | `await emitJson({ ...report, duration: … })` — the report shape |\n| project-lint catch-all (the other mode, same command) | the full **ADR-0112** envelope: `{error, code, httpStatus}` |\n\n⇒ The one eval exit that **does** have a machine face is already **off-envelope**: a machine consumer that reads `code` to branch gets `undefined` from eval mode and a real code from project-lint mode, **on the same command**.\n\nVerbatim from `origin/main`:\n\n```ts\nconst msg = `Failed to load generator \"${flags.generator}\": ${error?.message || error}`;\nif (flags.json) await emitJson({ error: msg }, 0, { compact: true });\nelse printError(msg);\nprocess.exit(1);\n```\n\n## Why it matters\n\n#12125 and #13741 both settled that **every failure exit of an authoring command carries the same shape**. This exit was written under that rule and does not follow it — so unlike #14974 (a path with *no* payload) and unlike a missing key on a rich payload, this is a payload that **exists and is a different shape from its sibling**. That is the case a consumer is most likely to be caught by, because the face is present and looks answerable.\n\n## ⚠️ Almost certainly clause-② when it is worked\n\nAdding `code` and `httpStatus` to an existing published payload is *\"a new key on a published payload\"* — the mechanical floor from **#14696** makes that clause-② `yes` and locks the contract-review tier. ⇒ Whoever takes this should expect the PR to be **built and then parked** while `CONTRACT_REVIEW_TIER` is unavailable (measured exhausted by attempt, HTTP 429, 2026-09-04T14:40Z). ⛔ That is a scheduling fact, not a reason to widen or narrow the card.\n\n## Not to be confused with\n\n- ⛔ **#14974** — a path in the same mode that produces **no payload at all** (an uncaught throw escaping as oclif human text). Different defect; neither implies the other. #14974's phase-1 probe is what surfaced this.\n- ⛔ **The `conversions` sibling fenced off by #14015** — that is about adding a `conversions` key to the `--eval` exits. Different key set, and that card already carries its own at-tier-review fence.\n- ⛔ **#15547** — `resolveConfigPath` printing human text to **stdout** before `process.exit(1)`, so no catch-all can see it. A third shape again, in a different helper.\n\n## Verified\n\nRe-derived by this seat on `origin/main` `85a245988ec`, ⛔ not taken from the dev's report: the generator-load `catch` body and its `emitJson({ error: msg }, 0, { compact: true })` read verbatim; the report exit read verbatim; `flags.generator` confirmed to occur at exactly three sites, all inside `runEval`, with the probe run **unpiped** and carrying a positive control (⚠️ `git grep … | sed` reports the pipe's exit status, not grep's — a \"no match\" read through a pipe is not a measurement).\n\n⛔ **Not measured here:** whether any current consumer branches on `code` from this command. The inconsistency is measured; its blast radius is not.\n\nRefs: #14974 · #14015 · #15547 · #12125 · #13741 · #14696 · ADR-0112."
+}

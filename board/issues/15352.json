@@ -1,0 +1,35 @@
+{
+  "number": 15352,
+  "kind": "issue",
+  "title": "service-storage: the file-read authorizer supplies no `tenancyPosture` to `resolveAuthzContext` — an ex-member's org-stamped API key authenticates for downloads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T12:39:34Z",
+  "updated_at": "2026-09-05T21:22:13Z",
+  "closed_at": "2026-09-05T21:21:42Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15352",
+  "body": "Censused under #15256 (maintainer ruling 2026-09-04, item 5). That card repaired the REST single-kernel seam; this is the same hole through another door.\n\n## This site\n\n`packages/services/service-storage/src/storage-service-plugin.ts:841`\n\n    const authz = await resolveAuthzContext({ ql: engine, headers, getSession });\n    if (!authz.userId) return 'unauthenticated';\n\nHeaders come from the real request via `toWebHeaders(req)`, so `x-api-key` is accepted. No posture, so an ex-member's stamped key resolves a `userId` and proceeds into `buildFileReadAuthorizer`'s ownership and record-reachability checks — which are then evaluated for a principal the wall should have refused at the door.\n\n## The mechanism, unchanged from #15256\n\n`resolveAuthzContext` gates BOTH posture-conditional API-key refusals on a `tenancyPosture` its **caller** supplies:\n\n- `organization_required` — `packages/core/src/security/api-key.ts`, `if (!tenantId && tenancyPosture)`\n- `organization_membership_ended` — `packages/core/src/security/resolve-authz-context.ts`, `if (keyPrincipal?.tenantId && input.tenancyPosture)`\n\nNo posture supplied means neither guard runs. The key's `tenantId` is `sys_api_key.active_organization_id` **copied verbatim** — the caller's own stored claim, never vetted against current membership. So under a wall-enforcing posture (`isolated`), an API key stamped with an organization its owner has left is admitted, carrying that organization as its tenant.\n\n## The census this came from\n\nOf the eight non-test `resolveAuthzContext` callers on `main`, exactly **two** supply a posture:\n\n- `packages/rest/src/rest-server.ts` — both wirings, after #15256\n- `packages/runtime/src/security/resolve-execution-context.ts` — already did\n\nThe other six do not. This issue is one of them; the ruling directed one issue per site.\n\n## Why #15256's PR did not fix it inline\n\nRuling item 5 says fix in that PR **if it is one line per site**. It is not. A correct derivation has to carry decision-1-option-A's classification (#13906): a `tenancy` service that was never registered is branded and resolves quietly to \"no posture\", while one that was registered and FAILED to build must raise `AuthzStoreUnavailableError` (503). A naive `try { ... } catch { undefined }` at this seam re-introduces precisely the permissive-on-failure defect #13906 was filed to repair — a failure reading as \"this check does not apply\".\n\nRefs: #15256 (the ruling and the repaired REST seam) · #15163 (the framework measurement) · #13906 (decision 1 option A) · ADR-0105 D2/D3 · ADR-0123 D2.\n\nBlocked-by: #15256\n"
+}

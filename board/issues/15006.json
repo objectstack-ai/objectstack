@@ -1,0 +1,35 @@
+{
+  "number": 15006,
+  "kind": "issue",
+  "title": "reader program 3/4 — `@objectstack/cli`: the four config-load boundaries and the gates that key off `config.objects`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T17:08:41Z",
+  "updated_at": "2026-09-06T02:00:37Z",
+  "closed_at": "2026-09-04T09:01:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15006",
+  "body": "Part of #14122 · blocks #14512 · **Blocked-by: #15004** (the acceptance probe).\n\nReader half of the program ruled on #14512 (comment 5528589044, maintainer 2026-09-03, batch #23). The artifact **stays additive** through this card.\n\n## The sites\n\nFrom the boundary measurement in 5523741937. Note this package holds **four independent config-load boundaries**, not one — a fold at any single point reaches none of the others.\n\n| Boundary / reader | `file:line` | Note |\n|:--|:--|:--|\n| B2 `os serve` / `os dev` config-module load | `packages/cli/src/commands/serve.ts:2170` (`bundleRequire`) → `:2172` (`let config = mod.default \\|\\| mod;`) | The from-source entry. The compiled artifact never passes through it |\n| `configHasMetadata` + `new AppPlugin(config)` | `serve.ts:2802`, `:2923` | Everything `AppPlugin` then reads — see card 2/4 |\n| i18n auto-registration | `serve.ts:2976-2995` | |\n| **ObjectQL engine auto-registration** | `serve.ts:2632` — `if (config.objects && !hasObjectQL)` | ⚠️ Silent: with no top-level `objects` this reads `undefined` and **the engine is simply not registered** |\n| **Storage-driver auto-registration** | `serve.ts:2669` — `if (!hasDriver && config.objects)` | ⚠️ Same mechanism, same silence |\n| `appSecurityPluginOptions(config)` | `serve.ts:3710` | Feeds the ADR-0056 D7 permission surface from the from-source side — the same surface card 2/4 feeds from the artifact side |\n| B3 `os build` config-module load | `packages/cli/src/commands/compile.ts:211` (`loadConfig`) | Then `normalizeStackInput` `:231`, safeParse `:318`, authoring rules `:344`, per-package run `:401` |\n| B4 `os migrate` — its **own second, independent** `loadConfig` | `packages/cli/src/utils/schema-migration-plugins.ts:1083` → `configHasMetadata` `:1094`, `new AppPlugin(config, …)` `:1100` | Not behind B2; missed by both earlier enumerations |\n| `dev.ts` `readArtifactObjects()` | `packages/cli/src/commands/dev.ts:653-666` | Opens the artifact with its **own** `JSON.parse(readFileSync(...))` at `:655` and its own envelope unwrap at `:656`, reading top-level `meta.objects` at `:657` to diff the inventory across recompiles. Non-fatal — it just goes permanently empty — but it is a sixth place the artifact is opened |\n| `resolveDevDatabase` / `os start` / `os db clean` | `dev.ts:56`, `start.ts:557`, `db/clean.ts:46` | These call into `resolve-project-database` (card 2/4) before any stack exists |\n\n## The trap in this card\n\nThe two auto-registration gates at `serve.ts:2632` and `:2669` are the sharpest silent failures in the whole program, and they interact with a runtime-side detail: `standalone-stack.ts:785` **omits the `objects` key entirely** when the array is absent rather than setting `[]`, and `mergeBootConfig` (`packages/cli/src/utils/merge-boot-config.ts:42`) is a plain spread. So an option-B artifact reaches these gates with `config.objects === undefined` and the app boots **with no query engine and no storage driver**, having thrown nothing. Verify this pair against card 2/4's behaviour on the probe before calling either done.\n\n## Acceptance\n\n- The option-B leg of #15004's probe goes green for every cli-side subsystem above, driven from **both** entry paths (compiled artifact and from source); the additive leg stays green.\n- Package order comes from `resolveArtifactPackageOrder` (`@objectstack/core`, since #14643) — not re-derived here.\n- ⛔ Do not change `composeStacks`, `packages/spec/src/stack.zod.ts`, or what any command emits. Artifact stays additive.\n- ⛔ Do not weaken or edit the probe pin to make this card pass.\n- ⚠️ Whether B2/B3/B4 can be collapsed into one shared CLI config-load helper was **not established** — `serve.ts` calls `bundleRequire` directly while `compile.ts` and `schema-migration-plugins.ts` call `loadConfig`. If they turn out to be behaviourally interchangeable, one helper is better than three call sites; measure before assuming, and do not let that refactor grow this card.\n\nSibling cards: #15004 (probe, blocks this), #15005 `@objectstack/runtime`, 4/4 `@objectstack/plugin-security`. Emitter half: #14512."
+}

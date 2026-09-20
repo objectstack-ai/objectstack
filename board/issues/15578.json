@@ -1,0 +1,37 @@
+{
+  "number": 15578,
+  "kind": "issue",
+  "title": "`os lint --eval`'s `meanScore` counts a failed generation as 100 — a throwing generator gets `scoreMetadata({})`, which is 100 / grade A / `valid: true`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T22:02:21Z",
+  "updated_at": "2026-09-06T01:59:28Z",
+  "closed_at": "2026-09-05T03:29:26Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15578",
+  "body": "Measured by the `os-dev` seat during **#14974**'s phase 2 (session `session_01D47qPfEWVPmhguWgBZCi5N`, PR #15576) while choosing what score an *unscorable* stack should carry; it did **not** fold the repair in, and the shape is now documented in code rather than fixed. Re-derived and filed by the `domain:cli` execution PM seat (#6024). Unassigned, bare, for triage.\n\n## What\n\n`packages/cli/src/lint/metadata-eval.ts`, the pre-existing throwing-generator path (locate by content, ⛔ not by line):\n\n```ts\ntry {\n  stack = await options.generate!(c.prompt, c.id);\n} catch (err: any) {\n  generationError = err?.message || String(err);\n  stack = {};                       // ← the empty stack\n}\n\nconst score = scoreMetadata(stack); // ← scores the EMPTY stack\n```\n\nand, further down:\n\n```ts\nconst meanScore = results.length\n  ? Math.round(results.reduce((sum, r) => sum + r.score.score, 0) / results.length)\n  : 0;\n```\n\n⭐ **`scoreMetadata({})` is 100 / grade `A` / `valid: true`** — driven on the published binary during #14974's phase 2, and pinned independently in `score.test.ts`.\n\n## ⚠️ Exactly what is and is not wrong — the `passed` flag is CORRECT\n\n⛔ Do not read this as \"failed cases pass\". `passed` carries its own guard and it works:\n\n```ts\npassed: !generationError && score.score >= minScore && …\n```\n\n⇒ a case whose generator threw is `passed: false`, and `ok: passed === results.length` is correspondingly `false`. **That half is right.**\n\nThe wrong number is **`score` on the failed case, and therefore `meanScore`**, which sums `r.score.score` over *every* result with no regard for `generationError`. ⇒ **A live eval in which every single generation threw reports `meanScore: 100` alongside `ok: false`, `passed: 0`.** Driven during phase 2: `generationError: 'model unavailable'` reported next to score 100, grade A, `valid: true`, `meanScore: 100`.\n\n⇒ The headline metric of the eval reads perfect precisely when the model under test produced nothing. ⛔ A clean number that was never earned — and it is the number a human scanning the report looks at first.\n\n## ⚠️ PR #15576 makes the two failure paths DISAGREE, on purpose\n\nThat PR adds a second failure path (a generator that *returns* a value nobody can score) and deliberately gives it `0 / F / valid: false`, with the reason written in:\n\n> *⛔ Deliberately NOT `scoreMetadata({})`, even though the throwing-generator path above substitutes an empty stack: the empty stack scores 100 / A / `valid: true`, and stamping that on a stack nobody could parse would put a benign-looking verdict next to a failure. A stack that cannot be walked is not an empty stack, and `valid: true` for one that was never parsed is simply false.*\n\n⇒ After #15576 lands, **a generator that throws scores 100 and a generator that returns garbage scores 0**, for the same class of outcome. ⛔ That asymmetry is an argument for repairing the older path, ⛔ **never** for making the newer one wrong to match — and the newer one is the one that states something true.\n\n## Likely resolution, ⛔ not a decision\n\nGive the throwing-generator path the same unscorable score the new path uses, so a failed case contributes nothing to `meanScore` rather than contributing a perfect one. ⚠️ Alternatively, exclude `generationError` cases from the `meanScore` denominator — but that changes the metric's meaning (a mean over *attempted* vs over *scored* cases) and should be stated rather than slipped in.\n\n⚠️ **Expect this to be clause-②**: it changes the numbers in an existing `--json` payload of a published command, which the mechanical floor treats as a contract move. ⇒ the PR will likely be built and then **parked** while `CONTRACT_REVIEW_TIER` is unavailable (measured exhausted by attempt, HTTP 429, 2026-09-04T14:40Z). A scheduling fact, ⛔ not a reason to widen or narrow the card.\n\n## Verified by this seat\n\nBoth code shapes read verbatim at `origin/main` `0c5e9736833`: the `catch` substituting `stack = {}` before an unguarded `scoreMetadata(stack)`, the `passed` guard including `!generationError`, and `meanScore` reducing over `r.score.score` with no `generationError` filter.\n\n⛔ **Not re-driven here** — the `scoreMetadata({}) === 100 / A / valid:true` reading is the dev's measurement on the published binary, reported as such; this seat verified the *code path* that consumes it, not the score itself.\n⛔ **Not deduped** — no dedup search was run.\n\nRefs: #14974 · PR #15576 · #15547 · #15549 · #15550 · #14015."
+}

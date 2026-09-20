@@ -1,0 +1,37 @@
+{
+  "number": 14894,
+  "kind": "issue",
+  "title": "cli: `os i18n extract --no-metadata-forms` is ignored once `--no-objects-only` is passed — the 761-key English Studio metadataForms baseline is inlined into the app's zh-CN bundle",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "i18n",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T08:08:39Z",
+  "updated_at": "2026-09-06T06:29:45Z",
+  "closed_at": "2026-09-06T06:15:44Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14894",
+  "body": "## Summary\n\n`os i18n extract --no-metadata-forms` is honoured only while the default `--objects-only` is in effect. Pass `--no-objects-only` (needed to get `apps` / `dashboards` / `pages` keys into the bundle) and the Studio `metadataForms` baseline (761 keys, **English** source text) is inlined into the app's per-locale bundle file even though `--no-metadata-forms` was given — the flag's own help says it exists precisely for \"a package that owns only its own objects\".\n\n## Minimal reproduction\n\nPlatform 17.2.0, any stack with a few objects and an app.\n\n```\n$ objectstack i18n extract --locales=zh-CN --no-metadata-forms --no-objects-only --dry-run\n  Skeleton summary\n    zh-CN     1290 key(s)  (of 1290 expected)  + 761 metadataForms key(s)\n...\n  metadataForms: {          ← line 1374 of the emitted zh-CN.objects.generated.ts\n```\n\nControl: drop `--no-objects-only` → no `metadataForms` block (but no `apps` either, so the app label cannot be localised).\n\nWorkaround we used: `--filter=kpi_` (our namespace prefix) removes the block; a line diff against the unfiltered output shows the `metadataForms` block is the only difference.\n\n## Expected\n\n- `--no-metadata-forms` suppresses the `metadataForms` group regardless of `--objects-only`; the two flags are documented as independent.\n- Either way, `--no-objects-only` should not silently ship the platform's English Studio baseline inside an application bundle for a non-English locale — under the runtime's `zh-CN → en → authored` chain that file would override the platform's own zh-CN Studio strings with English.\n\n## Environment\n\n`@objectstack/cli` 17.2.0 · Node 22 · app objectstack-ai/kpi (`i18n.defaultLocale: 'zh-CN'`).\n"
+}

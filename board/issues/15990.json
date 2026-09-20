@@ -1,0 +1,35 @@
+{
+  "number": 15990,
+  "kind": "issue",
+  "title": "`check-regen-pending --self-test` runs its gate stubs through ambient `pnpm` in a temp dir with no `packageManager`, so a launcher that cannot resolve there reds an innocent PR — reproduced 2/2 on `origin/main` and on an unrelated branch",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T17:44:22Z",
+  "updated_at": "2026-09-06T05:59:39Z",
+  "closed_at": "2026-09-06T05:59:38Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15990",
+  "body": "Filed unassigned by the `domain:cli` seat while diagnosing a red `Lint & Repo Gates` on PR #15980, whose diff (5 files, all i18n coverage) touches none of this machinery. Deliberately unlabelled — triage owns `domain:*` and the grading. Not fixed in that PR: it is not that PR's defect, and the standing rule forbids touching a self-test to get green.\n\n## Symptom\n\n`pnpm check:merge-driver` → `node scripts/check-regen-pending.mjs --self-test` fails in CI with 11 assertions red inside the `deferred-merge sequence` battery, and this summary:\n\n```\n✗ self-test failed -- 1 failure(s) (cases and floor).\n```\n\nObserved on PR #15980, run 33980432580, job 101344623621. Green on `origin/main` and on four unrelated PRs at the same time, which is what makes it read as \"that PR's fault\".\n\n## Root cause, reproduced\n\nThe fixture's stub gate is a `package.json` written into `mkdtempSync(join(tmpdir(), 'os-regen-defer-'))` (`check-regen-pending.mjs:887, 930-944`) carrying only `name` and `scripts`. The gate is then invoked through `ownerRunCommand` (`regen-artifacts.mjs:804`), which returns **`pnpm <script>`**, run with `cwd` set to that temp dir.\n\nSo the stub's verdict depends on an ambient `pnpm` resolving in a directory that\n\n- declares **no `packageManager` field** (the repo root pins `pnpm@10.31.0+sha512…`, but the fixture dir is under `tmpdir()`, outside the repo, so no parent manifest supplies it), and\n- in CI is served by **corepack** — the failing job's env carries `COREPACK_HOME: /home/runner/work/_temp/corepack`, and the post-job \"Restore the Corepack store\" step is present.\n\nWhen that launcher cannot resolve, **every stub collapses to \"the gate exited non-zero\"**, which the script correctly reads as `stale`. That produces a very specific signature: the stubs whose expected outcome IS stale still pass, and every stub whose expected outcome is anything else fails — `clean` (`exit 0`), `unloadable`, `runner-missing`, `gate-refused`. That is exactly the 11-red / 3-interleaved-green pattern in the CI log, including the three greens that survive (`…and the marker still holds the debt`, `a gate that RAN and failed is still stale, exit 1`, and the `--ff-only` trio).\n\n### The 2x2 that settles ownership\n\nReproduced by replacing `pnpm` on `PATH` with a shim that prints a corepack-style refusal and exits 1. Exit codes captured before any pipe:\n\n| tree | gate runner | exit |\n|---|---|---|\n| `origin/main` f7db8f4fd | real pnpm | **0** |\n| PR #15980 head 0691987f3 | real pnpm | **0** |\n| PR #15980 CI merge ref 8c3f5ce10 | real pnpm | **0** |\n| `origin/main` f7db8f4fd | broken pnpm | **1** |\n| PR #15980 head 0691987f3 | broken pnpm | **1** |\n\nThe two failing runs are **byte-identical** to each other (`diff` of the battery output = 0) and carry the same `1 failure(s) (cases and floor)` summary line as CI. The verdict is a pure function of the runner, not of the tree.\n\n## Why `1 failure(s)` while 11 assertions are marked red\n\nNot a floor breach, and worth writing down because the phrase invites the wrong read. `failures` is `[noDist, noTree, ...results].filter((ok) => !ok).length + floorBreaches.length` (`check-regen-pending.mjs:1235`); a battery contributes **one** entry to `results` and prints its own per-assertion lines. So `1` is one failing battery, not one failing assertion, and the floor held. \"cases and floor\" names the two sources of the count, not a claim that both fired.\n\n## Severity: it can only false-RED, never false-green\n\nWorth stating, because it bounds the urgency. A launcher that fails makes every gate look stale, and stale is the refusing verdict — so this cannot pass a genuinely stale artifact. It is a CI-reliability defect: it burns a triage cycle on an innocent PR and points the seat at its own diff, which is the expensive part. It also fails **non-deterministically across PRs in the same repo state**, which is the property that makes it read as \"yours\".\n\n## Candidate directions — ⛔ none of these is measured as a fix\n\n1. Do not route a stub through a package-manager launcher at all: the stub bodies are `exit 0` / `exit 1` / a `node -e` one-liner, so the fixture could execute them directly and test the script's *grading* of an exit code without importing an ambient toolchain dependency into the assertion.\n2. Write the root manifest's `packageManager` value into the stub manifest, so corepack resolves the same pinned pnpm the repo uses.\n3. Assert the prerequisite instead of inheriting it — if the fixture must shell out to `pnpm`, a probe that refuses with `PREREQUISITE NOT MET` when the launcher does not resolve would turn this into the honest verdict the script already knows how to emit for gates (it is the very distinction cases 12-23 exist to test).\n\nOption 1 looks strongest on the \"a detector with no dependencies cannot itself fail to resolve in CI\" principle this repo already applies to `check:cross-package-test-inputs`, but the choice is triage's.\n\nSame class as #15457 and #15731 — a gate's verdict decided by the box rather than by the tree. Prior art in this exact fixture: #9258, a different environment-dependent flake in the same `deferred-merge sequence` battery, fixed by removing the dependence rather than by retrying.\n"
+}

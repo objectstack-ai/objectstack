@@ -1,0 +1,35 @@
+{
+  "number": 15232,
+  "kind": "issue",
+  "title": "reader program 6/4 — `@objectstack/plugin-dev`: the i18n auto-detect never fires for a multi-package app",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:43:12Z",
+  "updated_at": "2026-09-06T02:00:32Z",
+  "closed_at": "2026-09-04T10:59:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15232",
+  "body": "Part of #14122 · blocks #14512 · **split out of #15210** (the by-shape sweep record — read it for the sweep method and the triaged false positives) · acceptance pin is #15004.\n\nReader half of the program ruled on #14512 (comment 5528589044). The artifact **stays additive** through this card.\n\n## The site\n\n| `file:line` | Reads | What an option-B artifact does to it |\n|:--|:--|:--|\n| `packages/plugins/plugin-dev/src/dev-plugin.ts:526` | `options.stack.translations` | the `I18nServicePlugin` auto-detect never fires, so a multi-package app boots `os dev` with the in-memory i18n fallback instead of the file-based service |\n\nReached through the documented construction `new DevPlugin({ stack: config })` (`packages/plugins/plugin-dev/src/index.ts:36`).\n\n## What the failure looks like\n\nNot a crash and not an empty screen — the app boots and serves. Translations resolve against the in-memory fallback instead of the file-based service, so a developer sees keys or stale strings where the app declared real copy, on the `os dev` path specifically. It reads as \"the translations are wrong\" rather than \"a collection went missing\", which is what makes it worth a card rather than a footnote.\n\n## The pin, already on main\n\n#15004 merged. Read all three before writing implementation:\n- `packages/cli/test/fixtures/option-b-collection-zoo.ts`\n- `packages/cli/test/fixtures/option-b-reader-probe.ts`\n- `packages/cli/test/option-b-reader-acceptance.pin.test.ts`\n\n⚠️ **This site has no row in `OPTION_B_LOSSES` today** — the by-shape sweep found it, not the pin. So this card does **both** halves: add the row that ledgers the loss, *then* fix the reader and delete it. Do it in that order and say so in the PR — a row that never existed is a row nobody can check you against.\n\nThe pin asserts by **set equality**: adding a row for a loss already fixed goes red just as surely as leaving a row for one that is not. ⛔ **Never weaken the pin to pass** — do not relax set equality, stop asserting a subsystem, or add rows to silence a red.\n\n## Acceptance\n\n- The reader resolves `translations` through `resolveArtifactPackageOrder` (`@objectstack/core`, ADR-0130 D4+D5, since #14643) — **flattened top level first**, so today's additive artifact answers bit-identically and `packages[]` only supplies what the top level lacks.\n- ⛔ Do not iterate `config.packages` directly — a second traversal is a second ordering.\n- ⚠️ `DevPlugin` takes its stack from a **caller-supplied** object (`options.stack`), not from a load boundary this repo owns. Check whether the auto-detect should also fire when a caller passes an already-composed multi-package config, and say what you found — the enumeration in #14512 comment 5523741937 lists this as one of three construction sites with no load step to fold at.\n- ⛔ Do not change `composeStacks`, `packages/spec/src/stack.zod.ts`, or what any command emits.\n- ⛔ Never edit `content/docs/releases/`.\n\nSibling cards: #15005 (`@objectstack/runtime`), #15006 (`@objectstack/cli`), #15007 (`@objectstack/plugin-security`, landed as PR #15226), #15229 (**5/4**, `@objectstack/verify`). Emitter half: #14512."
+}

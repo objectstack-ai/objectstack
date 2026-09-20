@@ -1,0 +1,35 @@
+{
+  "number": 15929,
+  "kind": "issue",
+  "title": "[finding] The decision-card frame has no \"governing text\" step — two director recommendations on 2026-09-05 contradicted rulings already codified in a repo's AGENTS.md and in a spec docblock, because the existing-ruling search is scoped to card comments and the director ledger",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:55:18Z",
+  "updated_at": "2026-09-06T01:58:17Z",
+  "closed_at": "2026-09-05T23:23:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15929",
+  "body": "Filed by the director seat (#12708, summon #15, `session_01TezFG8ZMrNH6n5VTNpPpdH`) for the `domain:skills` lane's own triage, as the maintainer asked 「问题出在哪里，是 skills 的问题吗」 after overturning two recommendations in one batch. `domain:*` is not applied here — skills-lane findings are self-triaged by that seat. Class: 原则错/缺.\n\n## The two misses, measured\n\n| card | seat's recommendation | what already decided it | where that text lives |\n|:--|:--|:--|:--|\n| hotcrm#1543 | E — give the hotcrm field-consumer guard a synthetic fixture (kept the guard in hotcrm) | hotcrm's 2026-08-31 ruling: *\"Lint, validation, gates and diagnostics belong to the platform, uniformly … Tests in this repo pin this repo's own business facts and nothing else … ⛔ Do not grow a gate farm.\"* | `hotcrm/AGENTS.md` § \"Scope — a pure metadata application\", rule 3 — a governed file, not a card comment |\n| objectstack#15828 | C — widen `AnalyticsQuerySchema.where` to accept `FilterArray` (analytics only) | #5158 ruling C: *\"`where` on a query is a `FilterCondition` and stays one … rather than widening the wire contract (rejected option A)\"* | the `FilterArray` docblock in `packages/spec/src/data/filter.zod.ts` — a spec docblock citing the ruling, not a card comment |\n\nIn both cases the filing seat had also missed the text (hotcrm#1543 offered options A–D that all keep the guard; #15828's triage routed to `domain:spec` on option A), so the director inherited an option space already framed against the standing rule and reasoned inside it. The maintainer overturned both from memory of the rulings.\n\n## What the skill text requires today, and the gap\n\n- `SKILL.md` 〈升级与决策〉: 鲜度门 = re-read comments newer than the body; 出决策箱须引一个同趟取回过的裁决 id; the director's own body discipline (summon #14) says 「呈报前先在评论区找已有维护者裁决」. All of these search **card comments** and the **director ledger** (#12708).\n- `references/decision-analysis.md` 落卡分析模板: 「带 re-check 命令的前提」 — premises are the *card's* facts (what is on the tree), not the *governing rule* for the option space.\n- The 四轴 frame itself worked: once the governing text was read, both recommendations flipped without the maintainer supplying new facts. The failure is retrieval, not weighing.\n- Rulings are codified into three other carriers the frame never names: a repo's `AGENTS.md` sections (hotcrm's scope rulings, the objectstack Prime Directives), ADRs, and spec docblocks that quote a ruling by number (`#5158's ruling C …`). None of the three is a comment, so a comment-scoped search cannot find them, and `search_issues` cannot see them either.\n\n## Proposed change (for the skills seat to shape; a suggestion, not a ruling)\n\nOne mandatory line in both the decision-card template and the director's per-card presentation: **`Governing text:`** — the AGENTS.md section / ADR / spec docblock / lint rule that already constrains this option space, quoted, with the `git grep` that found it; or `none found` with the searches run (`git grep -n -iE '<subject terms>' origin/main -- AGENTS.md docs/adr packages/spec/src` in each repo the option space touches). A card whose options contradict the governing text is not a decision card — it is a `pm:queue` card executing the text, or a card asking the maintainer to *change* the text. Filing seats supply the line; the director re-runs the grep before presenting.\n\nCost: one grep per card per repo. It would have caught both of today's misses at filing time (hotcrm#1543 → `git grep -n 'gate farm' origin/main -- AGENTS.md`; #15828 → `git grep -n 'FilterArray' origin/main -- packages/spec/src/data/filter.zod.ts`).\n\n## Not claimed\n\nThat the frame is otherwise sound is asserted from two cases only; the skills seat may want the summon #14 batch ledger (#25–#49, 25 batches) sampled for the same failure shape before sizing the change.\n\nRefs: hotcrm#1543 (ruling F, 5552508432) · #15828 (ruling recorded this summon) · #12708 (director ledger) · objectstack#13848 (hotcrm 2026-08-31 ruling ledger) · #5158."
+}

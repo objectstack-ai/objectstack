@@ -1,0 +1,35 @@
+{
+  "number": 14025,
+  "kind": "issue",
+  "title": "[decision] Was the ADR-0030 notification cut-over ever run against a live Postgres/MySQL deployment — and should the migration be registered in the sys_migration ledger so the question stops being unanswerable?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:13:16Z",
+  "updated_at": "2026-09-06T01:59:23Z",
+  "closed_at": "2026-09-05T05:02:16Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14025",
+  "body": "Filed by the `domain:engine` lane PM (session `session_01F3jdziLbAPGeceVNmSox5L`) on the seat's recommendation while working #13998. ⛔ **Only the maintainer can answer the first question** — it depends on operational knowledge the repository does not contain.\n\n## Why it is being asked\n\n#13998 measured that `migrateSysNotificationToEvent` writes `String(row.created_at)` into the new timestamp columns. On Postgres/MySQL that is a `Date.toString()` spelling (`\"Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)\"`), not ISO. The migration is **one-way**, so whatever landed is what a deployment carries afterwards.\n\n**The code half is fixed** (PR #14024, `Part of #13998`). This card is the **data** half: if any deployment already ran it against a live dialect, rows exist today carrying a skewed, de-precisioned, process-zone-baked timestamp — and repairing existing data is a maintainer floor, not something a dev may write.\n\n## The repository cannot answer it — measured, four ways\n\n| Reading | Result |\n|:--|:--|\n| Callers in this repo | **none** — no CLI command under `packages/cli/src/commands/migrate/`, no boot hook; only the export in `migrations/index.ts`, its tests, seven changelogs and the docs |\n| The documented operator path | `docs/handoff/adr-0030-notification-convergence.md`, under a heading that reads *\"Data migration (**not auto-run**)\"*; step 2 is `Run migrateSysNotificationToEvent({ driver, data })` |\n| `sys_migration` ledger | ⚠️ **not registered.** `DATA_MIGRATION_FLAG_OBJECT`'s well-known ids in `packages/spec/src/system/migration.zod.ts` are only `adr-0104-file-references` and `adr-0104-value-shapes` ⇒ no applied-migrations row, no `verified_at`, no `last_run_at`, on any deployment |\n| Published? | yes — ships from `@objectstack/metadata/migrations`; the ADR-0030 change landed |\n\n⇒ **The platform has a migration ledger and this migration is simply not in it.** That absence is why the question is unanswerable at all, and it is arguably the more durable defect.\n\n## ⭐ What narrows the population — and it may be zero\n\n**#14023** measures that every migration in `packages/metadata/src/migrations/` calls `driver.raw(...)`, and **no driver in this repo defines `raw`**: `SqlDriver`, `MemoryDriver`, `MongoDriver` and the Turso transport all expose `execute()`; `IDataDriver` declares `execute?()` and no `raw`. Verified with a firing positive control — the `raw` sweep returns only an unrelated HTTP harness, while the identical `execute` sweep returns all four drivers.\n\n⇒ **The cut-over step the handoff doc hands operators verbatim returns `{status:'error', migrated:0}` and does nothing.** The only remaining way to have run it is with a hand-built knex-like handle — which the repository can see even less than the rest.\n\n## The question, and three shapes\n\n1. **A — ask and act on the answer.** Confirm from operational knowledge whether the ADR-0030 cut-over was ever run on a live PG/MySQL deployment; write a backfill **only if yes**.\n2. **B — write a defensive idempotent repair now** that rewrites any non-ISO `created_at`/`at` on `sys_inbox_message` and `sys_notification_receipt`, on the theory that it no-ops where nothing ran.\n3. **C — register this migration in the `sys_migration` ledger** so the question becomes answerable for every future deployment, and treat the historical question as permanently unanswerable.\n\n**Recommendation: A, with C as a follow-up card.** ⚠️ ⛔ **Not B**, and the reason is not cost: a speculative **one-way data-mutating pass over production timestamp columns**, authored against a population nobody has shown exists, inverts the risk this card is about. #14023 makes the documented path a no-op on every driver this repo ships, so B would be writing a production data mutation for a hypothesis. ⇒ That is precisely the shape that should require a human decision rather than an agent's inference.\n\nC is the contract-first answer to *why this was unanswerable*, and it costs nothing to decide separately.\n\n⛔ Nothing further is dispatched against the data half until this is answered. The code half is unaffected and lands on its own.\n\n**Refs**: #13998 (the card) · PR #14024 (the code half) · #14023 (`driver.raw` is defined by no driver) · #13973 (the census that found the class) · #13382 (the OCC seam, same class)."
+}

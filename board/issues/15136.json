@@ -1,0 +1,36 @@
+{
+  "number": 15136,
+  "kind": "issue",
+  "title": "action.visible 的 current_user.positions 装的是 auth 角色而非安全层岗位,按岗位收敛的按钮对所有人静默消失(17.2.0)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T02:50:46Z",
+  "updated_at": "2026-09-05T21:35:27Z",
+  "closed_at": "2026-09-05T21:22:29Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15136",
+  "body": "## 现象\n\n在对象动作(`defineAction`)的 `visible` CEL 里,`current_user.positions` 拿到的是 **auth 层的角色**(`[\"user\",\"org_member\"]`),**不是**安全层的岗位。持有业务岗位的用户,按岗位收敛的按钮谓词一律判假,按钮对**所有人**消失 —— 包括本该看到它的那个岗位。\n\n`current_user` 这个根本身是绑上的(`has(current_user.id)` 与 `has(current_user.positions)` 都为真),所以谓词不报错、控制台无告警,只是数组里装的是另一根轴上的值。对作者而言,这是一次静默的判假。\n\n## 最小复现(17.2.0,Console UI)\n\n1. 应用里给某对象加一个动作:\n\n   ```ts\n   defineAction({\n     name: 'demo_archive', label: '归档', objectName: 'demo_sheet', type: 'script',\n     body: { language: 'js', capabilities: ['api.write'], source: \"return { ok: true };\" },\n     visible: \"has(record.status) && record.status == 'approved' && ('demo_reviewer' in current_user.positions)\",\n     locations: ['record_header'],\n   });\n   ```\n\n2. 用一个**确实持有** `demo_reviewer` 岗位的账号登录 Console,打开一条 `status == 'approved'` 的记录。\n3. 观察:按钮不显示。控制台无 CEL 告警。\n4. 对照两个接口:\n\n   - `GET /api/v1/auth/me/permissions` → `{\"positions\":[\"org_member\",\"demo_reviewer\",\"everyone\"], ...}` —— 岗位在这里,服务端也是按它判的;\n   - `GET /api/v1/auth/get-session` → `{\"user\":{ ..., \"positions\":[\"user\",\"org_member\"], ...}}` —— Console 的 `current_user` 取自这里,岗位不在其中。\n\n5. 把谓词换成 `has(current_user.positions)`,按钮显示 —— 说明根与字段都在,只是内容是 auth 角色。\n\n## 期望能力\n\nUI 谓词里的 `current_user.positions` 与服务端授权判定用的是同一根轴:即 `/auth/me/permissions` 报告的那组岗位。这样「按钮只对当前节点的审核岗位显示」这类需求可以在元数据里表达,而不必在应用侧另建一套。\n\n如果 `get-session` 的 `user.positions` 是有意保留给 auth 角色的,那么希望给 UI 谓词另开一个明确的根(例如 `current_user.security_positions` 或 `os.positions`),并在 `action.visible` 的文档里写清两者的区别 —— 现在两者同名同形状、内容不同轴,作者无从分辨,判假还是静默的。\n\n## 平台版本\n\n`@objectstack/*` 17.2.0(Console UI + REST)。\n\n## 上下文\n\n来自一个 KPI 考核应用:流程按钮需要「只对当前节点的审核岗位显示」。因为拿不到岗位,该应用只能退回到 hook 端拦截作为唯一防线(点了之后才报「你没有该岗位」),按钮无法提前收敛。同一应用另有一条相关的动作体上下文问题见 objectstack-ai/objectstack#2849。\n"
+}

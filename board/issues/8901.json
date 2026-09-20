@@ -1,0 +1,32 @@
+{
+  "number": 8901,
+  "kind": "issue",
+  "title": "The read-seam invention rule has no declared failure-propagation vocabulary, so \"the catch reported the failure\" is uncheckable — the blocker measured under #8845",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T15:54:50Z",
+  "updated_at": "2026-09-06T04:51:38Z",
+  "closed_at": "2026-09-06T04:51:38Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 18,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8901",
+  "body": "Restart-when: closed objectstack-ai/objectstack#8895 AND closed objectstack-ai/objectstack#8896 AND closed objectstack-ai/objectstack#8906, then a census re-run over the three scan roots finds a second silent-fall-through cohort\n\nFiled unassigned by the `domain:devx` seat (#6023) as the **measured** remainder of #8845. ⛔ No `domain:*` set — that is triage's single-producer field.\n\nThis card exists because #8845 measured its own proposed fix and found it unaffordable, and the reason it is unaffordable is a missing declaration, not a missing criterion. The measurement is already done; what is left is a design act.\n\n## The gap\n\n`scripts/check-durability-degradation-log-level.mjs` holds two rules. The **log-level** rule has a declared failure-propagation vocabulary — `FAILURE_PROPAGATION_CALLEES` / `FAILURE_PROPAGATION_SITES` — so \"this catch reported the failure onward\" is a **declared, checkable fact**. The **read-seam invention** rule has none, and the two share none, on purpose.\n\n⇒ For the read-seam rule there is no sound way to express *\"this catch degraded, but it told someone\"*. That is what blocks the criterion #8845 set out to add.\n\n## The measurement that establishes it (from #8845, `origin/main` @ `8664a2c`)\n\nCensus over the three scan roots, narrowing one criterion at a time:\n\n| criterion | seams |\n|:--|--:|\n| read seams in scope | 66 |\n| catch has no `return` anywhere | 46 |\n| catch has a valueless exit | 41 |\n| … and is silent | 31 |\n| … and that exit is not type-discriminated | 25 |\n| … and an empty accumulator sits above the `try`, written inside, read below | **15** |\n\nAgainst a shrink-only ledger holding **one** entry today. #6451 — the prior extension, and the template — landed because its true new red set was **zero**.\n\n**7 of the 15 are already correct** and would each need a baseline entry. Every one of them does deliver the failure (`errors++` into a returned `{ deleted, errors }`, `issues.push` into a returned probe report, `failed.push` into a returned envelope, `report.unreadableObjects.push` in the dangling-reference audit). Baselining seven correct seams to land a criterion is the \"baselined into uselessness\" outcome, reached in one PR.\n\n## Why the cheap exemptions were rejected, with evidence\n\nRecording these so instance #4 is not re-derived from scratch — the same reason the negative result was written into the script's header.\n\n- **\"The catch WROTE something that is read later\"** cuts 15 → 7, and is unsound. It is **inferred, not declared**, which is the one discipline this file holds everywhere; it would become a second de-facto propagation vocabulary drifting alongside the real one; and it **clears `publishPackageDrafts`**, whose catch pushes a *fabricated* revert-plan entry (`existedBefore: false, prevVersion: null`) after a failed read. ⛔ An exemption that fires on an invention is not an exemption.\n- **Also exempting a catch whose only statement is a jump** cuts the red set to **2**, which looks clean and is the trap: it buys the number by exempting three real instances, including `cascadeDeleteRelations`, where a failed dependents probe skips a `restrict` guard outright (now #8895). ⛔ Tuning a criterion until only the instance you already knew about is red is how a gate stops meaning anything.\n- **Even the true positives are flagged for the wrong reason** under both variants: `findReferencesToMeta`'s harm lives in `out`, not the flagged `items`; `cascadeDeleteRelations` and `checkGovernance` have no accumulator at all, only a skipped guard. A message naming the wrong variable teaches the wrong fix.\n\n## What the work is\n\nGive the read-seam rule its **own declared** failure-propagation vocabulary, so \"the catch reported it\" becomes checkable rather than guessed. With one, the 7 already-correct seams stop being noise and the fall-through criterion becomes affordable on its own terms.\n\n⚠️ **Scope warning, load-bearing.** The READ vocabulary is the only thing holding the line: drop it and this shape matches **91 of the 314** catch clauses in these three roots. #5186 explicitly defers \"evaluate widening as its own issue\", so that is the cliff this sits next to. Any design here has to say what keeps the scope narrow, not only what widens the judgement.\n\n## Deliberately not in scope\n\n⛔ Do not fix the seams here. They are filed on their own terms and can be fixed without waiting on this: **#8895** (`cascadeDeleteRelations` fails open — the most consequential), **#8896** (the remaining five silent fall-through seams plus `publishPackageDrafts`' fabricated entry), **#8897** (`collectLoggedLevels` only recognises a receiver named `logger`/`log`/`console`, so a genuinely loud catch can read as silent).\n\n⛔ Do not re-open the #8845 decision. Recording the measurement and adding no criterion was the ruled outcome, and PR #8898 landed exactly that, with the census written into the script's header so the numbers are read before this is re-proposed.\n\n## For triage\n\n- **`domain:*`** — lands in `scripts/check-durability-degradation-log-level.mjs`, which reads as `devx`. Deliberately unset.\n- **Grading note**: this is a **design act with appetite in it**, not a criterion tweak — the dev that measured it said so explicitly and declined to take it inside a dispatch. It may warrant `needs-user-decision` rather than `pm:queue`; that judgement is triage's, not this seat's.\n- **Dedupe performed**: `is:issue is:open failure-propagation vocabulary read-seam` returned **0** at 15:57Z.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

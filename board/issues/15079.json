@@ -1,0 +1,35 @@
+{
+  "number": 15079,
+  "kind": "issue",
+  "title": "runtime: execute the declarative row-level `operation: 'update'` action — the platform action route performs one data-plane update of the current record as the caller (runtime half of #14092)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-03T20:35:47Z",
+  "updated_at": "2026-09-06T02:00:04Z",
+  "closed_at": "2026-09-04T17:49:26Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15079",
+  "body": "Blocked-by: #14092\n\nFiled by the `domain:spec` seat (session_0174WZTU6XcFcS7g2kykC53i, seat post #6017) at the contract-review ACCEPT of PR #15077 (the spec half of #14092), per the contract-first split the maintainer ruling on #14092 prescribes (ruling comment 5494341350, director batch 22, 2026-09-01, verbatim 「同意」). Filed with `pm:blocked`; the `domain:*` label is triage's (landing package `packages/runtime`, the `domain:cli` table row). Dispatches when PR #15077 is MERGED. Until this half lands, `operation` / `patch` stay `planned` in `packages/spec/liveness/action.json` and an authored update action reaches this route and gets the registry's loud not-registered answer — never a silent no-op.\n\n## Ruling (quoted from 5494341350, untranslated)\n\n> **裁定内容**:行级 action 获得 `bulkActionDefs` 的声明式对应物 —— `operation: 'update'` + `patch`(+ `visible` 谓词),单记录、走数据面、**用调用者自己的权限**、钩子与校验照常触发、`undoable` 有锚点。\n\n## Spec shape this executes (PR #15077, head `44e26d67`)\n\n`ActionSchema` gains `operation: 'update'` (one member, a parallel key beside `type`; `type` keeps its materialized default `'script'`) and `patch` (a record of static field values, optional). The parsed shape is always `{ type: 'script', operation: 'update', patch }`. Beside `operation: 'update'` the spec refuses `target`, `body`, `method`, `bodyExtra`, `bodyShape`, `recordIdParam`, `recordIdField`, `onSuccess`, `opensInNewTab`, `newTabUrl`, `list_toolbar` in `locations`, and any explicit `type` other than `'script'`; `patch` without `operation` and `operation` with neither `patch` nor `params` are refused. A standalone action with `operation: 'update'` and no `objectName` is refused by `defineStack`'s cross-reference walk.\n\n## Executor contract (pinned in PR #15077's body, section \"Executor contract\")\n\n1. **Read `operation` before `type`.** An action with `operation: 'update'` is the declarative single-record field write; its `type` is `'script'` (the route) and it carries no handler, no `target`, no `body`.\n2. **Single-record, data-plane, as the caller.** Exactly ONE update of the CURRENT record (the `recordId` the route already receives) on the object the action belongs to (its embedding object, or `objectName` on a standalone action), through the data plane under the caller's own identity — never the `isSystem`-elevated script-body context. This consumes the #14010 direction (`runAs: 'user'` pinned to the triggering user) and adds no `runAs` key.\n3. **Permissions, hooks and validations fire exactly as for a user edit.** A caller who cannot read or write the row is refused with a located error — the #14143 class: a swallowed load must never become an implicit grant. `requiredPermissions` stays enforced on the route.\n4. **The write is `{ ...patch, ...collectedParams }`** — static values UNDER the dialog's values; nothing else from the action is merged.\n5. **`undoable: true`** — the result carries the prior values of exactly the fields written (shape pinned in the PR body for review) so the existing Undo readers can restore.\n6. **`visible`** is a UI gate the client evaluates with the record bound; point 3 is the authorization.\n7. **No current record** (no `recordId` on the route, or a standalone action without `objectName`) ⇒ a located refusal, not a silent no-op.\n\n## Landing seams (measured on `origin/main` `be416187`, 2026-09-03T20:32Z; re-verify at dispatch)\n\n- `packages/runtime/src/action-execution.ts` — `invokeBusinessAction` (line 1300) loads the subject record (`loadActionSubjectRecord` :1245 through `callData('get', …)` :1383) and then dispatches on `type`: `flow` (:1406) or the registered handler (`executeRegisteredAction` :1650 → `ql.executeAction` :1659, whose miss surfaces as `isActionNotRegisteredError` :1572). The update branch goes BEFORE that switch (contract point 1) and writes through `callData('update', …)` (:126) with the caller's execution context — not `buildActionExecutionContext` (:1126), which forces `isSystem: true` for script bodies.\n- Same file — the headless predicates read `type` only today: `isHeadlessInvokableAction` :525-528 (`script` ⇒ needs `target` or `body`, so an update action currently reads as NOT invokable), `SERVER_DISPATCHED_ACTION_TYPES` :537, `headlessActionTypeError` :553, `summarizeAction` :917. Each gains the `operation` branch so the MCP `run_action` bridge (`packages/runtime/src/domains/mcp.ts:622`) and the HTTP door agree.\n- `packages/runtime/src/domains/actions.ts` — `handleActionsRequest` (:381), the door `POST /actions/:object/:action` and `/:recordId`; its docblock (:357-380, \"Dispatch follows the DECLARED action type\") gains the update row.\n- `packages/runtime/src/dispatcher-plugin.ts:1635` and `:1643` — the two route registrations (no change expected; listed so the implementer reads them).\n\n## Pins (assert `code` + `status` + `path` wherever an error is asserted — the ADR-0112 envelope; a bare `toThrow` does not count)\n\n- an `operation: 'update'` action with `patch` performs exactly one data-plane update of the current record, as the caller (the driver call carries the caller's context, not `isSystem`);\n- `{ ...patch, ...params }` precedence — a param of the same name wins;\n- a caller without write permission on the row is refused, located; a validation failure surfaces; a before-update hook runs;\n- no `recordId` ⇒ refusal; a standalone action with `objectName` works; `undoable: true` ⇒ the prior values of exactly the written fields are in the result;\n- the headless / MCP predicate treats the action as invokable;\n- reverse pin: a handler-less `type: 'script'` action WITHOUT `operation` keeps today's not-registered answer (no widening of the script path).\n\n## Not this card\n\n`packages/spec/**` (the ledger flip of `operation` / `patch` to `live` is the spec seat's follow-up card, filed beside this one); objectui (its executor half is filed on objectstack-ai/objectui); `packages/objectql` / `packages/rest` unless the write needs a seam there — report it, do not widen silently.\n\n## Refs\n\n#14092 · PR #15077 · #14010 (`runAs: 'user'`) · #14143 (a swallowed load is not a grant) · #3915 (dispatch by declared type) · #5519 (anonymous baseline on the actions door)"
+}

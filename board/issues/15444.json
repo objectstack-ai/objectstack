@@ -1,0 +1,35 @@
+{
+  "number": 15444,
+  "kind": "issue",
+  "title": "The boot action-governance inventory reads `type` only, so every declarative `operation: 'update'` action is warned as \"a button wired to nothing\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T16:00:13Z",
+  "updated_at": "2026-09-05T22:43:52Z",
+  "closed_at": "2026-09-05T22:40:11Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15444",
+  "body": "Filed out of scope from #15079 (the runtime executor for the declarative row-level `operation: 'update'` action, ruled on #14092). Found while auditing whether the card's list of four `type`-only readers is complete — it is not, and this is the fifth.\n\n## What happens\n\n`reconcileActionRegistrations` in `packages/objectql/src/action-governance.ts` builds the `unboundDeclarations` finding — \"a declared `script` action with no `body` and no handler under any candidate key: a button wired to nothing\" — from a `type`-only test:\n\n```ts\nfor (const { action, objectName, storeKey } of declarations) {\n    if ((action?.type ?? 'script') !== 'script') continue; // only script needs a handler\n    if (action?.body) continue;                            // its handler is synthesized\n```\n\nA declarative update action is exactly that shape and is meant to be: `ActionSchema` refuses `target` and `body` beside `operation: 'update'`, and its `type` stays at the materialized default `'script'` because the platform action route IS where the write is performed. So every such action falls through both `continue`s and lands in `unboundDeclarations`.\n\n`runActionGovernanceInventory` then logs, at every boot and on every `metadata:reloaded`:\n\n```\n[action-governance] declared script actions with NO handler — a button wired to\nnothing (ADR-0078); add a `body`, or register a handler under the declared `target`\n```\n\nOnce the runtime executor lands, that sentence is false for these actions and its prescription is actively wrong: adding a `body` or a `target` is refused at parse time for an `operation: 'update'` action.\n\n## Why it is not just noise\n\nThe inventory is the ADR-0110 D5 governance surface an operator reads to find real dead buttons. A population that is never actionable and grows with every declarative update action an app author writes is how a diagnostic stops being read — and the undeclared-handler 404 on the `/actions` door cites `[action-governance]` by name as the place to look.\n\n## Blast radius, measured\n\n- **Warn-only.** `runActionGovernanceInventory` is documented as \"warn-only and exception-proof\"; nothing refuses a boot or a dispatch on it, and the route dispatches the update correctly regardless. No behaviour is wrong — the diagnostic is.\n- It reaches every host that boots the engine plugin, once per boot plus once per metadata reload whose fingerprint changed.\n\n## The fix, in one line of the same shape the runtime took\n\nRead `operation` before `type`, as the runtime doors now do:\n\n```ts\nif (action?.operation === 'update') continue;   // the platform performs the write\n```\n\n`@objectstack/objectql` is where the reader lives, so this is that package's card. The runtime side deliberately did not widen into it: the executor does not need this seam, and #15079's file surface says to report rather than widen silently.\n\n## Refs\n\n#15079 (the runtime executor) · #14092 (the ruling) · PR #15077 (the spec half, where `operation`/`patch` land) · ADR-0110 D5 (the inventory) · ADR-0078"
+}

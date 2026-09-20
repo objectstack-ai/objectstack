@@ -1,0 +1,37 @@
+{
+  "number": 15621,
+  "kind": "issue",
+  "title": "[finding] `getMetaItems`' gate docblock calls the `/meta/:type` list door \"the only door that both gates and reaches this method\" and enumerates \"the four remaining\" call sites — `rest-server.ts` has SIX, and the diagnostics `?type=` door is the one missing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T00:14:18Z",
+  "updated_at": "2026-09-06T03:48:53Z",
+  "closed_at": "2026-09-06T03:48:19Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15621",
+  "body": "Found while executing #15034 (PR #15619). The file is fenced for that card (`protocol.ts` belongs to another seat, and PR #15592 is open on it), so this is filed rather than edited.\n\n## The enumeration, and the count\n\n`packages/metadata-protocol/src/protocol.ts`, the `[#14683]` gate docblock above `getMetaItems`' `organizationIdForMetaRead` call (around `:6928`-`:6942` on `origin/main` at `ba426b0f091`), lists the callers that already gate:\n\n> - `packages/rest`'s `GET /meta/:type` list door — **the only door that both gates and reaches this method** — computes `organizationIdForMetaRead(canonicalMetaUrlType(req.params.type), ctx?.tenantId)` [...]\n> - the search sweep's page read below gates on `'page'` [...]\n> - **the four remaining** `organizationIdForMetaRead` call sites in `rest-server.ts` (`/layers`, the by-name read, `/history`, `/diff`) reach `getMetaItemLayered` / `getMetaItem` / `historyMetaItem` / `diffMetaItem` — **never this method**\n\nMeasured, same ref, `git show origin/main:packages/rest/src/rest-server.ts | grep -n organizationIdForMetaRead` — there are **six** call sites, not five:\n\n```\n:3353   /meta/:type/:name/layers   -> getMetaItemLayered     listed\n:4808   /meta/diagnostics ?type=   -> getMetaItems           ABSENT FROM THE ENUMERATION\n:5079   GET /meta/:type list door  -> getMetaItems           named as \"the only door\"\n:5968   by-name read               -> getMetaItem            listed\n:6824   /history                   -> historyMetaItem        listed\n:7392   /diff                      -> diffMetaItem           listed\n```\n\n1 named + 4 remaining = 5. The diagnostics `?type=` door is the sixth, and it **both gates and reaches `getMetaItems`** — so \"the only door that both gates and reaches this method\" is false, and \"the four remaining ... never reach this method\" silently excludes a site that does.\n\n## ⭐ Why it was missed, which is the interesting half\n\nThe diagnostics door does not call `getMetaItems` directly. It calls `getMetaDiagnostics`, which loops `getMetaItems({ type: t, organizationId })` per swept type. A grep for doors invoking `getMetaItems` therefore misses it — the same reason the population statement one method over (`getMetaItem`'s \"FOUR, across two files\") warns that its own first enumeration \"named only the first file and was wrong\".\n\n⚠️ And `getMetaDiagnostics` is **not a member of `MetadataProtocol`** at all — not required, not optional — so it is reached through a runtime cast and 501s when a kernel does not implement it. The transitive path runs through an undeclared extension, which is precisely the kind of edge a caller census has to be told about rather than derive.\n\n## Why it matters\n\nThe enumeration is the artefact #14683 offers as the proof that its change is a no-op for every already-gating caller. A caller absent from it is a caller whose idempotence nobody stated. (It IS a no-op — PR #15619 measured it: both sites fold the identical string, and swapping the door's predicate for a raw tenant id leaves the pin 30/30 green. The conclusion holds; the enumeration backing it does not.)\n\n## What is asked\n\nAdd the diagnostics `?type=` site to the enumeration, note that it reaches this method transitively through `getMetaDiagnostics`, and correct the \"only door\" clause.\n\n## ⚠️ Adjacency\n\nPR #15592 is open and edits the sibling docblock's raw-organization caller enumeration in this same file. Whichever lands second inherits the other's text — re-read on the merged ref rather than on this card.\n"
+}

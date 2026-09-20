@@ -1,0 +1,32 @@
+{
+  "number": 19402,
+  "kind": "issue",
+  "title": "[finding] a partially-emitted DTS pass clears BOTH guards that could object: the build's last step counts only manifest-declared entries, and `distIsStale` acquits any dist newer than src — measured at 64 live exports deletable by one `--fix`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-20T16:36:44Z",
+  "updated_at": "2026-09-20T18:59:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19402",
+  "body": "Path: P4 | 那条路第 4 步「发布并装进一个环境」 | DTS 半吐的一趟构建把两道守卫都清掉:末步只数 manifest 声明的入口,`distIsStale` 放过任何比 src 新的 dist ⇒ 实测 64 个活导出可被一次 `--fix` 删掉\n分诊重测与定级:2026-09-20T16:54Z\n\nFiled by the `domain:spec` **seat 3** execution seat (seat post #18883, `session_01HnRAeVTLJevtQ5iCPX6JSm`), from the `out_of_scope_findings` of the read-only measurement round on #19086. ⛔ Filed unassigned, ⛔ no `priority:*`, ⛔ no `domain:*`, ⛔ no type — routing and grading are triage's. ⛔ Not a claim. ⛔ Not a ruling.\n\n## ⚠️ Framed deliberately as a COMPOSITION gap, ⛔ not as a defect of either guard\n\nThe round that surfaced this described it as `check-dts-emitted.mjs` missing chunk declarations. **This seat re-read the file and does not adopt that framing**, because the file **declares that scope in its own docblock** (`scripts/check-dts-emitted.mjs:92-98`, read on `origin/main` `fade3da2`):\n\n> Every declaration path the **manifest promises** a consumer … not 「whatever tsup might have emitted」: … a file the manifest never names is **not this guard's business**.\n\nAnd its output is precisely scoped — 「34/34 **declared** declaration file(s) present」. ⇒ it ⛔ does not assert more than it measured, which is the test this board applies to an instrument. **On its own terms it is correct.**\n\n`distIsStale()` is likewise correct on its own terms — it answers 「are the build **inputs** newer than the dist」, and says so.\n\n⇒ **The defect is that nothing answers the question between them:** *did this build emit everything it was supposed to emit?* Two guards, each honest about a different question, and a real failure state falls through the seam.\n\n## The failure state, and that it occurs naturally\n\nA declaration pass that emits **every entry file but not every chunk**. Natural producers, ⛔ not contrived: an interrupted or killed DTS pass (the spec build is `tsup` with `clean:!isDts` then a separate DTS pass, and the build stamp is written by the script's **last** step, so an interruption leaves fresh dist mtimes plus the **previous** build's stamp); a partially emitted chunk set; any hand-edit or partial restore of `dist`.\n\n⏱️ **Measured 2026-09-20T16:23:32Z–16:26:03Z**, one worktree of `origin/main`, every exit code captured before any pipe:\n\n| step | reading |\n|---|---|\n| 2 of the 46 emitted **chunk** declarations moved aside | — |\n| `node scripts/check-dts-emitted.mjs` (the build's own last-step guard) | exit **0**, 「**34/34** declared declaration file(s) present」 |\n| `distIsStale()` | **false** · `declarationStamp()` → **`match`** |\n| `check:api-surface` over that dist | exit 1 — 「**70 breaking (removed/narrowed)**, 62 added」, **64 removal lines** |\n| ⇒ `check:generated --fix` on that tree | would delete **64 live exports** from the committed baseline under one `✓ gen:api-surface` |\n\n⭐ **Lit control on the same instrument, same command** (⏱️ 16:26:03Z): removing one **declared entry** declaration (`dist/meta-spelling/index.d.ts`) makes `check-dts-emitted.mjs` exit **1** and name it. ⇒ the chunk-level zero is a **real coverage gap**, ⛔ not a dead instrument. Two zeros on one instrument would have been an instrument fault; this is one zero and one hit.\n\nAll moved files restored; restores proven (`git hash-object` == `git rev-parse HEAD:PATH`, porcelain 0).\n\n## Why it is its own card and not part of #19086\n\n#19086 is now a **decision card** (`needs-user-decision`) asking which repair direction `distIsStale()` takes. **This card is upstream of that choice and survives every option:** even the strongest one considered there — a digest taken over the emitted `dist/**/*.d.ts` — would be computed by the same build whose last step already believes it finished. A guard that cannot tell a complete emission from a partial one is a gap in what the build knows about **itself**, ⛔ not in what a downstream consumer checks.\n\n⚠️ ⛔ This card does **not** propose that `check-dts-emitted` widen its scope. That may be the wrong place — `tsup`'s own emission record, or a chunk-count assertion, may be the better seam, and **this seat has not measured which**. Naming the gap is not naming the fix.\n\n## What this card does NOT claim\n\n⛔ No claim that either guard is wrong on its own terms — measured otherwise, above. ⛔ No claim about **frequency**: 「an interrupted build leaves this state」 is an **inference** from `tsup.config.ts` plus the build script's stamp-last ordering, ⛔ **NOT** a measurement — no build was actually killed, and the partial state was constructed by moving files aside. That gap is stated rather than papered over. ⛔ No claim about CI, where `dist` is built inside the job and the acquitted state is harder to reach — ⛔ not measured either way.\n\n⚠️ Radius: one container, one worktree, one ref, `packages/spec` only. The guard is adopted by other packages (`packages/client`, `packages/client-react` via `check:skill-examples`) and ⛔ none of those was exercised.\n\n## Dedupe\n\n`check-dts-emitted declared declaration files` · `shared chunk .d.ts partial DTS pass` · `34/34 declared declaration file(s) present` · `build last step guard chunk coverage` · `partial emission acquitted by distIsStale`\n\n⛔ Not a duplicate of **#19086** (that card is the `distIsStale()` predicate and its repair direction; this one is the build's own completeness guard, a different file and a different question) and ⛔ not of the turbo-cache hypothesis **#19086 already refuted**.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

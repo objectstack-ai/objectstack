@@ -1,0 +1,35 @@
+{
+  "number": 15589,
+  "kind": "issue",
+  "title": "Make the next `exports`-map sealing regression visible before publish — an in-repo ledger of out-of-repo consumers' specifiers, held against each package's exports map",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T22:33:45Z",
+  "updated_at": "2026-09-06T01:24:50Z",
+  "closed_at": "2026-09-06T01:24:50Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15589",
+  "body": "Observation filed out of #15325 (the dispatch asked whether anything could have caught either sealing event; ⛔ proposed here as a card, not landed there). Unassigned; for triage.\n\n## The same event, twice\n\n- 17.3.0 sealed `@objectstack/cli` behind an `exports` map (#13123). cloud's `objectos-runtime` deep-imported `dist/utils/console.js` ⇒ broken ⇒ `./console` ratified (#13662).\n- The same seal broke hotcrm's hook-body fidelity harness (`dist/utils/extract-hook-body.js`) ⇒ broken at type level and run time ⇒ `./hook-body` ratified (#15325).\n\nBoth consumers were **predicted** by #13123's own body (\"ratify the subpath rather than read `dist/` paths\"), and both were discovered **after publish**, by the consumer, during an upgrade. Nothing in this repo could have gone red: the deep imports live in other repositories, and every in-repo consumer reaches any file through a relative import, a vitest alias or a `paths` entry — inside the monorepo nothing is sealed.\n\n## What #15325 leaves behind, and what it cannot do\n\n`packages/cli/test/published-subpath-hook-body.pin.test.ts` packs the package with `pnpm pack`, unpacks it into a throwaway `node_modules` outside the workspace, and resolves the ratified specifiers from there. It pins the **current** exports map exactly (`.`, `./console`, `./hook-body`, `./package.json`), so a subpath *removed* from `@objectstack/cli` now goes red in-repo. It cannot see the next package that gains an `exports` map, and it knows nothing about which specifiers out-of-repo consumers actually use.\n\n## Proposal (options, not a decision)\n\n**A. A consumer-specifier ledger, held against the exports maps.** `packages/qa/downstream-contract` already exists as \"a frozen, representative third-party consumer of `@objectstack/spec`\" whose fixtures a spec change must not break. Extend the idea one level down: a small, hand-curated JSON ledger of the bare specifiers known out-of-repo consumers import (`@objectstack/cli/console` — cloud `objectos-runtime`; `@objectstack/cli/hook-body` — hotcrm `action-sandbox`; `@objectstack/cli/package.json`; …), each with the consumer and a date, checked by a gate (or a downstream-contract test) that resolves every entry through the workspace package's `exports` map with Node's real resolver. A seal that drops a ledgered specifier is red on the PR that seals it, naming the consumer it would break. Shrink-only in the sense that an entry leaves only with a recorded consumer-side migration.\n\n**B. `check:published-files` GATED, one step further.** That gate already asserts every publishable package declares an `exports` map. It could additionally refuse a PR that *introduces* a map (or removes a subpath from one) unless the changeset for that package is at least `minor` and carries a `BREAKING`-style consumer note naming the deep paths that stop resolving — the packaging analogue of the ADR-0087 disposition marker. Mechanical, no ledger; it makes the seal loud rather than predicting who it hits.\n\n**C. Both** — B makes any seal a declared act; A makes the known consumers a test.\n\nA is the one that would have caught #13662 and #15325 specifically; B is the one that would have made #13123 itself say which doors it closed.\n\n## Boundary\n\n⛔ Not a request to widen any exports map or to weaken `check:published-files`'s GATED invariant — sealing was right in both cases (#15325 triage, and the reporter, both say so). The gap is visibility, not policy."
+}

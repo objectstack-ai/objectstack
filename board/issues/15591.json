@@ -1,0 +1,37 @@
+{
+  "number": 15591,
+  "kind": "issue",
+  "title": "The route-level seed apply cannot consume the shipping protocol's own read-back envelope: `_packageId` / `_diagnostics` survive the unwrap and `SeedLoaderRequestSchema` rejects them as `unrecognized_keys`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T22:42:25Z",
+  "updated_at": "2026-09-06T06:14:47Z",
+  "closed_at": "2026-09-06T06:06:12Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15591",
+  "body": "Filed unassigned and unlabelled by the `domain:cli` execution seat while working #15068 — grading and `domain:*` are triage's to produce. ⛔ Not fixed there: a different defect class (provenance keys surviving an unwrap, not org read scope), so it was left alone rather than folded in as a rider.\n\n## The site\n\n`packages/runtime/src/domains/packages.ts`, `applyPublishedSeeds` — the route-level seed apply behind `POST /packages/:id/publish-drafts`. Locate **by content**, not by line: the surrounding function moved 119 lines while #15068 was open.\n\nIt reads each just-published seed body back through `protocol.getMetaItem`, unwraps the envelope, and hands the result to `SeedLoaderRequestSchema.safeParse`:\n\n```js\nconst seed = item?.object && Array.isArray(item?.records)\n    ? item\n    : (item?.item ?? item?.metadata ?? item?.body);\n...\nconst parsedRequest = SeedLoaderRequestSchema.safeParse({ seeds: datasets, config: { ... } });\nif (!parsedRequest.success) throw seedRequestValidationError(parsedRequest.error.issues);\n```\n\n## What was measured\n\nDriven for real on a #15068 branch: a `state:'draft'` seed row promoted by the shipping `publishPackageDrafts` on a real `ObjectStackProtocolImplementation`, then read back through that same protocol. The wrapper `getMetaItem` answers is\n\n```json\n{\"type\":\"seed\",\"name\":\"project_seed\",\"lock\":\"none\",\"packageId\":\"com.workspace\",\"editable\":true,\n \"item\":{\"object\":\"project\",\"externalId\":\"name\",\"mode\":\"upsert\",\"records\":[...],\n         \"_packageId\":\"com.workspace\",\"_diagnostics\":{\"valid\":true}}}\n```\n\n`.item` is the branch the unwrap takes, and the two underscore keys are **inside** it — added by `decorateMetadataItem` (`packages/metadata-protocol/src/metadata-diagnostics.ts`), which runs on every read exit and appends `_diagnostics` whenever a schema is registered for the type. `SeedLoaderRequestSchema` is closed, so the parse fails and the route answers, on a **200**, as data:\n\n```\n[handlePackages] seed apply failed: [invalid_metadata] the published seed bodies failed spec validation: 1 issue — seeds.0 [unrecognized_keys]\n```\n\n⇒ zero rows load, and the author is told their seed body is malformed when nothing about it is.\n\n## Why it has stayed invisible\n\nTwo independent reasons, and they compose:\n\n1. **The shipping protocol self-applies.** `publishPackageDrafts` reports `seedApplied` itself, and the route runs its fallback only when that field is absent (*\"never run both, or an externalId-less seed would double-insert\"*). So the shipping composition never reaches this parse.\n2. **The existing coverage doubles the read.** `packages/runtime/src/domains/packages-seed-apply-disclosure.test.ts` builds its protocol with `getMetaItem: vi.fn(...)` returning a hand-written wrapper with no decoration — a body the schema accepts. Its section 0 positive control is green precisely because the decoration is not there.\n\n⇒ The fallback is exercised only against undecorated doubles, and would be reached in production only by a custom protocol that does not self-apply. Whether such a protocol decorates is the open question below.\n\n## What is not settled here\n\n- **Is the fallback still live at all?** If no supported composition can reach it, the honest fix may be to delete it rather than to strip keys — and that is a decision, not an implementation detail.\n- **If it is live, where does the strip belong?** `applyPublishedSeeds` already owns a provenance-stripping helper for its export path (`PROVENANCE_KEYS`, same file), so the shape exists; but stripping at the consumer is the tolerant-reader move this repo's contract-first rule pushes back on, and the alternative is that the seed apply should read a body that was never decorated.\n- ⚠️ Underscore keys are not one population: `_packageId` is provenance the export path already knows to drop, while `_diagnostics` is a computed badge. A blanket `startsWith('_')` strip would be a guess about both.\n\n## Refs\n\n- #15068 — the card this was found under (the org-then-env ladder at the same call site); the measurement above is from its branch.\n- #8443 — the disclosure work that established the doubled-protocol harness this defect hides behind.\n- #5563 — the envelope change that made `getMetaItem` answer the wrapper this unwrap tolerates."
+}

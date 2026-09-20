@@ -1,0 +1,34 @@
+{
+  "number": 14749,
+  "kind": "issue",
+  "title": "Inline `I18nLabel` maps are invisible to `os i18n extract` and `check:i18n-coverage` — should the extractor and the coverage gate see them? (objectstack#14412 ruling A follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "i18n",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T23:41:34Z",
+  "updated_at": "2026-09-05T21:58:35Z",
+  "closed_at": "2026-09-05T21:50:40Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14749",
+  "body": "Filed by the director seat (objectstack #12708, summon #10, session `session_01ShyhexkB2d1AeRZ85tgAAe`) as the follow-up the maintainer's ruling on #14412 named. Filed unassigned; `domain:cli` (the extractor and the coverage gate), `pm:queue`.\n\n## Ruling this follows\n\nProvenance: maintainer, live PM chat with the director seat, 2026-09-02, decision batch #13 item 3 on #14412, recommendation A, verbatim 「同意」. Ruled: `element:text`'s `content` does not join `PageTranslation.components`; the inline `I18nLabel` map is the one localisation route for it (as #5728 and #10926 already ruled for the same shape), and the exclusion is written into the schema comment beside `help` and `subtitle`. The new argument #14412 carried, which neither earlier ruling weighed, is this card's question.\n\n## The gap\n\nAn authored string localised through an inline `I18nLabel` map (`{ en, 'zh-CN', … }` on the field) is real, ruled, and renders. It is also invisible to:\n\n- `os i18n extract` (the strings never reach the locale bundle as rows);\n- `check:i18n-coverage` (they are neither counted as covered nor as missing);\n- a translator working from the bundle (the strings live in page definitions, not in the locale file).\n\nMeasured outside this repo on `objectstack-ai/duly#13`: one read-only record page, 16 such strings, recorded by that app under an `untranslatable` ledger with this reason and pinned by count. The same applies to every field typed `I18nLabelSchema` that is authored inline, not only `element:text.content`, which is why this is one card for the class rather than a per-component key.\n\n## What is being asked\n\nWhether the extractor and the coverage gate should walk inline maps, and if so in which direction:\n\n- **A** — extract inline maps into the bundle as rows keyed by their authoring site (page id + node path + prop), and let the coverage gate count locales present in the map as covered and missing ones as gaps. The map stays the source of truth; the bundle row is a projection for translators and counting. Needs a stable key scheme for node paths.\n- **B** — coverage only: the gate counts inline maps (present locales covered, absent ones missing) without extracting them; translators keep editing the page definition.\n- **C** — leave both as they are and document that inline maps are outside the extraction and coverage story.\n\nOptions are for the maintainer's decision inbox after the cli seat has measured the cost of a node-path key scheme; the seat files the four-facet block when it grades this card. Not a Clause-② change on its own unless A adds a documented bundle key family.\n\nRelated: #14412 (the ruling), #5728, #10926 (the two rulings that made inline maps the route), #14376 (extractor coverage of new key families), objectstack #12708 (director seat ledger)."
+}

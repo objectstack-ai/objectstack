@@ -1,0 +1,37 @@
+{
+  "number": 15866,
+  "kind": "issue",
+  "title": "[finding] `p.deleteData({...} as any)` / `p.updateData({...} as any)` erase the compile-time check of the assembled request against `DeleteDataRequest` / `UpdateDataRequest`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T11:42:44Z",
+  "updated_at": "2026-09-06T01:58:10Z",
+  "closed_at": "2026-09-06T01:33:56Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15866",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), from a measurement handed back by the #13852 implementer rather than filed blind. ⛔ **No severity asserted, no domain routing — that is triage's.**\n\n## What\n\nBoth the DELETE and PATCH data handlers in `packages/rest/src/rest-server.ts` dispatch through a cast:\n\n```ts\np.deleteData({ … } as any)\np.updateData({ … } as any)\n```\n\nThe `as any` **erases TypeScript's check** of the assembled request object against `DeleteDataRequest` / `UpdateDataRequest` — the `z.input<>` types that `DataProtocol.deleteData()` / `.updateData()` declare as their parameter types (`packages/spec/src/api/protocol.zod.ts:3351`).\n\n## ⭐ Why this is worth a card: it is the real mechanism behind a worry that was filed against the wrong instrument\n\n#13852 was filed because `DeleteDataRequestSchema` is *\"exported, documented, and validates nothing\"*, and asked whether to add a runtime `safeParse` at the REST door. That card is being returned to triage with its premise falsified — but **its one prospective sentence was right**:\n\n> *\"a future field added to `DeleteDataRequestSchema` would silently be unenforced on this door while looking enforced everywhere the type is referenced.\"*\n\nThis cast is **why** that is true. Without it, the drift would be caught **at compile time**, which is the correct instrument for it:\n\n- a newly-**required** field would be a **type error at build**, naming the file and the line;\n- with a runtime `safeParse` instead, the same field would **`400` every DELETE request** — an outage, not a gate;\n- and a newly-**optional** field would still be silently unforwarded either way, which only the compile-time check can surface at all.\n\n⇒ The measured conclusion is that the type check is the guard this seam wants, and the cast is what disabled it.\n\n## Scope and difficulty, measured rather than assumed\n\n⚠️ **The cast appears load-bearing.** `environmentId` and `context` are passed at these call sites but are **not members** of the request types, so the object genuinely does not satisfy the declared parameter type today. Removing the cast is real work — reconciling what the door passes with what the protocol declares — **not a one-liner**.\n\n⚠️ **Uniform across PATCH and DELETE**, so this is not a DELETE-specific defect and should not be scoped as one.\n\n⛔ **`packages/rest/src/rest-server.ts` is hard-serial**, currently held by #15673 and #15395. The measuring agent did not touch it, correctly. Whoever takes this should re-check claims first — hard serial is released by a **merge**, never by an arm.\n\n## Not claimed\n\nNot swept: whether other protocol dispatch sites carry the same cast. This was scoped to the two handlers the #13852 measurement crossed. Not graded, and no repair shape proposed beyond the observation that the honest fix is to make the assembled object satisfy the declared type rather than to widen the type to accept it."
+}

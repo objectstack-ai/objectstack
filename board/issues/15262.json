@@ -1,0 +1,36 @@
+{
+  "number": 15262,
+  "kind": "issue",
+  "title": "`AppPlugin` collects every seed dataset TWICE on a flat-manifest bundle — the `manifest.data` legacy fallback has no reference guard, and its sibling `translations` block does",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T07:40:24Z",
+  "updated_at": "2026-09-06T01:59:10Z",
+  "closed_at": "2026-09-05T10:04:04Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15262",
+  "body": "Found in passing while landing #15005 (reader program 2/4). **Pre-existing on `origin/main`, untouched by that PR, and not in its scope** — filed rather than folded in.\n\n## The defect\n\n`AppPlugin.start()` collects seed datasets from two locations, `packages/runtime/src/app-plugin.ts`:\n\n```\n// 1. Top-level `data` field\nif (Array.isArray(<the top-level data>)) {\n    seedDatasets.push(...<the top-level data>);\n}\n\n// 2. Legacy: `manifest.data` (backward compatibility)\nconst manifest = this.bundle.manifest || this.bundle;\nif (manifest && Array.isArray(manifest.data)) {\n    seedDatasets.push(...manifest.data);\n}\n```\n\nWhen the bundle carries **no `manifest` key**, `manifest` falls back to `this.bundle` itself — so step 2 re-reads the very array step 1 just pushed, and every dataset lands in `seedDatasets` twice.\n\nThe sibling block for `translations`, ~590 lines further down in the same method, does the same two-location read and **does** carry the guard that makes it safe:\n\n```\nmanifest.translations !== <the top-level translations>\n```\n\nSo one of the two collectors has the reference check and the other does not. That asymmetry is the whole bug.\n\n## Why the shape is reachable, not hypothetical\n\nThe flat bundle — manifest fields written directly on the bundle rather than nested under `manifest:` — is a shape `AppPlugin` supports by design (`const sys = bundle?.manifest || bundle` in the constructor) and one this repo's own tests construct:\n\n- `packages/runtime/src/app-plugin.jobs.test.ts` builds `new AppPlugin({ id: 'com.test.jobs', jobs: […], functions: {…} })`.\n\nAny such bundle carrying a top-level `data` array hits it.\n\n## Why it is not harmless\n\n`mergeSeedDatasets` (`packages/runtime/src/seed-datasets.ts`) does **not** de-duplicate — it is a plain `list.push(...datasets)` onto the shared registry, so both copies reach the loader and both reach every later per-org replay.\n\nFor `mode: 'upsert'` datasets with an `externalId` the second pass is idempotent and the only cost is doubled work. For **`mode: 'insert'`** datasets it is not: the dataset is applied twice per boot. That is the same end state as the closed #3434 (`mode:'insert'` datasets duplicating on replay boots, showcase memberships 3 → 6 → 9), reached by a different route — that card was about repeated boots, this is one boot collecting the dataset twice — so the fix there does not cover this.\n\n## Suggested fix\n\nGive the `data` fallback the guard its `translations` sibling already has, i.e. skip step 2 when `manifest.data` is the same array the top level already contributed. Worth checking in the same pass whether any other two-location read in `start()` is missing it.\n\n## Verification notes for whoever takes it\n\nA regression test wants a bundle with no `manifest` key and a top-level `data`, asserting the dataset count reaching `readSeedDatasets(ctx)` is 1 rather than 2. `packages/runtime/src/app-plugin.seed.test.ts` and `app-plugin.disabled-seed.test.ts` are the existing rigs.\n\nSearched before filing (`AppPlugin seed datasets collected twice manifest.data legacy fallback duplicate seed dataset`) with a positive control query in the same session; #3434, #3453 and #9070 are the neighbours and none of them is this."
+}

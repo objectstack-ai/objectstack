@@ -1,0 +1,36 @@
+{
+  "number": 15682,
+  "kind": "issue",
+  "title": "[#14478 stack 6/6] widen `check:duration-unit-keys` from `packages/spec/src/**` to every workspace package's zod schemas (folds #15642) and convert the one turso offender it finds",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T02:55:30Z",
+  "updated_at": "2026-09-06T03:19:33Z",
+  "closed_at": "2026-09-06T03:19:33Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15682",
+  "body": "Part of #14478 — follow-on card 6 of 6, filed by the `domain:spec` seat (`session_01M59rPZZFzqhfMUPFqqZTkf`, 2026-09-05T02:55Z) under the maintainer ruling **B** on #14478 (`5548763981`, batch #43, 「同意」). Folds **#15642** (the gate's declared population is `packages/spec/src/**` only) into the stack, as the ruling directs; that card closes with this one's PR. Dispatched last, after stack cards 1/6–5/6 have PRs to stack on (the widened population must be measured against a tree where the spec-side remainder is already converted, or the count is meaningless).\n\n## Ruling text this card executes (verbatim)\n\n> The gate's population widens to every workspace package's zod schemas (#15642).\n\n> #15642 (population limited to `packages/spec/src`) is folded into the same plan: the gate's `SRC_ROOT` widens to every workspace package's zod schemas, with the one turso offender converted.\n\n## What this card changes\n\n1. `packages/spec/scripts/check-duration-unit-keys.ts`: the declared population (`SRC_ROOT` / `ROOT_DIR_WATCH_HINTS`, held by the script's self-test) widens from `packages/spec/src/**` to every workspace package's zod schema sources — the walk must EXCLUDE `node_modules` (measured trap on #15642: `--root` pointed at a package root walked `node_modules` and reported \"7151 offenders in 150098 source files\", a reading about dependencies), `dist/`, and test files; the self-test pins the exclusion. Wiring in `lint.yml` stays as it is (last step of `Lint & Repo Gates`).\n2. The offender(s) the widened walk finds outside `packages/spec`: measured on #15642 as **one** — `packages/drivers/driver-turso/src/spec/turso.zod.ts:104`, a published connection-config `timeout` described in ms ⇒ `timeoutMs` with the driver's own ADR-0087 route (that package publishes; `@objectstack/driver-turso` **minor** with a BREAKING banner). Any further offender the widened gate reports is converted in the same PR or, if it belongs to an exemption class, marked per card 1/6's convention — ⛔ no exception list, no baseline.\n3. `#15642` is closed by this PR (`Fixes #15642` on its own line; `Part of #14478` stays first).\n\n## The predicate (unchanged; only the population moves)\n\nA property whose value is a `z.number()` / `z.int()` / `z.coerce.number()` chain and whose `.describe()` names a time unit must carry that unit as a token of its key name (`Ms` / `Seconds` / `Minutes` / `Hours` / `Days`, plus `Millis`), and the token must agree with the prose; `{ value, unit }` pairs, duration literals, calendar positions and rates are outside the population; keys marked `externalVocabulary` and values that are the shared `EpochMs` schema (card 1/6) are exempt by declaration.\n\n## Execution notes\n\n- **Stacked** on card 5/6's head; draft PR, base = that branch; body first line `Part of #14478`, then `Fixes #15642`. ⛔ Never `Fixes #14478`.\n- **`Clause-②: yes`** (a published driver key renames) ⇒ `needs:contract-review` on PR and card at creation. Changesets: `@objectstack/driver-turso` **minor** + BREAKING; `@objectstack/spec` patch for the gate script only if it ships (derive from `check:published-files`).\n- The stacked head with this card is the one the ruling names: \"the set lands together when `check:duration-unit-keys` is green on the stacked head\" — this PR's CI must show the gate green on the whole stack.\n\nRelated: #14478 · PR #15626 · #15642 · stack 1/6."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 15007,
+  "kind": "issue",
+  "title": "reader program 4/4 — `@objectstack/plugin-security`: the app default permission set reads `config.permissions`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T17:09:00Z",
+  "updated_at": "2026-09-06T02:00:39Z",
+  "closed_at": "2026-09-04T08:59:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15007",
+  "body": "Part of #14122 · blocks #14512 · **Blocked-by: #15004** (the acceptance probe).\n\nReader half of the program ruled on #14512 (comment 5528589044, maintainer 2026-09-03, batch #23). The artifact **stays additive** through this card.\n\n## The site\n\nOne reader, one line:\n\n| Reader | `file:line` |\n|:--|:--|\n| app default permission set | `packages/plugins/plugin-security/src/app-default-permission-set.ts:122` — reads `config.permissions` |\n\nReached from `packages/cli/src/commands/serve.ts:3710` via `appSecurityPluginOptions(config)`.\n\n## Why it is its own card despite being one line\n\n**This is the site that both earlier enumerations missed**, and it is the reason the program is scoped the way it is. The first pass scoped itself to \"`@objectstack/runtime` and `@objectstack/cli`\" and stated that as its boundary; this reader is in neither. It was found only by the second, wider measurement (comment 5523741937).\n\nIt is separated rather than folded into card 3/4 because the ruling requires each site to be separately reviewable and revertible, and because a third package in the blast radius is exactly the fact a reviewer should see rather than have buried in a cli-scoped diff.\n\n⚠️ The ADR-0056 D7 permission surface this feeds is **also** fed from the artifact side by `createStandaloneStack` (`packages/runtime/src/standalone-stack.ts:791`, card #15005). The two paths must agree: fixing one and not the other leaves a multi-package artifact with a permission surface that depends on which entry path booted it. The probe pin (#15004) covers both, which is why it lands first.\n\n## Acceptance\n\n- The option-B leg of #15004's probe goes green for the default permission set on **both** entry paths; the additive leg stays green.\n- Package order comes from `resolveArtifactPackageOrder` (`@objectstack/core`, since #14643).\n- ⛔ Do not change `composeStacks`, `packages/spec/src/stack.zod.ts`, or what any command emits. Artifact stays additive.\n- ⛔ Do not weaken or edit the probe pin to make this card pass.\n- ⚠️ Before implementing, re-run the wider sweep once for a **fifth** package: the two enumerations that missed this site both scoped themselves by package name up front. Search by the shape (`config.permissions`, `config.objects`, `bundle.<collection>` reads) across all of `packages/`, not by a package list. If another package turns up, file it as 5/4 rather than folding it in here.\n\nSibling cards: #15004 (probe, blocks this), #15005 `@objectstack/runtime`, #15006 `@objectstack/cli`. Emitter half: #14512."
+}

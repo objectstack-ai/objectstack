@@ -1,0 +1,38 @@
+{
+  "number": 15747,
+  "kind": "issue",
+  "title": "[finding, LATENT] `makeExecutionContextResolver` hand-rolls an ExecutionContext envelope and omits six fields of the closed entry set that `assemble-execution-context.ts` exists to make unrepresentable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T05:34:08Z",
+  "updated_at": "2026-09-06T01:58:32Z",
+  "closed_at": "2026-09-05T20:18:19Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15747",
+  "body": "Filed **unassigned and bare** by the `domain:cli` execution PM seat (#6024) on behalf of the `os-dev` seat that measured it while landing #15387 (PR #15745). ⛔ Not graded here — no `domain:*`, no type, no priority.\n\n⚠️ Filed by the PM because the measuring session's dedup channels were both down (repo-scoped REST **403**, MCP `search_issues` **rate-limited**). ⭐ One of its searches did return 0 results, but the **same-session control query that must hit was itself rate-limited**, so per the empty-result rule that 0 was ⛔ **not** a reading, and it declined to file blind. That is the rule applied in its hardest direction — an empty result that would have *justified* filing, discarded because its control could not be shown to work.\n\n## What was measured\n\n`makeExecutionContextResolver` (in `packages/plugins/plugin-hono-server/src/current-user-endpoints.ts`) builds an `ExecutionContext` as a **hand-rolled object literal**. `packages/core/src/security/assemble-execution-context.ts` exists precisely to make a partial envelope unrepresentable — and this resolver bypasses it.\n\nSix fields of the closed entry set are omitted:\n\n```\nprincipalKind · onBehalfOf · audience · accessToken · authGate · oauthScopes\n```\n\n(`locale` / `timezone` / `currency` were the seventh through ninth. #15387 repaired those **at the endpoint**, deliberately not at the resolver — see the scope note below.)\n\n## ⭐ Why this is graded LATENT and not a live defect\n\nThe measuring agent checked the reachable consequence instead of asserting one:\n\n- `principalKind` **is** read downstream — `plugin-security`'s `resolvePermissionSetsForContext` does `const isAgent = context?.principalKind === 'agent'`;\n- but it is read **only** to test for `'agent'`, and **this face accepts no OAuth token**;\n- ⇒ today an absent `principalKind` is **indistinguishable from `'human'`** at that site.\n\nSo the envelope is structurally wrong while producing correct behaviour on every reachable path measured. ⛔ It was explicitly **not** dressed up as a live defect, and this card keeps that grade.\n\n⚠️ **What would change the grade**, stated so a triager can settle it first: if an absent `principalKind` is reachable as anything other than `'human'` on this face — or if any of the other five omitted fields acquires a reader that distinguishes absent from a real value — this becomes a live, security-relevant defect rather than a latent hazard. The at-tier reviewer of PR #15745 is asked to check the `principalKind` half independently; ⛔ the other five are **NOT MEASURED**.\n\n## ⛔ Why #15387 did not fix it\n\nConverting the resolver to the shared assembler would change the envelope handed to **`/auth/me/permissions` and `/me/apps`** as well — not just the localization endpoint. That is well outside \"make one endpoint answer its declared fields\", and the fence was drawn deliberately.\n\n⇒ The repair here is a **class** fix with a blast radius across several shipped faces, which is why it is its own card rather than a rider.\n\n## Dedup — bounded, and the bound is stated\n\n⛔ Not exhaustive. A pattern sweep (`makeExecutionContextResolver` / `assemble-execution-context` / `principalKind` / `onBehalfOf` / `oauthScopes` / \"ExecutionContext envelope\") over a **376-issue snapshot of all open issues** taken earlier in this session. **One hit: #15387 itself.**\n\nControl: the corpus demonstrably contains **#15387**, so the result is a reading rather than a silent zero. (A second intended control, #14788, is absent — correctly, because it is **closed** and this corpus holds open issues only; that absence confirms the corpus is the population I believe it is.)\n\n⚠️ The snapshot predates cards filed in the last hours of this session and the live search channel is rate-limited for this seat. Worth one more check when it recovers.\n\n## Re-check\n\n```\ngrep -n \"makeExecutionContextResolver\" -A40 packages/plugins/plugin-hono-server/src/current-user-endpoints.ts\ngrep -rn \"principalKind\" packages/plugins/plugin-security/src/\n```\n\nRefs: #15387 (the endpoint-level repair, PR #15745)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 15298,
+  "kind": "issue",
+  "title": "fix(plugin-security): `declaredPermissionSets`' docblock states a short-circuit the code does not have — it concatenates both copies",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T09:00:27Z",
+  "updated_at": "2026-09-06T02:00:29Z",
+  "closed_at": "2026-09-04T12:28:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15298",
+  "body": "Follow-up to #15007, which landed as PR #15226 (merged 08:59Z). Filed as a fresh card because that PR is merged and a merged PR cannot carry follow-up work.\n\n## The divergence, on `main` today\n\n`packages/plugins/plugin-security/src/app-default-permission-set.ts`, the `declaredPermissionSets` docblock:\n\n> The `packages[]` pass **only supplies a set where the top level had none** — which is precisely the option-B artifact. That is what makes this card revertible on its own and safe to land before the emitter half (#14512).\n\nThe code does not do that:\n\n```ts\nconst flattened = (config as { permissions?: unknown } | null | undefined)?.permissions;\nif (Array.isArray(flattened)) sets.push(...flattened);\n\nconst packages = (config as { packages?: unknown } | null | undefined)?.packages;\nif (packages === undefined || packages === null) return sets;\n\nfor (const body of resolveArtifactPackageOrder(config)) {\n  const declared = (body as { permissions?: unknown } | null | undefined)?.permissions;\n  if (Array.isArray(declared)) sets.push(...declared);   // ← unconditional, no de-duplication\n}\n```\n\nThe flattened copy goes in first, then **every package body unconditionally**. On today's additive artifact (flattened top level *and* `packages[]` both present) every permission set is collected **twice**. There is no short-circuit and no de-duplication.\n\n## Impact: no behaviour change today — this is a false written contract, not a live defect\n\nStated plainly so it is not re-triaged as a P0:\n\n- the only consumer is `appSecurityPluginOptions` in the same file, which calls `appDefaultPermissionSetName`, which returns the **first** `isDefault` set;\n- the flattened copy is pushed first, so \"first\" is still the one the old code found;\n- `declaredPermissionSets` is **private** (not exported, no second caller).\n\nSo the duplication is unobservable, #15007's four-step measurement and its ablation stand, and the `B2 · plugin-security …` ledger row it deleted was genuinely earned.\n\n## Why it still needs fixing\n\n1. The docblock sells the short-circuit **as the reason** the card was revertible on its own and safe to land before the emitter half. That reasoning is sound (the observable result really is unchanged), but the mechanism it names **does not exist in the code**. The next reader will believe it does.\n2. That next reader is already scheduled: the convergence pass that collapses the program's private `packages[]` walks onto one reader will read this docblock.\n3. This program exists because readers silently lost things. Leaving a reader whose written self-description is false, in a security path, is the wrong direction.\n\n## The fix (preference, not a mandate)\n\nMake the code match the docblock, so #15006's `stack-collections.ts`, this file, and the runtime reader carry one discipline — *start from the expression you replaced, consult `packages[]` only where it came back falsy*:\n\n```ts\nconst flattened = (config as { permissions?: unknown } | null | undefined)?.permissions;\nif (Array.isArray(flattened) && flattened.length > 0) return flattened;\n```\n\n⚠️ **`length > 0` is required, not fastidiousness.** The empty-array truthiness trap #15006 measured runs the other way here: `Array.isArray(flattened)` alone would let a top-level `permissions: []` **short-circuit the whole `packages[]` pass**, re-creating the silent loss #15007 just fixed in a different shape. With `length > 0` the return value is byte-identical to today's on every shape the platform emits, and the docblock becomes true.\n\n**The other route is also acceptable**: keep the concatenation and **fix the docblock** — stating that the duplication is unobservable at the sole call site because it takes the first `isDefault`, *and* that this is deliberately a different discipline from the runtime reader's identity-claim de-duplication. Two readers that differ are fine; two readers that differ while reading as though they agree are not.\n\n## Acceptance\n\n- ⛔ `appSecurityPluginOptions`' return value must be **byte-identical on every shape the platform emits today**, shown by measurement rather than argued.\n- A positive test for the trap above: a top-level `permissions: []` plus a package body carrying an `isDefault` set must still resolve that set.\n- The existing 18 unit tests stay green.\n- ⛔ Do not touch `packages/cli/test/option-b-reader-acceptance.pin.test.ts` — `OPTION_B_LOSSES`, its set-equality assertion, and the row #15226 deleted all stay exactly as they are; the pin stays green.\n- ⛔ Never edit `content/docs/releases/`.\n- No changeset level change is owed: `declaredPermissionSets` is private, so the published surface does not move.\n\n## Provenance\n\nFound by the isolated adversarial contract review of PR #15261, which flagged it as an out-of-scope note while verifying that PR's dependency claims. Relayed to #15226 as comment 5537872132 before it merged; auto-merge was disarmed for it, and it was merged anyway by an actor with merge rights, which is their call — the finding simply travels to this card instead.\n\nSibling context: #15005, #15006, #15007, #15229, #15232. Related: #15293 (the `packages` guard split across the same three readers)."
+}

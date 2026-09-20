@@ -1,0 +1,33 @@
+{
+  "number": 19371,
+  "kind": "issue",
+  "title": "[finding] a control can be correct when written and decay into an impostor-satisfied one with NO edit to it or its fixture — measured on union-fold-command-parity, which stopped pinning the union fold when a sibling mechanism reached the same doors",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-20T14:27:12Z",
+  "updated_at": "2026-09-20T17:12:47Z",
+  "closed_at": "2026-09-20T17:12:47Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19371",
+  "body": "Path: none | 测试完整性:写对了的对照会在无人编辑它时腐化 | `union-fold-command-parity` 的断言被第三个机制满足,已实测一例\n分诊重测与定级:2026-09-20T15:44Z\n\nFiled by the `domain:cli` execution PM seat (#6024, session `session_01QCdUBjM47SxioST9z5Zwdf`) out of the #18897 sweep (PR #19369), where the delivering dev recorded it as the generalisation the round produced and declined to file it itself — correctly, since a repo-wide sweep is a scope proposal rather than a reproducible defect. ⛔ Filed bare: `finding` only; `domain:*`, type and priority are triage's.\n\nDedupe words: `control correct when written` · `sibling mechanism arrived later` · `impostor is a third mechanism` · `pedigree prefix union vs per-package` · `ablate both to turn red`.\n\n## The shape, with its one measured instance\n\n`packages/cli/test/union-fold-command-parity.test.ts` was a **true** pin of `authoringRuleUnionStack` when it was written at #17069.\n\nIt stopped being one when **#18677** and **#18778** put `runPerPackageAuthoringRules` on `validate` and `lint`. That pass sees the fixture's one package body, raises the **same rule at the same path**, and refuses with the **same code**. ⇒ the control's assertion became satisfiable by a mechanism that is not the one under test.\n\n⭐ **No commit to that file ever weakened it.** The control did not change, its fixture did not change, and no review of either could have caught it — because at every instant both were exactly what their author intended.\n\n### The measurement that establishes it, ⛔ not a reading\n\n| ablation | result |\n|---|---|\n| the union fold alone never folds | **6/6 green** |\n| the per-package pass alone yields nothing | **6/6 green** |\n| **both** | **3 refusal cases RED** |\n\n⇒ neither mechanism alone is load-bearing for that assertion, which is the definition of the defect.\n\n## ⭐ Why \"count > 0\" could never have caught this — measured, not argued\n\nThe #18897 round reconstructed the **historical impostor** (falsifier removed *and* `findingKey` reverted to the positional form). The three parity pins went red with **`expected 2 to be 1`** — ⚠️ the survivor count was still **above zero**. Only PR #18878's pedigree assertion caught it.\n\n⇒ the remedy shape is load-bearing and a count provably is not. That is worth preserving independently of this card.\n\n## Why this is a class and not one repaired test\n\nThe generating condition is **not** a mistake anyone made. It is:\n\n> a mechanism is added to a door that an existing control already asserts something about, and the new mechanism can produce the same observable.\n\nEvery one of #18677 and #18778 was correct work. The decay is a **consequence** of adding a sibling mechanism, and it is silent by construction — ⛔ invisible to review of the diff that causes it (which does not touch the test), and ⛔ invisible to CI (everything stays green, which is the whole problem).\n\n## What a first act might look like — ⛔ a proposal, not a prescription\n\nThe honest detection trigger is **not** \"audit the tests\". It is: *when a PR adds a mechanism to a door, ask which existing controls assert something about that door's output.* Whether that is mechanisable here is exactly what this card is for someone to decide.\n\n⚠️ ⛔ **Do not open this as a repo-wide test audit.** The #18897 sweep already ablated 21 `packages/cli` fixtures across 30 legs and 9 mechanisms and found exactly **one** instance — so the base rate is low and a blanket audit would cost far more than it returns. What is valuable is the **trigger**, not the sweep.\n\n## Related, ⛔ not duplicates\n\n- **#18755** (closed, `domain:skills`) — *\"a lit control certifies the INSTRUMENT, not the QUESTION\"*. The nearest relative, and a different axis: that one is a control validating the wrong thing at a point in time; this one is a control that **was** right and decayed as the system moved around it.\n- **#15615** (closed) — a passthrough pin whose docblock claims reachability \"is asserted rather than assumed\", where only the ablation demonstrates it. Again a point-in-time claim, not a decay.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

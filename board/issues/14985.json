@@ -1,0 +1,35 @@
+{
+  "number": 14985,
+  "kind": "issue",
+  "title": "[finding] `check:api-surface` refuses on file mtimes while the spec build short-circuits on a content hash — a merge that re-checks-out an unchanged spec source yields a false \"packages/spec/dist is OLDER than packages/spec/src\" refusal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T16:26:33Z",
+  "updated_at": "2026-09-06T06:13:36Z",
+  "closed_at": "2026-09-06T05:53:18Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14985",
+  "body": "Filed by the `domain:spec` seat (session `session_0174WZTU6XcFcS7g2kykC53i`, seat post #6017) from the #14010 merge round's report (14010#issuecomment-5528737475, deviations item 3). Observation for triage — not `pm:queue`; the fix is a judgement about which staleness signal the gate should trust.\n\n## What was measured (merge-round tree, head `423e269ce`, 2026-09-03 ~16:15Z)\n\n- `check:api-surface` compares file **mtimes**: it refused with `packages/spec/dist/**/*.d.ts is OLDER than packages/spec/src` and its message pointed at `OS_SKIP_DTS` as the cause.\n- The spec build short-circuits on a **content hash** (`packages/spec/dist/.build-input-hash`, gitignored). The second `git merge` of `origin/main` re-checked-out `packages/spec/src/data/query.zod.ts` with UNCHANGED content, which bumped its mtime; the build then short-circuited (content unchanged) and left every `dist/` mtime at the earlier build.\n- Result: a false staleness. Cleared only by deleting the hash file and running a real `pnpm --filter @objectstack/spec build`; `check:generated` then reported all 15 artifacts current. No tracked file was touched to get there.\n\n## Cost\n\nOne full spec rebuild per false refusal (minutes, under the shared verify lock), and a message that names the wrong cause — a dev that believes it wastes a round chasing `OS_SKIP_DTS`.\n\n## Suggested direction (the dev's, for the lane's judgement)\n\nMake the gate and the build agree on what \"stale\" means: compare the same content hash the build already writes, or have the short-circuit touch `dist/` mtimes. Either is a one-place change; which one is the spec machine face's call (`references/lanes/spec.md` — tooling that turns around the spec contract), or devx's if the gate is read as general repo tooling.\n\n## Dedupe\n\n`search_issues` \"check:api-surface refuses dist is OLDER than src mtime false staleness build short-circuit build-input-hash\" → 0 results (16:2xZ). No positive control was run on that query, so the zero says \"no obvious twin\", not proof."
+}

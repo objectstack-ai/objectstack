@@ -1,0 +1,36 @@
+{
+  "number": 14147,
+  "kind": "issue",
+  "title": "finding: the insert-path `readonly` strip is a protocol-boundary guard only — `engine.insert` applies none of it, and `create_record`'s `onFieldsDropped` channel can never fire for a readonly drop",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T08:06:00Z",
+  "updated_at": "2026-09-06T01:59:04Z",
+  "closed_at": "2026-09-05T12:24:25Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 24,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14147",
+  "body": "Observation from an application (`objectstack-ai/duly`), filed for triage rather than as a defect — the asymmetry may be intended, but the engine's own prose says otherwise and one consumer is wired for a signal it cannot receive.\n\nMeasured against `@objectstack/runtime` 17.2.0 / `@objectstack/objectql` 17.2.0 / `@objectstack/metadata-protocol` 17.2.0, on a real booted kernel with the in-memory driver.\n\n## What was measured\n\n`duly_task.completed_at` is `readonly: true`.\n\n| write face | context | forged `completed_at` |\n|:--|:--|:--|\n| `MetadataProtocolService.createData` | none | **stripped** (row then refused by a validation rule) |\n| `MetadataProtocolService.createData` | `{ isSystem: false }` | **stripped** |\n| `MetadataProtocolService.createData` | `{ isSystem: true }` | preserved (intended — the documented exemption) |\n| `engine.insert` (the `data` service) | **none** | **preserved** |\n\nThe last row is the finding: a non-system caller reaching `engine.insert` directly writes the read-only column, with no refusal, no `WARN`, and no `onFieldsDropped` event.\n\n## Why it happens\n\nThe insert-path strip is `stripReadonlyForInsert`, which lives in `@objectstack/metadata-protocol` and is called from exactly two places — `MetadataProtocolService.createData` and `cloneData`:\n\n```js\nfunction stripReadonlyForInsert(schema, data, context) {\n  if (context?.isSystem) return data;\n  ...\n}\n```\n\nThe **update** path is not like this: `stripReadonlyFields` is inside ObjectQL and runs on every `engine.update`, `isSystem`-gated. So `readonly` is enforced in-engine on update and only at the API boundary on insert.\n\n## Two things that look unintended\n\n**1. The engine's own doc comment claims otherwise.** `assertReferencesResolve` in `objectql/dist/core.js` describes its non-system scoping as being\n\n> like every other write-path guard in this engine (`stripReadonlyFields`, `stripReadonlyForInsert`).\n\n`stripReadonlyForInsert` is not in that engine and is not on `engine.insert`'s path at all. An application author reading that reasonably concludes the engine enforces `readonly` on insert.\n\n**2. `create_record` is wired for a drop event it can never get.** The automation engine's `create_record` executor (`@objectstack/service-automation`) calls `data.insert` — the engine, not the protocol — and passes `onFieldsDropped`, then surfaces the result as `output.droppedFields` and node `warnings`:\n\n```js\nconst created = await data.insert(objectName, fields, {\n  context: dataCtx,\n  onFieldsDropped: (e) => { dropped.push(e); }\n});\n```\n\nSince no readonly strip runs on that path, that channel cannot report a readonly drop. A flow without `runAs: 'system'` can set a `readonly` column at insert and the run reports a clean success.\n\n(In the application that found this, the relevant flow does declare `runAs: 'system'`, so nothing there is currently affected — this is reported as a seam, not an incident.)\n\n## The question for triage\n\nIs the insert-side strip deliberately a *user-context / API-boundary* concern (which #3425's framing suggests), with `engine.insert` trusted by construction? If so the fix is prose plus the dead `onFieldsDropped` wiring on `create_record`. If not, the strip belongs on the engine insert path where its update-side twin already lives.\n\nEither way `readonly` currently means something different on insert than on update, and the difference is not written down anywhere an application author would look.\n\n## Reproduction\n\nTwo `duly_task` inserts with an identical payload carrying a forged `completed_at`, one through `protocol.createData` and one through `data.insert`, both with no context. Pinned as a tripwire in `objectstack-ai/duly` — `test/seed-history.test.ts`, the `insert-path strip is a BOUNDARY guard` block — which is written to go red and be deleted when this is closed."
+}

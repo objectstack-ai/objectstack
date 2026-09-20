@@ -1,0 +1,36 @@
+{
+  "number": 14451,
+  "kind": "issue",
+  "title": "`POST /packages/:id/duplicate` 对一个启动中的代码包返回 `success:false, copiedCount:0, failedCount:0`（空 base）—— ADR-0070 D4「复制成可写 base」对代码包是否本就该拷贝其对象？",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T07:29:06Z",
+  "updated_at": "2026-09-06T01:58:29Z",
+  "closed_at": "2026-09-05T20:29:07Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14451",
+  "body": "两次独立的真实进程取证（PM 会话与 objectui#7177 的 dev，各自的 `os dev` 启动）都撞到同一现象，先记录待 triage，不预设修法。\n\n## 实测\n\n`examples/app-todo`，`os dev --seed-admin`，登录后：\n\n```\nPOST /api/v1/packages/com.example.todo/duplicate  {\"targetPackageId\":\"com.acme.dupbase\",\"targetName\":\"Dup Base\"}\n→ HTTP 200\n  {\"success\":true,\"data\":{\"success\":false,\"copiedCount\":0,\"failedCount\":0,\"targetPackageId\":\"com.acme.dupbase\",\"copied\":[],\"failed\":[]}}\n```\n\n- 源包 `com.example.todo` 是启动中的代码包（`registerApp` 注册，`scope:'project'`），带 1 个对象、4 个 flow、视图、仪表盘、报表。\n- 包记录**建成了**：`GET /api/v1/packages` 里出现 `com.acme.dupbase`（无 `scope` 键、`writable:true`），detail 门 200。\n- 但一条元数据都没拷进去：`copied:[]`、`failed:[]`——这是 objectui `describeDuplicateFailure` 文档里写明的 EMPTY 臂（\"nothing was copied … rows may be outside this caller's scope\"）。\n- 复制出的 `manifest` 里还嵌了一份源包的 `manifest`（`manifest.manifest.id === 'com.example.todo'`）——复制的是摊平后的源 bundle。\n- showcase 上同一调用因 #14442 的循环引用在 `sys_packages` 持久化处直接失败，无法对照。\n\n## 为什么值得一张卡\n\n`packages/rest/src/package-routes.ts:816-818` 与 objectui `packages-io.ts` 的注释都把 duplicate 描述为 **ADR-0070 D4 的「duplicate base」手势：只读的代码包由此变成可定制的起点，对象重命名空间、包内引用服务端重写**。如果对代码包的对象本就不拷（只拷 `sys_metadata` 里的 DB 行），那这条手势对它的主要用例是空的，文档与实现至少有一方不对；如果本该拷，那就是缺陷。两种结论都需要一个 pin：对一个启动中的代码包 duplicate 后 `copiedCount` 等于其对象数（或明确的 422 拒绝，说明该手势只适用于 DB base）。\n\n## 不做的事\n\n不在 objectui 侧绕：客户端已经按 EMPTY 臂正确报错，问题在服务端语义。"
+}

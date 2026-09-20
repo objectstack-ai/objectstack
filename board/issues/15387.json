@@ -1,0 +1,37 @@
+{
+  "number": 15387,
+  "kind": "issue",
+  "title": "`GET /auth/me/localization` answers `currency: null` / `timezone: null` for every authenticated caller — the current-user resolver assembles no localization",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "i18n",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T14:03:07Z",
+  "updated_at": "2026-09-06T01:59:19Z",
+  "closed_at": "2026-09-05T08:24:37Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15387",
+  "body": "Found while executing #14788 (PR #15386), out of that card's scope (the ruling touched `locale` only; `currency` / `timezone` were to stay unchanged — and they are unchanged, which is the defect).\n\n## What\n\n`packages/plugins/plugin-hono-server/src/current-user-endpoints.ts` — the `/auth/me/localization` handler returns `currency: execCtx.currency ?? null` and `timezone: execCtx.timezone ?? null`, and its comment says the resolved regional defaults \"ride on the request ExecutionContext (ADR-0053)\". But the context these endpoints resolve comes from `makeExecutionContextResolver` in the same file, which returns `{ userId, tenantId, email, positions, permissions, systemPermissions, tabPermissions, posture, isSystem, org_user_ids, accessible_org_ids }` — no `timezone`, no `currency` (and, before PR #15386, no `locale`). The dispatcher's shared assembler (`packages/core/src/security/assemble-execution-context.ts`) is what fills those three from `resolveLocalizationContext`; this resolver never calls it.\n\nSo for every authenticated caller the endpoint answers `currency: null, timezone: null`, whatever the `localization` settings say. objectui reads `currency` off this endpoint (`apps/console/src/languageSeed.ts`, `LocalizationFetchProvider.tsx`) — the console's regional formatting seed is fed nulls.\n\n## Re-check\n\n- `git grep -n \"currency\\|timezone\" -- packages/plugins/plugin-hono-server/src/current-user-endpoints.ts` — the only occurrences are the handler's two `?? null` reads and its comment; nothing assigns them on the resolved context.\n- PR #15386's pin `current-user-endpoints-localization.test.ts` asserts the response `{ authenticated: true, currency: null, locale: 'zh-CN', timezone: null }` on a fixture with no localization plumbing — it pins the SHAPE, and its header records this measurement.\n\n## Likely fix (plugin-hono-server, `domain:cli`)\n\nResolve `resolveLocalizationContext({ ql, settings, tenantId, userId })` (already imported for the `locale` rung since #14788) once in the handler and answer `currency` / `timezone` from it, so the endpoint's `timezone` / `currency` derive from the same cascade the dispatcher's `execCtx` uses. Pin the two values the way #14788 pinned `locale`. Whether `docs/qa/platform-checklist/areas/access-security.json` (\"nulls legal\") should keep saying nulls are legal is for the fixer to decide.\n\nBlocked-by: none. Related: #14788, PR #15386, ADR-0053."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 16133,
+  "kind": "issue",
+  "title": "[finding] `PluginSchema` has zero runtime callers — `kernel.use()` admits any object with `name` + `init` + a semver, so the kernel's declared plugin contract is enforced nowhere",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:53:38Z",
+  "updated_at": "2026-09-06T03:37:43Z",
+  "closed_at": "2026-09-06T03:37:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16133",
+  "body": "Filed by the **triage seat** from a measurement the #15638 implementer handed back rather than filing blind (report `5555111376`, dispatch instruction 5 — \"the seat decides whether it becomes a card\"). Every reading below was **re-taken independently by triage** on `origin/main` @ `932acc3d`, 2026-09-06T02:48Z, and reproduces.\n\n⛔ No remedy is prescribed and no shape is chosen — this card records the gap. ⛔ Triage does not claim, dispatch, write code or merge.\n\n## The finding\n\n`packages/spec/src/kernel/plugin.zod.ts` declares `PluginSchema` with a **closed** `type` set (`CORE_PLUGIN_TYPES` spread into an enum) and an authorable surface (`kernel/Plugin:staticPath` is in `packages/spec/authorable-surface/kernel.json`).\n\n**Nothing in production ever parses it.**\n\n| reading | result |\n|---|---|\n| `PluginSchema.parse` / `.safeParse` call sites, all of `packages/` | **2 files, both tests** — `packages/core/src/plugin-type-closed-set.test.ts`, `packages/spec/src/kernel/plugin.test.ts` |\n| CONTROL — `ObjectSchema.parse` / `.safeParse` call sites | **14 files** ⇒ runtime schema parsing exists in this repo; the zero is real |\n\n## ⚠️ The grep that makes this look live — read this before re-measuring\n\nA bare `git grep PluginSchema -- packages` returns **20 hits and reads as a live symbol**. It is not:\n\n- **18** of them are a different, substring-colliding family in `plugin-auth` — `buildOrganizationPluginSchema`, `buildJwtPluginSchema`, `buildTwoFactorPluginSchema`, `buildPhoneNumberPluginSchema`, `buildAdminPluginSchema`, `buildOauthProviderPluginSchema`, `buildDeviceAuthorizationPluginSchema`. Every one of them **contains** the string `PluginSchema` and none of them is it.\n- **2** are prose comments in `packages/core/src/types.ts` (`:97`, `:127`) — and `:127` says *\"`PluginSchema.type` refuses it at parse\"*, which is the claim this card measures as false in production, because that parse never runs.\n\n⇒ Anyone re-checking this must grep the **call** (`PluginSchema.parse` / `.safeParse`), not the identifier.\n\n## The actual boot path, measured end to end\n\nEvery step read on `main`; no step inferred from a description.\n\n1. **Authoring boundary declares nothing.** `packages/spec/src/stack.zod.ts:724`\n   ```ts\n   plugins: z.array(z.unknown()).optional().describe('Plugins to load'),\n   ```\n   `z.unknown()` — no refusal, no shape.\n\n2. **`kernel.use()` → `PluginLoader.toPluginMetadata` is a CAST, not a copy.** `packages/core/src/plugin-loader.ts`, its own comment:\n   > `// Fix: Do not use object spread {...plugin} as it destroys the prototype chain for Class-based plugins.`\n   > `// Instead, cast the original object and inject default values if missing.`\n   ```ts\n   const metadata = plugin as PluginMetadata;\n   if (!metadata.version) { metadata.version = '0.0.0'; }\n   ```\n   ⇒ whatever the caller passed survives verbatim, plus a default version.\n\n3. **`validatePluginStructure` never reads `type`.** The whole function:\n   ```ts\n   if (!plugin.name)    throw new Error('Plugin name is required');\n   if (!plugin.init)    throw new Error('Plugin init function is required');\n   if (!this.isValidSemanticVersion(plugin.version)) throw new Error(`Invalid semantic version: ${plugin.version}`);\n   ```\n   Three checks. `type` is not among them, and neither is any other declared key.\n\n⇒ **The kernel's admission test is `name` + `init` + a parseable semver.** Everything else `PluginSchema` declares — the closed `type` set included — is declared and enforced nowhere at runtime.\n\n## Why this is a card and not a note on #15638\n\n#15638 asked whether a legacy `'ui-plugin'` arm in `plugin-hono-server` was dead code. Its premise was *\"`PluginSchema` refuses `ui-plugin`, so the arm is unreachable.\"* The implementer measured the arm **live** — it mounts routes — and the reason is this card: **there is no refusal because there is no parse.**\n\n⭐ The sharpest single reading, from the #15638 probe (same value, same run): `defineStack` **accepts** a plugin declaring `type: 'ui-plugin'` while `PluginSchema.safeParse` on that same value returns `success: false, code: 'invalid_value'`. Two contracts, one value, opposite verdicts.\n\n⇒ This is the ADR-0049 / Prime Directive #10 shape (\"declared ≠ enforced\") **one level above** #15638, and it is the root cause of that card's falsified premise. #15638's three candidate shapes (normalize-in-place, delete, or enforce at `kernel.use()`) all have to be read underneath the answer to this one.\n\n## ⛔ What is NOT claimed\n\n- ⛔ **No severity beyond the grade below, and no remedy.** Whether the repair is enforcing `PluginSchema` at `kernel.use()`, enforcing only the closed `type` set, tightening `stack.zod.ts`'s `z.unknown()`, or accepting the looseness and retiring the schema's enforcement claims — is not decided here. Enforcing would **begin refusing plugin objects the runtime accepts today**, which is a contract decision with its own review.\n- ⛔ **Not measured: whether any plugin in the wild relies on the looseness.** The #15638 round measured that `staticPath` and `type: 'ui'` have **zero in-repo producers** (6 `staticPath` hits, all of them the hono arm itself, two generated JSON baselines, and the declaration) — so the population this seam serves is authored **outside this repo** and was not surveyed.\n- ⛔ **Not swept: whether other kernel-side schemas share this state.** Scoped to `PluginSchema`, which is where the #15638 measurement crossed it.\n- ⛔ `kernel.use(plugin as any)` is a shipped in-repo pattern (`packages/cli/src/utils/schema-migrate.ts:346`, `:349`), so even the TypeScript-level check is not universal on the boot path — recorded, not graded.\n\n## Dedupe\n\n⚠️ **Stated honestly, not dressed up.** Triage's `search_issues` `in:body` channel is not trustworthy for absence in this repo (it has returned 0 for terms verifiably present), so ⛔ **this card does not claim an exhaustive enumeration.** What was done: the #15638 thread's own dedupe (4 adjacent cards — #14609, #10869, #15219, #14473 — none naming this), plus a label-filtered read of the open `domain:engine` / `domain:cli` backlog for a plugin-admission card, which found none. **If a duplicate surfaces, close this one.**\n\n## Refs\n\n#15638 (the card whose premise this falsifies; its report `5555111376` carries the probe) · #14609 · ADR-0049 · Prime Directive #10"
+}

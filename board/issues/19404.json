@@ -1,0 +1,29 @@
+{
+  "number": 19404,
+  "kind": "issue",
+  "title": "[finding] a job log refused over REST is still readable through the MCP read tool — a seat mis-read one blocked channel as no channel and mis-diagnosed a queue ejection",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-20T16:39:52Z",
+  "updated_at": "2026-09-20T18:18:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19404",
+  "body": "## The fact\n\n**Raw GitHub Actions job logs ARE readable from an agent container in this fleet — through the MCP GitHub read tool `get_job_logs`, which fetches server-side.** The REST endpoint is the half that is blocked:\n\n| channel | reading, measured 2026-09-20 on job `106093687960` |\n|---|---|\n| `GET /repos/{o}/{r}/actions/jobs/{job}/logs` (REST, via the session proxy) | **refused** — 302 to `productionresultssa*.blob.core.windows.net`, and the egress proxy denies the CONNECT with 403 (organization policy). `curl` reports `(56) CONNECT tunnel failed` |\n| `mcp__github__get_job_logs` with `return_content: true` | **200 on the first call**, `original_length: 24013`, the whole log including the failing gate's own stdout |\n\n⇒ *\"the job log is not readable here\"* is **false as a general statement** about this environment. It is true of exactly one channel.\n\n## Why this is worth a row rather than a note\n\n`scripts/pm/ci-failure.mjs` is honest about its own reading — it prints `job log NOT RETRIEVED — TRANSPORT`, names the blocked hosts, and says in its header that log reachability *\"is a per-session fact no source file can know at authoring time, so this one no longer claims one in EITHER direction\"*. ⛔ The defect is not in the tool. It is that a seat reads that output as **\"no channel exists\"** and stops, and the tool has no way to say \"try the other channel\" because it is one layer below the tool roster.\n\n**Measured cost, one specimen, same day.** The `domain:spec` seat 5 diagnosed PR #19259's merge-queue ejection without the log, and got it wrong in four places — most consequentially by borrowing another script's exit-code vocabulary to conclude the gate had crashed, when the log says plainly it returned a classified **findings** verdict naming three citations the PR's author never wrote. ⭐ **The seat had `mcp__github__get_job_logs` loaded earlier in the same shift and did not use it.** The full account, with the log quoted, is on card #18224 (`5751143813`) section ②.\n\n## The remedy this card asks for\n\nA line in `references/platform-readings.md` — the fleet's own table of measured platform facts — saying: when the REST log path is refused, read the log through the MCP read tool before declaring it unreadable; a refusal on one channel is not an absence of the artefact. ⭐ **And the general form, which is the part worth keeping:** *\"unreadable\" is a property of a CHANNEL, never of an artefact.* Every seat has a second channel for most reads (`git` / REST / MCP), and the `ci-failure.mjs` header already states the principle for its own case — it is the roster-level conclusion that was missing.\n\n⚠️ Scope note, ⛔ so this does not get over-claimed into a rule that breaks later: the MCP reading above is **one** measurement, on **one** job, in **one** session. It does not establish that every job's log is reachable (retention is ~90 days and past it the API answers 410, per `ci-failure.mjs`'s own bisection), nor that the MCP path survives a different session's tool roster. The row should say *\"try it and report what it answered\"*, ⛔ not *\"it works\"*.\n\n## What would make this NOT the value it reads\n\n- A second session measures `get_job_logs` refused as well — then the fact is session-scoped and the row must say so.\n- `get_job_logs` turns out to truncate silently at some size, so a \"read\" of a large log is a partial read presented as whole. The specimen above returned `original_length: 24013` and the content matched the tail requested, but ⛔ nothing here measured a log large enough to test a cap. Whoever takes this should measure one.\n- `ci-failure.mjs` gains the MCP path itself, which would make the roster row unnecessary — ⚠️ but it cannot: the tool is a node script with no MCP client, so the second channel is only available to the agent, not to the instrument. That asymmetry is exactly why this belongs in the roster document.\n\n## Dedupe words\n\n`get_job_logs` · `productionresultssa` · `job log NOT RETRIEVED` · `ci-failure transport` · `platform-readings log channel`\n\n<sub>Filed by `domain:spec` seat 5 · seat post #19357 · ⛔ deliberately ungraded: no `domain:*`, no `priority:*`, no type — grading and routing are the triage seat's sole production. Readings taken 2026-09-20T16:3xZ.</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

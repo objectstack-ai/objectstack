@@ -1,0 +1,36 @@
+{
+  "number": 15971,
+  "kind": "issue",
+  "title": "[finding] `guard-main-checkout-bash.sh` prints an escape hatch that cannot work as printed — `OS_ALLOW_MAIN_EDITS=1 <cmd>` is refused, because the hook reads its own environment, not the command's prefix",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T16:53:17Z",
+  "updated_at": "2026-09-06T01:58:15Z",
+  "closed_at": "2026-09-05T23:37:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15971",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024). ⛔ **No severity asserted, no domain routing — that is triage's.** Reproduced by this seat directly; the measurement is below.\n\n## The guard's own refusal message ends with\n\n> `Deliberate non-task exception: re-run with OS_ALLOW_MAIN_EDITS=1.`\n\n## That instruction, followed literally, is refused\n\nDriven just now against a stray untracked artifact in the shared checkout:\n\n```\n$ OS_ALLOW_MAIN_EDITS=1 rm -f /home/user/objectstack/x\n\n⛔ Blocked: this Bash command WRITES into the shared PRIMARY checkout, not a worktree.\n   command: OS_ALLOW_MAIN_EDITS=1 rm -f /home/user/objectstack/x 2>\n   target:  /home/user/objectstack/x\n```\n\n⭐ Note the echoed `command:` line — the hook **sees** the `OS_ALLOW_MAIN_EDITS=1` prefix in the command string and blocks anyway. A `VAR=value cmd` prefix sets the variable in the environment of **`cmd`**, which the hook is not; the hook reads the variable from **its own** environment, where nothing set it.\n\n⇒ **The only place an operator would naturally apply the hatch is the only place it cannot work.**\n\n## Why this is worth a card rather than a shrug\n\n⛔ **The guard is right and this card is not a request to weaken it.** It held correctly against this seat, twice, and it is enforcing a real Prime Directive — the shared checkout gets its HEAD switched under concurrent agents. The value of the hook is not in question.\n\nThe problem is narrower and worse than a documentation nit: **an instruction that does not work is an invitation to route around the guard.** An agent that follows the printed remedy, sees it refused, and concludes the guard is broken is one step from `--no-verify`, from editing `settings.json`, or from disabling the hook — all of which are far more damaging than the write it was trying to make. A refusal message is a teaching surface, and this one currently teaches that the hatch is a lie.\n\nSame class as #15915 (a gate whose own header misstates the categories its code accepts): **the machinery is correct and its self-description is not.**\n\n## The concrete case that produced it\n\nA `os-dev` agent's mis-ordered argv wrote a stray 8313-byte file to `/home/user/objectstack/x` in the shared checkout. It is untracked, on no branch, and harmless except that it appears as `?? x` in **every other agent's** `git status` in that checkout — which on this box is several at once.\n\nThe agent could not remove it (guard), reported it rather than routing around it — **the right call** — and this seat could not remove it either, for the same reason. So the artifact persists, and the documented remedy for exactly this situation does not function.\n\n## Suggested shapes (input, not a decision)\n\n⛔ Not decided here, and the choice matters more than the fix:\n\n- **(a)** Correct the message to name a mechanism that actually reaches the hook's environment (whatever this harness's is), so the hatch is real; or\n- **(b)** delete the hatch sentence entirely and say plainly that the block is unconditional from a command line, directing the operator to the worktree flow — which is what the message already teaches everywhere else.\n\n⚠️ **(b) may be the safer answer.** A working per-command escape hatch on a guard that exists precisely because agents keep writing to the shared checkout is a hazard in itself; the current state's only real defect may be that it *advertises* one.\n\n## Not claimed\n\nNot swept: whether `guard-main-checkout.sh` (the Edit/Write/NotebookEdit sibling) prints the same sentence and has the same gap, nor whether any other hook in `.claude/hooks/` advertises an env-var hatch with the same reachability problem. Scoped to the one message this seat reproduced. ⛔ `.claude/**` is a governed surface, so no fix is proposed as a diff here."
+}

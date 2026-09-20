@@ -1,0 +1,36 @@
+{
+  "number": 15658,
+  "kind": "issue",
+  "title": "`scoreMetadata` swallows a `lintConfig` crash into `issues: []` — a stack whose linter never ran scores 100 / A / `valid: true`, indistinguishable from a perfect one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T01:52:48Z",
+  "updated_at": "2026-09-06T01:58:48Z",
+  "closed_at": "2026-09-05T14:08:39Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15658",
+  "body": "Found by the `os-dev` seat while implementing #15578 (the sibling defect one module over). Out of scope there and deliberately not folded in: different file, different function, and #15578's scope is fenced to the throwing-generator path in `metadata-eval.ts`. Unassigned and bare, for triage.\n\n## What\n\n`packages/cli/src/lint/score.ts`, in `scoreMetadata` (located by content, not by line):\n\n```ts\n  // 2) Lint (naming/labels/structure + data-model conventions).\n  let issues: LintIssue[] = [];\n  try {\n    issues = lintConfig(normalized) as LintIssue[];\n  } catch {\n    // A linter crash shouldn't mask the schema verdict — treat as no lint data.\n    issues = [];\n  }\n```\n\n`issues` is the sole input to everything downstream of it:\n\n```ts\n  const penalty =\n    schemaErrors.length * SCORE_WEIGHTS.schemaError +\n    errors.length * SCORE_WEIGHTS.error +\n    warnings.length * SCORE_WEIGHTS.warning +\n    suggestions.length * SCORE_WEIGHTS.suggestion;\n\n  const score = Math.max(0, Math.min(100, 100 - penalty));\n  …\n  valid: schemaErrors.length === 0 && errors.length === 0,\n```\n\n⇒ when the linter crashes on a schema-valid stack, `errors`/`warnings`/`suggestions` are all empty, `penalty` is 0, and the verdict is **100 / grade `A` / `valid: true`, `counts` all zero, `issues: []`** — byte-for-byte the verdict a genuinely clean stack gets. Nothing in `MetadataScore` records that half the rubric never ran.\n\nThe comment states the intent honestly and the intent is defensible: a linter crash should not mask the schema verdict. What is not defensible is the **score** that comes out of it. \"The linter found nothing\" and \"the linter never ran\" are different facts, and this collapses them into the better-looking one.\n\n## Why it is the same family as #15578\n\n#15578 is the eval harness stamping `scoreMetadata({})` — 100 / A / `valid: true` — on a case whose generator threw. Same shape one level down: a failure path that terminates in the *best possible* number rather than an honest one. #15578 is being repaired; this one is untouched and reaches a wider surface, because `scoreMetadata` has a second caller.\n\n## Blast radius — two published faces, not one\n\n`scoreMetadata` is called from `os lint --score` as well as from the eval harness, so the swallowed crash can surface as:\n\n- `os lint --score` reporting a clean 100 / A for a stack whose lint never ran;\n- an eval case scored 100 / A / `valid: true` and therefore **passing** its `minScore` bar (`passed` guards on `generationError`, which is not set here — this path never sets one), which then feeds `meanScore` and `ok`.\n\n⚠️ That second bullet is the part worth grading carefully: unlike #15578, this path can turn a failure into a **PASS**, not merely into a wrong mean.\n\n## Evidence, and its honest limits\n\n⛔ **Not driven.** No input was constructed that makes `lintConfig` throw while surviving `normalizeStackInput` and `ObjectStackDefinitionSchema.safeParse`, both of which walk the value first. The reading is of the code path, plus one measured fact that pins the terminal state: `scoreMetadata({})` was driven on this tree at `origin/main` `d30ccb9bd96` and returns\n\n```\n{\"score\":100,\"grade\":\"A\",\"valid\":true,\"counts\":{\"schemaErrors\":0,\"errors\":0,\"warnings\":0,\"suggestions\":0}}\n```\n\nwhich is exactly the state the `catch` produces for any schema-valid stack. ⚠️ So the open question a triager should settle first is **reachability** — whether `lintConfig` can throw on a value that already passed the two walks ahead of it. If it cannot, this is dead defensive code and the right repair may be to delete the `catch`, not to widen the report.\n\n## Prior art in the same family, both closed, both elsewhere\n\n- #10653 — packages/lint's three validators score an unparseable source CLEAN; the defect was the unread `parseDiagnostics`, not the try/catch.\n- #10123 — the two ESLint ratchet gates swallow a fatal parse error and an unparseable file scores clean.\n\n⇒ The repair shape this repo has chosen before is to make the failure **visible in the output** rather than to remove the guard. ⛔ Not a decision here — routing information for triage.\n\n## Not deduped beyond one search\n\nOne targeted search was run against this repository with a positive control in the same session (the control returned #15578, so the search was live, not silently empty). It surfaced no open duplicate.\n"
+}

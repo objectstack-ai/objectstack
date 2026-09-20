@@ -1,0 +1,35 @@
+{
+  "number": 16129,
+  "kind": "issue",
+  "title": "service-automation: the mid-park window in `persistSuspendedRun` is an unpinned limit — a concurrent per-id read can evict a live entry between the map write and the store save",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:43:58Z",
+  "updated_at": "2026-09-06T04:58:02Z",
+  "closed_at": "2026-09-06T04:55:16Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16129",
+  "body": "Filed by the `domain:services` PM seat as the follow-up the director flagged when reviewing PR #16031 (which landed as `1157e7b72`). ⛔ Priority and any further lane grading are triage's — this seat is not producing them.\n\n⚠️ **This is NOT a contract defect, and the card must not be worked as one.** It is a real but bounded limit that is currently *undocumented and unpinned*, which is the whole reason to file it: an unpinned limit becomes folklore, and the next reader cannot tell a deliberate boundary from an oversight.\n\n## The window\n\n`AutomationEngine.persistSuspendedRun` (`packages/services/service-automation/src/engine.ts`, line numbers as read at `1157e7b72` — ⚠️ **re-locate them, main moves**):\n\n| line | what happens |\n|---|---|\n| `:2037` | the entry is written into `this.suspendedRuns` |\n| `:2040` | `await store.save(...)` |\n| `:2051` | `cacheOnlySuspensions` is added **only if that save failed** |\n\n⇒ Between `:2037` and the resolution of `:2040`, the entry is in the map but is **not yet** marked cache-only. A concurrent per-id read that consults the store, finds no row (the save has not landed), and takes the eviction path #16031 introduced will **evict a live entry mid-park**.\n\n## Why it is bounded — the part that must survive into whatever is written\n\n- `loadSuspendedRunStrict` is **store-first** when a store is attached, so the run stays resumable: the authoritative copy is the store's, and the evicted map entry is a cache.\n- `listSuspendedRuns()` merely **omits** the run. Under-reporting is already inside that method's declared latitude; over-reporting never was — which is exactly the asymmetry #16031 relies on.\n\n⇒ ⛔ Do not \"fix\" this by widening the cache-only marking, adding a lock, or moving the save before the map write, unless a measurement shows the harm escapes those two bounds. The likely correct output is **one of**:\n\n- a comment on `evictConsumedSuspension` (and/or at `:2037`) naming the window and why it is inside the declared latitude, or\n- a **control pin** that drives the interleaving and asserts the bounded outcome — the run still resumable through the strict loader, the listing merely omitting it.\n\n⭐ A pin is the stronger form, because it makes the boundary **executable** rather than a claim in a comment that later drifts. Whoever takes this should say which they chose and why.\n\n## What is NOT established\n\n⛔ This seat has **not** measured the window — it is the director's reading from the #16031 review, recorded here rather than re-derived, and re-measuring it is step 1 for whoever takes this. In particular it is not established that the interleaving is reachable on any shipped composition; if it turns out not to be, **that is a finding and belongs in the pin's own text**, not a reason to close the card silently.\n\n## Deliberately separate\n\n- **#15832** — Note 1 landed in #16031; Note 2's store half is PR #16128. ⛔ This is neither, and it was explicitly kept out of that card so its two notes did not become three.\n- **#16033** — the contract half (`ObjectQL.delete` declares `Promise<any>` while `IDataDriver.deleteMany` declares `Promise<number>`). Unrelated mechanism.\n\nRefs: #15832 · #16031 · PR #16128"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 15330,
+  "kind": "issue",
+  "title": "Platform half of server-side list-view grouping: pin the compiled group-header and row-page queries through the existing `POST /data/:object/query` door (driver-sql + in-memory)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T12:04:32Z",
+  "updated_at": "2026-09-06T01:59:48Z",
+  "closed_at": "2026-09-04T21:50:31Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15330",
+  "body": "Filed by the `domain:spec` seat (`session_01H2oQebDDxYKfWZusyd8GXk`, seat post #6017) at the ACCEPT of #14556's spec half (PR #15284, review comment 5540162483 on #14556), as the card's item 2 — the platform half of maintainer ruling A on objectui#7189 (2026-09-02, 「7189 A  其他同意」: grouping on a list view is server-side; the groups and every header number are query properties, rows within a group are paged). Filed unassigned for triage's `domain:*` (the fix lands in `packages/rest` / `packages/objectql` test surfaces, not in `packages/spec`).\n\nBlocked-by: #14556\n\n## What the spec half delivered (lands with PR #15284)\n\n`@objectstack/spec/ui` exports `compileListViewGroupQuery(view, { where?, depth? })` → `EngineAggregateOptions` (the group-header query: `groupBy` = `grouping.fields[].field` in nesting order, a fieldless `count` node aliased `count`, the view's column summaries mapped onto `AggregationFunction`, the four derived members as one `count_<field>` node each, `where` = the view's composed filter) and `compileListViewGroupRowsQuery(view, groupKey, { where?, limit?, offset?, orderBy?, fields? })` → `EngineQueryOptions` (the per-group row page: `{ $and: [viewWhere, …keyPredicates] }`, `$null` for the empty group), plus `deriveColumnSummary(row, summary, field)` for `count_filled` / `count_empty` / `percent_filled` / `percent_empty` on a header row. Pinned on the 186-row five-unit fixture (86/61/31/7/1 in both row orders) against a test-local reducer — not yet against a platform face.\n\n## The door already exists — no new route, no new wire shape\n\nMeasured on `origin/main` `6e67b86c` (2026-09-04): `POST /data/:object/query` (`packages/rest/src/rest-server.ts:7947-7994`) hands a body carrying `groupBy` / `aggregations` to `protocol.findData` (`packages/metadata-protocol/src/protocol.ts:10293-10322`), which routes it to `engine.aggregate` and answers `{ object, records, total, hasMore }` with the header rows as `records`; `client.data.query()` (`packages/client/src/index.ts:5321-5330`) already posts there; the RPC face declares `method: 'aggregate'` with an `EngineAggregateOptions` body (`data-engine.zod.ts:720-725`). The seat's earlier claim that no aggregate door existed was false and is corrected on #14556 (5538128398). So this card mints nothing.\n\n## Deliverable\n\n1. A REST-level (or dogfood) pin that posts the **compiled** header query and the compiled row page of the spec fixture's list view through `POST /data/:object/query` and asserts the five header rows (`count` 86/61/31/7/1) in both row orders, a two-level `groupBy`, the `depth: 1` outer level, the empty group via `$null`, and one derived summary (`count_filled` of a nullable field) — on **driver-sql** and on the **in-memory** tier (the engine's dispatch at `packages/objectql/src/engine.ts:13323` decides which face runs; both must agree).\n2. A pin that `limit` / `offset` on the row page slice inside one group (86 rows page as `[50, 36]` with 86 distinct ids).\n3. If any face disagrees with the spec's reducer, the face is the contract to fix (the spec pins state the ruled semantics of `aggregation-conformance.ts`), reported back on #14556 before changing a spec pin.\n\n## Not this card\n\nobjectui's `plugin-grid` consuming the header rows and stopping page-scoped grouping — objectui#7189 (card item 3; unblocked by a spec publish carrying `view-grouping-query`). Any `orderBy` / `limit` on the aggregate verb for high-cardinality groupings — a separate engine-contract card if ever needed (recorded as a known limit on `GroupingConfigSchema`).\n\nDedupe (2026-09-04): the seat's reads of the lane queue and the open PR list carry no card for a REST/dogfood pin of the grouping queries; the nearest neighbours are #14556 (the spec half) and objectui#7189 (the ui half)."
+}

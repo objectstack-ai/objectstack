@@ -1,0 +1,35 @@
+{
+  "number": 11809,
+  "kind": "issue",
+  "title": "Both worktree-first guards treat ANY git-dir path containing `/worktrees/` as a linked worktree — a primary checkout under `~/worktrees/` is unguarded from subdirectories",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T17:34:38Z",
+  "updated_at": "2026-09-05T16:12:19Z",
+  "closed_at": "2026-09-05T16:03:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11809",
+  "body": "Found while authoring the self-test matrix for `guard-main-checkout.sh` (#11800). Filing rather than fixing: #11800 is explicitly scoped to coverage and rules out editing the hook.\n\n## The hole\n\nBoth worktree-first guards decide \"am I in a linked worktree?\" by **substring-matching the git-dir path**:\n\n```sh\ngitdir=\"$(git -C \"$d\" rev-parse --git-dir 2>/dev/null)\" || exit 0\ncase \"$gitdir\" in\n  */worktrees/*) exit 0 ;;   # <- treats ANY path containing /worktrees/ as a linked worktree\nesac\n```\n\n- `.claude/hooks/guard-main-checkout.sh` (the Edit/Write/NotebookEdit half)\n- `.claude/hooks/guard-main-checkout-bash.sh` line 339, `return 1` in the same shape — its header line 29 states the idiom outright: `git-dir matches */worktrees/*  (a linked worktree)`\n\nThat is not a test for a linked worktree; it is a test for the seven characters `worktrees` appearing anywhere in the git-dir path. A **primary** checkout that lives under a directory named `worktrees` — e.g. the ordinary layout `~/worktrees/objectstack` — therefore reads as a linked worktree and both guards allow edits into it.\n\n## What makes it a defect rather than a boundary\n\n`git rev-parse --git-dir` prints a **relative** path (`.git`) at the repo toplevel and an **absolute** one from any subdirectory. So the same unguarded primary checkout gets opposite verdicts by depth:\n\n```\nPRIMARY toplevel:                       .git\nPRIMARY subdir pkg:                     /tmp/XXX/mainrepo/.git\nODD (path has /worktrees/) toplevel:    .git\nODD subdir pkg:                         /tmp/XXX/worktrees/oddrepo/.git\n```\n\nVerdicts measured against those exact fixtures, `guard-main-checkout.sh`:\n\n| payload `file_path` | verdict | correct? |\n| --- | --- | --- |\n| `$ODD/README.md` (repo root) | BLOCK (rc=2) | yes, by accident — gitdir was relative |\n| `$ODD/pkg/x.ts` (subdirectory) | **ALLOW (rc=0)** | **no — unguarded primary checkout** |\n| `$MAIN/README.md` (control) | BLOCK (rc=2) | yes |\n| `$MAIN/pkg/x.ts` (control) | BLOCK (rc=2) | yes |\n\n`guard-main-checkout-bash.sh` fails open on the same fixture, same asymmetry:\n\n| payload `command` | verdict |\n| --- | --- |\n| `sed -i s/a/b/ $ODD/pkg/x.ts` | **ALLOW (rc=0)** |\n| `echo x > $ODD/pkg/x.ts` | **ALLOW (rc=0)** |\n| `sed -i s/a/b/ $ODD/README.md` | BLOCK (rc=2) |\n| `sed -i s/a/b/ $NORM/pkg/x.ts` (control) | BLOCK (rc=2) |\n\nA guard whose verdict on one checkout flips with the *depth of the edited file* is not expressing a design posture. This is the quiet failure direction the #11800 card names: no error anywhere, edits into a shared primary checkout simply start being allowed.\n\n## Reproduction\n\n```sh\ntmp=\"$(mktemp -d)\"; ODD=\"$tmp/worktrees/oddrepo\"; mkdir -p \"$ODD/pkg\"\n( cd \"$ODD\" && git init -q . && git config user.email s@e.com && git config user.name s \\\n  && : > README.md && : > pkg/x.ts && git add -A && git commit -qm i ) >/dev/null 2>&1\njq -nc --arg f \"$ODD/pkg/x.ts\" '{tool_name:\"Edit\",tool_input:{file_path:$f}}' \\\n  | .claude/hooks/guard-main-checkout.sh; echo \"rc=$?\"   # rc=0 — allowed into a PRIMARY checkout\n```\n\n## Why 121 cases missed it\n\n`guard-main-checkout-bash.selftest.sh` builds its fixture as `mainrepo` / `wt` / `plain` under a plain `mktemp -d`. No case places a repo under a path segment named `worktrees`, so the substring idiom is never separated from the structural question it stands in for.\n\n## Fix shape (not applied here)\n\nThe structural test is that a linked worktree's git-dir differs from its git-**common**-dir, which is true regardless of path spelling and regardless of relative-vs-absolute printing:\n\n```sh\ngd=\"$(git -C \"$d\" rev-parse --absolute-git-dir 2>/dev/null)\" || exit 0\ncd=\"$(git -C \"$d\" rev-parse --git-common-dir 2>/dev/null)\" || exit 0\n[ \"$gd\" != \"$(cd \"$(dirname \"$cd\")\" && pwd)/$(basename \"$cd\")\" ] && exit 0   # linked worktree\n```\n\n`--absolute-git-dir` alone also removes the depth asymmetry, since it never prints a relative path. Any fix wants a case in both matrices pinning the `worktrees`-segment primary checkout as BLOCK at **both** repo root and subdirectory.\n\n## Blast radius\n\nFour files: `guard-main-checkout.sh` and `guard-main-checkout-bash.sh` in this repo, and the same two in `objectui` — `guard-main-checkout.sh` is byte-identical across the two repos (sha256 `217a8b1c2d9ff9009e2db0f54d0380c1202f16f7fb99698f419ce46d19a7d2b3`), so a fix here must be mirrored there.\n\nThe self-test matrix landing for #11800 pins today's ALLOW in a section explicitly labelled a known hole pointing at this issue, so CI stays green and the fix flips those two cases to `block` mechanically.\n\nAdjacent but distinct from the `split_segments()` escaped-quote family (#11131, #11738, #11804) — that class is about shell parsing; this one is about the worktree test itself, and it is the only class shared by both guards.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

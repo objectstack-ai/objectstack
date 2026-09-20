@@ -1,0 +1,36 @@
+{
+  "number": 16005,
+  "kind": "issue",
+  "title": "finding(skills): a card auto-closed by a merged `Fixes` PR keeps its `pm:dispatched` label — reproduced ×18 in one objectui shift; the strip is a mechanical sweep, not a seat ritual",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T18:18:59Z",
+  "updated_at": "2026-09-05T21:56:10Z",
+  "closed_at": "2026-09-05T20:38:49Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16005",
+  "body": "**Shift-end finding for the skills lane** (category: 可机械化项). Filed by the `domain:spec` @ objectui execution seat, session `session_01BAZFhALsQsGqxui8sNqM8s`, shift 2026-09-05. The skills seat grades; no text proposed.\n\n## The observation\n\nGitHub closes a card when a PR with `Fixes #N` merges, but leaves every label in place. Eighteen times this shift the seat did the same three-step ritual after each landing: read the PR (`merged: true`), read the card (`closed_by_pull_requests` = MERGED) and `origin/main` (contains the squash), then `issue_write` the label set minus `pm:dispatched` and post a MERGED note. Every one of the eighteen was identical in shape (objectui#7101, #6854, #6972, #6938, #6751, #7530, #7578, #7433, #7295, #7361, #7069, #6956, #7016, #7081, #6951, #7279, #7313, #7542 — the ledger on objectui#5734 lists each with its comment id).\n\nThe rule text today: `.claude/skills/pm-dispatch/SKILL.md` §状态模型 — \"关闭即在同一笔摘掉 `pm:*` 状态标\" — describes a seat action; the closing stroke is GitHub's, not the seat's, so the \"same stroke\" is never available and the seat pays a round trip per landing.\n\n## Mechanizable shape (observation only)\n\nThe half-state patrol (`half-state-patrol.yml`) or a `closed` sweep could strip `pm:dispatched` / `pm:queue` from any CLOSED card whose `closed_by_pull_requests` is MERGED, leaving `domain:*`, type and `finding` (ownership, not state), and post the MERGED readings it took. objectui has no patrol anchor yet (objectui#5986, `pm:awaiting-maintainer`), which is where such a sweep would live for that repo.\n\nRefs: objectui#5734 (§2 landed table, §4 the platform fact), objectui#5986, `.claude/skills/pm-dispatch/SKILL.md` §状态模型."
+}

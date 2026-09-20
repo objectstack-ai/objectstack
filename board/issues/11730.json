@@ -1,0 +1,33 @@
+{
+  "number": 11730,
+  "kind": "issue",
+  "title": "[Decision] `check:platform-checklist` has no reporting channel — it is deliberately not CI-wired, so its red is visible to nobody until a runner reads it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T14:15:40Z",
+  "updated_at": "2026-09-06T03:56:52Z",
+  "closed_at": "2026-09-06T03:55:40Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11730",
+  "body": "Filed by the `domain:devx` PM seat (session `session_015ahemw8RcTgqtxrj15PEZx`) for maintainer decision.\n\n⛔ **本席的流程失误**：这个残留问题本班一直只写在轮次报告和座位贴里，**从未立卡、也从未进 `needs-user-decision` 队列**。原始卡 #11421 讲的是「红本身」，那部分已修复并关闭；**策略这一半没有承载它的卡**，所以你的决策队列里看不到它。已修正。\n\n## 事实（已测，非推断）\n\n`.github/workflows/lint.yml:1205-1211` 自己记录着这个决定：\n\n> by MAINTAINER DECISION it is NOT wired into CI — it runs on a periodic manual cadence\n\n后果不是假设，本班撞到两次：\n\n1. **#11421** —— `check:platform-checklist` 在 `main` 上**红了**（`coverage.json` · manifest UNCLASSIFIED）。没有任何 lane 因此变红，因为**没有渠道**。红是被一个碰巧跑了它的 dev 发现的。已修复并双向验证（#11524 → `cd932772`，exit 1 → exit 0）。\n2. **#11420 / #11138** —— 两张清单卡的 dev 都**主动跑了这个 gate**（它是该 area 自己的 gate），并如实记录了判词。同样：**纪律，不是机制**。\n\n⇒ 这个 gate 的正确性目前由「dev 恰好想到要跑它」维持。本班三次都想到了，那说明纪律好，不说明机制好。\n\n## 要决定什么\n\n⚠️ **这是一个策略选择，不是修复。** 那条 MAINTAINER DECISION 是你的，本席不推翻它，只请求把「红被谁看见」这一半补上：\n\n| # | 路线 | 代价 |\n|---|---|---|\n| **A** | **维持现状**（手动周期）—— 并在卡片/skill 里写明「红可能已存在数日」，让读者知道绿不代表刚验过 | 零成本；红的可见性仍为零 |\n| **B** | **接入 CI 但不阻塞**（`continue-on-error` 或独立 job，只报告不 gate） | 每次 CI 多一次运行；⚠️ 需先测它在 CI 环境里是否稳定 |\n| **C** | **定期任务**（cron/Routine）跑它，红则开 issue | 不拖慢 PR；把「谁看见」变成机制；需要一个 owner 承接开出的 issue |\n| **D** | **完全接入 CI 并阻塞** | ⛔ 与你已记录的决定直接冲突，本席不建议 |\n\n## 本席的建议（不是裁决）\n\n**C**。它是唯一同时满足「不违反你不接 CI 的决定」和「红有渠道」的路线——你当初不接 CI 的理由（不该拖慢每个 PR）在 C 下完全成立，而 A 只是把现状写下来、并不改变红对所有人不可见。\n\n⛔ 在你选之前本席不动这条。若你选 A，我会把「绿不代表刚验过」这句写进 checklist 的 RUNNER 文档并关掉本卡。\n\nRefs：#11421（红本身，已修复关闭）· #11420 · #11138 · `lint.yml:1205-1211`"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 15072,
+  "kind": "issue",
+  "title": "plugin-sharing: expand the ruled `field` sharing recipient per record — `expandRecipient` reads the user field on the matched row, re-materialises on that record's own update, `position` stays rule-wide (services half of #14103, ruling B)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T20:03:30Z",
+  "updated_at": "2026-09-05T23:24:05Z",
+  "closed_at": "2026-09-05T23:23:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15072",
+  "body": "Blocked-by: #14103\n\nFiled by the `domain:spec` seat (session_0174WZTU6XcFcS7g2kykC53i, seat post #6017) as the `domain:services` half the maintainer ruling on #14103 assigns to this seat to file (ruling 5507512776, director summon #8, 2026-09-02, verbatim 「同意」 adopting B). Contract-first: the spec half (`ShareRecipientType` gains `field`) lands first under #14103; this card dispatches when that PR is MERGED and the spec is consumable by this repo's packages. Filed with `pm:blocked` and the `Blocked-by:` line; the `domain:*` label is triage's.\n\n## Ruled scope (quoted from 5507512776)\n\n> **Ruled: B.** `ShareRecipientType` gains one member, `field`: `sharedWith: { type: 'field', value: '<user-field-name>' }` shares each matched record with the user or users named by that column on the record, honouring `multiple: true`. `expandRecipient` becomes per-record for that member only. ⛔ No `manager` member.\n\n> Execution, contract-first: … the spec seat files the `domain:services` half (`plugin-sharing` `expandRecipient` per-record expansion, re-materialisation on the record's own update, one pin that a `position` recipient still expands rule-wide) with `Blocked-by:` pointing at the spec half. **Hard precondition for the services half, carried from the confidence gap: before implementing, read the reasoning that removed the `owner` recipient type and confirm on the tree that criteria-rule materialisation re-runs on a record update that changes the recipient field; if it does not, stop and report the fork rather than adding a second materialisation trigger.**\n\n## Landing files (measured on `origin/main` `89eb997d`, 2026-09-03T20:02Z; re-verify at dispatch)\n\n- `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` — `SharingRuleService.expandRecipient` is \"the one switch that decides\" (`bu-tree-recompute.ts:26`); the `field` member is the only per-record branch: read the named column on the matched record (a user id or, with `multiple: true`, an array), expand to `sys_record_share` rows for exactly those principals; every other member keeps its rule-wide expansion.\n- Re-materialisation: a record update that changes the recipient column must re-run the criteria-rule materialisation for that record — the precondition above says to CONFIRM the existing materialiser already does this before adding anything.\n- Pins: `field` single and `multiple`; a `position` recipient still expands rule-wide (the ruling's explicit pin); a record whose recipient column is empty shares with nobody (fail-closed); the `owner`-removal reasoning cited in the PR body.\n\n## Serial constraints known at filing\n\nPR #14930 (open at 19:08Z) touches `plugin-sharing/src/index.ts`, `sharing-rule-service.ts` and a reconcile test — the same file this card lands in; the dispatching seat re-reads it. H17: on-hold #6736 declares `plugin-sharing/src/sharing-service.ts` as a `Restart-touch` trigger file — the dispatch owes it a notification if the surface reaches that file.\n\n## Refs\n\n#14103 (the ruling and the spec half) · #14234 (closed; the misleading lint hint, landed separately) · #6736 · #8241 (the AND-composition family) · ADR on the `owner` recipient removal (to be located by the implementer: the reasoning the precondition names)."
+}

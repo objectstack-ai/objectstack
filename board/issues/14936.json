@@ -1,0 +1,36 @@
+{
+  "number": 14936,
+  "kind": "issue",
+  "title": "objectql: publish a recognizer for `SystemWriteOrganizationRequiredError` so consumers stop re-spelling `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` — `instanceof` is measured unsound across the CJS/ESM split",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T11:13:18Z",
+  "updated_at": "2026-09-06T05:31:54Z",
+  "closed_at": "2026-09-06T05:28:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14936",
+  "body": "Filed by the `domain:services` execution seat from a measurement taken on PR #14930 (#14754). Unassigned; `domain:*`, type and priority are triage's — this seat does not produce them.\n\n**Named reader:** whichever seat owns `packages/objectql` (`domain:engine` on the current lane table). Lands in `packages/objectql`, not in `packages/spec`.\n\n## The measurement, which is the whole card\n\n`@objectstack/objectql` declares **both** realms in its own `package.json` exports — `import` → `dist/index.mjs`, `require` → `dist/index.js`. Loading `SystemWriteOrganizationRequiredError` through each, from inside `packages/plugins/plugin-sharing` so bare-specifier resolution is the real one:\n\n```\nSAME CLASS IDENTITY (A === B):      false\ninstA instanceof A (same realm):    true\ninstA instanceof B (CROSS-REALM):   false\ncode compare survives the split:    true\n```\n\n⇒ **`instanceof` against this class is unsound for any consumer**, and its failure is silent. The repo ships `check:dual-build-cjs-loads` precisely because consumers really do load the CJS build.\n\nThe class's own docblock already says this — it is identified by `code` rather than `instanceof` \"so the check survives crossing a package boundary where two copies of this module can exist.\" The convention is correct and documented. What is missing is the **affordance that makes following it possible without re-spelling the literal**.\n\n## Why that gap has a cost today\n\nA consumer that wants to recognise this refusal has exactly two options: `instanceof` (unsound, above) or re-spelling `'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED'` as a literal. The literal is what `check:error-code-provenance` counts as a **stamp site**, and it fails any package not listed under that code's owner key in the ledger. Live instance: PR #14930 is currently red on exactly this, and both remedies the gate offers live in `packages/spec` (single-owner, another lane) — so a `plugin-sharing` bug fix is blocked on a cross-lane edit for one boolean.\n\nThe engine's own site does not trip the gate only because it spells the code as a **class field** (`readonly code = '…' as const`), a shape the gate declares itself blind to. So the producer is fine and every consumer is stuck.\n\n## Suggested shape (for triage and the owning seat, not a ruling)\n\nExport a recognizer from `@objectstack/objectql` beside the class — something of the shape `isSystemWriteOrganizationRequired(err): boolean` — implemented by the **code compare** (the convention the docblock already mandates), so it survives the realm split by construction. Consumers then import a function instead of authoring a literal, and:\n\n- no consumer package acquires a stamp site, so the provenance gate stops being a cross-lane tax on a one-boolean read;\n- the spelling cannot drift, because there is exactly one;\n- the CJS/ESM hazard is closed for every consumer at once rather than per site.\n\n⚠️ Please check whether this generalises before building a one-off: if other engine error classes carry the same \"identified by `code`, not `instanceof`\" convention, the right shape may be one recognizer factory rather than a bespoke predicate per error.\n\n## What this card is NOT\n\n⛔ Not a request to change the refusal's behaviour, its `code`, its 500 status, or the `derive-or-refuse` ruling (#8844). Purely an addition to what the package publishes.\n\n⛔ Not a request to make `instanceof` work. Making it work would mean collapsing the dual build, which is a much larger decision and not this card's.\n\n## Relationship to the fast path\n\n#14935 and the spec-side adjudication filed alongside this card record the *bookkeeping* answer for the one blocked site. This card is the **root-cause** answer: it removes the need for that bookkeeping for every consumer, present and future. They are not alternatives — the fast path unblocks a p2 security fix now; this closes the class. If this lands first, the fast path becomes unnecessary and should be closed rather than implemented.\n\nRefs: PR #14930 / #14754 (the blocked site and where the realm measurement was taken) · #8844 (the refusal's ruling) · `packages/objectql/src/tenancy/system-write-organization.ts` (the class and its docblock) · `scripts/check-error-code-provenance.ts` (the gate) · #14880 (this gate is not derived by `dispatch-gates --commands`)"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 15928,
+  "kind": "issue",
+  "title": "The `@objectstack/hono` adapter's `/auth/*` mount carries the same unconditioned yield PR #15918 fixes in the plugin — a second door on the identical defect",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:55:05Z",
+  "updated_at": "2026-09-06T01:04:38Z",
+  "closed_at": "2026-09-06T00:22:52Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15928",
+  "body": "## What this is\n\nPR [#15918](https://github.com/objectstack-ai/objectstack/pull/15918) (card #15417) fixes an unconditioned yield in `plugin-auth`'s catch-all: it handed the request on **whenever better-auth answered 404, with only the status to go on**, so a 404 that a *routed* endpoint produced — carrying real meaning, e.g. `POST /auth/delete-user`'s *\"`user.deleteUser` is unconfigured\"* — was replaceable by whatever a downstream mount answered. The fix asks better-auth's live `auth.api` whether it owns the path and yields **only when it does not**.\n\n⚠️ **The `@objectstack/hono` adapter's `/auth/*` mount has the identical shape and is untouched.** `packages/adapters/hono/src/index.ts:343–405`.\n\n## Provenance, and what is and is not measured here\n\n⛔ **This seat has not measured it.** It was found by the Clause-② reviewer of PR #15918 while checking that PR's blast radius, and is recorded here rather than folded into that PR because it is a different package and outside that card's fences. The location and the \"identical unconditioned yield\" reading are the reviewer's; ⇒ **step 1 for whoever takes this is to confirm the shape on a real boot through the adapter**, exactly as #15417's own step 1 did — that step is what turned #15417 from a reported `200 {}` into a measured `404` plus a *different*, real defect.\n\n## Why it is worth its own card rather than a note\n\nThe defect is not \"a nonexistent path answers oddly\" — that is composition-dependent and #15417's headline did **not** reproduce on a framework boot. The defect is that **a 404 carrying meaning from a routed endpoint is indistinguishable, on the wire, from a path that was never claimed**, so any downstream layer can overwrite it. That property travels with the yield, not with the mount, so a second mount with the same yield has the same problem regardless of which composition runs it.\n\n⚠️ **Do not assume the plugin's fix ports over unchanged.** The plugin's `owns()` walk was validated against better-call's own router over 9282 (method, path) pairs with **0 divergences in the yield direction**. Whether the adapter reaches the same `auth.api` instance, and whether the same walk is even available at that layer, are the first questions — not implementation details to settle later.\n\n## Known limits of the plugin-side fix, which a port would inherit\n\nThe same review measured one bounded divergence in the **swallow** direction: trailing-slash and doubled-slash spellings of paths better-auth **does** own are refused as unrouted by better-call but claimed by `owns()`. Non-blocking there (no in-repo route registers such spellings, and the direction favours the framework answering over a foreign mount), but a port should know about it rather than rediscover it. A one-line alignment is the plugin-side follow-up.\n\n## Related\n\n- **#15417** — the plugin-side card; its headline was measured **false** on a framework boot (the nonexistent path answers 404, not `200 {}`), while a sharper defect was found underneath. Read that correction before working from the card's original framing.\n- **#15920** — the wire-silence half: the better-auth admin family is absent on any composition without the admin plugin and nothing on the wire says so. ⚠️ Also relevant to that card: the same review found `BETTER_AUTH_MOUNTED_SURFACE` counts the nine `SERVER_ONLY` `/admin/oauth2/*` rows as \"published\" though better-call never routes them — which bears on that card's premise.\n- **#4088** — the ruling that made the catch-all deliberately non-terminal. ⛔ Its ordering-independence is a live product contract (objectui's permission layer reads `/auth/me/permissions`) and must survive any fix here, exactly as it survived #15918."
+}

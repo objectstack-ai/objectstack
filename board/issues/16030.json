@@ -1,0 +1,35 @@
+{
+  "number": 16030,
+  "kind": "issue",
+  "title": "Two artifact-roster gates report a green that is not PR clearance — the pnpm script names resolve to --self-test only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T20:30:37Z",
+  "updated_at": "2026-09-06T07:39:37Z",
+  "closed_at": "2026-09-06T07:25:39Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16030",
+  "body": "_Filed by [Claude Code](https://claude.ai/code) from a measurement handed back by a dev agent during the patch round on #15968._\n\n## The defect\n\n`node scripts/pm/dispatch-gates.mjs --commands` prints an **\"Artifact rosters\"** block. Two of its entries are reported GREEN while measuring nothing about the PR under review:\n\n- `pnpm check:partof-closing-keyword`\n- `pnpm check:single-claim-paths`\n\nBoth pnpm script names resolve to a `--self-test` invocation only. Their green is a statement about the **checker's own fixtures**, not about the pull request.\n\nThe invocation that actually judges a PR is the bare `node` form, and on a developer machine it does not run at all:\n\n```\nnode scripts/check-partof-closing-keyword.mjs\n  → exit 2, \"NOT WIRED … judged nothing\"\n\nnode scripts/check-single-claim-paths.mjs\n  → exit 2, \"NOT WIRED — PR_NUMBER is not set\"\n```\n\nSo a seat harvesting the roster block sees **two greens that read as PR clearance and are not**. The correct reading of those two rows is NOT MEASURED (exit 2), and the roster presents the opposite.\n\n## Why this matters more than a cosmetic mislabel\n\nThis is the failure class this repo has now hit twelve times: **a reading that cannot fail is indistinguishable from one that passed.** A `--self-test` cannot fail because of anything in the PR, so its green carries no information about the PR — yet it sits in the same harvested list, in the same shape, as gates whose green does.\n\nThe repair principle that keeps being re-derived: *name the axis your control discriminates on, and check that it is the axis that can fail.* A row in a harvested gate roster should either judge the diff or say plainly that it cannot.\n\n## Reproduction\n\n```sh\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands\n# read the \"Artifact rosters\" block; note the two pnpm rows above\n# then compare against the bare node invocations, capturing the exit code\n# BEFORE any pipe:\nnode scripts/check-partof-closing-keyword.mjs > /tmp/a.log 2>&1; echo $?   # 2\nnode scripts/check-single-claim-paths.mjs     > /tmp/b.log 2>&1; echo $?   # 2\n```\n\nThe discriminator is the echoed command in the roster: for these two rows it ends in `--self-test`, for the rows whose green is meaningful it does not.\n\n## Not asserted\n\nWhether this is by design is **not** settled here. The roster block is documented as sitting outside the reconciliation total, and it is possible the two `--self-test` entries are there deliberately as checker-health rows rather than as PR verdicts. If so, the ask is narrower: the block should distinguish a checker-health row from a PR-judging row, so a harvest cannot read one as the other.\n\nNo grading of `domain:*` or type is applied here — that is triage's call."
+}

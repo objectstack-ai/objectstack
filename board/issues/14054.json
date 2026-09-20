@@ -1,0 +1,36 @@
+{
+  "number": 14054,
+  "kind": "issue",
+  "title": "test(cli): no test boots `serve` and asserts the four cluster-driver diagnosis branches (follow-up promised in #14042)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T01:23:51Z",
+  "updated_at": "2026-09-06T02:00:16Z",
+  "closed_at": "2026-09-04T14:53:21Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14054",
+  "body": "Follow-up disclosed in #14042 (the #13330 fix), filed as promised there. This is a **coverage gap the author disclosed**, not a defect: the at-tier contract review on #14042 judged it non-blocking on merits, but required the promised follow-up to exist as an issue.\n\n## What is untested\n\nNo test boots `serve` and asserts the four cluster-driver diagnosis branches added by #14042 (`packages/cli/src/commands/serve.ts`, the cluster block in the boot method):\n\n1. **registered** — driver loaded and visible in the registry: silent (no diagnosis printed);\n2. **loaded-but-invisible** — the driver evaluated without error but the registry this boot reads does not hold it (a physical-copy split): warns, naming the split and the one-line config remedy;\n3. **not-resolvable** — prints the `undeclared` / `declared-unresolvable` classification from `createHostImporter` that the old silent `catch` swallowed;\n4. **resolved-then-crashed** — the driver package's own evaluation error is printed instead of being reported as \"not registered\".\n\nThere is also a fifth, deliberately silent case — an app on an older `@objectstack/service-cluster` with no `listClusterDrivers` accessor prints nothing (declines to claim either answer) — which is equally unasserted at boot level.\n\n## Why it is untested\n\nThe reading sits inline in a very long boot method, so there is no seam to drive the branches through without booting the whole of `serve`.\n\n## Compensating coverage (why this is p3, not a defect)\n\n- the `serve-cluster-host-resolution` source scan pins the **shape** of the block (32 tests);\n- the CLI typecheck covers the block's types;\n- the accessor invariant the reading rests on — `listClusterDrivers()` agreeing with `defineCluster()` — is pinned in both directions in `packages/services/service-cluster/src/cluster-driver-registry.test.ts` (suite 70/70 at #14042 head);\n- every branch is print-and-continue: downstream behaviour was verified unchanged in the #14042 review (an absent driver still reaches `defineCluster()`'s documented error).\n\nThe risk the gap leaves open is the one the review named: silent-print branches are the exact shape that regresses invisibly.\n\n## Done means\n\nA test (or tests) that boots `serve` (or extracts the reading into a testable seam first) and asserts each diagnosis branch fires on its condition — including that the registered case and the older-`service-cluster` case stay silent.\n\nRefs: #14042, #13330."
+}

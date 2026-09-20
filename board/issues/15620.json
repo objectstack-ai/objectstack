@@ -1,0 +1,37 @@
+{
+  "number": 15620,
+  "kind": "issue",
+  "title": "[finding] The `/meta/:type/:name/references` door's org-scope comment carries the SAME falsified `getMetaItems` clause as #15034 — and its bullet-1 harm analysis is neutralised by the gate that falsified it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T00:13:57Z",
+  "updated_at": "2026-09-06T05:09:35Z",
+  "closed_at": "2026-09-06T05:09:35Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15620",
+  "body": "Found while executing #15034 (PR #15619). ⛔ Not a defect in that PR — it is the second instance of the same class, and it is **not** mechanically fixable the way #15034's site was, which is why it is filed rather than folded in.\n\n## The claim\n\n#15034's card states the diagnostics call-site comment is *\"the only artefact in the tree that still says it\"*. **Measured on `origin/main` at `ba426b0f091`, it is not.** The falsified sentence lives at three sites:\n\n```\npackages/rest/src/rest-server.ts:4757                        the ?type= diagnostics door   <- #15034, repaired in PR #15619\npackages/rest/src/rest-server.ts:5548                        the /references door          <- THIS CARD\npackages/rest/src/rest-server-meta-read-org-scope.test.ts    the harness header            <- taken in scope by PR #15619\n```\n\nThe second one reads, inside the `[#13753]` recorded-gap block on `GET /meta/:type/:name/references`:\n\n> one request-level organization is applied to a SET of types the target's own registry flag says nothing about, and `getMetaItems` applies no gate of its own.\n\n#14683 put `organizationIdForMetaRead(request.type, request.organizationId)` inside `getMetaItems`, after the canonical fold (`packages/metadata-protocol/src/protocol.ts:6958`). The clause has been false since.\n\n## Why this is NOT the same one-line repair\n\n⚠️ The clause is **load-bearing for the recorded gap's own reasoning**, not decoration. The comment argues the door must stay unrepaired because gating on the target answers a question about the wrong type, in two directions. Its **first** direction depends directly on the falsified clause:\n\n> target `allowOrgOverride: true` ⇒ the org is named for EVERY source type, `object` / `flow` / `app` included — the unconditional tenant the read predicate exists to prevent, unioning pre-#6190 phantom rows back into a destructive-action clearance\n\nWith the inner gate in place, `findReferencesToMeta` reads each source through `getMetaItems({ type: matcher.fromType, ... })`, and the gate folds **each `matcher.fromType` separately**. A non-overridable source type therefore resolves `undefined` and the phantom union does not happen. ⇒ **the stated harm of direction 1 is gone.** Direction 2 (a non-overridable target naming nothing, so an org-scoped `view` stays invisible and \"Safe to delete.\" is still rendered) is untouched and still stands.\n\n⇒ Correcting the sentence honestly means re-deriving whether the recorded gap still holds and on which of its two legs. That is a deliberate call on #13753's territory, not a comment edit, which is why #15034's bounded in-place rule does not reach it.\n\n## What is asked\n\n1. Correct the clause so it describes today's tree.\n2. State which of the two directions still justifies leaving the door unrepaired, now that direction 1's mechanism is closed one layer down.\n\n## Boundary\n\n⛔ The reasoning here is about `packages/rest`'s comment. Whether the `/references` door should now forward an organization at all is #13753's question and is deliberately left there.\n\n## Provenance\n\nMeasured on `origin/main` `ba426b0f091` during PR #15619. Inner gates re-verified at `protocol.ts:6958` (plural) and `:7583` (singular overlay read).\n"
+}

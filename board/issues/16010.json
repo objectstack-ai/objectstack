@@ -1,0 +1,33 @@
+{
+  "number": 16010,
+  "kind": "pull_request",
+  "title": "tooling(pm): H8, H19 and H37 quote the LANDED release act, both halves",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T18:35:22Z",
+  "updated_at": "2026-09-05T20:18:19Z",
+  "closed_at": "2026-09-05T20:18:18Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-09-05T20:18:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16010",
+  "body": "Fixes #15899\n\n`scripts/pm/check-half-states.mjs` presented a shorthand inside quotation brackets at four\nplaces. In this file's register those brackets signal a verbatim\n`.claude/skills/pm-dispatch/SKILL.md` quotation — and that phrase is in no SKILL.md. Two\nmeasurements, both cheap to repeat:\n\n- `git grep` for it outside this one script: zero hits. SKILL.md and\n  `references/state-machine.md` carry 同笔摘标, a label removal on `pm:retriage` — a different\n  act on a different field, deliberately left alone here.\n- `git log -S` for it over SKILL.md's whole history, non-shallow: empty. It was the script's\n  own coinage, wearing a promise the source could not answer.\n\n## Why this is not a spelling nit\n\nThe release act is ONE act with TWO halves:\n\n> 释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。\n\nClearing the assignee is half of it; the `Release:` line is the other half. The coinage named\nonly the first, so a reader following those remedy sentences exactly produced the very shape the\nH47 row exists to report — the field cleared, no `Release:` line, an exit that left no record.\nThe sweeper's own remedy text prescribed a half-state.\n\n## What changed — one file, no predicate changes\n\nA new module constant `RELEASE_ACT_RULE` carries the landed line verbatim, kept unbroken on one\nline so it stays greppable against its source. Its text was **extracted** from the transcriptions\nalready in the tree (the `RELEASE_COMMENT_MARKER` docblock and `selfTest`'s `RELEASE_RULE_LINE`)\nand asserted equal to SKILL.md's line during the edit, never retyped — a hand-retyped quotation is\nhow a verbatim quote stops being one. Three emitted sentences now quote that constant and name\nboth halves:\n\n| Site | Row | Was |\n|:--|:--|:--|\n| full-delivery remedy | H8 (`h8MergedPrStillDispatched`) | assignee drop only |\n| release text, closed **and** unresolved branch | H19 (`h19BlockOutlivedBlocker`) | assignee drop only |\n| dispatched-residue remedy | H37 (`h37FamilyMemberDrift`) | assignee drop only |\n\nThe fourth site is the H24 header-inventory paragraph, which narrated where the coinage came\nfrom; it now reads the rule instead of the history.\n\nNo predicate changes, no new rows, and `CLAIM_COMMENT_MARKER` / `RELEASE_COMMENT_MARKER` /\n`ACCEPT_VERDICT_MARKER` / `MAINTAINER_BRIEF_MARKER` are untouched. H24's own remedy and H47's two\nlegs already quoted the landed line and were not edited.\n\n## Verification — all at head `67bec961f4`\n\n- **Self-test 2414 → 2427 cases, all passing.** Case-name set diffed: exactly two names left\n  (the two that spelled the coinage), fifteen arrived; the other two of the four pinned cases keep\n  their names with re-pointed assertions. Each re-pointed sentence gained a case that the rule\n  line is quoted UNBROKEN, one that the second half is named, and one grep-negative that fails if\n  the coinage returns.\n- **The grep-negative needle is assembled, not spelled.** The measure of this repair is\n  `git grep -c` for the coinage over this file reading zero; a literal needle in a negative case\n  would be the single hit that defeats the check it protects. It now reads zero, and the\n  neighbouring `同笔摘标` occurrences are untouched.\n- **Ablation.** The coinage was restored at H8's site on a scratch copy laid out beside a copy of\n  `scripts/invoked-as.mjs`, with an unmutated control copy at the same path. Mutation confirmed on\n  disk by occurrence counts either side (coinage 1 / landed phrase 0 on the ablated copy; 0 / 1 on\n  the control). Control: 1 failure — `H43 register`, environmental, a sibling-repo copy cannot see\n  the governed register. Ablated: 4 failures, i.e. the same environmental one plus exactly the\n  three H8 pins (`names the release act in the spelling that LANDED`, `quoting the rule line\n  unbroken`, and the grep-negative flipping to `got true, want false`). No rebuild leg applies —\n  node loads this `.mjs` source directly, there is no `dist/` in the resolution path. The tree\n  file's blob hash was identical before and after (`3161d0b325…`, equal to its HEAD blob).\n- **Gates.** `dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 32\n  commands from the committed change set; all 32 ran, all exit 0, and `--ran` reconciles:\n  `32 derived, 32 run, 0 NOT-MEASURED, 0 UNRUN`. The 7 roster gates whose baseline sits under\n  `scripts/` were also run green. `check-governed-merges.mjs --test` on this file list:\n  `NOT governed`.\n- **Whole-repo `pnpm lint`** through the shared verify lock: `VERDICT command-exit 0`. Not a\n  narrowed run — the full farm.\n- **NOT MEASURED, named rather than skipped:** `check:dts-closure` and\n  `check:published-readme-exports` both exit 3 `PREREQUISITE NOT MET` here (no package `dist/`;\n  they need a whole-repo build). Neither can be moved by a one-file `scripts/pm/` diff, and CI\n  builds before running them.\n\n## Known-red step, inherited and untouched\n\n`main` has been red on **`Lint & Repo Gates`** at **`pnpm check:merge-driver`** since 17:05Z —\nCorepack resolving pnpm 12.3.4, which rejects the fixture's `pnpm -s`. It is tracked as #15992 in\nthe devx lane and is not this branch's; nothing here works around it. For the record, that gate\npasses locally on this branch under pnpm 10.31.0. Every other check is expected green.\n\n`skip-changeset`: `scripts/pm/**` publishes nothing from any package.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_"
+}
