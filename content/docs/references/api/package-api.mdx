@@ -13,7 +13,7 @@ Base path: /api/v1/packages
 
 **Endpoints**
 ```
-POST   /api/v1/packages/install              — Install a package
+POST   /api/v1/packages                      — Install a package
 POST   /api/v1/packages/upgrade              — Upgrade a package
 POST   /api/v1/packages/resolve-dependencies — Resolve dependencies
 POST   /api/v1/packages/upload               — Upload an artifact
@@ -30,8 +30,8 @@ DELETE /api/v1/packages/:packageId           — Uninstall a package
 ## TypeScript Usage
 
 ```typescript
-import { AssembledInstalledPackageSchema, GetInstalledPackageRequestSchema, GetInstalledPackageResponseSchema, InstalledPackageAtEitherStageSchema, ListInstalledPackagesRequestSchema, ListInstalledPackagesResponseSchema, PackageApiErrorCode, PackageInstallRequestSchema, PackageInstallResponseSchema, PackagePathParamsSchema, PackageRollbackRequestSchema, PackageUpgradeRequestSchema, PackageUpgradeResponseSchema, ResolveDependenciesRequestSchema, ResolveDependenciesResponseSchema, UninstallPackageApiRequestSchema, UninstallPackageApiResponseSchema, UploadArtifactRequestSchema, UploadArtifactResponseSchema } from '@objectstack/spec/api';
-import type { AssembledInstalledPackage, GetInstalledPackageRequest, GetInstalledPackageResponse, InstalledPackageAtEitherStage, ListInstalledPackagesRequest, ListInstalledPackagesResponse, PackageApiErrorCode, PackageInstallRequest, PackageInstallResponse, PackagePathParams, PackageRollbackRequest, PackageUpgradeRequest, PackageUpgradeResponse, ResolveDependenciesRequest, ResolveDependenciesResponse, UninstallPackageApiRequest, UninstallPackageApiResponse, UploadArtifactRequest, UploadArtifactResponse } from '@objectstack/spec/api';
+import { AssembledInstalledPackageSchema, GetInstalledPackageRequestSchema, GetInstalledPackageResponseSchema, InstalledPackageAtEitherStageSchema, ListInstalledPackagesRequestSchema, ListInstalledPackagesResponseSchema, PackageApiErrorCode, PackageInstallBodySchema, PackageInstallRequestSchema, PackageInstallResponseSchema, PackagePathParamsSchema, PackageRollbackRequestSchema, PackageUpgradeRequestSchema, PackageUpgradeResponseSchema, ResolveDependenciesRequestSchema, ResolveDependenciesResponseSchema, UninstallPackageApiRequestSchema, UninstallPackageApiResponseSchema, UploadArtifactRequestSchema, UploadArtifactResponseSchema } from '@objectstack/spec/api';
+import type { AssembledInstalledPackage, GetInstalledPackageRequest, GetInstalledPackageResponse, InstalledPackageAtEitherStage, ListInstalledPackagesRequest, ListInstalledPackagesResponse, PackageApiErrorCode, PackageInstallBody, PackageInstallRequest, PackageInstallResponse, PackagePathParams, PackageRollbackRequest, PackageUpgradeRequest, PackageUpgradeResponse, ResolveDependenciesRequest, ResolveDependenciesResponse, UninstallPackageApiRequest, UninstallPackageApiResponse, UploadArtifactRequest, UploadArtifactResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = AssembledInstalledPackageSchema.parse(data);
@@ -135,11 +135,14 @@ Installed package row whose manifest is the assembled package body
 
 ## GetInstalledPackageRequest
 
+Get installed package request
+
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Package identifier |
+| **version** | `string` | optional | Scope the read to this exact installed version; `latest` or omitted reads the installed row |
 
 
 ---
@@ -154,7 +157,7 @@ Get installed package response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … } \| … +1 more` | ✅ | Installed package details |
 
 ### Nested Shape: `GetInstalledPackageResponse.error`
@@ -170,6 +173,15 @@ Get installed package response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `GetInstalledPackageResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `GetInstalledPackageResponse.data[option 1]`
 
@@ -389,8 +401,9 @@ List installed packages request
 | :--- | :--- | :--- | :--- |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional | Filter by package status |
 | **enabled** | `boolean` | optional | Filter by enabled state |
-| **limit** | `integer` | optional (default: `50`) | Maximum number of packages to return |
-| **cursor** | `string` | optional | Cursor for pagination |
+| **type** | `string` | optional | Filter by the installed manifest's `type` — exact match, unmatched values select nothing |
+| **limit** | `never` | optional | [REMOVED] `limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the serving door filters on `status` / `type` and then returns every remaining row, so no page was ever withheld and no continuation token was ever minted. `limit` also declared `.default(50)`, so a reader of the published schema was entitled to believe an unparameterised list is capped at 50 rows; it has never been capped at all, and nothing parses a query string through this schema, so that default has never been stamped onto anything. Delete the key. This route is NOT paginated — it answers the whole installed set, which is a bounded table of tens of rows, and `hasMore` on the response is a constant `false` that is now true by construction. Filter with `status` and `type` instead of asking for a window. A first-class package cursor, if one is ever designed, will be a response-minted opaque token, not this key. |
+| **cursor** | `never` | optional | [REMOVED] `limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the serving door filters on `status` / `type` and then returns every remaining row, so no page was ever withheld and no continuation token was ever minted. `limit` also declared `.default(50)`, so a reader of the published schema was entitled to believe an unparameterised list is capped at 50 rows; it has never been capped at all, and nothing parses a query string through this schema, so that default has never been stamped onto anything. Delete the key. This route is NOT paginated — it answers the whole installed set, which is a bounded table of tens of rows, and `hasMore` on the response is a constant `false` that is now true by construction. Filter with `status` and `type` instead of asking for a window. A first-class package cursor, if one is ever designed, will be a response-minted opaque token, not this key. |
 
 
 ---
@@ -405,7 +418,7 @@ List installed packages response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ packages: (object \| object)[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 ### Nested Shape: `ListInstalledPackagesResponse.error`
@@ -422,6 +435,15 @@ List installed packages response
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
 
+### Nested Shape: `ListInstalledPackagesResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
+
 ### Nested Shape: `ListInstalledPackagesResponse.data`
 
 | Property | Type | Required | Description |
@@ -429,7 +451,7 @@ List installed packages response
 | **packages** | `({ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … } \| … +1 more)[]` | ✅ | Installed packages |
 | **total** | `integer` | optional | Total matching packages |
 | **nextCursor** | `string` | optional | Cursor for the next page |
-| **hasMore** | `boolean` | ✅ | Whether more packages are available |
+| **hasMore** | `boolean` | ✅ | Whether more packages are available — this door serves one page, so always `false` |
 
 
 ---
@@ -455,6 +477,177 @@ List installed packages response
 
 ---
 
+## PackageInstallBody
+
+Install package request body, wrapped or as a bare manifest
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Install package request
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install (AUTHORING stage: `objects` are glob patterns) |
+| **settings** | `Record<string, any>` | optional | User-provided settings at install time |
+| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install — honoured at POST /api/v1/packages: the installed row's `enabled` is written from this key |
+| **overwrite** | `boolean` | optional | Overwrite an already-installed package id instead of answering 409 Conflict |
+| **platformVersion** | `string` | optional | Current platform version for compatibility verification |
+| **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for marketplace installation |
+
+### Nested Shape: `PackageInstallBody[option 1].manifest`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
+| **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
+| **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
+| **version** | `string` | ✅ | Package version (semantic versioning) |
+| **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
+| **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **name** | `string` | ✅ | Human-readable package name |
+| **description** | `string` | optional | Package description |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions at the AUTHORING stage: legacy string[] or structured plugin block (ADR-0025 §3.2) — at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`) |
+| **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
+| **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
+| **dependencies** | `Record<string, string>` | optional | Package dependencies |
+| **configuration** | `never` | optional | [REMOVED] `manifest.configuration` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read the block: no settings UI rendered it and no loader resolved a setting from it, so authoring it configured nothing. Worse, `properties.*.secret` promised "value is encrypted/masked (e.g. API Keys)" while nothing encrypted, masked or even parsed the flag — a false assurance about credential handling. Delete the key. A plugin is configured by the host that composes it: pass options to its constructor in `defineStack({ plugins: [new MyPlugin({ … })] })`, which is the enforced channel. A declarative settings surface must be designed with an enforcing reader first, not revived here. |
+| **contributes** | `{ kinds?: object[] }` | optional | Platform contributions |
+| **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
+| **capabilities** | `never` | optional | [REMOVED] `manifest.capabilities` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no discovery path ever consulted the block: nothing read `implements`, `provides`, `requires`, `extensionPoints` or `extensions`, so the declared "interoperability and automatic discovery" never happened. Delete the key. Real dependency resolution runs off top-level `manifest.dependencies`, which stays. Capability-based discovery must be designed with an enforcing reader first, not revived here. |
+| **extensions** | `never` | optional | [REMOVED] `manifest.extensions` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — an untyped map with zero readers: whatever was parked here was stored and never consulted. Delete the key. Extend the platform through the enforced channels instead: `contributes.kinds` registers metadata kinds, `navigationContributions` injects navigation into other packages' apps, and code-level extension happens in the plugin itself (`init`/`start`). |
+| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — and the plugin trust tier (`manifest.runtime`) does not give it back: that tier is enforced at the cloud marketplace PUBLISH gate only (an unverified publisher requesting the `node` tier is rejected with HTTP 422 and forced to manual review), while load-side enforcement is NOT implemented, so a locally installed plugin is not isolated by the tier it declares. ⛔ Nor do the permission declarations give it back: the install-time granted set is REGISTERED on the PluginPermissionEnforcer at load and queried by nothing, so it refuses no operation. Neither surface confines a plugin today — do not author either one expecting isolation. |
+| **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
+| **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
+| **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review); load-side enforcement is NOT implemented, so a locally installed plugin is not isolated by the tier it declares |
+| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
+| **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
+
+### Nested Shape: `PackageInstallBody[option 1].artifactRef`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | Artifact download URL |
+| **sha256** | `string` | ✅ | SHA256 checksum |
+| **size** | `integer` | ✅ | Artifact size in bytes |
+| **format** | `Enum<'tgz' \| 'zip'>` | optional (default: `"tgz"`) | Artifact format |
+| **uploadedAt** | `string` | ✅ | Upload timestamp |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
+| **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
+| **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
+| **version** | `string` | ✅ | Package version (semantic versioning) |
+| **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| 'module' \| 'gateway' \| 'adapter'>` | ✅ | Type of package |
+| **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **name** | `string` | ✅ | Human-readable package name |
+| **description** | `string` | optional | Package description |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions at the AUTHORING stage: legacy string[] or structured plugin block (ADR-0025 §3.2) — at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`) |
+| **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
+| **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
+| **dependencies** | `Record<string, string>` | optional | Package dependencies |
+| **configuration** | `never` | optional | [REMOVED] `manifest.configuration` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read the block: no settings UI rendered it and no loader resolved a setting from it, so authoring it configured nothing. Worse, `properties.*.secret` promised "value is encrypted/masked (e.g. API Keys)" while nothing encrypted, masked or even parsed the flag — a false assurance about credential handling. Delete the key. A plugin is configured by the host that composes it: pass options to its constructor in `defineStack({ plugins: [new MyPlugin({ … })] })`, which is the enforced channel. A declarative settings surface must be designed with an enforcing reader first, not revived here. |
+| **contributes** | `{ kinds?: object[] }` | optional | Platform contributions |
+| **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
+| **capabilities** | `never` | optional | [REMOVED] `manifest.capabilities` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no discovery path ever consulted the block: nothing read `implements`, `provides`, `requires`, `extensionPoints` or `extensions`, so the declared "interoperability and automatic discovery" never happened. Delete the key. Real dependency resolution runs off top-level `manifest.dependencies`, which stays. Capability-based discovery must be designed with an enforcing reader first, not revived here. |
+| **extensions** | `never` | optional | [REMOVED] `manifest.extensions` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — an untyped map with zero readers: whatever was parked here was stored and never consulted. Delete the key. Extend the platform through the enforced channels instead: `contributes.kinds` registers metadata kinds, `navigationContributions` injects navigation into other packages' apps, and code-level extension happens in the plugin itself (`init`/`start`). |
+| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — and the plugin trust tier (`manifest.runtime`) does not give it back: that tier is enforced at the cloud marketplace PUBLISH gate only (an unverified publisher requesting the `node` tier is rejected with HTTP 422 and forced to manual review), while load-side enforcement is NOT implemented, so a locally installed plugin is not isolated by the tier it declares. ⛔ Nor do the permission declarations give it back: the install-time granted set is REGISTERED on the PluginPermissionEnforcer at load and queried by nothing, so it refuses no operation. Neither surface confines a plugin today — do not author either one expecting isolation. |
+| **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
+| **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
+| **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review); load-side enforcement is NOT implemented, so a locally installed plugin is not isolated by the tier it declares |
+| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
+| **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
+
+### Nested Shape: `PackageInstallBody[option 2].permissions`
+
+Structured plugin permission grants (ADR-0025 §3.2)
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **services** | `string[]` | optional | Platform services the plugin may resolve (e.g. "object", "http") |
+| **hooks** | `string[]` | optional | Lifecycle hooks the plugin may register (e.g. "record.beforeInsert") |
+| **network** | `string[]` | optional | Network hosts the plugin may reach (e.g. "api.acme.com") |
+| **fs** | `string[]` | optional | Filesystem paths the plugin may access |
+
+### Nested Shape: `PackageInstallBody[option 2].contributes`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kinds** | `{ id: string; description?: string }[]` | optional | Metadata kind identifiers this package registers |
+| **events** | `never` | optional | [REMOVED] `manifest.contributes.events` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read the list: its only in-repo author already subscribed imperatively in plugin code, so the declaration was decorative. Delete the key. Subscribe to system events in the plugin itself — `ctx.hook('kernel:ready', …)` (or the events service) from `init`/`start` is the enforced channel; record lifecycle hooks register on the data engine. |
+| **menus** | `never` | optional | [REMOVED] `manifest.contributes.menus` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no renderer ever read it; two alias maps already redirected this spelling to `navigation`. Delete the key. Declare navigation in the app's `navigation` tree, or inject items into another package's app via `manifest.navigationContributions` (ADR-0029 D7), which the engine registers. |
+| **themes** | `never` | optional | [REMOVED] `manifest.contributes.themes` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it never had an effect: theme registration reaches the registry only through the stack-level `themes` collection (a `ThemeSchema` surface, unrelated to this `{ id, label, path }` shape), never through `contributes.themes`. Delete the key; declare themes in the stack `themes` collection instead. |
+| **translations** | `never` | optional | [REMOVED] `manifest.contributes.translations` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no loader ever read these `{ locale, path }` entries; authoring them registered no translations. Delete the key. Declare translations as `translation` metadata: `defineTranslationBundle({ … })` in the stack's `translations` collection (`defineStack({ translations: […] })`), which the engine registers and the i18n pipeline serves. |
+| **actions** | `never` | optional | [REMOVED] `manifest.contributes.actions` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it; actions declared here were never invocable. Delete the key. Declare actions in the stack `actions` collection (registered by the engine) or register imperatively via `engine.registerAction`. |
+| **drivers** | `never` | optional | [REMOVED] `manifest.contributes.drivers` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it never had an effect: a storage driver is wired by registering a kernel SERVICE named `driver.*` (the objectql plugin picks it up and calls `registerDriver`), and its only in-repo author was registered that way, not by this declaration. Delete the key. |
+| **fieldTypes** | `never` | optional | [REMOVED] `manifest.contributes.fieldTypes` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — there is no `registerFieldType` seam anywhere: the declaration advertised an extension point the platform does not have, so authoring it configured nothing. Delete the key. The field-type vocabulary is the spec `FieldType` enum; extending it is a spec change, not a manifest declaration. |
+| **functions** | `never` | optional | [REMOVED] `manifest.contributes.functions` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it; ObjectQL functions declared here were never registered. Delete the key. Declare functions on the stack (`defineStack({ functions: […] })`), which the hook binder registers via `engine.registerFunction`. |
+| **routes** | `never` | optional | [REMOVED] `manifest.contributes.routes` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: the HttpDispatcher never registered a prefix from the declaration, so an entry here parsed cleanly and served nothing while published material kept recommending it. Delete the key. A route that needs real handler CODE is mounted imperatively: resolve the `http.server` service from the plugin context and register the handler on `kernel:ready`. A declarative endpoint over a pipeline the platform already runs (query/return records, trigger a flow) is `defineStack({ apis })`. |
+| **commands** | `never` | optional | [REMOVED] `manifest.contributes.commands` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — the CLI never resolved commands from this declaration: commands are auto-discovered through oclif's native plugin system (the plugin package declares an `oclif` section in its own `package.json`; see `cli-extension.zod.ts`), and the `objectstack.config.ts` plugins array no longer determines CLI commands. Delete the key. |
+
+### Nested Shape: `PackageInstallBody[option 2].data[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Target Object Name |
+| **externalId** | `string \| string[]` | optional (default: `"name"`) | Field (or composite list of fields) matched for the uniqueness check |
+| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Conflict resolution strategy |
+| **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
+| **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale |
+| **records** | `Record<string, any>[]` | ✅ | Data records |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `PackageInstallBody[option 2].navigationContributions[number]`
+
+A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **app** | `string` | ✅ | Target app name to contribute navigation into (e.g. "setup") |
+| **group** | `string` | optional | Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level. Naming a group the target app does not declare is not refused: the items are appended at the app top level anyway and a `nav_contribution_group_missing` diagnostic is emitted — by the runtime at `warn`, and by `os build` and `os validate` at compile time. |
+| **priority** | `integer` | optional (default: `200`) | Merge priority within the target group — lower applied first (matches object extender priority) |
+| **items** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items contributed into the target app/group |
+
+### Nested Shape: `PackageInstallBody[option 2].engine`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectstack** | `string` | ✅ | ObjectStack platform version requirement (SemVer range, e.g. ">=3.0.0") |
+
+### Nested Shape: `PackageInstallBody[option 2].engines`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **platform** | `string` | optional | ObjectStack platform release range (SemVer, e.g. ">=4.0 &lt;5") |
+| **protocol** | `string` | optional | Runtime/metadata protocol range, checked first (ADR §3.10 #3) |
+
+---
+
+
+---
+
 ## PackageInstallRequest
 
 Install package request
@@ -463,9 +656,10 @@ Install package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install (AUTHORING stage: `objects` are glob patterns) |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install |
+| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install — honoured at POST /api/v1/packages: the installed row's `enabled` is written from this key |
+| **overwrite** | `boolean` | optional | Overwrite an already-installed package id instead of answering 409 Conflict |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for marketplace installation |
 
@@ -522,7 +716,7 @@ Install package response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ package: object; dependencyResolution?: object; namespaceConflicts?: object[]; message?: string }` | ✅ |  |
 
 ### Nested Shape: `PackageInstallResponse.error`
@@ -538,6 +732,15 @@ Install package response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `PackageInstallResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `PackageInstallResponse.data`
 
@@ -636,7 +839,7 @@ Upgrade package response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ success: boolean; phase: string; plan?: object; snapshotId?: string; … }` | ✅ |  |
 
 ### Nested Shape: `PackageUpgradeResponse.error`
@@ -652,6 +855,15 @@ Upgrade package response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `PackageUpgradeResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `PackageUpgradeResponse.data`
 
@@ -722,7 +934,7 @@ Resolve dependencies response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ dependencies: object[]; canProceed: boolean; requiredActions: object[]; installOrder: string[]; … }` | ✅ | Dependency resolution result with topological sort |
 
 ### Nested Shape: `ResolveDependenciesResponse.error`
@@ -739,6 +951,15 @@ Resolve dependencies response
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
 
+### Nested Shape: `ResolveDependenciesResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
+
 ### Nested Shape: `ResolveDependenciesResponse.data`
 
 | Property | Type | Required | Description |
@@ -754,11 +975,14 @@ Resolve dependencies response
 
 ## UninstallPackageApiRequest
 
+Uninstall package request
+
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Package identifier |
+| **keepData** | `boolean` | optional | Preserve object tables and remove metadata only; on the wire, `?keepData=true` or `?keepData=1` |
 
 
 ---
@@ -773,7 +997,7 @@ Uninstall package response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ packageId: string; success: boolean; message?: string }` | ✅ |  |
 
 ### Nested Shape: `UninstallPackageApiResponse.error`
@@ -789,6 +1013,15 @@ Uninstall package response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `UninstallPackageApiResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `UninstallPackageApiResponse.data`
 
@@ -843,7 +1076,7 @@ Upload artifact response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ success: boolean; artifactRef?: object; submissionId?: string; message?: string }` | ✅ |  |
 
 ### Nested Shape: `UploadArtifactResponse.error`
@@ -859,6 +1092,15 @@ Upload artifact response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `UploadArtifactResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `UploadArtifactResponse.data`
 
