@@ -1698,7 +1698,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
   '#19099 — the enclosing-delimiter walk says when it STOPPED READING and started guessing': 15,
-  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 64,
+  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 66,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -6056,6 +6056,15 @@ export function selfTest() {
   const BRACE_IN_CALL = [CTX('export const registry = defineRegistry({'), CTX('  UserSchema,')];
   t('⭐ a `{` frame a CALL opened carries that call\'s paren in its head — the `[`-only guard is what keeps the arm inside it `unread` instead of refused', enclosingDelimiters(BRACE_IN_CALL, 1).frames.at(-1)?.opener === '{' && enclosingDelimiters(BRACE_IN_CALL, 1).frames.at(-1)?.head.endsWith('(') && closedSetMembership(BRACE_IN_CALL, 1) === 'unread');
   t('…and the ROW survives it, which is the half a reader-only case cannot pin', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+export const registry = defineRegistry({', '+  UserSchema,') }).some((r) => r.line === 4 && r.tell === 'T2'));
+  // ⛔ …and the case that actually PINS the guard once the refusal is a closed
+  // vocabulary: `defineRegistry` is a name the vocabulary does not carry, so
+  // dropping the guard leaves that arm `unread` either way and the two cases
+  // above go quiet about it. The `{` has to be opened by a call this file DOES
+  // refuse on, and then the guard is the only thing between the arm and a
+  // silence.
+  const BRACE_IN_REFUSING_CALL = [CTX('export const S = z.object({}).default({'), CTX('  UserSchema,')];
+  t('⭐ a `{` frame opened by a REFUSING call is what the `[`-only guard exists for — without it the arm inside `.default({` would be swallowed, in the quiet direction', enclosingDelimiters(BRACE_IN_REFUSING_CALL, 1).frames.at(-1)?.opener === '{' && calleeOfFrameHead(enclosingDelimiters(BRACE_IN_REFUSING_CALL, 1).frames.at(-1)?.head) === 'default' && closedSetMembership(BRACE_IN_REFUSING_CALL, 1) === 'unread');
+  t('…and its ROW survives too', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+export const S = z.object({}).default({', '+  UserSchema,') }).some((r) => r.line === 4 && r.tell === 'T2'));
   // -- the refusal is a CALL, never "any head ending in `(`" -----------------
   t('⭐ a GROUPING paren is not a call — `const X = ([` … `] as const)` is the fourth form wrapped, and it keeps its row', closedSetMembership([CTX('const X = (['), CTX("  'read',")], 1) === 'unread');
   t('…and the ROW survives it too', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+const X = ([', "+  'read',") }).some((r) => r.line === 4 && r.tell === 'T2'));
