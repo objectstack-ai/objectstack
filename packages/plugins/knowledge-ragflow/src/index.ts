@@ -57,23 +57,29 @@ interface RagflowSourceOptions {
   vectorSimilarityWeight?: number;
 }
 
+/**
+ * Reads this source's RAGFlow binding from `adapterConfig` — the key
+ * `KnowledgeSourceSchema` declares for adapter-specific configuration.
+ * That schema is a plain `z.object`, so any parsing path drops keys it
+ * does not declare; the adapter therefore reads the declared key and no
+ * other spelling (Prime Directive #12 — no lenient consumer).
+ */
 function extractRagflowOptions(source: KnowledgeSource): RagflowSourceOptions {
-  const opts = ((source as unknown as { options?: Record<string, unknown> }).options ?? {}) as
-    Record<string, unknown>;
-  const datasetId = opts.datasetId;
+  const cfg = source.adapterConfig ?? {};
+  const datasetId = cfg.datasetId;
   if (typeof datasetId !== 'string' || !datasetId) {
     throw new Error(
-      `RAGFlow adapter requires source.options.datasetId on source '${source.id}'`,
+      `RAGFlow adapter requires source.adapterConfig.datasetId on source '${source.id}'`,
     );
   }
   return {
     datasetId,
-    rerankModel: typeof opts.rerankModel === 'string' ? opts.rerankModel : undefined,
+    rerankModel: typeof cfg.rerankModel === 'string' ? cfg.rerankModel : undefined,
     similarityThreshold:
-      typeof opts.similarityThreshold === 'number' ? opts.similarityThreshold : undefined,
+      typeof cfg.similarityThreshold === 'number' ? cfg.similarityThreshold : undefined,
     vectorSimilarityWeight:
-      typeof opts.vectorSimilarityWeight === 'number'
-        ? opts.vectorSimilarityWeight
+      typeof cfg.vectorSimilarityWeight === 'number'
+        ? cfg.vectorSimilarityWeight
         : undefined,
   };
 }
