@@ -22325,8 +22325,31 @@ export class ObjectStackProtocolImplementation implements
      *      rows back into the registry on boot).
      *
      * The DB write is best-effort and non-fatal: when the `package` service is
-     * absent (e.g. the `marketplace` capability is off) the package is still
-     * registered in-memory and visible for the lifetime of the process.
+     * absent the package is still registered in-memory and visible for the
+     * lifetime of the process — and that in-memory-only branch STAYS, as the
+     * documented degraded path for reduced hosts (#17676 ruling A' item 2,
+     * decision batch #125 item 2). ⛔ It is not a bug to delete: a host that
+     * mounts no provider (`objectstack serve --preset minimal`, a metadata-only
+     * embedding) must still be able to install a package for the life of its
+     * process, and the `warn` below is what keeps the degradation from being
+     * silent.
+     *
+     * Which capability OWNS the service is no longer `marketplace`: ruling A'
+     * item 1 split the persistence half — the `sys_packages` container and the
+     * boot hydration that replays it — out under its own always-on token
+     * `package-registry` (`PLATFORM_ALWAYS_ON_CAPABILITIES`,
+     * `packages/spec/src/kernel/platform-capabilities.ts`), leaving
+     * `marketplace` naming only the optional catalogue / browsing half. ⚠️ The
+     * runtime half of that split is NOT landed: measured on `origin/main` at
+     * c334ba0f3a, `Serve.CAPABILITY_PROVIDERS`
+     * (`packages/cli/src/commands/serve.ts`) keys `marketplace` and does not key
+     * `package-registry`, so the always-on token is force-appended to every
+     * app's `requires` and then resolves to no provider — silently, because the
+     * resolver only warns for tokens outside the vocabulary. ⇒ on a stock
+     * `objectstack dev` boot of an app that does not itself declare
+     * `requires: ['marketplace']`, this branch is still the one taken, which is
+     * the defect #17676 reports. Recorded here rather than worked around: the
+     * fix belongs to the capability resolver, not to this primitive.
      *
      * [#19277] `request.enableOnInstall` is HONOURED here, under the same rule
      * the HTTP door implements — 「缺省 = 保持，有旗 = 设置」: `true` enables,
@@ -22469,6 +22492,10 @@ export class ObjectStackProtocolImplementation implements
      * service so the edit survives a restart. Persistence is best-effort and
      * non-fatal (matching `installPackage`): the registry write already
      * succeeded, so a persist failure is logged, never thrown.
+     *
+     * The service-absent branch below is the same documented degraded path
+     * #17676 ruling A' item 2 keeps — see `installPackage`'s note for which
+     * capability owns the service and for the measured state of that split.
      */
     async updatePackage(request: {
         packageId: string;
