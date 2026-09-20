@@ -1021,12 +1021,34 @@
  *
  * ## #19099 — NOT a variable removed: a walk that says when it stopped reading
  *
- * ⛔ This section removes no accidental variable and moves no row. Over the
- * 250-diff corpus the tells this file reports are unchanged, and that is the
- * claim — ⛔ not an improvement measured somewhere and asserted here. What
+ * ⛔ This section removes no accidental variable and moves no row, and that is
+ * the claim — ⛔ not an improvement measured somewhere and asserted here. What
  * changed is that {@link enclosingDelimiters} now reports the one thing it
  * could not say before: whether the stack it hands back is a READING or a
  * GUESS.
+ *
+ * ⚠️ THE HORIZON COMES FIRST, because a shallow clone answers at exit 0 with no
+ * warning and every corpus reading below is worthless without it. Git renders a
+ * GRAFT BOUNDARY commit against the EMPTY TREE, so a shallow clone shows one
+ * ordinary commit as the whole repository arriving at once — here 1,092 files
+ * and 309,028 insertions under `packages/spec/src` for a commit the API reports
+ * as 2 files, +41/-7. Every added line of that phantom is then judged as if it
+ * were a diff. ⛔ So state the horizon and what was dropped, or do not report a
+ * rate: read `.git/shallow` (or `historyHorizon()` in
+ * `scripts/pm/git-history.mjs`, which AGENTS.md routes windowed history through
+ * for exactly this reason) and EXCLUDE every boundary.
+ *
+ * CORPUS, on that discipline — this clone IS shallow, with ONE boundary
+ * (`ae8edd2c4f`, 2026-08-31), excluded: 436 non-merge commits touching
+ * `packages/spec/src` are reachable, 435 after the exclusion, giving **1,149
+ * file diffs** of non-test `.ts`. The version of this file at the branch's
+ * merge base and the version in it were imported into one process and run row
+ * for row over all of them: **722 rows against 722 rows, 0 differing commits**
+ * (T2 368, T1 265, T4 89). ⇒ this change moves no tell anywhere on the corpus.
+ * The two firing-only readers agree as well — `enclosingDelimiter` and
+ * `inParameterList` over **84,924 side-lines** (2,298 sides), **0
+ * disagreements** each. ⛔ Answer-identical, ⛔ not byte-identical: both
+ * bodies changed.
  *
  * The reading lexes no regex literal and pops type-blind. Both limits are free
  * while every caller only makes a tell FIRE — a guessed stack buys a false tell
@@ -1058,38 +1080,39 @@
  *     with no second `/` left on its line cannot open one; it pushes and pops
  *     nothing and the stack is as correct as it was.
  *
- * ⚠️ THE RESIDUALS, each named with the rate it actually occurs at — ⛔ and
- * this paragraph is the one an earlier cut of this section got wrong, by
- * calling ONE shape "the whole residual" when the measurement behind that word
- * counted a different population. Naming one trigger while another dominates is
- * the failure being corrected here, so BOTH are stated, in the same population,
- * and ⛔ neither is called the whole of anything.
+ * ⚠️ THE RESIDUAL. This paragraph has now been wrong three times, each time by
+ * asserting a RATE, so it is written to be checkable rather than persuasive:
+ * the population is the **265 T1 rows this gate REPORTS** on the corpus above
+ * — one boundary commit excluded, without which the count is off by more than
+ * an order of magnitude and every trigger below reads as common.
  *
- * READING: 436 non-merge commits touching `packages/spec/src` reachable from
- * this branch, non-test `.ts` only, 1,841 file diffs; population = the **9,482
- * T1 rows this gate REPORTS** on them; the walk is unreadable at **3,128
- * (33.0%)** of those rows. First trigger, and ⛔ these are occasions of
- * judgement, not distinct lines:
+ * ⭐ ONE trigger OCCURS, and it is the apostrophe. The walk is unreadable at
+ * **2 of those 265 rows (0.8%)**, and both are an APOSTROPHE IN JSDOC PROSE in
+ * a hunk that begins inside the comment — `automation/approval.zod.ts`
+ * (`Entra's`) and `ai/solution-blueprint.zod.ts` (`object's`). Read as code an
+ * apostrophe opens a string literal that never closes on its line, so the walk
+ * is unreadable at that byte BEFORE the terminator line the reset above would
+ * have used is ever reached. ⛔ Widening the reset does not close it — the flag
+ * is already up — and closing it needs a lexer that knows prose from code,
+ * which is the guess this reader does not make.
  *
- *   • a `/` that MAY open a regex literal — **3,069 rows (32.4%)**, from just
- *     **72** distinct lines, because this tree's machine-name pattern
- *     (`z.string().regex(/^[a-z_][a-z0-9_]*$/)`) sits in the leading context of
- *     an enormous number of hunks. ⚠️ Its brackets are BALANCED, so the stack
- *     it is read across is in fact still correct — the flag is the conservative
- *     half of the discrimination doing what it says, ⛔ not a corrupted stack.
- *   • an APOSTROPHE IN DOC PROSE — `value's`, `Entra's`, `object's` — inside a
- *     hunk that begins within a JSDoc: **59 rows (0.6%)**, 3 distinct lines.
- *     Read as code it opens a string literal that never closes on its line, so
- *     the walk is unreadable at that byte BEFORE the terminator line the reset
- *     above would have used is ever reached. ⛔ Widening the reset does not
- *     close it — the flag is already up — and closing it needs a lexer that
- *     knows prose from code, which is the guess this reader does not make.
+ * ⛔ THE OTHER THREE TRIGGERS OCCUR ZERO TIMES in this window, and they are
+ * still triggers: a reader that meets one must refuse, and a reader written
+ * against this paragraph must know they exist. They are triggers BY
+ * CONSTRUCTION, ⛔ not by observation — each is pinned by its own `--self-test`
+ * case rather than by a corpus row:
  *
- * ⇒ THE NUMBER THAT MATTERS TO THE NEXT AUTHOR is the 33%, not either trigger
- * alone: a reader that DECLINES on these frames refuses on a third of the T1
- * rows this gate reports, and must be designed knowing that before it is
- * written. Nothing suppresses on the flag today, so nothing is silenced by
- * either residual right now.
+ *   • a `/` with another `/` left on its line, which MAY open a regex literal —
+ *     **0 rows**. ⚠️ ⛔ Do not read that zero as "regex literals are rare here":
+ *     they are common, and the flag is deliberately conservative about them.
+ *     It says only that none sat in the leading context the walk crossed for a
+ *     reported T1 row in this window.
+ *   • a closer whose type does not match the opener it popped — **0 rows**.
+ *   • a `*\/` this walk cannot explain — **0 rows**.
+ *
+ * ⇒ Nothing is silenced by any of them today: no reader suppresses on the flag.
+ * The number a future suppressing reader needs is the 0.8%, and it should be
+ * re-measured on that day rather than quoted from here.
  *
  * ## The shape this gate keeps firing on, and what to do about it — ruling D′
  *
@@ -2299,18 +2322,22 @@ function topLevelMembers(s, open, close) {
  * stated at the definition rather than left for the next author to infer.
  * ⇒ any future reader that DECLINES a tell on these frames refuses when the
  * flag is set, and states every trigger above wherever it describes itself. A
- * disclosure naming only the division operator — which raises nothing, and
- * occurs zero times on this tree's corpus — while ` *\/` fired on 24% of
- * readable T1 stacks is how the first cut of this flag regressed a landed
- * #18234 decline in the commonest hunk shape there is.
+ * disclosure naming only the division operator — which raises nothing — while
+ * leaving ` *\/` unnamed is how the first cut of this flag regressed a landed
+ * #18234 decline, and it did so in the commonest hunk shape there is: a hunk
+ * that BEGINS inside a comment is **34 of the 265 T1 rows** this gate reports
+ * on the corpus in the header (12.8%), against **2** rows for the one residual
+ * that still raises the flag. ⇒ the undisclosed trigger outnumbered the
+ * disclosed one by more than an order of magnitude, which is the whole lesson.
  *
  * ⭐ Like `readToCloser`, raising the flag does NOT move the frames: a caller
  * that only ever makes a tell FIRE (⇒ {@link inParameterList}) reads the same
  * ANSWER it read before this flag existed. ⛔ Not the same BYTES — this
  * function's body and `enclosingDelimiter`'s both changed — and the claim is
  * only worth what it is measured over: `enclosingDelimiter` and
- * `inParameterList` agree on 431,750 side-lines (1,881 sides of 250 real commit
- * diffs), 0 disagreements. ⛔ Fixing the stack instead — lexing regex literals
+ * `inParameterList` agree on **84,924 side-lines** (2,298 sides of the 1,149
+ * file diffs the header's corpus names, one graft boundary excluded), **0
+ * disagreements** each. ⛔ Fixing the stack instead — lexing regex literals
  * in full — was deliberately not attempted: telling a regex literal from a
  * division at every position needs the preceding TOKEN, which is one more guess
  * in a reader whose whole safety property is that it makes none. The two cheap,
@@ -2371,8 +2398,9 @@ export function enclosingDelimiters(side, index) {
       // #19099 — `*/` OUTSIDE a block comment: the hunk BEGAN INSIDE one. A
       // hunk's scan starts at the hunk's own first line, so a doc comment that
       // opened above it is invisible and its body was being read as code —
-      // which is what raised the flag on ` */` for 24% of this tree's readable
-      // T1 stacks, in the commonest hunk shape there is. ⭐ It needs no regex
+      // which is what raised the flag on ` */` before this reset existed, in
+      // the commonest hunk shape there is — 34 of the 265 T1 rows this gate
+      // reports on the header's corpus begin inside one. ⭐ It needs no regex
       // lexer and it is not a heuristic: outside a string and outside a comment,
       // `*/` is not valid TypeScript, so the only reading it has is a
       // terminator. Everything scanned so far was comment text, so the frames it
