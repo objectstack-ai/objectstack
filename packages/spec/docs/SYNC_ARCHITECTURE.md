@@ -153,25 +153,34 @@ Complete, production-grade integration with external systems. Includes authentic
 > nothing throttles the calls a connector makes *out*. Do **not** substitute
 > `shared`'s `RateLimitConfig` — that is the inbound limiter and would cap the
 > wrong direction. **Until an outbound throttle exists, rate-limit at the
-> connector provider or upstream gateway.** **And do not reach for
-> `retryConfig` instead.** This paragraph used to end "what L3 does declare for
-> a rate-limited upstream is `retryConfig` — whose `retryableStatusCodes`
-> default `[408, 429, 500, 502, 503, 504]` includes `429` — and
-> `health.circuitBreaker`", which reads as a remedy. It is not one: both keys
-> are **declared but currently unimplemented**.
-> `packages/spec/liveness/connector.json` records every `retryConfig` sub-key
-> and every `health.circuitBreaker` sub-key as `dead`, and outside
-> `packages/spec` nothing reads either — no retry loop consumes a strategy, a
-> backoff, a jitter or that status-code list, so the `429` in it never causes a
-> retry, and no breaker ever opens. They are **not retired**: both are still
-> declared and still parse, so an author can write them and see no error. They
-> are **not left to the host** either — `ConnectorProviderContext`
-> (`src/integration/connector-provider.ts`) carries exactly `name`, `label`,
-> `description`, `icon`, `type`, `providerConfig`, `auth` and
-> `loadPackageFile`, so a provider factory is never handed either key and has
-> no way to honour it. ADR-0049 owes these keys a decision (retire / implement /
-> declare as a host contract); until it rules, the advice above is the whole
-> advice — retry and throttle **at the connector provider or upstream gateway**.
+> connector provider or upstream gateway.**
+>
+> **What you MAY reach for is `retryConfig`: ADR-0049 ruled `实现` and the
+> platform now executes it.** A connector's declared policy is applied at the
+> one place the platform makes an outbound call — `shared/resilientFetch` — via
+> the single mapping in `src/integration/connector-fetch-policy.ts`: the backoff
+> shape (`strategy`, `initialDelayMs`, `backoffMultiplier`, `maxDelayMs`,
+> `jitter`), the attempt count (`maxAttempts`, counting TOTAL calls with the
+> first included), what is retried (`retryableStatusCodes`, whose default
+> `[408, 429, 500, 502, 503, 504]` includes `429`, and `retryOnNetworkError`),
+> and `requestTimeoutMs` as each attempt's deadline. `ConnectorProviderContext`
+> (`src/integration/connector-provider.ts`) carries the policy to a provider
+> factory, so a custom provider doing its own I/O honours the same thing the
+> built-in HTTP providers honour by construction.
+>
+> ⚠️ **A retry is not a throttle.** Retrying a `429` spaces out calls you have
+> already made; it does not cap the rate at which you make them. The rate-limit
+> advice above is unchanged: throttle at the connector provider or upstream
+> gateway.
+>
+> ⛔ **Two keys on this surface are still inert, and both are still `dead` in
+> `packages/spec/liveness/connector.json`.** `health.circuitBreaker`: every
+> sub-key is unread and no breaker ever opens — implement circuit breaking in
+> the connector provider. `connectionTimeoutMs`: it is carried to a provider
+> factory, but the platform does not enforce it, because a WHATWG `fetch`
+> exposes one `AbortSignal` over the whole operation and never the connection
+> phase alone — `requestTimeoutMs` is the bound the platform can keep, and
+> ADR-0049 owes this one key a narrower decision.
 
 > **Field mapping does not transform values.** The ticked line above used to read
 > "With transformations and data type conversion". Only the second half was ever
@@ -313,12 +322,10 @@ const sapConnector: Connector = {
   // (`rateLimitConfig` sat here until #4911 retired it — no outbound
   // rate-limiting engine ever existed. Throttle at the provider/gateway.)
 
-  // Retry Configuration — DECLARED BUT CURRENTLY UNIMPLEMENTED. The block
-  // below parses and is stored, and nothing reads it: no retry loop exists, so
-  // the `retryableStatusCodes` list — 429 included — never causes a retry.
-  // Every sub-key is recorded `dead` in `packages/spec/liveness/connector.json`,
-  // and ADR-0049 owes it a decision. It is shown because this example is a tour
-  // of the surface, not because authoring it buys behaviour.
+  // Retry Configuration — EXECUTED (ADR-0049 ruled `实现`). The platform
+  // applies this at its one outbound call, `shared/resilientFetch`, through
+  // `src/integration/connector-fetch-policy.ts`. `maxAttempts` counts TOTAL
+  // calls with the first included, so the 5 below is five calls, not six.
   retryConfig: {
     strategy: 'exponential_backoff',
     maxAttempts: 5,
@@ -330,10 +337,12 @@ const sapConnector: Connector = {
     jitter: true
   },
 
-  // Also declared but currently unimplemented, and `dead` in the same
-  // ledger (`packages/spec/liveness/connector.json`):
-  // both timeouts parse and default, and no fetch, transport or handler reads
-  // either, so a connector call is unbounded whatever is written here.
+  // `requestTimeoutMs` is each attempt's deadline and is enforced.
+  // ⛔ `connectionTimeoutMs` is NOT: it is carried to a provider factory, but a
+  // WHATWG `fetch` exposes one `AbortSignal` over the whole operation and never
+  // the connection phase alone, so the platform has nowhere to apply it. It
+  // stays `dead` in `packages/spec/liveness/connector.json` and is owed a
+  // narrower ADR-0049 decision.
   connectionTimeoutMs: 30000,
   requestTimeoutMs: 60000,
   status: 'active',
@@ -358,11 +367,10 @@ const sapConnector: Connector = {
 - **Security First**: Always use encrypted credentials and secure storage
 - **Rate Limiting**: Respect the upstream API's limits — and enforce that at the
   connector provider or upstream gateway, since the connector shape declares no
-  outbound throttle (#4911). This bullet used to add that `retryConfig` handles
-  the `429` you get for exceeding a limit. It does not: `retryConfig` is
-  declared but currently unimplemented — every sub-key is `dead` in
-  `packages/spec/liveness/connector.json` — so nothing retries that `429`
-  either. Both the throttling and the retrying are the provider's to implement
+  outbound throttle (#4911). `retryConfig` does now retry the `429` you get for
+  exceeding a limit (and honours a `Retry-After` the upstream sends), but ⛔ a
+  retry is not a throttle: it spaces out calls you already made rather than
+  capping the rate. The throttling stays the provider's to implement
 - **Error Handling**: Implement comprehensive retry logic with exponential backoff
 - **Monitoring**: Set up health checks and alerting for connector failures
 - **Testing**: Test authentication, sync, and webhook flows thoroughly
@@ -385,7 +393,7 @@ mostly answers "which surface", and — for the two questions that used to route
 | Do you need multi-source aggregation? | **Same answer**, and for the same reason — see [Retired: L2 ETL Pipeline](#retired-l2-etl-pipeline-v17) |
 | Do you need real-time webhooks? | **Yes** → L3 (Connector) |
 | Do you need advanced authentication (OAuth2, SAML)? | **Yes** → L3 (Connector) |
-| Do you need retry policies and circuit breaking? | **Not a reason to pick a level.** L3 *declares* `retryConfig` and `health.circuitBreaker`, but both are **declared but currently unimplemented** — every sub-key of each is `dead` in `packages/spec/liveness/connector.json`, nothing outside `packages/spec` reads either, and ADR-0049 owes them a decision — so neither is a capability you can select for. Implement retry and circuit breaking in the connector provider. Outbound **rate limiting** is not a reason to pick any level: no level provides it (#4911); throttle at the provider or gateway |
+| Do you need retry policies and circuit breaking? | **Retry: yes, L3.** `retryConfig` is executed at the platform's one outbound call (ADR-0049 ruled `实现`) — backoff shape, attempt count, retryable statuses, network-error retry and a per-attempt `requestTimeoutMs`. **Circuit breaking: no level provides it** — every `health.circuitBreaker` sub-key is still `dead` in `packages/spec/liveness/connector.json` and no breaker ever opens; implement it in the connector provider. Outbound **rate limiting** is not a reason to pick any level either: no level provides it (#4911); throttle at the provider or gateway |
 | Is it a simple point-to-point sync with an external system? | **Yes** → L3 (Connector) with `syncConfig` |
 | Are you building a data warehouse pipeline? | The extraction half is L3 (`syncConfig`); the warehouse-side transformation is the warehouse's own tooling. There is no ObjectStack pipeline protocol (#6414) |
 | Are you integrating with an enterprise system? | **Yes** → L3 (Connector) |
