@@ -15,10 +15,12 @@ toFixed() digits argument must be between 0 and 100`, and `Intl.NumberFormat` th
 `RangeError: maximumFractionDigits value is out of range.` So a spec-valid declaration was
 unrenderable by any conforming consumer, and its author got no signal at publish time —
 the failure arrived as a render-time crash in someone else's repository. The route from
-this row to that reader is the one the schema's own comment already states: objectui's
-spec bridge (`form-view.ts` `mapField`) and plugin-form (`sectionFields.ts`) copy the
-row's constraint keys onto the runtime field, whose number cell renderer passes `scale`
-straight into `maximumFractionDigits`.
+this row to that reader, measured in the sibling checkout at the `.objectui-sha` pin
+`53ded82bf7`: plugin-form copies the row's constraint keys onto the runtime field
+(`packages/plugin-form/src/sectionFields.ts:220`, `if (fd.scale != null) base.scale =
+fd.scale;`), and the number cell renderer hands that value straight to `Intl.NumberFormat`
+(`packages/fields/src/index.tsx:661-667`, `maximumFractionDigits: scale ?? 20`). That one
+route carries the premise on its own.
 
 The row now carries that upper bound, and the refusal says **why** — it names both
 primitives, the `RangeError` and the legal maximum — so an author reads a platform limit

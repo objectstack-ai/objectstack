@@ -26,9 +26,23 @@
  * `MAX_RENDERABLE_SCALE`, for the two `scale` declarations that file carries.
  * #19088 is the third site — `FormFieldBaseSchema.scale` in `ui/view.zod.ts`,
  * the form-row override — which reaches the same `Intl.NumberFormat` reader
- * through objectui's spec bridge (`form-view.ts` `mapField`) and plugin-form
- * (`sectionFields.ts`), both of which copy the row's constraint keys onto the
- * runtime field.
+ * through plugin-form. Measured in the sibling checkout at the `.objectui-sha`
+ * pin `53ded82bf7`:
+ *
+ *   packages/plugin-form/src/sectionFields.ts:220
+ *     if (fd.scale != null) base.scale = fd.scale;   // form row -> runtime field
+ *   packages/fields/src/index.tsx:661-667
+ *     maximumFractionDigits: scale ?? 20             // runtime field -> Intl
+ *
+ * ⛔ Do NOT cite an objectui "spec bridge" (`form-view.ts` `mapField`) here.
+ * That route is RETIRED at this pin — the tree carries
+ * `.changeset/retire-spec-bridge-6366.md`, there is no `spec-bridge/`
+ * directory, and the only `mapField` hits are `mapFieldTypeToFormType` in
+ * `app-shell`, a different symbol. The citation survives in this repo's older
+ * neighbouring comments (the #12174 block in `ui/view.zod.ts` and its test),
+ * inherited from `liveness/view.json`'s 2026-08-26 reading at objectui@f7c52e2;
+ * it was carried forward once into this card and corrected here. The
+ * plugin-form route above carries the premise on its own.
  *
  * A second file needing the same number left three ways to share it, each with
  * its own price:

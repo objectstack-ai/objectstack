@@ -2903,13 +2903,16 @@ const FormFieldBaseSchema = lazySchema(() => {
   max: z.number().optional().describe('Maximum value'),
   precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer; for number/currency)'),
   // #19088 — the UPPER bound is the SAME platform ceiling #18972 landed on the
-  // two `scale` declarations in `data/field.zod.ts`, reached from this row by
-  // the same route the comment above describes: objectui's spec bridge
-  // (`form-view.ts` mapField) and plugin-form (`sectionFields.ts`) copy this
-  // key onto the runtime field, and the number cell renderer
-  // (`packages/fields/src/index.tsx`) hands it straight to
-  // `Intl.NumberFormat`'s `maximumFractionDigits`, which throws above 100. So a
-  // declaration past the ceiling was spec-valid and unrenderable at once.
+  // two `scale` declarations in `data/field.zod.ts`. The route from this row,
+  // measured at the `.objectui-sha` pin `53ded82bf7` rather than read off the
+  // comment above: plugin-form copies the key onto the runtime field
+  // (`packages/plugin-form/src/sectionFields.ts:220`) and the number cell
+  // renderer hands that value to `Intl.NumberFormat`
+  // (`packages/fields/src/index.tsx:661-667`, `maximumFractionDigits: scale ??
+  // 20`), which throws above 100. So a declaration past the ceiling was
+  // spec-valid and unrenderable at once. ⛔ The `form-view.ts` mapField bridge
+  // named in the block above is RETIRED at that pin — do not carry that half
+  // of the citation forward; the plugin-form leg carries the premise alone.
   // `precision` deliberately keeps no maximum: it is a TOTAL digit count and
   // reaches neither primitive, so this argument does not carry to it (#18972
   // measured the same and left it alone). See {@link MAX_RENDERABLE_SCALE}.
