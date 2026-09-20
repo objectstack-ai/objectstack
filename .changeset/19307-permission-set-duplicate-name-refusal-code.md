@@ -1,11 +1,11 @@
 ---
 '@objectstack/plugin-security': patch
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 ---
 
 fix(plugin-security): the `sys_permission_set` duplicate-name refusal carries `UNIQUE_VIOLATION`, and the packaged-set lock answers first (#19307)
 
-Clause-②: no
+Clause-②: yes
 
 Two halves of one defect on the data door's insert leg for `sys_permission_set`
 (`permission-set-projection.ts`), both measured live on `examples/app-showcase`
@@ -48,13 +48,24 @@ POST /api/v1/data/sys_permission_set {"name":"showcase_manager"}
 ```
 
 **What did NOT move**, measured on the same runtime: an ordinary
-(non-package-declared) duplicate still answers the duplicate refusal and not
-`NOT_OVERRIDABLE`; an unauthenticated write on the same resource still answers
-`401 UNAUTHENTICATED`; and an `update` targeting a packaged set answers
-`403 NOT_OVERRIDABLE` exactly as before.
+(non-package-declared) duplicate **whose provenance the lock can resolve** still
+answers the duplicate refusal and not `NOT_OVERRIDABLE` — that qualifier is
+load-bearing, and the corner below is the case it excludes; an unauthenticated
+write on the same resource still answers `401 UNAUTHENTICATED`; and an `update`
+targeting a packaged set answers `403 NOT_OVERRIDABLE` exactly as before.
 
 ⚠️ **One corner moved with the order**: an ordinary duplicate attempted while no
-artifact source can answer now takes the lock's fail-closed `unknown` refusal
-(403, "retry once the metadata layer is readable") instead of the 409. Both are
-refusals and neither writes; it is pinned so the behaviour is declared rather
-than incidental.
+artifact source can answer now takes the lock's fail-closed `unknown` refusal —
+`403` `NOT_OVERRIDABLE` (`PackagedPermissionSetProvenanceUnknownError`, "retry
+once the metadata layer is readable") — instead of the 409. Both are refusals and
+neither writes; it is pinned so the behaviour is declared rather than incidental.
+
+⚠️ **And the order has a cost, stated rather than discovered**: the lock's probe
+(`protocol.getMetaItemLayered`) used to be evaluated only AFTER the duplicate
+check passed, so a duplicate insert never paid for it. It is now evaluated
+unconditionally, ahead of that check. Two consequences, both deliberate: every
+**duplicate** insert on `sys_permission_set` costs one extra metadata round trip
+(the accepted path's cost is unchanged — it always paid this probe), and the
+duplicate path is now COUPLED to metadata-layer reachability, where before it
+answered from the record alone. That coupling is the mechanism behind the corner
+above, and it is the price of putting the refusal that names the remedy first.
