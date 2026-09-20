@@ -424,9 +424,13 @@
  *                               which is why it is not the class above, whose
  *                               word is "plus".
  *   footer-blank-collapsed      stored is that body with the block's own blank
- *                               line collapsed to one newline — sent N, stored
- *                               N-1. The footer path DOES take a byte here, and
- *                               the byte is its own separator (#19048).
+ *                               line collapsed to one newline, with or without
+ *                               the strip above — sent N, stored N-1 on its
+ *                               own and N-2 over a stripped trailing newline,
+ *                               which is the shape a seat post's `--body`
+ *                               write sends (#19048, #19312). The footer path
+ *                               DOES take a byte here, and the byte is its own
+ *                               separator.
  *   mutated                     anything else — the warning, kept whole, plus
  *                               the FIRST DIFFERING BYTE and what stands at it
  *                               on each side.
@@ -511,7 +515,8 @@
  * gives up only newlines the platform does not keep, `footer-appended` adds
  * without removing, `footer-re-anchored` moves a newline the act itself sent,
  * and `footer-blank-collapsed` gives up one newline of the platform's OWN
- * footer separator. Every one of them exits 0.
+ * footer separator, over any trailing newline it does not keep. Every one of
+ * them exits 0.
  *
  * `mutated` is the only class that answers no, and since #18693 it is also the
  * only class that CAN: the two shapes the platform's own footer takes are
@@ -527,9 +532,10 @@
  *                with those newlines removed and exactly one newline inserted
  *                immediately before the block. Class `footer-re-anchored`,
  *                exit 0.
- *   COLLAPSED    the sent body ended in the block with no trailing newline,
- *                and the stored body is it with the block's blank line
- *                collapsed. Class `footer-blank-collapsed`, exit 0 (#19048).
+ *   COLLAPSED    the sent body ended in the block, with or without trailing
+ *                newline(s) of its own, and the stored body is it — those
+ *                newlines stripped — with the block's blank line collapsed.
+ *                Class `footer-blank-collapsed`, exit 0 (#19048, #19312).
  *   NOT STORED   `mutated`, and nothing else is: a byte this act sent is not
  *                the byte the platform holds at that offset, or the stored
  *                body stops before the sent one does. `EXIT_NOT_STORED`.
@@ -1724,7 +1730,7 @@ export const READ_BACK_CLASSES = Object.freeze({
   'footer-re-anchored':
     "the stored body is that body with the trailing newline(s) it sent moved to before the footer block's rule — nothing added, nothing lost",
   'footer-blank-collapsed':
-    "the stored body is that body with the blank line immediately before the footer block's rule collapsed — one newline of the block's own separator gone, and no content byte touched",
+    "the stored body is that body with the blank line immediately before the footer block's rule collapsed, over any trailing newline(s) the platform does not keep — one newline of the block's own separator gone, and no content byte touched",
   mutated: 'something nobody measured — the bytes disagree, and the offset says where',
 });
 
@@ -1792,11 +1798,14 @@ function byteWindowFrom(text, from, limit = SPAN_BYTES) {
  *                the same bytes, a newline moved from after the footer to
  *                before its rule — at one trailing newline, equal length, one
  *                byte MOVED and zero lost.
- *   collapsed    the sent body ENDS in the block exactly, with no trailing
- *                newline of its own, and the stored body is that same body
- *                with the block's leading blank line collapsed to one
- *                newline. Sent N, stored N-1: the platform really does take a
- *                byte away here, and the byte is its OWN separator.
+ *   collapsed    the sent body ENDS in the block — after its own trailing
+ *                newline(s), if it sent any — and the stored body is that
+ *                same body, those newlines stripped, with the block's leading
+ *                blank line collapsed to one newline. The platform really
+ *                does take a byte away here, and the byte is its OWN
+ *                separator; over a stripped trailing newline it takes that
+ *                one too, and THAT pair is the shape a seat post's `--body`
+ *                write sends (#19312).
  *
  * ## THE CRITERION — which mutations are the footer's, and which the sanitizer's
  *
@@ -1850,12 +1859,18 @@ export function footerReAnchoring(sent, stored) {
     const head = trimmed.slice(0, trimmed.length - PLATFORM_COMMENT_FOOTER.length);
     if (stored === `${head}\n${PLATFORM_COMMENT_FOOTER}`) return { strippedNewlines, shape: 're-anchored' };
   }
-  // ⛔ `strippedNewlines === 0` is load-bearing, ⛔ not tidiness: a sent body
-  // that carried trailing newlines AND came back collapsed is a cell nobody
-  // has measured, and an unmeasured cell is not one this tool forgives.
-  if (strippedNewlines === 0 && sentText.endsWith(PLATFORM_COMMENT_FOOTER)) {
-    const head = sentText.slice(0, sentText.length - PLATFORM_COMMENT_FOOTER.length);
-    if (stored === `${head}${PLATFORM_COMMENT_FOOTER_COLLAPSED}`) return { strippedNewlines: 0, shape: 'collapsed' };
+  // The collapse reads the TRIMMED body, so ONE arm covers the collapse alone
+  // and the collapse OVER the strip — the cell this arm used to refuse as
+  // unmeasured, and the shape a seat post's `--body` write actually sends: a
+  // file ending in a newline whose last paragraph stands a blank line above the
+  // rule, so `\n\n\n---` goes out and the block's own `\n\n---` comes back.
+  // Measured 13 times in one shift (#19312), the content whole on a fresh read
+  // every one of them. ⛔ The head is still compared literally, so a whitespace
+  // truncation in the CONTENT — two newlines sent there, one stored — is still
+  // `null` and still exits 4.
+  if (trimmed.endsWith(PLATFORM_COMMENT_FOOTER)) {
+    const head = trimmed.slice(0, trimmed.length - PLATFORM_COMMENT_FOOTER.length);
+    if (stored === `${head}${PLATFORM_COMMENT_FOOTER_COLLAPSED}`) return { strippedNewlines, shape: 'collapsed' };
   }
   return null;
 }
@@ -1869,8 +1884,9 @@ export function footerReAnchoring(sent, stored) {
  * newlines the platform does not keep, `footer-appended` adds without
  * removing, `footer-re-anchored` moves a newline the act itself sent, and
  * `footer-blank-collapsed` drops one newline of the platform's own footer
- * separator — the single byte the footer path has been measured taking, and
- * never a byte of the body. So `mutated` — "something nobody
+ * separator, over any trailing newline the platform does not keep — the only
+ * bytes the footer path has been measured taking, and never a byte of the
+ * body. So `mutated` — "something nobody
  * measured" — is the one class that can answer no, and since #18693 ONE
  * measurement decides both what the status line says and what `$?` says.
  * ⛔ `unreadable` answers YES on purpose: nothing was measured there, which is
@@ -2029,8 +2045,9 @@ export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 
   } else if (readBack.class === 'footer-blank-collapsed') {
     lines.push(
       `  read-back: clean — the platform re-anchored its own footer block: the blank line before its rule was` +
-        ` COLLAPSED, so the one byte short is that separator newline and every CONTENT byte sent IS stored` +
-        ` (sent ${sentBytes}, stored ${storedBytes})`,
+        ` COLLAPSED${readBack.strippedNewlines > 0 ? `, over ${readBack.strippedNewlines} stripped trailing newline(s)` : ''}, so the byte(s)` +
+        ` short are that separator newline${readBack.strippedNewlines > 0 ? ' and the newline(s) the platform does not keep' : ''}, and` +
+        ` every CONTENT byte sent IS stored (sent ${sentBytes}, stored ${storedBytes})`,
     );
   } else {
     // `mutated` means one thing now, so it says one thing: nobody measured this
@@ -3568,7 +3585,8 @@ export function selfTest() {
   t('⛔ a loss INSIDE the block is the sanitizer\'s, ⛔ not the footer\'s, and exits 4', rb({ sent: C_SENT, stored: `${C_HEAD}${PLATFORM_COMMENT_FOOTER_COLLAPSED.replace('---', '--')}` }).exit === EXIT_NOT_STORED);
   t('⛔ BOTH newlines gone is a cell nobody measured, ⛔ not a collapse this tool forgives', rb({ sent: C_SENT, stored: `${C_HEAD}${PLATFORM_COMMENT_FOOTER.slice(2)}` }).exit === EXIT_NOT_STORED);
   t('⛔ …and the arm requires the act to have SENT the block: no footer, no collapse', footerReAnchoring(C_HEAD, collapsedAfter(C_HEAD)) === null);
-  t('⛔ …and requires it to have sent NO trailing newline: a strip AND a collapse is unmeasured', footerReAnchoring(`${C_SENT}\n`, collapsedAfter(C_HEAD)) === null);
+  t('⭐ …and the strip AND the collapse in ONE act is the MEASURED cell now, ⛔ no longer refused as unseen', footerReAnchoring(`${C_SENT}\n`, collapsedAfter(C_HEAD))?.shape === 'collapsed');
+  t('…with the strip RECORDED on the verdict, so the line can name the second byte it cost', footerReAnchoring(`${C_SENT}\n`, collapsedAfter(C_HEAD))?.strippedNewlines === 1);
   t('⭐ SHAPE B IS NOT WHAT LANDED: a whitespace-only truncation in the CONTENT still exits 4', rb({ sent: `${C_HEAD}\n\n${PLATFORM_COMMENT_FOOTER}`, stored: collapsedAfter(C_HEAD) }).exit === EXIT_NOT_STORED);
   const C_LOST = rb({ sent: C_SENT, stored: collapsedAfter(C_HEAD.replace('this', 'that')) });
   // ⛔ The falsified claim is ASSEMBLED, ⛔ never written out: `git grep` for
@@ -3576,6 +3594,37 @@ export function selfTest() {
   t('⛔ THE FALSIFIED SENTENCE IS GONE: the report no longer asserts the footer path removes nothing', notStoredText(C_LOST, 'o/n', 19048).includes(['takes', 'nothing', 'away'].join(' ')) === false);
   t('⭐ …and names all THREE measured shapes instead, the collapse included', notStoredText(C_LOST, 'o/n', 19048).includes('appends its block') && notStoredText(C_LOST, 'o/n', 19048).includes('moves a') && notStoredText(C_LOST, 'o/n', 19048).includes('COLLAPSES the blank line'));
   t('…while still saying the thing that decides it: something this act sent is not there', notStoredText(C_LOST, 'o/n', 19048).includes('something this act sent is not there') && notStoredText(C_LOST, 'o/n', 19048).includes('READ THE ARTEFACT'));
+
+  // The collapse OVER the strip (#19312) — the shape a seat post's `--body`
+  // write actually sends: the file ends in a newline and its last paragraph
+  // stands a blank line above the rule, so three newlines go out before the
+  // rule and the block's own two come back. 13 writes in one shift exited 4 on
+  // it — 7 of 11 at 2026-09-20T21:40Z and 6 more at 22:31Z — every one with the
+  // content whole on a fresh `GET`, which is the false NOT-STORED that invites
+  // the duplicate re-post. The STORED byte counts are read off those cards; the
+  // sent side is that reading's own transformation, ⛔ not a count nobody wrote.
+  const liveCollapseOverStrip = (storedBytes) => {
+    const head = 'x'.repeat(storedBytes - FOOTER_BYTES);
+    return { sent: `${head}\n${PLATFORM_COMMENT_FOOTER}\n`, stored: `${head}${PLATFORM_COMMENT_FOOTER}` };
+  };
+  for (const live of [{ card: 19343, stored: 3585 }, { card: 19360, stored: 2892 }, { card: 19404, stored: 4623 }]) {
+    const { sent, stored } = liveCollapseOverStrip(live.stored);
+    const v = rb({ sent, stored });
+    t(`⭐ THE FILED READING — the body of objectstack#${live.card}: ${live.stored} bytes stored, and the run before the rule 3 newlines sent to 2 stored`,
+      Buffer.byteLength(stored, 'utf8') === live.stored && Buffer.byteLength(sent, 'utf8') === live.stored + 2, `stored=${Buffer.byteLength(stored, 'utf8')}`);
+    t('…and it LANDED: exit 0, ⛔ not the 4 that told a seat thirteen landed writes were lost', v.landed === true && v.exit === EXIT_OK);
+    t('…named by the collapse\'s own word, with the stripped newline RECORDED beside it', v.readBack.class === 'footer-blank-collapsed' && v.readBack.strippedNewlines === 1);
+  }
+  const OVER_STRIP = liveCollapseOverStrip(4096);
+  t('⭐ the line names the SECOND byte out loud — ⛔ never "the one byte short" about a body two short',
+    rb({ ...OVER_STRIP }).lines[1].includes('over 1 stripped trailing newline(s)') && rb({ ...OVER_STRIP }).lines[1].includes('every CONTENT byte sent IS stored'), rb({ ...OVER_STRIP }).lines[1]);
+  t('⛔ THE CONTROL — one CONTENT byte different under the very same strip-and-collapse still exits 4',
+    rb({ sent: `${C_HEAD}\n${PLATFORM_COMMENT_FOOTER}\n`, stored: `${C_HEAD.replace('this', 'that')}${PLATFORM_COMMENT_FOOTER}` }).exit === EXIT_NOT_STORED);
+  t('⛔ …and a footer RELOCATED — the SAME bytes in another position, the card\'s own first claim — exits 4',
+    rb({ sent: C_SENT, stored: `${PLATFORM_COMMENT_FOOTER}${C_HEAD}` }).exit === EXIT_NOT_STORED
+      && Buffer.byteLength(C_SENT, 'utf8') === Buffer.byteLength(`${PLATFORM_COMMENT_FOOTER}${C_HEAD}`, 'utf8'));
+  t('⛔ …so a MULTISET compare is still refused: equal bytes in a different order is not a normalisation',
+    firstDifferingByte(C_SENT, `${PLATFORM_COMMENT_FOOTER}${C_HEAD}`) === 0);
 
   battery('the CLI: the one decision a typo must never make');
   t('a comment target parses', parseOptions(['--comment=17314']).options.mode === 'comment');
