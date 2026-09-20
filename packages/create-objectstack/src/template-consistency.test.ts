@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { syncObjectStackDeps } from './pkg-utils.js';
 import { copyDir, TEMPLATE_FILE_ALIASES } from './template-copy.js';
 import { TEMPLATES } from './template-registry.js';
+import { gitFreeEnv } from '../../../scripts/git-env.mjs';
 import { SKILLS_CATALOG, SKILLS_INSTALL_COMMAND } from './skills-install.js';
 
 const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -52,26 +53,32 @@ const REGISTRY_SOURCE = fs.readFileSync(path.join(pkgRoot, 'src', 'index.ts'), '
 //     read a checkout owned by another user inside a container. Closing it could
 //     turn a passing read into `detected dubious ownership`, which is a
 //     regression this file gets no isolation benefit in exchange for.
-const LEAKED_GIT_ENV = [
-  'GIT_DIR',
-  'GIT_WORK_TREE',
-  'GIT_COMMON_DIR',
-  'GIT_INDEX_FILE',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-  'GIT_NAMESPACE',
-  'GIT_CEILING_DIRECTORIES',
-  'GIT_TEMPLATE_DIR',
-  'GIT_CONFIG',
-] as const;
+//
+// #16644 — the hand-maintained allowlist of ten location variables that used to
+// stand here is retired in favour of the blanket strip in `scripts/git-env.mjs`,
+// and it is not re-spelled anywhere in this file so that a census of the retired
+// shape does not match this paragraph. The reason the list goes rather than gets
+// one more entry: it had to be kept level with git's own list of location
+// variables, and its failure mode is that THE KEY IT MISSES IS THE KEY THAT
+// BITES. ⛔ One spelling in the repo, not two — no "either is fine" transition
+// state.
+//
+// `gitFreeEnv()` removes every `GIT_`-prefixed key, which is strictly wider than
+// the list it replaces and still inside the boundary drawn above. It DELETES
+// keys rather than pinning any of them to `/dev/null`, so it never sets
+// `GIT_CONFIG_GLOBAL`: global and system config stay open and `safe.directory`
+// with them, which is the whole of the concern in the bullet above — preserved,
+// and more strictly, because the deletion moves git toward its own defaults
+// instead of substituting an empty config file. The widening is free here for
+// the other reason the module's header names: both children below are LOCAL
+// reads — `ls-files` and `git grep` against `cwd` — so the transport settings
+// the strip also takes (`GIT_CONFIG_*` rewriting remotes, `GIT_SSL_*`) are
+// nothing either one needs. ⛔ A child that fetches, clones or pushes would not
+// be entitled to this environment.
 
 /** The environment the repo-reading git calls below get: this process's, minus
  *  every variable that could aim them at a different repository. */
-const REPO_READ_ENV: NodeJS.ProcessEnv = (() => {
-  const env = { ...process.env };
-  for (const key of LEAKED_GIT_ENV) delete env[key];
-  return env;
-})();
+const REPO_READ_ENV: NodeJS.ProcessEnv = gitFreeEnv();
 
 // ── Declared version surfaces, per bundled template (#9264) ─────────────────
 //
