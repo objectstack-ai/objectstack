@@ -2,10 +2,10 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 202,
-    "droppedRefinementSites": 553,
-    "refinementSitesThatDidProject": 367,
-    "refinementSitesWithNoJsonFormToCompare": 3
+    "publishedSchemasWithDroppedRefinements": 204,
+    "droppedRefinementSites": 569,
+    "refinementSitesThatDidProject": 357,
+    "refinementSitesWithNoJsonFormToCompare": 9
   },
   "entries": {
     "ai/BlueprintField": {
@@ -61,12 +61,14 @@
         "manifest.flows.element",
         "manifest.flows.element.errorHandling",
         "manifest.flows.element.nodes.element.in.waitEventConfig",
+        "manifest.jobs.element.schedule.options[0].timezone",
         "manifest.navigationContributions.element.items.element.lazy.options[0]",
         "manifest.objectExtensions.element",
         "manifest.objects.element",
         "manifest.objects.element.fieldGroups",
-        "manifest.objects.element.fields.valueType",
-        "manifest.objects.element.fields.valueType.currencyConfig",
+        "manifest.objects.element.fields.out.keyType",
+        "manifest.objects.element.fields.out.valueType",
+        "manifest.objects.element.fields.out.valueType.currencyConfig",
         "manifest.objects.element.lifecycle",
         "manifest.pages.element",
         "manifest.pages.element.slots.header.options[0].in.type",
@@ -152,11 +154,13 @@
         "data.options[1].manifest.flows.element",
         "data.options[1].manifest.flows.element.errorHandling",
         "data.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "data.options[1].manifest.jobs.element.schedule.options[0].timezone",
         "data.options[1].manifest.objectExtensions.element",
         "data.options[1].manifest.objects.element",
         "data.options[1].manifest.objects.element.fieldGroups",
-        "data.options[1].manifest.objects.element.fields.valueType",
-        "data.options[1].manifest.objects.element.fields.valueType.currencyConfig",
+        "data.options[1].manifest.objects.element.fields.out.keyType",
+        "data.options[1].manifest.objects.element.fields.out.valueType",
+        "data.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.pages.element",
         "data.options[1].manifest.pages.element.slots.header.options[0].in.type",
@@ -232,11 +236,13 @@
         "options[1].manifest.flows.element",
         "options[1].manifest.flows.element.errorHandling",
         "options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "options[1].manifest.jobs.element.schedule.options[0].timezone",
         "options[1].manifest.objectExtensions.element",
         "options[1].manifest.objects.element",
         "options[1].manifest.objects.element.fieldGroups",
-        "options[1].manifest.objects.element.fields.valueType",
-        "options[1].manifest.objects.element.fields.valueType.currencyConfig",
+        "options[1].manifest.objects.element.fields.out.keyType",
+        "options[1].manifest.objects.element.fields.out.valueType",
+        "options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.pages.element",
         "options[1].manifest.pages.element.slots.header.options[0].in.type",
@@ -273,11 +279,13 @@
         "data.packages.element.options[1].manifest.flows.element",
         "data.packages.element.options[1].manifest.flows.element.errorHandling",
         "data.packages.element.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "data.packages.element.options[1].manifest.jobs.element.schedule.options[0].timezone",
         "data.packages.element.options[1].manifest.objectExtensions.element",
         "data.packages.element.options[1].manifest.objects.element",
         "data.packages.element.options[1].manifest.objects.element.fieldGroups",
-        "data.packages.element.options[1].manifest.objects.element.fields.valueType",
-        "data.packages.element.options[1].manifest.objects.element.fields.valueType.currencyConfig",
+        "data.packages.element.options[1].manifest.objects.element.fields.out.keyType",
+        "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
+        "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.pages.element",
         "data.packages.element.options[1].manifest.permissions.element.objects.valueType.out",
@@ -315,9 +323,10 @@
         "data.actions.element.in",
         "data.actions.element.in.params.element.in",
         "data.fieldGroups",
-        "data.fields.valueType",
-        "data.fields.valueType.currencyConfig",
-        "data.fields.valueType.relatedListFilter.lazy",
+        "data.fields.out.keyType",
+        "data.fields.out.valueType",
+        "data.fields.out.valueType.currencyConfig",
+        "data.fields.out.valueType.relatedListFilter.lazy",
         "data.lifecycle",
         "data.listViews.valueType",
         "data.listViews.valueType.bulkActionDefs.element",
@@ -374,7 +383,7 @@
     },
     "automation/AssignmentConfig": {
       "sites": [
-        "assignments.valueType"
+        "assignments.out.valueType"
       ]
     },
     "automation/AssignmentValue": {
@@ -674,9 +683,10 @@
         "actions.element.in",
         "actions.element.in.params.element.in",
         "fieldGroups",
-        "fields.valueType",
-        "fields.valueType.currencyConfig",
-        "fields.valueType.relatedListFilter.lazy",
+        "fields.out.keyType",
+        "fields.out.valueType",
+        "fields.out.valueType.currencyConfig",
+        "fields.out.valueType.relatedListFilter.lazy",
         "lifecycle",
         "listViews.valueType",
         "listViews.valueType.bulkActionDefs.element",
@@ -944,7 +954,8 @@
         "operations.element.options[3].object.actions.element.in",
         "operations.element.options[3].object.actions.element.in.params.element.in",
         "operations.element.options[3].object.fieldGroups",
-        "operations.element.options[3].object.fields.valueType",
+        "operations.element.options[3].object.fields.out.keyType",
+        "operations.element.options[3].object.fields.out.valueType",
         "operations.element.options[3].object.lifecycle",
         "operations.element.options[3].object.listViews.valueType",
         "operations.element.options[3].object.listViews.valueType.bulkActionDefs.element",
@@ -961,9 +972,10 @@
         "object.actions.element.in",
         "object.actions.element.in.params.element.in",
         "object.fieldGroups",
-        "object.fields.valueType",
-        "object.fields.valueType.currencyConfig",
-        "object.fields.valueType.relatedListFilter.lazy",
+        "object.fields.out.keyType",
+        "object.fields.out.valueType",
+        "object.fields.out.valueType.currencyConfig",
+        "object.fields.out.valueType.relatedListFilter.lazy",
         "object.lifecycle",
         "object.listViews.valueType",
         "object.listViews.valueType.bulkActionDefs.element",
@@ -972,6 +984,16 @@
         "object.listViews.valueType.grouping.fields.element.field",
         "object.listViews.valueType.kanban.groupByField",
         "object.listViews.valueType.timeline.groupByField"
+      ]
+    },
+    "system/CronSchedule": {
+      "sites": [
+        "timezone"
+      ]
+    },
+    "system/Job": {
+      "sites": [
+        "schedule.options[0].timezone"
       ]
     },
     "system/LifecyclePolicyConfig": {
@@ -993,7 +1015,8 @@
         "options[3].object.actions.element.in",
         "options[3].object.actions.element.in.params.element.in",
         "options[3].object.fieldGroups",
-        "options[3].object.fields.valueType",
+        "options[3].object.fields.out.keyType",
+        "options[3].object.fields.out.valueType",
         "options[3].object.lifecycle",
         "options[3].object.listViews.valueType",
         "options[3].object.listViews.valueType.bulkActionDefs.element",
@@ -1007,6 +1030,11 @@
     "system/ObjectStorageConfig": {
       "sites": [
         "buckets.element.lifecyclePolicy.rules.element"
+      ]
+    },
+    "system/Schedule": {
+      "sites": [
+        "options[0].timezone"
       ]
     },
     "system/ServerRateLimitConfig": {
@@ -1042,16 +1070,6 @@
     "system/StackServerSecurity": {
       "sites": [
         "rateLimit"
-      ]
-    },
-    "system/TraceSamplingConfig": {
-      "sites": [
-        "composite.element.condition"
-      ]
-    },
-    "system/TracingConfig": {
-      "sites": [
-        "sampling.composite.element.condition"
       ]
     },
     "ui/Action": {
@@ -1264,6 +1282,12 @@
     "ui/ObjectMetricProps": {
       "sites": [
         "filter.element"
+      ]
+    },
+    "ui/ObjectTimelineProps": {
+      "sites": [
+        "filter.element",
+        "timeline.groupByField"
       ]
     },
     "ui/ObjectTreeProps": {

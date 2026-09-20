@@ -177,6 +177,19 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // to a gap: both commands read it to COUNT the packages for the step line.
   'Reads the artifact\'s `packages[]` for a count both commands print; the pass that judges them is a gate above':
     ['artifactPackages'],
+  // [#18431] Artifact ASSEMBLY, and deliberately not a `BUILD_ONLY_GATES` row.
+  // That ledger's entries are gates that cannot run read-only (they rewrite a
+  // committed snapshot, or emit a sibling module); filing this one there would
+  // assert it judges something, and it judges nothing. It takes the docs
+  // `collectAndLintDocs` already collected AND ALREADY LINTED — a name in
+  // SHARED_NON_REGISTRY_GATES above, run by all three doors — and places them
+  // on the body of the package that owns them (ADR-0130 D4). It refuses
+  // nothing, reports nothing, and returns its own argument when it has nothing
+  // to place. ⛔ Nor is there a parity gap behind it: `os validate` emits no
+  // artifact, so there is no `packages[]` for it to place them in, and every
+  // issue the placement could ever raise was raised by the gate above it.
+  'Artifact assembly — puts already-collected, already-linted content into the bundle `os build` writes; judges nothing':
+    ['attachPackageDocs'],
   'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
     [
       'printHeader',

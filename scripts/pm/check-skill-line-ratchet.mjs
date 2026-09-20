@@ -317,7 +317,22 @@ export const CEILINGS = new Map([
   // 112 B line; re-wrap funding is refused per the 2026-08-17 rule, and deleting
   // a ruled clause is refused on the state-machine precedent. Landed count,
   // headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 812],
+  // Raised 812 → 813 by the human-merge line-threshold ruling — an ORDINARY raise
+  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
+  // 2026-09-18, live chat beside ruling C on the regenerated-artefact landing,
+  // verbatim and untranslated: 「还有应该完善skills，修改代码量超过某个行数
+  // （比如5000）就应该人工审核。」 The content is ONE rule line beside the
+  // four-piece-terminal trigger: a PR over 5,000 changed lines (additions +
+  // deletions, generated files included) takes the same terminal, with no
+  // fact-layer exception; the mechanical face is `check-governed-merges.mjs`.
+  // It could not be paid in place — measured, not assumed: the trigger line it
+  // belongs beside stands at 118 B against the 120-byte cap and the shortest
+  // self-contained form of the rule is 111 B; of the file's 598 adjacent bullet
+  // pairs ZERO merge under the cap (smallest 123 B); and deleting a ruled
+  // clause is refused on the state-machine precedent. Ruled content is not
+  // growth (the 811 → 812 entry above). Landed count, headroom 0, same
+  // convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 813],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.

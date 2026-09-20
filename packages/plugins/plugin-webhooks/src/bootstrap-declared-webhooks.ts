@@ -1,8 +1,38 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * bootstrapDeclaredWebhooks — materialize stack/connector-declared `webhooks`
- * into `sys_webhook` rows so the dispatcher can actually see them (closes #3461).
+ * bootstrapDeclaredWebhooks — materialize STACK-declared `webhooks`
+ * (`defineStack({ webhooks })`) into `sys_webhook` rows so the dispatcher can
+ * actually see them (closes #3461 for that half — see the next section for the
+ * half it does not reach).
+ *
+ * ## What this path does NOT reach: a connector's nested `webhooks[]`
+ * This opening sentence used to say "stack/connector-declared", and the
+ * connector half of it was false. The function's ONE source is
+ * `readDeclared(engine, metadataService, 'webhook')` — `webhook` METADATA
+ * ITEMS — and every registrar of that type is keyed on the TOP-LEVEL
+ * `webhooks:` collection of a manifest / nested-plugin document:
+ * `registerMetadataCollections` enumerates `METADATA_ARRAY_KEYS` over that
+ * document (objectql `engine.ts`), and the artifact loader's collection map
+ * (`packages/metadata/src/plugin.ts`) reads the same spelling table
+ * (`PLURAL_TO_SINGULAR`, `@objectstack/spec/meta-spelling`). None of them walks
+ * INTO a `connectors:` entry. A connector's nested `webhooks[]` therefore stays
+ * inside the connector document, never becomes a `webhook` metadata item, is
+ * never in `declared`, and is never materialized here — no row, no warning, no
+ * skip count. The shapes are not even the same: a connector's entries are
+ * `WebhookConfigSchema` (`WebhookSchema` plus `events` / `signatureAlgorithm`),
+ * not the `WebhookSchema` this seeder parses.
+ *
+ * That gap is the DECLARED direction, not an oversight to route around. The
+ * spec says so twice: `@objectstack/spec/automation/webhook` — "(Connector
+ * `webhooks` remain NOT-yet-enforced — see #3197.)" — and the nested schema
+ * itself (`WebhookConfigSchema`, `integration/connector.zod.ts`) — "declared
+ * but ignored at registration ... parse and are stored, but no runtime
+ * dispatches, emits, or filters on them". Widening this seeder to read
+ * connectors would enforce a surface the spec declares unenforced; that is
+ * #3197's card, not this one. The absence is pinned as behaviour by
+ * `bootstrap-declared-webhooks.connector-nested.test.ts`, so this paragraph
+ * cannot quietly go stale the way the sentence above it did.
  *
  * ## The disconnect this closes
  * The spec authoring surface (`WebhookSchema` — `defineStack({ webhooks })`,

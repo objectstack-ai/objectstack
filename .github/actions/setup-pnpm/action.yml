@@ -47,11 +47,15 @@
 # this action materialised the pin, with an assertion in between -- is what
 # makes a job structurally unable to donate an unpinned manager to the cache.
 #
-# Deliberately NOT in here: `actions/setup-node`. `scripts/check-node-version.mjs`
-# scans `.github/workflows/*.yml` ONLY, and reports how many setup-node steps it
-# audited. Moving those steps into this composite would drop them from its census
-# and it would still print OK -- a gate silently auditing less than it says.
-# Callers keep their own `setup-node` step, with its literal `node-version` pin.
+# Deliberately NOT in here: `actions/setup-node`. The reason was a gate's blind
+# spot -- `scripts/check-node-version.mjs` scanned `.github/workflows/*.yml`
+# only, so a setup-node step moved into this composite would have dropped out of
+# its census while it still printed OK, a gate silently auditing less than it
+# says. That blind spot is CLOSED (#19229): the census now reads
+# `.github/actions/**` as well, and a step's Node pin is audited wherever it is
+# written. The separation is kept anyway, because the callers' own pins are
+# already in place and moving them buys nothing -- ⛔ it is no longer a
+# constraint, and a future composition is free to hold one.
 
 name: Setup pnpm
 description: >-

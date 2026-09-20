@@ -383,6 +383,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 // #16055, the level axis below. Both are IMPORTED rather than restated: the
 // clause-② declaration has exactly one legal spelling and exactly one label
@@ -469,6 +470,13 @@ const isChangesetFile = (p) => p.startsWith('.changeset/') && p.endsWith('.md') 
 function git(args, cwd, { quiet = false } = {}) {
   return execFileSync('git', args, {
     cwd,
+    // #16644: `cwd` is the only thing that may name the repository here, and the
+    // self-test hands it mkdtemp fixtures. GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE
+    // outrank `cwd`, so an inherited one redirects `init`, `add -A` and `commit`
+    // onto the real checkout. ⭐ This helper is also the one that runs `fetch` in the
+    // #4690 leg -- its remote there is another LOCAL mkdtemp repository passed by
+    // path, so no transport configuration is in play and the strip is safe.
+    env: gitFreeEnv(),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     // `execFileSync` inherits the child's stderr by default. That is right for
@@ -911,7 +919,8 @@ export function render(result) {
 //   * PR #16347 (head `23443ce169af`) — `@objectstack/lint` graded `minor`, and
 //     that is where the widening is (a new field-typed refusal arm on
 //     `filter-preset-comparand`); `@objectstack/spec` graded `patch`, and what
-//     it received is ONE re-worded TSDoc comment at `date-range-presets.ts:101`.
+//     it received is ONE re-worded TSDoc comment in
+//     `packages/spec/src/data/date-range-presets.ts` (line 101 as measured).
 //     The gate refused, and it refused the SPEC line — the package that did not
 //     grow — while never naming the package that did.
 //
@@ -1580,10 +1589,12 @@ export function declarationFromPullRequest(pr) {
  *   not-measured-material no declaration, and a `yes` WOULD have refused  -> exit 1
  *   not-declared          the declaration reads `no` and names no
  *                         `narrowing` arm (#16421)                     -> exit 0
- *   clean                 declared `yes`, no moved package graded `patch` -> exit 0
- *   discharged            declared `yes`, a moved package IS graded `minor`+,
+ *   clean                 the axis is CARRIED (`yes`, or `no (narrowing)` — the
+ *                         arm carries it too, #16421), and no moved package is
+ *                         graded `patch`                               -> exit 0
+ *   discharged            the axis is CARRIED, a moved package IS graded `minor`+,
  *                         and others are graded `patch`                -> exit 0
- *   enforce               declared `yes`, moved packages graded `patch` and
+ *   enforce               the axis is CARRIED, moved packages graded `patch` and
  *                         NONE of them graded `minor` or above         -> exit 1
  *
  * Nine verdicts and no two of them collapse, because every collapse in this
@@ -1612,7 +1623,19 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   // when a caller hands in a declaration that carries no axis at all, which
   // keeps the pre-#17229 rendering for every shape that never had one.
   const carrier = declaration?.carrier ?? null;
-  if (!levels) return { verdict: 'unreadable-diff', offenders: [], raised: [], carrier, readings, unreadable: [] };
+  // ⭐ #19008. The DECLARATION ITSELF travels beside the readings, for the third
+  // time and the same reason `carrier` and `arm` do: `renderLevel` must not
+  // assert a declaration it did not read. Past the `not-declared` lane below,
+  // this verdict is decided by `refusable` and `offenders.length` ALONE —
+  // `value` plays no further part — so `clean`, `discharged` and `enforce` are
+  // every one of them reachable on a `no (narrowing)`. Each of their headlines
+  // used to state `yes` as a LITERAL, which made the arm docblock's own rule
+  // ("a PR that declares `no (narrowing)` must not be reported as having
+  // declared `yes`") false in the one line a reader quotes. ⛔ The repair is
+  // this field and the derivation in `renderLevel` — it is ⛔ NOT a reworded
+  // branch: a literal in any headline is the same defect one branch along.
+  const declared = { value: declaration?.value ?? null, arm: declaration?.arm ?? null };
+  if (!levels) return { verdict: 'unreadable-diff', offenders: [], raised: [], carrier, declared, readings, unreadable: [] };
   const unreadable = touched?.unreadable ?? [];
 
   // NO PR TO READ A DECLARATION FROM. This is a different fact from "a PR that
@@ -1637,8 +1660,8 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   // this file takes everywhere else.
   if (declaration?.payload === false) {
     return prEvent
-      ? { verdict: 'payload-unreadable', offenders: [], raised: [], carrier, readings, unreadable }
-      : { verdict: 'no-pull-request', offenders: [], raised: [], carrier, readings, unreadable };
+      ? { verdict: 'payload-unreadable', offenders: [], raised: [], carrier, declared, readings, unreadable }
+      : { verdict: 'no-pull-request', offenders: [], raised: [], carrier, declared, readings, unreadable };
   }
 
   // The offenders are computed BEFORE the declaration is consulted, because
@@ -1688,8 +1711,8 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
     //     not happen must not be indistinguishable from one that passed at the
     //     only layer anything downstream reads (#4690).
     return refusable
-      ? { verdict: 'not-measured-material', offenders, raised, carrier, readings, unreadable }
-      : { verdict: 'not-measured-moot', offenders, raised, carrier, readings, unreadable };
+      ? { verdict: 'not-measured-material', offenders, raised, carrier, declared, readings, unreadable }
+      : { verdict: 'not-measured-moot', offenders, raised, carrier, declared, readings, unreadable };
   }
   // #16421. A `no` stands the axis down — UNLESS it carries the narrowing arm.
   // `no (narrowing)` is a truthful `no` to the widening question and a breaking
@@ -1698,19 +1721,45 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   // inferred from the value: `no` alone keeps standing the axis down, which is
   // what every declaration written before the arm existed says.
   if (declaration.value === 'no' && declaration.arm !== 'narrowing') {
-    return { verdict: 'not-declared', offenders: [], raised: [], carrier, readings, unreadable };
+    return { verdict: 'not-declared', offenders: [], raised: [], carrier, declared, readings, unreadable };
   }
 
   // An unread manifest can only ever hide an offender, so it cannot be reported
   // under a tick: every green below states it, and the reader is told what was
   // not named.
-  if (refusable) return { verdict: 'enforce', offenders, raised, carrier, readings, unreadable };
+  if (refusable) return { verdict: 'enforce', offenders, raised, carrier, declared, readings, unreadable };
   // #16361. A `patch` on a moved package that this gate is NOT refusing is a
   // reading it made and set aside, not an absence — it gets its own verdict so
   // the residual is printed rather than folded into a tick that means "nothing
   // to see".
-  if (offenders.length) return { verdict: 'discharged', offenders, raised, carrier, readings, unreadable };
-  return { verdict: 'clean', offenders: [], raised, carrier, readings, unreadable };
+  if (offenders.length) return { verdict: 'discharged', offenders, raised, carrier, declared, readings, unreadable };
+  return { verdict: 'clean', offenders: [], raised, carrier, declared, readings, unreadable };
+}
+
+/**
+ * The clause-② declaration a level verdict was reached on, spelled for a reader
+ * — the ONE sentence any headline in `renderLevel` is allowed to make about it.
+ *
+ * It is the DECLARATION AS WRITTEN, value and arm together, so the headline and
+ * the `Clause-②:` line in the PR body are the same string and a reader can grep
+ * one for the other. The arm is not dropped on the way up: `yes (widening)` and
+ * a bare `yes` are different declarations, and the headline that flattened them
+ * is the one that also flattened `no (narrowing)` into `yes`.
+ *
+ * `value: null` is spelled `NOT MEASURED` rather than guessed at. The three
+ * carried lanes cannot be reached with a null value — `judgeLevel` returns a
+ * `not-measured-*` verdict first — so a result that arrives here without one is
+ * a caller that dropped the axis, and #4690's direction is that such a run says
+ * so rather than printing a reading it does not have.
+ *
+ * @param {{ value: 'yes'|'no'|null, arm: 'widening'|'narrowing'|null }|null|undefined} declared
+ * @returns {string}
+ */
+export function declaredClause2(declared) {
+  const value = declared?.value ?? null;
+  if (value !== 'yes' && value !== 'no') return 'NOT MEASURED';
+  const arm = declared?.arm ?? null;
+  return arm === null ? `\`${value}\`` : `\`${value} (${arm})\``;
 }
 
 /**
@@ -1766,6 +1815,16 @@ export function renderLevel(result) {
   // interchangeable. `null` (a caller that hands in no axis) keeps the
   // pre-#17229 rendering, so only a POSITIVE `not-measured` softens anything.
   const carrierUnread = result?.carrier === 'not-measured';
+  // ⭐ #19008. The headline's subject, DERIVED from the same parsed declaration
+  // the `readings` lines below it come from — never a literal. Three of the
+  // lanes below are reachable on a `no (narrowing)` (see `declared` in
+  // `judgeLevel`), and a literal `yes` in any of them reports a declaration the
+  // PR did not make while the rows underneath print the true one.
+  const declaredValue = declaredClause2(result?.declared);
+  // And the ACT that declaration names, for the one headline that names it. A
+  // declared narrowing is accounted for by the same grade, but calling it a
+  // widening is the same misreport one noun along.
+  const declaredAct = result?.declared?.arm === 'narrowing' ? 'narrowing' : 'widening';
 
   switch (result?.verdict) {
     case 'unreadable-diff':
@@ -1876,12 +1935,12 @@ export function renderLevel(result) {
       return { exitCode: 1, stdout, stderr };
 
     case 'not-declared':
-      stdout.push('✓ LEVEL AXIS: this PR declares clause-② `no`, so no package here is declared to have grown a published surface.', ...readings, ...unreadableNote);
+      stdout.push(`✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, so no package here is declared to have grown a published surface.`, ...readings, ...unreadableNote);
       return { exitCode: 0, stdout, stderr };
 
     case 'clean':
       stdout.push(
-        '✓ LEVEL AXIS: this PR declares clause-② `yes`, and no package whose `packages/**/src/**` it moves is graded `patch`.',
+        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and no package whose \`packages/**/src/**\` it moves is graded \`patch\`.`,
         ...readings,
         ...unreadableNote,
       );
@@ -1894,8 +1953,8 @@ export function renderLevel(result) {
     // mode the filing card is about, one layer along.
     case 'discharged':
       stdout.push(
-        '✓ LEVEL AXIS: this PR declares clause-② `yes`, and it grades a package whose `packages/**/src/**` ' +
-          'it moves at `minor` or above — the declared widening is accounted for:',
+        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and it grades a package whose \`packages/**/src/**\` ` +
+          `it moves at \`minor\` or above — the declared ${declaredAct} is accounted for:`,
         ...raisedLines(result.raised),
         '',
         '   These packages the diff also moves are graded `patch`, and are NOT refused:',
@@ -1913,7 +1972,7 @@ export function renderLevel(result) {
 
     case 'enforce':
       stderr.push(
-        '⛔ This PR declares clause-② YES, and it grades NO package whose `packages/**/src/**` it moves\n' +
+        `⛔ This PR declares clause-② ${declaredValue}, and it grades NO package whose \`packages/**/src/**\` it moves\n` +
           '   at `minor` or above.\n',
       );
       stderr.push('   The packages this PR moves `packages/**/src/**` of, and the level each is graded:');
@@ -1962,7 +2021,7 @@ export function renderLevel(result) {
       );
       stdout.push(
         errorAnnotation({
-          title: 'Check Changeset (level axis): clause-② declares YES while no moved package is graded `minor` or above',
+          title: `Check Changeset (level axis): clause-② declares ${declaredValue} while no moved package is graded \`minor\` or above`,
           message:
             `Moved and graded \`patch\`: ${offenderList(result.offenders)}. None of them is graded \`minor\` or above.\n` +
             `${readingsBlock}\n` +
@@ -2233,11 +2292,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)': 37,
   '#17229: an UNREAD carrier is NOT MEASURED, never an absent one': 25,
   '#18263: the refusal says its reason, and says it where the API can read it': 35,
+  '#19008: the level headline is the parsed declaration, not a literal': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 19;
+const SELF_TEST_BATTERY_FLOOR = 20;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3180,6 +3240,126 @@ function selfTest() {
         JSON.stringify(majorPackagesIn(MAJOR)) === JSON.stringify(entriesIn(MAJOR).filter((e) => e.bump === 'major').map((e) => e.pkg)),
         'majorPackagesIn must equal the `major` filter over entriesIn — one block, one parse',
       );
+    }
+
+    // ── The HEADLINE is the DECLARATION, never a literal (#19008) ────────────
+    //
+    // ⭐ BOTH DIRECTIONS, on ALL THREE carried lanes. Past `not-declared` the
+    // verdict is decided by `refusable` and `offenders.length` alone, so
+    // `clean`, `discharged` and `enforce` are each reachable on a
+    // `no (narrowing)` — and each of their headlines used to state `yes` as a
+    // LITERAL, the `enforce` one twice over (stderr, and the check-run
+    // annotation title that outlives the step log). The `yes` rows here are not
+    // decoration: they are every other PR in the repo, and a derivation pinned
+    // only on the narrowing side would have broken them silently.
+    //
+    // ⛔ The verdict and the exit code are pinned UNCHANGED beside every
+    // headline. This card is a REPORTING defect; a repair that moved a grade
+    // would be a different and worse one.
+    battery('#19008: the level headline is the parsed declaration, not a literal');
+    {
+      const CLI = '@objectstack/cli';
+      const OTHER = '@objectstack/spec';
+      const CS = '.changeset/headline.md';
+      const NARROWING = 'Clause-②: no (narrowing)\n';
+      const YES = 'Clause-②: yes\n';
+      const WIDENING = 'Clause-②: yes (widening)\n';
+      const BARE_NO = 'Clause-②: no\n';
+      // The REAL reader, so every row below is judged on a declaration this
+      // repo's parser actually returns rather than on one assembled here.
+      const decl = (body) => declarationFromPullRequest({ labels: ['domain:devx'], body });
+      // One levels/touched pair per lane, named by the verdict it must produce.
+      const LANES = {
+        clean: { levels: [{ file: CS, entries: [{ pkg: CLI, bump: 'minor' }] }], touched: { packages: [CLI], unreadable: [] }, exit: 0 },
+        discharged: {
+          levels: [{ file: CS, entries: [{ pkg: CLI, bump: 'patch' }, { pkg: OTHER, bump: 'minor' }] }],
+          touched: { packages: [CLI, OTHER], unreadable: [] },
+          exit: 0,
+        },
+        enforce: { levels: [{ file: CS, entries: [{ pkg: CLI, bump: 'patch' }] }], touched: { packages: [CLI], unreadable: [] }, exit: 1 },
+      };
+      const judged = (lane, body) =>
+        judgeLevel({ levels: LANES[lane].levels, touched: LANES[lane].touched, declaration: decl(body), prEvent: true });
+      const textOf = (lane, body) => {
+        const out = renderLevel(judged(lane, body));
+        return { text: [...out.stdout, ...out.stderr].join('\n'), exitCode: out.exitCode };
+      };
+
+      for (const lane of ['clean', 'discharged', 'enforce']) {
+        assert(
+          judged(lane, NARROWING).verdict === lane && judged(lane, YES).verdict === lane,
+          `LANE IDENTITY: a headline pin is worthless if the row it reads is not the row it names — the \`${lane}\` fixtures must reach \`${lane}\` on BOTH declarations, and a \`no (narrowing)\` reaches it because past \`not-declared\` only \`refusable\` and \`offenders.length\` decide (got ${judged(lane, NARROWING).verdict} / ${judged(lane, YES).verdict})`,
+        );
+        assert(
+          textOf(lane, NARROWING).exitCode === LANES[lane].exit && textOf(lane, YES).exitCode === LANES[lane].exit,
+          `⛔ GRADING IS UNTOUCHED on \`${lane}\`: exit ${LANES[lane].exit} in both directions. This card is a reporting defect, and a repair that moved an exit code would be a worse card than the one it closes`,
+        );
+        assert(
+          textOf(lane, NARROWING).text.includes('clause-② `no (narrowing)`'),
+          `the \`${lane}\` lane reports the declaration the PR ACTUALLY made — the arm docblock's rule, verbatim: "a PR that declares \`no (narrowing)\` must not be reported as having declared \`yes\`"`,
+        );
+        assert(
+          !/clause-② `yes`|clause-② YES/.test(textOf(lane, NARROWING).text),
+          `⛔ and the \`${lane}\` lane claims \`yes\` NOWHERE on a narrowing declaration — stdout, the stderr refusal and the check-run annotation title alike; one corrected branch beside an uncorrected sibling is the same defect one lane along`,
+        );
+        assert(
+          textOf(lane, YES).text.includes('clause-② `yes`'),
+          `⛔ CONTROL: a bare \`yes\` still renders \`yes\` on \`${lane}\` — that is every other PR in this repo, and a derivation verified only on the narrowing side breaks it silently`,
+        );
+        assert(
+          textOf(lane, WIDENING).text.includes('clause-② `yes (widening)`'),
+          `⛔ CONTROL: the ARM reaches the headline too on \`${lane}\` — \`yes (widening)\` and a bare \`yes\` are different declarations, and the flattening that lost that difference is the flattening that printed \`yes\` for a narrowing`,
+        );
+      }
+
+      // The channel that crosses OUT of the step log. A literal here outlives
+      // the readings that would have corrected it, so it is pinned separately
+      // from the stderr prose it sits beside.
+      const annotation = renderLevel(judged('enforce', NARROWING)).stdout.filter((l) => l.startsWith('::error '));
+      assert(annotation.length === 1, `the \`enforce\` lane still annotates EXACTLY once — the derivation is in the title, not in the count (got ${annotation.length})`);
+      assert(
+        annotation[0].includes('clause-② declares `no (narrowing)` while no moved package is graded'),
+        'the CHECK-RUN annotation title carries the true declaration too — it is the one line a reader outside the run sees, and it used to read `declares YES` for a PR that declared the opposite',
+      );
+      assert(!annotation[0].includes('\n'), 'and it is still ONE line — a workflow command carrying a raw newline is truncated at it, and the diagnosis would be lost in the channel that exists to carry it');
+
+      // The ACT the declaration names, in the one headline that names it.
+      assert(
+        textOf('discharged', NARROWING).text.includes('the declared narrowing is accounted for'),
+        'the declared ACT is derived as well: calling a declared narrowing a widening is the same misreport one noun along, in the same sentence',
+      );
+      assert(
+        textOf('discharged', YES).text.includes('the declared widening is accounted for'),
+        '⛔ CONTROL: a declared `yes` is still a widening in that sentence — the noun is read, not swapped',
+      );
+
+      // The lane a bare `no` takes, which the derivation must leave exactly where
+      // it was: this row is what says nothing widened while the headline was fixed.
+      const bareNo = judgeLevel({ levels: LANES.enforce.levels, touched: LANES.enforce.touched, declaration: decl(BARE_NO), prEvent: true });
+      assert(
+        bareNo.verdict === 'not-declared' && renderLevel(bareNo).exitCode === 0,
+        `⛔ CONTROL: a bare \`no\` still stands the axis down at exit 0 on the very tree the narrowing refuses — the ARM is what carries the axis, and this row says the derivation did not widen the lane (got ${bareNo.verdict})`,
+      );
+      assert(
+        renderLevel(bareNo).stdout.join('\n').includes('declares clause-② `no`'),
+        'and that lane, derived like the rest, prints the `no` it always printed — a derivation that rewrote a correct sentence would be a regression dressed as a repair',
+      );
+
+      // The axis itself, and the spelling function the four headlines share.
+      assert(
+        judged('clean', NARROWING).declared.value === 'no' && judged('clean', NARROWING).declared.arm === 'narrowing',
+        'the parsed declaration TRAVELS on the verdict, beside `carrier` and for the same reason — `renderLevel` derives from what it was handed and must never re-parse a body it was never given',
+      );
+      assert(declaredClause2({ value: 'yes', arm: null }) === '`yes`', 'the spelling of a bare `yes`');
+      assert(
+        declaredClause2({ value: 'no', arm: 'narrowing' }) === '`no (narrowing)`',
+        'and of a narrowing — it is the declaration AS WRITTEN, so a reader can grep the PR body for the string the headline printed',
+      );
+      assert(
+        declaredClause2({ value: null, arm: null }) === 'NOT MEASURED',
+        '⛔ an absent value reads NOT MEASURED, never a guessed `yes`: the three carried lanes cannot be reached with one, so a result that arrives without it is a caller that dropped the axis, and #4690 says such a run states that rather than printing a reading it does not have',
+      );
+      assert(declaredClause2(undefined) === 'NOT MEASURED', 'control: no axis at all reads the same as a null value — both are a reading that did not happen');
     }
 
     // ── The GRAIN: a PR-scoped declaration judged at PR scope (#16361) ───────

@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
-import { AggregationFunction } from '@objectstack/spec/data';
+import { AggregationFunction, referenceCarrierOf } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IAnalyticsService, IDataDriver, IDataEngine, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { translateObject, type ObjectLike, type ObjectFieldLike, type TranslationBundle } from '@objectstack/spec/system';
@@ -732,8 +732,29 @@ export class AnalyticsServicePlugin implements Plugin {
       })();
       const obj = engine?.getObject?.(baseObject);
       const field = obj?.fields?.[relationshipName];
-      if (field && (field.type === 'lookup' || field.type === 'master_detail') && field.reference) {
-        return field.reference;
+      if (field && (field.type === 'lookup' || field.type === 'master_detail')) {
+        // The carrier is read through the ONE arbiter instead of a truthiness
+        // gate: an object- or array-valued `reference` passed that gate and was
+        // returned as the JOINED TABLE for this relationship, so a dataset
+        // compiled against a non-string table name. Absence is the contract's
+        // answer, and absence here falls through to the rejection below.
+        //
+        // The throw is caught at the site because this resolver runs inside
+        // dataset compilation: the compiler's own "cannot resolve this
+        // relationship" refusal is the diagnostic the caller understands, and a
+        // TypeError escaping into it would replace that refusal with a crash.
+        let reference: string | undefined;
+        try {
+          reference = referenceCarrierOf(field, 'Analytics.relationshipResolver');
+        } catch (err: any) {
+          ctx.logger.warn(
+            `[Analytics] relationship "${baseObject}.${relationshipName}" names no readable target object, `
+            + `so any dataset including it is rejected rather than joined against an unreadable table: `
+            + `${err?.message ?? err}`,
+          );
+          reference = undefined;
+        }
+        if (reference) return reference;
       }
       // Unknown to the schema — fall back to the relationship name as the table
       // (legacy same-name convention). Returning undefined would make the

@@ -36,7 +36,9 @@ import type { ResolveUserAuthzGrantsOptions } from '../resolve-authz-context.js'
 export interface RecordedCall { object: string; where: unknown; limit: unknown; isSystem: boolean }
 
 /**
- * An in-memory ObjectQL double that (a) records every read, (b) ENFORCES the
+ * An in-memory ObjectQL double that (a) records every read AS ISSUED — a deep
+ * SNAPSHOT of `where`, never the caller's live reference (#19141; see the note
+ * at the `calls.push` below, which is the authority on why) — (b) ENFORCES the
  * `limit` the caller passed — a real driver does, and a batch that quietly
  * changed a limit would otherwise be invisible — and (c) counts LEGS.
  *
@@ -68,7 +70,26 @@ export function makeRecordingQl(tables: Record<string, unknown[]>) {
       legOf.push(legs);
       calls.push({
         object,
-        where: opts?.where,
+        // [#19141] ⛔ A SNAPSHOT, never the caller's reference. `where` arrives
+        // here as the resolver's OWN live object: `sys_position` is read as
+        // `{ name: { $in: grants.positions } }`, whose `$in` IS the
+        // `grants.positions` array — and the resolver keeps mutating that array
+        // after the read has already gone out (step 6c,
+        // `grants.positions.unshift(BUILTIN_IDENTITY_PLATFORM_ADMIN)`; step 6a
+        // also REASSIGNS it to a filtered copy when a position is deactivated,
+        // so a stored reference diverges in either direction depending on
+        // fixture data). Storing the reference records the array's FINAL
+        // contents under the name of the query AS ISSUED, so a golden captured
+        // from it pins a read no driver ever saw — a pin that reads green while
+        // certifying something that did not happen. Deep-copying at record time
+        // is the same fix the sibling double in
+        // `resolve-authz-context.platform-admin-config.test.ts` carries;
+        // `structuredClone` is called WITHOUT a `?? null` normalisation so an
+        // absent `where` still records as absent rather than as a value no
+        // caller passed. The property is pinned — failure-capably — by
+        // `resolve-authz-context.batch-equivalence.test.ts`'s
+        // "records each read AS ISSUED" describe block.
+        where: structuredClone(opts?.where),
         limit: opts?.limit,
         isSystem: opts?.context?.isSystem === true,
       });

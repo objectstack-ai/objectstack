@@ -56,7 +56,7 @@ import type {
 // fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
-import { isFileIdToken } from '@objectstack/spec/data';
+import { isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
@@ -5762,16 +5762,68 @@ export class ApprovalService implements IApprovalService {
     return names;
   }
 
-  /** Lookup-typed fields (key + referenced object) of an object's schema. */
+  /**
+   * Reference-typed fields (key + TARGET OBJECT) of an object's schema.
+   *
+   * The target is read through `referenceTargetOf` — the spec's single arbiter
+   * of "what does this field point at" — and NOT through the materialized
+   * `reference` carrier. For `user` the two differ, and the contract is
+   * explicit about which one answers: `IMPLICIT_REFERENCE_TARGETS`
+   * (`@objectstack/spec/data`) declares the target of a `user` field "a
+   * CONSTANT OF THE TYPE, so `reference` on a `user` field materializes that
+   * constant; it does not supply it. Metadata authored without it
+   * (hand-written JSON, an AI author, a Studio form) is fully specified, not
+   * under-specified." Gating on the carrier therefore dropped the spelling the
+   * contract calls COMPLETE: a `{ type: 'user' }` field with no `reference`
+   * was left out of inbox display enrichment with no refusal and no
+   * diagnostic, so the reviewer read a raw user id where every other reference
+   * field showed a name (Framework#4443 / cloud#983 is the same defect at the
+   * expand gate, fixed there by the same arbiter).
+   *
+   * The type gate stays the three types this enrichment has always carried.
+   * `tree` is a reference type too but is deliberately not added here: it takes
+   * an author-chosen target, so admitting it would widen what the inbox
+   * resolves rather than repair what it silently dropped.
+   *
+   * `referenceTargetOf` reads the carrier through `referenceCarrierOf`, so the
+   * unreadable-carrier behaviour below is unchanged. That carrier is read
+   * through the ONE arbiter instead of a truthiness gate: `String()` on an
+   * object-valued `reference` produced the literal target name
+   * `'[object Object]'`, and the sole consumer below hands the target straight
+   * to `engine.find(<object name>)` — so an unreadable carrier became a query
+   * for an object that can never exist, swallowed by that consumer's own
+   * `catch`. Absence is the contract's answer (`FieldSchema.reference` is an
+   * optional STRING) and is what this yields.
+   *
+   * The throw is caught PER FIELD, which is the deliberate difference between
+   * this reader and the cascade seams in `@objectstack/objectql` that let the
+   * arbiter propagate: those assert something positive about the schema on a
+   * write path, while this is a best-effort display enrichment whose outer
+   * `catch` returns `[]` — letting the throw reach it would drop EVERY
+   * reference field of the object over one unreadable carrier. The entry is
+   * dropped rather than pushed with the target absent because the consumer
+   * uses it as the object name argument and has nothing to do with an entry
+   * that carries none. The warning names THIS reader, because the message the
+   * arbiter throws names itself.
+   */
   private resolveLookupFields(object: string): Array<{ key: string; reference: string }> {
     try {
       const schema: any = (this.engine as any).getSchema?.(object);
       const fields = schema?.fields ?? {};
       const out: Array<{ key: string; reference: string }> = [];
       for (const [key, f] of Object.entries<any>(fields)) {
-        if ((f?.type === 'lookup' || f?.type === 'master_detail' || f?.type === 'user') && f?.reference) {
-          out.push({ key, reference: String(f.reference) });
+        if (f?.type !== 'lookup' && f?.type !== 'master_detail' && f?.type !== 'user') continue;
+        let reference: string | undefined;
+        try {
+          reference = referenceTargetOf(f);
+        } catch (err: any) {
+          this.logger?.warn?.(
+            `[approvals] ApprovalService.resolveLookupFields: reference field "${object}.${key}" `
+            + `left out of inbox display enrichment: ${err?.message ?? err}`,
+          );
+          continue;
         }
+        if (reference) out.push({ key, reference });
       }
       return out;
     } catch { return []; }

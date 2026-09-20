@@ -51,7 +51,35 @@ export const actionForm = defineForm({
             { field: 'memoryMb', type: 'number', helpText: 'Per-invocation memory cap (MB, max 256)' },
           ],
         },
-        { field: 'params', type: 'repeater', helpText: 'User input parameters (show form before executing)' },
+        {
+          field: 'params',
+          type: 'repeater',
+          helpText: 'User input parameters (show form before executing)',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'name', label: 'Name' },
+            { field: 'field', label: 'Field' },
+            { field: 'objectOverride', label: 'Object Override' },
+            { field: 'label', label: 'Label' },
+            { field: 'type', label: 'Type' },
+            { field: 'required', label: 'Required' },
+            { field: 'options', label: 'Options' },
+            { field: 'placeholder', label: 'Placeholder' },
+            { field: 'helpText', label: 'Help Text' },
+            { field: 'defaultValue', label: 'Default Value' },
+            { field: 'multiple', label: 'Multiple' },
+            { field: 'accept', label: 'Accepted Types' },
+            { field: 'maxSize', label: 'Max Size (bytes)' },
+            { field: 'reference', label: 'Reference Object' },
+            { field: 'defaultFromRow', label: 'Default From Row' },
+            { field: 'carryOver', label: 'Carry Over' },
+            { field: 'visible', label: 'Visible When' },
+            { field: 'requiresFeature', label: 'Requires Feature' },
+          ],
+        },
         { field: 'confirmText', helpText: 'Confirmation message (e.g., "Are you sure?")' },
         { field: 'successMessage', helpText: 'Success message after completion' },
         { field: 'refreshAfter', helpText: 'Refresh the list/page after action completes' },

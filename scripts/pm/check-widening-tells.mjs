@@ -354,16 +354,11 @@
  *
  *   1. A PARAMETER ADDED to an ALREADY-exported function is a signature
  *      widening, and it now goes unreported here. Nothing else in this file
- *      catches it: T3's listing records that an export EXISTS, and its shape
- *      sibling is not on this surface. ⚠️ That sibling CHANGED at #16045 and the
- *      silence did not: the 27-row `api-surface-signatures.json` hash was retired
- *      for `api-surface-declarations/`, which does record the declaration text of
- *      every export — but the ruling that built it assigned "is a snapshot diff a
- *      Clause-② signal" to the skills seat, out of that card's scope, so it is a
- *      declared non-surface here rather than a forgotten one (both directions
- *      pinned in T3's battery). What is NOT lost is the function itself — a newly
- *      exported check adds its own row to the listing, which is the T3 row PR
- *      #17616 still reports.
+ *      catches it: T3's listing records that an export EXISTS, and its
+ *      signatures sibling `api-surface-signatures.json` carries 27 `define*`
+ *      helpers (measured on this tree), none of them one of these checks. What
+ *      is NOT lost is the function itself — a newly exported check adds its own
+ *      row to the listing, which is the T3 row PR #17616 still reports.
  *   2. A widening carried by the CHAINED methods rather than by the member list
  *      — `.optional()` first among them — now declines on a closed-set-valued
  *      key. ⛔ Not a new class: #16943 already declines it for every key whose
@@ -4838,12 +4833,7 @@ export function selfTest() {
   t('the contract source surface is IMPORTED from SUSPECT_TIER_GLOBS, not spelled here', CONTRACT_SOURCE_SURFACES.some((s) => s.imported === 'SUSPECT_TIER_GLOBS'));
   t('…and it covers exactly what that table declares', SUSPECT_TIER_GLOBS.every((g) => CONTRACT_SOURCE_SURFACES.some((s) => s.glob === g.glob)));
   t('the published surface is DERIVED from REGEN_ARTIFACTS', PUBLISHED_SURFACES.length > 0 && PUBLISHED_SURFACES.every((s) => s.imported === 'REGEN_ARTIFACTS'));
-  t('…so the api-surface listing reaches it without a literal here', surfaceCovers(PUBLISHED_SURFACES, 'packages/spec/api-surface/kernel.json'));
-  // The counterfactual half of the line above, and the reason it is worth a case:
-  // `api-surface-signatures.json` used to be the SECOND row this derivation picked
-  // up, and #16045 retired that artifact. The path falling off this surface is the
-  // derivation tracking REGEN_ARTIFACTS; a literal here would still be matching it.
-  t('⛔ …and the RETIRED signatures sibling does not — the surface follows the table, not a literal', !surfaceCovers(PUBLISHED_SURFACES, 'packages/spec/api-surface-signatures.json'));
+  t('…so both api-surface artifacts reach it without a literal here', surfaceCovers(PUBLISHED_SURFACES, 'packages/spec/api-surface/kernel.json') && surfaceCovers(PUBLISHED_SURFACES, 'packages/spec/api-surface-signatures.json'));
   t('a spec source file is on the contract surface', surfaceCovers(CONTRACT_SOURCE_SURFACES, 'packages/spec/src/kernel/plugin.zod.ts'));
   t('⛔ a sibling directory that merely shares a prefix is not', !surfaceCovers(CONTRACT_SOURCE_SURFACES, 'packages/spec/src-legacy/plugin.zod.ts'));
   t('an api-surface file is NOT on the contract source surface — the two tells stay apart', !surfaceCovers(CONTRACT_SOURCE_SURFACES, 'packages/spec/api-surface/kernel.json'));
@@ -5799,13 +5789,7 @@ export function selfTest() {
   battery('T3 — a new row in a published entry point');
   t('a new export row is a tell', tells(FILE_API_SURFACE)[0]?.tell === 'T3');
   t('…reported at its file:line', at(FILE_API_SURFACE)[0] === 'packages/spec/api-surface/kernel.json:14');
-  t('⛔ the RETIRED signatures sibling is off this surface', tells({ filename: 'packages/spec/api-surface-signatures.json', patch: patchOf(4, '+  "defineWorkflow": "sha256:0000000000000000",') }).length === 0);
-  // ⛔ And its replacement is deliberately NOT on it either. #16045's ruling put
-  // the declaration-text snapshot in `api-surface-declarations/` and assigned the
-  // question of whether a snapshot diff is a Clause-② signal to the skills seat,
-  // by name and out of that card's scope. So this is a DECLARED boundary, not an
-  // oversight: wiring it in is a separate decision with its own owner.
-  t('⛔ nor is its declaration-text replacement — a separate decision, with its own owner', tells({ filename: 'packages/spec/api-surface-declarations/kernel.txt', patch: patchOf(4, '+declare const Added: z.ZodString;') }).length === 0);
+  t('the signatures sibling is on the surface too', tells({ filename: 'packages/spec/api-surface-signatures.json', patch: patchOf(4, '+  "defineWorkflow": "sha256:0000000000000000",') })[0]?.tell === 'T3');
   t('⛔ a removed row is not a tell', tells({ filename: 'packages/spec/api-surface/kernel.json', patch: '@@ -14,1 +14,0 @@\n-    "Gone (const)",' }).length === 0);
   t('⛔ a JSON file elsewhere is not on this surface', tells({ filename: 'packages/spec/package.json', patch: patchOf(4, '+    "./workflow": "./dist/workflow.js",') }).length === 0);
   t('⛔ nor a non-string structural line inside the listing', tells({ filename: 'packages/spec/api-surface/kernel.json', patch: patchOf(4, '+  ]') }).length === 0);

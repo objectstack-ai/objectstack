@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { bannedKeys } from '../shared/refinement-projection';
 
 /**
  * Tracing Protocol - Distributed Tracing & Observability
@@ -422,7 +423,7 @@ export const TraceSamplingConfigSchema = lazySchema(() => z.object({
     condition: z.record(z.string(), z.unknown(), {
       error: (issue) => samplingConditionExpressionRefusal(issue.input),
     })
-      .refine((value) => !('dialect' in value), {
+      .refine(bannedKeys(['dialect']), {
         message: SAMPLING_CONDITION_EXPRESSION_RETIRED,
         abort: true,
       })

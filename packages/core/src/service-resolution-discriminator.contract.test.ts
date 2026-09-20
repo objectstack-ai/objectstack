@@ -19,6 +19,19 @@ import {
     isServiceNotRegisteredError,
     SERVICE_NOT_REGISTERED_CODE,
 } from './service-not-registered.js';
+// The package entry point is loaded HERE, at module top, instead of with an
+// `await import('./index.js')` inside the last case below. The whole
+// `@objectstack/core` index graph is loaded on that import, and inside a case
+// it is charged to vitest's per-case budget (5000ms by default): the case was
+// measured at 5036ms and timed out on a loaded box while the same tree passed
+// on a quiet one, which made the pin's verdict a function of the machine
+// rather than of the code. At module top the same load is charged to the
+// COLLECT phase, where no per-case budget applies. The pin loses nothing: its
+// assertions are symbol presence and identity only -- they observe no side
+// effect, no registration order and no before/after state -- and this file
+// already loads four modules of this package statically (the imports above),
+// every one of which the index re-exports.
+import * as coreEntryPoint from './index.js';
 
 function makeLoader(withContext = true): PluginLoader {
     const logger = createLogger({ level: 'error' });
@@ -224,8 +237,10 @@ describe('[#13905] the SUPPORTED no-data-plane kernel stays quiet, the broken on
 });
 
 describe('[#13905] the published increment', () => {
-    it('reaches consumers through the package entry point, and is exactly two symbols', async () => {
-        const core: Record<string, unknown> = await import('./index.js');
+    it('reaches consumers through the package entry point, and is exactly two symbols', () => {
+        // Widened deliberately: the last assertion probes for a name the entry
+        // point must NOT publish, which the namespace's own type cannot spell.
+        const core: Record<string, unknown> = coreEntryPoint;
 
         expect(typeof core.isServiceNotRegisteredError).toBe('function');
         expect(core.SERVICE_NOT_REGISTERED_CODE).toBe('SERVICE_NOT_REGISTERED');

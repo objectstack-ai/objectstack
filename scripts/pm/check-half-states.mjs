@@ -961,8 +961,10 @@
  * ## Exit codes
  *
  *   0  the sweep completed — 0 or 40 findings alike (report-only, see above).
- *   3  PREREQUISITE NOT MET — a classified transport failure. Nothing was swept,
- *      and the report says so instead of implying a clean board.
+ *   3  PREREQUISITE NOT MET — a classified transport failure, or a
+ *      `PM_SWEEP_CHECKOUT` naming a checkout that does not serve the swept
+ *      board. Nothing was swept, and the report says so instead of implying a
+ *      clean board.
  *   2  the sweep could not run for a reason this file cannot classify. The
  *      pre-existing catch-all, kept so an unfamiliar failure stays loud (#4690).
  *
@@ -1046,6 +1048,50 @@ export function resolveSweepRepo(env = {}) {
     return { repo: value, source, valid: SWEEP_REPO_SHAPE.test(value) };
   }
   return { repo: DEFAULT_SWEEP_REPO, source: 'default', valid: true };
+}
+
+/**
+ * WHICH checkout serves that board — the half `PM_SWEEP_REPO` never answered. The three local git
+ * reads below feed H17's oracle and H57's workflow files, and each inherited whatever tree the shell
+ * stood in: measured 2026-09-19 (#19191), a sweep of objectui validated its H17 trigger-file index
+ * against OBJECTSTACK's 8888 tracked files (objectui has 7945) and H57 refused for the whole run,
+ * hiding a lane dead through five scheduled fires — internally consistent and externally wrong, the
+ * #11217 disease one layer down. Set: the three reads take it as `cwd`, and a checkout whose `origin`
+ * is not the swept board REFUSES (exit 3) rather than reading a second repo's tree. Unset: today's
+ * behaviour exactly, plus the H17 footer NAMING the tree it read. Returns `{ path, source, set }`.
+ */
+export function resolveSweepCheckout(env = {}) {
+  const value = String(env?.PM_SWEEP_CHECKOUT ?? '').trim();
+  return value ? { path: value, source: 'PM_SWEEP_CHECKOUT', set: true } : { path: null, source: 'cwd', set: false };
+}
+
+// The ONE local git read in this file, so the knob above answers for every reader at once. ⛔ A
+// fourth reader spelled with its own `execFileSync` keeps the defect — the self-test pins the count.
+function gitRead(args, extra = {}) {
+  const cwd = resolveSweepCheckout(process.env).path ?? undefined;
+  return execFileSync('git', args, { encoding: 'utf8', cwd, ...extra });
+}
+
+/**
+ * The knob's refusal, in the shape `reportPrerequisiteNotMet` prints (exit 3). `null` when the knob is
+ * unset — today's behaviour is not a prerequisite — or when the named checkout really serves the board.
+ * Otherwise a NAMED failure: ⛔ never a silent fall back to `cwd`, because a report built from another
+ * repo's tree reads exactly like a report about this one. `originUrl` is read IN that tree.
+ */
+export function checkoutPrerequisite(sweepRepo, env = {}, originUrl = null) {
+  const checkout = resolveSweepCheckout(env);
+  if (!checkout.set) return null;
+  const serves = localCheckoutServes(sweepRepo, env, originUrl);
+  if (serves.serves) return null;
+  return {
+    kind: 'checkout-does-not-serve',
+    headline: `PM_SWEEP_CHECKOUT=${JSON.stringify(checkout.path)} does not serve \`${sweepRepo}\``,
+    detail: [`${serves.reason}.`, '',
+      'H17 validates every on-hold trigger path against that checkout and H57 classifies its workflow',
+      'files there, so a foreign tree renders an index whose paths were checked against another repo.'],
+    fix: ['point PM_SWEEP_CHECKOUT at the checkout whose `origin` IS the swept board,',
+      'or unset it and run the sweep from inside that checkout.'],
+  };
 }
 
 const SWEEP_REPO = resolveSweepRepo(process.env);
@@ -1349,11 +1395,43 @@ export function markerMatches(marker, text) {
  *     the corpus above, so it is left unnamed rather than guessed at — add it
  *     WITH its fixture when a live line appears.
  *
+ * ## The `leading-sigil` form (#18829 A) — the shape a SECOND stripper used to swallow
+ *
+ * `check-clause2-carriers.mjs` read its retraction lines through a stripper of
+ * its own, which removed every leading non-letter/non-digit character before
+ * matching — so `🚨 Claim:`, `## Claim:`, `- Claim:` and `__Claim:__` all
+ * read as the directive THERE while `markerMatches` refused every one of them:
+ * two undecoration paths, 5 of 12 spellings apart. The maintainer ruled (batch
+ * #156 item 4, letter A) that the protocol's definition of a decorated
+ * ownership line is THIS reading, that the other stripper is deleted, and that
+ * the sigil-led #18373 shape 「becomes a **named** near-miss row with its own
+ * fixture, so the loud, declared direction keeps reading it」. This member is
+ * that row.
+ *
+ * A sigil is an emoji or symbol run (`So` / `Sm` / `Sk` / `Sc`, with its
+ * combining and format marks) in front of the word — 「🚨 」, 「⚠️ 」, 「⇒ 」,
+ * 「⛔ 」, the fleet's own openers — optionally under a bullet or a blockquote
+ * (「- ⚠️ 」 is on #18373's own thread). It is ⛔ NOT decoration:
+ * `undecorateProseLine` strips asterisks and backticks and nothing else, on
+ * purpose, so a sigil-led `**Release:**` stays unread by `markerMatches` and
+ * is NAMED here instead — the same trade the `underscore-emphasis` member
+ * makes. The fixture is the #18373 line written in the act the protocol names
+ * (`Release:`, 去向 「让先到者」 — #18773 A), sigil and bold intact.
+ *
+ * ⚠️ Two boundaries, stated: the specimen's own PROSE (「🚨 **撤回上一条认领…」)
+ * is named by NO form, because naming it would mean reading the verb — the
+ * channel #18773 A retires (⛔ B: 「a reader inferring an act from a verb
+ * replays the next spelling」); its thread is named by the cross-author row
+ * one file over instead. And a heading AND a sigil (`## 🚨 Release:`) is named
+ * by no form — no live line has shown it; add it WITH its fixture when one does.
+ *
  * Ordered MOST SPECIFIC FIRST: the form a line is named by is the first that
  * matches it, so `## __Release:__` is a heading rather than an emphasis, and
  * `## Claim + dispatch` is `heading-bare` rather than `heading` only because
- * `heading` holds out for the colon. The two additions sit LAST, so neither can
- * rename a line an older form already read.
+ * `heading` holds out for the colon. The two #18831 additions sit LAST, so
+ * neither can rename a line an older form already read; `leading-sigil` sits
+ * between `separator` and them — no older form's fixture opens with a sigil,
+ * and neither addition's does.
  *
  * `re` matches the OFFENDING OPENING only and never the remainder, so the
  * matched text IS the prefix a row prints and a seat greps for. No `g` flag,
@@ -1389,6 +1467,12 @@ export const OWNERSHIP_MARKER_NEAR_MISS_FORMS = Object.freeze([
     what: 'the canonical word with a separator that is not the canonical colon',
     example: 'Release — session `session_x` — 去向 `pm:queue`',
     re: /^[ \t]*>?[ \t]*[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[：–—-]/iu,
+  }),
+  Object.freeze({
+    id: 'leading-sigil',
+    what: 'the directive led by a SIGIL — an emoji or symbol run before the word, which the shared stripper does not remove (it strips decoration, ⛔ never a sigil)',
+    example: '🚨 **Release:** session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者',
+    re: /^[ \t]*>?[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(?:[\p{So}\p{Sm}\p{Sk}\p{Sc}][\p{So}\p{Sm}\p{Sk}\p{Sc}\p{Mn}\p{Me}\p{Cf}]*[ \t]*)+[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
   }),
   Object.freeze({
     id: 'heading-bare',
@@ -1796,7 +1880,7 @@ function stripMatchingDecoration(value, opener) {
  * cause with.
  *
  * @param {string} text
- * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'} key
+ * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'|'Unlock-action'} key
  * @returns {string[]}
  */
 export function directiveValues(text, key) {
@@ -4525,10 +4609,7 @@ export function decisionDependentIndex(issues, index) {
  */
 function readTrackedFiles() {
   try {
-    const out = execFileSync('git', ['ls-files', '-z'], {
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-    });
+    const out = gitRead(['ls-files', '-z'], { maxBuffer: 64 * 1024 * 1024 });
     const set = new Set(out.split('\0').filter(Boolean));
     return set.size > 0 ? set : null;
   } catch {
@@ -6756,6 +6837,49 @@ export function h31ContractReviewCarrierSplit(issue, openPrs) {
 }
 
 // ---------------------------------------------------------------------------
+// The label-transition exit — the second `Unlock-action:` value (#19255).
+//
+// The unlock predicate is "the `Blocked-by:` target CLOSED", and the one rewrite the state model admitted
+// (`re-check PR #M`) is read by seats and by no script — so a block on a `needs-user-decision` / `pm:on-hold`
+// target had no exit a machine could fire (H26), and any other spelling fell back to the closed predicate in
+// SILENCE. This value names the CARD, the LABEL and the STATE tested on it (a state, not an event: a sweep
+// observes labels, never transitions; `absent` is the live case — the ruling lands, `needs-user-decision` leaves
+// the target). ⛔ Every other spelling still falls back silently, by ruling: the closed set IS the contract.
+// ---------------------------------------------------------------------------
+
+const UNLOCK_LABEL_EXIT_RE =
+  /^re-check[ \t]+(?:([A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*))?#([1-9]\d{0,5})[ \t]+when[ \t]+label[ \t]+`?([^\s`]+?)`?[ \t]+(absent|present)\b/;
+/** Every `re-check #N when label <label> <absent|present>` exit a card declares (trailing prose tolerated), body then comments, keyed like its `Blocked-by:` targets. */
+export function unlockLabelExits(issue, commentBodies, ownerRepo = OWNER_REPO) {
+  const out = [];
+  for (const text of [issue?.body, ...(commentBodies ?? [])]) {
+    for (const m of directiveValues(text, 'Unlock-action').map((v) => UNLOCK_LABEL_EXIT_RE.exec(v))) {
+      if (m) out.push({ ...blockerTargetKey({ repo: m[1] ?? null, number: m[2] }, ownerRepo), label: m[3], state: m[4] });
+    }
+  }
+  return out;
+}
+
+// The unlock sweep's second exit, under H19 because it is H19's reading (what the card waits for has happened): null
+// unless a declared label exit has COME TRUE on a resolved OPEN target — closed and unresolved ones are H19's own legs.
+export function h19DeclaredExitFired(issue, resolutions, commentBodies, ownerRepo = OWNER_REPO) {
+  if (!needsBlockerLiveness(issue)) return null;
+  const exits = unlockLabelExits(issue, commentBodies, ownerRepo);
+  const fired = (resolutions ?? []).flatMap((r) => (r?.state !== 'open' || !Array.isArray(r.labels) ? [] :
+    exits.filter((e) => e.key === r.key && (e.state === 'present') === r.labels.includes(e.label)).map((e) => ({ r, e }))));
+  if (fired.length === 0) return null;
+  const named = fired.map(({ r, e }) => `\`${r.local ? `#${r.number}` : r.key}\` (\`${e.label}\` ${e.state})`).join(', ');
+  return (
+    `\`pm:blocked\` while the label-transition exit its \`Unlock-action:\` line declares has COME TRUE on ${named}: the target ` +
+    'is open and the named label is in the state the line asked this sweep to test — the second recognised `Unlock-action:` ' +
+    'value (`re-check #N when label needs-user-decision absent` is the live spelling; any label, `absent` or `present`, body ' +
+    'or comment), the exit a block on a `needs-user-decision` / `pm:on-hold` target can now hand a machine. Report-only: the ' +
+    'release is the unlock sweep\'s, under the same two double-checks (「放行双查」) and the same landed act as a closed target — ' +
+    '⛔ never a label written from this script.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // H26 — a block whose target can never CLOSE, and the stale chain (#11219).
 //
 // The unlock predicate is "the `Blocked-by:` target CLOSED". `pm:on-hold` and
@@ -6834,16 +6958,18 @@ export const INDEFINITE_TARGET_LABELS = ['pm:on-hold', 'needs-user-decision'];
  * @param {{ key: string, number: number, local: boolean,
  *   state: 'open'|'closed'|'unresolved', labels?: string[]|null }[]} resolutions
  */
-export function h26BlockOnIndefiniteTarget(issue, resolutions) {
+export function h26BlockOnIndefiniteTarget(issue, resolutions, commentBodies, ownerRepo = OWNER_REPO) {
   if (!needsBlockerLiveness(issue)) return null;
   const open = (resolutions ?? []).filter(
     (r) => r?.state === 'open' && Array.isArray(r.labels),
   );
   if (open.length === 0) return null;
 
+  // A target the card gives a label-transition exit for is not indefinite: the sweep can fire it, so the row stands down (#19255).
+  const exitKeys = new Set(unlockLabelExits(issue, commentBodies, ownerRepo).map((e) => e.key));
   const indefinite = open
     .map((r) => ({ row: r, states: INDEFINITE_TARGET_LABELS.filter((l) => r.labels.includes(l)) }))
-    .filter((r) => r.states.length > 0);
+    .filter((r) => r.states.length > 0 && !exitKeys.has(r.row.key));
   // A target that is BOTH parked and blocked is named once, under the reading
   // that ends the wait forever rather than the one that merely lengthens it.
   const chained = open.filter(
@@ -6876,6 +7002,16 @@ export function h26BlockOnIndefiniteTarget(issue, resolutions) {
         'sometimes exactly right. It says the wait is indefinite BY CONSTRUCTION, so the release ' +
         'has to come from the target\'s own state changing (a ruling answered, a hold restarted) ' +
         'and someone has to want that.',
+    );
+    // The remedy — the exit the state model admits, or the close — and the silent fallback made loud on the card (#19255).
+    const unread = [issue?.body, ...(commentBodies ?? [])].flatMap((t) => directiveValues(t, 'Unlock-action')).filter((v) => !UNLOCK_LABEL_EXIT_RE.test(v));
+    parts.push(
+      '⭐ The exit: write `Unlock-action: re-check #N when label needs-user-decision absent` (or `pm:on-hold absent` — the second ' +
+        'recognised value: the card, the label, and `absent`/`present`; body or comment) and this row stands down for that target, ' +
+        'because the unlock sweep can then fire the exit (H19 reports it the moment the label state matches); or close the waiting ' +
+        'card `not planned`, which is 「无机制可唤醒的卡 ⛔ 不 hold」 one state over. ⛔ Any other spelling falls back silently, by ' +
+        `ruling, and leaves this row firing${unread.length === 0 ? '.' : ` — as ${unread.length} \`Unlock-action:\` line(s) on this ` +
+          `card already do (${unread.slice(0, 3).map((v) => `\`${v}\``).join(', ')}): PR-shaped, or a spelling nothing reads.`}`,
     );
   }
   if (chained.length > 0) {
@@ -13671,6 +13807,7 @@ export function h57ScheduledWorkflowRed(entry, nowMs = Date.now()) {
  * runs would classify by one repo and alarm about another, with no symptom at
  * all. So the answer is two definite readings and a refusal, never a guess:
  *
+ *   the knob leg     `PM_SWEEP_CHECKOUT` names the tree — the `origin` below is read IN it (#19191).
  *   the runner leg   `GITHUB_REPOSITORY` names the repo a runner checks out, so
  *                    when it equals the swept repo the disk is that repo. This
  *                    is the leg that answers on every real patrol run.
@@ -13684,7 +13821,8 @@ export function h57ScheduledWorkflowRed(entry, nowMs = Date.now()) {
  */
 export function localCheckoutServes(sweepRepo, env = {}, originUrl = null) {
   const want = String(sweepRepo ?? '').trim();
-  const fromEnv = String(env?.GITHUB_REPOSITORY ?? '').trim();
+  // The knob outranks the runner leg: `GITHUB_REPOSITORY` names the tree the RUNNER checked out.
+  const fromEnv = resolveSweepCheckout(env).set ? '' : String(env?.GITHUB_REPOSITORY ?? '').trim();
   if (fromEnv) {
     return fromEnv === want
       ? { serves: true, source: 'GITHUB_REPOSITORY', reason: null }
@@ -18636,8 +18774,8 @@ export function summaryClause(summary, key) {
  *   - read, nothing found → says the holds were READ and name no tracked file
  *   - read, rows          → the index
  *
- * @param {{ rows: Array<{issue: object, files: string[]}>, candidates?: number,
- *   probed?: number, tracked?: number|null }} [index]
+ * @param {{ rows: Array<{issue: object, files: string[]}>, candidates?: number, probed?: number,
+ *   tracked?: number|null, checkoutRoot?: string|null, checkoutOrigin?: string|null }} [index]
  * @param {{ markdown?: boolean }} [options]
  */
 export function renderTriggerIndex(index, { markdown = false } = {}) {
@@ -18646,6 +18784,10 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
   const probed = index.probed ?? 0;
   const candidates = index.candidates ?? 0;
   const read = `read on ${probed} of ${candidates} open \`pm:on-hold\` card(s)`;
+  // WHICH tree the oracle was read in (#19191) — printed knob or no knob, because a wrong-tree read
+  // is internally consistent and the tree it names is the only thing that distinguishes it.
+  const where = ` Read in ${index.checkoutRoot ? `\`${index.checkoutRoot}\`` : 'an unnamed tree'}` +
+    ` (\`origin\` ${index.checkoutOrigin ? `\`${index.checkoutOrigin}\`` : 'unresolved'}).`;
   const head = markdown
     ? ['### On-hold trigger-file index (H17)', '']
     : ['', 'On-hold trigger-file index (H17)'];
@@ -18654,7 +18796,7 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
     head.push(
       `⚠️ The tracked-file oracle (\`git ls-files\`) could not be read, so NO candidate path was ` +
         `validated and this index is EMPTY BY FAILURE, not by finding. Run the patrol from inside a ` +
-        `checkout. (${read}.)`,
+        `checkout. (${read}.)${where}`,
     );
     return head;
   }
@@ -18666,7 +18808,7 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
     `measured at 0-for-19 while it lived only as a remembered protocol step (#10034). Report-only: ` +
     `a card here is a hold in good standing, never a finding. Extraction is deterministic — every ` +
     `path shown is a tracked file; anything unverifiable was dropped rather than guessed, so this ` +
-    `list under-reports and never invents. (${read}; ${index.tracked} tracked file(s) in the oracle.)`;
+    `list under-reports and never invents. (${read}; ${index.tracked} tracked file(s) in the oracle.)${where}`;
   head.push(intro, '');
 
   if (rows.length === 0) {
@@ -20702,6 +20844,10 @@ async function listIssues(label, stats = {}) {
 }
 
 async function sweep(options = {}) {
+  // WHICH tree serves this board (#19191), BEFORE the probe: a foreign checkout reads nothing.
+  const originUrl = readOriginUrl();
+  const foreignTree = checkoutPrerequisite(OWNER_REPO, process.env, originUrl);
+  if (foreignTree) reportPrerequisiteNotMet(foreignTree);
   // Answered once, before any listing — so an unusable transport costs ONE
   // classified verdict instead of a raw HTTP status from whichever label page
   // happened to go first (`pm:dispatched`, in the failure #7412 recorded).
@@ -20898,6 +21044,8 @@ async function sweep(options = {}) {
     candidates: hold.candidates,
     probed: hold.probed,
     tracked: tracked ? tracked.size : null,
+    checkoutRoot: readRepoRoot(),
+    checkoutOrigin: originUrl,
   };
   // Instruction ④'s NOT-MEASURED population: H4's OWN rows, counted rather than
   // re-derived (one computation, two readers). It has to be read HERE because
@@ -22360,7 +22508,7 @@ export const SEEN_LABEL_PAGES = Object.freeze([
  */
 function readRepoRoot() {
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim() || null;
+    return gitRead(['rev-parse', '--show-toplevel']).trim() || null;
   } catch {
     return null;
   }
@@ -22368,7 +22516,7 @@ function readRepoRoot() {
 
 function readOriginUrl() {
   try {
-    return execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim() || null;
+    return gitRead(['remote', 'get-url', 'origin']).trim() || null;
   } catch {
     return null;
   }
@@ -24082,12 +24230,15 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
     const expired = h19BlockOutlivedBlocker(issue, resolutions);
     if (expired) findings.push([issue, 'H19', expired]);
+    // …and the same row's second exit: a declared label transition that came true on an open target (#19255).
+    const exitFired = h19DeclaredExitFired(issue, resolutions, fallbackFor(issue));
+    if (exitFired) findings.push([issue, 'H19', exitFired]);
     // H26 — the same resolutions, asked the OTHER question: not "has the target
     // closed" but "can it ever". Both rows can fire on one card (a two-target
     // block where one blocker closed and the other is parked indefinitely), and
     // they must: they name different halves of the same wait and prescribe
     // different reads.
-    const indefinite = h26BlockOnIndefiniteTarget(issue, resolutions);
+    const indefinite = h26BlockOnIndefiniteTarget(issue, resolutions, fallbackFor(issue));
     if (indefinite) findings.push([issue, 'H26', indefinite]);
     // H28 — the same resolutions, asked a THIRD question: which CHANNEL each
     // target arrived in. H19 reports that the block is half-expired; this
@@ -24683,10 +24834,12 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // because a number with no provenance is what got re-derived from memory the
   // first time.
   'ISSUE_BODY_LIMIT measured cap': 52,
+  // Registered with the label-transition unlock exit (#19255), pin just under the count: a NEW EXIT beside a STAND-DOWN.
+  'H19/H26 label-transition unlock exit': 10,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
-export const SELF_TEST_BATTERY_FLOOR = 6;
+export const SELF_TEST_BATTERY_FLOOR = 7;
 
 async function selfTest() {
   const cases = [];
@@ -28953,7 +29106,7 @@ async function selfTest() {
   b(BATTERY18664, '#18664 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18664), true);
   b(BATTERY18664, '#18664 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY18664] > 0, true);
   b(BATTERY18664, '#18664 floor: the roster is frozen', Object.isFrozen(SELF_TEST_BATTERIES), true);
-  b(BATTERY18664, '#18664 floor: the roster now declares SIX batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY18664, '#18664 floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
   b(BATTERY18664, '#18664 floor: …including the five this battery landed BESIDE, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'H2/H47/H66 decorated ownership marker'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY18664, '#18664 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -29061,6 +29214,12 @@ async function selfTest() {
   const noOracle = renderMarkdown([], counts, { triggerIndex: { rows: idxRows, candidates: 79, probed: 79, tracked: null } });
   t('H17 no-oracle: says the index is empty BY FAILURE', noOracle.includes('EMPTY BY FAILURE, not by finding'), true);
   t('H17 no-oracle: …and renders no row, so nothing unvalidated leaks out', noOracle.includes('#8331'), false);
+  // The tree the oracle was read in (#19191) — named in BOTH oracle states, knob set or not.
+  const tree19191 = (over) => renderTriggerIndex({ ...triggerIdx, ...over }).join('\n');
+  t('#19191 footer: the H17 footer NAMES the tree the oracle was read in', renderMarkdown([], counts, { triggerIndex: { ...triggerIdx, checkoutRoot: '/home/user/objectui', checkoutOrigin: 'https://github.com/objectstack-ai/objectui' } }).includes('Read in `/home/user/objectui` (`origin` `https://github.com/objectstack-ai/objectui`)'), true);
+  t('#19191 footer: …beside the oracle size, so the two are read together', tree19191({ checkoutRoot: '/r', checkoutOrigin: 'o' }).includes('6360 tracked file(s) in the oracle.) Read in `/r`'), true);
+  t('#19191 footer: an unnamed tree says so rather than reading as this one', tree19191({}).includes('Read in an unnamed tree (`origin` unresolved).'), true);
+  t('#19191 footer: …and the EMPTY-BY-FAILURE branch names its tree too', tree19191({ tracked: null, checkoutRoot: '/r', checkoutOrigin: 'o' }).includes('EMPTY BY FAILURE, not by finding. Run the patrol from inside a checkout. (read on 79 of 79 open `pm:on-hold` card(s).) Read in `/r`'), true);
   // The partial-read gap is stated, never implied.
   t('H17 partial: a partial hold read says so', renderMarkdown([], counts, { triggerIndex: { rows: [], candidates: 79, probed: 12, tracked: 10 } }).includes('read on 12 of 79'), true);
   // Budget: the index is RESERVED, so a board noisy enough to truncate the
@@ -30563,6 +30722,25 @@ async function selfTest() {
   // comment-borne one, and a spent comment-borne line founds no row (#17564).
   const waitingBoth = { ...waiting(), body: 'Blocked-by: #900\nBlocked-by: #987' };
   t('H26 + H19: a partially expired, partially indefinite block fires both', Boolean(h19BlockOutlivedBlocker(waitingBoth, expiredAndIndefinite, REPO_OS)) && Boolean(h26BlockOnIndefiniteTarget(waitingBoth, expiredAndIndefinite)), true);
+
+  // -- The label-transition exit, the second `Unlock-action:` value (#19255): firing controls and fallbacks together --
+  const BATTERY19255 = 'H19/H26 label-transition unlock exit';
+  const LIVE_EXIT = 'Unlock-action: re-check #68 when label needs-user-decision absent';
+  const exitsOf = (body, comments) => unlockLabelExits({ body }, comments, REPO_OS).map((e) => `${e.key} ${e.label} ${e.state}`).join('|');
+  const exitCard = (body) => ({ ...waiting(75), body });
+  const h19exit = (card, targets, comments) => h19DeclaredExitFired(card, targets, comments, REPO_OS);
+  const [ruled, parked] = [tgt(68, ['pm:queue']), tgt(68, ['needs-user-decision'])];
+  b(BATTERY19255, 'exit reader: the live spelling names the card, the label and the state, in either channel', [exitsOf(LIVE_EXIT), exitsOf('no line here', [LIVE_EXIT])].join(), 'objectstack-ai/objectstack#68 needs-user-decision absent,objectstack-ai/objectstack#68 needs-user-decision absent');
+  b(BATTERY19255, 'exit reader: `present` is the same reader the other way, a cross-repo card keeps its qualifier, two lines are two exits in order', exitsOf('Unlock-action: re-check #987 when label pm:queue present\nUnlock-action: re-check objectstack-ai/objectos#68 when label needs-user-decision absent'), 'objectstack-ai/objectstack#987 pm:queue present|objectstack-ai/objectos#68 needs-user-decision absent');
+  b(BATTERY19255, 'exit reader: a decorated line, a backticked label and trailing prose are all the same line (shared reader)', exitsOf('- **`Unlock-action: re-check #68 when label `needs-user-decision` absent (the ruling lands)`**'), 'objectstack-ai/objectstack#68 needs-user-decision absent');
+  b(BATTERY19255, 'exit reader: ⛔ the closed set — PR-shaped, no state word, a word outside the pair, the pair in another case, a lowercase key and a mid-sentence mention all fall back; a missing issue does not crash', exitsOf(`Unlock-action: re-check PR #123\nUnlock-action: re-check #68 when label needs-user-decision\nUnlock-action: re-check #68 when label needs-user-decision removed\nUnlock-action: re-check #68 when label needs-user-decision Absent\nunlock-action: re-check #68 when label needs-user-decision absent\nseats write the ${LIVE_EXIT} line`) + unlockLabelExits(undefined, undefined, REPO_OS).length, '0');
+  b(BATTERY19255, 'H19 exit: `absent` fires once the target no longer carries the label, names the target, the label and the state, and is report-only', [typeof h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled]), String(h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled])).includes('`#68` (`needs-user-decision` absent)'), String(h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled])).includes('never a label written from this script')].join(), 'string,true,true');
+  b(BATTERY19255, 'H19 exit: ⛔ silent while the label is still on the target, on a card the block does not wait on, on a CLOSED or unresolved target (H19\'s own legs), and past the label gate', [h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [parked]), h19exit(exitCard(`Blocked-by: #987\n${LIVE_EXIT}`), [tgt(987, ['pm:queue'])]), h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [{ ...ruled, state: 'closed' }, { ...tgt(68, null), state: 'unresolved', detail: 'HTTP 404' }]), h19exit({ ...exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), labels: [{ name: 'pm:queue' }] }, [ruled])].every((v) => v === null), true);
+  b(BATTERY19255, 'H19 exit: `present` fires when the target carries the label and not before; a comment-borne exit fires too', [typeof h19exit(exitCard('Blocked-by: #68\nUnlock-action: re-check #68 when label pm:queue present'), [ruled]), h19exit(exitCard('Blocked-by: #68\nUnlock-action: re-check #68 when label pm:queue present'), [parked]), typeof h19exit(exitCard('Blocked-by: #68'), [ruled], [LIVE_EXIT])].join(), 'string,,string');
+  b(BATTERY19255, '⭐ H26 stand-down: an exit naming the parked target silences the row in either channel — and once the label leaves, H19 fires the exit while H26 stays quiet', [h26row(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [parked], undefined, REPO_OS), h26row(exitCard('Blocked-by: #68'), [parked], [LIVE_EXIT], REPO_OS), h26row(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled], undefined, REPO_OS)].every((v) => v === '') && typeof h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled]) === 'string', true);
+  b(BATTERY19255, 'H26 stand-down: ⛔ a comment it was not handed is not read; an exit naming ANOTHER card, or the PR-shaped value, leaves the row firing and the latter is named as a line nothing fires; two parked targets with one exit report only the other', [h26row(exitCard('Blocked-by: #68'), [parked], undefined, REPO_OS) !== '', h26row(exitCard('Blocked-by: #68\nUnlock-action: re-check #987 when label pm:on-hold absent'), [parked], undefined, REPO_OS) !== '', h26row(exitCard('Blocked-by: #68\nUnlock-action: re-check PR #123'), [parked], undefined, REPO_OS).includes('already do (`re-check PR #123`)'), h26row(exitCard(`Blocked-by: #68, #987\n${LIVE_EXIT}`), [parked, tgt(987, ['pm:on-hold'])], undefined, REPO_OS).includes('on 1 target(s)'), h26row(exitCard(`Blocked-by: #68, #987\n${LIVE_EXIT}`), [parked, tgt(987, ['pm:on-hold'])], undefined, REPO_OS).includes('`#987`')].join(), 'true,true,true,true,true');
+  b(BATTERY19255, 'H26 remedy: the row without an exit prescribes the live spelling and the close, says other spellings fall back silently, and the chain leg carries none of it', [h26row(waiting(75), [parked]).includes('`Unlock-action: re-check #N when label needs-user-decision absent`'), h26row(waiting(75), [parked]).includes('close the waiting card `not planned`'), h26row(waiting(75), [parked]).includes('falls back silently'), h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('⭐ The exit')].join(), 'true,true,true,false');
+  b(BATTERY19255, 'floor: the roster now declares SEVEN batteries, and this one is on it', SELF_TEST_BATTERY_FLOOR === 7 && Object.hasOwn(SELF_TEST_BATTERIES, BATTERY19255), true);
 
   // -- The UNGATED liveness read + H28: the stale body line (#11747) ----------
   //
@@ -34106,6 +34284,24 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H57 checkout: a DIFFERENT origin refuses and names both repos', localCheckoutServes('o/r', {}, 'https://github.com/o/other').reason.includes('o/other'), true);
   t('H57 checkout: no origin at all refuses', localCheckoutServes('o/r', {}, null).serves, false);
 
+  // The checkout knob (#19191) — WHICH tree the three local git reads take.
+  const SELF19191 = readFileSync(SELF_PATH, 'utf8');
+  t('#19191 knob: ONE git read site in the file, so a fourth reader cannot skip the cwd', SELF19191.split(['execFileSync', "('git'"].join('')).length - 1, 1);
+  t('#19191 knob: …and no `spawnSync` git read beside it', SELF19191.split(['spawnSync', "('git'"].join('')).length - 1, 0);
+  t('#19191 knob: …and that one site takes the knob as its `cwd`', /resolveSweepCheckout\(process\.env\)\.path[\s\S]{0,120}cwd,/.test(SELF19191), true);
+  t('#19191 knob: unset is the inherited cwd — no path is handed to git', resolveSweepCheckout({}).path, null);
+  t('#19191 knob: whitespace is unset too', resolveSweepCheckout({ PM_SWEEP_CHECKOUT: '  ' }).set, false);
+  t('#19191 knob: a path becomes the cwd every local git read takes', resolveSweepCheckout({ PM_SWEEP_CHECKOUT: '/home/user/objectui' }).path, '/home/user/objectui');
+  t('#19191 knob: the knob outranks GITHUB_REPOSITORY, which names the RUNNER\'s tree', localCheckoutServes('o/r', { PM_SWEEP_CHECKOUT: '/t', GITHUB_REPOSITORY: 'o/r' }, 'https://github.com/o/other').serves, false);
+  t('#19191 knob: …so a knob tree whose `origin` IS the board serves, whatever the runner says', localCheckoutServes('o/r', { PM_SWEEP_CHECKOUT: '/t', GITHUB_REPOSITORY: 'o/other' }, 'https://github.com/o/r').serves, true);
+  t('#19191 refusal: unset is no prerequisite at all — today\'s behaviour, unchanged', checkoutPrerequisite('o/r', {}, 'https://github.com/o/other'), null);
+  t('#19191 refusal: knob + matching origin passes, and the sweep runs', checkoutPrerequisite('o/r', { PM_SWEEP_CHECKOUT: '/t' }, 'https://github.com/o/r'), null);
+  const FOREIGN19191 = checkoutPrerequisite('o/r', { PM_SWEEP_CHECKOUT: '/t' }, 'https://github.com/o/other') ?? { headline: '', detail: [], fix: [] };
+  t('#19191 refusal: knob + mismatching origin REFUSES, naming the checkout it was given', String(FOREIGN19191.headline).includes('"/t"'), true);
+  t('#19191 refusal: …and names the repo that tree actually is', FOREIGN19191.detail.join(' ').includes('o/other'), true);
+  t('#19191 refusal: …and carries a fix, ⛔ never a fall back to cwd', String(FOREIGN19191.fix[1]).includes('unset it'), true);
+  t('#19191 refusal: a knob path with no `origin` at all refuses too', checkoutPrerequisite('o/r', { PM_SWEEP_CHECKOUT: '/nope' }, null)?.kind, 'checkout-does-not-serve');
+
   // Census and forwarding.
   t('H57 census: every count key rides the enumerated forwarding contract', ['scheduledDeclared', 'scheduledJudged', 'scheduledUnreadRuns', 'scheduledGating', 'scheduledInactive', 'scheduledInactiveNames', 'scheduledUnreadable', 'scheduledRequests', 'scheduledListingShort', 'scheduledUnresolved'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   const SUM57 = saidBy('h57Scheduled', summaryLine({ scheduledDeclared: 22, scheduledJudged: 7, scheduledUnreadRuns: 0, scheduledGating: 15, scheduledInactive: 0, scheduledUnreadable: 0, scheduledRequests: 8 }, 0));
@@ -35326,7 +35522,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // THE ROSTER — a floor that cannot be satisfied by a zero.
   b(BATTERY67, 'H67 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY67), true);
   b(BATTERY67, 'H67 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY67] > 0, true);
-  b(BATTERY67, 'H67 floor: the roster grew again with #18664\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY67, 'H67 floor: the roster grew again with #19255\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
   b(BATTERY67, 'H67 floor: …including the two batteries this row landed BESIDE, so neither side of the base merge silently dropped one', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H65 tier declaration spelling') && Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H19 judged-set founding'), true);
   b(BATTERY67, 'H67 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -35434,7 +35630,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // fixture. ⭐ The counterfactual pin: the roster is asserted EQUAL to a frozen
   // list of ids, so a form added without a fixture reds and a form silently
   // dropped reds. That is the failure mode that produced this card.
-  b(BATTERY68, 'vocabulary ⭐ the roster is EXACTLY the declared forms — an addition without a fixture reds, a silent drop reds', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(','), 'heading,list-item,underscore-emphasis,inflected-word,separator,heading-bare,bare-word');
+  b(BATTERY68, 'vocabulary ⭐ the roster is EXACTLY the declared forms — an addition without a fixture reds, a silent drop reds', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(','), 'heading,list-item,underscore-emphasis,inflected-word,separator,leading-sigil,heading-bare,bare-word');
   b(BATTERY68, 'vocabulary: the roster is FROZEN', Object.isFrozen(OWNERSHIP_MARKER_NEAR_MISS_FORMS), true);
   b(BATTERY68, 'vocabulary: …and so is every member', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => Object.isFrozen(f)), true);
   b(BATTERY68, 'vocabulary: every member carries an id, a printable name, a fixture and a pattern', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => typeof f.id === 'string' && typeof f.what === 'string' && typeof f.example === 'string' && f.re instanceof RegExp), true);
@@ -35485,6 +35681,30 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, '#18831 ordering: …an inflected word with a colon is still `inflected-word`', miss68('Claiming: seat, session `session_x`').form, 'inflected-word');
   b(BATTERY68, '#18831 ordering: …and a dash-written claim is still `separator`, which is H34\'s row and ⛔ not this addition\'s', miss68('Claim — skills seat, session 019x').form, 'separator');
   b(BATTERY68, '#18831 ordering: …a `-` bulleted claim with no colon is named by NEITHER addition — a list is not a heading and not a line start', ownershipMarkerNearMisses(rows68('- Claiming the producer half, seat `domain:spec`')).length, 0);
+
+  // THE `leading-sigil` FORM (#18829 A) — the shape the sibling's retired
+  // retraction stripper used to swallow, NAMED here instead. The fixture is the
+  // #18373 retraction (`os-bill`, comment 5717333576) written in the act the
+  // protocol names, its own sigil and bold kept; the PROSE it was actually
+  // written as is pinned below as named by NO form, with the reason.
+  const SIGIL_RELEASE = '🚨 **Release:** session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者';
+  const SIGIL_18373_PROSE = '🚨 **撤回上一条认领(`5717315121`)—— 本卡已由 `os-litant` 在先认领,本席晚了 13 分钟。** `domain:spec` seat 2(`session_01JbZnqu8bt6YqfJsr9vaFb3`,座位贴 #18549)。⏱️ 本条读数取自同一动作:2026-09-17T15:54Z。';
+  b(BATTERY68, '#18829 ⭐ a sigil-led `Release:` is read by NEITHER marker — the stripper removes decoration, ⛔ never a sigil', markerMatches(RELEASE_COMMENT_MARKER, SIGIL_RELEASE) || markerMatches(CLAIM_COMMENT_MARKER, SIGIL_RELEASE), false);
+  b(BATTERY68, '#18829 ⭐ …and it is NAMED, as `leading-sigil`, with the sigil-and-decoration prefix a seat greps for', [miss68(SIGIL_RELEASE).form, miss68(SIGIL_RELEASE).prefix].join(' '), 'leading-sigil 🚨 **Release:');
+  b(BATTERY68, '#18829: the very line the sibling pinned as 「the SHARED reading does not strip a leading sigil」 is the same form on the claim side', miss68('🚨 Claim: PM loop round 1').form, 'leading-sigil');
+  b(BATTERY68, '#18829 control: take the sigil off by hand and the SAME line reads through `markerMatches` — the sigil was the only thing in the way', markerMatches(RELEASE_COMMENT_MARKER, SIGIL_RELEASE.replace('🚨 ', '')), true);
+  b(BATTERY68, '#18829 control: …and once read it is ⛔ not a near miss — reading and census stay complements', ownershipMarkerNearMisses(rows68(SIGIL_RELEASE.replace('🚨 ', ''))).length, 0);
+  b(BATTERY68, '#18829 control: the derived bare line really differs from the fixture', SIGIL_RELEASE === SIGIL_RELEASE.replace('🚨 ', ''), false);
+  b(BATTERY68, '#18829: the fleet\'s other openers — ⚠️ with its variation selector, ⇒, ⛔, ⭐ — are the same form, decorated or not', ['⚠️ Release: x', '⇒ Claim: x', '⛔ **Claimed:** x', '⭐ `Release:` x'].map((l) => miss68(l).form).join(','), 'leading-sigil,leading-sigil,leading-sigil,leading-sigil');
+  b(BATTERY68, '#18829: two sigils, a sigil under a bullet (「- ⚠️ 」, on #18373\'s own thread) and a sigil in a blockquote are named too', ['🚨 ⚠️ Release: x', '- ⚠️ Release: x', '> 🚨 Claim: x'].map((l) => miss68(l).form).join(','), 'leading-sigil,leading-sigil,leading-sigil');
+  b(BATTERY68, '#18829 control: a sigil AFTER the word is not in the way — the line reads, and is no near miss', [markerMatches(RELEASE_COMMENT_MARKER, 'Release: 🚨 session x'), ownershipMarkerNearMisses(rows68('Release: 🚨 session x')).length].join(','), 'true,0');
+  b(BATTERY68, '#18829 control: a sigil-led line WITHOUT the word is silent — 「⚠️ 本条读数…」 and 「⇒ …」 are prose', ownershipMarkerNearMisses(rows68('⚠️ 本条读数取自同一动作:2026-09-17T15:54Z。\n⇒ the next seat re-reads the card\n⭐ Claimed by nobody yet')).length, 0);
+  b(BATTERY68, '#18829 control: a sigil-led directive with NO record after it is silent — a census, ⛔ not a sigil count', ownershipMarkerNearMisses(rows68('🚨 Release:')).length, 0);
+  b(BATTERY68, '#18829 ⛔ the #18373 PROSE specimen itself — a sigil before 撤回, an act the protocol never declared — is named by NO form: reading the verb is the channel #18773 A retires (⛔ B), so here it is prose, and its thread is named by the cross-author row one file over', ownershipMarkerNearMisses(rows68(SIGIL_18373_PROSE)).length, 0);
+  b(BATTERY68, '#18829 ⛔ CONTROL: the specimen really opens with the sigil-and-bold the form reads — only the word is missing', SIGIL_18373_PROSE.startsWith('🚨 **') && SIGIL_RELEASE.startsWith('🚨 **'), true);
+  b(BATTERY68, '#18829 ordering: the form sits between `separator` and the two #18831 additions', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).slice(4, 7).join(','), 'separator,leading-sigil,heading-bare');
+  b(BATTERY68, '#18829 ordering: …and steals no older form\'s fixture — every earlier member is still named by ITSELF', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(0, 5).every((f) => miss68(f.example).form === f.id), true);
+  b(BATTERY68, '#18829 boundary: a heading AND a sigil is named by no form — unseen on any thread read, left unnamed rather than guessed', ownershipMarkerNearMisses(rows68('## 🚨 Release: x')).length, 0);
 
   // SILENCE CONTROLS — a census that names prose is a census nobody reads, and
   // every one of these is a line MEASURED on the open board.
@@ -35645,7 +35865,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // FLOOR — this battery is declared, pinned, and the roster grew with it.
   b(BATTERY68, 'floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY68), true);
   b(BATTERY68, 'floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY68] > 0, true);
-  b(BATTERY68, 'floor: the roster now declares SIX batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY68, 'floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
   b(BATTERY68, 'floor: …including the four this battery landed BESIDE and the one that landed after it, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'ISSUE_BODY_LIMIT measured cap'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY68, 'floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -35969,6 +36189,7 @@ export const USAGE = [
   '',
   'the board is named by the ENVIRONMENT — there is no --repo and no positional argument:',
   '  PM_SWEEP_REPO         `owner/name` to sweep; else GITHUB_REPOSITORY, else the built-in default',
+  '  PM_SWEEP_CHECKOUT     the checkout SERVING that board — `cwd` for the three local git reads; a foreign `origin` refuses (exit 3)',
   '  PM_SWEEP_CLOSED_FLOOR YYYY-MM-DD floor for the closed-card pass',
   '  GITHUB_TOKEN/GH_TOKEN the credential the sweep reads with',
   '  NODE_OPTIONS=--use-env-proxy   node reads its proxy flag at process START, so it goes there or',

@@ -34,7 +34,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           login: "login",
           logout: "logout",
           config_change: "config_change",
-          import: "import"
+          import: "import",
+          platform_admin_standing_change: "platform_admin_standing_change"
         }
       },
       user_id: {

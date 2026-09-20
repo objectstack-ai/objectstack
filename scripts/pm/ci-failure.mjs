@@ -194,7 +194,12 @@
  * `proxyRearmPlan`, imported rather than re-derived: one instrument, one set of
  * measured branches, and a node too old for the flag gets a printed hint
  * instead of a crash loop. `--self-test` and `--help` never re-exec — they
- * open no socket.
+ * open no socket. The GUARD that stops the re-exec looping is this file's OWN
+ * variable (`PROXY_REARM_GUARD` below) and is handed to that plan per call:
+ * while the pair shared one name, the guard either tool set was inherited by the
+ * other and answered "already re-armed" for a run that never re-armed — the
+ * suppressed run then bypassed the proxy and reported the resulting 401 as a
+ * dead credential, printing nothing at all about why (#18939, #18989).
  *
  * ## The transport, part two — an authenticated container that cannot read THIS
  *    repo (#9966, the fourth container class)
@@ -295,7 +300,7 @@ import {
   parseRemaining,
   resolveSweepRepo,
 } from './check-half-states.mjs';
-import { PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan } from './check-governed-merges.mjs';
+import { PROXY_FLAG, PROXY_REARM_GUARD as GOVERNED_MERGES_GUARD, proxyRearmPlan } from './check-governed-merges.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -323,7 +328,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'isRosterJob': 5,
   'runIdOf': 3,
   'stepBodies / resolveStep': 8,
-  'proxyRearmFor: the transport trap': 7,
+  'proxyRearmFor: the transport trap': 17,
   'usageText: --help tracks the header instead of a line number': 4,
   'verdictOf: the exit table': 11,
   'midWalkVerdict: the mid-walk net (#10155)': 12,
@@ -342,6 +347,25 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
+
+/**
+ * The re-exec guard THIS tool sets on the child it spawns — its own name, never
+ * the plan's default (#18989).
+ *
+ * The decision is `check-governed-merges.mjs`'s `proxyRearmPlan`, imported; the
+ * guard is a NAME, and a name belongs to whoever SETS it. This file used to
+ * import that file's constant and set it, so the two tools shared one variable:
+ * a governed-merges run that had re-armed exported it, this tool inherited it,
+ * and the plan answered "already re-armed" for a process that had never
+ * re-armed. The un-re-armed run then bypassed the session proxy and answered 401
+ * on every endpoint — a self-consistent "the credential is dead" story, and the
+ * suppression printed no line anywhere. Both halves are closed: the plan takes
+ * the caller's `guard`, and the suppressed branch speaks through `hint`.
+ *
+ * ⛔ Do not "unify" this with the sibling's spelling. The sibling's name is
+ * imported as `GOVERNED_MERGES_GUARD` for the self-test to pin the two apart.
+ */
+const PROXY_REARM_GUARD = 'OS_CI_FAILURE_PROXY_REARMED';
 // Which board this file reads, resolved by the sweeper's own resolver rather
 // than by a hardcoded default of its own: `PM_SWEEP_REPO` -> `GITHUB_REPOSITORY`
 // (what Actions sets to the repo the workflow is INSTALLED IN) -> the literal
@@ -427,6 +451,7 @@ export function proxyRearmFor(argv, { env = process.env, execArgv = process.exec
     env,
     execArgv,
     flagSupported: flagSupported ?? process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+    guard: PROXY_REARM_GUARD,
   });
 }
 
@@ -2103,6 +2128,58 @@ async function selfTest() {
       return [plan.rearm, plan.hint];
     })(),
     [false, true],
+  );
+
+  // -- #18989: the guard is a NAME, and this tool sets its OWN ---------------
+  //
+  // The plan is the sibling's, imported; the guard is this file's. While the two
+  // shared one variable, either tool's inherited guard answered "already
+  // re-armed" for a run that never re-armed, and the un-re-armed run bypassed the
+  // proxy and answered 401 on every endpoint with nothing printed to say why.
+  // Both directions are pinned, plus the silence that was the whole cost.
+  const ownGuarded = proxyRearmFor(['--pr', '9774'], { env: { ...proxied, [PROXY_REARM_GUARD]: '1' }, execArgv: [], flagSupported: true });
+  t('this tool\'s guard is its own name, never the plan owner\'s', PROXY_REARM_GUARD !== GOVERNED_MERGES_GUARD);
+  t(
+    'the sibling name pinned here IS the plan\'s default, so a rename there reds this battery',
+    proxyRearmPlan({ env: { ...proxied, [GOVERNED_MERGES_GUARD]: '1' } }).guarded,
+    GOVERNED_MERGES_GUARD,
+  );
+  t(
+    'the sibling\'s inherited guard does NOT suppress this tool\'s re-exec',
+    proxyRearmFor(['--pr', '9774'], { env: { ...proxied, [GOVERNED_MERGES_GUARD]: '1' }, execArgv: [], flagSupported: true }).rearm,
+    true,
+  );
+  t('a suppressed run SPEAKS — silence is the whole cost of this chain', ownGuarded.hint, true);
+  t('...naming the variable a reader has to unset', ownGuarded.reason.includes(PROXY_REARM_GUARD), true);
+  t('...and naming the 401 the silence would otherwise be read as', ownGuarded.reason.includes('401 Bad credentials'), true);
+  t('...and reporting the suppressing variable machine-readably', ownGuarded.guarded, PROXY_REARM_GUARD);
+  t(
+    'the Actions-runner leg is unchanged: no proxy, no re-exec, no extra line',
+    (() => {
+      const plan = proxyRearmFor(['--pr', '9774'], { env: { [PROXY_REARM_GUARD]: '1' }, execArgv: [], flagSupported: true });
+      return [plan.rearm, plan.hint];
+    })(),
+    [false, false],
+  );
+  t(
+    'an offline mode stays silent even with the guard set — it opens no socket to hint about',
+    (() => {
+      const plan = proxyRearmFor(['--self-test'], { env: { ...proxied, [PROXY_REARM_GUARD]: '1' }, execArgv: [], flagSupported: true });
+      return [plan.rearm, plan.hint];
+    })(),
+    [false, false],
+  );
+  t(
+    'structural: the dispatch hands the plan THIS file\'s guard, and re-execs under it',
+    (() => {
+      const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+      return [
+        /^\s+guard: PROXY_REARM_GUARD,$/m.test(ownSource),
+        /^const PROXY_REARM_GUARD = 'OS_CI_FAILURE_PROXY_REARMED';$/m.test(ownSource),
+        /\[PROXY_REARM_GUARD\]: '1'/.test(ownSource),
+      ];
+    })(),
+    [true, true, true],
   );
 
   // -- usageText: --help tracks the header instead of a line number ---------

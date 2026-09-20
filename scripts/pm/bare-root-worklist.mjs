@@ -226,6 +226,11 @@ const POPULATION_PROPERTY = /^(?:[a-z][A-Za-z0-9]*Roots?|[a-z][A-Za-z0-9]*Dirs?|
  *                      the root, and NO spelling of the idiom describes it. The
  *                      subtree idiom can only say "all of it", at the precision
  *                      quoted. This is the +139084 shape.
+ *                      ⛔ A refusal records NO `spelling` — its whole content
+ *                      is that no honest one exists — and `--self-test` holds
+ *                      that. What it MAY record, and must when its gate
+ *                      declares at its own root, is an `omits`: see the
+ *                      attribution note below.
  *   SPELLABLE-UNDECLARED
  *                      a PRECISE live spelling of the population EXISTS, and the
  *                      declaration is deferred with the reason recorded. The row
@@ -386,6 +391,48 @@ const POPULATION_PROPERTY = /^(?:[a-z][A-Za-z0-9]*Roots?|[a-z][A-Za-z0-9]*Dirs?|
  * triage and this fix in under two days. Three readings of three trees is the
  * drift this docblock permits; pairing any one of those numerators with another
  * reading's denominator is the defect it forbids, and the spread is why.
+ *
+ * ⭐ ATTRIBUTION was added on 2026-09-19 (#15926), and it is a widening of a
+ * PIN rather than a re-decision on any row: no verdict is added, changed or
+ * withdrawn, and the 46/13/14 census is the one it was measured at. The
+ * declaration pin was scoped by VERDICT — only a DECLARED-NARROWER row had its
+ * gate's array read back — `contradictedRows` is scoped by REACHABILITY, and
+ * every other pin here asks the TREE, which a declaration does not move. So a
+ * `REFUSE-*` row whose gate declares a genuinely NARROWER hint at that row's
+ * root fell between all three and could assert "nothing honest is declarable"
+ * while its own gate declared, indefinitely, green. #15602 is that measured
+ * rather than argued.
+ *
+ * The obstacle is not the pin, it is the IDIOM: hints are declared per FILE,
+ * one array beside the constants, and `check-driver-conformance` carries TWO
+ * rows at `packages` — `DRIVERS_DIR`, which owns `packages/drivers/**`, and
+ * `CASE_SETS_DIR`, which owns nothing there. ⭐ Attributing a declared hint to
+ * a CONSTANT rather than to a FILE is information the ROOT_DIR_WATCH_HINTS
+ * idiom does not carry today, so a file-level "this gate declares at this root
+ * ⇒ the refusal is false" pin reds a correct row on day one.
+ *
+ * Three routes were priced before one was taken, and the other two are recorded
+ * because the price is the finding. Deriving the attribution from the row's
+ * POPULATION — does any declared hint COVER what this row's constant names —
+ * needs the population machine-readable, and this map holds it as prose plus a
+ * number; the gates mostly export no walk to drive, so that route is one
+ * re-measurement per row and cannot be priced without being done. Carrying the
+ * constant beside the hint AT THE DECLARATION SITE is the idiom-level repair:
+ * 64 files declare, 70 declarations, 159 hints, and `literalHints` in
+ * check-watch-hint-literal.mjs reads a FLAT ARRAY OF STRING LITERALS, so every
+ * one of those 70 declarations reads as "COMPUTED, not a literal array" until
+ * that parser, its roster and each gate's own self-test move with them.
+ *
+ * What was taken instead extends `omits` DOWNWARD: a row that claims nothing
+ * names the sibling declaration it is deliberately not claiming, exactly as a
+ * DECLARED-NARROWER row names a hint it passes over. It buys no new
+ * information — the CASE_SETS_DIR row's `why` has said "its sibling constant
+ * took the escape" since it was written — and that is the point: ⭐ it puts an
+ * already-recorded sentence under a pin that re-checks it every run, turning
+ * prose that happens to be true into a fact that must stay true. ⛔ It is not
+ * an allowlist: an allowlist names a ROW to skip and nothing about the gate can
+ * make it fire again; this names a HINT, is read back out of the gate's source
+ * every run, and reds when either side moves.
  *
  * ⚠️ One row of that seventeen was re-measured into a DIFFERENT population, not
  * merely fresher digits: #12392 (PR #12423, `69d0e18`) made
@@ -928,8 +975,28 @@ const TRIAGE = new Map([
   // ── Refused: the population is a filter the idiom cannot spell ────────────
   ['scripts/check-driver-conformance.mjs CASE_SETS_DIR packages', {
     verdict: 'REFUSE-UNSPELLABLE',
+    // The ATTRIBUTION this row's `why` has always asserted in prose, moved
+    // under the pin that re-checks it every run (#15926). ⛔ The verdict is
+    // untouched and no term of the 7-of-143 reading is refreshed: what is added
+    // is the name of the declaration this row is deliberately NOT claiming, and
+    // that name is read back out of the gate's source on every run. Same shape
+    // as #15270, which brought the sibling row inside the declaration pin by
+    // recording the set its `why` named in prose — a repair, not a re-decision.
+    omits: [['packages', 'drivers', '**']],
     why: 'a filename pattern inside one directory — 7 of 143 files (4.9%). Its sibling constant '
-      + 'took the escape; this one has nothing honest to declare',
+      + 'took the escape; this one has nothing honest to declare. ⭐ That sibling sentence is what '
+      + 'the `omits` above now RECORDS rather than merely states: DRIVERS_DIR is the row that owns '
+      + 'packages/drivers/** and this row disclaims it by name, because hints are declared per '
+      + 'FILE — one array beside the constants — and a file-level read cannot tell two rows at the '
+      + 'same root apart. Attributing a declared hint to a CONSTANT rather than to a FILE is '
+      + 'information the ROOT_DIR_WATCH_HINTS idiom does not carry, so the attribution is recorded '
+      + 'HERE, per row, and held in both directions: the day check-driver-conformance stops '
+      + 'declaring that hint, or declares a second one at this root, this row reds until someone '
+      + 'attributes it. ⛔ It is not an allowlist entry and not a skip — an allowlist names a ROW '
+      + 'and nothing about the gate can make it fire again; this names a HINT and is re-read out '
+      + 'of the gate source every run. ⛔ Neither term of the ratio above is re-measured here: '
+      + 'this edit adds an attribution, and refreshing a denominator alongside it would mint a '
+      + 'ratio nothing ever measured, which this docblock forbids by name',
   }],
   ['scripts/check-meta-type-normalized.mjs SCAN_DIRS packages', {
     verdict: 'REFUSE-UNSPELLABLE',
@@ -1794,6 +1861,106 @@ export function contradictedRows(rows, triage = TRIAGE) {
     .sort();
 }
 
+/**
+ * The hints a row CLAIMS its own gate DECLARES, as against the ones it merely
+ * records about the TREE.
+ *
+ * Only DECLARED-NARROWER makes a claim about the ARRAY: its whole content is
+ * "the gate took the escape, and this is the subtree it took".
+ * SPELLABLE-UNDECLARED carries a spelling too and claims the OPPOSITE — a
+ * precise live spelling EXISTS and the gate declares NOTHING for that
+ * population — which is why that verdict is pinned by LIVENESS and PRECISION
+ * over the corpus and not here. The two refusals claim nothing at all, and
+ * record no spelling to be read as one.
+ *
+ * ⛔ So a spelling is read as a claim on the declared array ONLY under the one
+ * verdict defined that way. Folding the other three in would make every
+ * SPELLABLE-UNDECLARED row assert the very declaration its verdict says is
+ * absent, and would turn the pin below from a measurement into a tautology on
+ * eleven rows.
+ */
+export function claimedHints(record) {
+  return record.verdict === 'DECLARED-NARROWER' && record.spelling && SPELLINGS.has(record.spelling)
+    ? hintsOf(SPELLINGS.get(record.spelling).segments).map((parts) => parts.join('/'))
+    : [];
+}
+
+/**
+ * ATTRIBUTION — every hint a gate declares at a row's bare root, sorted into
+ * the ones that row CLAIMS and the ones it explicitly DISCLAIMS. Pure, so the
+ * live rows and the fixture cases beside them cannot disagree about what an
+ * attribution IS, the same reason `contradictedRows` above is pure.
+ *
+ * ## The gap this closes (#15926)
+ *
+ * ⭐ Attributing a declared hint to a CONSTANT rather than to a FILE is
+ * information the `ROOT_DIR_WATCH_HINTS` idiom does not carry today. Hints are
+ * declared per FILE, one array beside the constants, so a file-level read
+ * cannot tell two rows at the same root apart — and `check-driver-conformance`
+ * carries exactly two at `packages`, one of which owns the declaration and one
+ * of which deliberately does not.
+ *
+ * Until this function existed, that missing attribution was not merely
+ * unrecorded, it was UNASKED. A `REFUSE-*` row whose gate declares a genuinely
+ * narrower hint at that row's root fell between all three mechanisms that
+ * compare a record against a declaration: the declaration pin below was scoped
+ * by VERDICT (DECLARED-NARROWER only), `contradictedRows` is scoped by
+ * REACHABILITY (`r.covered`, which a narrower declaration never makes true),
+ * and every remaining pin in this file asks the TREE, which a declaration does
+ * not move. #15602 is that measured rather than argued: `check-declaration-mirrors`
+ * declared both sides of its mirror, the row went on recording
+ * REFUSE-UNSPELLABLE, and nothing anywhere reddened.
+ *
+ * ## Why the attribution is RECORDED here and not DERIVED
+ *
+ * Two other places could hold it and both were priced before this one was
+ * written. Deriving it from the row's POPULATION — does any declared hint cover
+ * what this row's constant names — needs the population machine-readable, and
+ * this map holds it as prose plus a number; making it machine-readable is a
+ * separate piece of work, one re-measurement per row, and it cannot even be
+ * priced without doing it. Carrying the constant beside the hint AT THE
+ * DECLARATION SITE is the idiom-level repair, and its blast radius is measured:
+ * 64 files declare, 70 declarations, 159 hints, and `literalHints` in
+ * `check-watch-hint-literal.mjs` reads a FLAT ARRAY OF STRING LITERALS, so any
+ * richer element shape turns every one of those 70 declarations into
+ * "COMPUTED, not a literal array" until that parser moves with them.
+ *
+ * What is recorded here instead is the one sentence the map already contained
+ * in prose, put under a pin that re-checks it every run — so a sentence that
+ * happens to be true becomes a fact that must stay true. Both directions bite:
+ * a hint the gate STOPS declaring reds as loudly as one it starts, and a row
+ * cannot both claim and disclaim the same hint.
+ *
+ * ⛔ It is NOT an allowlist and the difference is mechanical, not rhetorical: an
+ * allowlist names a ROW to skip, and nothing about the gate can make it fire
+ * again. This names a HINT, re-reads that hint out of the gate's source on
+ * every run, and reds the moment either side moves.
+ *
+ * ⛔ When this reds the remedy is to re-measure the ROW — never to extend
+ * `omits` until it agrees again, which is the same move as relaxing `holds`,
+ * refused by name where the spellings are pinned.
+ *
+ * @param record  a TRIAGE record: `{ verdict, spelling?, omits? }`
+ * @param declared  the hints its gate declares AT THAT ROW'S ROOT
+ */
+export function declarationAttribution(record, declared) {
+  const claimed = claimedHints(record);
+  const disclaimed = (record.omits ?? []).map((parts) => parts.join('/'));
+  const undeclared = claimed.filter((h) => !declared.includes(h));
+  const unattributed = declared.filter((h) => !claimed.includes(h) && !disclaimed.includes(h));
+  const staleOmits = disclaimed.filter((h) => !declared.includes(h));
+  const doubleClaimed = disclaimed.filter((h) => claimed.includes(h));
+  return {
+    claimed,
+    disclaimed,
+    undeclared,
+    unattributed,
+    staleOmits,
+    doubleClaimed,
+    held: unattributed.length === 0 && staleOmits.length === 0 && doubleClaimed.length === 0,
+  };
+}
+
 function report({ wide = false } = {}) {
   const files = trackedFiles();
   const families = [...discoverFamilies().byCheck];
@@ -1901,7 +2068,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The triage coupling, both directions': 19,
   'The MECHANISM a repaired reason turns on, held mechanically': 4,
   'The RECORDED SPELLINGS, pinned: LIVENESS and PRECISION': 65,
-  "The DECLARATION a row describes, read from the gate's own SOURCE": 43,
+  // ⭐ 43 → 128 (#15926): the loop now runs over EVERY recorded row rather than
+  // the eleven DECLARED-NARROWER ones, and the RED end of the new direction is
+  // driven on constructed gates beside it. A FLOOR, measured on a run.
+  "The DECLARATION a row describes, read from the gate's own SOURCE": 128,
   'CENSUS_REFUSE_WIDE, pinned on its OWN terms (#14695)': 5,
 });
 
@@ -2590,13 +2760,41 @@ function selfTest() {
   //                          every run: an omission the gate stopped declaring
   //                          reds exactly as loudly as one it started.
   //
-  // ⛔ Only DECLARED-NARROWER rows are asked, and that is a definition rather
-  // than an exemption: a SPELLABLE-UNDECLARED row IS the row whose gate
-  // declares nothing for that population, so the comparison there has its
-  // answer built into the verdict. The `spelling` test in the loop is belt to
-  // the braces above, which now REFUSE such a record rather than let it pass
-  // over this pin unjudged (#15270) — reaching it would mean that rule had
-  // been removed. ⛔ When this reds the remedy is to re-measure
+  // ⛔ The FIRST direction is asked of DECLARED-NARROWER rows alone, and that
+  // is a definition rather than an exemption: a SPELLABLE-UNDECLARED row IS the
+  // row whose gate declares nothing for that population, so "does the gate
+  // declare what this row records" has its answer built into the verdict, and
+  // asking it there would red eleven rows for holding their own verdict. The
+  // `spelling` test in the loop is belt to the braces above, which REFUSE a
+  // DECLARED-NARROWER record carrying no spelling rather than let it pass over
+  // this pin unjudged (#15270).
+  //
+  // ⭐ The SECOND direction is asked of EVERY recorded row (#15926), and that
+  // widening is the card. Scoped to one verdict it read "a DECLARED-NARROWER
+  // record must account for its gate's whole array at this root"; asked of
+  // every row it reads "every hint a gate declares at a row's root is
+  // ATTRIBUTED — claimed by some row's spelling, or explicitly disclaimed by
+  // the row that is not claiming it". A `REFUSE-*` row claims nothing, so every
+  // hint its gate declares at its root is one it must DISCLAIM, by name, with
+  // the reason in its `why`.
+  //
+  // Measured at 4cb3b15f4, which is why that widening is not a rewrite of the
+  // map: 34 of the 46 recorded rows sit in a gate that declares NOTHING at
+  // their root and pass vacuously; 11 of the remaining 12 are the
+  // DECLARED-NARROWER rows this pin already held; and the twelfth is
+  // `check-driver-conformance CASE_SETS_DIR packages`, whose `why` has said
+  // since it was written that its sibling constant owns the declaration — a
+  // sentence nothing re-checked until this direction reached it.
+  //
+  // ⛔ That row is NOT excused by a skip, an allowlist, a threshold or a
+  // special case. It DISCLAIMS the hint by name, and the disclaimer is read
+  // back out of the gate's source every run: if `check-driver-conformance`
+  // stops declaring `packages/drivers/**`, or declares a second hint at
+  // `packages`, this row reds until someone attributes it. What the idiom
+  // cannot say — which CONSTANT a declared hint belongs to — the MAP now says,
+  // per row, under a pin.
+  //
+  // ⛔ When this reds the remedy is to re-measure
   // the ROW -- never to extend `omits` until it agrees again, which is the same
   // move as relaxing `holds`, refused above in as many words.
   battery("The DECLARATION a row describes, read from the gate's own SOURCE");
@@ -2610,43 +2808,147 @@ function selfTest() {
   };
   const sameSet = (a, b) => a.length === b.length
     && [...a].sort().join('\n') === [...b].sort().join('\n');
-  t('an `omits` field appears only on a DECLARED-NARROWER record that names a spelling, and is a '
-    + 'non-empty list of SEGMENT ARRAYS — it records what a DECLARATION says, so there is nothing '
-    + "for it to be about on any other row, and a path literal there would enter this file's own "
-    + 'hint set the way a spelling literal would',
-    [...TRIAGE.values()].every((v) => !v.omits
-      || (v.verdict === 'DECLARED-NARROWER' && Boolean(v.spelling)
-        && Array.isArray(v.omits) && v.omits.length > 0
-        && v.omits.every((parts) => Array.isArray(parts) && parts.length > 0
-          && parts.every((p) => typeof p === 'string' && p.length > 0)))));
+  const omitsWellFormed = (v) => !v.omits
+    || (Array.isArray(v.omits) && v.omits.length > 0
+      && (v.verdict !== 'DECLARED-NARROWER' || Boolean(v.spelling))
+      && v.omits.every((parts) => Array.isArray(parts) && parts.length > 0
+        && parts.every((p) => typeof p === 'string' && p.length > 0)));
+  t('an `omits` field is a non-empty list of SEGMENT ARRAYS, and on a DECLARED-NARROWER record it '
+    + 'still requires the spelling that record\'s verdict is defined with — a path literal there '
+    + "would enter this file's own hint set the way a spelling literal would. ⚠️ It is no longer "
+    + 'scoped to that one verdict (#15926): a row that claims NOTHING has the same thing to record '
+    + 'about a hint its gate declares at its own root, and nowhere else to record it',
+    [...TRIAGE.values()].every(omitsWellFormed));
+  t('…and that rule can FAIL, asked of FIXTURE records rather than of the map it judges: an empty '
+    + 'list, a bare path string in place of a segment array, and a DECLARED-NARROWER record '
+    + 'carrying omits with no spelling are each REFUSED',
+    !omitsWellFormed({ verdict: 'REFUSE-UNSPELLABLE', omits: [] })
+      && !omitsWellFormed({ verdict: 'REFUSE-UNSPELLABLE', omits: [['packages', '']] })
+      && !omitsWellFormed({ verdict: 'DECLARED-NARROWER', omits: [['packages', 'drivers', '**']] })
+      && omitsWellFormed({ verdict: 'REFUSE-UNSPELLABLE', omits: [['packages', 'drivers', '**']] }));
+  const REFUSALS = new Set(['REFUSE-WIDE', 'REFUSE-UNSPELLABLE']);
+  const refusedWithSpelling = [...TRIAGE.entries()]
+    .filter(([, v]) => REFUSALS.has(v.verdict) && v.spelling).map(([k]) => k);
+  t('no refusal records a spelling — a refusal\'s whole content is that no honest spelling of the '
+    + 'idiom describes the population, so recording one would be the row contradicting itself, and '
+    + `\`claimedHints\` would then have a claim to read where the verdict says there is none${
+      refusedWithSpelling.length ? ` — SPELLED: ${refusedWithSpelling.join(' · ')}` : ''}`,
+    refusedWithSpelling.length === 0);
   let declPinned = 0;
+  let attributionPinned = 0;
+  let declaringRows = 0;
+  let refusalsAttributing = 0;
   for (const [key, v] of TRIAGE) {
-    if (v.verdict !== 'DECLARED-NARROWER' || !v.spelling) continue;
     const [file, , root] = key.split(' ');
-    const recorded = hintsOf(SPELLINGS.get(v.spelling).segments).map((parts) => parts.join('/'));
     const declared = declaredHintsAt(file, root);
     t(`the gate source the row "${key}" judges is readable from here — a row whose file moved `
       + 'cannot have its declaration read, and reporting that as agreement would be the silence '
       + 'this pin exists to break', declared !== null);
     if (declared === null) continue;
-    t(`the spelling recorded for "${key}" is rooted at that row's own bare root (${root}) — a `
-      + 'spelling paired with the wrong row would otherwise be compared against a declaration it '
-      + 'was never about', recorded.length > 0 && recorded.every((h) => h.split('/')[0] === root));
-    const unspelled = recorded.filter((h) => !declared.includes(h));
-    t(`every hint the row "${key}" records is one its gate DECLARES at ${root}${unspelled.length
-      ? ` — NOT DECLARED: ${unspelled.join(' · ')}. The record claims a declaration the gate does `
-        + 'not make; re-measure the row.' : ''}`, unspelled.length === 0);
-    const unrecorded = declared.filter((h) => !recorded.includes(h));
-    const named = (v.omits ?? []).map((parts) => parts.join('/'));
-    t(`…and every hint that gate declares at ${root} is either recorded by "${v.spelling}" or `
-      + `named in the row's \`omits\`${sameSet(unrecorded, named) ? '' : ` — DRIFT: declared and `
-        + `not recorded [${unrecorded.join(' · ') || 'none'}], named as omitted `
-        + `[${named.join(' · ') || 'none'}]. The gate moved under the record: re-measure BOTH `
-        + 'terms of the row and re-decide it.'}`, sameSet(unrecorded, named));
-    declPinned += 1;
+    const a = declarationAttribution(v, declared);
+    if (declared.length > 0) declaringRows += 1;
+    if (v.verdict === 'DECLARED-NARROWER' && v.spelling) {
+      t(`the spelling recorded for "${key}" is rooted at that row's own bare root (${root}) — a `
+        + 'spelling paired with the wrong row would otherwise be compared against a declaration it '
+        + 'was never about',
+        a.claimed.length > 0 && a.claimed.every((h) => h.split('/')[0] === root));
+      t(`every hint the row "${key}" records is one its gate DECLARES at ${root}${a.undeclared.length
+        ? ` — NOT DECLARED: ${a.undeclared.join(' · ')}. The record claims a declaration the gate `
+          + 'does not make; re-measure the row.' : ''}`, a.undeclared.length === 0);
+      declPinned += 1;
+    } else if (declared.length > 0) {
+      refusalsAttributing += 1;
+    }
+    t(`…and every hint that gate declares at ${root} is ATTRIBUTED by "${key}" — claimed by its `
+      + `own recorded spelling, or named in its \`omits\` as a declaration it is deliberately not `
+      + `claiming${a.held ? '' : ` — UNATTRIBUTED: [${a.unattributed.join(' · ') || 'none'}], named `
+        + `as omitted but NOT declared: [${a.staleOmits.join(' · ') || 'none'}], both claimed and `
+        + `disclaimed: [${a.doubleClaimed.join(' · ') || 'none'}]. Either the gate moved under the `
+        + 'record — re-measure BOTH terms of the row and re-decide it — or the declaration belongs '
+        + "to a SIBLING constant in the same file, in which case say so in this row's `omits` and "
+        + 'record why in its `why`. ⛔ Not an allowlist entry and not a skip: whichever it is, it '
+        + 'is re-read out of the gate source on every run.'}`, a.held);
+    attributionPinned += 1;
   }
   t('the declaration pin judges something — at least one DECLARED-NARROWER record carries a '
     + 'spelling to hold against its gate', declPinned > 0);
+  t(`the attribution pin runs over EVERY recorded row and not only the declaring ones — `
+    + `${attributionPinned} of ${TRIAGE.size}; a pin that skipped the silent rows could not tell `
+    + '"this gate declares nothing here" from "this row was never asked"',
+    attributionPinned === TRIAGE.size);
+  t(`…and it is asked of a non-empty declared set somewhere: ${declaringRows} recorded row(s) sit `
+    + 'in a gate that declares at their own root, so the set difference above is measuring rather '
+    + 'than passing vacuously on every row', declaringRows > 0);
+
+  // ── The pin driven RED then GREEN on a CONSTRUCTED gate (#15926) ──────────
+  //
+  // The live rows above can only ever show this pin in the state the tree is
+  // in, and today that state is GREEN on every one of them. So the RED end is
+  // driven here, on a gate source built for it and read through the idiom's OWN
+  // parser rather than hand-fed a hint array — the same reason the live pin
+  // goes through `auditSource` instead of a roster retyped in this file.
+  //
+  // ⚠️ The fixture hints are JOINED FROM SEGMENTS, never spelled as path
+  // literals, for the reason `SPELLINGS` follows the same rule: a glob literal
+  // in this file would hand a reporting tool a population it does not read, and
+  // the assertion two batteries up refuses it in as many words.
+  //
+  // ⚠️ The declaration NAME is assembled at runtime for the same class of
+  // reason the hints are: spelled out, `const <the rostered name> =` inside this
+  // file IS a declaration to `check:watch-hint-literal`, which reads declaration
+  // sites out of source TEXT — so a fixture written the obvious way hands that
+  // gate a computed declaration in a file that declares nothing. Measured: it
+  // reds `every live declaration is a literal` on this file.
+  const idiomName = ['ROOT', 'DIR', 'WATCH', 'HINTS'].join('_');
+  const fixtureGate = (segments) => {
+    const hint = segments.join('/');
+    const declared = auditSource('scripts/check-fixture-gate.mjs',
+      `const ${idiomName} = ['${hint}'];\n`)
+      .filter((d) => d.ok).flatMap((d) => d.hints).filter((h) => h.split('/')[0] === segments[0]);
+    return { hint, declared };
+  };
+  const sibling = fixtureGate(['packages', 'drivers', '**']);
+  const mine = fixtureGate(['packages', 'spec', 'src', 'data', '**']);
+  t('the constructed gates are read through the idiom\'s own parser — a fixture whose declaration '
+    + 'that parser could not read would make every case below vacuous',
+    sameSet(sibling.declared, [sibling.hint]) && sameSet(mine.declared, [mine.hint]));
+  const refusalBlind = declarationAttribution({ verdict: 'REFUSE-UNSPELLABLE' }, mine.declared);
+  t('RED: a REFUSE record whose gate DECLARES a narrower hint at that row\'s own root, and which '
+    + 'attributes it to nothing, is UNATTRIBUTED — the shape that fell between the verdict-scoped '
+    + 'declaration pin, the reachability-scoped contradiction and the tree-scoped rest, and ran '
+    + 'green indefinitely (#15602 measured it happening)',
+    !refusalBlind.held && sameSet(refusalBlind.unattributed, [mine.hint]));
+  const refusalAttributed = declarationAttribution(
+    { verdict: 'REFUSE-UNSPELLABLE', omits: [['packages', 'spec', 'src', 'data', '**']] },
+    mine.declared);
+  t('GREEN: the same record DISCLAIMING that hint by name holds — the attribution is RECORDED, and '
+    + 'this is the whole difference between attributing and suppressing',
+    refusalAttributed.held);
+  const refusalStale = declarationAttribution(
+    { verdict: 'REFUSE-UNSPELLABLE', omits: [['packages', 'drivers', '**']] }, mine.declared);
+  t('…and the disclaimer is re-measured in BOTH directions: a hint the gate no longer declares reds '
+    + 'exactly as loudly as one it started declaring, so an `omits` cannot rot into an allowlist',
+    !refusalStale.held && sameSet(refusalStale.staleOmits, [sibling.hint])
+      && sameSet(refusalStale.unattributed, [mine.hint]));
+  const doubleClaim = declarationAttribution(
+    { verdict: 'DECLARED-NARROWER', spelling: 'driver package files', omits: [['packages', 'drivers', '**']] },
+    sibling.declared);
+  t('…and a record cannot both CLAIM and DISCLAIM one hint — an attribution that says two things '
+    + 'about the same declaration attributes it to neither',
+    !doubleClaim.held && sameSet(doubleClaim.doubleClaimed, [sibling.hint]));
+  const spellableUndeclared = declarationAttribution(
+    { verdict: 'SPELLABLE-UNDECLARED', spelling: 'driver package files' }, sibling.declared);
+  t('…and a SPELLABLE-UNDECLARED spelling is NOT read as a claim on the array: that verdict says '
+    + 'the gate declares NOTHING for the population, so a gate that STARTS declaring exactly that '
+    + 'spelling reds the row for a re-decision instead of quietly satisfying it',
+    !spellableUndeclared.held && sameSet(spellableUndeclared.unattributed, [sibling.hint]));
+  t(`CONTROL: the live tree today has ${refusalsAttributing} row(s) carrying a verdict other than `
+    + 'DECLARED-NARROWER whose gate declares at their root, so the fixtures above describe a shape '
+    + 'this map really holds rather than one invented for them — and a row that stops disclaiming '
+    + 'reds through the live loop, not through these cases',
+    refusalsAttributing === [...TRIAGE.entries()]
+      .filter(([k, v]) => v.verdict !== 'DECLARED-NARROWER'
+        && (declaredHintsAt(k.split(' ')[0], k.split(' ')[2]) ?? []).length > 0).length);
 
   // Every verdict must be one of the four the docblock defines, and every one
   // must carry its measured reason — a bare verdict is the allowlist row this
@@ -2724,8 +3026,16 @@ function selfTest() {
       + `${spellingRows.length} record(s) carry a spelling and every one of ${usedSpellings.size} `
       + 'distinct spelling(s) is pinned LIVE, PRECISE and COMPLETE against the tracked corpus in '
       + `hintCovers' own terms. ${declPinned} DECLARED-NARROWER record(s) are held SET-EQUAL, in `
-      + "both directions, to their gate's own declared hint array read from its source, with "
-      + 'every deliberate omission named and re-measured. The recogniser is proven to speak and '
+      + "both directions, to their gate's own declared hint array read from its source. "
+      + `All ${attributionPinned} recorded row(s) are then held to ATTRIBUTE every hint their gate `
+      + "declares at their own bare root \u2014 claimed by the row's own recorded spelling, or named "
+      + 'in its `omits` as a declaration it is deliberately not claiming, re-read out of the gate '
+      + `source in both directions on every run \u2014 with ${declaringRows} of them sitting in a gate `
+      + `that declares there at all and ${refusalsAttributing} of those carrying a verdict other `
+      + 'than DECLARED-NARROWER, the class that fell between the verdict-scoped declaration pin, '
+      + 'the reachability-scoped contradiction and the tree-scoped rest until it was asked '
+      + "(#15926); the RED end of it is driven on constructed gates read through the idiom's own "
+      + 'parser. The recogniser is proven to speak and '
       + 'to discriminate (a '
       + 'separator-carrying and a dotted root are both refused as already visible), the '
       + 'constant-name restriction is proven to restrict, and neither the triage keys nor this '
