@@ -94,6 +94,100 @@ describe('resilientFetch', () => {
         expect(fetchImpl).toHaveBeenCalledTimes(2);
     });
 
+    // ── The policy knobs (#18975) ───────────────────────────────────────────
+    // Each one is a key `connector.retryConfig` declares, so each pin asserts a
+    // DELAY SEQUENCE or a CALL COUNT — something that changes when the knob is
+    // ignored. `sleep` is captured rather than stubbed so the delays are read,
+    // not assumed, and `jitter: false` is what makes them exact (the default
+    // +[0,100)ms is unassertable by design).
+
+    it('linear_backoff grows the delay by one base per attempt', async () => {
+        const fetchImpl = scripted([500, 500, 500, 200]);
+        const sleep = vi.fn(noSleep);
+        await resilientFetch('http://x', {}, {
+            fetchImpl, sleep, retries: 4,
+            strategy: 'linear_backoff', backoffBaseMs: 100, jitter: false,
+        });
+        expect(sleep.mock.calls.map((c) => c[0])).toEqual([100, 200, 300]);
+    });
+
+    it('fixed_delay keeps every delay at the base', async () => {
+        const fetchImpl = scripted([500, 500, 200]);
+        const sleep = vi.fn(noSleep);
+        await resilientFetch('http://x', {}, {
+            fetchImpl, sleep, retries: 3,
+            strategy: 'fixed_delay', backoffBaseMs: 250, jitter: false,
+        });
+        expect(sleep.mock.calls.map((c) => c[0])).toEqual([250, 250]);
+    });
+
+    it('no_retry makes the first attempt the only one, whatever `retries` says', async () => {
+        const fetchImpl = scripted([500, 200]);
+        const sleep = vi.fn(noSleep);
+        const res = await resilientFetch('http://x', {}, {
+            fetchImpl, sleep, retries: 5, strategy: 'no_retry',
+        });
+        expect(res.status).toBe(500);
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it('backoffMultiplier drives exponential growth (not a hardcoded 2)', async () => {
+        const fetchImpl = scripted([500, 500, 500, 200]);
+        const sleep = vi.fn(noSleep);
+        await resilientFetch('http://x', {}, {
+            fetchImpl, sleep, retries: 4,
+            backoffBaseMs: 100, backoffMultiplier: 3, jitter: false,
+        });
+        expect(sleep.mock.calls.map((c) => c[0])).toEqual([100, 300, 900]);
+    });
+
+    it('maxDelayMs caps the delay — and caps it AFTER jitter, so it is a real maximum', async () => {
+        const fetchImpl = scripted([500, 500, 500, 200]);
+        const sleep = vi.fn(noSleep);
+        await resilientFetch('http://x', {}, {
+            fetchImpl, sleep, retries: 4,
+            backoffBaseMs: 100, backoffMultiplier: 10, maxDelayMs: 500, jitter: true,
+        });
+        // Jitter is on, so only the ceiling is assertable — which is the point:
+        // every delay must be <= the declared maximum, jitter included.
+        const delays = sleep.mock.calls.map((c) => c[0] as number);
+        expect(delays).toHaveLength(3);
+        for (const d of delays) expect(d).toBeLessThanOrEqual(500);
+        expect(delays[2]).toBe(500);
+    });
+
+    it('jitter: false makes the delay exactly the computed backoff', async () => {
+        const fetchImpl = scripted([500, 200]);
+        const sleep = vi.fn(noSleep);
+        await resilientFetch('http://x', {}, {
+            fetchImpl, sleep, retries: 2, backoffBaseMs: 400, jitter: false,
+        });
+        expect(sleep).toHaveBeenCalledTimes(1);
+        expect(sleep).toHaveBeenCalledWith(400);
+    });
+
+    it('retryOnNetworkError: false surfaces the network error without a second attempt', async () => {
+        const fetchImpl = vi.fn(async () => { throw new Error('ECONNRESET'); });
+        const sleep = vi.fn(noSleep);
+        await expect(
+            resilientFetch('http://x', {}, { fetchImpl, sleep, retries: 3, retryOnNetworkError: false }),
+        ).rejects.toThrow(/ECONNRESET/);
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it('retryableStatus narrows what is retried — a 500 is final when only 429 is listed', async () => {
+        const codes = [429];
+        const fetchImpl = scripted([500, 200]);
+        const res = await resilientFetch('http://x', {}, {
+            fetchImpl, sleep: noSleep, retries: 3,
+            retryableStatus: (s) => codes.includes(s),
+        });
+        expect(res.status).toBe(500);
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
     it('does not retry when the caller aborts', async () => {
         const ac = new AbortController();
         ac.abort();
