@@ -5886,57 +5886,81 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  *
  * ## The census, measured on this tree
  *
- * 3,513 top-level VALUE declarations over the 230 tracked JS/TS files under
- * `scripts/`. 64 identifiers match the predicate; 58 carry at least one string
- * literal; the whole set moves 14 hints, across 6 files:
+ * Re-measured with the `DEFERRED` arm in place, over the objectstack-ai/objectstack
+ * tree at `e6a03e6491`. The METHOD, which this block used to leave implicit: run
+ * `topLevelDecls` over every tracked JS/TS file under `scripts/`, keep the
+ * non-callable declarations, test each name against the predicate, and price
+ * the arm by diffing `extractWatchHints` against a build of this module whose
+ * predicate matches nothing. Attribution is the regex engine's own — leftmost
+ * position first, then alternation order.
  *
- *   scripts/check-doc-authoring.mjs       SKIP_PATHS, SKIP_FILES,
+ * 4,697 top-level VALUE declarations over the 287 tracked JS/TS files under
+ * `scripts/`. 75 identifiers match the predicate; 66 carry at least one string
+ * literal; the whole set moves 24 hints, across 8 files:
+ *
+ *   scripts/check-issue-citations.mjs     DEFERRED_SURFACES                 8
+ *   scripts/check-doc-authoring.mjs       SKIP_DIRS, SKIP_PATHS, SKIP_FILES,
  *                                         PACKAGES_PROSE_EXCLUDED           6
  *   scripts/check-refd-timer-probe.mjs    EXCLUDED_DIRS                     4
- *   scripts/check-corpus-claim-drift.mjs  SKIP_SUBTREES                     1
- *   scripts/check-role-word.mjs           SKIP_SUBTREES                     1
+ *   scripts/pm/measurement-claim-triage.mjs  EXCLUDED, SKIP_DIRS            2
+ *   scripts/check-corpus-claim-drift.mjs  SKIP_DIRS, SKIP_SUBTREES          1
+ *   scripts/check-role-word.mjs           SKIP_DIRS, SKIP_SUBTREES          1
  *   scripts/check-keyed-text-bounds.mjs   SKIP_DIRS                         1
- *   scripts/pm/check-half-states.mjs      H36_SHARED_PREFIX_NOISE           1
+ *   scripts/pm/check-half-states.mjs      H36_SHARED_PATH_NOISE,
+ *                                         H36_SHARED_PREFIX_NOISE           1
  *
  * Each was read against the gate that declares it, and each is an exclusion in
  * that gate's own words: "whole subtrees skipped by path", "generated
  * subtrees, excluded by PATH under ROOTS", "generated from spec/frontmatter —
  * not hand-authored, don't police", "directories `git ls-files` can still name
- * that hold no authored source", and — for `PACKAGES_PROSE_EXCLUDED`, the one
- * that is a bare string rather than a list — the `continue` in the gate's own
- * `descend` that skips it.
+ * that hold no authored source", "deliberately OUT, each with the reading that
+ * put it out", and — for `PACKAGES_PROSE_EXCLUDED`, the one that is a bare
+ * string rather than a list — the `continue` in the gate's own `descend` that
+ * skips it.
  *
- * ## What the 14 cost, which is not 14
+ * ## What the 24 cost, which is not 24
  *
- * EIGHT of them change no derivation at all, because the gate ALSO declares the
- * containing root as an inclusion population and `hintCovers` still reaches the
- * path through that. Measured per hint, probing under each dropped hint against
- * the surviving set: all six of check-doc-authoring's (`.claude/**`, `docs/**`,
- * `content/**` and `packages/**` are its `ROOT_WATCH_HINTS`) and both
- * `content/docs/references` (covered by `content/docs`). That gate's own
- * self-test already said so from the other side — every `SKIP_PATHS` entry must
- * sit UNDER a declared root — so the exclusion hints were pure duplication.
+ * THIRTEEN of them change no derivation at all, because the gate ALSO declares
+ * the containing root as an inclusion population and `hintCovers` still reaches
+ * the path through that. Measured per hint, probing under each dropped hint
+ * against the surviving set: all six of check-doc-authoring's (`.claude/**`,
+ * `docs/**`, `content/**` and `packages/**` are its `ROOT_WATCH_HINTS`), both
+ * `content/docs/references` (covered by `content/docs`), and the five test
+ * globs of the deferred table (covered by check-issue-citations' own
+ * `packages/**`). That gate's own self-test already said so from the other
+ * side — every `SKIP_PATHS` entry must sit UNDER a declared root — so those
+ * exclusion hints were pure duplication.
  *
- * SIX really leave a derivation, and every one of them is a lead that was
+ * ELEVEN really leave a derivation, and every one of them is a lead that was
  * false: `node_modules`, `dist`, `coverage` and `.turbo` off
- * check-refd-timer-probe's skip set, and `.changeset` twice — off
+ * check-refd-timer-probe's skip set; `.changeset` twice — off
  * check-keyed-text-bounds' `SKIP_DIRS` and off the noise floor the card was
- * filed on. The changeset pair is what a dev actually saw: a card that has not
- * written its changeset yet is told which families it will owe once it does,
- * and that projection carried FOUR fabricated rows, 16 -> 12 — including
+ * filed on; the two gate paths measurement-claim-triage declares it skips; and
+ * `scripts/**`, `docs/adr/**` and `.changeset/**` off `DEFERRED_SURFACES`,
+ * which is what the `DEFERRED` arm retired. The changeset pair is what a dev
+ * actually saw when #15753 was filed: a card that has not written its
+ * changeset yet is told which families it will owe once it does, and that
+ * projection carried FOUR fabricated rows, 16 -> 12 — including
  * `check-half-states.mjs --format=markdown --provenance="$PROVENANCE"`, the
  * networked half-state-patrol sweep, advertised to every card in the tree as a
- * gate its changeset would trigger.
+ * gate its changeset would trigger. The deferred table is that same reading
+ * one gate over, and it is why this arm exists: `surfaceFor` opens by
+ * returning `null` for every deferred glob, so `check:issue-citations` was
+ * offered to a changeset path as a gate it triggers while the gate looks at
+ * nothing there.
  *
  * ## The predicate: what the census kept, and what it retired
  *
  * `DENY`/`DENIED` was measured and REMOVED. It matched exactly one declaration
  * on this tree and that one is a false positive — an HTTP fixture, not an
  * exclusion list — and "deny" in this tree names AUTHORIZATION vocabulary
- * (`DENY_CODE`), never a path skip list. Matches for the surviving
- * alternatives, first-match attribution: SKIP 47, EXCLUDED 9, NOISE 2,
- * SKIPPED 2, EXCLUSION 2, EXCLUSIONS 1, EXCLUDES 1, and EXCLUDE / IGNORE /
- * IGNORED 0. The three zero-scoring arms are kept deliberately and the reason is
+ * (`DENY_CODE`), never a path skip list. `DEFERRED` was measured and ADDED: it
+ * matches two declarations on this tree, `DEFERRED_SURFACES` and
+ * `DEFERRED_GLOBS` in `check-issue-citations.mjs`, and both are that gate's
+ * own exclusion table. Matches for the surviving alternatives, first-match
+ * attribution: SKIP 54, EXCLUDED 10, EXCLUSION 4, NOISE 2, SKIPPED 2,
+ * DEFERRED 2, EXCLUSIONS 1, and EXCLUDE / EXCLUDES / IGNORE / IGNORED 0. The
+ * four zero-scoring arms are kept deliberately and the reason is
  * the direction this predicate fails in: over-matching DROPS a hint (a missing
  * lead — one card, one CI round), while under-matching KEEPS a wrong one (a
  * fabricated lead pasted into every dispatch prompt whose surface brushes it).
@@ -5959,14 +5983,16 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  * is not reached — `check-test-completeness.mjs` has the one instance on this
  * tree, and it costs nothing today because every literal in it is a bare
  * directory word the admission rule already refuses. camelCase spellings are
- * not reached either: the anchor is the SCREAMING_SNAKE segment, and the four
- * camelCase near-misses on this tree (`scripts/docs-audit/affected-docs.mjs`)
- * are counters and note strings, not populations. Both are the direction that
+ * not reached either: the anchor is the SCREAMING_SNAKE segment, and the seven
+ * camelCase near-misses on this tree (five in
+ * `scripts/docs-audit/affected-docs.mjs`, one in
+ * `scripts/check-type-check-coverage.mjs`, one here) are counters, note strings
+ * and memo caches, not populations. Both are the direction that
  * drops LESS, which is the direction a widening of this rule may not silently
  * take.
  */
 const EXCLUSION_DECL_NAME =
-  /(?:^|_)(?:NOISE|SKIP|SKIPPED|EXCLUDE|EXCLUDED|EXCLUDES|EXCLUSION|EXCLUSIONS|IGNORE|IGNORED)(?:_|$)/;
+  /(?:^|_)(?:NOISE|SKIP|SKIPPED|DEFERRED|EXCLUDE|EXCLUDED|EXCLUDES|EXCLUSION|EXCLUSIONS|IGNORE|IGNORED)(?:_|$)/;
 
 /** `topLevelDecls` classifies self-tests for its OTHER caller; this one has no stake in it. */
 const NO_SELF_TEST_STARTS = new Set();
@@ -17145,7 +17171,7 @@ function selfTest() {
   t('and a declaration AFTER it is unaffected — the span closes where the statement does', multilineHints.includes('packages/core/src'));
   // The named spellings, one case each, so a narrowing of the predicate is
   // visible here rather than only in the live census.
-  for (const word of ['SKIP', 'EXCLUDE', 'EXCLUDED', 'EXCLUSIONS', 'IGNORE']) {
+  for (const word of ['SKIP', 'EXCLUDE', 'EXCLUDED', 'EXCLUSIONS', 'IGNORE', 'DEFERRED']) {
     const named = `const ${word}_PATHS = ['packages/skipped/src'];`;
     t(`\`${word}\` names an exclusion too — the predicate is the convention, not one constant`, !extractWatchHints(named).includes('packages/skipped/src'));
   }
@@ -23899,30 +23925,14 @@ function selfTest() {
   // filter is `packages/**` and already covered them; it gains the right
   // PROVENANCE, and it is what this case exists to keep honest.
   const CLASS_SEVENTH = 'check:dual-build-cjs-loads';
-  // ⭐ THE EIGHTH, and it is the same question answered a second time by a gate
-  // that did not exist when the seventh was recorded. `check:api-surface-declarations`
-  // (#16045) walks the spec `exports` map to the packed `.d.ts` of every entry
-  // point and snapshots the declaration text it finds there, so that export
-  // surface is its subject in exactly the sense the six and the seventh are. It
-  // is declared here for one reason: the edge ALREADY gave it a population on
-  // the run that landed it, before any list named it — which is the ruling's
-  // question ("does the next gate of this class get covered automatically")
-  // answered live for a second time, by a family nobody wired in.
-  const CLASS_EIGHTH = 'check:api-surface-declarations';
   t(
     `and every family the edge gives a population to really re-derives from an export surface` +
       ` (${[...new Set(manifestInherited.map(([c]) => c))].join(' · ') || 'none'})`,
-    manifestInherited.every(
-      ([c]) => EXPORT_SURFACE_SIX.includes(c) || c === CLASS_SEVENTH || c === CLASS_EIGHTH,
-    ),
+    manifestInherited.every(([c]) => EXPORT_SURFACE_SIX.includes(c) || c === CLASS_SEVENTH),
   );
   t(
     `⭐ and a SEVENTH live gate the card never named is covered by the same edge (${CLASS_SEVENTH})`,
     manifestInherited.some(([c]) => c === CLASS_SEVENTH),
-  );
-  t(
-    `⭐ …and an EIGHTH, added after that reading was taken (${CLASS_EIGHTH})`,
-    manifestInherited.some(([c]) => c === CLASS_EIGHTH),
   );
 
   // Additive BY CONSTRUCTION, the claim the wiring comment makes: the manifest

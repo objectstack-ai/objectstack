@@ -303,6 +303,92 @@ export const SysUser = ObjectSchema.create({
       refreshAfter: true,
       confirmText: 'Start an impersonation session for this user? Use only for legitimate support cases — actions will be logged.',
     },
+    {
+      // #16678 Phase 2 — set (or re-point) a user's manager. The ruling
+      // (decision batch #127 item 1, maintainer 2026-09-13) is verbatim:
+      // 「同意 经理 = 管理员在用户上显式设置的 manager_id;部门负责人 = 单元
+      // 上的 manager_user_id,两者独立。」 — so this writes `sys_user.manager_id`
+      // ONLY, and derives nothing from (and nothing for)
+      // `sys_business_unit.manager_user_id`, the Business Unit Head.
+      //
+      // ⛔ NOT a picker that writes `manager_id` through the generic data API.
+      // `sys_user` is `managedBy: 'better-auth'` and the ADR-0092 D2
+      // managed-update whitelist is `{name, image, locale}`, so the identity
+      // write guard refuses that write — correctly — and the refusal would
+      // read as a Console bug. The endpoint below reaches the column by SYSTEM
+      // CONTEXT instead, which is why the field keeps `readonly: true` and no
+      // Tier-1 list moves (`plugin-auth/src/admin-set-user-manager.ts`).
+      //
+      // Every refusal — self-assignment, cycle, depth, cross-organization and
+      // directory-owned identity — is enforced AT THE WRITE and surfaces from
+      // there. ⛔ No second copy of any of them is declared here: the
+      // endpoint's `applyUserManagerLink` is the ONE derivation (the bulk
+      // importer already routes onto it rather than re-deriving), and a
+      // client-side duplicate is the drift, not the safety net.
+      //
+      // ⛔ No `requiresFeature: 'admin'`, deliberately — the ONE key where
+      // this action departs from its `unlock_user` / `set_user_password`
+      // precedent, and the reason is the gate's own: the block header above
+      // gates those on `admin` because they hit endpoints "only wired when
+      // `auth.plugins.admin` is enabled", i.e. to avoid rendering a button
+      // that 404s. This route is not one of them — it is an ObjectStack mount
+      // registered unconditionally beside `unlock-user` (`auth-plugin.ts`)
+      // and authorized by the ADR-0068 platform-admin gate
+      // (`judgePlatformAdmin`), never by the better-auth admin plugin. So
+      // `features.admin == true` would hide a working affordance on every host
+      // that has not opted into that plugin — precisely the population #16678
+      // measured as having no write surface for this column at all.
+      name: 'set_user_manager',
+      label: 'Set Manager',
+      icon: 'network',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/admin/set-user-manager',
+      recordIdParam: 'userId',
+      successMessage: 'Manager updated',
+      refreshAfter: true,
+      // Hidden for a directory-managed identity, whose manager the IdP owns:
+      // the endpoint's refusal 5 answers 403 / `idp_provisioned`, so the
+      // button would be an affordance the server side refuses by design.
+      // This carries the SAME `record.source` term the three self-service
+      // identity actions below carry — and only that term: this is an admin
+      // action on someone else's row, so their `record.id == ctx.user.id`
+      // half is deliberately NOT copied (it would hide the button from every
+      // admin). `has()` per operand for the sparse action face (#8990) — the
+      // rationale is on the self-service block below.
+      visible: 'has(record.source) && record.source != "idp_provisioned"',
+      // The action collects a param, so its explanatory line rides
+      // `description` and ⛔ never `confirmText` — pairing the two shows two
+      // dialogs for one decision (#7278/#7309).
+      description: "Set this user's manager. The reporting chain drives approval routing and the own_and_reports record scope.",
+      params: [
+        {
+          // INLINE, not field-backed. A field-backed `{ field: 'manager_id' }`
+          // param inherits the referenced field's metadata, and that field is
+          // `readonly: true` (ADR-0092 D4 — it must stay non-editable in the
+          // standard edit form), so inheriting it here is a picker that may
+          // render read-only. `name` is the request-body key, and it is the
+          // camelCase spelling the endpoint reads first (`readId(body,
+          // 'managerId', 'manager_id')`).
+          name: 'managerId',
+          label: 'Manager',
+          type: 'lookup',
+          reference: 'sys_user',
+          // Required, because the endpoint refuses an ABSENT or empty key by
+          // design — "managerId is required — send null to clear the link,
+          // never omit the key" — so a dialog that could submit nothing would
+          // turn a normal click into a 400 about a key the user never saw.
+          // Required means a value is collected before anything is POSTed.
+          // ⚠️ Clearing the link (`managerId: null`) is a real endpoint
+          // capability that this action therefore does not reach; it is
+          // recorded in the PR's acceptance notes rather than half-declared
+          // here.
+          required: true,
+          helpText: 'The user this person reports to. The server refuses a manager outside their organization, a self-assignment, and a link that would close or over-deepen the reporting chain.',
+        },
+      ],
+    },
 
     // ── Self-service actions (the row owner only) ─────────────────────
     //
