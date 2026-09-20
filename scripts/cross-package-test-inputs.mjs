@@ -1393,6 +1393,23 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // with ERR_MODULE_NOT_FOUND), which is exactly the trigger radius this
       // declaration exists to keep honest.
       'scripts/invoked-as.mjs',
+      // The git-environment strip, IMPORTED by src/template-consistency.test.ts.
+      // That file's skills-catalog block asks git two questions whose answers ARE
+      // its verdict — `ls-files '*SKILL.md'` and a `git grep` over the
+      // customer-facing surfaces — and both run against the REAL checkout, so a
+      // `GIT_DIR` or `GIT_INDEX_FILE` inherited from a hook would make them answer
+      // for a DIFFERENT repository while `cwd` still reads as this one. The test
+      // used to spell a hand-maintained ten-name allowlist inline; `gitFreeEnv()`
+      // replaces it, which is the #16644 convergence onto one spelling.
+      //
+      // FORCED rather than chosen, and the same shape as the `.d.mts` pair above:
+      // the import is a relative ES-module specifier vitest RESOLVES AND LOADS at
+      // run time, so the module is a live input to this package's verdict, and an
+      // undeclared escaping import is a red gate by design. Measured on the
+      // conversion commit before this line existed — the gate printed
+      // `scripts/git-env.mjs   (named in packages/create-objectstack/src/template-consistency.test.ts)`
+      // and exited 1.
+      'scripts/git-env.mjs',
       '.github/workflows/scaffold-e2e.yml',
       'packages/cli/src/commands/serve.ts',
       'scripts/gen-sdui-manifest.sh',
