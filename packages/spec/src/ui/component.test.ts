@@ -279,18 +279,19 @@ describe('PageAccordionProps variant (#6776)', () => {
 // sweep once read as declared-but-unenforced. It has a live cross-repo consumer:
 // objectui's `PageAccordionRenderer` renders `{item.icon && <LazyIcon
 // name={item.icon} …/>}` inside the `AccordionTrigger`
-// (`packages/components/src/renderers/layout/containers.tsx:919-925`), and the
+// (`packages/components/src/renderers/layout/containers.tsx:1069-1075`), and the
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
-// the Studio block designer at `:966` (the `items` input, documented as
+// the Studio block designer at `:1116` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `53ded82bf`. Re-derived at that pin
-// 2026-09-08: `containers.tsx` is byte-identical to the one at `a472b0716`
-// (and, through it, to `00d3f09c5` — the last hop on which either anchor
-// moved, both by exactly one line, `918-924` to `919-925` and `965` to `966`),
-// so NO anchor moved here — the icon block still spans `919-925` and the
-// registration input still lands on `:966`. Both were re-READ at the new pin
-// rather than inferred from that identity, because identity preserves a wrong
-// anchor as faithfully as a right one (#10274).
+// builds against — `.objectui-sha` = `87af769e9`. Re-derived at that pin
+// 2026-09-20: `containers.tsx` is NO LONGER byte-identical to the one at
+// `53ded82bf` (300 insertions, 100 deletions), so both anchors were re-READ
+// rather than carried — the icon block MOVED `919-925` to `1069-1075` with its
+// seven lines byte-identical, and the registration input MOVED `966` to `1116`
+// with its LINE rewritten (it now declares `of: 'object'` and carries a longer
+// description, and no longer carries a `label`), while the member list this
+// pin cites is unchanged. Identity preserves a wrong
+// anchor as faithfully as a right one, which is why neither was carried (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving that read point from scratch
 // after the sweep proposed retiring the key. This block plus the `.describe()`
@@ -369,17 +370,18 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same bare declaration a liveness sweep reads as declared-but-unenforced.
 // objectui's `PageTabsRenderer` renders `{item.icon && <LazyIcon
 // name={item.icon} …/>}` inside the `TabsTrigger`
-// (`packages/components/src/renderers/layout/containers.tsx:730-736`), and the
+// (`packages/components/src/renderers/layout/containers.tsx:853-859`), and the
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
-// Studio block designer at `:789` (the `items` input, documented as
+// Studio block designer at `:912` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `53ded82bf`. Re-derived
-// at that pin 2026-09-08: `containers.tsx` is byte-identical to the one at
-// `a472b0716` (and, through it, to `00d3f09c5` — the last hop on which either
-// anchor moved, both by exactly one line, `729-735` to `730-736` and `788` to
-// `789`), so NO anchor moved here — the icon block still spans `730-736` and
-// the registration input still lands on `:789`. Both were re-READ at the new
-// pin, never inferred (#10274).
+// the pin this repo builds against — `.objectui-sha` = `87af769e9`. Re-derived
+// at that pin 2026-09-20: `containers.tsx` is NO LONGER byte-identical to the
+// one at `53ded82bf` (300 insertions, 100 deletions), so both anchors were
+// re-READ rather than carried — the icon block MOVED `730-736` to `853-859`
+// with its seven lines byte-identical, and the registration input MOVED `789`
+// to `912` with its LINE rewritten (it now declares `of: 'object'` and carries
+// a longer description, and no longer carries a `label`), while the member list
+// this pin cites is unchanged. Never inferred (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving the accordion's read point
 // after the sweep proposed retiring it. This block plus the `.describe()` it
@@ -3357,13 +3359,17 @@ describe('#7751 — object-* block props schemas', () => {
 // #16503 — the spec half of objectui#8172 (decision batch #68, 2026-09-07,
 // option A: the contract declares the capability that already ships, is
 // documented and is in use). Measured at the objectui pin this repo builds
-// against (`.objectui-sha` = `53ded82bf`; all four anchors re-READ at that pin
-// 2026-09-08 — every `plugin-kanban` file below is byte-identical to the one at
-// `a472b0716`, and none moved): `plugin-kanban/src/ObjectKanban.tsx:264`
-// queries `$top: schema.limit ?? DEFAULT_KANBAN_LIMIT` (100, `:71`),
-// `plugin-kanban/src/index.tsx:395-398` maps `limit: 'limit'` in
-// `OBJECT_KANBAN_DATA_SOURCE`, `plugin-kanban/src/types.ts:134` declares
-// `KanbanSchema.limit?: number`, and `content/docs/plugins/plugin-kanban.mdx`
+// against (`.objectui-sha` = `87af769e9`; all four anchors re-READ at that pin
+// 2026-09-20 — this hop moved every one of them and renamed one face outright,
+// so none is carried): `plugin-kanban/src/ObjectKanban.tsx:676`
+// queries `$top: resolveRowLimit(schema.limit, DEFAULT_KANBAN_LIMIT)` (100,
+// `:84`; the bare `??` became `resolveRowLimit` in objectui#9925, which drops
+// and reports a cap the contract refuses),
+// `plugin-kanban/src/index.tsx:447-450` maps `limit: 'limit'` in
+// `OBJECT_KANBAN_DATA_SOURCE`, ⚠️ `KanbanSchema` is RETIRED at this pin and
+// `plugin-kanban/src/types.ts` declares the member no more — the published
+// twin is `ObjectKanbanSchema`, declaring `limit?: number` at
+// `packages/types/src/objectql.ts:3735` — and `content/docs/plugins/plugin-kanban.mdx`
 // teaches `limit: 250` with a Properties row. The strict map refused the key by
 // name — the same `unrecognized_keys` verdict as the `bogusProp` control — so an
 // author following the published docs wrote a node the save gate rejected.
@@ -3424,12 +3430,16 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // on the React-host `kanban-ui` block). Unlike `limit` above — a key four
 // objectui faces already implemented, so the spec was the half that was wrong
 // — `quickAdd` was FORWARDED and never read: at the pin this repo builds
-// against (`.objectui-sha` = `53ded82bf`) `ObjectKanban.tsx:931` spreads the
+// against (`.objectui-sha` = `87af769e9`; re-READ there 2026-09-20, every
+// anchor MOVED with its cited text byte-identical) `ObjectKanban.tsx:1563`
+// spreads the
 // authored bag into `KanbanRenderer` and `KanbanImpl` gates the affordance on
-// `quickAdd && onQuickAdd` (`:355`, `:368`), while `onQuickAdd` is a
+// `quickAdd && onQuickAdd` (`KanbanImpl.tsx:621`, `:634` — the file is spelled
+// here because those two ranges are NOT in `ObjectKanban.tsx`), while
+// `onQuickAdd` is a
 // host-supplied FUNCTION no producer puts on an `object-kanban` node
-// (`ObjectKanban.tsx` names neither half: 0 each, against 6 for the sibling
-// `onCardClick` in the same file).
+// (`ObjectKanban.tsx` names neither half: 0 each re-counted at this pin,
+// against 11 for the sibling `onCardClick` in the same file).
 describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
   const kanban = ComponentPropsMap['object-kanban'];
 
@@ -3486,15 +3496,18 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // #9881 and #9972 recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `53ded82bf`, re-derived there 2026-09-08. Both files in
-// this chain, `resolve-icon.ts` and `button.tsx`, are byte-identical to the
-// ones at `a472b0716` and, through it, to `00d3f09c5`, so no anchor moved;
-// every one below was still re-READ at the new pin rather than inferred from
-// that identity (#10274). The hop
+// `.objectui-sha` = `87af769e9`, re-derived there 2026-09-20. Both files in
+// this chain moved on this hop — `resolve-icon.ts` +203/-7 and `button.tsx`
+// +6/-11 against `53ded82bf` — so no anchor below is carried and every one
+// was re-READ (#10274). ⚠️ `resolveIcon` itself was rewritten: its tail no
+// longer indexes `lucide-react`'s `icons` record, it asks `recordIconName`
+// for the kebab-case name and hands the pair to `lazyIconComponent`, so the
+// glyph arrives lazily. What an author may write did not change with it. The
+// earlier hop
 // onto `00d3f09c5` was the one that changed this record's SUBSTANCE and not
 // merely its line numbers: `resolve-icon.ts` was restructured (110
 // insertions), so `resolveIcon` no longer PascalCases and maps inline — it
-// delegates to the `describeIconLookup` seam (`:117-120`), and the tokeniser
+// delegates to the `describeIconLookup` seam (now `:302-305`), and the tokeniser
 // splits on hyphen, underscore AND whitespace (`/[-_\s]+/`), where this record
 // used to say "splits on `-` only". That sentence was true when written and
 // was false by then, which is exactly why a citation refresh re-READS instead
@@ -3516,11 +3529,13 @@ describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
   it('accepts an icon on a button — the value objectui resolves through the lucide `icons` map', () => {
     // objectui `packages/components/src/renderers/form/button.tsx:43` hands the
     // name to the shared `resolveIcon`
-    // (`packages/components/src/renderers/action/resolve-icon.ts:129-132`),
-    // which delegates to `describeIconLookup` (`:117-120`): that PascalCases
-    // through `toPascalCase` (`:100-105`, splitting on hyphen, underscore or
-    // whitespace) and applies the one-entry rename map (`:90-92`) before the
-    // lookup in `icons` from `lucide-react`; `button.tsx:72` / `:74`
+    // (`packages/components/src/renderers/action/resolve-icon.ts:322-328`),
+    // which delegates to `describeIconLookup` (`:302-305`): that PascalCases
+    // through `toPascalCase` (`:153-158`, splitting on hyphen, underscore or
+    // whitespace) and applies the one-entry rename map (`:143-145`) before the
+    // lookup, which at this pin runs through `recordIconName` +
+    // `lazyIconComponent` rather than indexing `icons` from `lucide-react`
+    // directly; `button.tsx:72` / `:74`
     // draw it either side of the label per `iconPosition`.
     const result = button.safeParse({ label: 'Save', icon: 'arrow-right' });
     expect(result.success).toBe(true);
