@@ -67,9 +67,6 @@ function makeEngine(rows: Array<Record<string, unknown>> = []) {
         async count(_object: string, _options?: Record<string, unknown>) {
             return rows.length;
         },
-        async update(_object: string, _data: Record<string, unknown>, _options?: Record<string, unknown>) {
-            return { ok: true };
-        },
         async delete(object: string, options?: Record<string, unknown>) {
             assertEngineDeleteDispatch(options);
             return { ok: true, object };

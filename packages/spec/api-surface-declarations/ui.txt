@@ -151,8 +151,10 @@ interface ActionEngineFacade {
      * ## What changed, and why it is a WITHDRAWAL rather than a narrowing
      *
      * Until #15124 this slot took a bare `FilterCondition` — the `where`
-     * half alone — and the runtime wrapped it. That parameter shape differed
-     * from the engine's for no reason a caller could see, and the cost was
+     * half alone — and the runtime's `find` arm wrapped it
+     * (`packages/runtime/src/action-execution.ts`, `:1183` on `369da918`; that
+     * wrap is gone as of this card). That parameter shape differed from the
+     * engine's for no reason a caller could see, and the cost was
      * silent: an author who wrote the engine's own envelope got
      * `{ where: { where: … } }`, which matches no row (no object has a field
      * named `where`) and resolves to `[]` with no error. A handler that made
