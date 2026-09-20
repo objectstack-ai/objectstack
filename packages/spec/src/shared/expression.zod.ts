@@ -428,14 +428,18 @@ export type PredicateInput = z.input<typeof PredicateInputSchema>;
  * `expression`, {@link cel}, {@link tmpl} and {@link cron} each assign a
  * `string` to `source` unconditionally — read their four bodies — so the wider
  * `Expression` return type they used to carry was never a statement about what
- * they PRODUCE. It was slop, and the evaluated-slot narrowing of #15811 is what
- * made it cost something: an evaluated slot requires `source`, `Expression`
- * does not carry it, and so ``visibleWhen: P`…` `` stopped type-checking at the
- * one spelling this file's own docblock tells authors to use.
+ * they PRODUCE: a helper that over-declares its output is a defect at the
+ * PRODUCER (Prime Directive #12), not a harmless looseness. It was slop, and
+ * the evaluated-slot narrowing of #15811 is what made it cost something: an
+ * evaluated slot requires `source`, `Expression` does not carry it, and so
+ * ``visibleWhen: P`…` `` and `FlowEdgeSchema.condition` stopped type-checking
+ * (TS2322) at the one spelling this file's own docblock tells authors to use —
+ * against a value that in fact satisfies the schema at runtime.
  *
- * `EvaluatedExpression` is assignable to `Expression`, so every
- * persistence-contract slot still accepts these values unchanged; what the
- * narrower type adds is that an evaluated slot accepts them too.
+ * `EvaluatedExpression` is assignable to `Expression`, so narrowing the return
+ * type removes nothing from a caller: every persistence-contract slot still
+ * accepts these values unchanged; what the narrower type adds is that an
+ * evaluated slot accepts them too.
  *
  * ⛔ Never widen these back to buy a call site. A caller that genuinely has no
  * `source` is constructing an `ast`-only envelope — it does not come from here,
