@@ -23,9 +23,13 @@
  *   evidence), the registry agrees (the next reader's evidence), and the
  *   durable state file names the package (the evidence that a restart does not
  *   silently re-enable it — the whole reason `PATCH /:id/disable` writes it).
- * - `true` and ABSENT ⇒ installed enabled. Without these the `false` case is
- *   satisfiable by a door that disables everything, and the declared default is
- *   `true`.
+ * - `true` and ABSENT ⇒ installed enabled ON A FRESH ID. Without these the
+ *   `false` case is satisfiable by a door that disables everything, and a fresh
+ *   id lands at the declared default. ⚠️ On an EXISTING row the two part
+ *   company — [#18877] ruled the contract 「缺省 = 保持，有旗 = 设置」, so
+ *   ABSENT preserves that row's state and only a PRESENT flag sets it. The
+ *   cases in this first block all install fresh ids, which is why they read the
+ *   same under both rules.
  * - The BARE body form carries no options, so an `enableOnInstall` spelled
  *   there is NOT honoured — `ManifestSchema`'s strict close refuses that key by
  *   name, and honouring what no schema declares is the same defect pointing the
@@ -183,17 +187,27 @@ describe('#18058 — the install door honours `enableOnInstall`', () => {
  *                                                           and the state file STILL lists it
  * ```
  *
- * Nothing is red at that moment. The loss surfaces one restart later:
- * `SchemaRegistry.installPackage` reads `initialDisabledPackageIds`, finds the
- * id, and re-installs the package DISABLED — a door that answered correctly on
- * the wire and wrongly on disk. `PATCH /packages/:id/enable` has always made
- * exactly the `false` call these cases demand; the install door did not.
+ * Nothing is red at that moment. The loss surfaces one restart later: the door
+ * answered correctly on the wire and wrongly on disk. `PATCH /packages/:id/enable`
+ * has always made exactly the `false` call these cases demand; the install door
+ * did not. The remedy — the disk follows THE ROW THIS DOOR RETURNED — is
+ * unchanged and still pinned here.
  *
- * ⚠️ The fix is deliberately UNCONDITIONAL rather than scoped to the overwrite
- * path: `DELETE /packages/:id` does not clear the durable disable either, so a
- * disable → uninstall → re-install lands on a FRESH registry id whose durable
- * record still says disabled. Persisting the state the door actually returned,
- * every time, is one call that cannot be out of step with the row.
+ * ⭐ [#18877] WHAT the row says on the flag-absent arm has been RE-RULED.
+ * Maintainer batch #157 item 5 letter C makes the install contract
+ * 「缺省 = 保持，有旗 = 设置」, and item 4 re-rules this block's first case by
+ * name: 「flag-absent re-install CLEARS the durable disable」 becomes
+ * 「PRESERVES」 it. `SchemaRegistry.installPackage` now carries an existing
+ * row's `enabled` / `status` / `statusChangedAt` over instead of recomputing
+ * them from the boot seed, so an install nobody asked to move the lifecycle
+ * state does not move it — in the registry or on disk. The `enableOnInstall:
+ * true` case keeps clearing the disable, now because the DOOR calls
+ * `enablePackage` for it rather than because a re-install restamped the row.
+ *
+ * ⚠️ The durable write stays UNCONDITIONAL rather than scoped to the overwrite
+ * path. It is one call either way, and it is what keeps the row and the disk
+ * from ever disagreeing — including on the preserve arm, where it re-writes the
+ * value the operator's last explicit action left there.
  */
 describe('#18058 — a re-install persists the state it RETURNS, not just a disable', () => {
     let registry: SchemaRegistry;
@@ -216,21 +230,33 @@ describe('#18058 — a re-install persists the state it RETURNS, not just a disa
         expect(persistedDisabled().has(id), 'precondition: the disable really reached disk').toBe(true);
     };
 
-    it('re-installing with the flag ABSENT clears the durable disable — the declared default is `true`', async () => {
+    it('[#18877 re-ruled] re-installing with the flag ABSENT PRESERVES the disable — 「缺省 = 保持」', async () => {
+        // ⚠️ This case asserted the OPPOSITE until #18877: 「re-installing with
+        // the flag ABSENT clears the durable disable — the declared default is
+        // `true`」 (row / registry / disk all `true`). Ruling batch #157 item 5
+        // letter C, item 4, re-rules it BY NAME. It is flipped rather than
+        // deleted on purpose: the arm is still the one this door has to get
+        // right, and a pin that no longer asserts anything is worse than a red
+        // one.
         const id = 'com.acme.reinstall.absent';
         await installDisabled(id, 'reinstallabsent');
 
         const again = await install(dispatcher, { manifest: manifest(id, 'reinstallabsent'), overwrite: true });
 
-        expect(again.response?.status).toBe(201);
-        expect(again.response?.body?.data?.enabled, 'the row this door RETURNED').toBe(true);
-        expect(registry.getPackage(id)?.enabled, 'the registry the next read serves from').toBe(true);
-        // ⭐ The line this F item exists for: without it the next boot reads the
-        // stale id out of `initialDisabledPackageIds` and installs it DISABLED.
+        expect(again.response?.status, 'the install must still SUCCEED — preserving is not refusing').toBe(201);
+        expect(again.response?.body?.data?.enabled, 'the row this door RETURNED').toBe(false);
+        expect(registry.getPackage(id)?.enabled, 'the registry the next read serves from').toBe(false);
+        // ⭐ The line this F item exists for, now pointing the other way: an
+        // install that asked for nothing must leave the operator's last
+        // explicit decision standing, on disk as well as in memory.
         expect(
             persistedDisabled().has(id),
-            'the durable state — a re-install that answered `enabled` must not leave `disabled` on disk',
-        ).toBe(false);
+            'the durable state — a re-install that asked for nothing must not clear a disable',
+        ).toBe(true);
+        expect(
+            again.response?.body?.data?.status,
+            '`status` is carried over with `enabled`, not recomputed',
+        ).toBe('disabled');
     });
 
     it('re-installing with `enableOnInstall: true` clears the durable disable', async () => {
@@ -249,12 +275,16 @@ describe('#18058 — a re-install persists the state it RETURNS, not just a disa
         expect(persistedDisabled().has(id)).toBe(false);
     });
 
-    it('a BARE re-install clears it too — that form cannot ask for `false`, so it installs enabled', async () => {
+    it('[#18877 re-ruled] a BARE re-install PRESERVES it too — that form cannot ask for anything, so it asks for nothing', async () => {
+        // ⚠️ Asserted `enabled: true` / disk cleared until #18877, on the
+        // reasoning that a form which cannot spell `false` installs at the
+        // declared default. Under 「缺省 = 保持」 that same fact reads the other
+        // way: a body that cannot ask for a lifecycle change is 「缺省」, and
+        // 「缺省」 preserves. Ruling batch #157 item 5 letter C, items 1 and 2.
         const id = 'com.acme.reinstall.bare';
         await installDisabled(id, 'reinstallbare');
 
-        // No wrapper, so `enableOnInstall` is not a declared key here at all and
-        // the door installs at the default. The durable record must follow.
+        // No wrapper, so `enableOnInstall` is not a declared key here at all.
         const again = await install(dispatcher, manifest(id, 'reinstallbare'));
 
         expect(again.response?.status, 'the bare form reaches overwrite through the query string alone').toBe(409);
@@ -263,8 +293,8 @@ describe('#18058 — a re-install persists the state it RETURNS, not just a disa
             '', 'POST', manifest(id, 'reinstallbare'), { overwrite: 'true' }, PKG_ADMIN(),
         );
         expect(forced.response?.status).toBe(201);
-        expect(forced.response?.body?.data?.enabled).toBe(true);
-        expect(persistedDisabled().has(id)).toBe(false);
+        expect(forced.response?.body?.data?.enabled).toBe(false);
+        expect(persistedDisabled().has(id)).toBe(true);
     });
 
     it('⛔ the disable direction is UNCHANGED — a re-install asking for `false` still persists it', async () => {
@@ -318,15 +348,21 @@ describe('#18058 — a re-install persists the state it RETURNS, not just a disa
  * SDK's default `client.packages.install(manifest)` and from objectui's
  * `{ manifest }` post.
  *
- * ## The remedy, and the one that was NOT taken
+ * ## The remedy
  *
  * The disk follows the ROW THIS DOOR RETURNED (`!pkg.enabled`), so memory and
- * disk cannot disagree by construction. ⛔ Deliberately NOT "enable first so
- * the declared default wins": that would make a flag-absent install RE-ENABLE a
- * package an operator disabled in an earlier boot — a new behaviour this card
- * does not authorise. Which state a seeded id should end in when the request
- * asks for `enableOnInstall: true` is therefore left exactly as it was, and the
- * last case here pins that it is at least SELF-CONSISTENT.
+ * disk cannot disagree by construction. ⛔ Still NOT "enable first so the
+ * declared default wins": a flag-absent install must never RE-ENABLE a package
+ * an operator disabled in an earlier boot. #18877 kept that and generalised it
+ * — 「缺省 = 保持」 — which is why every case in this block is UNCHANGED by
+ * that ruling: a seeded id whose install asks for nothing still lands, and
+ * stays, disabled.
+ *
+ * ⭐ [#18877] F1b STANDS as ruled (batch #157 item 5 letter C, item 4: 「F1b
+ * stands as is」). The one case here that moves is the LAST one: 「the seed
+ * wins」 over an explicit `enableOnInstall: true` was self-consistency, not a
+ * rule anyone chose, and item 2 now rules that a PRESENT flag sets the state in
+ * both directions.
  */
 describe('#18058 F1b — a boot-seeded disable survives an install that never asked to clear it', () => {
     /**
@@ -420,12 +456,15 @@ describe('#18058 F1b — a boot-seeded disable survives an install that never as
         expect(third.response?.body?.data?.enabled, 'a re-seeded registry still agrees with that row').toBe(false);
     });
 
-    it('a seeded id asked for `enableOnInstall: true` is at least SELF-CONSISTENT — the seed wins, and the disk says so', async () => {
-        // ⛔ NOT a claim that the flag is honoured here. The registry seed is
-        // read at registration and this door does not re-enable (that is remedy
-        // (b), which no ruling authorises). What IS required is that the three
-        // records do not disagree: whatever state the install lands in, the
-        // durable file records THAT state and a restart replays it.
+    it('[#18877 re-ruled] a seeded id asked for `enableOnInstall: true` is ENABLED — 「有旗 = 设置」', async () => {
+        // ⚠️ This case asserted only SELF-CONSISTENCY until #18877 — its name
+        // said 「the seed wins, and the disk says so」 and it deliberately made
+        // no claim about WHICH state the install lands in, because the door did
+        // not re-enable and no ruling had chosen. Ruling batch #157 item 5
+        // letter C item 2 chooses: 「`enableOnInstall` present sets the state in
+        // both directions」. The self-consistency assertions are kept underneath
+        // the new one rather than replaced — they are the half that catches a
+        // door which moves the row without telling the disk.
         const id = 'com.acme.seeded.true';
         await persistDisableInAnEarlierBoot(id, 'seededtrue');
 
@@ -437,11 +476,18 @@ describe('#18058 F1b — a boot-seeded disable survives an install that never as
 
         expect(again.response?.status).toBe(201);
         const returned = again.response?.body?.data?.enabled;
+        // ⭐ The choice item 2 made: an explicit flag outranks the boot seed.
+        expect(returned, 'the row this door RETURNED — the flag was present and it said `true`').toBe(true);
         expect(registry.getPackage(id)?.enabled, 'the registry agrees with the row').toBe(returned);
         expect(
             loadDisabledPackageIds(undefined).has(id),
             'the disk agrees with the row',
         ).toBe(returned === false);
+
+        // And the restart round-trip: the enable really outlived this boot.
+        const boot3 = rebootFromDisk();
+        const third = await install(boot3.dispatcher, { manifest: manifest(id, 'seededtrue') });
+        expect(third.response?.body?.data?.enabled, 'a restart replays the ENABLE, not the stale disable').toBe(true);
     });
 
     it('⛔ the seed is not a door that disables everything — an UNSEEDED id still installs enabled', async () => {

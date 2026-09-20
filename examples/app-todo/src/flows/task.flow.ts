@@ -58,21 +58,69 @@ export const TaskReminderFlow: Flow = {
       config: { objectName: 'todo_task', filter: { due_date: '{tomorrow}', status: { $ne: 'completed' } }, outputVariable: 'tasksToRemind', limit: 200 },
     },
     {
+      // #19206 — the per-item steps live in `config.body`, and that is what
+      // binds `currentTask` at all. A `loop` node carrying only `collection` +
+      // `iteratorVariable` takes the LEGACY flat-graph path
+      // (`loop-node.ts`: `if (raw.body == null)`), which sets `$loopItems` /
+      // `$loopIndex` and returns WITHOUT ever binding `iteratorVariable` — so
+      // every `{currentTask.X}` token in the nodes wired after it resolved to
+      // nothing. The structured container (ADR-0031) is the form that
+      // iterates: it binds `iteratorVariable` in the enclosing scope and runs
+      // the body region once per item, and the node's ordinary out-edge
+      // (`→ end`) is the after-loop continuation.
       id: 'loop_tasks', type: 'loop', label: 'Loop Through Tasks',
-      config: { collection: '{tasksToRemind}', iteratorVariable: 'currentTask' },
-    },
-    {
-      // `notify` is what actually delivers (#4343): it hands the messaging
-      // service the notification — the in-app inbox by default, and email once
-      // `@objectstack/plugin-email` is installed. The `script` node this
-      // replaced only ever logged a line and reported success.
-      id: 'send_reminder', type: 'notify', label: 'Send Reminder',
       config: {
-        recipients: '{currentTask.owner}',
-        title: 'Task due tomorrow: {currentTask.subject}',
-        message: 'Due {currentTask.due_date} · priority {currentTask.priority}.',
-        sourceObject: 'todo_task',
-        sourceId: '{currentTask.id}',
+        collection: '{tasksToRemind}',
+        iteratorVariable: 'currentTask',
+        // The read above is capped at `limit: 200`, so this cap is the same
+        // bound stated on the side that iterates it — the engine FAILS the
+        // node on a longer collection rather than truncating in silence.
+        maxIterations: 200,
+        body: {
+          nodes: [
+            {
+              // Per-iteration containment (`flow-loop-body-uncontained`). A
+              // `loop` body has no error handling of its own: the container
+              // iterates with a bare `await`, so a body node answering
+              // `success: false` propagates straight out and ends the WHOLE
+              // sweep. `notify` fails on an empty resolved recipient set, so
+              // one task with a blank `owner` would leave every later task
+              // unreminded. The guard is a `try_catch` INSIDE the body.
+              id: 'guard_reminder', type: 'try_catch', label: 'Guarded Reminder',
+              config: {
+                try: {
+                  nodes: [
+                    {
+                      // `notify` is what actually delivers (#4343): it hands the
+                      // messaging service the notification — the in-app inbox by
+                      // default, and email once `@objectstack/plugin-email` is
+                      // installed. The `script` node this replaced only ever
+                      // logged a line and reported success.
+                      id: 'send_reminder', type: 'notify', label: 'Send Reminder',
+                      config: {
+                        recipients: '{currentTask.owner}',
+                        title: 'Task due tomorrow: {currentTask.subject}',
+                        message: 'Due {currentTask.due_date} · priority {currentTask.priority}.',
+                        sourceObject: 'todo_task',
+                        sourceId: '{currentTask.id}',
+                      },
+                    },
+                  ],
+                },
+                // The shortest handler that works: ONE bare `assignment` node
+                // with no `config`. A `catch` region cannot be empty —
+                // `FlowRegionSchema.nodes` is `.min(1)`, so `catch: {}` and
+                // `catch: { nodes: [] }` are both refused by the parse, and
+                // omitting `catch` entirely parses while containing NOTHING.
+                catch: {
+                  nodes: [
+                    { id: 'reminder_failed', type: 'assignment', label: 'Reminder Failed (contained)' },
+                  ],
+                },
+              },
+            },
+          ],
+        },
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -81,8 +129,9 @@ export const TaskReminderFlow: Flow = {
   edges: [
     { id: 'e1', source: 'start', target: 'get_upcoming_tasks', type: 'default' },
     { id: 'e2', source: 'get_upcoming_tasks', target: 'loop_tasks', type: 'default' },
-    { id: 'e3', source: 'loop_tasks', target: 'send_reminder', type: 'default' },
-    { id: 'e4', source: 'send_reminder', target: 'end', type: 'default' },
+    // The loop's ordinary out-edge is the AFTER-loop continuation; the
+    // per-item step is `config.body`, not a node wired after the container.
+    { id: 'e3', source: 'loop_tasks', target: 'end', type: 'default' },
   ],
 };
 
@@ -117,26 +166,78 @@ export const OverdueEscalationFlow: Flow = {
       },
     },
     {
+      // #19206 — same repair as `task_reminder` above, and this is the flow
+      // where the omission was MEASURED: with the per-item steps wired as
+      // ordinary nodes AFTER a body-less `loop`, `currentTask` was never
+      // bound, and the run died at `update_priority` with "refusing to run -
+      // 1 filter condition(s) resolved to nothing: {currentTask.id} (at id)".
+      // `notify_owner` sits one node BEHIND that refusal, so no escalation
+      // notice was ever sent — the loud refusal is the only reason a filter
+      // that resolved to nothing did not match every task in the table.
       id: 'loop_overdue', type: 'loop', label: 'Loop Through Overdue Tasks',
-      config: { collection: '{overdueTasks}', iteratorVariable: 'currentTask' },
-    },
-    {
-      id: 'update_priority', type: 'update_record', label: 'Escalate Priority',
       config: {
-        objectName: 'todo_task',
-        filter: { id: '{currentTask.id}' },
-        fields: { priority: 'urgent', tags: ['important', 'follow_up'] },
-      },
-    },
-    {
-      id: 'notify_owner', type: 'notify', label: 'Notify Task Owner',
-      config: {
-        recipients: '{currentTask.owner}',
-        title: 'URGENT: task overdue — {currentTask.subject}',
-        message: 'Due {currentTask.due_date}, {currentTask.days_overdue} day(s) overdue.',
-        severity: 'critical',
-        sourceObject: 'todo_task',
-        sourceId: '{currentTask.id}',
+        collection: '{overdueTasks}',
+        iteratorVariable: 'currentTask',
+        // Same bound as the read above (`limit: 200`), stated on the side
+        // that iterates: a longer collection fails the node rather than
+        // truncating in silence.
+        maxIterations: 200,
+        body: {
+          nodes: [
+            {
+              // Per-iteration containment (`flow-loop-body-uncontained`): both
+              // per-item steps are fallible — `update_record` answers
+              // `success: false` on a refused write, `notify` on an empty
+              // resolved recipient set — and an uncontained failure propagates
+              // straight out of the container, ending the sweep at the first
+              // bad row with every later task left unescalated.
+              //
+              // ONE `try_catch` over BOTH steps, not one per step: the notice
+              // announces the escalation the update performs, so a row whose
+              // update was refused must not be told its priority was raised.
+              id: 'guard_escalation', type: 'try_catch', label: 'Guarded Escalation',
+              config: {
+                try: {
+                  nodes: [
+                    {
+                      id: 'update_priority', type: 'update_record', label: 'Escalate Priority',
+                      config: {
+                        objectName: 'todo_task',
+                        filter: { id: '{currentTask.id}' },
+                        fields: { priority: 'urgent', tags: ['important', 'follow_up'] },
+                      },
+                    },
+                    {
+                      id: 'notify_owner', type: 'notify', label: 'Notify Task Owner',
+                      config: {
+                        recipients: '{currentTask.owner}',
+                        title: 'URGENT: task overdue — {currentTask.subject}',
+                        // `days_overdue` is the formula field the record
+                        // projection carries (#18584); the loop binding this
+                        // template reads it from is what #19206 restores.
+                        message: 'Due {currentTask.due_date}, {currentTask.days_overdue} day(s) overdue.',
+                        severity: 'critical',
+                        sourceObject: 'todo_task',
+                        sourceId: '{currentTask.id}',
+                      },
+                    },
+                  ],
+                  edges: [
+                    { id: 'be1', source: 'update_priority', target: 'notify_owner', type: 'default' },
+                  ],
+                },
+                // One bare `assignment` — the shortest handler that works; a
+                // `catch` region's `nodes` is `.min(1)`, so an empty one is
+                // refused at parse and an omitted one contains nothing.
+                catch: {
+                  nodes: [
+                    { id: 'escalation_failed', type: 'assignment', label: 'Escalation Failed (contained)' },
+                  ],
+                },
+              },
+            },
+          ],
+        },
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -145,9 +246,8 @@ export const OverdueEscalationFlow: Flow = {
   edges: [
     { id: 'e1', source: 'start', target: 'get_overdue_tasks', type: 'default' },
     { id: 'e2', source: 'get_overdue_tasks', target: 'loop_overdue', type: 'default' },
-    { id: 'e3', source: 'loop_overdue', target: 'update_priority', type: 'default' },
-    { id: 'e4', source: 'update_priority', target: 'notify_owner', type: 'default' },
-    { id: 'e5', source: 'notify_owner', target: 'end', type: 'default' },
+    // The container's ordinary out-edge is the after-loop continuation.
+    { id: 'e3', source: 'loop_overdue', target: 'end', type: 'default' },
   ],
 };
 
