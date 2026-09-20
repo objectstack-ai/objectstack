@@ -1071,11 +1071,18 @@ export function collectAndLintDocs(
  * owns it — `packages[i].manifest.docs`, the structural position ADR-0130 D4
  * reserves for a package body (#18431, the ruling's clause 1).
  *
- * ⛔ Not the artifact top level. The runtime reads a package-owned collection
- * back UP through `resolveArtifactCollections`
- * (`packages/runtime/src/artifact-collections.ts`), so a doc written here is
- * served exactly as a top-level one is — while `packages[]` keeps the OWNERSHIP
- * that ADR-0130 D1 is about and a flattened copy would destroy.
+ * ⛔ Not the artifact top level. A body's docs are served because the load path
+ * REGISTERS EACH BODY — ⛔ not through `resolveArtifactCollections`, which is a
+ * different seam (it answers the top-level READ of a collection):
+ * `AppPlugin.init` calls `getService('manifest').register(artifact)`
+ * (`packages/runtime/src/app-plugin.ts`); that service runs
+ * `resolveArtifactPackageOrder` — every package body when `packages` is present
+ * — and calls `ql.registerApp(body)` per body
+ * (`packages/objectql/src/plugin.ts`); `registerApp` feeds
+ * `registerMetadataCollections`, whose `METADATA_ARRAY_KEYS` carries `docs`
+ * (`packages/objectql/src/engine.ts`). So a doc written here reaches the
+ * registry stamped with its OWNING package, which is the ownership ADR-0130 D1
+ * is about and a flattened copy would destroy.
  *
  * Returns the ARGUMENT ITSELF when nothing is added, so an artifact with no
  * per-package docs is not merely equal to the one built before this landed —

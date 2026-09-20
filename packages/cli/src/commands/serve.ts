@@ -2643,9 +2643,11 @@ export default class Serve extends Command {
       // [#18431] The same mirroring, one level down: a `src/<pkg>/docs/`
       // directory naming one of this config's `packages[]` entries is collected
       // onto THAT package's body (ADR-0130 D4 option B), exactly where
-      // `os build` puts it. `AppPlugin` reads a package-owned collection back
-      // up through `resolveArtifactCollections`, so dev serves them as an
-      // artifact boot does. Leaving this half out would re-open the asymmetry
+      // `os build` puts it. `AppPlugin` REGISTERS each body — it hands the
+      // whole artifact to `getService('manifest').register()`, which runs
+      // `resolveArtifactPackageOrder` and `registerApp(body)` per body, and
+      // `registerMetadataCollections` enumerates `docs` — so dev serves them as
+      // an artifact boot does. Leaving this half out would re-open the asymmetry
       // the paragraph above exists to close — `os build` producing docs that
       // `os dev` cannot show.
       if (!useArtifactFallback) {

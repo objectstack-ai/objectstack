@@ -8,10 +8,12 @@ Clause-②: yes
 
 A module can now ship its own docs. Before this, ADR-0046 collection was anchored at exactly one path, `<config dir>/src/docs`, so an ADR-0130 project that moved its docs into their packages lost all of them — loudly since #18428, but lost. The maintainer's ruling (batch #147 item 4) decided the two contract questions that blocked the widening, and both are implemented literally:
 
-- **Where they attach**: to `packages[i]`, ⛔ never the artifact top level. The runtime already merges a package-owned collection back up for readers (`resolveArtifactCollections`, ADR-0130 D4), so a flattened copy would buy nothing and destroy the ownership D1 is about.
+- **Where they attach**: to `packages[i]`, ⛔ never the artifact top level. A body's docs are served because the load path **registers every body**: `AppPlugin` hands the whole artifact to `getService('manifest').register(…)`, which runs `resolveArtifactPackageOrder` (every package body, when `packages` is present) and calls `registerApp(body)` for each; `registerApp` feeds `registerMetadataCollections`, whose `METADATA_ARRAY_KEYS` carries `docs`. A doc written onto a body therefore reaches the registry under its owning package, so a flattened copy would buy nothing and would destroy the ownership D1 is about.
 - **Whose namespace the lint uses**: the owning package's. A doc outside any package keeps `stack.manifest.namespace`. A multi-package artifact therefore has **one prefix rule per package** and ⛔ no single global prefix — and ⛔ no fallback between the two: a package doc that fails its own package's prefix is refused, never re-tried against the artifact's.
 
-**What it costs, stated as the whole of it.** Exactly ONE class of input that `os build` accepted before is refused now, and it is the direct consequence of the ruled prefix rule: in a multi-package artifact (only `composeStacks(…, { manifest: 'preserve' })` produces one) whose packages declare namespaces DIFFERENT from the artifact manifest's, a doc owned by such a package used to be judged by the artifact's prefix and is now judged by its own package's.
+**What it costs — TWO classes, and these are both of them.** Two classes of input that `os build` accepted before are refused now. Both follow directly from the ruled prefix rule (the owning package's `namespace`, ⛔ with no fallback to the artifact's), both arise only in a multi-package artifact (only `composeStacks(…, { manifest: 'preserve' })` produces one), and both are pinned in the unit tier rather than only stated here.
+
+**(1) A package doc carrying the ARTIFACT's prefix instead of its own.** A package that declares a namespace DIFFERENT from the artifact manifest's used to have its docs judged by the artifact's prefix; they are judged by its own now.
 
 ```
 FROM  packages[i] with namespace "sales" inside an artifact whose manifest.namespace is "crm"
@@ -19,7 +21,20 @@ FROM  packages[i] with namespace "sales" inside an artifact whose manifest.names
 TO    rename it to          sales_orders_guide   (and the file to sales_orders_guide.md)
 ```
 
-The refusal is `docs/namespace-prefix`, an error, and it names that exact spelling. Nothing else that built green stops building: an artifact whose packages share one namespace — the ADR-0130 D1 shape, and the one `examples/app-multi-package` documents — sees no change at all, because the per-package rule and the artifact rule are then the same rule. In the other direction the same change is a widening, and the larger half: that package could not ship a doc under its OWN prefix at all before.
+The refusal is `docs/namespace-prefix`, an error, and it names that exact spelling.
+
+**(2) A package that ships docs and declares NO namespace at all.** `manifest.namespace` is optional, so such a body is legal and its docs used to be judged under the artifact's prefix — the one global rule. With one prefix rule per package and no fallback, that package's own namespace is the only one that can answer for its docs, and ADR-0046 §3.2 requires it.
+
+```
+FROM  packages[i] with NO namespace, inside an artifact whose manifest.namespace is "crm",
+      shipping docs (inline, or now from src/<pkg>/docs/)  -> accepted before, REFUSED now
+TO    declare  namespace: "sales"  on that package — its docs then take the "sales_" prefix
+      or move those docs up to the stack level, where stack.manifest.namespace still judges them
+```
+
+The refusal is `docs/namespace-required`, an error, located at `packages[i].manifest.namespace` — the key to add.
+
+Beyond those two, nothing that built green stops building: an artifact whose packages each declare one shared namespace — the ADR-0130 D1 shape, and the one `examples/app-multi-package` documents — sees no change at all, because the per-package rule and the artifact rule are then the same rule. In the other direction the same change is a widening, and the larger half: that package could not ship a doc under its OWN prefix at all before.
 
 ⚠️ Same-prefix LINKS and metadata-embed references are deliberately NOT partitioned with the naming rule — both resolve across the whole artifact. A doc's prefix says who judges its NAME; a link asks whether the target EXISTS, and ADR-0130 D1 exists so that N packages may share a namespace and cross-link inside it. Partitioning links too would have turned an ordinary cross-package link into `docs/broken-link` and stopped an artifact that built green from building; that was caught by this card's contract review and is pinned in the unit tier.
 

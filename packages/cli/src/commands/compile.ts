@@ -836,9 +836,12 @@ export default class Compile extends Command {
       //     package that owns them — `packages[i].manifest`, ADR-0130 D4 option
       //     B — and ⛔ never to the top level, which is the maintainer's ruling
       //     (batch #147 item 4) and also what keeps ownership readable: the
-      //     runtime merges a package-owned collection back up through
-      //     `resolveArtifactCollections`, so a flattened copy would buy nothing
-      //     and destroy the attribution. `attachPackageDocs` hands back the
+      //     load path REGISTERS each body — `manifest.register()` ->
+      //     `resolveArtifactPackageOrder` -> `registerApp(body)` ->
+      //     `registerMetadataCollections` over `METADATA_ARRAY_KEYS`, which
+      //     carries `docs` — so a doc on a body is served under that package
+      //     and a flattened copy would buy nothing while destroying the
+      //     attribution. `attachPackageDocs` hands back the
       //     ARGUMENT when it adds nothing, so a stack with no per-package docs
       //     serializes from the very same references as before.
       if (docsResult.packageDocs.length > 0) {

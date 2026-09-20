@@ -85,6 +85,14 @@ const ORDERS = {
   type: 'module',
 };
 
+/**
+ * The same package body with the key REMOVED, not set to `undefined` —
+ * `ManifestSchema.namespace` is `.optional()`, so this is a body a real
+ * artifact can carry, and it is the FROM side of the changeset's second
+ * refused class (N2).
+ */
+const { namespace: _ordersNamespace, ...ORDERS_NO_NAMESPACE } = ORDERS;
+
 /** The composed artifact these fixtures stand in for: two packages, `crm` on top. */
 const stack = (extra: Record<string, unknown> = {}) => ({
   manifest: { ...CORE },
@@ -277,6 +285,69 @@ describe('the doc lint reads the OWNING package namespace', () => {
     const refusal = issues.filter((i) => i.rule === 'docs/namespace-prefix');
     expect(refusal).toHaveLength(1); // once — judged by `sales`, not twice by `sales` and `crm`
     expect(refusal[0].path).toBe('packages[1].docs/crm_orders_inline');
+  });
+
+  // ── N2: the SECOND class of input this card refuses ──────────────────────
+  //
+  // Raised by this card's contract review. `ManifestSchema.namespace` is
+  // OPTIONAL, so a `packages[i]` body can ship docs while declaring no
+  // namespace of its own: before the ruling those docs were judged under
+  // `stack.manifest.namespace`, because there was one global prefix rule. The
+  // ruling's clause 2 — the OWNING package's namespace, ⛔ with no fallback —
+  // makes that body's own namespace the only one that can answer, and ADR-0046
+  // §3.2 requires it, so `os build` now refuses with `docs/namespace-required`.
+  //
+  // The changeset states this class as a cost, in the same FROM → TO form as
+  // the first one. These cases are what make that sentence MEASURED rather
+  // than asserted; the third is the control that can fail.
+  it('REFUSES a namespace-less package that ships DIRECTORY docs — once, at its own manifest.namespace', () => {
+    const marker = writePackageDoc('orders', 'sales_playbook', 'MARKER-ns-missing-dir');
+    const { issues, packageDocs } = collectAndLintDocs(configPath, {
+      manifest: { ...CORE }, // the ARTIFACT declares `crm` — it does not answer for the package
+      packages: [pkg({ ...CORE }), pkg({ ...ORDERS_NO_NAMESPACE })],
+    });
+
+    // Pedigree: the refusal is about a doc that really came off that directory.
+    expect(packageDocs.map((s) => [s.index, s.dir, s.docs.map((d) => d.name)])).toEqual([
+      [1, 'src/orders/docs', ['sales_playbook']],
+    ]);
+    expect(packageDocs[0].docs[0].content).toContain(marker);
+    expect(packageDocs[0].namespace).toBeUndefined();
+
+    const required = issues.filter((i) => i.rule === 'docs/namespace-required');
+    expect(required).toHaveLength(1);
+    expect(required[0].severity).toBe('error');
+    expect(required[0].path).toBe('packages[1].manifest.namespace');
+
+    // ⛔ And NOT the prefix rule: there is no namespace to build a prefix from,
+    // so re-trying the doc against the artifact's `crm` is exactly the fallback
+    // clause 2 forbids. One refusal, naming the one thing the author must add.
+    expect(issues.filter((i) => i.rule === 'docs/namespace-prefix')).toEqual([]);
+  });
+
+  it('...and the same refusal for a namespace-less package that ships INLINE body docs', () => {
+    const { issues } = collectAndLintDocs(configPath, {
+      manifest: { ...CORE },
+      packages: [
+        pkg({ ...CORE }),
+        pkg({ ...ORDERS_NO_NAMESPACE, docs: [{ name: 'sales_orders_inline', content: '# Inline' }] }),
+      ],
+    });
+
+    const required = issues.filter((i) => i.rule === 'docs/namespace-required');
+    expect(required).toHaveLength(1);
+    expect(required[0].severity).toBe('error');
+    expect(required[0].path).toBe('packages[1].manifest.namespace');
+    expect(required[0].message).toContain('ADR-0046 §3.2');
+    expect(issues.filter((i) => i.rule === 'docs/namespace-prefix')).toEqual([]);
+  });
+
+  it('...while the SAME package with its namespace declared raises neither — the control that can fail', () => {
+    writePackageDoc('orders', 'sales_playbook', 'MARKER-ns-declared');
+    const { issues } = collectAndLintDocs(configPath, stack()); // ORDERS declares `sales`
+
+    expect(issues.filter((i) => i.rule === 'docs/namespace-required')).toEqual([]);
+    expect(issues.filter((i) => i.severity === 'error')).toEqual([]);
   });
 
   it('reports a doc name declared by two different owners — the one thing per-package lint cannot see', () => {
