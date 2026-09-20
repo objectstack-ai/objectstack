@@ -2917,6 +2917,15 @@ export class ObjectStackClient {
    * that it is wrong when it is right — the `SearchResult` near-miss class
    * #8140 recorded, at family scale. The control-plane implementation is not
    * in this repo, so the casing cannot be settled from here.
+   *
+   * ⚠️ [#19383] That licence is BOUNDED, and this paragraph is no longer the
+   * only thing holding it. `src/environments-any-family.pin.test.ts` enumerates
+   * the family by name — 21 callables here, 14 of them `any`-carrying, derived
+   * with a `ts.createProgram` + `TypeChecker` census rather than a text search,
+   * because these methods carry no return annotation for text to read and
+   * `check:exported-any-returns` asks IS-`any`, never CONTAINS-`any`. ⛔ Do not
+   * read this paragraph as covering a method that pin does not list: a 15th is
+   * a diff whose author adds its name, not a silent addition absorbed here.
    */
   environments = {
     /**
