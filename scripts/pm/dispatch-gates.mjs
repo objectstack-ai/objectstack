@@ -22173,8 +22173,16 @@ function selfTest() {
   }
   const censusRows = liveMarkerCensus.map((r) => `${r.file}:${r.line} ${r.key}`).sort();
   t(
-    `the live tree carries the six declarations this card measured, and no others (${censusRows.join(' · ') || 'none'})`,
+    `the live tree carries the seven declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
     censusRows.join(' · ') === [
+      // Seventh row, added with the declaration it names: `checklist-status.yml`
+      // is paths-filtered (its `pull_request:` trigger is filtered to itself) and
+      // its only working step invokes the GENERATOR `pnpm gen:checklist-status`,
+      // so it discovers no `check:` family and declares why. ⚠️ This roster is the
+      // maintenance this pin exists to force: it is NAMED rather than counted
+      // precisely so a seventh declaration reddens WITH the six already read
+      // printed beside it, and the author adds their row instead of a number.
+      '.github/workflows/checklist-status.yml:57 no-check-families',
       '.github/workflows/merged-branch-reaper.yml:212 no-check-families',
       '.github/workflows/os-create-smoke.yml:48 no-check-families',
       '.github/workflows/scaffold-e2e.yml:23 no-check-families',
@@ -22187,7 +22195,7 @@ function selfTest() {
   const censusCut = liveMarkerCensus.filter((r) => !r.whole).map((r) => `${r.file}:${r.line} ${r.key}`);
   t(
     `every live reason on those markers ENDS on its own marker line (cut: ${censusCut.join(', ') || 'none'})`,
-    censusCut.length === 0 && liveMarkerCensus.length === 6,
+    censusCut.length === 0 && liveMarkerCensus.length === 7,
   );
   t(
     'and every one of them carries a non-empty reason — whole is not the same claim as present, and both are owed',
