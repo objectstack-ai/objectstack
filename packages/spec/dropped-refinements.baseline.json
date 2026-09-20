@@ -605,6 +605,8 @@
     },
     "data/FieldOperators": {
       "sites": [
+        "$between.items[0]",
+        "$between.items[1]",
         "$in",
         "$nin"
       ]
@@ -668,8 +670,13 @@
     },
     "data/NormalizedFilter": {
       "sites": [
+        "lazy.$and.element.options[0]",
+        "lazy.$not.options[0]",
+        "lazy.$not.options[0].valueType.$between.items[0]",
+        "lazy.$not.options[0].valueType.$between.items[1]",
         "lazy.$not.options[0].valueType.$in",
-        "lazy.$not.options[0].valueType.$nin"
+        "lazy.$not.options[0].valueType.$nin",
+        "lazy.$or.element.options[0]"
       ]
     },
     "data/Object": {
@@ -734,6 +741,12 @@
         "in.where.options[0].lazy.options[0].items[0]",
         "in.where.options[0].lazy.options[0].items[1]",
         "in.where.options[0].lazy.options[2].items[0]"
+      ]
+    },
+    "data/RangeOperator": {
+      "sites": [
+        "$between.items[0]",
+        "$between.items[1]"
       ]
     },
     "data/ReferenceIdValue": {
