@@ -274,6 +274,44 @@ is an additive key on an existing object rather than a shape change. The reserva
 structural commitment only; the segmented form itself needs its own decision and is a Non-goal
 here.
 
+**The entry door refuses an unusable `manifest.id` before the id-or-name fallback is consulted**
+(2026-09-16, [#17534](https://github.com/objectstack-ai/objectstack/issues/17534) — an addition
+to this record; D4's two branches above read exactly as accepted). `ManifestSchema.id` now
+carries `MANIFEST_ID_PATTERN` (`packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN`) —
+the reverse-domain rule the registry face (`PackageSchema.manifestId`,
+`packages/spec/src/marketplace/package.zod.ts`) has always enforced, declared once and referenced
+from both sites — and `AssembledPackageBodySchema` inherits it through `.extend()`. The order an
+entry meets the two doors in is therefore:
+
+- **DOOR 1 — the schema.** `ArtifactPackageSchema.safeParse(entry)`
+  (`packages/core/src/artifact-packages.ts#resolveArtifactPackageOrder`) refuses an `id` of `''`
+  here, as `INVALID_ARTIFACT_PACKAGE_ENTRY` / `422`, naming `manifest.id` and echoing the value it
+  refused. `''` is no longer a valid manifest id to the schema at all.
+- **DOOR 2 — the id.** `artifactPackageId`
+  (`packages/core/src/artifact-packages.ts#artifactPackageId`) is still `id || name` — ⛔
+  deliberately untouched, because `ObjectQL.registerApp` still keys the installed package that way
+  — but for `''` it never runs: DOOR 1 refuses the entry first, so `{ id: '', name: 'x' }` can no
+  longer be carried under its sibling `name`. An entry that survives DOOR 1 carries an id matching
+  the pattern, non-empty by construction, so DOOR 2's `no usable package id` refusal is
+  unreachable from the `packages` branch. It is kept rather than deleted: it is the one
+  declaration of that requirement, and `artifactPackageId` is read by seams outside this path.
+
+**The direction is fail-OPEN → fail-CLOSED, on a consent path**, and it is recorded here rather
+than left to the pins. Before: an artifact whose `grantedPermissions` record was keyed by `''`
+was carried under its `name`, the consent record bound to nothing, it was reported `unbound`, and
+the package registered with no consent record — nothing was denied. Now: the entry is refused at
+materialize time and no package inside that artifact registers. The affected population is
+artifacts that were already half-broken — their consent record never applied and the registry
+face refused to publish them — so what changes is that a silent failure becomes an explicit one.
+⛔ Read the refusal's provenance precisely: it is the artifact package door refusing a malformed
+manifest id, **not** the permission seam acquiring teeth —
+`packages/core/src/security/granted-permissions-not-enforced.pin.test.ts` still measures that
+nothing on this tree enforces `grantedPermissions`.
+
+The order is pinned behaviourally, each case asserting its own door's message **and** the absence
+of the other door's, in `packages/runtime/src/security/artifact-granted-permissions.test.ts` (the
+`#13457 / #17534` block) — an alternation over both messages would survive deleting a whole door.
+
 ### D5 — Topological ordering is an acceptance criterion, and reuses the one sorter
 
 Packages inside an artifact MUST be registered in **dependency topological order**. A package
