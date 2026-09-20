@@ -153,6 +153,11 @@ on:
       # as the row above, one file along: a step whose script can change without
       # this trigger firing is a step whose PR-time proof is a coincidence.
       - 'scripts/pm/sweep-closed-cards.mjs'
+      # The citation census this workflow also calls (#18224). Same reasoning as
+      # the two rows above, one file along: a step whose script can change
+      # without this trigger firing is a step whose PR-time proof is a
+      # coincidence.
+      - 'scripts/check-issue-citations.mjs'
       - '.github/workflows/half-state-patrol.yml'
 
 # Least privilege: this job reads the repo and writes exactly one issue BODY.
@@ -458,6 +463,83 @@ jobs:
             echo
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Census the repo's issue citations
+        # #17512's gate, wired here by #18224 — the REPORT-ONLY half, and the
+        # posture is a ruling, not a preference. `--census` judges every
+        # citation in the gate's declared surfaces (the published release pages
+        # and package source docblocks), which is ~2,785 unresolvable sites on a
+        # tree nobody touched, and its verdict is NOT a function of this tree:
+        # #16783, #16786 and #16787 were measured RESOLVING on 2026-09-10 and
+        # 404 on 2026-09-14 with no change to this repository. That is exactly
+        # the shape this workflow exists for — a fact about a live shared board,
+        # not about whichever change happens to run CI next — so it belongs on
+        # the patrol lane and ⛔ NEVER on a blocking one. The DIFF-scoped half of
+        # the same gate is the blocking one and lives in `lint.yml`; the two
+        # postures are opposite on purpose and ⛔ neither moves to the other's
+        # lane.
+        #
+        # WHERE THE REPORT GOES: this run's step summary and job log, plus one
+        # `::warning::` carrying the site count. ⛔ NOT the anchor issue — that
+        # body is owned end-to-end by `check-half-states.mjs`'s generator, and a
+        # second writer is how half of a generated body goes stale.
+        # HOW OFTEN: on this workflow's schedule — four times a day, six hours
+        # apart — plus any `workflow_dispatch`, plus the `pull_request` runs the
+        # paths filter above admits.
+        # WHAT IT COSTS AND WHO PAYS: the census enumerates the whole board once
+        # (159 requests on this repo at the time of writing, cursor-paginated —
+        # the alternative is one request per distinct number). It is paid by
+        # THIS repository's own `secrets.GITHUB_TOKEN` core quota, the same
+        # 5,000/hour this job already draws the live sweep from: ~636
+        # requests/day at four runs, under half a percent of a single hour's
+        # allowance. ⛔ No PAT, no cross-repo credential — the file's own rule.
+        #
+        # ⛔ Gated on the repository NAME, for the reason the closed-card sweep
+        # above states: this script is objectstack-only until a sibling has a
+        # copy, and a verbatim copy of this workflow elsewhere must SKIP rather
+        # than fail on a missing file.
+        #
+        # ⛔ This step never fails the job, whatever the census returns —
+        # findings are not a failure condition here, and neither is a census
+        # that could not read the board: that is an alarm (`::error::`), not a
+        # gate. Placed AFTER the anchor write on purpose, unlike the closed-card
+        # sweep: the anchor is this patrol's product, this job has a
+        # 15-minute timeout, and a report-only reading must never be able to
+        # starve the thing the workflow exists to deliver.
+        if: github.repository == 'objectstack-ai/objectstack'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          node scripts/check-issue-citations.mjs --census \
+            > "$RUNNER_TEMP/issue-citations.md" 2> "$RUNNER_TEMP/issue-citations.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between, for the reason the two steps above
+          # state at length: piped, `$?` is the pipe's status and a red run and a
+          # green one read the same.
+          {
+            echo "### Issue-citation census — exit $code (report-only)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/issue-citations.md" 2>/dev/null || echo '(no report produced)'
+            echo '```'
+            echo
+            echo '<details><summary>stderr</summary>'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/issue-citations.err" 2>/dev/null || true
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/issue-citations.err" >&2 || true
+          if [ "$code" != "0" ]; then
+            echo "::error::issue-citation census exited $code — the board was NOT read, so this run says nothing about whether unresolvable citations are accumulating. A census that could not run is not a clean census. See this run's summary."
+          else
+            sites=$(sed -n 's/^.*census: \([0-9][0-9]*\) unresolvable citation site(s).*$/\1/p' "$RUNNER_TEMP/issue-citations.md" | tail -1)
+            echo "::warning::issue-citation census: ${sites:-unknown} unresolvable citation site(s) in the declared surfaces. Report-only — the blocking half judges only what a change ADDS."
+          fi
 
       - name: Fail the run if the sweep could not run
         # LAST, on purpose: the anchor is updated with the did-not-run report
