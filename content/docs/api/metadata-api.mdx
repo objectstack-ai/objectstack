@@ -105,16 +105,16 @@ List installed packages.
 Install a package from its manifest (SDK: `client.packages.install`). Re-installing an
 already-installed `id` returns **409 Conflict** unless `overwrite: true`.
 
-**Body**: `{ manifest: { id: "plugin-auth", name: "Plugin Auth", version: "1.0.0", ... }, settings?: { ... }, enableOnInstall?: true, overwrite?: false }`  
-**Response**: `{ package: { id: "plugin-auth", version: "1.0.0", ... }, message?: "..." }`
+**Body**: `{ manifest: { id: "com.objectstack.plugin-auth", name: "Plugin Auth", version: "1.0.0", ... }, settings?: { ... }, enableOnInstall?: true, overwrite?: false }`  
+**Response**: `{ package: { id: "com.objectstack.plugin-auth", version: "1.0.0", ... }, message?: "..." }`
 
 ### `POST /packages/publish`
 
 Publish a package (manifest + metadata) to the package marketplace registry. This is
 publisher tooling, not part of the app SDK surface.
 
-**Body**: `{ manifest: { id: "plugin-auth", name: "Plugin Auth", version: "1.0.0", ... }, metadata: { objects: [...], views: [...], ... } }`  
-**Response**: `{ success: true, message: "...", package: { id: "plugin-auth", version: "1.0.0" } }`
+**Body**: `{ manifest: { id: "com.objectstack.plugin-auth", name: "Plugin Auth", version: "1.0.0", ... }, metadata: { objects: [...], views: [...], ... } }`  
+**Response**: `{ success: true, message: "...", package: { id: "com.objectstack.plugin-auth", version: "1.0.0" } }`
 
 ### `GET /packages/:id`
 

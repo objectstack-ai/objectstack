@@ -28,7 +28,7 @@ afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 const writeConfig = (ns: string) =>
   fs.writeFileSync(
     path.join(dir, 'objectstack.config.ts'),
-    `export default defineStack({\n  manifest: {\n    id: 'x',\n    namespace: '${ns}',\n  },\n});\n`,
+    `export default defineStack({\n  manifest: {\n    id: 'com.example.x',\n    namespace: '${ns}',\n  },\n});\n`,
   );
 
 const writeObject = (file: string, name: string) =>
