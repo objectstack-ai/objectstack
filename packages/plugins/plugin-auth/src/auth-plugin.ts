@@ -3186,7 +3186,8 @@ export class AuthPlugin implements Plugin {
       } else {
         ctx.logger.warn(
           'MCP server is enabled but the OAuth track is NOT live (base URL fails the OAuth 2.1 TLS rule — ' +
-            'https required, loopback exempt). /api/v1/mcp stays API-key-only; no OAuth metadata is advertised.',
+            'https required, loopback exempt; an operator may explicitly accept insecure HTTP with ' +
+            'OS_ALLOW_INSECURE_OAUTH_HTTP=true). /api/v1/mcp stays API-key-only; no OAuth metadata is advertised.',
         );
       }
     }

@@ -411,9 +411,10 @@ export function assertScimAdminCoherence(pluginConfig?: Partial<AuthPluginConfig
 /**
  * OAuth 2.1 §1.5 transport rule for the MCP OAuth track: authorization/token
  * exchanges and bearer usage require TLS, with loopback exempt (dev). A
- * plain-HTTP non-loopback deployment keeps the API-key track only — the
- * OAuth surface (protected-resource metadata, bearer acceptance) stays dark,
- * fail-closed, and is logged once at mount time.
+ * plain-HTTP non-loopback deployment keeps the API-key track only unless the
+ * operator explicitly accepts that transport risk with
+ * `OS_ALLOW_INSECURE_OAUTH_HTTP=true`. The escape hatch is default-off and
+ * only the exact value `true` enables it; misspellings stay fail-closed.
  */
 export function isOAuthEligibleBaseUrl(url: string): boolean {
   try {
@@ -421,13 +422,15 @@ export function isOAuthEligibleBaseUrl(url: string): boolean {
     if (u.protocol === 'https:') return true;
     if (u.protocol !== 'http:') return false;
     const host = u.hostname.toLowerCase();
-    return (
+    const loopback =
       host === 'localhost' ||
       host === '127.0.0.1' ||
       host === '[::1]' ||
       host === '::1' ||
-      host.endsWith('.localhost')
-    );
+      host.endsWith('.localhost');
+    if (loopback) return true;
+    const env = (globalThis as any)?.process?.env as Record<string, string | undefined> | undefined;
+    return env?.OS_ALLOW_INSECURE_OAUTH_HTTP === 'true';
   } catch {
     return false;
   }

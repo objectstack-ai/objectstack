@@ -39,7 +39,12 @@ vi.mock('@better-auth/oauth-provider', () => ({
 import { betterAuth } from 'better-auth';
 import { oauthProvider } from '@better-auth/oauth-provider';
 
-const ENV_KEYS = ['OS_MCP_SERVER_ENABLED', 'OS_OIDC_PROVIDER_ENABLED', 'OS_OIDC_DCR_ENABLED'] as const;
+const ENV_KEYS = [
+  'OS_MCP_SERVER_ENABLED',
+  'OS_OIDC_PROVIDER_ENABLED',
+  'OS_OIDC_DCR_ENABLED',
+  'OS_ALLOW_INSECURE_OAUTH_HTTP',
+] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -70,6 +75,17 @@ describe('isOAuthEligibleBaseUrl (OAuth 2.1 TLS rule, loopback exempt)', () => {
     ['not a url', false],
   ])('%s → %s', (url, expected) => {
     expect(isOAuthEligibleBaseUrl(url)).toBe(expected);
+  });
+
+  it('allows non-loopback HTTP only for the exact explicit escape-hatch value', () => {
+    for (const refused of ['false', '1', 'yes', 'tru', 'TRUE', ' true ']) {
+      process.env.OS_ALLOW_INSECURE_OAUTH_HTTP = refused;
+      expect(isOAuthEligibleBaseUrl('http://intranet.corp:3000')).toBe(false);
+    }
+    process.env.OS_ALLOW_INSECURE_OAUTH_HTTP = 'true';
+    expect(isOAuthEligibleBaseUrl('http://intranet.corp:3000')).toBe(true);
+    expect(isOAuthEligibleBaseUrl('http://10.0.0.5')).toBe(true);
+    expect(isOAuthEligibleBaseUrl('ftp://intranet.corp')).toBe(false);
   });
 });
 
@@ -164,6 +180,19 @@ describe('canonical issuer / resource URLs', () => {
     });
     expect(m.isMcpOAuthEnabled()).toBe(false);
     expect(m.getMcpResourceMetadataUrl()).toBeNull();
+  });
+
+  it('advertises the metadata URL on intranet HTTP only after explicit operator opt-in', () => {
+    process.env.OS_MCP_SERVER_ENABLED = 'true';
+    process.env.OS_ALLOW_INSECURE_OAUTH_HTTP = 'true';
+    const m = new AuthManager({
+      secret: 'test-secret-at-least-32-chars-long',
+      baseUrl: 'http://intranet.corp:3000',
+    });
+    expect(m.isMcpOAuthEnabled()).toBe(true);
+    expect(m.getMcpResourceMetadataUrl()).toBe(
+      'http://intranet.corp:3000/.well-known/oauth-protected-resource',
+    );
   });
 
   it('advertises the metadata URL when MCP + AS are on over an eligible origin', () => {
