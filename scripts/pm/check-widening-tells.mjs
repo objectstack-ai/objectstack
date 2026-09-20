@@ -3107,11 +3107,13 @@ export function closedSetMembership(side, index) {
  * worth. The behaviour is pinned where it is now decided: by `extract` and
  * `exclude` being absent from {@link NON_SET_CALLEE_NAMES}.
  *
- * ⛔ The loop terminates on the head's own LENGTH: every transparent step
- * replaces the head with the text left of that call, which is strictly shorter
- * because the callee and its paren are gone. The guard below states that as an
- * invariant rather than trusting it, and answers `unread` — the loud direction —
- * if it is ever false.
+ * ⛔ The loop terminates STRUCTURALLY, and it is written that way on purpose. A
+ * transparent step replaces the head with `before`, the slice ending where a
+ * match begins that runs to the head's LAST character and spans at least a
+ * callee and its paren — so every pass drops two characters or more, and an
+ * empty head matches nothing and answers `unread`. ⛔ A length guard here would
+ * be a line no head can reach and no case can pin, which is the shape this
+ * round exists to stop adding.
  *
  * @param {string} head — a `[` frame's `head`, the text left of the delimiter
  * @returns {'declared'|'refused'|'unread'}
@@ -3130,7 +3132,6 @@ function arrayHeadMembership(head) {
       // it does not know leaves the tell where it was.
       return NON_SET_CALLEE_NAMES.includes(call.callee) ? 'refused' : 'unread';
     }
-    if (call.before.length >= text.length) return 'unread';
     text = call.before;
   }
 }
