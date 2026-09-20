@@ -428,8 +428,7 @@ alias tax on every API.
 > it is a **guard** rather than a structural impossibility:
 > `packages/runtime/src/security/resolve-execution-context.ts#extractJwtBearer` refuses an
 > `osk_`-prefixed bearer and anything that is not a three-segment JWS, so no OAuth provenance is
-> ever derived from a key. ⚠️ That guard IS this decision's enforcement on that door: loosening it
-> would make an API key an agent principal without anyone editing this record.
+> ever derived from a key.
 >
 > **What this changes.** Nothing in the runtime — the behaviour above IS the decided behaviour.
 > What changes is the DECLARATION: rule 4's 「every write」 is narrowed to agent principals in the
