@@ -1177,9 +1177,10 @@
  * hunk. Every one of the four forms puts its members inside a `[`, so
  * {@link closedSetMembership} asks that `[`'s head which construct opened it
  * and answers in three states — `declared` (one of the closed-set
- * constructors), `refused` (another call's argument list) and `unread`
- * (everything else). ⛔ Only `refused` takes a row away, and only on positive,
- * hunk-local evidence, which is the shape of every decline in this file.
+ * constructors, BY NAME and under any receiver), `refused` (a call that closes
+ * no set and derives none) and `unread` (everything else). ⛔ Only `refused`
+ * takes a row away, and only on positive, hunk-local evidence, which is the
+ * shape of every decline in this file.
  *
  * ⭐ `unread` is the answer that keeps this repair honest, and it is the COMMON
  * one. An opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array
@@ -1210,15 +1211,66 @@
  * has not yet had occasion to exercise, not a refusal aimed at work already
  * done.
  *
+ * ## ⛔ THE CENSUS ABOVE COULD NOT HAVE SEEN THE HOLE IT WAS QUOTED AGAINST
+ *
+ * The first cut of this reading asked the bracket head for a LITERAL `z.enum(`,
+ * while the refusal arm matched `.enum(` as an ordinary call. So Prettier's
+ * chain wrap — `z` on one line, `  .enum([` on the next — read `refused`, and a
+ * member added under it raised NO row: not a member row, and not an opener row
+ * either, because the opener test wants `z.` and the wrap does not carry it.
+ * The set went fully dark. Measured on a synthetic member under that spelling:
+ * exit 4 on the previous instrument, exit 0 on the first cut. The same hole
+ * swallowed `z.enum<Mode>([`, `zod.enum([` and `Full.extract([`.
+ *
+ * ⚠️ AND THE CENSUS READ 0 BEGIN-FIRING OVER A POPULATION THE DEFECT DOES NOT
+ * LIVE IN. Every chain-wrapped constructor site in this tree — 13 line-initial
+ * `.enum([` against a control of 741 one-line `z.enum([`, and 16 against 906
+ * across all four forms — carries a ONE-LINE member list: checked site by site,
+ * 0 of the 16 is followed by a bare element. So no commit in that window ever
+ * added a member under the spelling, and a tree census cannot reach it either.
+ * A population in which the failure cannot occur is not evidence of its
+ * absence, and a count taken over one says nothing it can be quoted for. The
+ * second round therefore measures THREE populations, and the containing one is
+ * synthetic by construction:
+ *
+ *   ① the same commit window, both instruments — 349 commits, 3,850 file diffs,
+ *     774 rows each side, 0 declined, 0 begun, 0 row changing CLASS, 166
+ *     changing only their sentence's wording. The repair moves no historical
+ *     verdict, which is the same fact as "this census cannot contain it".
+ *   ② the tree, both instruments — identical, for the same reason.
+ *   ③ ⭐ THE CONTAINING ONE. Every bare element the reader calls a member today
+ *     (1,354 in `packages/spec/src/**`, each rebuilt as a one-member addition
+ *     with a 40-line context window), with its constructor RE-SPELLED the way a
+ *     formatter or an author may spell it. Per spelling, on the first cut:
+ *     1,179 of 1,354 went SILENT and not one read as measured. On this reading:
+ *     1,354 rows, 1,223 measured, 0 silent — the same answer as the un-re-spelled
+ *     control, for chain-wrapped, generic (`<Mode>`) and aliased (`zod.`) alike.
+ *     A sub-enum (`Full.extract([`) fires all 1,354, all as NOT MEASURED, which
+ *     is the honest verdict for a form the doctrine does not name. ⛔ And the
+ *     lit controls that make the census a reading rather than a hope: re-spelt
+ *     to `z.tuple([` or `new Set([`, the same 1,179 stay silent on BOTH
+ *     instruments — the silence is bought by the construct, never by the
+ *     harness.
+ *
  * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
- * genuine closed set CONSTRUCTED THROUGH A CALL — `z.enum(Object.keys(X))` has
- * no per-member line at all, but `new Set([…])` spread into an enum, or an
- * array built inside `Object.freeze([…])` and then handed to `z.enum`, does —
- * and its members now decline. ⛔ That is not zero risk. What still catches
- * one: the enum's own opener line, which fires as an opener row; and
+ * genuine closed set CONSTRUCTED THROUGH A CALL. `z.enum(Object.keys(X))` has
+ * no per-member line at all, but three shapes do have one and still decline —
+ * `new Set([…])` spread into an enum, an array built inside `Object.freeze([…])`
+ * and handed to `z.enum`, and the FOURTH FORM WRAPPED, `Object.freeze([… ] as
+ * const)`, whose `as const` sits below its members exactly as the bare form's
+ * does while `freeze` closes no set. ⛔ That is not zero risk, and the last of
+ * the three is the one a reader is most likely to write by accident. It is
+ * pinned as a STATED silence rather than left to be rediscovered. What still
+ * catches one: the enum's own opener line, which fires as an opener row; and
  * `check:authorable-surface` plus `check:api-surface` on anything the resulting
  * set publishes. Measured over the window above: 0 of the 12 declines is such a
- * set.
+ * set, and `Object.freeze` accounts for 65 of the tree's 92 refusals — 9 of
+ * which this window exercises, all near-miss key spellings a schema REFUSES.
+ *
+ * ⛔ What is NOT in that list any more, because the vocabulary is read by NAME:
+ * the receiver and the type arguments. `z.enum(`, `zod.enum(`, a chain-wrapped
+ * `  .enum(` and `z.enum<Mode>(` are one form spelled four ways, and the
+ * formatter decides which one tomorrow's file carries.
  *
  * ## The shape this gate keeps firing on, and what to do about it — ruling D′
  *
@@ -6659,7 +6711,7 @@ export function selfTest() {
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
       "#19099's walk saying when it STOPPED READING — the whole shown stack beside a flag raised on a possible regex literal, a type-blind pop and an unterminated string, with a lone slash read as the division it is, a hunk that BEGINS inside a JSDoc read rather than guessed at, each of the reset's three guards pinned against the frames it protects, the apostrophe residual pinned in the direction it fails, and the reset reaching `inParameterList` so an `@example` arrow cannot swallow the key line behind it, " +
-      "#19384's bare element that is not a member until the hunk shows one of the four forms above it — the card's three legs, where A and B now agree because the verdict is no longer keyed on line layout and C still fires, PR #19314's own seven discriminants silent beside the control that is the finding, and the loud direction pinned five ways over: an opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array, a property-valued array, a guessed stack and a removed element that buys no budget, " +
+      "#19384's bare element that is not a member until the hunk shows one of the four forms above it — the card's three legs, where A and B now agree because the verdict is no longer keyed on line layout and C still fires, PR #19314's own seven discriminants silent beside the control that is the finding, and the loud direction pinned: an opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array, a property-valued array, a guessed stack, and the removed element that buys no budget with its removal and its addition in ONE change block beside the control that DOES pay — the four spellings of one form (chain-wrapped, generic, aliased, plain) each reading as measured under any receiver with `parseenum(` as the whole-token control, a sub-enum builder firing rather than declining while a sibling method is still refused, the `[`-only guard pinned on the `{` a call opened where alone it can be swallowed, the grouping paren that is not a call, the constructor that must be the delimiter's OWN, the NOT-MEASURED sentence claiming only what was not measured, and `Object.freeze([… ] as const)` pinned as the residual STATED silence, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
