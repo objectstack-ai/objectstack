@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   annotateEffectiveApiOperations,
+  foldWildcardSuperUser,
   seedSuperUserRestrictedObjects,
   type ApiExposureSchemaLike,
 } from './current-user-endpoints.js';
@@ -189,10 +190,30 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
     expect(objects.open_obj).toBeUndefined();
   });
 
-  it('does not seed for a viewAll-only wildcard (avoids flipping check() to explicit deny)', () => {
+  // [#18990] INVERTED on purpose. This used to read "does not seed for a
+  // viewAll-only wildcard (avoids flipping check() to explicit deny)". The
+  // ruling on #18990 (batch #159 item 1, letter A) settles that the flip is the
+  // truth for this class, not an overreach: the seed only touches objects with
+  // no explicit entry, and there a viewAll-only principal really can only read.
+  it('seeds for a viewAll-only wildcard too — the read bypass is what admits a principal', () => {
     const objects: Record<string, any> = { '*': { viewAllRecords: true } }; // no modifyAllRecords
     seedSuperUserRestrictedObjects(objects, schemas);
+    expect(objects.widget).toEqual({ allowCreate: false, allowRead: false, allowEdit: false, allowDelete: false });
+    expect(objects.locked).toBeDefined();
+    // the export axis withholds `export` here (no `allowExport` on the
+    // wildcard), which is its own reason to seed the unrestricted object
+    expect(objects.open_obj).toBeDefined();
+  });
+
+  // The other half of that predicate, and the reason it is the READ BYPASS
+  // rather than "any wildcard": a plain wildcard grant carries no bypass bit,
+  // `foldWildcardSuperUser` pulls nothing true for it, and a seeded entry would
+  // therefore be an all-false claim with no server behaviour behind it.
+  it('does not seed for a wildcard carrying neither bypass bit', () => {
+    const objects: Record<string, any> = { '*': { allowRead: true, allowEdit: true } };
+    seedSuperUserRestrictedObjects(objects, schemas);
     expect(objects.widget).toBeUndefined();
+    expect(objects.locked).toBeUndefined();
   });
 
   it('does not clobber an object already present in the map', () => {
@@ -277,12 +298,42 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
       expect(objects.crm_lead).toBeUndefined();
     });
 
-    it('does not reach a viewAll-only principal (the seed guard is unchanged)', () => {
-      // Materialising a `false` entry for a caller the fold does NOT pull true
-      // would flip the client's `check()` from default-allow to explicit deny.
-      // #18931 widens WHICH schemas are considered, never WHICH principals.
-      const objects: Record<string, any> = { '*': { viewAllRecords: true } };
+    // [#18990] INVERTED on purpose, under the ruling on #18990 (batch #159
+    // item 1, letter A). This case read "does not reach a viewAll-only
+    // principal (the seed guard is unchanged)" and asserted `toBeUndefined`;
+    // #18931 deliberately widened WHICH schemas are considered and left WHICH
+    // principals alone, pinning that boundary while saying in the same breath
+    // that the pin was not a ruling that the silence was correct. It is that
+    // ruling that now says otherwise, so the pin moves with it.
+    it('reaches a viewAll-only principal: read folded true, writes explicitly false', () => {
+      const objects: Record<string, any> = { '*': { viewAllRecords: true } }; // no modifyAllRecords
       seedSuperUserRestrictedObjects(objects, unrestricted);
+      foldWildcardSuperUser(objects);
+      annotateEffectiveApiOperations(objects, (name) => unrestricted.find((s) => s.name === name));
+
+      // The four affordances, each pinned — the entry's VALUE is the whole
+      // point of materialising it, so "an entry exists" is not the assertion.
+      expect(objects.crm_lead).toBeDefined();
+      expect(objects.crm_lead.allowRead).toBe(true);   // the wildcard read bypass, folded
+      expect(objects.crm_lead.allowEdit).toBe(false);  // …and the write bits the fold leaves alone
+      expect(objects.crm_lead.allowCreate).toBe(false);
+      expect(objects.crm_lead.allowDelete).toBe(false);
+      // The export axis withholds `export` for this principal exactly as it
+      // does for the modify-all class above — one predicate, both classes.
+      expect(objects.crm_lead.apiOperations).not.toContain('export');
+      expect(objects.crm_lead.apiOperations).toEqual(
+        ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+      );
+    });
+
+    it('stays silent for a viewAll-only principal once it really may export', () => {
+      // The ruling's own carve-out — "skip only an unrestricted object whose
+      // export stays allowed" — is the SAME skip the modify-all control above
+      // pins, reached through the same predicate and not a second one.
+      const objects: Record<string, any> = { '*': { viewAllRecords: true, allowExport: true } };
+      seedSuperUserRestrictedObjects(objects, unrestricted);
+      foldWildcardSuperUser(objects);
+      annotateEffectiveApiOperations(objects, (name) => unrestricted.find((s) => s.name === name));
       expect(objects.crm_lead).toBeUndefined();
     });
   });
