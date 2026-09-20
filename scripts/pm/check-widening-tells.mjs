@@ -1038,17 +1038,29 @@
  * `scripts/pm/git-history.mjs`, which AGENTS.md routes windowed history through
  * for exactly this reason) and EXCLUDE every boundary.
  *
+ * ⚠️ AND THE READ PATH IS PART OF THE HORIZON, which cost this paragraph a
+ * round of its own. A census must call {@link wideningTells} with
+ * {@link headBlobSource} live — the path the gate itself takes. Reading each
+ * file through {@link tellsInFile} alone drops {@link ledgerRowLicences}, so
+ * every #17300 ledger row tells and T2 inflates; handing it a `readSource` that
+ * answers `null` drops #18702's file-local factory resolution, so T1 deflates.
+ * ⛔ Worse, BOTH failures are silent. `ROOT` here is derived from
+ * `import.meta.url`, so a copy of this module imported from outside a git
+ * worktree makes every `git cat-file` fail and every blob read answer `null`
+ * with nothing raised. ⇒ a census asserts its own resolution before it counts —
+ * probe one known blob, and refuse to report if it comes back empty.
+ *
  * CORPUS, on that discipline — this clone IS shallow, with ONE boundary
  * (`ae8edd2c4f`, 2026-08-31), excluded: 436 non-merge commits touching
  * `packages/spec/src` are reachable, 435 after the exclusion, giving **1,149
- * file diffs** of non-test `.ts`. The version of this file at the branch's
- * merge base and the version in it were imported into one process and run row
- * for row over all of them: **722 rows against 722 rows, 0 differing commits**
- * (T2 368, T1 265, T4 89). ⇒ this change moves no tell anywhere on the corpus.
- * The two firing-only readers agree as well — `enclosingDelimiter` and
- * `inParameterList` over **84,924 side-lines** (2,298 sides), **0
- * disagreements** each. ⛔ Answer-identical, ⛔ not byte-identical: both
- * bodies changed.
+ * file diffs** of non-test `.ts`, of which **1,133 head blobs resolved** and 22
+ * definitions were reported unresolved by name. The version of this file at the
+ * branch's merge base and the version in it were run row for row over all of
+ * them through `wideningTells`: **484 rows against 484 rows, 0 differing
+ * commits** (T2 125, T1 270, T4 89). ⇒ this change moves no tell anywhere on
+ * the corpus. The two firing-only readers agree as well — `enclosingDelimiter`
+ * and `inParameterList` over **84,924 side-lines**, **0 disagreements** each.
+ * ⛔ Answer-identical, ⛔ not byte-identical: both bodies changed.
  *
  * The reading lexes no regex literal and pops type-blind. Both limits are free
  * while every caller only makes a tell FIRE — a guessed stack buys a false tell
@@ -1080,14 +1092,15 @@
  *     with no second `/` left on its line cannot open one; it pushes and pops
  *     nothing and the stack is as correct as it was.
  *
- * ⚠️ THE RESIDUAL. This paragraph has now been wrong three times, each time by
+ * ⚠️ THE RESIDUAL. This paragraph has been wrong four times, every time by
  * asserting a RATE, so it is written to be checkable rather than persuasive:
- * the population is the **265 T1 rows this gate REPORTS** on the corpus above
- * — one boundary commit excluded, without which the count is off by more than
- * an order of magnitude and every trigger below reads as common.
+ * the population is the **270 T1 rows this gate REPORTS** on the corpus above
+ * — one boundary commit excluded and the gate's own read path used, without
+ * which the count moves in both directions at once and every trigger below
+ * reads as common.
  *
  * ⭐ ONE trigger OCCURS, and it is the apostrophe. The walk is unreadable at
- * **2 of those 265 rows (0.8%)**, and both are an APOSTROPHE IN JSDOC PROSE in
+ * **2 of those 270 rows (0.7%)**, and both are an APOSTROPHE IN JSDOC PROSE in
  * a hunk that begins inside the comment — `automation/approval.zod.ts`
  * (`Entra's`) and `ai/solution-blueprint.zod.ts` (`object's`). Read as code an
  * apostrophe opens a string literal that never closes on its line, so the walk
@@ -1105,14 +1118,16 @@
  *   • a `/` with another `/` left on its line, which MAY open a regex literal —
  *     **0 rows**. ⚠️ ⛔ Do not read that zero as "regex literals are rare here":
  *     they are common, and the flag is deliberately conservative about them.
- *     It says only that none sat in the leading context the walk crossed for a
- *     reported T1 row in this window.
+ *     It says only that none sat on a line this walk CROSSED before a reported
+ *     T1 row in this window — and the lines it crosses are every kind the hunk
+ *     shows before that row, ⛔ not the leading context alone.
  *   • a closer whose type does not match the opener it popped — **0 rows**.
  *   • a `*\/` this walk cannot explain — **0 rows**.
  *
  * ⇒ Nothing is silenced by any of them today: no reader suppresses on the flag.
- * The number a future suppressing reader needs is the 0.8%, and it should be
- * re-measured on that day rather than quoted from here.
+ * The number a future suppressing reader needs is the 0.7%, and it should be
+ * re-measured on that day rather than quoted from here — on the gate's own read
+ * path, with its blob resolution asserted first.
  *
  * ## The shape this gate keeps firing on, and what to do about it — ruling D′
  *
@@ -2325,8 +2340,8 @@ function topLevelMembers(s, open, close) {
  * disclosure naming only the division operator — which raises nothing — while
  * leaving ` *\/` unnamed is how the first cut of this flag regressed a landed
  * #18234 decline, and it did so in the commonest hunk shape there is: a hunk
- * that BEGINS inside a comment is **34 of the 265 T1 rows** this gate reports
- * on the corpus in the header (12.8%), against **2** rows for the one residual
+ * that BEGINS inside a comment is **35 of the 270 T1 rows** this gate reports
+ * on the corpus in the header (13.0%), against **2** rows for the one residual
  * that still raises the flag. ⇒ the undisclosed trigger outnumbered the
  * disclosed one by more than an order of magnitude, which is the whole lesson.
  *
@@ -2335,9 +2350,11 @@ function topLevelMembers(s, open, close) {
  * ANSWER it read before this flag existed. ⛔ Not the same BYTES — this
  * function's body and `enclosingDelimiter`'s both changed — and the claim is
  * only worth what it is measured over: `enclosingDelimiter` and
- * `inParameterList` agree on **84,924 side-lines** (2,298 sides of the 1,149
- * file diffs the header's corpus names, one graft boundary excluded), **0
- * disagreements** each. ⛔ Fixing the stack instead — lexing regex literals
+ * `inParameterList` agree on **84,924 side-lines** over the 1,149 file diffs
+ * the header's corpus names, one graft boundary excluded, **0 disagreements**
+ * each. That is 2,298 sides counted as two per file diff — 1,939 of them
+ * non-empty, the other 359 being the absent side of an added or deleted file.
+ * ⛔ Fixing the stack instead — lexing regex literals
  * in full — was deliberately not attempted: telling a regex literal from a
  * division at every position needs the preceding TOKEN, which is one more guess
  * in a reader whose whole safety property is that it makes none. The two cheap,
@@ -2399,7 +2416,7 @@ export function enclosingDelimiters(side, index) {
       // hunk's scan starts at the hunk's own first line, so a doc comment that
       // opened above it is invisible and its body was being read as code —
       // which is what raised the flag on ` */` before this reset existed, in
-      // the commonest hunk shape there is — 34 of the 265 T1 rows this gate
+      // the commonest hunk shape there is — 35 of the 270 T1 rows this gate
       // reports on the header's corpus begin inside one. ⭐ It needs no regex
       // lexer and it is not a heuristic: outside a string and outside a comment,
       // `*/` is not valid TypeScript, so the only reading it has is a
