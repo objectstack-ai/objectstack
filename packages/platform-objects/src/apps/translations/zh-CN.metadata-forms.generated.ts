@@ -781,8 +781,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "页面区块与组件"
       },
       interface: {
-        label: "Interface (list pages)",
-        description: "Interface mode (Airtable parity): the page defines its own data surface directly — columns, filters, visualizations and toolbar — no inheriting from a separate view."
+        label: "Interface（列表页）",
+        description: "Interface 模式（对标 Airtable）：页面直接定义自己的数据展现面——列、筛选、可视化与工具栏——不再继承独立视图。"
       },
       advanced: {
         label: "高级设置",
@@ -852,24 +852,24 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "组件"
       },
       interfaceConfig: {
-        label: "Interface Config",
-        helpText: "The page IS the view: source picks the object, columns/filterBy are defined directly here; appearance.allowedVisualizations whitelists renderers (one entry = locked); userActions toggles the toolbar."
+        label: "Interface 配置",
+        helpText: "页面本身就是视图：source 选择对象，columns/filterBy 直接在这里定义；appearance.allowedVisualizations 限定可用的渲染器（只有一项即锁定）；userActions 控制工具栏开关。"
       },
       "interfaceConfig.source": {
-        label: "Source",
-        helpText: "Object this page reads from"
+        label: "数据来源",
+        helpText: "此页面读取数据的对象"
       },
       "interfaceConfig.columns": {
-        label: "Columns",
-        helpText: "Columns to show — defined directly on the page (blank = all object fields)"
+        label: "列",
+        helpText: "要展示的列——直接在页面上定义（留空表示对象的全部字段）"
       },
       "interfaceConfig.filterBy": {
-        label: "Filter By",
-        helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+        label: "筛选条件",
+        helpText: "页面始终生效的基础筛选——与列表工具栏相同的可视化构建器。"
       },
       "interfaceConfig.sort": {
-        label: "Sort",
-        helpText: "Default sort order for the page, defined directly on the page."
+        label: "排序",
+        helpText: "页面的默认排序方式，直接在页面上定义。"
       },
       "interfaceConfig.sort.field": {
         label: "字段"
@@ -878,40 +878,40 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "排序方向"
       },
       "interfaceConfig.levels": {
-        label: "Levels",
-        helpText: "Hierarchy levels to display (tree-like sources)"
+        label: "层级",
+        helpText: "要展示的层级（树形数据源）"
       },
       "interfaceConfig.appearance": {
-        label: "Appearance",
-        helpText: "Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility"
+        label: "外观",
+        helpText: "允许的可视化（Grid / Kanban / Calendar / …）与描述是否显示"
       },
       "interfaceConfig.userFilters": {
-        label: "User Filters",
-        helpText: "End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field). None removes the config."
+        label: "用户筛选器",
+        helpText: "终端用户筛选栏：None（不显示筛选栏）/ Tabs（命名预设）/ Dropdown（按字段）。None 会移除该配置。"
       },
       "interfaceConfig.userActions": {
-        label: "User Actions",
-        helpText: "Toolbar toggles (search, sort, filter, row height)"
+        label: "用户操作",
+        helpText: "工具栏开关（搜索、排序、筛选、行高）"
       },
       "interfaceConfig.addRecord": {
-        label: "Add Record",
-        helpText: "Add-record entry point"
+        label: "添加记录",
+        helpText: "添加记录的入口"
       },
       "interfaceConfig.buttons": {
-        label: "Buttons",
-        helpText: "Toolbar buttons — pick from this object's actions"
+        label: "按钮",
+        helpText: "工具栏按钮——从该对象的操作中选择"
       },
       "interfaceConfig.recordAction": {
-        label: "Record Action",
-        helpText: "How clicking a record opens its detail"
+        label: "记录操作",
+        helpText: "点击记录时如何打开其详情"
       },
       "interfaceConfig.showRecordCount": {
-        label: "Show Record Count",
-        helpText: "Show the record count bar"
+        label: "显示记录数",
+        helpText: "显示记录数栏"
       },
       "interfaceConfig.allowPrinting": {
-        label: "Allow Printing",
-        helpText: "Allow users to print this page"
+        label: "允许打印",
+        helpText: "允许用户打印此页面"
       },
       isDefault: {
         label: "默认",
