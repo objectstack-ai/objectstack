@@ -5,7 +5,7 @@ import { z } from 'zod';
 /**
  * The `__proto__` pre-parse guard family — two wrappers, one mechanism.
  *
- * ## The shared defect (objectstack#17852, objectstack#19151)
+ * ## The shared defect (#17852, #19151)
  *
  * Zod v4 has TWO open-key branches — the ones that accept keys no shape
  * declares — and BOTH skip a `__proto__` own key before anything author-facing
@@ -130,7 +130,7 @@ function refuseProtoOwnKey<Schema extends z.ZodType>(schema: Schema, message: st
 /**
  * `refuseRecordProtoKey` — a pre-parse guard that refuses a `__proto__` own
  * key on the RAW input, before `z.record()` ever gets to run its key schema
- * (objectstack#17852; the module docblock above is the authority on why).
+ * (#17852; the module docblock above is the authority on why).
  *
  * @param schema - the `z.record(...)` (or any schema) to guard.
  * @param slotLabel - the authored surface name, echoed in the refusal so a
@@ -153,7 +153,7 @@ export function refuseRecordProtoKey<Schema extends z.ZodType>(
 /**
  * `refuseCatchallProtoKey` — the same pre-parse guard for the OTHER open-key
  * branch: an object whose own top-level keys are author-named and admitted by
- * `.catchall(...)` (objectstack#19151).
+ * `.catchall(...)` (#19151).
  *
  * A sibling of {@link refuseRecordProtoKey} rather than a reuse of it, for one
  * reason: the refusal text names the parser that would otherwise drop the key,

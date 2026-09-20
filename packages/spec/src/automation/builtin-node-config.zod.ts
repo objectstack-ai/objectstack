@@ -950,7 +950,7 @@ export const AssignmentConfigSchema = lazySchema(() => refuseCatchallProtoKey(z.
   // Open by design: the bare legacy `{ <variable>: <value> }` config and any
   // top-level key an author names live here.
   .catchall(z.unknown()),
-  // [objectstack#19151] `__proto__` ONLY, and for the same structural reason
+  // [#19151] `__proto__` ONLY, and for the same structural reason
   // the `assignments` slot above refuses it: `handleCatchall`'s
   // `if (key === "__proto__") continue;` runs above `_catchall.run`, so no
   // catchall schema can ever see the key. `constructor`, `prototype` and
