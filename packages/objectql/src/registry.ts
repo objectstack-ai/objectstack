@@ -1430,7 +1430,7 @@ function withDeclaredFunctionEntries(manifest: ObjectStackManifest): ObjectStack
     }
   }
   if (!rewrote) return manifest;
-  return { ...(manifest as Record<string, unknown>), functions: declared } as ObjectStackManifest;
+  return { ...manifest, functions: declared } as ObjectStackManifest;
 }
 
 /**
