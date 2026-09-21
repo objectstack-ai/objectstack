@@ -84,8 +84,8 @@ import { z } from 'zod';
  * ⚠️ With ONE stated exception, so the sentence above is not read as a promise
  * it cannot keep. The two halves ask different questions and are answered by
  * different faces of the shared resolver: the history row is STAMPED (`who is
- * this row about` — the platform stamp column wins there, by the #8778 /
- * cloud#1395 ruling), while the run's acting organization is a WALL reading
+ * this row about` — the platform stamp column wins there, by the cloud#1395
+ * ruling), while the run's acting organization is a WALL reading
  * (`what is this row scoped by`, which never consults that column). They give
  * the same answer on every object where the two coincide — every ordinary
  * object, because a stamp column is what makes them differ and exactly one

@@ -22,12 +22,12 @@
  * > SUBJECT record's organization; actor context is the fallback, never the
  * > primary.
  *
- * ⛔ The stamp-only divergence this resolver reads stays scope-pinned (#8778,
- * widened by name on cloud#1395): exactly THREE consumers are sanctioned —
- * audit stamping, the approval-row writer, and the automation-run recorder —
- * and no others. A fourth consumer needs its own maintainer ruling, exactly as
- * #8778 required. Sharing the implementation here does not open it: it closes
- * the excuse for a fourth copy.
+ * ⛔ The stamp-only divergence this resolver reads stays scope-pinned by the
+ * ruling quoted above, widened by name on cloud#1395: exactly THREE consumers
+ * are sanctioned — audit stamping, the approval-row writer, and the
+ * automation-run recorder — and no others. A fourth consumer needs its own
+ * maintainer ruling, exactly as the original scope-pin required. Sharing the
+ * implementation here does not open it: it closes the excuse for a fourth copy.
  *
  * ⭐ [#19054] The divergence is no longer AUTHORABLE. It used to be declared by
  * the `tenancy.organizationField` spec key, which every application could write
@@ -77,7 +77,7 @@ import { SystemFieldName } from '@objectstack/spec/system';
  *
  * ⛔ Adding a row is a PROTOCOL decision, not a convenience. Each row is an
  * object whose platform rows are stamped from somewhere other than its wall,
- * which is exactly the divergence the #8778 / cloud#1395 rulings scope-pinned;
+ * which is exactly the divergence the cloud#1395 ruling scope-pinned;
  * a new one needs its own ruling, the same bar a fourth consumer of the old key
  * needed. ⛔ And it is never a substitute for `tenancy.tenantField`: an object
  * whose tenant column genuinely is not `organization_id` declares that key,
@@ -191,7 +191,7 @@ export function createFieldPresenceProbe(
  *
  *  0. **A {@link PLATFORM_STAMP_ORGANIZATION_COLUMNS} row for this object,
  *     when the object really has that column.** The stamp-only divergence
- *     #8778's ruling introduced (option A; #8707's remaining half), carried
+ *     the stamp-only ruling introduced (option A), carried
  *     since protocol 18 by the platform-internal table above instead of the
  *     retired authorable `tenancy.organizationField` key. It answers "which
  *     column says who this row is ABOUT" — a different question from "what is
@@ -237,9 +237,10 @@ export function createFieldPresenceProbe(
  * the same conclusion through a heuristic is the same mistake with no gate on
  * it.
  *
- * `sys_api_key.active_organization_id` is reachable through limb 0 since
- * #8778 (it was the object that motivated the divergence). Its column is still
- * not — and must never become — the object's tenant-scope column:
+ * `sys_api_key.active_organization_id` is reachable through limb 0 since the
+ * stamp-only ruling (it was the object that motivated the divergence). Its
+ * column is still not — and must never become — the object's tenant-scope
+ * column:
  * `tenancy.tenantField` feeds `applyTenantScope` / `injectTenantOnInsert`, so
  * declaring it there would wall the credential table on an equality that
  * excludes NULL — every pre-#8287 key would vanish from its own owner's
@@ -341,8 +342,8 @@ function resolveOrganizationField(
   { objectName, readStampColumn }: { objectName: string | undefined; readStampColumn: boolean },
 ): string | null {
   if (!objectDef || typeof objectDef !== 'object') return null;
-  // Limb 0 — the platform's own stamp-only divergence (#8778, carried by
-  // `PLATFORM_STAMP_ORGANIZATION_COLUMNS` since #19054) wins over everything,
+  // Limb 0 — the platform's own stamp-only divergence, carried by
+  // `PLATFORM_STAMP_ORGANIZATION_COLUMNS` since #19054, wins over everything,
   // the ADR-0066 opt-out below included: see the precedence doc above. Reached
   // by the three sanctioned platform-row writers and by nobody else.
   if (readStampColumn && objectName !== undefined) {

@@ -45,7 +45,7 @@ export const SysApiKey = ObjectSchema.create({
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   // [#19054] The stamp-only organization declaration that used to sit here
-  // (`organizationField: 'active_organization_id'`, #8778 / #8707 remainder) is
+  // (`organizationField: 'active_organization_id'`, the stamp-only ruling) is
   // GONE from the authorable surface in protocol 18 (ADR-0049 enforce-or-remove;
   // maintainer ruling 2026-09-18, verbatim and untranslated:
   // 「organizationField 撤出可授权面 同意你的建议」).

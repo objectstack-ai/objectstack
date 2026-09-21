@@ -9969,8 +9969,8 @@ const dashboardWidgetChartConfigStructureRemoved: MetadataConversion = {
  * repository declared it exactly once, on `sys_api_key`, a table this platform
  * ships. An authorable key whose only real declaration is ours makes every
  * future piece of organization logic ask "what if somebody set this?" for a
- * divergence no sanctioned consumer would honour: the #8778 / cloud#1395
- * scope-pin allows exactly three readers, all of them platform-row writers.
+ * divergence no sanctioned consumer would honour: the cloud#1395 scope-pin
+ * allows exactly three readers, all of them platform-row writers.
  *
  * The divergence itself is NOT retired — only its authorability. It moves to
  * `@objectstack/metadata-core`'s `PLATFORM_STAMP_ORGANIZATION_COLUMNS`

@@ -629,7 +629,7 @@ const TENANCY_MODES_EXPLAINER =
  * ⛔ What does NOT come back with a new spelling: an application-declared
  * "stamp column" of any name. The retirement is the ADR-0049 answer to a key
  * whose only real declaration was ours; re-opening it needs its own maintainer
- * ruling, exactly as the #8778 scope-pin required of a fourth consumer.
+ * ruling, exactly as the original scope-pin required of a fourth consumer.
  *
  * @example Shared database, platform-default tenant column (organization_id)
  * {
