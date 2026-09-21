@@ -391,14 +391,33 @@ export interface ISecurityService {
    *
    * ⚠️ **One of those four axes has since left that arrangement: `objects`.**
    * Where {@link resolveEffectiveObjectPermissions} is available, take the
-   * `objects` axis from it instead of folding these sets. The caller-side
-   * most-permissive fold described above is not merely a second copy of that
-   * rule — it is measurably STRICTER than enforcement, because it treats `'*'`
-   * and named objects as independent keys and so never propagates a super-user
-   * grant into an entry another set denied (ADR-0124 D4). It remains correct,
-   * and remains the only route, for a service that predates that method: it is
-   * the FALLBACK on this axis, no longer the preferred path. The other three
-   * axes are unaffected and stay exactly as stated above.
+   * `objects` axis from it rather than folding these sets — and not merely to
+   * avoid a second copy of the rule. A caller-side fold cannot reach the same
+   * answer even done correctly, because the server's derivation reads object
+   * SCHEMAS that a holder of these sets does not have: `enable` (API exposure)
+   * for the restricted-object seed, `managedBy` / `userActions` for the
+   * managed-write clamp. It also parts company with
+   * `PermissionEvaluator.checkObjectPermission` on the wildcard — a
+   * most-permissive fold treats `'*'` and named objects as independent keys,
+   * so a super-user grant is never propagated into a named entry at all,
+   * whatever any set says about that object (ADR-0124 D4). ⛔ Read that as
+   * non-propagation, not as "deny wins": most-permissive has no deny.
+   *
+   * ⚠️ **When that method is ABSENT the fallback is scoped by CONSUMER CLASS,
+   * and the two arms are ⛔ not interchangeable.**
+   *  - A consumer that SERVES a projection of its own — the
+   *    `/auth/me/permissions` and `/me/apps` handlers — keeps the caller-side
+   *    fold described above. It is the behaviour they already ship, and they
+   *    own the place where the residual corrections are applied.
+   *  - A consumer whose only job is to POPULATE a permission map for something
+   *    else to answer from — the engine filling `EvalContext.permissions` —
+   *    ⛔ builds no fold. There a map that is merely close is
+   *    indistinguishable from a correct one at the point of use, so the
+   *    fallback is to pass nothing;
+   *    {@link resolveEffectiveObjectPermissions} states that arm for its own
+   *    consumers.
+   *
+   * The other three axes are unaffected and stay exactly as stated above.
    *
    * **Throws** on resolution failure, exactly as {@link resolvePermissionSetNames}
    * does; callers must fail CLOSED on a throw rather than reading it as "no sets".
@@ -456,11 +475,14 @@ export interface ISecurityService {
    * single rule with a measured history of being re-implemented and drifting
    * (#7608 / #7555 / #6334), and ADR-0124 D4 puts it on the server. This method
    * is that merged answer, so a consumer needing it asks instead of folding.
-   * That sibling's own paragraph on merge semantics carries the other half of
-   * this sentence: the `objects` axis now prefers this method, and the
-   * caller-side fold is the fallback for a service that predates it. ⛔ The two
-   * passages are one instruction, not two — a consumer that reads only one of
-   * them must not come away with a different rule.
+   * And it is not a fold anyone could write from those sets in any case: the
+   * derivation reads object schemas the set holder does not have (`enable` for
+   * the restricted-object seed, `managedBy` / `userActions` for the
+   * managed-write clamp), which is stated with the rest of the comparison in
+   * that sibling's own paragraph on merge semantics. That paragraph also
+   * carries the arm of the ABSENT case that does NOT apply here: a consumer
+   * that SERVES a projection of its own keeps its fold of those sets. The arm
+   * that applies to THIS method's consumers is under OPTIONAL below.
    *
    * **Entries, not verdicts.** Each value is the effective `allow*` +
    * super-user entry, NOT a per-verb boolean: the fold from entry to verdict
@@ -491,12 +513,17 @@ export interface ISecurityService {
    *
    * **OPTIONAL, and absence is a defined state — not a bug.** A security
    * service that predates this method omits it, and consumers feature-detect
-   * (`typeof svc.resolveEffectiveObjectPermissions === 'function'`). ⛔ The
-   * fallback for an absent method is NOT an empty map and NOT a locally merged
-   * one: a consumer that can no longer answer passes NOTHING, so the surface
-   * downstream refuses loudly rather than denying quietly — which is what
-   * `can()` already does when `EvalContext.permissions` is absent, and the
-   * reason it does it. Declaring the method optional is what makes that
+   * (`typeof svc.resolveEffectiveObjectPermissions === 'function'`). ⛔ For
+   * THIS method's consumer class — a caller that POPULATES a permission map
+   * for something else to answer from — the fallback is neither an empty map
+   * nor a locally merged one: it passes NOTHING, so the surface downstream
+   * refuses loudly rather than denying quietly — which is what `can()` already
+   * does when `EvalContext.permissions` is absent, and the reason it does it.
+   * ⚠️ A consumer that SERVES a projection of its own is in the OTHER class
+   * and keeps its existing fold of {@link resolvePermissionSetsForContext},
+   * where that arm is stated; the two arms are ⛔ not interchangeable, and a
+   * consumer picks by what it does with the map rather than by which paragraph
+   * it read first. Declaring the method optional is what makes that
    * degradation a property of the type rather than a promise in prose: the
    * unguarded call does not compile, so a consumer cannot skip the fallback by
    * accident.
