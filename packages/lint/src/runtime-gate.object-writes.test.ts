@@ -130,6 +130,16 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateReferenceIntegrity',
       'lintAutonumberFormats',
       'validateSecurityPosture', // #8310 — at this door before #4716
+      // [#19370] `security-role-word` joins this door, and NOT silently —
+      // which is the distinction this pin exists to draw. The maintainer
+      // ruling (batch #203 item 3, letter B) moved the vocabulary freeze from
+      // `CLI_ONLY` to `CLI_AND_RUNTIME` declaring the write type of all six
+      // collections it judges, `object` among them, so an object whose name,
+      // a field, an action or a field-group header carries the reserved word
+      // `role` is refused at the write door and not only by `os lint`.
+      // Written in here the same way #15254 wrote `validateReferenceIntegrity`
+      // in: a ruled join is a line in this list, a drift is a red test.
+      'validateSecurityRoleWord',
       'validateRuleCompilability',
       'validateRuleSchemaFormats',
     ]);
@@ -376,6 +386,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateReferenceIntegrity', // [#15254]
       'lintAutonumberFormats',
       'validateSecurityPosture',
+      'validateSecurityRoleWord', // [#19370] — see the roster pin above
       'validateRuleCompilability',
       'validateRuleSchemaFormats',
     ]);

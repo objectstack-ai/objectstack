@@ -1646,14 +1646,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `security-role-word` is NOT in this entry any more — that is what the
   // `validateSecurityRoleWord` entry below records. It judges six collections
   // (objects, fields, actions, permission sets, positions, apps — plus books),
-  // and `positions`/`apps` are neither carried by the per-write snapshot nor
-  // mapped in `TYPE_TO_STACK_KEY`, so declaring `permission`/`book` on a
-  // function that still contained it would have enforced ONE rule id for a
-  // strict subset of its collections: a door where a permission set named
-  // `role_manager` is refused and a position named `sales_role` walks through
-  // — the #7220 failure this table refuses to build, in either direction. The
-  // rule therefore stays behind WHOLE (#8310's explicit call), as its own
-  // entry.
+  // and when this entry crossed, `positions`/`apps` were neither carried by the
+  // per-write snapshot nor mapped in `TYPE_TO_STACK_KEY`; declaring
+  // `permission`/`book` on a function that still contained it would therefore
+  // have enforced ONE rule id for a strict subset of its collections — a door
+  // where a permission set named `role_manager` is refused and a position named
+  // `sales_role` walks through, the #7220 failure this table refuses to build
+  // in either direction. So it was split out and held back WHOLE (#8310's
+  // explicit call). [#19370] It has since crossed, also whole, on its own
+  // entry; the split is what let each half cross on its own evidence, and it
+  // stays split for that reason rather than being folded back.
   //
   // This entry remains the rest of the D7 block (14 rule ids) as ONE
   // registration, not a per-rule split: the baseline/candidate differential is
@@ -1671,36 +1673,55 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['seed', 'permission', 'book', 'object'],
     run: (stack) => validateSecurityPosture(stack),
   },
-  // [ADR-0090 D3 / #8310] The vocabulary freeze, split out of
+  // [ADR-0090 D3 / #8310 → #19370] The vocabulary freeze, split out of
   // `validateSecurityPosture` the day the rest of that block crossed the
   // runtime wall — so that it could stay behind WHOLE rather than cross for
   // three of the six collections it judges (#7220: one rule id must sit on ONE
-  // side of the wall). The split is a surface boundary, not taste: the rule's
-  // verdict and findings are byte-identical to before on every CLI command
-  // (both entries run on all three), and the runtime door does not run it for
-  // ANY type.
+  // side of the wall). It is now across, and across WHOLE: the `runtimeTypes`
+  // below name the write type of every one of those six collections, so there
+  // is no identifier the CLI refuses for D3 and the write door waves past.
   //
-  // The road to crossing is concrete and short, recorded here so the next
-  // seat prices it correctly: carry `positions`/`apps` in
-  // `RuntimeStackContext` + `CONTEXT_STACK_KEYS`, map both types in
-  // `TYPE_TO_STACK_KEY` (both are `allowRuntimeCreate: true`, so the writes
-  // are real), then declare `runtimeTypes: ['object', 'permission', 'book',
-  // 'position', 'app']` on THIS entry — all six collections in one edit, the
-  // #7220 discipline satisfied.
+  // ## Why this had to wait, and what actually unblocked it
+  //
+  // `position` and `app` are `allowRuntimeCreate: true` in
+  // `DEFAULT_METADATA_TYPE_REGISTRY` — Studio's app designer is a shipped
+  // tenant capability and REST `/meta` and an MCP/AI author reach the same
+  // door — so until this edit a position named `sales_role` was minted through
+  // the only entrance a tenant has while an object of that name was refused.
+  // The blocker was never the rule; it was that the gate builds NO snapshot for
+  // a type `TYPE_TO_STACK_KEY` does not map, so declaring the two types without
+  // mapping them would have been the #4449 wired-onto-nothing shape. Mapping
+  // them is the whole unblock.
+  //
+  // The road recorded here before it was walked also priced a third half —
+  // carry `positions`/`apps` in `RuntimeStackContext` + `CONTEXT_STACK_KEYS` —
+  // and that half is deliberately NOT taken. It was projected, not measured: a
+  // collection joins the CONTEXT because some rule RESOLVES REFERENCES INTO IT,
+  // and this rule resolves nothing. It judges each identifier and label on its
+  // own, so a position write's universe is the written position; a sibling's
+  // finding is produced byte-identically in both differential passes and
+  // cancels. The ⛔ and the full argument live on the two new rows of
+  // `TYPE_TO_STACK_KEY` in `runtime-gate.ts`, where the next seat will be
+  // standing when the question comes up again.
+  //
+  // ## What this changes for a tenant
+  //
+  // The refusal set GROWS: a runtime write of an object, permission set, book,
+  // position or app whose identifier or label carries the reserved word `role`
+  // is now refused with the 422 lint envelope instead of stored. The CLI's
+  // verdict is unchanged — both entries have always run on all three commands.
   {
     name: 'validateSecurityRoleWord',
     tier: 'gating',
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-security-posture.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason:
-      'P2 (#4463)/#8310: judges six collections (objects, fields, actions, permission sets, ' +
-      'positions, apps — plus books), and the per-write snapshot neither carries nor maps ' +
-      'positions/apps. Wiring it for the mapped types alone would enforce one rule id for three of ' +
-      'its six collections — the #7220 split (an object named sales_role refused while a position ' +
-      'named sales_role walks through). It crosses whole — positions/apps carried, mapped and ' +
-      'declared — or stays behind; it stays behind until that wiring exists.',
+    surfaces: CLI_AND_RUNTIME,
+    // All six collections, in one declaration: `object` covers the object's own
+    // name/label plus its fields, actions and field groups; the other four are
+    // one collection each. ⛔ Never a subset — that is the #7220 split this
+    // entry exists to have avoided.
+    runtimeTypes: ['object', 'permission', 'book', 'position', 'app'],
     run: (stack) => validateSecurityRoleWord(stack),
   },
   // ADR-0105 D6 — the org tree is a REPORTING dimension. An RLS policy or
