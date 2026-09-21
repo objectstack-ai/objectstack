@@ -6385,7 +6385,18 @@ export function selfTest() {
     ].join('\n'),
   };
   t("⚠️ THE OTHER DARK WIDENING IS A SHAPE GAP — a string-valued KEYED entry on an object literal answers `null` from `memberTellKind`, in both key spellings, so a new `AST_OPERATOR_MAP` key (the only way `VALID_AST_OPERATORS` widens today) raises 0 rows and never reaches a frame at all", tells(MAP_KEY_ENTRY).length === 0 && memberTellKind("  'newop': '$eq',", { onContractSource: true }) === null && memberTellKind("  newop: '$eq',", { onContractSource: true }) === null);
-  t('⛔ CONTROL — the identical `{` frame is LOUD, which is why it can never be the cause of that silence: a BARE element added inside it raises its T2 row with the NOT-MEASURED sentence, a zod-valued key inside one raises T1, and the two bare spellings both answer T2 on their own', tells(MAP_BARE_ELEMENT).length === 1 && tells(MAP_BARE_ELEMENT)[0]?.tell === 'T2' && says(tells(MAP_BARE_ELEMENT)[0]?.why, 'does not show it inside one of the four closed-set forms') && tells({ filename: 'packages/spec/src/data/filter.zod.ts', patch: patchOf(10, '+  newop: z.string(),') })[0]?.tell === 'T1' && memberTellKind("  'between',", { onContractSource: true }) === 'T2' && memberTellKind('  "quoted",', { onContractSource: true }) === 'T2');
+  const MAP_ZOD_VALUED_KEY = {
+    filename: 'packages/spec/src/data/filter.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -2036,4 +2036,5 @@',
+      ' const Shape = z.object({',
+      '   a: z.string(),',
+      '+  newop: z.string(),',
+      ' });',
+    ].join('\n'),
+  };
+  t('⛔ CONTROL — the identical `{` frame is LOUD, which is why it can never be the cause of that silence: a BARE element added inside it raises its T2 row with the NOT-MEASURED sentence, a zod-valued key added inside one raises T1, and the two bare spellings both answer T2 on their own', tells(MAP_BARE_ELEMENT).length === 1 && tells(MAP_BARE_ELEMENT)[0]?.tell === 'T2' && says(tells(MAP_BARE_ELEMENT)[0]?.why, 'does not show it inside one of the four closed-set forms') && tells(MAP_ZOD_VALUED_KEY).length === 1 && tells(MAP_ZOD_VALUED_KEY)[0]?.tell === 'T1' && memberTellKind("  'between',", { onContractSource: true }) === 'T2' && memberTellKind('  "quoted",', { onContractSource: true }) === 'T2');
   // -- the type-argument group, pinned on the head that READS it -------------
   //
   // ⛔ Two heads carry the group and only the DECLARED one had a case: deleting
