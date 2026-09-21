@@ -444,10 +444,13 @@ export interface ISecurityService {
    * merges the sets per object KEY, while `PermissionEvaluator` falls back to
    * `'*'` per SET — so a non-super-user `'*'` grant in one set (carrying
    * neither `viewAllRecords` nor `modifyAllRecords`) never reaches an object
-   * another set names explicitly. There the enforcement path reads that
-   * wildcard for the named object and ALLOWS, while the merged entry carries
-   * none of the wildcard's bits and reads as "no grant"; `foldWildcardSuperUser`
-   * does not close the gap, it propagates the two super-user bypasses alone.
+   * another set names explicitly. Where that object is not `private`, the
+   * enforcement path reads that wildcard for it and ALLOWS, while the merged
+   * entry carries none of the wildcard's bits and reads as "no grant". A
+   * `private` object is not in that population at all — a plain `'*'` does not
+   * cover one server-side either, so there the two ends already agree.
+   * `foldWildcardSuperUser` does not close the gap, it propagates the two
+   * super-user bypasses alone.
    * ADR-0124 D4 allows that direction — the client told less than the server
    * permits — so ⛔ a consumer may not read a "no grant" here as proof that
    * the server would refuse.
@@ -510,9 +513,14 @@ export interface ISecurityService {
    * **The wildcard is CARRIED, and absence still means "no grant".** A `'*'`
    * super-user grant appears under its own key, and the named entries carry it
    * folded in, mirroring what the endpoint serves. What neither this method nor
-   * the endpoint does is materialise an entry for every object in the
-   * deployment — so for an object no permission set mentions, the map is silent
-   * and every reader of it (this contract's included) answers "no grant". A
+   * the endpoint is REQUIRED to do is materialise an entry for every object in
+   * the deployment — ⚠️ and the endpoint sometimes does: for a wildcard
+   * super-user it seeds a false-initialised entry per registered object that
+   * needs an `apiOperations` annotation, which is EVERY registered object when
+   * that wildcard carries no `allowExport`, each one then pulled readable by
+   * the fold. So for an object no permission set mentions the map MAY be
+   * silent, and where it is silent every reader of it (this contract's
+   * included) answers "no grant". A
    * consumer that must give a super-user the enforcement path's answer for such
    * an object reads the `'*'` entry itself; it may not read the silence as one.
    *
