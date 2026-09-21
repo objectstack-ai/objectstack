@@ -90,7 +90,7 @@ export const entry: SemanticMigration = {
     + 'would not be the one to discover the type was unenforced; this ruling decides it '
     + 'instead — there will be no cursor implementation on this door — so the refusal would '
     + 'be validating a key the contract no longer has. This route declares no closed query '
-    + 'set (ADR route-ownership rule 5), so an unrecognised name has never been refused here '
+    + 'set (AGENTS.md route-ownership rule 5), so an unrecognised name has never been refused here '
     + 'on its own account. '
     + '⚠️ `hasMore` also changes, from a constant to an answer: a request whose window is '
     + 'shorter than the matching run set now receives `hasMore: true` where it previously '

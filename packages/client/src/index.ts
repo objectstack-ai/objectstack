@@ -5537,12 +5537,16 @@ export class ObjectStackClient {
            * List execution runs for a flow.
            *
            * Returns the newest `limit` runs — a WINDOW, not a page. The
-           * `cursor` parameter was removed in protocol 18 (#19365): it was
-           * appended to the query string here and read by nothing on the
-           * server, so a caller paginating by it re-read the first window
-           * forever. Omit `limit` to take the server's window (20, clamped to
-           * 1..100); raise it to see further back. There is no continuation
-           * token — read `hasMore` to learn whether the window was short.
+           * `cursor` parameter was removed in `@objectstack/spec` 17.5.0
+           * (#19365): it was appended to the query string here and read by
+           * nothing on the server, so a caller paginating by it re-read the
+           * first window forever.
+           *
+           * Omit `limit` to take the server's window (20). It is
+           * bounded to 1..100 and a value outside that range is REFUSED with
+           * `400 VALIDATION_FAILED`, never clamped — so raise it deliberately
+           * to see further back. There is no continuation token — read
+           * `hasMore` to learn whether the window was short.
            */
           list: async (flowName: string, options?: { limit?: number }): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
               const route = this.getRoute('automation');
@@ -5616,9 +5620,9 @@ export class ObjectStackClient {
       /**
        * Alias for `automation.runs.list`.
        *
-       * `cursor` was removed in protocol 18 (#19365) — see that method for the
-       * reason. A window, not a page: widen `limit` (1..100, default 20) and
-       * read `hasMore`.
+       * `cursor` was removed in `@objectstack/spec` 17.5.0 (#19365) — see that
+       * method for the reason. A window, not a page: widen `limit`
+       * (1..100, default 20) and read `hasMore`.
        */
       listRuns: async <T extends { runs: ExecutionLog[]; hasMore: boolean } = { runs: ExecutionLog[]; hasMore: boolean }>(
           flowName: string,
@@ -8101,7 +8105,7 @@ export class ScopedEnvironmentClient {
     /**
      * List recent runs for a flow, optionally narrowed to one status.
      *
-     * `cursor` was removed in protocol 18 (#19365) — see
+     * `cursor` was removed in `@objectstack/spec` 17.5.0 (#19365) — see
      * `automation.runs.list` for the reason. A window, not a page: widen
      * `limit` (1..100, default 20) and read `hasMore`.
      */
