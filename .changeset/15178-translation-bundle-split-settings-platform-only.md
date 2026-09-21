@@ -28,6 +28,9 @@ included.
 is not application-authorable at all — `settings` is keyed by
 `SettingsManifest.namespace` and only platform code declares a manifest, so the
 only namespaces a per-app entry could ever address were the platform's own.
+`settingsCommon` is **not** affected — the Settings UI shell strings (the source
+badges, under `settingsCommon.sourceLabels`) stay on the per-app face; only the
+per-namespace manifest copy under `settings` leaves.
 Run `os migrate meta --from 17` to list the mechanical edits for existing
 sources; apply them by hand.
 

@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { TranslationDataSchema } from '../../../system/translation.zod.js';
 import type { SemanticMigration } from '../../types.js';
 
 // The judgment half of `translation-per-app-settings-removed`. The D2
@@ -10,17 +11,31 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'translation-per-app-settings-platform-only',
   surface: 'stack.translations[].<locale>.settings — the per-app bundle’s settings group',
-  replacement:
-    'Delete the group from the per-app bundle. There is no per-app replacement key: settings copy '
-    + 'is not application-authorable at all. `settings` is keyed by `SettingsManifest.namespace`, '
-    + 'and only platform code declares a manifest '
-    + '(`packages/services/service-settings/src/manifests/*.manifest.ts`), so the only namespaces a '
-    + 'per-app entry could ever address were the platform’s own. Platform settings copy is '
-    + 'translated in the PLATFORM bundle — `@objectstack/service-settings`’s '
-    + '`settingsBuiltinTranslations`, typed `PlatformTranslationData` — which is where a correction '
-    + 'to a platform string belongs. An application’s own copy goes in the groups the per-app bundle '
-    + 'still declares: `objects`, `apps`, `pages`, `dashboards`, `datasets`, `flows`, '
-    + '`globalActions`, `metadataForms`, `messages`.',
+  // The group names are DERIVED from `TranslationDataSchema.shape`, never typed
+  // out beside it. A hand-maintained copy of a schema's key set is the construct
+  // that drifted to nine-of-ten in this very message, so the copy is deleted
+  // rather than pinned: there is one spelling of the set, and a group added to
+  // the per-app face reaches this sentence the day it is declared.
+  // `Object.keys` on a zod object shape yields the declaration order of the
+  // literal it was built from — the order this sentence promises the operator.
+  // A getter, not an eager template: importing the registry must not force the
+  // lazy translation schema at module load.
+  get replacement(): string {
+    const groups = Object.keys(TranslationDataSchema.shape);
+    return 'Delete the group from the per-app bundle. There is no per-app replacement key: settings copy '
+      + 'is not application-authorable at all. `settings` is keyed by `SettingsManifest.namespace`, '
+      + 'and only platform code declares a manifest '
+      + '(`packages/services/service-settings/src/manifests/*.manifest.ts`), so the only namespaces a '
+      + 'per-app entry could ever address were the platform’s own. Platform settings copy is '
+      + 'translated in the PLATFORM bundle — `@objectstack/service-settings`’s '
+      + '`settingsBuiltinTranslations`, typed `PlatformTranslationData` — which is where a correction '
+      + 'to a platform string belongs. An application’s own copy goes in the '
+      + `${groups.length} groups the per-app bundle still declares, in the order it declares them: `
+      + groups.map((g) => `\`${g}\``).join(', ')
+      + '. Note `settingsCommon` among them: it IS on this face, so the Settings UI shell strings an '
+      + 'application may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT '
+      + 'what is being removed here — only the per-namespace manifest copy under `settings` is.';
+  },
   reason:
     'Not losslessly convertible, and NOT because the content was inert — but not because it '
     + 'overrode anything either. Measured on this tree before the split: '
