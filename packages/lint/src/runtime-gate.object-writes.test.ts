@@ -145,8 +145,28 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       expect(entry, `${name} left AUTHORING_RULES — re-point this fence or retire it`).toBeDefined();
       expect(entry!.tier, `${name} changed tier — this fence pins the ADVISORY six; a severity `
         + `change needs its own PR and re-opens the crossing question for the rule`).toBe('advisory');
-      expect((entry!.surfaceReason ?? '').length, `${name} sits off the runtime surface with no `
-        + `substantive reason`).toBeGreaterThanOrEqual(40);
+      // [#19474] The fence is about the OBJECT door, and until this card every
+      // fenced rule happened to be off the runtime surface ENTIRELY, so "is
+      // there a substantive `surfaceReason`?" was a faithful proxy for it.
+      // `lintLivenessProperties` crossed for `email_template` / `mapping` and
+      // broke the proxy without touching the thing it stood for — it owes no
+      // `surfaceReason` once it is on the surface, and the registry's own
+      // guard is what asks for one on a rule that is off it.
+      //
+      // So the fence now asks the question directly, and the crossed arm is
+      // the STRONGER of the two: a declared `runtimeTypes` that omits `object`
+      // is mechanical, where a `surfaceReason` is prose that can go stale.
+      // ⛔ Neither arm is a way around the fence — `object` appearing in
+      // `runtimeTypes` fails here exactly as it did before, and the
+      // `atDoor.has(name)` assertion above is unchanged.
+      if (entry!.surfaces.includes('runtime-publish')) {
+        expect(entry!.runtimeTypes ?? [], `${name} is on the runtime surface AND declares `
+          + `'object' — the #4716 adjudication fenced the advisory tier out of THIS door; `
+          + `crossing it is a UX/volume decision with its own card`).not.toContain('object');
+      } else {
+        expect((entry!.surfaceReason ?? '').length, `${name} sits off the runtime surface with no `
+          + `substantive reason`).toBeGreaterThanOrEqual(40);
+      }
     }
     // And the five crossed rules really are gating tier — the exemption's
     // arithmetic (refusal risk lives only in `error`-capable rules) holds
