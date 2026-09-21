@@ -1239,24 +1239,24 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "L1 表达式或 L2 沙箱 JS 体"
       },
       "body.language": {
-        label: "Language",
-        helpText: "expression = pure formula; js = sandboxed JavaScript"
+        label: "语言",
+        helpText: "expression = 纯公式；js = 沙箱 JavaScript"
       },
       "body.source": {
-        label: "Source",
-        helpText: "Function body source — no top-level imports"
+        label: "源码",
+        helpText: "函数体源码——禁止顶层 import"
       },
       "body.capabilities": {
-        label: "Capabilities",
-        helpText: "Allowed ctx APIs (api.read, api.write, crypto.uuid, log, …)"
+        label: "功能",
+        helpText: "可用的 ctx API（api.read、api.write、crypto.uuid、log 等）"
       },
       "body.timeoutMs": {
-        label: "Timeout Ms",
-        helpText: "Per-invocation timeout (ms)"
+        label: "超时（毫秒）",
+        helpText: "单次调用超时时间（毫秒）"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "内存（MB）",
+        helpText: "单次调用内存上限（MB，最大 256）"
       },
       params: {
         label: "参数",
@@ -1345,8 +1345,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "CEL 表达式：满足条件时禁用"
       },
       ai: {
-        label: "Ai",
-        helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
+        label: "AI 暴露",
+        helpText: "AI 暴露（需显式开启）：设置 ai.exposed=true 并填写 ai.description（≥40 个字符），此操作即可被代理调用。"
       },
       recordIdParam: {
         label: "记录 ID 参数",
