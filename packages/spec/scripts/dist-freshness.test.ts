@@ -537,10 +537,19 @@ describe('the prerequisite exit code, and the refusal text that explains it (#19
     // The drift check, against the authority rather than against a copy of it.
     // `packages/spec` already declares `scripts/**` in CROSS_PACKAGE_TEST_INPUTS,
     // so this read is inside a declared radius.
-    const frame = (await import('../../../scripts/import-prerequisite.mjs')) as {
-      EXIT_PREREQUISITE_NOT_MET: number;
-      EXIT_FINDINGS: number;
+    //
+    // ⚠️ The cast goes through `unknown` because `scripts/import-prerequisite.d.mts`
+    // is PARTIAL BY DESIGN — its own header says the exit-code constants are
+    // deliberately omitted from the mirror — so tsc sees a namespace without
+    // them. That is exactly why the two `typeof` assertions are here rather
+    // than implied: without them the cast would make a vanished export read as
+    // `undefined` on both sides of a comparison nobody would notice.
+    const frame = (await import('../../../scripts/import-prerequisite.mjs')) as unknown as {
+      EXIT_PREREQUISITE_NOT_MET?: number;
+      EXIT_FINDINGS?: number;
     };
+    expect(typeof frame.EXIT_PREREQUISITE_NOT_MET).toBe('number');
+    expect(typeof frame.EXIT_FINDINGS).toBe('number');
     expect(EXIT_PREREQUISITE_NOT_MET).toBe(frame.EXIT_PREREQUISITE_NOT_MET);
     expect(EXIT_FINDINGS).toBe(frame.EXIT_FINDINGS);
   });
