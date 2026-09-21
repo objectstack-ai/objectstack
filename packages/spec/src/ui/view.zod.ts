@@ -1216,14 +1216,114 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  * as complete, which is worse than the unbounded-and-silent one this key
  * replaces — the author needs to know the cap is visible, and the renderer
  * author needs to know it is owed.
+ *
+ * ⚠️ WHICH FACE THIS KEY IS ON, and why that has to be said first. There are
+ * TWO `limit`s a reader can confuse, on two different documents, and three
+ * rounds of #19228 went wrong on the boundary:
+ *   · **VIEW FACE** — THIS key. A member of a `ListViewSchema` document's
+ *     `kanban` / `gallery` / `timeline` block. An ADAPTER turns that document
+ *     into a rendered node; no renderer reads this document directly.
+ *   · **ELEMENT FACE** — a page component node's OWN `limit`
+ *     (`ObjectKanbanPropsSchema`, `ObjectTimelinePropsSchema`),
+ *     declared in `component.zod.ts`, with no applied default. That is the key
+ *     every renderer and `ElementDataSourceGate` actually read.
+ * Every sentence below names its face before it says anything else.
+ *
+ * ⚠️ WHAT THIS VIEW-FACE KEY REACHES TODAY — recorded, not repaired (#19228).
+ * Measured first-hand at the pin this repo builds against (`.objectui-sha` =
+ * `87af769e9`), 2026-09-21T09:15Z, with TWO instruments, because one was not
+ * enough and the first one's answer was wrong:
+ *
+ *  1. PROPERTY-ACCESS spellings. ⛔ Published as its EXPRESSION, not as a
+ *     number — this card exists because a confident count was wrong once, so
+ *     a control nobody can re-derive is not a control. Run at the pin, from
+ *     an objectui checkout, over every tracked file:
+ *       probe:   git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.limit\b'
+ *       control: git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.(groupByField|scale|coverField)\b'
+ *     Probe: **0** lines, 0 files. Control: **13** lines across **6** files —
+ *     `app-shell/src/views/ObjectView.galleryBinding-7547.test.tsx:41`,
+ *     `app-shell/src/views/ObjectView.tsx:450`,
+ *     `plugin-list/src/ListView.tsx:2538`, `:2540`, `:2547`, `:3057`, `:3114`,
+ *     `:3116`,
+ *     `plugin-list/src/__tests__/ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`,
+ *     `:99`, `plugin-view/src/ObjectView.tsx:1695`, and
+ *     `types/src/__tests__/object-kanban-group-by-limit-7322.test.ts:146`, `:148`.
+ *     ⚠️ Filtering changes that number and the filter must be stated with it.
+ *     Of the 13: **2 are COMMENTS** (`ObjectView.galleryBinding-7547.test.tsx:41`,
+ *     `ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`), **1 is an
+ *     `it()` TITLE string** (same file, `:99` — ⛔ not a comment), and **2 are
+ *     lines inside a QUOTED source-text pin**
+ *     (`object-kanban-group-by-limit-7322.test.ts:146`, `:148`). So a reader
+ *     counting executable reads only gets **8**. All three readings are of one
+ *     hit set. A live instrument — and a WRONG answer.
+ *  2. ⭐ SPREADS — a spread carries a key without ever spelling it, so it is
+ *     the hole instrument 1 cannot see by construction. ⛔ Re-take it by its
+ *     PREDICATE, not by its count: **a spread whose target is the object
+ *     literal an adapter RETURNS as the node** — flattening onto the node —
+ *     as against a merge that builds a nested config (`...mergedTimeline` is
+ *     the lit control for the instrument AND the example of what the predicate
+ *     excludes). A grep broad enough to find these also returns the nested
+ *     merges, so the rule, not the number, is what makes it reproducible.
+ *     ⛔ And name what the predicate EXCLUDES, or the next reader re-finds
+ *     it and wonders: `app-shell/src/views/ObjectView.tsx:206` and `:342`
+ *     ARE spreads of a view block, inside `timelineViewOptions` (`:201`) and
+ *     `galleryViewOptions` (`:334`). They build an OPTIONS BAG that feeds
+ *     `ListView`'s nested forward, not the object literal an adapter returns
+ *     as the node, so the predicate excludes them — deliberately, not by
+ *     oversight. Two more the predicate excludes for their own reasons:
+ *     `plugin-list/src/ListView.tsx:3044-3046` (`mergedGallery`) builds a
+ *     NESTED gallery prop, the `...mergedTimeline` family; and
+ *     `app-shell/src/views/ObjectView.tsx:1284`
+ *     (`spec.kanban = { ...(spec.kanban || {}), columns }`) writes back into a
+ *     VIEW document's own block — a metadata write, not a node build.
+ *     Under that predicate, at that pin, the VIEW-face per-kind blocks give:
+ *       `plugin-list/src/ListView.tsx:2979`   `...restKanban`
+ *       `plugin-view/src/ObjectView.tsx:1638`  `...restKanban`
+ *       `plugin-view/src/ObjectView.tsx:1697`  `...(viewOptions.gallery || {})`
+ *       `plugin-view/src/ObjectView.tsx:1725`  `...(viewOptions.timeline || {})`
+ *     Neither `restKanban` destructure strips `limit` (`ListView.tsx:2952`,
+ *     `ObjectView.tsx:1579`), so a VIEW's per-kind `limit` — INCLUDING the 100
+ *     this applied default materializes — becomes the generated node's
+ *     ELEMENT-face flat `limit`, which is the key the renderers read.
+ *
+ * ⇒ **A view's `kanban.limit`: flattened on BOTH adapter routes, and read.**
+ *   `ObjectKanban.tsx:553` runs `describeRefusedRowLimit(schema.limit, …)`
+ *   unconditionally.
+ * ⇒ **A view's `timeline.limit`: ROUTE-DEPENDENT.** `plugin-view` flattens it
+ *   (`ObjectView.tsx:1725`) and the node it returns carries no `timeline`
+ *   block at all, so the value arrives as the node's flat `limit` and
+ *   `ObjectTimeline.tsx:279` reads it. `plugin-list` instead forwards the
+ *   block NESTED (`ListView.tsx:3084`), where nothing reads it.
+ * ⇒ **A view's `gallery.limit`: flattened by `ObjectView.tsx:1697` and read by
+ *   NOBODY** — `ObjectGallery.tsx` contains no `limit` at all (0 occurrences,
+ *   case-insensitive, against a lit control `schema.imageField` /
+ *   `schema.titleField` at `:340` / `:348`). ⛔ Do not generalise that
+ *   asymmetry to the other two; it is gallery's alone.
+ *
+ * ⚠️ Where it IS read, the `$top` it would govern (`ObjectKanban.tsx:676`,
+ * `ObjectTimeline.tsx:407`) is still not issued on either adapter route today:
+ * both hosts hand rows down as a React `data` prop (`ListView.tsx:4702`,
+ * `ObjectView.tsx:2319`) and both children short-circuit their own fetch on it
+ * (`ObjectKanban.tsx:559`, `ObjectTimeline.tsx:420`). ⛔ That is a statement
+ * about the QUERY, not about the key being unread.
+ *
+ * ⚠️ A consequence of APPLIED that the open decision needs: through those
+ * spreads a spec-parsed view emits a node carrying an authored-LOOKING
+ * ELEMENT-face `limit: 100` that no author wrote. ⛔ Flagged, not acted on —
+ * changing it is a contract direction, not a tidy-up.
+ *
+ * ⛔ Which of the row bounds wins is NOT decided here and NOT implied by this
+ * declaration: #19228 opens that question and picks nothing, and neither does
+ * this note. What is recorded is only what each key reaches today.
  */
 const rowLimitKey = (view: RowLimitView) =>
   z.number().int().positive().default(DEFAULT_VIEW_ROW_LIMIT).describe(
-    `Row ceiling — the most ${ROW_LIMIT_SUBJECT[view]}, sent as the query \`$top\`; default `
-    + `${DEFAULT_VIEW_ROW_LIMIT} when the key is absent. When the ceiling APPLIES (the filtered `
-    + 'set is larger than it), the renderer must show a visible truncation signal saying what is '
-    + 'on screen is not the whole set — a bounded view that looks complete is worse than an '
-    + 'unbounded one.',
+    `Row ceiling — the most ${ROW_LIMIT_SUBJECT[view]}; default `
+    + `${DEFAULT_VIEW_ROW_LIMIT} when the key is absent. The renderer owes two things: bound its `
+    + 'fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), '
+    + 'show a visible truncation signal saying what is on screen is not the whole set — a bounded '
+    + 'view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a '
+    + 'renderer that reads this key yet; which do is recorded on the declaration.',
   );
 
 /**

@@ -24,7 +24,10 @@ import {
   ObjectKanbanPropsSchema,
 } from './component.zod';
 import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
-import { GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema, ListColumnSchema, ListViewSchema } from './view.zod';
+import {
+  GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema, ListColumnSchema, ListViewSchema,
+  TimelineConfigSchema, DEFAULT_VIEW_ROW_LIMIT,
+} from './view.zod';
 import { FieldSchema } from '../data/field.zod';
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { strictObjectDeclarations } from '../shared/strict-object';
@@ -3797,5 +3800,113 @@ describe('the three #18305 object blocks — key sets derived from the renderers
 
   it('object-chart is STILL deliberately absent — the three rows did not sweep it in', () => {
     expect((ComponentPropsMap as Record<string, unknown>)['object-chart']).toBeUndefined();
+  });
+});
+
+// #19228 — two authorable row bounds land on one `object-timeline` node, and
+// the react tier's own precedence sentence was narrower than the guard it
+// names. ⛔ This card picks NO precedence and changes no `.default()`; these
+// pins only hold the two structural facts the repair rests on, measured
+// first-hand at the objectui pin `87af769e9` on 2026-09-21T06:30-06:40Z.
+describe('row caps on the object-bound blocks — what #19228 recorded', () => {
+  const timeline = ComponentPropsMap['object-timeline'];
+  const kanban = ComponentPropsMap['object-kanban'];
+
+  it('leaves the ELEMENT-face `limit` undefaulted — the fact that keeps the gate arm alive', () => {
+    // `ElementDataSourceGate` lowers a bound view's cap into this key only
+    // when it does not already carry a USABLE one
+    // (`ElementDataSourceGate.tsx:316-331`, `!fromView || !isUsableRowLimit`).
+    // An applied default here would make every parsed node carry a usable cap
+    // and kill that arm outright — the failure #19228 feared, on the schema it
+    // would actually happen to. ⛔ Do not "fix" a red here by deleting the pin.
+    for (const [label, schema] of [['object-kanban', kanban], ['object-timeline', timeline]] as const) {
+      const parsed = schema.parse({ objectName: 'task' }) as Record<string, unknown>;
+      expect(Object.prototype.hasOwnProperty.call(parsed, 'limit'), label).toBe(false);
+    }
+
+    // LIT CONTROL, same instrument (a Zod applied default, observed through
+    // `parse`): the VIEW-face sibling DOES materialize one, so the zeros above
+    // are a reading rather than a parse that never ran.
+    const viewSide = TimelineConfigSchema.parse({ startDateField: 'start_date', titleField: 'name' }) as { limit?: number };
+    expect(viewSide.limit).toBe(DEFAULT_VIEW_ROW_LIMIT);
+  });
+
+  it('materializes the NESTED `timeline.limit` on a node whose flat `limit` stays absent', () => {
+    // The shape the record is about: one strictObject, two authorable row
+    // caps, and an applied default on the nested one. ⚠️ Faces, because this
+    // card keeps confusing them: the NESTED key asserted below is the ELEMENT
+    // face, and at the pin no renderer reads it on any route. The
+    // route-dependent one is a VIEW document's `timeline.limit`, a different
+    // key on a different document, which `ObjectView.tsx:1725` flattens onto
+    // a generated node's FLAT `limit`. Neither is asserted here: this pin is
+    // about the PARSE, which is the only half a schema owns.
+    const result = timeline.safeParse({
+      objectName: 'task',
+      timeline: { startDateField: 'start_date', titleField: 'name' },
+    });
+    expect(result.success).toBe(true);
+    const data = (result.success ? result.data : undefined) as
+      { limit?: unknown; timeline?: { limit?: unknown } } | undefined;
+    expect(data?.timeline?.limit).toBe(DEFAULT_VIEW_ROW_LIMIT);
+    expect(Object.prototype.hasOwnProperty.call(data ?? {}, 'limit')).toBe(false);
+
+    // CONTROL — the node is still strict, so the acceptance above is not the
+    // verdict of a map that has stopped refusing anything.
+    const control = timeline.safeParse({ objectName: 'task', zzUnlikelyBogusKey__: 1 });
+    expect(control.success).toBe(false);
+    expect(JSON.stringify(control.error?.issues)).toContain('unrecognized_keys');
+  });
+
+  it('admits only caps the binding gate calls usable — the SUBSET that makes 「unset」 the whole rule', () => {
+    // ⛔ Not a prose pin. The published sentence says a bound view's
+    // `pagination.pageSize` fills this key only when it is UNSET, and this is
+    // the structural fact that makes that true rather than narrow:
+    // `ElementDataSourceGate`'s guard is `!isUsableRowLimit(authored)` with
+    // `isUsableRowLimit = typeof v === 'number' && Number.isInteger(v) && v > 0`.
+    // This key's accept set is a SUBSET of that predicate — ⛔ NOT the same
+    // set; `2 ** 53 + 2` separates them, and the case below pins it. Subset is
+    // the direction the sentence needs: it makes 「set but not usable」 empty
+    // across the whole accept set, so the guard has exactly two outcomes.
+    //
+    // ⚠️ What this pin can and cannot catch, because the two sides are not
+    // symmetric here:
+    //  · SPEC side — reds. A `.nullable()`, a `0` sentinel, dropping `.int()`
+    //    or adding a `.default()` each fail a specific expect below.
+    //  · GATE side — ⛔ CANNOT red. `usableToTheGate` is a TRANSCRIPTION of
+    //    `isUsableRowLimit` as it read at objectui pin `87af769e9`, not an
+    //    import — nothing here resolves into objectui. A rewrite of that
+    //    predicate at objectui HEAD leaves this test green. It is re-read on
+    //    a PIN BUMP, by hand, and that is the only thing that refreshes it.
+    const usableToTheGate = (v: unknown): boolean =>
+      typeof v === 'number' && Number.isInteger(v) && v > 0;
+
+    // ACCEPTED by the schema ⇒ usable to the gate ⇒ the view's cap does NOT land.
+    for (const cap of [1, 25, 100, 5000]) {
+      const r = kanban.safeParse({ objectName: 'x', limit: cap });
+      expect(r.success, `accept ${cap}`).toBe(true);
+      expect(usableToTheGate((r.success ? r.data : {} as never).limit), `usable ${cap}`).toBe(true);
+    }
+
+    // REFUSED by the schema ⇒ never reaches the gate from a valid document,
+    // which is why the displaced-and-reported arm is not in the describe.
+    for (const cap of [0, -1, 2.5, '100', null]) {
+      expect(kanban.safeParse({ objectName: 'x', limit: cap }).success, `refuse ${JSON.stringify(cap)}`).toBe(false);
+      expect(usableToTheGate(cap), `gate also rejects ${JSON.stringify(cap)}`).toBe(false);
+    }
+
+    // ⛔ The sets are NOT equal, and this is the witness. `2 ** 53 + 2` is
+    // refused here (zod 4's `.int()` enforces SAFE integers, `too_big`) while
+    // `Number.isInteger` calls it usable. Subset, not coincidence — if this
+    // case ever flips, the docblock sentence built on the subset direction
+    // has to be re-derived rather than reworded.
+    const beyondSafe = 2 ** 53 + 2;
+    expect(kanban.safeParse({ objectName: 'x', limit: beyondSafe }).success).toBe(false);
+    expect(usableToTheGate(beyondSafe)).toBe(true);
+
+    // UNSET — accepted, and the one state the gate treats as unauthored.
+    const unset = kanban.safeParse({ objectName: 'x' });
+    expect(unset.success).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(unset.success ? unset.data : {}, 'limit')).toBe(false);
+    expect(usableToTheGate(undefined)).toBe(false);
   });
 });

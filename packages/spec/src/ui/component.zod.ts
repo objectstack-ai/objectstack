@@ -3092,12 +3092,71 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Why the carrier is `limit` and not the bound view's `pagination.pageSize`
    * (the alternative the card opened): precedence is the `ElementDataSourceGate`
    * table, not this key's. The component-level `dataSource.limit` overrides
-   * this key, and a bound named view's `pagination.pageSize` is LOWERED INTO
-   * it through the `limit: 'limit'` mapping only when the component authored
-   * none (`react/src/element-data-source/ElementDataSourceGate.tsx:316-331`,
+   * this key unconditionally; a bound named view's `pagination.pageSize` is
+   * LOWERED INTO it through the `limit: 'limit'` mapping only when this key is
+   * unset (`react/src/element-data-source/ElementDataSourceGate.tsx:316-331`,
    * `readLimit`/`writeLimit` keyed by `ElementDataSourceLimitKey`; the branch
    * gained objectui#9899's presence-is-not-authorship test and a
-   * `describeDisplacedRowLimit` report on this hop). The board
+   * `describeDisplacedRowLimit` report on this hop).
+   *
+   * ⚠️ 「only when UNSET」 reads narrower than the guard and is nonetheless
+   * EXACTLY right on this face — a correction to a correction, measured
+   * 2026-09-21T10:20Z. The branch is
+   * `if (!fromView || !isUsableRowLimit(authored))`, and
+   * `isUsableRowLimit` is `typeof v === 'number' && Number.isInteger(v) && v > 0`
+   * (`ElementDataSourceGate.tsx:192-194`), and this key's accept set
+   * (`z.number().int().positive()`) is a SUBSET of it — ⛔ not the same set,
+   * and the difference is reachable: `2^53 + 2` is refused here (zod 4's
+   * `.int()` is safe-integer, `too_big`) and `Number.isInteger` calls it
+   * usable. Subset is the direction that matters, and it is the whole
+   * argument: for every node this schema ACCEPTS, `authored` is either absent
+   * (not usable ⇒ the view's cap lands) or a cap the gate already treats as
+   * authored (⇒ it does not). So unset is the only reachable arm.
+   * The extra arm — a cap displaced and reported because it is `0`, negative
+   * or fractional — is reachable ONLY for a node this contract refuses, so
+   * ⛔ it does not belong in an author-facing describe. Pinned structurally
+   * beside the parse pins in `component.test.ts` rather than as prose.
+   *
+   * ⚠️ And the view half is `pagination.pageSize` ALONE on this face.
+   * `savedViewLimit` does fall back to a flat `view.limit`
+   * (`core/src/data-scope/element-data-source.ts:237-241`), but that names a
+   * THIRD face — a saved-view RECORD as the adapter's `listViews()` returns it
+   * — not an authored view document. Measured on this tree: `ListViewSchema`
+   * REFUSES a flat `limit` with `unrecognized_keys: ["limit"]`, the same
+   * verdict a bogus key gets, while the same minimal document parses with
+   * `pagination.pageSize: 50` and with a per-kind `kanban.limit: 50`. There is
+   * no flat `limit` member on any view document and no `retiredKey()`
+   * tombstone for one. ⛔ So naming that arm here would put a runtime-record
+   * shape on the author face with no qualifier — the face-merge this card has
+   * now failed on three times.
+   * ⛔ This note reports the guard; it picks no precedence.
+   *
+   * ⚠️ It takes a THIRD door, and missing it is what the at-tier review of
+   * #19533 caught. Stated with its faces named, because that is where this
+   * card keeps going wrong: `kanban.limit` is a VIEW-FACE key (a member of a
+   * `ListViewSchema` document's `kanban` block) and THIS `limit` is the
+   * ELEMENT-FACE key on the node; the third door is the one that turns the
+   * first into the second. The ADAPTERS spread the view's kanban block FLAT
+   * onto the generated node — `plugin-list/src/ListView.tsx:2979` and
+   * `plugin-view/src/ObjectView.tsx:1638`, both `...restKanban`, and neither
+   * destructure (`ListView.tsx:2952`, `ObjectView.tsx:1579`) strips `limit`.
+   * So a view's `kanban.limit`, INCLUDING the 100 its applied default
+   * materializes, lands on THIS key, and `ObjectKanban.tsx:553` reads it
+   * (`describeRefusedRowLimit`, unconditional). The `$top` at `:676` is not
+   * issued on either route today — both hosts pass rows down as a React `data`
+   * prop and the board short-circuits at `:559` — so it governs no query
+   * there, which is ⛔ NOT the same claim as 「no consumer reads it」. A
+   * spread carries a key without spelling it, so a property-access sweep
+   * cannot see this and returns a confident zero.
+   *
+   * ⭐ The arm is nonetheless REACHABLE, for a reason the spreads do not
+   * touch: its guard reads THIS key on the node as AUTHORED, and this
+   * declaration is `.optional()` with no applied default, so an author's
+   * silence is still silence at parse time. #19228 read the VIEW-face applied
+   * default as killing this arm; the two are different schemas, and what the
+   * adapters lower is a rendered node, not the parse of this one. ⛔ Do not add
+   * a `.default()` here: that — and only that — is what would make it dead.
+   * The board
    * has no `pagination` read point, so declaring that spelling here would name
    * a key the renderer ignores — the accepted-and-dropped defect this section
    * exists to remove. Same shape as the `element:record_picker` and
@@ -3106,7 +3165,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * a schema default would materialize `limit: 100` on every parsed board.
    */
   limit: z.number().int().positive().optional()
-    .describe("Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's `pagination.pageSize` fills it only when unset"),
+    .describe("Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's `pagination.pageSize` fills this key only when it is unset — and on this face unset is the whole rule, because every cap this key accepts is one the binding gate already treats as authored"),
   data: z.array(z.unknown()).optional().describe('Static inline cards — bypasses the object query'),
   cardTitle: z.string().optional().describe('Field rendered as each card title'),
   titleField: z.string().optional().describe('Legacy fallback for `cardTitle` (the board reads `cardTitle || titleField`). Prefer `cardTitle`'),
@@ -3942,8 +4001,15 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * the canonical nested config every field resolution prefers), `filter`
  * (`:210`, `:232` — verbatim to `$filter`), `sort` (`:211`, `:233` — through
  * the shared `convertSortToQueryParams` sink, as `object-calendar`'s does),
- * `limit` (`:234`, `:254` — the fetch's top-level `$top`, renderer default
- * `DEFAULT_TIMELINE_LIMIT` = 100 at `:28`), `items` (`:170`, `:247`, `:299`,
+ * `limit` (⭐ re-READ at the CURRENT pin `87af769e9` on 2026-09-21T06:30Z,
+ * #19228 — the other anchors in this list are still the `53ded82b` readings
+ * the header names: `:407`, the fetch's one top-level `$top`, through
+ * `resolveRowLimit(schema.limit, DEFAULT_TIMELINE_LIMIT)` with the default
+ * `100` at `:29` and the refused-cap diagnostic at `:279`. ⚠️ It is this FLAT
+ * key that is read — this node's own nested `timeline.limit` is not, on any
+ * route. What reaches this flat key is a VIEW document's `timeline.limit`,
+ * flattened onto the generated node by `ObjectView.tsx:1725`; see the
+ * `timeline` door below), `items` (`:170`, `:247`, `:299`,
  * `:480` — the authored pass-through that short-circuits the object query),
  * `data` (`:171`, `:247`, `:254`, `:256` — the pre-fetched record source,
  * read off REACT PROPS rather than `schema`; the door's own docblock carries
@@ -3969,6 +4035,45 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * VALUE posture: `timeline` takes {@link TimelineConfigSchema}, the block
  * `ListViewSchema.timeline` already declares — one vocabulary, taken by
  * reference, so this element face cannot fork from the view face.
+ * ⚠️ Taking it by reference also imported #19226's new `limit` onto THIS
+ * strictObject, beside the flat `limit` below — two authorable row caps on one
+ * node, and the nested one carries an APPLIED default, so every parsed node
+ * with a `timeline` block materializes `timeline.limit: 100` (#19228).
+ *
+ * ⛔ THE TWO ARE ON DIFFERENT FACES, and #19228 has now gone wrong on that
+ * boundary in both directions — once putting a view-face fact on the element
+ * key, once the reverse. So each statement names its face first. Measured at
+ * the pin `87af769e9`, 2026-09-21T09:15Z:
+ *  - **ELEMENT FACE — THIS node's own nested `timeline.limit`: read on NO
+ *    route.** `ObjectTimeline` binds `timelineConfig = schema.timeline`
+ *    (`ObjectTimeline.tsx:262`) and reads exactly eight members off it —
+ *    `startDateField`, `dateField`, `titleField`, `endDateField`,
+ *    `groupByField`, `colorField`, `metaFields` (`:520`, through an `as any`
+ *    cast, which is why a `timelineConfig?.x` sweep alone under-counts) and
+ *    `scale`. `limit` is not among them, and NO spread of a node's own
+ *    `timeline` block exists anywhere in objectui (0 hits; lit control, same
+ *    shape, the view-block spreads `...mergedTimeline` /
+ *    `...(viewOptions.timeline || {})`, which do fire). The
+ *    `ElementDataSourceGate` mapping is `limit: 'limit'`
+ *    (`plugin-timeline/src/index.tsx:333`) — FLAT, so it never touches the
+ *    nested key either.
+ *  - **VIEW FACE — a `ListViewSchema` document's `timeline.limit`: that is
+ *    the route-dependent one**, and it is a different key on a different
+ *    document. `ObjectView.tsx:1725` flattens the view block onto the node it
+ *    returns (which then carries no `timeline` block at all), so the value
+ *    arrives as this node's FLAT `limit` and is read; `ListView.tsx:3084`
+ *    forwards it nested instead, where nothing reads it. Recorded on
+ *    `rowLimitKey` in `view.zod.ts`, which is where that key lives.
+ *
+ * ⚠️ Flagged, not fixed — a THIRD route neither the card nor the first two
+ * reviews described: a hand-authored `object-timeline` node reaching
+ * `ObjectTimeline` through `SchemaRenderer` with no adapter in between. Its
+ * nested `timeline.limit` is unread there too (it is the same element-face
+ * key as the first bullet), and that route is the one an AUTHOR face is
+ * written for — so it is the route the open question most concerns.
+ *
+ * ⛔ Recorded, not repaired: which key should carry a timeline's row cap is
+ * the open half of #19228.
  * `mapping` stays `z.unknown()`: its contract
  * (`TimelineMappingSchema`) still lives in objectui, which is the
  * `object-calendar.calendar` posture this section's header prescribes for
@@ -3992,7 +4097,7 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
   objectName: z.string().optional()
     .describe('Object this timeline binds to. Optional because the component-level `dataSource` binding can supply the object instead — this block registers through `ElementDataSourceGate`, which lowers the binding onto this key before the renderer sees the node'),
   timeline: TimelineConfigSchema.optional()
-    .describe('Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: { startDateField, endDateField, titleField, groupByField, colorField, scale }. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling'),
+    .describe('Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: { startDateField, endDateField, titleField, groupByField, colorField, scale, limit }. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling. ⚠️ `limit` is the one member of this block NO renderer reads on any route: the rail is capped by the FLAT `limit` beside this key, which is also the only one a bound `dataSource` lowers into. A `limit` written inside this block is accepted, defaulted to 100, and never read'),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
   filter: z.array(ViewFilterRuleSchema, {
     error: ruleArrayFilterError({
