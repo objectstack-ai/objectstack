@@ -275,6 +275,25 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # entirely from objectui).
   gh label create pm:retriage         -R "$R" -c d4c5f9 -d "Question for triage, answered each fire; coexists with the standing pm:* label; no dispatch" 2>/dev/null || true
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" 2>/dev/null || true
+  # tooling marks a card whose fix lands in a gate, script, workflow, skill,
+  # seat protocol or PM tooling file (scripts/**, .github/**, .claude/**,
+  # packages/lint gate rules, packages/spec/scripts/**) rather than in a product
+  # package. Triage applies it at FIRST GRADING, in the same label write as
+  # domain:* and priority:*; a filer may pre-apply it. Four named consumers, all
+  # in the pm-dispatch charter (SKILL.md 状态模型 row, 分诊座位职责 and 候选与批次):
+  # the execution seat's candidate query, which excludes a tooling card carrying
+  # neither an `Unblocks: #N` line nor a named published surface; the triage
+  # first-touch close; the fleet-wide one-tooling-card-in-flight count; and the
+  # census / half-state patrol, for which a tooling card open in pm:queue with
+  # neither line is a half-state. It is in this five-repo loop on the rule stated
+  # beside priority:p0 above — the sweep that reads it is repo-parameterized
+  # (PM_SWEEP_REPO) and first-touch grading is a five-repo triage duty. Measured
+  # 2026-09-21 in objectstack, where the label is live on 44 queue cards: the
+  # object is GitHub's default `ededed` with an EMPTY description, because until
+  # this row nothing here named it — the exact drift the header describes, and
+  # one no rerun of the default mode can repair. The -d below is 100 characters,
+  # at the hard cap (check:pm-label-desc-cap).
+  gh label create tooling             -R "$R" -c fbca04 -d "Fix lands in tooling, not a product package — enters pm:queue only with Unblocks: or a named surface" 2>/dev/null || true
   gh label create pm:epic             -R "$R" -c 5319e7 -d "Reserved by a dedicated epic PM, parent or sub-issue; other PMs never take it; never with pm:queue" 2>/dev/null || true
 done
 
