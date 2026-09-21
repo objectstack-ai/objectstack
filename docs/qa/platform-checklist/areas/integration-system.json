@@ -1,7 +1,7 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md. FIXTURE MAP for this area (all in-repo, CI-deterministic): the showcase ships four declarative connectors (examples/app-showcase/src/system/connectors/index.ts — rest/openapi/mcp provider-bound instances + one enabled:false catalog descriptor), an outbound webhook (src/automation/webhooks — shipped inactive), a cron job (src/automation/jobs — showcase_health_sweep), an email template (src/system/emails — showcase_task_done_email) and two notify flows (src/automation/flows).",
   "area": "integration-system",
-  "axis": "api-integration",
+  "axis": "api",
   "title": "Integration & system services — connectors, webhooks, jobs, email templates, notifications",
   "items": [
     {

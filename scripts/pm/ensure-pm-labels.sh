@@ -470,6 +470,12 @@ gh label create domain:ui   -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui
 # seat may claim which files. The eleven values are the North Star definition
 # line (「做出来的是什么」) plus the road it measures, so the axis and the
 # product definition cannot drift apart without one of them being edited.
+# The eleven were put to the maintainer on the charter card and confirmed there
+# (2026-09-21) with ONE amendment: the API/integration value was shortened to
+# `area:api`, its customer capability (可对外的 API 与集成) unchanged. ⛔ The
+# longer spelling this replaced is deliberately NOT written here — the retired
+# name must not survive a `git grep` as though it were still a value. The
+# maintainer's sentence is quoted verbatim on that card's ruling comment.
 #
 # Triage applies it at FIRST GRADING, in the same label write as `domain:*` and
 # `priority:*`; a filer may pre-apply it; a tooling card carries the area it
@@ -498,17 +504,17 @@ gh label create domain:ui   -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui
 # shade of its own, `d2dae2`, so an area label is recognisable at a glance in a
 # label list that already carries `domain:*` in `bfd4f2`).
 for R in objectstack-ai/objectstack objectstack-ai/objectui; do
-  gh label create area:records         -R "$R" -c d2dae2 -d "Business objects, records, the views that show data, usable forms, search" 2>/dev/null || true
-  gh label create area:access          -R "$R" -c d2dae2 -d "Permissions that actually hold — RLS/FLS, sharing model, write-path guards" 2>/dev/null || true
-  gh label create area:workflow        -R "$R" -c d2dae2 -d "Approvals and automation — the work that runs without a person driving it" 2>/dev/null || true
-  gh label create area:reports         -R "$R" -c d2dae2 -d "Business reporting — dashboards, reports, the numbers a manager reads" 2>/dev/null || true
-  gh label create area:identity        -R "$R" -c d2dae2 -d "Login and identity — sign-up, sessions, organization membership, SSO" 2>/dev/null || true
-  gh label create area:api-integration -R "$R" -c d2dae2 -d "The API a customer can call, and integrations — REST, connectors, webhooks, jobs" 2>/dev/null || true
-  gh label create area:files           -R "$R" -c d2dae2 -d "Files — upload, download, signed URLs, access derived from the parent record" 2>/dev/null || true
-  gh label create area:i18n            -R "$R" -c d2dae2 -d "The customer's own language, across UI, metadata and notifications" 2>/dev/null || true
-  gh label create area:studio          -R "$R" -c d2dae2 -d "Changing a running app without code — authoring, publish, docs and the portal" 2>/dev/null || true
-  gh label create area:ai              -R "$R" -c d2dae2 -d "AI-native — agent / tool / skill metadata, and the MCP surface an agent drives" 2>/dev/null || true
-  gh label create area:devpath         -R "$R" -c d2dae2 -d "The road — create, dev, verify, publish/install, connect an agent, iterate" 2>/dev/null || true
+  gh label create area:records  -R "$R" -c d2dae2 -d "Business objects, records, the views that show data, usable forms, search" 2>/dev/null || true
+  gh label create area:access   -R "$R" -c d2dae2 -d "Permissions that actually hold — RLS/FLS, sharing model, write-path guards" 2>/dev/null || true
+  gh label create area:workflow -R "$R" -c d2dae2 -d "Approvals and automation — the work that runs without a person driving it" 2>/dev/null || true
+  gh label create area:reports  -R "$R" -c d2dae2 -d "Business reporting — dashboards, reports, the numbers a manager reads" 2>/dev/null || true
+  gh label create area:identity -R "$R" -c d2dae2 -d "Login and identity — sign-up, sessions, organization membership, SSO" 2>/dev/null || true
+  gh label create area:api      -R "$R" -c d2dae2 -d "The API a customer can call, and integrations — REST, connectors, webhooks, jobs" 2>/dev/null || true
+  gh label create area:files    -R "$R" -c d2dae2 -d "Files — upload, download, signed URLs, access derived from the parent record" 2>/dev/null || true
+  gh label create area:i18n     -R "$R" -c d2dae2 -d "The customer's own language, across UI, metadata and notifications" 2>/dev/null || true
+  gh label create area:studio   -R "$R" -c d2dae2 -d "Changing a running app without code — authoring, publish, docs and the portal" 2>/dev/null || true
+  gh label create area:ai       -R "$R" -c d2dae2 -d "AI-native — agent / tool / skill metadata, and the MCP surface an agent drives" 2>/dev/null || true
+  gh label create area:devpath  -R "$R" -c d2dae2 -d "The road — create, dev, verify, publish/install, connect an agent, iterate" 2>/dev/null || true
 done
 
 # Release board — `target:<major>` marks a release BLOCKER for that major

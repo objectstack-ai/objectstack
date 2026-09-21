@@ -22,16 +22,16 @@
 - access · 匿名请求在每个挂出来的 API 家族都统一按未认证拒绝,先于任何资源解析 · access-security.anonymous-deny-surfaces · P3
 - access · 没有活跃组织的会话是合法状态,且失败向关,永不写空租户 · access-security.no-active-org-session-semantics · P3
 - workflow · 非管理员从自己的应用进得去完整的审批收件箱 · approvals.account-app-entry · P3
-- api-integration · 数据 API 的查询契约:每个过滤算子答案已知,错的输入响亮拒绝 · api-backend.query-contract-matrix · P3
+- api · 数据 API 的查询契约:每个过滤算子答案已知,错的输入响亮拒绝 · api-backend.query-contract-matrix · P3
 - devpath · 一条命令把应用跑起来:能登录、数据库选择诚实、端口与陈旧都说出来 · cli.dev-boot-contract · P3
 - devpath · 起来就是干净的:健康与就绪都通,没有降级横幅,控制台与应用元数据都供得上 · platform-core.boot-health · P3
 - devpath · 种子数据原样落库,重放不多不少 · platform-core.seed-integrity · P3
 - devpath · 管理员从控制台登得进去,刷新后会话还在,过期后重新认证干净 · platform-core.console-login · P3
 - devpath · 每个导航面都渲染得出来,坏了也看得见错误边界,不是白屏 · platform-core.nav-surfaces-render · P3
 - devpath · 自带的应用(Setup / Account)每个菜单目标都打得开,门是挡不是报错 · platform-core.builtin-apps-nav-render · P3
-- api-integration · 数据源密钥写不进去也读不出来:内联即拒,两道读口都打码 · integration-system.datasource-credential-refusal-matrix · P4
+- api · 数据源密钥写不进去也读不出来:内联即拒,两道读口都打码 · integration-system.datasource-credential-refusal-matrix · P4
 - workflow · 停用一个随包发的流程,冷重启之后它还是停的 · automation.packaged-flow-disable-durable · P5
-- api-integration · 停用的随包动作在两道派发门都被拒,且拒得出于开关而非权限 · api-backend.packaged-action-disabled-dispatch · P5
+- api · 停用的随包动作在两道派发门都被拒,且拒得出于开关而非权限 · api-backend.packaged-action-disabled-dispatch · P5
 - ai · 没有密钥 MCP 就不起;拿成员的密钥连上,读与聚合都照他的权限走,吊销下一次调用即生效 · ai.mcp-stdio-fail-closed · P6
 
 **优先级**:
