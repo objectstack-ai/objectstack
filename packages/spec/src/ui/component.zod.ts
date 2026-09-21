@@ -3092,24 +3092,39 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Why the carrier is `limit` and not the bound view's `pagination.pageSize`
    * (the alternative the card opened): precedence is the `ElementDataSourceGate`
    * table, not this key's. The component-level `dataSource.limit` overrides
-   * this key unconditionally; a bound named view's row cap is LOWERED INTO it
-   * through the `limit: 'limit'` mapping only when this key does not already
-   * carry a USABLE cap (`react/src/element-data-source/ElementDataSourceGate.tsx:316-331`,
+   * this key unconditionally; a bound named view's `pagination.pageSize` is
+   * LOWERED INTO it through the `limit: 'limit'` mapping only when this key is
+   * unset (`react/src/element-data-source/ElementDataSourceGate.tsx:316-331`,
    * `readLimit`/`writeLimit` keyed by `ElementDataSourceLimitKey`; the branch
    * gained objectui#9899's presence-is-not-authorship test and a
    * `describeDisplacedRowLimit` report on this hop).
    *
-   * ⚠️ 「only when UNSET」 is what this docblock and the describe beside it
-   * used to say, and it is narrower than the guard — re-READ first-hand at the
-   * pin `87af769e9` on 2026-09-21T06:35Z. The branch is
-   * `if (!fromView || !isUsableRowLimit(authored))`, so the view's cap also
-   * lands when this key IS set to a value the contract refuses (`0`, negative,
-   * fractional, non-number), with `describeDisplacedRowLimit` telling the
-   * author. Unset is one arm of that guard, not the whole of it. The view half
-   * is likewise not `pagination.pageSize` alone: `savedViewLimit` reads
-   * `pagination.pageSize`, else that view's FLAT `limit`
-   * (`core/src/data-scope/element-data-source.ts:237-241`); the per-kind
-   * `kanban.limit` #19226 declared takes neither of those two doors.
+   * ⚠️ 「only when UNSET」 reads narrower than the guard and is nonetheless
+   * EXACTLY right on this face — a correction to a correction, measured
+   * 2026-09-21T10:20Z. The branch is
+   * `if (!fromView || !isUsableRowLimit(authored))`, and
+   * `isUsableRowLimit` is `typeof v === 'number' && Number.isInteger(v) && v > 0`
+   * (`ElementDataSourceGate.tsx:192-194`) — the SAME set this key declares,
+   * `z.number().int().positive()`. So for every node this schema ACCEPTS,
+   * `authored` is either absent (not usable ⇒ the view's cap lands) or a
+   * positive integer (usable ⇒ it does not): unset is the only reachable arm.
+   * The extra arm — a cap displaced and reported because it is `0`, negative
+   * or fractional — is reachable ONLY for a node this contract refuses, so
+   * ⛔ it does not belong in an author-facing describe. Pinned structurally
+   * beside the parse pins in `component.test.ts` rather than as prose.
+   *
+   * ⚠️ And the view half is `pagination.pageSize` ALONE on this face.
+   * `savedViewLimit` does fall back to a flat `view.limit`
+   * (`core/src/data-scope/element-data-source.ts:237-241`), but that names a
+   * THIRD face — a saved-view RECORD as the adapter's `listViews()` returns it
+   * — not an authored view document. Measured on this tree: `ListViewSchema`
+   * REFUSES a flat `limit` with `unrecognized_keys: ["limit"]`, the same
+   * verdict a bogus key gets, while the same minimal document parses with
+   * `pagination.pageSize: 50` and with a per-kind `kanban.limit: 50`. There is
+   * no flat `limit` member on any view document and no `retiredKey()`
+   * tombstone for one. ⛔ So naming that arm here would put a runtime-record
+   * shape on the author face with no qualifier — the face-merge this card has
+   * now failed on three times.
    * ⛔ This note reports the guard; it picks no precedence.
    *
    * ⚠️ It takes a THIRD door, and missing it is what the at-tier review of
@@ -3146,7 +3161,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * a schema default would materialize `limit: 100` on every parsed board.
    */
   limit: z.number().int().positive().optional()
-    .describe("Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's row cap (`pagination.pageSize`, else that view's flat `limit`) fills this key unless it already carries a USABLE cap — a cap the contract refuses (zero, negative, fractional) is displaced by the view's and reported, not honoured"),
+    .describe("Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's `pagination.pageSize` fills this key only when it is unset — and on this face unset is the whole rule, because every cap this key accepts is one the binding gate already treats as authored"),
   data: z.array(z.unknown()).optional().describe('Static inline cards — bypasses the object query'),
   cardTitle: z.string().optional().describe('Field rendered as each card title'),
   titleField: z.string().optional().describe('Legacy fallback for `cardTitle` (the board reads `cardTitle || titleField`). Prefer `cardTitle`'),

@@ -1234,10 +1234,24 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  * `87af769e9`), 2026-09-21T09:15Z, with TWO instruments, because one was not
  * enough and the first one's answer was wrong:
  *
- *  1. PROPERTY-ACCESS spellings — `.kanban.limit` / `.gallery.limit` /
- *     `.timeline.limit` and the receiver alternation: **0** hits. Lit control,
- *     identical shape, `.kanban.groupByField` / `.gallery.coverField` /
- *     `.timeline.scale`: **13** lines. A live instrument, and a WRONG answer.
+ *  1. PROPERTY-ACCESS spellings. ⛔ Published as its EXPRESSION, not as a
+ *     number — this card exists because a confident count was wrong once, so
+ *     a control nobody can re-derive is not a control. Run at the pin, from
+ *     an objectui checkout, over every tracked file:
+ *       probe:   git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.limit\b'
+ *       control: git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.(groupByField|scale|coverField)\b'
+ *     Probe: **0** lines, 0 files. Control: **13** lines across **6** files —
+ *     `app-shell/src/views/ObjectView.galleryBinding-7547.test.tsx:41`,
+ *     `app-shell/src/views/ObjectView.tsx:450`,
+ *     `plugin-list/src/ListView.tsx:2538`, `:2540`, `:2547`, `:3057`, `:3114`,
+ *     `:3116`,
+ *     `plugin-list/src/__tests__/ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`,
+ *     `:99`, `plugin-view/src/ObjectView.tsx:1695`, and
+ *     `types/src/__tests__/object-kanban-group-by-limit-7322.test.ts:146`, `:148`.
+ *     ⚠️ Filtering changes that number and the filter must be stated with it:
+ *     3 of the 13 are in COMMENTS and 2 more sit inside a quoted source-text
+ *     pin, so a reader counting executable reads only gets **8**. All three
+ *     readings are of one hit set. A live instrument — and a WRONG answer.
  *  2. ⭐ SPREADS — a spread carries a key without ever spelling it, so it is
  *     the hole instrument 1 cannot see by construction. ⛔ Re-take it by its
  *     PREDICATE, not by its count: **a spread whose target is the object
@@ -1246,6 +1260,13 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  *     the lit control for the instrument AND the example of what the predicate
  *     excludes). A grep broad enough to find these also returns the nested
  *     merges, so the rule, not the number, is what makes it reproducible.
+ *     ⛔ And name what the predicate EXCLUDES, or the next reader re-finds
+ *     it and wonders: `app-shell/src/views/ObjectView.tsx:206` and `:342`
+ *     ARE spreads of a view block, inside `timelineViewOptions` (`:201`) and
+ *     `galleryViewOptions` (`:334`). They build an OPTIONS BAG that feeds
+ *     `ListView`'s nested forward, not the object literal an adapter returns
+ *     as the node, so the predicate excludes them — deliberately, not by
+ *     oversight.
  *     Under that predicate, at that pin, the VIEW-face per-kind blocks give:
  *       `plugin-list/src/ListView.tsx:2979`   `...restKanban`
  *       `plugin-view/src/ObjectView.tsx:1638`  `...restKanban`

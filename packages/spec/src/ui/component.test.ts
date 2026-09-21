@@ -3857,17 +3857,37 @@ describe('row caps on the object-bound blocks — what #19228 recorded', () => {
     expect(JSON.stringify(control.error?.issues)).toContain('unrecognized_keys');
   });
 
-  it('states the gate guard the gate actually implements, not the narrower 「unset」 arm', () => {
-    // ⛔ The one prose assertion here, and it is negative on purpose: this
-    // card's whole repair IS the published sentence, so without a pin the
-    // change has no falsifier. The retired wording claimed the view's cap
-    // lands ONLY on an unset key; measured, it also lands on a key set to a
-    // cap the contract refuses, with `describeDisplacedRowLimit` reporting it.
-    const shape = (ObjectKanbanPropsSchema as unknown as {
-      def: { shape: Record<string, { description?: string }> };
-    }).def.shape;
-    const description = shape.limit?.description ?? '';
-    expect(description).not.toContain('only when unset');
-    expect(description).toMatch(/usable cap/i);
+  it('admits exactly the caps the binding gate calls usable — which is WHY 「unset」 is the whole rule', () => {
+    // ⛔ Not a prose pin. The published sentence says a bound view's
+    // `pagination.pageSize` fills this key only when it is UNSET, and this is
+    // the structural fact that makes that true rather than narrow:
+    // `ElementDataSourceGate`'s guard is `!isUsableRowLimit(authored)` with
+    // `isUsableRowLimit = typeof v === 'number' && Number.isInteger(v) && v > 0`
+    // — the same set this key declares. So across the whole accept set the
+    // guard has exactly two outcomes, and 「set but not usable」 is empty.
+    // If either side ever widens (a `.nullable()`, a `0` sentinel, a float),
+    // this reds and the sentence has to be rewritten with it.
+    const usableToTheGate = (v: unknown): boolean =>
+      typeof v === 'number' && Number.isInteger(v) && v > 0;
+
+    // ACCEPTED by the schema ⇒ usable to the gate ⇒ the view's cap does NOT land.
+    for (const cap of [1, 25, 100, 5000]) {
+      const r = kanban.safeParse({ objectName: 'x', limit: cap });
+      expect(r.success, `accept ${cap}`).toBe(true);
+      expect(usableToTheGate((r.success ? r.data : {} as never).limit), `usable ${cap}`).toBe(true);
+    }
+
+    // REFUSED by the schema ⇒ never reaches the gate from a valid document,
+    // which is why the displaced-and-reported arm is not in the describe.
+    for (const cap of [0, -1, 2.5, '100', null]) {
+      expect(kanban.safeParse({ objectName: 'x', limit: cap }).success, `refuse ${JSON.stringify(cap)}`).toBe(false);
+      expect(usableToTheGate(cap), `gate also rejects ${JSON.stringify(cap)}`).toBe(false);
+    }
+
+    // UNSET — accepted, and the one state the gate treats as unauthored.
+    const unset = kanban.safeParse({ objectName: 'x' });
+    expect(unset.success).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(unset.success ? unset.data : {}, 'limit')).toBe(false);
+    expect(usableToTheGate(undefined)).toBe(false);
   });
 });
