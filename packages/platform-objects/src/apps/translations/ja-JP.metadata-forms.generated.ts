@@ -559,7 +559,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "関数 body ソース — トップレベル import 不可"
       },
       "body.capabilities": {
-        label: "機能",
+        label: "ケイパビリティ",
         helpText: "許可する ctx API（api.read, api.write, crypto.uuid, log, …）"
       },
       "body.timeoutMs": {
@@ -567,8 +567,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "呼び出しごとのタイムアウト（ms）"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "メモリ（MB）",
+        helpText: "呼び出しごとのメモリ上限（MB、最大 256）"
       },
       handler: {
         label: "ハンドラー",
@@ -582,8 +582,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "エラー時"
       },
       timeoutMs: {
-        label: "Timeout Ms",
-        helpText: "Abort the hook after N milliseconds"
+        label: "タイムアウト（ms）",
+        helpText: "N ミリ秒経過後にフックを中止"
       },
       runAs: {
         label: "実行主体",
@@ -594,16 +594,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "任意の数式 — false 評価時はフックをスキップ"
       },
       retryPolicy: {
-        label: "Retry Policy",
-        helpText: "Retry on failure — most useful for async hooks"
+        label: "再試行ポリシー",
+        helpText: "失敗時に再試行 — 非同期フックで特に有用"
       },
       "retryPolicy.maxRetries": {
-        label: "Max Retries",
-        helpText: "Maximum retry attempts"
+        label: "最大再試行回数",
+        helpText: "再試行の最大回数"
       },
       "retryPolicy.backoffMs": {
-        label: "Backoff Ms",
-        helpText: "Delay between retries (ms)"
+        label: "バックオフ（ms）",
+        helpText: "再試行間の遅延（ms）"
       }
     }
   },
@@ -1247,7 +1247,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "関数 body ソース — トップレベル import 不可"
       },
       "body.capabilities": {
-        label: "機能",
+        label: "ケイパビリティ",
         helpText: "許可する ctx API（api.read, api.write, crypto.uuid, log, …）"
       },
       "body.timeoutMs": {
