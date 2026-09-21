@@ -71,15 +71,23 @@ import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
 // that already call it — the dataset query in `rest-server.ts`, the cold-boot
 // flow bind in `service-automation`, and `saveMetaItem`'s verbatim persist.
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-// [#19120] The DECLARED grammar of one manifest key, asked BY REFERENCE at the
-// install door below. `ManifestSchema.shape.version` is the very field schema
+// [#19120 / #19417] The DECLARED grammar of TWO manifest keys, asked BY
+// REFERENCE at the install door below. `ManifestSchema.shape.version` and
+// `ManifestSchema.shape.id` are the very field schemas
 // `PackageInstallRequestSchema` binds through `manifest: ManifestSchema` — not
-// a copy of it. ⛔ A hand-written semver regex here would be the THIRD judgment
-// of this one key on this one surface (the `PATCH /packages/:id` door further
-// down already keeps its own copy), and the version-grammar canon is an open
-// question on its own card: asking the declaration means whatever that canon
-// decides reaches this door with no edit to this file.
-import { ManifestSchema } from '@objectstack/spec/kernel';
+// copies of them. ⛔ A hand-written semver regex here would be the THIRD
+// judgment of that one key on this one surface (the `PATCH /packages/:id` door
+// further down already keeps its own copy), and the version-grammar canon is an
+// open question on its own card: asking the declaration means whatever that
+// canon decides reaches this door with no edit to this file. The same holds for
+// the id — `MANIFEST_ID_PATTERN` is declared ONCE in `kernel/manifest.zod.ts`
+// and shared with `PackageSchema.manifestId`, so ⛔ no reverse-domain regex is
+// spelled here either.
+//
+// `manifestIdRefusal` is imported for exactly one limb: the fallback when a
+// failed parse somehow carries no issue. Even that limb then prints the
+// DECLARATION's own sentence rather than a second one invented here.
+import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
 // [#17672] The repo's ONE message for a single-valued query parameter supplied
 // more than once, from the module whose header is the authority on the rule
 // (`packages/rest/src/query-multiplicity.ts`). Imported, never restated: this
@@ -880,6 +888,86 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // A package id is mandatory — without one the install cannot be keyed.
             if (!pkgId) {
                 return { handled: true, response: deps.error('Package id is required', 400) };
+            }
+            // [#19417] ⭐ THE DOOR PARSES THE `id` LEG — the declaration, by
+            // reference, exactly as the `version` leg below is parsed.
+            //
+            // `MANIFEST_ID_PATTERN` (`packages/spec/src/kernel/manifest.zod.ts`)
+            // is the reverse-domain rule declared ONCE and referenced by BOTH
+            // faces of this identity — `ManifestSchema.id`, what an author
+            // writes, and `PackageSchema.manifestId`, what the registry stores
+            // and publishes by. This door read `manifest.id` POSITIONALLY and
+            // parsed nothing, so `id: 'pkg-a'` installed and answered `201`
+            // while `defineStack()`, `os build`, `os validate` and the publish
+            // face all refused the same id. The author got a package that could
+            // never be rebuilt or published — «declared ≠ enforced» on a
+            // PUBLISHED API contract, the shape Prime Directive #10 refuses
+            // outright, and the failure 北极星 clause 4 names in as many words:
+            // 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+            //
+            // The authorising ruling is 基本裁决原则 —「声明而未兑现是实现缺口,
+            // 补实现或退役,⛔ 不在消费端收窄」— and by the mechanical boundary
+            // test, making a door parse what its schema ALREADY declares is
+            // 拉回已声明契约, ⛔ not 扩大接受集. Nothing in `packages/spec` moves
+            // for this; the declaration was already right.
+            //
+            // ⭐ THE SENTENCE IS THE DECLARATION'S, NOT THIS FILE'S. The issue
+            // message is SURFACED rather than reworded: `manifestIdRefusal`
+            // names the key, echoes the value the author wrote, lists the
+            // examples, and carries a suggestion arm that VERIFIES its candidate
+            // against the pattern before offering it. Rewording it here would
+            // have produced a fourth sentence for one rule and dropped the
+            // repair.
+            //
+            // ⛔ SCOPE — THE `id` LEG ALONE. The declaration's residual docblock
+            // records the classes this door still answers `201` to; a missing
+            // `type`, unknown keys on either body form, a string-typed
+            // `enableOnInstall`/`overwrite` and install options spelled on the
+            // bare form are each their own narrowing of a published wire
+            // contract and are deliberately LEFT STANDING. Closing them is the
+            // ONE call this code still pointedly does not make,
+            // `PackageInstallBodySchema.safeParse(body)`.
+            //
+            // ⭐ ORDERED AFTER THE `!pkgId` GATE, DELIBERATELY — and that is a
+            // decision, because `''` fails the pattern too. Left of this gate,
+            // an absent id would stop printing `Package id is required` and
+            // start printing `Invalid package id ''`, which is the ONE input
+            // where the refusal's suggestion arm has nothing to offer: a
+            // PUBLISHED message replaced by a weaker one, for a body this door
+            // already refused. The gate below therefore narrows the ACCEPT SET
+            // only. `packages-install-manifest-version.test.ts` pins the same
+            // precedence for the version leg («no id means no sentence this gate
+            // could print»), and the artifact path's DOOR-1 precedent is not
+            // this door: there the schema parse is the FIRST door, with no
+            // published `required` sentence ahead of it to displace.
+            //
+            // ⭐ ORDERED BEFORE THE `version` GATE, for that same reason read
+            // one key over: the version refusal's sentence NAMES the id
+            // («add it to the manifest for '<id>'»). Prescribing a repair for a
+            // package id that can never be legal sends the author round twice.
+            //
+            // ⛔ THE RAW VALUE IS PARSED, not `pkgId`. The trim above keys the
+            // package; it must not also launder the id past its own rule, or
+            // `'  com.acme.crm  '` would keep installing a manifest whose stored
+            // `id` the declaration refuses. Downstream this makes the trim a
+            // no-op by construction — the pattern admits no whitespace — so
+            // every accepted path now has `pkgId === manifest.id`.
+            //
+            // ⛔ HTTP-DOOR-ONLY BY CONSTRUCTION, as the version leg is:
+            // boot-time and in-process installs reach
+            // `SchemaRegistry.installPackage` / `registerApp` directly and never
+            // pass through this branch.
+            const rawId = (manifest as any)?.id;
+            const declaredId = ManifestSchema.shape.id.safeParse(rawId);
+            if (!declaredId.success) {
+                const [issue] = declaredId.error.issues;
+                return {
+                    handled: true,
+                    response: deps.error(
+                        issue?.message || manifestIdRefusal('manifest.id', rawId),
+                        400,
+                    ),
+                };
             }
             // [#19120] ⭐ THE DOOR PARSES THE `version` LEG — the declaration,
             // by reference.
