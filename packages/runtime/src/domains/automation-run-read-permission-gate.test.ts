@@ -73,7 +73,7 @@ interface ExplainCall {
 interface Harness {
     dispatcher: HttpDispatcher;
     getRun: ReturnType<typeof vi.fn>;
-    listRuns: ReturnType<typeof vi.fn>;
+    listRunsPage: ReturnType<typeof vi.fn>;
     listFlows: ReturnType<typeof vi.fn>;
     getFlowRuntimeStates: ReturnType<typeof vi.fn>;
     getSuspendedScreen: ReturnType<typeof vi.fn>;
@@ -94,7 +94,12 @@ function makeDispatcher(
 ): Harness {
     const explainCalls: ExplainCall[] = [];
     const getRun = vi.fn(async () => PAUSED_RUN as unknown);
-    const listRuns = vi.fn(async () => [PAUSED_RUN] as unknown[]);
+    // [#19365] The door reads the PAGE member — `listRuns` alone cannot
+    // report truncation, so a door that has to answer `hasMore` calls this
+    // one. The gate under test is unaffected either way: it refuses ahead of
+    // the service probe, deliberately, so that a 501-vs-403 is not what tells
+    // an ungranted caller whether automation is mounted here.
+    const listRunsPage = vi.fn(async () => ({ runs: [PAUSED_RUN], hasMore: false } as unknown));
     const listFlows = vi.fn(async () => ['approval_flow']);
     const getFlowRuntimeStates = vi.fn(() => [{ name: 'approval_flow', enabled: true, bound: true }]);
     const getSuspendedScreen = vi.fn(async () => ({ nodeId: 'collect', fields: [] } as unknown));
@@ -112,7 +117,7 @@ function makeDispatcher(
         automation: {
             handlerReady: true,
             getRun,
-            listRuns,
+            listRunsPage,
             listFlows,
             getFlowRuntimeStates,
             getSuspendedScreen,
@@ -137,7 +142,7 @@ function makeDispatcher(
     return {
         dispatcher: new HttpDispatcher(kernel as never),
         getRun,
-        listRuns,
+        listRunsPage,
         listFlows,
         getFlowRuntimeStates,
         getSuspendedScreen,
@@ -193,7 +198,7 @@ describe('#7900 — /automation run-state reads require the sys_automation_run r
 
             expect(codeOf(response)).toBe('PERMISSION_DENIED');
             expect((response as any).status).toBe(403);
-            expect(h.listRuns).not.toHaveBeenCalled();
+            expect(h.listRunsPage).not.toHaveBeenCalled();
         });
 
         it('does not answer the caller\'s authorization topology in the refusal (#7450)', async () => {
@@ -247,7 +252,7 @@ describe('#7900 — /automation run-state reads require the sys_automation_run r
             );
 
             expect(payloadOf(response)).toEqual({ runs: [PAUSED_RUN], hasMore: false });
-            expect(h.listRuns).toHaveBeenCalled();
+            expect(h.listRunsPage).toHaveBeenCalled();
         });
     });
 

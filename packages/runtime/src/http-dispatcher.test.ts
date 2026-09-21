@@ -297,6 +297,13 @@ describe('HttpDispatcher', () => {
                 execute: vi.fn().mockResolvedValue({ success: true, output: {} }),
                 toggleFlow: vi.fn().mockResolvedValue(undefined),
                 listRuns: vi.fn().mockResolvedValue([{ id: 'run_1', status: 'completed' }]),
+                // [#19365] The run-list door calls the PAGE member; `listRuns`
+                // stays declared here because the CONTRACT still declares it,
+                // and this mock's subject is contract completeness (#4127).
+                listRunsPage: vi.fn().mockResolvedValue({
+                    runs: [{ id: 'run_1', status: 'completed' }],
+                    hasMore: false,
+                }),
                 getRun: vi.fn().mockResolvedValue({ id: 'run_1', status: 'completed' }),
                 resume: vi.fn().mockResolvedValue({ success: true, output: {}, durationMs: 7 }),
                 // ASYNC per IAutomationService (#4515) — `Promise<ScreenSpec | null>`.
