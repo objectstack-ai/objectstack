@@ -157,7 +157,7 @@ import {
     isApiOperationAllowed,
     API_PRIMITIVES,
     DATA_ACTION_TO_API_OPERATION,
-    referenceCarrierOf,
+    referenceTargetOf,
 } from '@objectstack/spec/data';
 // [#8013] The SHARED envelope writer (#3973), aliased. [#9098] The alias no
 // longer exists to dodge a NAME collision — the local responder this used to
@@ -10902,16 +10902,37 @@ export class RestServer {
                             // `catch`, through the one arbiter — see there for why it moved.
                             fieldDef = obj?.fields?.[fieldName];
                         } catch {/* ignore */}
-                        // ABSENCE stays silent and unchanged: `undefined` /
-                        // `null` / `''` all answer `undefined`, so the route
-                        // falls to the `LOOKUP_TARGET_MISSING` refusal below
-                        // exactly as before. UNREADABILITY throws past this
-                        // handler's outer `catch`, which classifies and LOGS it
-                        // (`mapDataError` + `logError`) rather than reporting a
-                        // missing target — and it also stops an object-valued
-                        // carrier from being forwarded as `query.object` into
-                        // `findData`, which is what it did before this change.
-                        referenceObject = referenceCarrierOf(fieldDef, 'REST public-form lookup picker');
+                        // [#19289] The arbiter is `referenceTargetOf`, ⛔ not
+                        // `referenceCarrierOf`. This read has NO type gate — it
+                        // resolves whatever field the picker names — so a
+                        // `{ type: 'user' }` field reaches it, and for that type
+                        // the carrier is not the target:
+                        // `IMPLICIT_REFERENCE_TARGETS` declares it a CONSTANT OF
+                        // THE TYPE (`sys_user`) and metadata authored without
+                        // `reference` "fully specified, not under-specified".
+                        // Reading the carrier answered a spec-complete field
+                        // `500 LOOKUP_TARGET_MISSING`, so opening the picker on
+                        // a "responsible person" column returned an error page.
+                        // ⛔ This is NOT a re-widening of the #12920 narrowing
+                        // below: no alias is re-admitted and no `??` chain
+                        // returns. `referenceTargetOf` reads the canonical key
+                        // through `referenceCarrierOf` and supplies the type's
+                        // own constant only where the spec declares one — a
+                        // stored def spelling the target `referenceTo` /
+                        // `target` / `options.objectName` still resolves NOTHING
+                        // here and still answers `500`.
+                        //
+                        // ABSENCE stays silent and unchanged for the types that
+                        // have no constant: a `lookup` / `master_detail` with
+                        // `undefined` / `null` / `''` still answers `undefined`,
+                        // so the route falls to the `LOOKUP_TARGET_MISSING`
+                        // refusal below exactly as before. UNREADABILITY throws
+                        // past this handler's outer `catch`, which classifies and
+                        // LOGS it (`mapDataError` + `logError`) rather than
+                        // reporting a missing target — and it also stops an
+                        // object-valued carrier from being forwarded as
+                        // `query.object` into `findData`.
+                        referenceObject = referenceTargetOf(fieldDef);
                     }
                     if (!referenceObject) {
                         res.status(500).json({
