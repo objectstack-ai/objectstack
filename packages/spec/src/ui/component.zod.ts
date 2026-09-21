@@ -3104,10 +3104,14 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * 2026-09-21T10:20Z. The branch is
    * `if (!fromView || !isUsableRowLimit(authored))`, and
    * `isUsableRowLimit` is `typeof v === 'number' && Number.isInteger(v) && v > 0`
-   * (`ElementDataSourceGate.tsx:192-194`) — the SAME set this key declares,
-   * `z.number().int().positive()`. So for every node this schema ACCEPTS,
-   * `authored` is either absent (not usable ⇒ the view's cap lands) or a
-   * positive integer (usable ⇒ it does not): unset is the only reachable arm.
+   * (`ElementDataSourceGate.tsx:192-194`), and this key's accept set
+   * (`z.number().int().positive()`) is a SUBSET of it — ⛔ not the same set,
+   * and the difference is reachable: `2^53 + 2` is refused here (zod 4's
+   * `.int()` is safe-integer, `too_big`) and `Number.isInteger` calls it
+   * usable. Subset is the direction that matters, and it is the whole
+   * argument: for every node this schema ACCEPTS, `authored` is either absent
+   * (not usable ⇒ the view's cap lands) or a cap the gate already treats as
+   * authored (⇒ it does not). So unset is the only reachable arm.
    * The extra arm — a cap displaced and reported because it is `0`, negative
    * or fractional — is reachable ONLY for a node this contract refuses, so
    * ⛔ it does not belong in an author-facing describe. Pinned structurally

@@ -3857,16 +3857,26 @@ describe('row caps on the object-bound blocks — what #19228 recorded', () => {
     expect(JSON.stringify(control.error?.issues)).toContain('unrecognized_keys');
   });
 
-  it('admits exactly the caps the binding gate calls usable — which is WHY 「unset」 is the whole rule', () => {
+  it('admits only caps the binding gate calls usable — the SUBSET that makes 「unset」 the whole rule', () => {
     // ⛔ Not a prose pin. The published sentence says a bound view's
     // `pagination.pageSize` fills this key only when it is UNSET, and this is
     // the structural fact that makes that true rather than narrow:
     // `ElementDataSourceGate`'s guard is `!isUsableRowLimit(authored)` with
-    // `isUsableRowLimit = typeof v === 'number' && Number.isInteger(v) && v > 0`
-    // — the same set this key declares. So across the whole accept set the
-    // guard has exactly two outcomes, and 「set but not usable」 is empty.
-    // If either side ever widens (a `.nullable()`, a `0` sentinel, a float),
-    // this reds and the sentence has to be rewritten with it.
+    // `isUsableRowLimit = typeof v === 'number' && Number.isInteger(v) && v > 0`.
+    // This key's accept set is a SUBSET of that predicate — ⛔ NOT the same
+    // set; `2 ** 53 + 2` separates them, and the case below pins it. Subset is
+    // the direction the sentence needs: it makes 「set but not usable」 empty
+    // across the whole accept set, so the guard has exactly two outcomes.
+    //
+    // ⚠️ What this pin can and cannot catch, because the two sides are not
+    // symmetric here:
+    //  · SPEC side — reds. A `.nullable()`, a `0` sentinel, dropping `.int()`
+    //    or adding a `.default()` each fail a specific expect below.
+    //  · GATE side — ⛔ CANNOT red. `usableToTheGate` is a TRANSCRIPTION of
+    //    `isUsableRowLimit` as it read at objectui pin `87af769e9`, not an
+    //    import — nothing here resolves into objectui. A rewrite of that
+    //    predicate at objectui HEAD leaves this test green. It is re-read on
+    //    a PIN BUMP, by hand, and that is the only thing that refreshes it.
     const usableToTheGate = (v: unknown): boolean =>
       typeof v === 'number' && Number.isInteger(v) && v > 0;
 
@@ -3883,6 +3893,15 @@ describe('row caps on the object-bound blocks — what #19228 recorded', () => {
       expect(kanban.safeParse({ objectName: 'x', limit: cap }).success, `refuse ${JSON.stringify(cap)}`).toBe(false);
       expect(usableToTheGate(cap), `gate also rejects ${JSON.stringify(cap)}`).toBe(false);
     }
+
+    // ⛔ The sets are NOT equal, and this is the witness. `2 ** 53 + 2` is
+    // refused here (zod 4's `.int()` enforces SAFE integers, `too_big`) while
+    // `Number.isInteger` calls it usable. Subset, not coincidence — if this
+    // case ever flips, the docblock sentence built on the subset direction
+    // has to be re-derived rather than reworded.
+    const beyondSafe = 2 ** 53 + 2;
+    expect(kanban.safeParse({ objectName: 'x', limit: beyondSafe }).success).toBe(false);
+    expect(usableToTheGate(beyondSafe)).toBe(true);
 
     // UNSET — accepted, and the one state the gate treats as unauthored.
     const unset = kanban.safeParse({ objectName: 'x' });

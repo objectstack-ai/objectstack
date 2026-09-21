@@ -1248,10 +1248,14 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  *     `plugin-list/src/__tests__/ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`,
  *     `:99`, `plugin-view/src/ObjectView.tsx:1695`, and
  *     `types/src/__tests__/object-kanban-group-by-limit-7322.test.ts:146`, `:148`.
- *     ⚠️ Filtering changes that number and the filter must be stated with it:
- *     3 of the 13 are in COMMENTS and 2 more sit inside a quoted source-text
- *     pin, so a reader counting executable reads only gets **8**. All three
- *     readings are of one hit set. A live instrument — and a WRONG answer.
+ *     ⚠️ Filtering changes that number and the filter must be stated with it.
+ *     Of the 13: **2 are COMMENTS** (`ObjectView.galleryBinding-7547.test.tsx:41`,
+ *     `ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`), **1 is an
+ *     `it()` TITLE string** (same file, `:99` — ⛔ not a comment), and **2 are
+ *     lines inside a QUOTED source-text pin**
+ *     (`object-kanban-group-by-limit-7322.test.ts:146`, `:148`). So a reader
+ *     counting executable reads only gets **8**. All three readings are of one
+ *     hit set. A live instrument — and a WRONG answer.
  *  2. ⭐ SPREADS — a spread carries a key without ever spelling it, so it is
  *     the hole instrument 1 cannot see by construction. ⛔ Re-take it by its
  *     PREDICATE, not by its count: **a spread whose target is the object
@@ -1266,7 +1270,12 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  *     `galleryViewOptions` (`:334`). They build an OPTIONS BAG that feeds
  *     `ListView`'s nested forward, not the object literal an adapter returns
  *     as the node, so the predicate excludes them — deliberately, not by
- *     oversight.
+ *     oversight. Two more the predicate excludes for their own reasons:
+ *     `plugin-list/src/ListView.tsx:3044-3046` (`mergedGallery`) builds a
+ *     NESTED gallery prop, the `...mergedTimeline` family; and
+ *     `app-shell/src/views/ObjectView.tsx:1284`
+ *     (`spec.kanban = { ...(spec.kanban || {}), columns }`) writes back into a
+ *     VIEW document's own block — a metadata write, not a node build.
  *     Under that predicate, at that pin, the VIEW-face per-kind blocks give:
  *       `plugin-list/src/ListView.tsx:2979`   `...restKanban`
  *       `plugin-view/src/ObjectView.tsx:1638`  `...restKanban`
