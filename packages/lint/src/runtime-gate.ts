@@ -193,13 +193,16 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // above name a non-context key for the same reason — counted off this table,
   // where only `objects`, `permissions`, `books` and `datasets` are context
   // collections. (This sentence read «eight of the twelve» when the card that
-  // added the two rows above wrote it — #19370, which NO LONGER RESOLVES: it
+  // added the two rows above wrote it. That card is numbered 19370 — written
+  // WITHOUT the citation sigil on purpose, because it NO LONGER RESOLVES: it
   // and its PR were filed by an account since banned, so both answer 404 while
-  // their work is landed and unaffected. The live record is the merge commit
-  // `a227afa415f596269ed36aae0a0631c84270ccc9`, which carries that card's whole
-  // diff and is where its reasoning can still be read. ⛔ Do not re-point this
-  // number at a rebuild: unlike its sibling below, #19370 has none, and
-  // guessing an upstream is how a dangling reference becomes a wrong one.
+  // their work is landed and unaffected. A dead number dressed as a live link
+  // is the dangling reference `check:issue-citations` exists to refuse, so it
+  // is spelled as what it is: a historical card id. The live record is the
+  // merge commit `a227afa415f596269ed36aae0a0631c84270ccc9`, which carries
+  // that card's whole diff and is where its reasoning can still be read.
+  // ⛔ Do not re-point it at a rebuild — unlike its sibling below it has none,
+  // and guessing an upstream is how a dangling reference becomes a wrong one.
   //
   // «eight of the twelve» was true of the table it was written against;
   // #19542's three rows landed in the same merge, so the count is restated
