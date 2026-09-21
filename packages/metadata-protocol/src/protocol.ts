@@ -137,6 +137,9 @@ import {
     type MetadataProvenance,
 } from '@objectstack/spec/kernel';
 import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
+// [#19417] The package-id declaration and its remedy text, imported to be
+// SURFACED rather than restated — see the gate at the top of `installPackage`.
+import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { REFERENCE_SITES } from './reference-sites.js';
 // [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
@@ -19267,12 +19270,79 @@ export class ObjectStackProtocolImplementation implements
         copied: Array<{ type: string; name: string }>;
         failed: Array<{ type: string; name: string; error: string }>;
     }> {
+        // [#19417] ⭐ THE TARGET ID IS PARSED BEFORE ANYTHING IS MINTED — same
+        // declaration, same surfaced sentence, one key over.
+        //
+        // This door builds `dupManifest` with `id: request.targetPackageId` and
+        // writes it through {@link installPackage}, so the gate there already
+        // covers the WRITE. It does not cover this method, for two reasons that
+        // are both about where the refusal lands:
+        //
+        //   ① the `installPackage` call below sits inside a `catch {}` that is
+        //     deliberately best-effort (a manifest row is not worth aborting a
+        //     copy for), so a refusal raised THERE would be swallowed here and
+        //     the caller would read `success: true` on a package with no
+        //     manifest row — a silent partial state, strictly worse than the
+        //     201 this card set out to close;
+        //   ② the refusal has to precede the MUTATIONS, and the manifest write
+        //     is not the first of them. #14451 already established the position
+        //     for this door's other precondition: `duplicatePackage` mints the
+        //     target package record ahead of its copy loop, so a refusal any
+        //     later leaves the empty shell behind.
+        //
+        // The key named is `targetPackageId`, because that is the authoring
+        // path the caller actually wrote — `manifestIdRefusal` takes the key so
+        // one declaration can name itself correctly at every door.
+        const declaredTargetId = ManifestSchema.shape.id.safeParse(request.targetPackageId);
+        if (!declaredTargetId.success) {
+            throw Object.assign(
+                new Error(manifestIdRefusal('targetPackageId', request.targetPackageId)),
+                { statusCode: 400 },
+            );
+        }
+
         const registry: any = (this.engine as any).registry;
         const srcPkg = registry?.getPackage?.(request.sourcePackageId);
+        // [#19417] ⭐ ONE ASSUMPTION, ONE IMPLEMENTATION. Both namespaces were
+        // derived here by a RAW `id.split('.').pop()`, while
+        // {@link installPackage} derives the very same default with the spec
+        // helper `deriveNamespaceFromPackageId` — which sanitises to the
+        // namespace charset, truncates to 20 and answers `null` when nothing
+        // valid comes out. The raw copy did none of that, and `targetNs` is not
+        // a label: it is spliced into every copied OBJECT name as
+        // `${targetNs}_${short}`, and an object name is
+        // `/^[a-z_][a-z0-9_]*$/` (`packages/spec/src/data/object.zod.ts`).
+        //
+        // So the Studio's own default duplicate id — `<sourceId>-copy`, the
+        // value both objectui duplicate dialogs prefill — derived the namespace
+        // `leave-copy` and minted object names `leave-copy_ticket`, which the
+        // object declaration refuses. The helper answers `leave_copy`. The
+        // source side is the same rule read backwards: the prefix these rows
+        // actually carry is the one `installPackage` stamped, i.e. the helper's,
+        // so matching them with the raw split found nothing and the copy landed
+        // under the SOURCE's names — the collision the re-namespacing exists to
+        // prevent.
+        //
+        // ⛔ An explicitly declared `targetNamespace` still wins untouched: it
+        // is the caller's decision and this seam is about the DEFAULT.
         const sourceNs: string =
-            (srcPkg?.manifest?.namespace as string) ?? (request.sourcePackageId.split('.').pop() ?? '');
-        const targetNs: string =
-            request.targetNamespace ?? (request.targetPackageId.split('.').pop() ?? request.targetPackageId);
+            (srcPkg?.manifest?.namespace as string) ?? (deriveNamespaceFromPackageId(request.sourcePackageId) ?? '');
+        const targetNs: string | null =
+            request.targetNamespace ?? deriveNamespaceFromPackageId(request.targetPackageId);
+        if (!targetNs) {
+            // Reachable only for an id the pattern admits but the namespace
+            // charset cannot carry (a single-letter final segment), or for an
+            // explicit `targetNamespace: ''`. Loud, with the remedy — never a
+            // copy renamed with an empty prefix.
+            throw Object.assign(
+                new Error(
+                    `Cannot derive a package namespace from '${request.targetPackageId}'. `
+                    + 'Pass `targetNamespace` explicitly — a lowercase letter followed by '
+                    + '1–19 letters, digits or underscores.',
+                ),
+                { statusCode: 400 },
+            );
+        }
 
         const where: Record<string, unknown> = { package_id: request.sourcePackageId, state: 'active' };
         // [#7819 tier 2] Copy the source's env-wide (`organization_id IS NULL`)
@@ -22511,6 +22581,64 @@ export class ObjectStackProtocolImplementation implements
      * flag arms below.
      */
     async installPackage(request: InstallPackageRequest): Promise<InstallPackageResponse> {
+        // [#19417] ⭐ THE PRIMITIVE PARSES THE `id` LEG — the declaration, by
+        // reference, ahead of every write and every derivation below.
+        //
+        // `MANIFEST_ID_PATTERN` (`packages/spec/src/kernel/manifest.zod.ts`) is
+        // the reverse-domain rule declared ONCE and referenced by BOTH faces of
+        // this identity — `ManifestSchema.id`, what an author writes, and
+        // `PackageSchema.manifestId`, what the registry stores and publishes by.
+        // This primitive read `request.manifest` POSITIONALLY: it spread the
+        // request into `any` and handed it to
+        // `this.engine.registry.installPackage` with a second `as any`, so
+        // `id: 'pkg-a'` — or `com.example.my_erp` — installed and PERSISTED,
+        // while `defineStack()`, `os build`, `os validate` and the publish face
+        // all refuse the same id. That is «declared ≠ enforced» on a PUBLISHED
+        // contract, the shape Prime Directive #10 refuses outright and
+        // 北极星 clause 4 names in as many words:
+        // 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+        //
+        // ⭐ THE GATE IS ON THE PRIMITIVE, NOT ON ONE DOOR. #19473 landed the
+        // same parse at `POST /packages`
+        // (`packages/runtime/src/domains/packages.ts`), which is ONE caller of
+        // this method — that door calls `protocol.installPackage` whenever the
+        // protocol service resolves, and falls back to the bare registry write
+        // when it does not. {@link duplicatePackage} below is a second caller,
+        // and an embedder holding this object is a third. Gating a door alone
+        // buys that door; the rule belongs where every caller passes.
+        //
+        // ⭐ THE SENTENCE IS THE DECLARATION'S, NOT THIS FILE'S — surfaced
+        // rather than reworded, exactly as #19473 did it: `manifestIdRefusal`
+        // names the key, echoes what the author wrote, lists the examples, and
+        // offers a mechanical repair only after VERIFYING that candidate
+        // against the pattern. A fourth sentence for one rule would drop the
+        // repair.
+        //
+        // The throw carries `statusCode` so an HTTP boundary answers `400`
+        // rather than the `500` an unannotated throw earns
+        // (`resolveThrownHttpError`, `@objectstack/types`) — the same status
+        // the HTTP door serves for this refusal, and the spelling this file
+        // already uses for its `404`.
+        //
+        // ⛔ THE RAW VALUE IS PARSED, before the spread and before the version
+        // and namespace defaults: an id the declaration refuses must never
+        // reach `deriveNamespaceFromPackageId` below, which already ASSUMES the
+        // reverse-domain shape it was never given a chance to enforce.
+        //
+        // ⛔ SCOPE — THE `id` LEG ALONE. `InstallPackageRequestSchema` /
+        // `ManifestSchema` are still not parsed whole here; the residual
+        // classes the HTTP door's own docblock records are untouched by this
+        // and are each their own narrowing of a published contract.
+        const rawId = (request.manifest as { id?: unknown } | undefined)?.id;
+        const declaredId = ManifestSchema.shape.id.safeParse(rawId);
+        if (!declaredId.success) {
+            const [issue] = declaredId.error.issues;
+            throw Object.assign(
+                new Error(issue?.message || manifestIdRefusal('manifest.id', rawId)),
+                { statusCode: 400 },
+            );
+        }
+
         // #2532 — runtime-created base packages routinely arrive versionless
         // ({id, name} from the builder / Setup). `sys_packages.version` is NOT
         // NULL, and the old guard here (`pkgSvc?.publish && manifest.version`)
