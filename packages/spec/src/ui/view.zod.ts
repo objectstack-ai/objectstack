@@ -1217,32 +1217,60 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  * replaces — the author needs to know the cap is visible, and the renderer
  * author needs to know it is owed.
  *
- * ⚠️ NO CONSUMER READS THIS KEY YET — recorded, not repaired (#19228).
- * Measured 2026-09-21T06:40Z at the pin this repo builds against
- * (`.objectui-sha` = `87af769e9`), by `git grep` over all 8,228 files tracked
- * at that commit: `.kanban.limit` / `.gallery.limit` / `.timeline.limit` →
- * **0** read points, against **8** for the identically-shaped control
- * `.kanban.groupByField` / `.gallery.coverField` / `.timeline.scale` on the
- * same instrument. The row caps objectui DOES read are two other keys: a
- * saved view's `pagination.pageSize`, else that view's FLAT `limit`
- * (`core/src/data-scope/element-data-source.ts:237-241`, `savedViewLimit`),
- * and the element block's own flat `limit` (`plugin-timeline/src/
- * ObjectTimeline.tsx:407`, `plugin-kanban/src/ObjectKanban.tsx:676`).
- * `ListView`'s `baseProps` (`plugin-list/src/ListView.tsx:2840-2865`) carries
- * no `limit` on any branch, so a parsed view's per-kind ceiling reaches no
- * query at all — it is declared-and-dropped, the ADR-0049 class, at birth.
+ * ⚠️ WHAT THIS KEY REACHES TODAY — recorded, not repaired (#19228). Measured
+ * first-hand at the pin this repo builds against (`.objectui-sha` =
+ * `87af769e9`), 2026-09-21T08:05Z, with TWO instruments, because one was not
+ * enough and the first one's answer was wrong:
  *
- * ⛔ Which of the three row bounds wins is NOT decided here and NOT implied by
- * this declaration: #19228 opens that question and picks nothing, and neither
- * does this note. What is recorded is only what each key reaches today.
+ *  1. PROPERTY-ACCESS spellings — `.kanban.limit` / `.gallery.limit` /
+ *     `.timeline.limit` and the receiver alternation: **0** hits. Lit control,
+ *     identical shape, `.kanban.groupByField` / `.gallery.coverField` /
+ *     `.timeline.scale`: **13** lines. A live instrument, and a WRONG answer.
+ *  2. ⭐ SPREADS — a spread carries a key without ever spelling it, so it is
+ *     the hole instrument 1 cannot see by construction. Lit control:
+ *     `...mergedTimeline`, 1 line. It returns FOUR, and they overturn the zero:
+ *       `plugin-list/src/ListView.tsx:2979`   `...restKanban`
+ *       `plugin-view/src/ObjectView.tsx:1638`  `...restKanban`
+ *       `plugin-view/src/ObjectView.tsx:1697`  `...(viewOptions.gallery || {})`
+ *       `plugin-view/src/ObjectView.tsx:1725`  `...(viewOptions.timeline || {})`
+ *     Neither `restKanban` destructure strips `limit` (`ListView.tsx:2952`,
+ *     `ObjectView.tsx:1579`), so a view's per-kind `limit` — INCLUDING the 100
+ *     this applied default materializes — lands on the generated node's FLAT
+ *     `limit`, which is the key the renderers read.
+ *
+ * ⇒ **kanban and timeline: the key LANDS and IS READ.**
+ *   `ObjectKanban.tsx:553` / `ObjectTimeline.tsx:279` run
+ *   `describeRefusedRowLimit(schema.limit, …)` unconditionally.
+ *   ⚠️ The `$top` it would govern (`ObjectKanban.tsx:676`,
+ *   `ObjectTimeline.tsx:407`) is not issued on either adapter route today:
+ *   both hosts hand rows down as a React `data` prop (`ListView.tsx:4702`,
+ *   `ObjectView.tsx:2319`) and both children short-circuit their own fetch on
+ *   it (`ObjectKanban.tsx:559`, `ObjectTimeline.tsx:420`). So it governs no
+ *   query ON THOSE ROUTES — ⛔ which is not the same claim as 「reaches no
+ *   consumer」, and the difference is the whole correction.
+ * ⇒ **gallery, and gallery alone: carried flat and read by NOBODY.**
+ *   `ObjectView.tsx:1697` delivers it; `ObjectGallery.tsx` contains no `limit`
+ *   at all (0 occurrences, case-insensitive, against a lit control
+ *   `schema.imageField` / `schema.titleField` at `:340` / `:348`). ⛔ Do not
+ *   generalise that asymmetry to the other two — it is gallery's alone.
+ *
+ * ⚠️ A consequence of APPLIED that the open decision needs: through those
+ * spreads a spec-parsed view emits a node carrying an authored-LOOKING flat
+ * `limit: 100` that no author wrote. ⛔ Flagged, not acted on — changing it is
+ * a contract direction, not a tidy-up.
+ *
+ * ⛔ Which of the row bounds wins is NOT decided here and NOT implied by this
+ * declaration: #19228 opens that question and picks nothing, and neither does
+ * this note. What is recorded is only what each key reaches today.
  */
 const rowLimitKey = (view: RowLimitView) =>
   z.number().int().positive().default(DEFAULT_VIEW_ROW_LIMIT).describe(
-    `Row ceiling — the most ${ROW_LIMIT_SUBJECT[view]}, sent as the query \`$top\`; default `
-    + `${DEFAULT_VIEW_ROW_LIMIT} when the key is absent. When the ceiling APPLIES (the filtered `
-    + 'set is larger than it), the renderer must show a visible truncation signal saying what is '
-    + 'on screen is not the whole set — a bounded view that looks complete is worse than an '
-    + 'unbounded one.',
+    `Row ceiling — the most ${ROW_LIMIT_SUBJECT[view]}; default `
+    + `${DEFAULT_VIEW_ROW_LIMIT} when the key is absent. The renderer owes two things: bound its `
+    + 'fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), '
+    + 'show a visible truncation signal saying what is on screen is not the whole set — a bounded '
+    + 'view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a '
+    + 'renderer that reads this key yet; which do is recorded on the declaration.',
   );
 
 /**
