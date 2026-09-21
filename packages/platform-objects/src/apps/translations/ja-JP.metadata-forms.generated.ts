@@ -225,33 +225,33 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "CEL 述語 — TRUE の場合フィールドは必須（サーバー側で強制）"
       },
       enable: {
-        label: "Enable",
-        helpText: "Enable/disable system features"
+        label: "有効化",
+        helpText: "システム機能の有効/無効"
       },
       "enable.trackHistory": {
-        label: "Track History"
+        label: "履歴追跡"
       },
       "enable.searchable": {
-        label: "Searchable"
+        label: "検索可能"
       },
       "enable.apiEnabled": {
-        label: "Api Enabled"
+        label: "API 有効"
       },
       "enable.files": {
-        label: "Files"
+        label: "ファイル"
       },
       "enable.feeds": {
-        label: "Feeds"
+        label: "フィード"
       },
       "enable.activities": {
-        label: "Activities"
+        label: "アクティビティ"
       },
       "enable.clone": {
-        label: "Clone"
+        label: "クローン"
       },
       validations: {
-        label: "Validations",
-        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+        label: "検証ルール",
+        helpText: "オブジェクトレベルの検証ルール — ルールオブジェクトの配列。例: [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。ステートマシンの遷移テーブルもここで宣言します（ADR-0020）"
       },
       datasource: {
         label: "データソース",

@@ -225,33 +225,33 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Predicado CEL: el campo es obligatorio cuando es TRUE (aplicado en el servidor)"
       },
       enable: {
-        label: "Enable",
-        helpText: "Enable/disable system features"
+        label: "Habilitar",
+        helpText: "Activa/desactiva funciones del sistema"
       },
       "enable.trackHistory": {
-        label: "Track History"
+        label: "Seguimiento de historial"
       },
       "enable.searchable": {
-        label: "Searchable"
+        label: "Buscable"
       },
       "enable.apiEnabled": {
-        label: "Api Enabled"
+        label: "API habilitada"
       },
       "enable.files": {
-        label: "Files"
+        label: "Archivos"
       },
       "enable.feeds": {
-        label: "Feeds"
+        label: "Publicaciones"
       },
       "enable.activities": {
-        label: "Activities"
+        label: "Actividades"
       },
       "enable.clone": {
-        label: "Clone"
+        label: "Clonación"
       },
       validations: {
-        label: "Validations",
-        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+        label: "Validaciones",
+        helpText: "Reglas de validación a nivel de objeto — un array de objetos de regla, p. ej. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. Las tablas de transición de máquinas de estado también se declaran aquí (ADR-0020)"
       },
       datasource: {
         label: "Fuente de datos",

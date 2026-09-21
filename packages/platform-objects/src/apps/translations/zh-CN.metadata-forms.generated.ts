@@ -225,33 +225,33 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "CEL 判定式——结果为 TRUE 时该字段必填（由服务端强制）"
       },
       enable: {
-        label: "Enable",
-        helpText: "Enable/disable system features"
+        label: "启用",
+        helpText: "启用或禁用系统功能"
       },
       "enable.trackHistory": {
-        label: "Track History"
+        label: "历史跟踪"
       },
       "enable.searchable": {
-        label: "Searchable"
+        label: "可搜索"
       },
       "enable.apiEnabled": {
-        label: "Api Enabled"
+        label: "已启用 API"
       },
       "enable.files": {
-        label: "Files"
+        label: "文件"
       },
       "enable.feeds": {
-        label: "Feeds"
+        label: "动态"
       },
       "enable.activities": {
-        label: "Activities"
+        label: "活动"
       },
       "enable.clone": {
-        label: "Clone"
+        label: "克隆"
       },
       validations: {
-        label: "Validations",
-        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+        label: "校验规则",
+        helpText: "对象级校验规则——由规则对象组成的数组，例如 [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。状态机转移表也在此声明（ADR-0020）"
       },
       datasource: {
         label: "数据源",
