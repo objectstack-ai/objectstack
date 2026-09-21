@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { objectPermissionGrants } from '../security/permission.zod';
+import type { EffectiveObjectPermission } from '../security/permission.zod';
 import type {
   ISecurityService,
   AuthoredRowWriteVerdict,
@@ -297,6 +299,76 @@ describe('Security Service Contract', () => {
     // make the method a fourth copy of the rule rather than the one source of
     // its input.
     expect(sets).toHaveLength(2);
+  });
+
+  it('[#19354] resolveEffectiveObjectPermissions is OPTIONAL — and the fallback is NOT an empty map (compile-time)', () => {
+    // THE structural pin behind "a consumer that can no longer answer passes
+    // NOTHING". Optional is what makes that a property of the TYPE: a security
+    // service that predates the method still satisfies the contract, and the
+    // unguarded call does not compile, so the absent branch cannot be dropped
+    // on the way to a consumer that would otherwise invent a map.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.resolveEffectiveObjectPermissions).toBe('undefined');
+
+    // Never invoked — its only job is to make the COMPILER prove the point.
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.resolveEffectiveObjectPermissions({ userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // The shape a consumer writes: absence yields `undefined`, which is NOT the
+    // same value as an empty map and must not be flattened into one. `{}` is a
+    // real answer ("this subject holds nothing"), and substituting it for "no
+    // answer" turns a missing implementation into a denial of everything.
+    const answer = withoutIt.resolveEffectiveObjectPermissions?.({ userId: 'u1' });
+    expect(answer).toBeUndefined();
+  });
+
+  it('[#19354] the values are effective ENTRIES, not per-verb verdicts — the fold stays in objectPermissionGrants', async () => {
+    // Why the entry and not a boolean: the entry still carries the super-user
+    // axes, and folding them into a verdict is `objectPermissionGrants` — one
+    // reading, shared with `PermissionEvaluator.checkObjectPermission`, so a
+    // predicate answered from this map reaches the verdict the server's 403
+    // would. An implementation that pre-folded would be a fourth copy of it.
+    const service = makeService({
+      resolveEffectiveObjectPermissions: async () => ({
+        // A wildcard "Modify All Data" grant, carried under its own key…
+        '*': { modifyAllRecords: true },
+        // …and folded into the named entries, as `/auth/me/permissions` serves
+        // them: `organization_admin` denies the write, the super-user bypass
+        // restores it, and the map states the ENFORCED answer, not the declared
+        // one (ADR-0124 D4).
+        sys_user: { allowRead: true, allowEdit: true, modifyAllRecords: true },
+        deal: { allowRead: true },
+      }),
+    });
+
+    const map = await service.resolveEffectiveObjectPermissions?.({ userId: 'u1' });
+    expect(map?.['*']).toEqual({ modifyAllRecords: true });
+
+    // The fold reads the entry; the map does not pre-answer the verb.
+    expect(objectPermissionGrants(map?.sys_user, 'allowEdit')).toBe(true);
+    expect(objectPermissionGrants(map?.deal, 'allowEdit')).toBe(false);
+    // `allowCreate` has no super-user bypass — the entry keeps that distinction
+    // available, a boolean map would already have lost it.
+    expect(objectPermissionGrants(map?.sys_user, 'allowCreate')).toBe(false);
+
+    // An object no permission set mentions is absent, and absence reads as "no
+    // grant" — the same answer an all-`false` entry gives. A consumer that must
+    // give a super-user the enforcement path's answer for such an object reads
+    // the `'*'` entry itself; it may not read the silence as one.
+    expect(map?.crm_lead).toBeUndefined();
+    expect(objectPermissionGrants(map?.crm_lead, 'allowRead')).toBe(false);
+    expect(objectPermissionGrants(map?.['*'], 'allowRead')).toBe(true);
+
+    // The value type is the published effective entry. A map of verdicts is a
+    // different contract and does not compile — the compile-time half of
+    // "entries, not verdicts".
+    const notAnEntryMap: Record<string, EffectiveObjectPermission> = {
+      // @ts-expect-error a per-verb boolean is not an EffectiveObjectPermission
+      deal: true,
+    };
+    expect(notAnEntryMap).toBeDefined();
   });
 
   it('a partial implementation is feature-detectable rather than wrong', () => {
