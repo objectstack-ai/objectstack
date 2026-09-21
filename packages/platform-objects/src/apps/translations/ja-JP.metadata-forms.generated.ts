@@ -737,7 +737,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userFilters: {
         label: "ユーザーフィルター",
-        helpText: "クイックフィルターバー：要素スタイル（ドロップダウン / タブ / トグル）+ 公開フィールドまたはタブプリセット"
+        helpText: "クイックフィルターバー：要素スタイル（dropdown / tabs / toggle）+ 公開フィールドまたはタブプリセット"
       },
       tabs: {
         label: "タブ",
