@@ -3864,6 +3864,6 @@ describe('row caps on the object-bound blocks — what #19228 recorded', () => {
     }).def.shape;
     const description = shape.limit?.description ?? '';
     expect(description).not.toContain('only when unset');
-    expect(description).toContain('usable');
+    expect(description).toMatch(/usable cap/i);
   });
 });
