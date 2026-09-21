@@ -58,8 +58,17 @@ function isRecord(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-/** Locate `@objectstack/spec`'s shipped `liveness/` dir (workspace src or published files). */
-function resolveLivenessDir(): string | null {
+/**
+ * Locate `@objectstack/spec`'s shipped `liveness/` dir (workspace src or
+ * published files).
+ *
+ * Exported as part of the package-internal walk seam (`#19268`, see the block
+ * below `walkStack`): a test that drives the rule against a MODIFIED copy of
+ * the shipped ledgers has to start from the same directory the rule itself
+ * reads, resolved the same way, or it is testing a directory nothing uses.
+ */
+export function resolveLivenessDir(): string | null {
+
   try {
     const require = createRequire(import.meta.url);
     const pkgJson = require.resolve('@objectstack/spec/package.json');
@@ -467,23 +476,21 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
 ];
 
 /**
- * Lint the compiled stack for authored properties the liveness ledger flags as
- * misleading. Advisory only — returns findings, never throws. Covers every
- * governed metadata type: objects (incl. `enable.*`) and their fields walk
- * bespoke nesting, and translation bundles walk their locale entries (#11288);
- * the remaining types are flat stack collections. Container properties fan out
- * over arrays (each flow node, each dataset measure). The
- * mechanism stays ledger-driven — coverage grows by marking more entries
- * `authorWarn` rather than touching this code.
+ * The walk itself: every governed metadata type checked against whatever warn
+ * map `warnMapOf` answers with, findings appended in walk order.
+ *
+ * Split out from ledger RESOLUTION so the walk can be driven from ledgers the
+ * caller controls (`#19268` — see the seam block below). Every governed type is
+ * asked for exactly once per call whatever the stack holds, which is also what
+ * lets the seam report a fault for a type whose collection the stack never
+ * carries.
  */
-export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
-  const dir = resolveLivenessDir();
-  if (!dir) return [];
-
+function walkStack(stack: AnyRec, warnMapOf: (type: string) => WarnMap): LivenessLintFinding[] {
   const findings: LivenessLintFinding[] = [];
 
-  const objectWarn = loadWarnMap(dir, 'object');
-  const fieldWarn = loadWarnMap(dir, 'field');
+  const objectWarn = warnMapOf('object');
+  const fieldWarn = warnMapOf('field');
+
   for (const obj of recordsOf(stack.objects)) {
     // Malformed collection item — same "never throws" contract as the flat
     // TYPE_COLLECTIONS loop and the translation bundle walk below (#11385).
@@ -516,7 +523,7 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
   // this rule is `surfaces: CLI_ONLY` (`authoring-rules.ts`), so it never runs
   // at the runtime publish gate either. The two doors share the group
   // vocabulary, not the container; only the file-authored one is lintable.
-  const translationWarn = loadWarnMap(dir, 'translation');
+  const translationWarn = warnMapOf('translation');
   if (translationWarn.size > 0) {
     const bundles = recordsOf(stack.translations);
     for (let i = 0; i < bundles.length; i++) {
@@ -533,7 +540,7 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
   }
 
   for (const { type, key } of TYPE_COLLECTIONS) {
-    const warnMap = loadWarnMap(dir, type);
+    const warnMap = warnMapOf(type);
     if (warnMap.size === 0) continue;
     for (const item of recordsOf(stack[key])) {
       // Malformed collection item — "never throws" contract (#11385).
@@ -547,4 +554,60 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
   }
 
   return findings;
+}
+
+/**
+ * ── Walk seam (#19268). Package-internal: NOT part of the published surface,
+ *    the same posture as the #10262 seam below `getNested` — exported from the
+ *    MODULE only. `src/index.ts` re-exports neither this nor
+ *    `resolveLivenessDir`, and this package's `exports` map publishes exactly
+ *    two subpaths (`.` → `dist/index.js`, `./runtime` → `dist/runtime.js`, both
+ *    bundled by tsup from those two entries), so no consumer can reach either
+ *    symbol and the built `.d.ts` surface is unchanged. ────────────────────
+ *
+ * The whole rule, against a ledger directory the CALLER supplies.
+ *
+ * WHY THE SEAM IS A DIRECTORY AND NOT A READY-MADE WARN MAP. The field walk
+ * sits behind `if (fieldWarn.size > 0)`, so when `field.json`'s last
+ * `authorWarn` row correctly flipped `live` (#19187) the loop stopped
+ * executing and the `if (!isRecord(field)) continue` guard #11385 was filed for
+ * became unreachable THROUGH THE PUBLIC FUNCTION — with nothing to re-subject
+ * it to, because the field walk reads `field.json` and nothing else. That is
+ * the third time a correct ledger flip deleted this file's coverage (#7079,
+ * the #10262 block above, now this), so the cure is that block's: give the walk
+ * a subject no verdict can move. `checkItemAgainstWarnMap` cannot be that
+ * subject — it takes one ITEM, and what #11385 guards is the walk that finds
+ * the items. A synthetic ledger file can be all of it: copy the shipped ledger
+ * directory, change ONE file in the copy, run the real rule against it.
+ *
+ * The cost is honest and bounded, exactly as for the #10262 block: assertions
+ * made through this seam say nothing about what the SHIPPED ledgers classify —
+ * that stays the job of every ledger-driven assertion in the test file.
+ */
+export function lintLivenessPropertiesFromLedgerDir(dir: string, stack: AnyRec): LivenessLintFinding[] {
+  const maps = new Map<string, WarnMap>();
+  const warnMapOf = (type: string): WarnMap => {
+    const cached = maps.get(type);
+    if (cached) return cached;
+    const map = loadWarnMap(dir, type);
+    maps.set(type, map);
+    return map;
+  };
+  return walkStack(stack, warnMapOf);
+}
+
+/**
+ * Lint the compiled stack for authored properties the liveness ledger flags as
+ * misleading. Advisory only — returns findings, never throws. Covers every
+ * governed metadata type: objects (incl. `enable.*`) and their fields walk
+ * bespoke nesting, and translation bundles walk their locale entries (#11288);
+ * the remaining types are flat stack collections. Container properties fan out
+ * over arrays (each flow node, each dataset measure). The
+ * mechanism stays ledger-driven — coverage grows by marking more entries
+ * `authorWarn` rather than touching this code.
+ */
+export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
+  const dir = resolveLivenessDir();
+  if (!dir) return [];
+  return lintLivenessPropertiesFromLedgerDir(dir, stack);
 }

@@ -1,9 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   authorWarnedProperties,
   lintLivenessProperties,
+  LIVENESS_DEAD_PROPERTY,
   // #10262 test seam — package-internal (not re-exported by `src/index.ts`, not
   // in the package's `exports` map). See the block below `getNested` in the
   // source for why this ONE property is tested off the ledger.
@@ -12,6 +16,12 @@ import {
   // #14057 coverage seam — the statuses the shipped ledgers actually carry, so
   // the coverage pin below is derived from the ledgers rather than hand-listed.
   shippedLedgerStatuses,
+  // #19268 walk seam — package-internal, same posture as the two above (module
+  // exports; `src/index.ts` re-exports neither, and the package's `exports` map
+  // publishes only `.` and `./runtime`). The rule against a ledger directory the
+  // test controls, and the resolver that finds the real one to copy.
+  lintLivenessPropertiesFromLedgerDir,
+  resolveLivenessDir,
 } from './lint-liveness-properties.js';
 
 /**
@@ -1332,5 +1342,143 @@ describe('authorWarnedProperties', () => {
     // nothing and the CLI gates nothing. They go silent together; the state
     // that must never happen is one of them speaking alone.
     expect([...authorWarnedProperties('no-such-metadata-type')]).toEqual([]);
+  });
+});
+
+// ── #19268 / #19276: the walk seam, and the ledger reads it makes ───────────
+//
+// #19268 — `lintLivenessProperties` puts the whole field loop behind
+//     `if (fieldWarn.size > 0)`. `field.relatedListFilter` was the ONE
+//     `authorWarn` row on `field.json` at any depth, so when #19187 correctly
+//     flipped it `live` the loop stopped executing and #11385's
+//     `if (!isRecord(field)) continue` guard became unreachable through the
+//     public function — with no second warned field row anywhere to re-hang it
+//     on, because the field walk reads `field.json` and nothing else.
+//   - #19276 — `loadWarnMap` returned the same empty map for "this ledger
+//     classifies nothing as warn-worthy" and for "there is no ledger", so
+//     losing or corrupting one file under the shipped `liveness/` directory
+//     switched every author warning for that type off in silence. One frame up
+//     the directory-level failure is loud by construction (the rule returns
+//     `[]` and its dependants go red): loud by directory, silent by file.
+//
+// Both blocks below drive the REAL rule against a COPY of the shipped ledger
+// directory with one file changed. That is deliberately the same trade the
+// #10262 block above makes and states: assertions made through this seam say
+// nothing about what the shipped ledgers classify — every other block in this
+// file is still a contract test against the real ones — and in exchange no
+// future ledger flip can empty them. The subject is the walker and the loader,
+// and neither is a verdict that can move.
+const tempLedgerDirs: string[] = [];
+
+afterAll(() => {
+  for (const dir of tempLedgerDirs) rmSync(dir, { recursive: true, force: true });
+});
+
+/** The directory the rule itself reads — resolved its way, never re-derived. */
+function shippedLedgerDir(): string {
+  const dir = resolveLivenessDir();
+  if (!dir) {
+    throw new Error(
+      'the shipped liveness directory did not resolve; every assertion in this file depends on it',
+    );
+  }
+  return dir;
+}
+
+/** A throwaway copy of the shipped ledger directory, with `mutate` applied to it. */
+function ledgerDirWith(mutate: (dir: string) => void): string {
+  const dir = mkdtempSync(join(tmpdir(), 'os-liveness-ledgers-'));
+  tempLedgerDirs.push(dir);
+  cpSync(shippedLedgerDir(), dir, { recursive: true });
+  mutate(dir);
+  return dir;
+}
+
+const writeLedger = (dir: string, type: string, body: unknown) =>
+  writeFileSync(join(dir, `${type}.json`), typeof body === 'string' ? body : JSON.stringify(body));
+
+/**
+ * A `field.json` whose only row is synthetic. `status: 'dead'` is explicit for
+ * the same reason the #10262 block says it is: `describe()` throws on a status
+ * it does not recognise, and this fixture asserts nothing about verdicts.
+ */
+const SYNTHETIC_FIELD_LEDGER = {
+  props: {
+    synthWarnedSlot: {
+      status: 'dead',
+      authorWarn: true,
+      authorHint: 'synthetic (#19268) — this row exists only in a test ledger directory',
+    },
+  },
+};
+
+const fieldLedgerDir = () => ledgerDirWith((dir) => writeLedger(dir, 'field', SYNTHETIC_FIELD_LEDGER));
+
+describe('the object/field walk, against a synthetic ledger directory (#19268)', () => {
+  // The state that makes this block necessary, asserted rather than recalled.
+  // If `field.json` ever warns again these two flip, and the block above
+  // ("field walk: a malformed `fields` array …") can take its real subject back
+  // — but this block keeps working either way, which is the point.
+  it('the SHIPPED field ledger warns on nothing today — which is why the walk needs a subject of its own', () => {
+    expect([...authorWarnedProperties('field')]).toEqual([]);
+    expect(
+      lintLivenessProperties({
+        objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('runs the field walk and reports the authored field, where the public function reports nothing', () => {
+    const findings = lintLivenessPropertiesFromLedgerDir(fieldLedgerDir(), {
+      objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],
+    });
+    expect(findings.map((f) => f.where)).toEqual(["object 'widget' · field 'a'"]);
+    expect(findings[0].rule).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(findings[0].message).toContain('sets `synthWarnedSlot`');
+    expect(findings[0].hint).toBe('synthetic (#19268) — this row exists only in a test ledger directory');
+  });
+
+  it('reaches every field of every object, not just the first of each', () => {
+    const findings = lintLivenessPropertiesFromLedgerDir(fieldLedgerDir(), {
+      objects: [
+        { name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }, { name: 'b', synthWarnedSlot: true }] },
+        { name: 'gadget', fields: [{ name: 'c', synthWarnedSlot: true }] },
+      ],
+    });
+    expect(findings.map((f) => f.where)).toEqual([
+      "object 'widget' · field 'a'",
+      "object 'widget' · field 'b'",
+      "object 'gadget' · field 'c'",
+    ]);
+  });
+
+  // #11385, provable again. This is the assertion the card says was lost: with
+  // the field loop gated off, a `null` field could not even be reached, so the
+  // guard that skips it evaluated never. Driven from the seam the walk runs,
+  // the malformed element is skipped AND the walk keeps going past it — the
+  // two halves #11385 pairs on purpose, because a walk that aborts silently
+  // passes a no-throw assertion just as well as one that recovers.
+  it('#11385: skips a null element in `fields` and keeps walking past it', () => {
+    const findings = lintLivenessPropertiesFromLedgerDir(fieldLedgerDir(), {
+      objects: [{
+        name: 'widget',
+        fields: [null, { name: 'after_the_null', synthWarnedSlot: true }],
+      }],
+    });
+    expect(findings.map((f) => f.where)).toEqual(["object 'widget' · field 'after_the_null'"]);
+  });
+
+  it('#11385: a null OBJECT does not stop the field walk on the objects after it', () => {
+    const findings = lintLivenessPropertiesFromLedgerDir(fieldLedgerDir(), {
+      objects: [null, { name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],
+    });
+    expect(findings.map((f) => f.where)).toEqual(["object 'widget' · field 'a'"]);
+  });
+
+  it('is silent on fields that author no warned key — the walk running is not the walk warning', () => {
+    const findings = lintLivenessPropertiesFromLedgerDir(fieldLedgerDir(), {
+      objects: [{ name: 'widget', fields: [{ name: 'a', type: 'text', label: 'A' }] }],
+    });
+    expect(findings).toEqual([]);
   });
 });
