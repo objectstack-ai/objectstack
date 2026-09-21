@@ -2432,11 +2432,24 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** Data Source Configuration */
   data: ViewDataSchema.optional().describe('Data source configuration (defaults to "object" provider)'),
   
-  /** Shared Query Config */
+  /**
+   * Shared Query Config
+   *
+   * `columns` is the PROJECTION member of the per-view field composition
+   * declared on `hiddenFields` / `fieldOrder` below: it is the candidate set
+   * and the baseline order, `hiddenFields` subtracts from it, and `fieldOrder`
+   * orders what survives. Nothing downstream may re-add a field this list
+   * omits.
+   */
   columns: z.union([
     z.array(z.string()), // Legacy: simple field names
     z.array(ListColumnSchema), // Enhanced: detailed column config
-  ]).describe('Fields to display as columns'),
+  ]).describe(
+    'Fields to display as columns — the PROJECTION of the per-view field composition '
+    + '`columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the '
+    + 'baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. '
+    + 'A field omitted here is not displayed: `hiddenFields` and `fieldOrder` cannot add it back.',
+  ),
   filter: z.array(ViewFilterRuleSchema).optional().describe('Filter criteria (JSON Rules)'),
   /**
    * Sort order — the structured `{ field, order }[]` array, and only that.
@@ -2564,9 +2577,53 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** Row Color (Airtable-style) */
   rowColor: RowColorConfigSchema.optional().describe('Color rows based on field value'),
 
-  /** Field Visibility & Ordering per View (Airtable-style) */
-  hiddenFields: z.array(z.string()).optional().describe('Fields to hide in this specific view'),
-  fieldOrder: z.array(z.string()).optional().describe('Explicit field display order for this view'),
+  /**
+   * Field Visibility & Ordering per View (Airtable-style)
+   *
+   * ## The composition, declared (#15184 ruling B, 2026-09-11)
+   *
+   * Three keys on this schema decide which fields a list view shows and in
+   * what order, and they COMPOSE — they are not three ways to say the same
+   * thing, and none of them is a fallback for another:
+   *
+   * 1. `columns` is the **projection**: the candidate set and the baseline
+   *    order.
+   * 2. `hiddenFields` **subtracts** from that projection: every name it lists
+   *    is removed. A name it lists that `columns` never projected subtracts
+   *    nothing.
+   * 3. `fieldOrder` **orders what survives**: it sorts the set left after the
+   *    subtraction and never adds to it. A surviving column absent from
+   *    `fieldOrder` sorts LAST, after every listed one, keeping its
+   *    `columns`-relative order among its fellow unlisted columns; a name
+   *    `fieldOrder` lists that did not survive orders nothing.
+   *
+   * ⛔ This is a DECLARATION of the order of application, not a precedence
+   * rule between rival spellings: `columns` and `fieldOrder` never contradict
+   * each other, because one selects and the other sorts. An author who wants a
+   * field gone edits `columns` or `hiddenFields`; an author who wants it moved
+   * edits `fieldOrder`.
+   *
+   * The composition was ruled into the contract rather than retired to one key
+   * because it is the shape the renderer already applies — objectui
+   * `packages/plugin-list/src/ListView.tsx`, the `effectiveFields` memo, runs
+   * exactly these three steps in this order. The ledger row
+   * (`packages/spec/liveness/view.json`, `/props/list/children/fieldOrder`)
+   * carries the measured citation; `view-field-order-composition.pin.test.ts`
+   * holds this declaration and the accept set together.
+   */
+  hiddenFields: z.array(z.string()).optional().describe(
+    'Fields to hide in this specific view — the SUBTRACTION of the per-view field composition '
+    + '`columns` x `hiddenFields` x `fieldOrder`: each name listed here is removed from the '
+    + '`columns` projection before `fieldOrder` orders the remainder. A name `columns` never '
+    + 'projected subtracts nothing.',
+  ),
+  fieldOrder: z.array(z.string()).optional().describe(
+    'Explicit field display order for this view — the ORDERING of the per-view field composition '
+    + '`columns` x `hiddenFields` x `fieldOrder`: it sorts what survives `columns` minus '
+    + '`hiddenFields` and never adds a field. A surviving column absent from `fieldOrder` sorts '
+    + 'LAST, after every listed one, keeping its `columns`-relative order; a name listed here '
+    + 'that did not survive orders nothing.',
+  ),
 
   /** Row & Bulk Actions */
   rowActions: z.array(z.string()).optional().describe('Actions available for individual row items'),
