@@ -1370,8 +1370,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "ID とレポートタイプ。"
       },
       dataset_binding: {
-        label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        label: "データセットのバインド",
+        description: "このレポートがレンダリングするセマンティックレイヤーのデータセット。メジャーと行は、それぞれこのデータセットのメジャーとディメンションから取得します。"
       },
       joined_blocks: {
         label: "結合ブロック",
@@ -1424,8 +1424,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "並び方向"
       },
       drilldown: {
-        label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        label: "ドリルダウン",
+        helpText: "集計された行/セルをクリックして、元になったレコードを開きます"
       },
       blocks: {
         label: "ブロック",
@@ -1465,8 +1465,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "並び順"
       },
       runtimeFilter: {
-        label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        label: "実行時フィルター",
+        helpText: "レンダリング時のスコープフィルター。クエリ時に AND で結合されます"
       },
       chart: {
         label: "チャート",

@@ -1370,8 +1370,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "Identidad y tipo de informe."
       },
       dataset_binding: {
-        label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        label: "Vinculación del conjunto de datos",
+        description: "El conjunto de datos de la capa semántica que renderiza este informe. Las medidas y las filas provienen, respectivamente, de las medidas y las dimensiones del conjunto de datos."
       },
       joined_blocks: {
         label: "Bloques unidos",
@@ -1424,8 +1424,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Dirección"
       },
       drilldown: {
-        label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        label: "Desglose",
+        helpText: "Haz clic en una fila/celda agregada para abrir los registros subyacentes"
       },
       blocks: {
         label: "Bloques",
@@ -1465,8 +1465,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Orden"
       },
       runtimeFilter: {
-        label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        label: "Filtro en tiempo de ejecución",
+        helpText: "Filtro de ámbito en tiempo de renderizado, combinado con AND en el momento de la consulta"
       },
       chart: {
         label: "Gráfico",
