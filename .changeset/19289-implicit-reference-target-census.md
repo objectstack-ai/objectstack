@@ -1,0 +1,20 @@
+---
+"@objectstack/metadata-protocol": patch
+"@objectstack/lint": patch
+"@objectstack/rest": patch
+---
+
+Four consumers of the implicit-reference-target contract resolve a reference field's target through `referenceTargetOf` instead of the materialized `reference` carrier, so a `{ type: 'user' }` field authored without one seeds, serves, and lints as the fully specified metadata the spec says it is (#19289).
+
+`IMPLICIT_REFERENCE_TARGETS` (`@objectstack/spec/data`) says a `user` field's target is "a CONSTANT OF THE TYPE, so `reference` on a `user` field materializes that constant; it does not supply it. Metadata authored without it (hand-written JSON, an AI author, a Studio form) is **fully specified, not under-specified**." Two arbiters answer two different questions — `referenceCarrierOf` what the carrier says, `referenceTargetOf` what the field points at — and for `user` only the second matches that text. #18550 standardized a population of readers on the first, which is correct wherever a site's own type gate excludes `user` and wrong wherever it does not. This is the census of that population: 17 carrier call sites judged one by one, four repaired.
+
+Clause-②: no
+
+Not a widening. It deletes a mistaken refusal of metadata the published contract already declares complete, which the charter files as `no` — 「删已发布契约文本本就否定的误拒本身是 `no`」. No key, alias or spelling is newly accepted anywhere: the target comes from the spec's own constant, never from a second way of writing it.
+
+- **`@objectstack/rest` — the loud one.** A `publicPicker` on a spec-complete `{ type: 'user' }` field answered `500 LOOKUP_TARGET_MISSING`, so opening a reference picker on a "responsible person" column returned an error page. It now answers `200` over `sys_user`. ⛔ This is not a re-widening of #12920's narrowing: a stored def spelling the target `referenceTo` / `target` / `options.objectName` still resolves nothing and still answers `500`, pinned in both directions.
+- **`@objectstack/metadata-protocol` — the silent one, and the one that stored a wrong value.** A seed row's `{ type: 'user' }` field contributed no `dependsOn` edge and never reached `references`, so its natural key was written **verbatim** into a column that holds a record id — the dangling reference `buildDependencyGraph`'s own docblock names as the cause of broken parent joins.
+- **`@objectstack/lint` — the widest.** `object-graph`'s field slice fed `resolveFieldPath`, whose `RELATIONSHIP_FIELD_TYPES` admits `user`; a carrier-less one answered `hop-untargeted`, which `isUnjudgeable` treats as "the graph could not answer". Every rule in the package that resolves a field path therefore stopped judging any path through such a field, reporting nothing. `validate-field-consumers` separately dropped the `displayField` consumer edge onto `sys_user`, so a field that column displays was reported consumed by nobody.
+- **Nothing else widens.** `user` is the only member of `IMPLICIT_REFERENCE_TARGETS`, so a `lookup` / `master_detail` / `tree` whose author-chosen target is absent still names nothing, exactly as before — pinned at every repaired site.
+- **The unreadable-carrier behaviour is unchanged.** `referenceTargetOf` reads the carrier through `referenceCarrierOf` **before** it judges the type, so #13053/#18550's `TypeError` on an object- or array-valued `reference` still fires everywhere it fired before. The implicit target is not a fallback that swallows it.
+- **No authoring change.** Metadata that already spells `reference: 'sys_user'` resolves to the same target it always did; nobody has to restate the constant, and nobody has to stop restating it.
