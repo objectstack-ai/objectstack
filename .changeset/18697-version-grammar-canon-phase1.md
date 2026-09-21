@@ -6,7 +6,7 @@
 
 feat(spec): one declaration per version grammar — nine carriers of "the version of a package or plugin" now reference three exported constants
 
-Clause-②: no
+Clause-②: yes (widening)
 
 **No accept set moves, and that is the whole point of this change.** Nine sites
 spelled a version regex out as a literal of their own. Three of those spellings
