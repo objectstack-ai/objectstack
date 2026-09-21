@@ -1281,10 +1281,31 @@
  *     `git show --unified=3` split per file by this file's own
  *     `splitUnifiedDiff`, all three instruments over the SAME rows
  *     (`readSource` stubbed to `null` on all three alike, so #18702's factory
- *     resolution is out of every reading rather than out of one). Base 29,580
- *     rows (T1 16,498 · T2 5,993 · T3 6,141 · T4 948); the failed head 29,480;
- *     this reading 29,552. ⭐ Base → here: 29,552 stand, **28 decline, 0 begin**,
- *     5,164 change only their sentence. All 28 are T2 and all 28 were re-read
+ *     resolution is out of every reading rather than out of one).
+ *     ⭐ THE JUDGING UNIT, which every figure below is only re-takeable
+ *     against: EACH COMMIT'S FILE LIST IS JUDGED TOGETHER, in one
+ *     `wideningTells(files)` call. That is the instrument's own unit — it
+ *     mints {@link ledgerRowLicences} over the list it is handed, so a #17300
+ *     licence added in one file reaches its siblings exactly as it does on the
+ *     real PR the gate judges. Per commit, then: base 29,580 rows
+ *     (T1 16,498 · T2 5,993 · T3 6,141 · T4 948); the failed head 29,480; this
+ *     reading 29,552. ⭐ Base → here: 29,552 stand, **28 decline, 0 begin**,
+ *     5,164 change only their sentence.
+ *     ⛔ THE SAME HARNESS JUDGING EACH FILE ALONE reads 452 rows higher on T2
+ *     and identical on T1, T3 and T4 — base 30,032 (T2 6,445), the failed head
+ *     29,932, this reading 30,004, base → here 28 decline / 0 begin / 5,616
+ *     sentence-only, failed head → here 0 / 72 — and that second figure is the
+ *     one three records on this PR quoted. Neither harness erred and the
+ *     difference is not a disagreement of method: the 452 are 452 T2 rows,
+ *     every one in `packages/spec/src/migrations/registry.ts`, falling in 105
+ *     of the 275 non-merge commits that touch it, each row's #17300 licence
+ *     minted by a SIBLING file of the same commit — so the row declines when
+ *     the commit is read whole and stands when that file is read alone.
+ *     Re-measured here as a set difference of the two key dumps over those 275
+ *     commits: 452 per-file-only, **0 per-commit-only**, and 0 of the 452
+ *     outside that file or outside T2. ⇒ A census that does not state its unit
+ *     lands the next reader 452 rows away in one direction or the other, which
+ *     is the same defect as a census that does not state its population. All 28 are T2 and all 28 were re-read
  *     THROUGH THIS READER rather than by eye: callee `Set` on 28 of 28, 0
  *     exceptions, across eleven bindings — the three `field-value.zod.ts` value
  *     classes, `VALUE_DOMAIN_FIELD_TYPES`, `TEXT_OPERATOR_DOOR_PASSING_TYPES`,
@@ -1397,13 +1418,32 @@
  * (`data/filter.zod.ts:2036`), and measured on the shape a real PR carries
  * that diff raises 0 rows on the base instrument, on the failed head and HERE
  * alike, against `VALUE_DOMAIN_FIELD_TYPES`'s real member line as the firing
- * control (base 1 row / here 0). ⇒ a PRE-EXISTING BLIND SPOT in the T2 member
- * reading — a `{` frame, which this file leaves loud and unclassified — and
- * ranging it under this silence charges this round for a hole it neither
- * opened nor widened while hiding the hole that is really there. Its one
- * landed `new Set([` row is `ee6d064db9` (2026-02-24), the day the binding was
- * last spelled with members, and the census below counts that row and no
+ * control (base 1 row / here 0). ⇒ a PRE-EXISTING SHAPE GAP in the T2 member
+ * reading, and ranging it under this silence charges this round for a hole it
+ * neither opened nor widened while hiding the hole that is really there. Its
+ * one landed `new Set([` row is `ee6d064db9` (2026-02-24), the day the binding
+ * was last spelled with members, and the census below counts that row and no
  * other.
+ *
+ * ⛔ AND THE MECHANISM IS THE SHAPE, NOT THE FRAME — the sentence three
+ * records carried ("a `{` frame this file leaves loud and unclassified") is
+ * FALSE and is deleted rather than softened. Measured against the shape
+ * itself: `memberTellKind("  'newop': '$eq',", { onContractSource: true })`
+ * answers `null`, because a string-valued KEYED entry matches neither
+ * `BARE_STRING_ELEMENT` nor `SCHEMA_PROPERTY` — so the line never reaches T2's
+ * member reading, never reaches {@link closedSetMembership}, and never reaches
+ * a frame at all. The same reader on the same hunk, as the controls that tell
+ * the two causes apart: `  'between',` and `  "quoted",` both answer T2, a
+ * BARE element added inside that identical `{` frame raises 1 T2 row (the
+ * NOT-MEASURED sentence), and a zod-valued key added inside one raises T1.
+ * ⛔ "Loud and unclassified" cannot be a cause of silence in the first place:
+ * *loud* means the row FIRES, which is exactly what every `(` and `{` frame
+ * does here — {@link closedSetMembership} says so in its own words, "keeps its
+ * row". A future repairer sent after the frame reader would rebuild the one
+ * limb that is already firing (the 442 `(` and 1,791 `{` bare-element lines
+ * that census counts) and leave this limb dark. The shape is pinned by its own
+ * case beside the constructor-wrapped set literal, so the 0 rows cannot move
+ * unnoticed.
  *   `.default([`: `allowedLicenses` and `prohibitedLicenses`
  *     (`kernel/plugin-security.zod.ts`) and `redact` (`system/logging.zod.ts`)
  *     — a default VALUE list, which is the one member of this vocabulary whose
@@ -1768,7 +1808,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
   '#19099 — the enclosing-delimiter walk says when it STOPPED READING and started guessing': 15,
-  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 75,
+  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 77,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -3102,9 +3142,20 @@ const NON_SET_CALLEE_NAMES = Object.freeze(['Set', 'default']);
  *     reading exit 0. ⛔ `VALID_AST_OPERATORS` is NOT a third — it is
  *     `new Set(Object.keys(AST_OPERATOR_MAP))` on one line
  *     (`data/filter.zod.ts:2139`) with no member line under it, so nothing here
- *     ever classifies it; it is an accept set and it IS dark, to a `{` frame
- *     this file leaves loud and unclassified, on the base instrument exactly as
- *     here. The header says which hole that is and measures it.
+ *     ever classifies it; it is an accept set and it IS dark, on the base
+ *     instrument exactly as here — but to a SHAPE, never to a frame. Widening
+ *     it means a new string-valued KEYED entry on the object literal it
+ *     derives from, and `memberTellKind` answers `null` for that shape:
+ *     `  'newop': '$eq',` matches neither `BARE_STRING_ELEMENT` nor
+ *     `SCHEMA_PROPERTY`, so the line never reaches T2's member reading, this
+ *     function, or any frame. ⛔ The earlier sentence — "a `{` frame this file
+ *     leaves loud and unclassified" — is deleted as FALSE: *loud* means the
+ *     row fires, which is what every `(` and `{` frame does here (see below,
+ *     "keeps its row"), so a frame can never be the cause of 0 rows. The
+ *     controls that separate the two, on that same hunk: a BARE element added
+ *     inside the identical `{` frame raises 1 T2 row with the NOT-MEASURED
+ *     sentence, and a zod-valued key inside one raises T1. The header says
+ *     which hole this is and measures it, and a case pins the 0 rows.
  *
  *     ⚠️ AND THE OTHER HALF OF THE SAME RESIDUAL, which no site list can
  *     reach: a `new Set([` literal spelled INSIDE one of the four
@@ -3121,7 +3172,9 @@ const NON_SET_CALLEE_NAMES = Object.freeze(['Set', 'default']);
  *     other by a wrapper-peeling walk — a FILE-level fact no hunk-shaped reader
  *     reaches. ⛔ And the silence is PERMANENT rather than pending: ruling
  *     #202 B (#19457) makes a tooling card close at first grading, so no
- *     successor card is owed and none is promised here — the header states the
+ *     successor card is owed and none is promised here — reopening needs one
+ *     of that ruling's TWO readings, a product PR the defect blocks or a
+ *     customer-visible contract it protects, and the header states the
  *     disposition in full. Both directions are pinned below, so this silence
  *     cannot move unnoticed and cannot spread: every other callee is loud.
  *   `'unread'` — everything else, and it is the common answer: no delimiter
@@ -3174,10 +3227,17 @@ const NON_SET_CALLEE_NAMES = Object.freeze(['Set', 'default']);
  * evidence.
  *
  * ⛔ Reaching the `(` and `{` populations needs the callee NAME rather than the
- * bracket — a different reading, and under ruling #202 B (#19457) not a card
- * anybody opens in advance: it is filed on the day a real PR is held by one,
- * which is that ruling's own reopen reading. This file buys no silence it
- * cannot pay for with evidence.
+ * bracket — a different reading, and under ruling #202 B (#19457, #19458) not
+ * a card anybody opens in advance. ⭐ That ruling names TWO reopen readings and
+ * this paragraph used to name one: a product PR the defect blocks, OR a
+ * customer-visible contract it protects. The FIRST is the one a card here is
+ * filed under, on the day a real PR is held by one of these rows. ⛔ The
+ * SECOND is not this docblock's to answer — whether a reader guarding
+ * `@objectstack/spec`'s accept sets "protects a customer-visible contract" is
+ * the maintainer's weighing, and an instrument that decided it in its own
+ * comments would be ruling on the charter that governs it. Both are named so
+ * that neither is lost to a sentence carrying only the first. This file buys
+ * no silence it cannot pay for with evidence.
  *
  * ⛔ AND THAT CENSUS CANNOT CONTAIN THE FAILURE THIS READER WAS REPAIRED FOR,
  * which is why it is quoted for what it bounds and never as a clearance. Every
@@ -6286,6 +6346,45 @@ export function selfTest() {
   t("⚠️ THE RESIDUAL'S OTHER HALF — a `new Set([` literal spelled INSIDE one of the four constructors puts the member's innermost `[` on the SET, so the head answers `Set` and a GENUINE four-form set is refused: the spread, the `Array.from` and the union spelling alike", closedSetMembership([CTX('export const M = z.enum([...new Set(['), CTX("  'read',")], 1) === 'refused' && closedSetMembership([CTX('export const M = z.enum(Array.from(new Set(['), CTX("  'read',")], 1) === 'refused' && closedSetMembership([CTX('export const A = z.union([...new Set(['), CTX('  ReadSchema,')], 1) === 'refused');
   t('…and the ROW is gone with it — no member row and no opener row either, because the opener test reads the LINE and that line\'s own constructor is `new Set(`', tells(ENUM_OVER_SET).length === 0);
   t('⛔ CONTROL — the identical member with the inner set spelled away FIRES and reads as measured, so the silence above is bought by the `new Set(` and never by the spread or by the fixture', tells(ENUM_OVER_SET_CONTROL).length === 1 && says(tells(ENUM_OVER_SET_CONTROL)[0]?.why, 'this hunk shows the element inside'));
+  // -- the accept set that is dark to a SHAPE, not to a frame ----------------
+  //
+  // ⚠️ `VALID_AST_OPERATORS` is widened by a new KEY on the object literal it
+  // derives from, and that diff raises NOTHING — on the base instrument, on
+  // every head of this branch and here. Three records on this PR named the
+  // cause as "a `{` frame this file leaves loud and unclassified"; that is
+  // false, and the control below is what tells the two apart: a frame this
+  // reader cannot classify is LOUD, so it fires inside the identical `{`.
+  // The cause is that NO TELL MATCHES the shape — a string-valued keyed entry
+  // is neither a `BARE_STRING_ELEMENT` nor a `SCHEMA_PROPERTY` — so the line
+  // never reaches T2's member reading, `closedSetMembership`, or any frame.
+  // ⛔ An unpinned 0 is indistinguishable from a 0 that moved: the disclosure
+  // in the header is a measurement, so it gets a case like every other one.
+  const MAP_KEY_ENTRY = {
+    filename: 'packages/spec/src/data/filter.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -2036,4 +2036,5 @@',
+      ' const AST_OPERATOR_MAP = {',
+      "   '=': '$eq',",
+      "+  'newop': '$eq',",
+      "   'equals': '$eq',",
+      ' };',
+    ].join('\n'),
+  };
+  const MAP_BARE_ELEMENT = {
+    filename: 'packages/spec/src/data/filter.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -2036,4 +2036,5 @@',
+      ' const AST_OPERATOR_MAP = {',
+      "   '=': '$eq',",
+      "+  'newop',",
+      "   'equals': '$eq',",
+      ' };',
+    ].join('\n'),
+  };
+  t("⚠️ THE OTHER DARK WIDENING IS A SHAPE GAP — a string-valued KEYED entry on an object literal answers `null` from `memberTellKind`, in both key spellings, so a new `AST_OPERATOR_MAP` key (the only way `VALID_AST_OPERATORS` widens today) raises 0 rows and never reaches a frame at all", tells(MAP_KEY_ENTRY).length === 0 && memberTellKind("  'newop': '$eq',", { onContractSource: true }) === null && memberTellKind("  newop: '$eq',", { onContractSource: true }) === null);
+  t('⛔ CONTROL — the identical `{` frame is LOUD, which is why it can never be the cause of that silence: a BARE element added inside it raises its T2 row with the NOT-MEASURED sentence, a zod-valued key inside one raises T1, and the two bare spellings both answer T2 on their own', tells(MAP_BARE_ELEMENT).length === 1 && tells(MAP_BARE_ELEMENT)[0]?.tell === 'T2' && says(tells(MAP_BARE_ELEMENT)[0]?.why, 'does not show it inside one of the four closed-set forms') && tells({ filename: 'packages/spec/src/data/filter.zod.ts', patch: patchOf(10, '+  newop: z.string(),') })[0]?.tell === 'T1' && memberTellKind("  'between',", { onContractSource: true }) === 'T2' && memberTellKind('  "quoted",', { onContractSource: true }) === 'T2');
   // -- the type-argument group, pinned on the head that READS it -------------
   //
   // ⛔ Two heads carry the group and only the DECLARED one had a case: deleting
@@ -7232,6 +7331,7 @@ export function selfTest() {
       "#19384's bare element that is not a member until the hunk shows one of the four forms above it — the card's three legs, where A and B now agree because the verdict is no longer keyed on line layout and C still fires, PR #19314's own seven discriminants silent beside the control that is the finding, and the loud direction pinned: an opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array, a property-valued array, a guessed stack, and the removed element that buys no budget with its removal and its addition in ONE change block beside the control that DOES pay — the four spellings of one form (chain-wrapped, generic, aliased, plain) each reading as measured under any receiver with `parseenum(` as the whole-token control, a sub-enum builder firing rather than declining while a sibling method is still refused, the `[`-only guard pinned on the `{` a call opened where alone it can be swallowed, the grouping paren that is not a call, the constructor that must be the delimiter's OWN, the NOT-MEASURED sentence claiming only what was not measured, `Object.freeze([` read THROUGH to the head left of it so the fourth form wrapped keeps its row while `z.enum(Object.freeze([` reads as measured, the refusal closed to a NAMED vocabulary so an unknown helper is loud, `new Set([` pinned as the residual silence with the TWO accept sets it covers named " +
       "and with the constructor-wrapped set literal that goes dark beside them, the type-argument group pinned on the REFUSAL head with its non-nested bound stated rather than widened, " +
       "and a refused element still spending its block's unit so the genuine member beside it fires, " +
+      'the other dark widening pinned as the SHAPE GAP it is — a string-valued keyed entry on an object literal that no tell matches, so it never reaches a frame — bracketed by the LOUD `{` frame that fires on a bare element and on a zod-valued key inside the very same hunk, ' +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
