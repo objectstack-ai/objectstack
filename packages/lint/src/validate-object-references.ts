@@ -79,7 +79,7 @@ import {
   isPlatformProvidedObjectName,
   PLATFORM_PROVIDED_OBJECT_NAMES,
 } from '@objectstack/spec/system';
-import { referenceCarrierOf } from '@objectstack/spec/data';
+import { referenceCarrierOf, referenceTargetOf } from '@objectstack/spec/data';
 
 import { recordsOf, suggestName } from './object-graph.js';
 
@@ -301,9 +301,24 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       // not this rule's unknown-object error either. Absence still answers
       // `undefined` and this rule still, deliberately, says nothing about it —
       // an absent target is `field/relationship-without-reference`'s subject,
-      // not this rule's.
+      // not this rule's. An unreadable carrier still REFUSES:
+      // `referenceTargetOf` reads it through `referenceCarrierOf` first.
+      //
+      // [#19289] The whole FIELD is passed through and the arbiter is
+      // `referenceTargetOf`. `RELATIONSHIP_TARGET_FIELD_TYPES` admits `user`,
+      // so this rule DOES ask the target question about a `user` field — and
+      // answered it from the carrier, which for that type is not the target
+      // (`IMPLICIT_REFERENCE_TARGETS`: a CONSTANT OF THE TYPE). The OUTPUT was
+      // right for the wrong reason: a spec-complete `{ type: 'user' }` field
+      // answered `undefined` and `check` returned early, so the two legal
+      // spellings of one fully-specified field — with `reference: 'sys_user'`
+      // and without — took different paths to the same silence. They now take
+      // the same path: the target resolves to `sys_user`, which
+      // `isPlatformProvidedObjectName` admits at rung ③. ⛔ No new finding is
+      // produced for either spelling; what ends is the latent misread waiting
+      // for the day absence stops returning early.
       check(
-        referenceCarrierOf({ reference: field.reference }, 'validate-object-references field target'),
+        referenceTargetOf(field),
         `object "${objName}" · field "${fieldName}"`,
         `objects[${oi}].fields.${fieldName}.reference`,
         `${type} target`,
@@ -325,6 +340,22 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       // `ActionParamSchema.reference`, whose own docblock says the key name
       // "deliberately mirrors `FieldSchema.reference` so the same spelling"
       // carries the target object's name — one contract, so one reader.
+      //
+      // ⛔ [#19289] This site STAYS on the carrier, and the census judged it
+      // rather than missing it. A param is NOT a field definition:
+      // `ActionParamSchema.type` is OPTIONAL, because a field-backed param
+      // inherits its type from the referenced field at runtime — "not visible
+      // at parse time", as that schema's own refinement comment says. So the
+      // target question is UNANSWERABLE from a param alone, and asking it
+      // discards every carrier whose param declares no type.
+      //
+      // Measured, ⛔ not reasoned: swapping this one arbiter deleted a live
+      // check. `reference-integrity-suite.test.ts` holds a corpus param
+      // `{ name: 'owner', reference: 'user' }` — no `type`, and `user` is the
+      // classic miss for `sys_user` — and `object-reference-unknown` vanished
+      // from the suite's findings entirely. Nothing is owed here either way: a
+      // `user` param that omits the carrier already produces NO finding,
+      // because `check` returns early on absence.
       check(
         referenceCarrierOf({ reference: param.reference }, 'validate-object-references action param target'),
         where,
