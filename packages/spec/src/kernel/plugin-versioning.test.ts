@@ -175,6 +175,39 @@ describe('Plugin Versioning Schemas', () => {
       expect(result.migrationRequired).toBe(true);
       expect(result.estimatedMigrationTimeHours).toBe(8);
     });
+
+    // #18669 ruling A. The rename above is only half the contract; this is the
+    // other half. Without it the retirement is pinned by nothing: this shape is
+    // a plain `z.object`, so deleting the key rather than tombstoning it would
+    // strip the old spelling in SILENCE and every assertion above would stay
+    // green. The pin is on the PRESCRIPTION, not on "it throws" — a bare
+    // unrecognized-key error would also throw, and would carry no rename.
+    it('refuses the retired `estimatedMigrationTime` with the rename prescription, not a bare unknown-key error', () => {
+      const retired = CompatibilityMatrixEntrySchema.safeParse({
+        from: '1.0.0',
+        to: '2.0.0',
+        compatibility: 'breaking-changes',
+        estimatedMigrationTime: 8,
+      });
+      expect(retired.success).toBe(false);
+      const text = JSON.stringify(retired.error);
+      expect(text).toContain('Rename the key to');
+      expect(text).toContain('estimatedMigrationTimeHours');
+      expect(text).not.toContain('unrecognized_keys');
+    });
+
+    // The no-narrowing half of the same ruling: the value type did not move, so
+    // a fractional estimate that parsed before still parses. A sweep that added
+    // `.int()` or adopted a closed duration type turns this red.
+    it('keeps the value type: a fractional hours estimate still parses', () => {
+      const parsed = CompatibilityMatrixEntrySchema.parse({
+        from: '1.0.0',
+        to: '2.0.0',
+        compatibility: 'breaking-changes',
+        estimatedMigrationTimeHours: 8.5,
+      });
+      expect(parsed.estimatedMigrationTimeHours).toBe(8.5);
+    });
   });
 
   describe('PluginCompatibilityMatrixSchema', () => {

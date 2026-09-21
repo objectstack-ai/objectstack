@@ -6765,9 +6765,16 @@ const step18: MigrationStep = {
         + 'member that measured time was indistinguishable from a count at the very site an author '
         + '(very often a model, ADR-0033) writes it. `durationSeconds` rather than a mechanical '
         + '`durationSec` or `lengthSeconds`: this spec already spells a length of time '
-        + '`durationSeconds` in five places — ConversationAnalytics, the two aggregation/SLI '
-        + 'windows, the SLO period and the metrics retention window — so the media length now reads '
-        + 'alike with every other one instead of inventing a sixth vocabulary. '
+        + '`durationSeconds` in SIX places, and they are ENUMERATED rather than counted because a '
+        + 'bare number in shipped prose cannot be re-checked against the tree — '
+        + 'ai/conversation.zod.ts ConversationAnalytics.durationSeconds; and on system/metrics.zod.ts '
+        + 'MetricAggregationConfig.window.durationSeconds, ServiceLevelIndicator.window.durationSeconds, '
+        + 'ServiceLevelObjective.period.durationSeconds, '
+        + 'ServiceLevelObjective.errorBudget.burnRateWindows[].durationSeconds and '
+        + 'MetricsConfig.retention.durationSeconds. The media length is therefore the SEVENTH '
+        + 'spelling of one vocabulary, not the first of a second one. The retired-key tombstone '
+        + 'entry data/FileValue:duration carries the same six keys in the same order, so the two '
+        + 'surfaces that state one fact cannot drift apart. '
         + 'The value type is deliberately UNCHANGED at `z.number().optional()`: a fractional second '
         + 'is the ordinary shape of a media length, so the closed `DurationSeconds` type '
         + '(`.int().nonnegative()`, #18122) was considered and REFUSED by the ruling, and so was an '
@@ -13815,9 +13822,21 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // closed `DurationSeconds` type and an `.int()` floor. The name is
     // `durationSeconds` rather than the gate's mechanical `durationSec`/`lengthSeconds`
     // because `durationSeconds` is the spelling this spec already landed on for a
-    // length of time (`ConversationAnalytics`, the three `system/metrics.zod.ts`
-    // window lengths and `MetricsConfig.retention`), so the media length now reads
-    // alike with every other one. Tombstoned with `retiredKey()`: `FileValueSchema`
+    // length of time in SIX places, ENUMERATED rather than counted because a bare
+    // number in shipped prose cannot be re-checked against the tree:
+    // `ai/conversation.zod.ts` `ConversationAnalytics.durationSeconds`; and on
+    // `system/metrics.zod.ts` `MetricAggregationConfig.window.durationSeconds`,
+    // `ServiceLevelIndicator.window.durationSeconds`,
+    // `ServiceLevelObjective.period.durationSeconds`,
+    // `ServiceLevelObjective.errorBudget.burnRateWindows[].durationSeconds` and
+    // `MetricsConfig.retention.durationSeconds`. The media length is therefore the
+    // SEVENTH spelling of one vocabulary, not the first of a second one. The
+    // semantic entry `data-file-value-duration-unit-in-key` carries the same six keys
+    // in the same order, so the two surfaces that state one fact cannot drift apart.
+    // ⚠️ Read `metrics.zod.ts`'s own `burnRateWindows` JSDoc beside this list: it
+    // calls itself "The fourth window length on this file", which is the sentence
+    // that falsifies any shorter count of that file.
+    // Tombstoned with `retiredKey()`: `FileValueSchema`
     // is the one deliberate `z.looseObject` in this file, so a bare deletion would
     // wave the old spelling through as an unrecognised extra rather than prescribe
     // the rename. No D2 conversion: `FileValueSchema` is the ADR-0104 D3 wave-2
