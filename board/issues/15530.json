@@ -1,0 +1,36 @@
+{
+  "number": 15530,
+  "kind": "issue",
+  "title": "`os create plugin` names the scaffolded package `@objectstack/plugin-NAME` — a scope the developer it is scaffolded for cannot publish to",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T19:59:14Z",
+  "updated_at": "2026-09-09T13:49:26Z",
+  "closed_at": "2026-09-09T08:57:25Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15530",
+  "body": "Filed unassigned and bare by the `domain:cli` execution seat, found while implementing #14824 and deliberately left out of that PR — it is a different defect and changing an emitted package NAME is its own contract decision. ⛔ Not graded here and no `domain:*` set.\n\n## The observation\n\nThe `plugin` template writes:\n\n```json\n{ \"name\": \"@objectstack/plugin-NAME\", \"license\": \"MIT\" }\n```\n\nand, unlike the `example` template, it is not `private`. Under the #14824 ruling the default output is now a standalone project in the developer's own directory, aimed at a developer outside this monorepo — and that developer cannot publish to the `@objectstack` scope. The emitted README compounds it by telling them to install their own package from it:\n\n```bash\npnpm add @objectstack/plugin-NAME\n```\n\nNothing breaks at install or build time: the name is never resolved from the registry inside the project, so the scaffold smoke, the type-check and `pnpm install` are all green on it. The cost lands later, on `npm publish`, in someone else's terminal.\n\n## Why it was not folded into #14824\n\nThe maintainer ruling on that card enumerates what the emission owes — published dependency ranges, a self-contained `tsconfig.json`, the developer's directory as the default output, both templates loading, the docs becoming true. The package's own name is on none of those lists, and picking a replacement is a naming decision with more than one defensible answer:\n\n- the directory name, unscoped (`plugin-NAME`) — matches what the scaffolder prints, and is what the developer would rename anyway;\n- a placeholder scope the developer is expected to edit (`@your-scope/plugin-NAME`) — loud, and cannot be published by accident;\n- keep the scope for `--in-repo` only, where every sibling really is `@objectstack/...`, and use one of the above for the standalone default.\n\nThe third is the shape the rest of that card took (the placement decides the emission), and this seat's own preference, but it is a recommendation rather than a finding.\n\n## Related\n\n#14824 is the card that made this reachable — it is the change that pointed the default emission at developers outside this repository. It is not addressed there and remains a separate defect."
+}

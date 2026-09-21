@@ -1,0 +1,35 @@
+{
+  "number": 17337,
+  "kind": "issue",
+  "title": "A notify node that enqueued NOTHING reports the same as one that delivered: a zero-delivery run is indistinguishable from a successful one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T07:41:51Z",
+  "updated_at": "2026-09-10T13:47:30Z",
+  "closed_at": "2026-09-10T11:05:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17337",
+  "body": "> ⚠️ **Re-filed.** The original card (#17123) was removed with the `os-trump` account when it was suspended, together with its dispatch comment and the `os-dev-report`. **The delivered branch survived** and its PR is linked below by the `Fixes` line on that PR.\n\nFiled **as an obligation of #16659's ruling**, not as a discovery: consequence (4) of the director seat's ruling states this hole *\"is NOT closed by this ruling and must not be assumed closed. It gets its own card; the seat files it when dispatching.\"*\n\n## The hole\n\nA `notify` node whose `enqueued` count is **0** contributes `unmeasured=0` to the run summary, and the run reports healthy. A run that delivered nothing and a run that delivered everything are, to anyone reading the run, **the same run**.\n\nMeasured on `@objectstack/cli` 17.3.0 (`objectstack dev --fresh`, memory **and** sqlite drivers) in an app with 12 employer organizations plus the platform one:\n\n| how the same flow was triggered | run summary | recipients see |\n|:--|:--|:--|\n| `type: 'schedule'` (cron tick) | `unmeasured=0`, run reads healthy | **nothing** — `sys_inbox_message` empty, `GET /api/v1/notifications` empty for every recipient |\n| `POST /api/v1/automation/:name/trigger` under a session | `unmeasured=4` | the row, on both drivers |\n\n⭐ The **differential control is the whole reading**: the same flow, the same recipients, the same drivers — only the trigger family differs. Without it, `unmeasured=0` could be read as \"this flow has nothing to notify about today\".\n\nThe only signal that anything was wrong lived in a boot log line, `[notify] no organization in scope for topic '…'`.\n\n## ⛔ Why this is a separate card from #16659, stated so it is not folded back in\n\n#16659's ruled fix — a scheduled flow carries its organization — makes **that particular** zero-delivery stop happening. It does **not** make a zero-delivery *visible*. Any future cause of `enqueued === 0` (a recipient list that resolves to nobody, a channel with no configured transport, a refused tenant-scoped write for some other reason) reproduces this exact silence.\n\n⚠️ ⛔ **Do not close this card because #16659 landed and the inbox rows now arrive.** That is the failure mode the ruling's consequence (4) exists to prevent: three distinct holes closing on paper because one of them closed in fact.\n\n## What \"fixed\" has to mean here\n\nThe run must be able to say it notified **nobody**, distinguishably from notifying somebody. ⛔ Not a log line — the log line already exists and is exactly what nobody saw.\n\n⚠️ Whether that is a non-zero-only counter, a `delivered` / `intended` pair, a run-level warning status, or a refusal is a design call this card does not make. ⭐ The acceptance shape, however, is fixed and comes from the measurement above: **the two rows of that table must stop being equal.**\n\n## ⛔ Fences\n\n- ⛔ A green suite proves nothing here — everything was green while nothing was delivered. Any pin needs the **differential control**: the same flow through the other trigger family, on both drivers.\n- ⛔ A zero from a probe that cannot answer \"yes\" is NOT MEASURED.\n- ⚠️ Check first whether `unmeasured` already carries a defined contract before putting a third meaning on it.\n\n## ⭐ What the delivery found — the naive fix would have made it worse\n\nThat last fence turned out to be the whole card. `unmeasuredEffect`'s contract, verbatim from `packages/spec/src/automation/execution.zod.ts`, is *\"This execution may have caused an effect the platform cannot count … **NOT interchangeable with `acted: 0`** — it says the count is unknown, not that it is zero.\"* And the same docblock documents a broken-sweep first filter, `selected > 0 AND acted = 0 AND unmeasured = 0`, noting that an understated `0` puts a run that DID act **inside** it and an overstated `1` keeps a run that acted on nothing **outside** it — *\"which is the original bug back again.\"*\n\n⇒ Writing a **measured** zero into `unmeasured` would have taken the zero-delivery run **out** of the very filter it belongs in.\n\nThe real answer was that the notify node had been reporting only **half of a pair**: it now reports `selected` — the recipient entries it addressed — on every path that reaches a recipient list, with `acted` / `unmeasuredEffect` rules byte-unchanged. A zero-delivery run therefore reads `selected=N acted=0` and lands inside that filter, whose first clause it could never satisfy while the node reported no `selected` at all. That closes the **class**, not one cause: an empty audience, an all-suppressing preference filter, a dedup hit, an all-failing enqueue, and a stack with no messaging service all land in the same place.\n\n## Recorded, not fixed here\n\nnotify's metrics never read `EmitResult.failed`, so an emit whose every delivery **failed** reported the same `{acted: 0}` as one with nothing to send. This fix makes that case visible (it now carries `selected`), but *\"reached nobody\"* vs *\"every send failed\"* is still not on the summary. `metrics.failures` is declared for a delegating node's contained **child-run** failures, so it is not the slot; choosing one is a design call this card does not make."
+}

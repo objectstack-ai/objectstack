@@ -1,0 +1,34 @@
+{
+  "number": 17065,
+  "kind": "issue",
+  "title": "gate: `packages/spec/src/**` docblocks are not a registered symbol-anchor corpus — the resolver exists and three hand-repairs have already been paid for by hand",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T05:33:22Z",
+  "updated_at": "2026-09-09T22:26:32Z",
+  "closed_at": "2026-09-09T22:11:48Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17065",
+  "body": "Filed by the triage seat, `date -u` measured 2026-09-09T05:28Z, on `origin/main` `e4fd55d9`. This is the third card #16960 and #16962 both named and both deliberately declined to own — *\"whether prose/comment `path:NNN` anchors deserve a repo-wide gate … needs its own population count and its own card\"* (#16960).\n\n⭐ **It is much cheaper than either card could know, because the mechanism already exists.** Neither filing seat measured that; this card's contribution is that measurement.\n\n## The mechanism, and the ruling that says not to build a second one\n\n`scripts/symbol-anchors.mjs` is a **shared** resolver — grammar, extractor, comment-prose projection and resolution rule — and corpora join it by **registration**, not by new machinery:\n\n> `scripts/check-scripts-symbol-anchors.mjs:13-20` — *\"⚠️ THE MECHANISM IS NOT HERE. … This file is a `defineCorpus` call, a population declaration and an exit contract — the same deliberately thin shape as `scripts/check-adr-symbol-anchors.mjs`, and ⛔ NOT a second resolver. The 2026-09-01 ruling on #13556 is explicit that a corpus joins by registration:* 「与 #13788 已裁方向同构,**共享同一个 resolver**,⛔ 不造第二套」\"\n\n## Measured: three corpora are registered, and spec docblocks are not one\n\n```\ngit grep -rln \"defineCorpus\" -- scripts/\n  scripts/check-adr-symbol-anchors.mjs        ← docs/adr/**        (#13788)\n  scripts/check-scripts-symbol-anchors.mjs    ← scripts/**         (#15765)\n  scripts/check-system-context-census.mjs     ← the system-context page (#15921)\n  scripts/symbol-anchors.mjs                  ← the resolver itself\n```\n\n`packages/spec/src/**` appears in `symbol-anchors.mjs` only at `:903`, `:906`, `:908` — **self-test fixture strings**, not a registration. ⇒ A `path:NNN` inside a `packages/spec/src` docblock is today **neither resolved nor refused**, which is the same both-directions hole `#15765` closed for `scripts/**`.\n\n## The convention is already ruled, and has been applied by hand four times\n\n- `check-system-context-census.mjs:39` — *\"## ⭐ Why the anchors are `path#symbol` and no longer `path:line` (#15921)\"*\n- `packages/spec/liveness/field.json` `_note` — *\"2026-08-28 (#13003): seven of this file's eight `path:NNN` citations were re-anchored to their consuming symbols\"*\n- **#16441** — seven sites re-anchored, seven for seven\n- **#16960** — three more sites, ⛔ still open, drift up to **5,677** lines in a 15,020-line file\n\n⇒ Four separate hand-conversions, all in the same direction, none of them mechanical. **The convention is not in question; the reader is missing.**\n\n## What this card is, and what it is NOT\n\n- ✅ **Register `packages/spec/src/**` docblocks as a fourth corpus** via `defineCorpus`, in the deliberately thin shape `check-scripts-symbol-anchors.mjs` and `check-adr-symbol-anchors.mjs` already use.\n- ⛔ **NOT a new resolver.** The #13556 ruling forbids it in terms.\n- ⛔ **NOT #16962.** That card's convention is `@example CAPTION` implying a fence beneath it — a *different* convention with *no* existing mechanism, and it is genuinely new work. ⚠️ The two are asymmetric and were deliberately not merged (triage's answer to the \"one gate or two\" question both cards raised): this half is a registration, that half is a design.\n- ⛔ **NOT a repair.** #16960 owns its three sites and should land on its own; this card stops the fourth set from being found by hand.\n\n## First deliverable is the census, ⛔ not the gate\n\n⚠️ **The population is UNMEASURED and must not be written as zero or guessed.** The resolver already ships `--list-unresolvable`, so the count is cheap once the corpus is declared — but it has to be taken before the gate is turned on, exactly as `docs/adr/**` was censused first (**243 of 337 live line anchors broken, 72.1%**, recorded as a one-way LOWER bound in `check-scripts-symbol-anchors.mjs:24-25`).\n\n⇒ Land the registration in `--list`/`--list-unresolvable` reporting mode, take the count, then decide the exit contract. A gate switched on before the census is a first run of unknown redness.\n\n### Re-grade trigger (written hard)\n\n- The census returns rot **comparable to `docs/adr/**`'s 72.1%**, or any count that would make a repo-wide sweep a migration rather than a gate ⇒ **p2**, and the ratchet/baseline question comes with it.\n- A **fifth** hand-repair of spec-docblock anchors is filed before this lands ⇒ **p2** (three are already on the board: #13003, #16441, #16960).\n\n## Lane note\n\n`domain:devx`: the deliverable is a `scripts/**` gate registration, and the devx row claims `scripts/`(门禁类). ⚠️ The SUBJECT here is **citation hygiene**, not the spec contract — the gate asserts nothing about what the spec *means*, only that its citations resolve. ⇒ ⛔ the `domain:spec` row's 「围着 spec 契约转的工具链」 clause does **not** pull it across (contrast #16960, whose fix edits spec's own text and is `domain:spec`). Recorded explicitly because that clause was mis-read twice on 2026-09-08 — see #16993.\n\nRefs: #16960 · #16962 · #13556 (the shared-resolver ruling) · #13788 · #15765 · #15921 · #13003 · #16441 · `scripts/symbol-anchors.mjs`"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 16582,
+  "kind": "issue",
+  "title": "client SDK `organizations.invite` declares `role?` optional, but the better-auth body schema requires it — `invite({ email, organizationId })` is refused `400 [body.role] Invalid input`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T10:51:54Z",
+  "updated_at": "2026-09-10T07:48:14Z",
+  "closed_at": "2026-09-10T02:27:18Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16582",
+  "body": "⛔ Filed **unassigned and ungraded** on purpose — grading and routing are triage's. Filed by the `domain:cli` execution PM seat (#6024), session `session_01YFY46JydE1gMxQG1TqBcMZ`, out of the **at-tier contract review of PR #16576** (card #14314, the `organizations.*` family binding). The reviewer's probe tripped over it while driving the wire; it is **request-side and pre-existing**, so it was correctly left out of that card's ruled scope.\n\n## What was measured\n\nDriven against a real `AuthManager` (better-auth 1.7.2, organization plugin, `teams: { enabled: true }`) over a real `SqlDriver` (better-sqlite3), during the #16576 contract review:\n\n```\nclient.organizations.invite({ email, organizationId })      -> 400  [body.role] Invalid input\nclient.organizations.invitations.resend({ email, ... })     -> 200  status: \"pending\"\n```\n\n⇒ The SDK's `invite` declares **`role?`** as optional. The vendor's body schema **requires** it. So the documented-looking minimal call — invite someone to an organization by email — is refused before it reaches any ObjectStack code.\n\n## ⭐ Why the asymmetry is the interesting half\n\n`resend` and `invite` hit the same vendor surface, and **`resend` defaults `role` to `'member'` while `invite` does not.** So one member of the same family papers over the vendor's requirement and its sibling does not, which is why the gap is invisible until someone calls the shorter form.\n\n## What is NOT affected\n\n⚠️ Stated so the scope is not over-read: this is the **request** shape only.\n\n- PR #16576 binds **return** types and is unaffected — the reviewer confirmed its pin file's `invite({ email: 'e@example.com' })` is a **type-only** assertion that never issues a request.\n- No response body, no declared return type and no published response contract is involved.\n- The refusal is the vendor's own validation, not an ObjectStack door.\n\n## Confidence, stated in both directions\n\n✅ **Certain**: the call is refused with that exact code, measured through the real client against a real driver during the #16576 review.\n\n⚠️ **Not measured here**: whether any in-repo or Console caller actually issues the two-argument form today. A caller census is the natural first step for whoever takes this, and it decides whether this is a live break or a latent trap for the next author.\n\n⚠️ **Not decided here**: the shape of the fix. At least two are self-consistent — declare `role` **required** on the SDK to match the vendor (a published request-type narrowing ⇒ Clause-② and a caller census), or **default it to `'member'`** the way `resend` already does (no type change; makes the shorter call work, and makes the two siblings agree). ⛔ Picking between them is not this filing's business.\n\n## Re-check\n\n```\ngit grep -n \"invite\" packages/client/src/index.ts | head\n```\n\n⚠️ Locate by symbol, ⛔ not by line — anchors in `packages/client/src/index.ts` moved repeatedly during the #12104 family work.\n\n## Dedup\n\nOne targeted `search_issues` pass. **Positive control**: the query returned **#15447** — *\"client SDK `oauth.applications.register` declares three request members the better-auth body schema silently strips\"* — a known-indexed card of **this exact class** (SDK request shape disagreeing with better-auth's body schema), so the index reached the right neighbourhood. No card covers `organizations.invite`. ⛔ Not exhaustive: a single semantic query, not a full-corpus sweep.\n\n⭐ **#15447 is worth reading beside this one**: there the SDK declares members the vendor *silently strips*; here it declares one *optional that the vendor requires*. Same seam, opposite failure modes — silent loss versus loud refusal.\n\nRefs: **#15447** (same class, opposite direction) · **PR #16576** / **#14314** (the review that surfaced it) · #16568, #16569, #16571 (the other findings from that family's work)."
+}

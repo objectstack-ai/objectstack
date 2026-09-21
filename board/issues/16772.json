@@ -1,0 +1,37 @@
+{
+  "number": 16772,
+  "kind": "issue",
+  "title": "i18n: two surfaces a translation bundle cannot address at all — `walkAddressedPageComponents` misses a slotted page's `slots` and a tabs node's `items[].children`, and `dashboards.NAME` has no `globalFilters` group",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "i18n",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T04:45:15Z",
+  "updated_at": "2026-09-09T13:49:15Z",
+  "closed_at": "2026-09-09T10:56:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16772",
+  "body": "Split off #16735 (findings 2 and 3) by the triage seat. They are one card because both are the same defect — **a surface the console renders but a bundle has no key for** — both live in `packages/spec`, and both would otherwise produce two PRs touching the same package.\n\nOriginal provenance: filed from an app repo (`objectstack-ai/hotclm`, `@objectstack/*` 17.3.0) after translating it end to end into `en` + `zh-CN` — `objectstack-ai/hotclm#32`, PR `objectstack-ai/hotclm#33`. The reporter states they did not personally re-drive these; see **Provenance and boundaries** below.\n\n---\n\n## Finding A — `pages.NAME.components.*` addresses nothing on a `kind: 'slotted'` page, and a tab label has no key on any page kind\n\n```js\nlet n = 0;\nwalkAddressedPageComponents(ContractDetailPage, (c) => (n++, c));   // -> 0\n```\n\nagainst **21 authored components and tab labels** (`@objectstack/spec` 17.3.0). `walkAddressedPageComponents` is the traversal `translatePage` itself runs, so this is unresolvable rather than merely ungated.\n\nTwo independent causes, either sufficient on its own:\n\n- its roots are `regions[].components[]`, and a **slotted** page authors `slots`;\n- its descent is `properties.children`, and a `page:tabs` carries `properties.items[].children`.\n\n⇒ `pages.contract_detail` carries exactly two addressable keys, `label` and `description`, while **7 tab labels, 7 path stages, 7 related-list titles and 1 block label** cannot be reached from a bundle at all. Worked around in the app with 22 inline locale maps.\n\n**Triage's own reading, on `origin/main`** — the roots half is confirmed from the signature and the first pass:\n\n```\npackages/spec/src/system/i18n-resolver.ts:1568  export function walkAddressedPageComponents(\n:1569    doc: Pick<PageLike, 'regions'>,\n:1578    if (Array.isArray(doc.regions)) {\n:1579      for (const region of doc.regions) {\n:1580        if (!region || typeof region !== 'object' || !Array.isArray(region.components)) continue;\n```\n\n⇒ the parameter type itself is `Pick<PageLike, 'regions'>` — a slotted page's `slots` is not merely skipped, it is **outside the declared input**. ⚠️ The `properties.children` descent half was **not** separately verified by triage; re-derive it.\n\n---\n\n## Finding B — `dashboards.NAME` has no group for `globalFilters`\n\nA dashboard's global-filter labels and their option labels are not addressable — and the filter bar draws **directly above** the widget titles the bundle does translate, so the mixed-language result is maximally visible:\n\n```\n类别: 全部        Requesting Department: 全部\n[six Chinese widget titles below]\n```\n\n5 filter labels + 29 option labels in that app. Worked around with inline maps.\n\n**Triage's own reading, on `origin/main`** — confirmed, the group has exactly four members:\n\n```\npackages/spec/src/system/translation.zod.ts:694  dashboards: z.record(z.string(), strictObject({\n:699    label: z.string().optional().describe('Translated dashboard title'),\n:700    description: z.string().optional().describe('Translated dashboard description'),\n:701    actions: z.record(...)\n:708    widgets: z.record(...)\n```\n\n⇒ `label` · `description` · `actions` · `widgets`. No `globalFilters`.\n\n---\n\n## Why these two are `Bug` and not `Feature`\n\nBoth are **the benign direction of the same seam** #16735's finding 1 describes: there is nothing to address, so nothing claims coverage, so `os i18n check` does not lie about them. That is why they are `p2` and not higher.\n\nThey are still `Bug` rather than `Feature` because the console **already renders** these strings and the platform **already declares** that a bundle is how you translate a page or a dashboard. A declared translation surface that cannot reach a rendered string is a contract not delivered, not a capability nobody promised.\n\n## Suggested shape (⛔ not a prescription)\n\n- **A**: widen the traversal's roots to include a slotted page's `slots`, and its descent to include `properties.items[].children`. ⚠️ The parameter type changes with it (`Pick<PageLike, 'regions'>` no longer describes the input), so this is a published-signature change in `packages/spec` — expect contract review.\n- **B**: add a `globalFilters` group to the dashboard translation schema, keyed the way `widgets` and `actions` already are, covering both the filter label and its option labels.\n\n⛔ Do not collapse A and B into one traversal change; they are different files and different shapes and only share a lane.\n\n## Acceptance\n\n- A slotted page with tab labels yields a non-zero `walkAddressedPageComponents` count, and each authored key resolves.\n- A dashboard's global-filter labels and option labels are addressable from a bundle and render translated.\n- The 22 + 34 inline locale maps in the reporting app become removable (⛔ not this card's job to remove them — the app's).\n\n## Provenance and boundaries\n\n- ⚠️ Measured in a browser by the reporting app's implementation run. The filer states plainly: *\"I did not personally re-drive these four.\"* They also record that a **fifth** finding from the same run was independently re-measured and came back **inverted** (#16695) — so this run's output is not offered as unexamined, but it is also not independently confirmed end to end.\n- ⚠️ Triage verified the two code readings quoted above and **nothing else** — not the counts (21 components, 5 filter labels, 29 option labels), not the browser behaviour.\n- ⛔ Dedup could not be run from the reporting session: `search_issues` returned `total_count: 0` for the app's own repo **even on a control term certainly present in an open issue's title**, so the index was not answering. The run correctly reported this rather than filing blind. ⚠️ Whoever claims this should re-run the duplicate search.\n- One app, one console build, one dialect. Re-confirm before acting.\n\n## Split siblings\n\n- **#16735** — finding 1, `_views.VIEW.description` declared, walked, counted as covered, never rendered. `repo:objectui`. **That is the one with a gate consequence**; if only one of the family is picked up, it should be that one.\n- **#16773** — finding 4, chart category labels from `select` options ignore the bundle. `domain:services`.\n\nhttps://claude.ai/code/session_01SwJQDFKe8tVit3BXQ9EfR5"
+}

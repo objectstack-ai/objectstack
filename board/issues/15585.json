@@ -1,0 +1,38 @@
+{
+  "number": 15585,
+  "kind": "issue",
+  "title": "`os migrate meta` prints `(runtime 17.0.0)` beside real package versions — `PROTOCOL_VERSION` is the protocol major padded to semver, and reads as the runtime's version on a 17.3.0 install",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "needs:contract-review",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T22:26:49Z",
+  "updated_at": "2026-09-10T07:48:00Z",
+  "closed_at": "2026-09-10T07:18:31Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15585",
+  "body": "Carried out of #15325 per its triage (comment `5546724278`): the reporter observed this while upgrading hotcrm, and triage ruled it a **different defect** that must not close with that card. Filed unassigned for triage; #15325 is not addressed here and this card is not addressed there.\n\n## Observed (reporter, 17.3.0 runtime)\n\n```\nos migrate meta --from 17\nChain:  protocol 17 → 17 (runtime 17.0.0)\n```\n\n## Where it comes from (re-derived on `origin/main` at `0c5e97368`)\n\n- `packages/cli/src/commands/migrate/meta.ts:353` — `printInfo(\\`Chain:  protocol ${fromMajor} → ${toMajor} (runtime ${PROTOCOL_VERSION})\\`)`\n- the `--json` path, same file line 330 — `runtime: PROTOCOL_VERSION`\n- `PROTOCOL_VERSION` is `'17.0.0'` in `packages/spec/src/kernel/protocol-version.ts:18`, and `PROTOCOL_MAJOR` is derived from it. It is the **protocol** major padded to a semver string. It is not, and never tracks, the installed `@objectstack/cli` / runtime package version.\n\n## Why it misleads\n\nThe word in front of it is `runtime`, and it prints next to real package versions in the same upgrade session (`npm view`, `os info`, the changelog). On a 17.3.0 install a reader takes `runtime 17.0.0` as \"your runtime is 17.0.0\" — an apparent downgrade or a stale install, neither of which is true. The `--json` field `runtime` carries the same ambiguity to machine consumers, which is the worse half: an agent scripting the upgrade has no prose to disambiguate.\n\n## Options (for triage, not decided here)\n\n- **A.** Print what the value is: `(protocol 17.0.0)` — or, since the chain line already says `protocol 17 → 17`, drop the padded semver from the human line entirely. Human-only, zero consumer impact.\n- **B.** Where \"runtime\" is actually meant, print the real package version (`@objectstack/cli`'s own `version`, read through the now-resolvable `@objectstack/cli/package.json` once #15325 lands) beside the protocol major, so both facts are on the line and neither impersonates the other.\n- **C.** In `--json`, rename `runtime` → `protocolVersion` (or add `protocolVersion` and keep `runtime` one release with a deprecation note). ⚠️ This is a machine-readable output shape — a consumer-facing change that needs its own changeset and a look at who reads the field.\n\nA and C are independent; B is optional on top of A.\n\n## Scope fence\n\nNot a security, data or correctness defect — a labelling defect in a diagnostic line and one JSON field name. `@objectstack/cli` `migrate meta` only; the spec constant is correct as a protocol version and should not move."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 15447,
+  "kind": "issue",
+  "title": "client SDK `oauth.applications.register` declares three request members the better-auth body schema silently strips (`metadata`, `name`, `scopes`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T16:03:14Z",
+  "updated_at": "2026-09-09T18:44:05Z",
+  "closed_at": "2026-09-09T18:43:04Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15447",
+  "body": "Found while binding the `oauth.*` return types in #14312 (PR #15445). **Request side, not return side** — out of that card's scope, filed rather than fixed in passing.\n\n## The defect\n\n`ObjectStackClient.oauth.applications.register` declares this request type (`packages/client/src/index.ts`):\n\n```ts\nregister: async (req: {\n  client_name?: string;\n  name?: string;                            // not in the vendor body schema\n  redirect_uris: string[];\n  token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post';\n  grant_types?: string[];\n  response_types?: string[];\n  client_uri?: string;\n  logo_uri?: string;\n  scope?: string;\n  scopes?: string[];                        // not in the vendor body schema\n  contacts?: string[];\n  tos_uri?: string;\n  policy_uri?: string;\n  metadata?: Record< string, unknown >;     // not in the vendor body schema\n})\n```\n\nThe route is `POST /api/v1/auth/oauth2/create-client`, mounted verbatim from `@better-auth/oauth-provider` (`auth-route-ledger.ts` records it `source: 'better-auth'`). Its body schema is a Zod object with `z.core.$strip` semantics, and its members are: `redirect_uris`, `scope`, `client_name`, `client_uri`, `logo_uri`, `contacts`, `tos_uri`, `policy_uri`, `software_id`, `software_version`, `software_statement`, `post_logout_redirect_uris`, `backchannel_logout_uri`, `backchannel_logout_session_required`, `token_endpoint_auth_method`, `application_type`, `jwks`, `jwks_uri`, `grant_types`, `response_types`, `dpop_bound_access_tokens`.\n\n`name`, `scopes` and `metadata` are not among them, so a caller who sets any of the three gets **HTTP 201 and a client that silently does not have it**. `$strip` drops unknown keys rather than refusing them, so there is no error to notice.\n\nThis is the repo's first commandment pointed at the request side: the SDK declares a capability the runtime does not honour.\n\n## Measured, not inferred\n\nDriven against a real server (real `betterAuth` + real `oauthProvider` over the real `createObjectQLAdapterFactory` on a real ObjectQL engine and a real better-sqlite3 database, real session cookie, real `ObjectStackClient`). Registering with `metadata: { tenant: 'acme', tier: 7 }` returned 201 and a body carrying **neither** key:\n\n```json\n{\"client_id\":\"pWhEhQXRmdLVGVZkgiobMJfxEmsgVCoB\",\"client_secret\":\"EPsjhqMCoPzoNPiQdMRLDPfcUIWDnFmp\",\"client_secret_expires_at\":0,\"scope\":\"openid profile email\",\"user_id\":\"t3IvR7eGC7IHhZnZUy4ftuLgeesecJ4a\",\"client_id_issued_at\":1788534576,\"client_name\":\"Probe App\",\"client_uri\":\"``https://app.example.com\",\"logo_uri\":\"https://app.example.com/logo.png\",\"contacts\":[\"ops@example.com\"],\"tos_uri\":\"https://app.example.com/tos\",\"policy_uri\":\"https://app.example.com/privacy\",\"redirect_uris\":[\"https://app.example.com/cb\"],\"token_endpoint_auth_method\":\"client_secret_basic\",\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"application_type\":\"web\",\"disabled\":false,\"dpop_bound_access_tokens\":false}``\n```\n\n`metadata` was measured directly. `name` and `scopes` rest on the body-schema reading above, not on a drive — worth confirming before acting, since the correct disposition may differ per member (`name` and `scopes` look like near-misses for the real `client_name` and `scope`, which the same type also declares; `metadata` has no vendor counterpart at all and the serialiser only ever spreads metadata that some other door stored).\n\n## Not decided here\n\nWhether each member is deleted, renamed onto its real counterpart, or routed to a door that can honour it is a contract question, and the near-miss pairs (`name` / `client_name`, `scopes` / `scope`) mean deleting them changes what existing callers compile against. Left to triage.\n\nVersion measured: `@better-auth/oauth-provider@1.7.2`. Nothing here changes the return-type work in #14312 or its two sibling cards, which are return-side only."
+}

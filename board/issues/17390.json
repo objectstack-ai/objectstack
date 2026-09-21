@@ -1,0 +1,34 @@
+{
+  "number": 17390,
+  "kind": "issue",
+  "title": "PM board snapshot: a scheduled workflow archives every issue, comment and PR record to an orphan branch, so an account suspension destroys no record — with a restore recipe",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T10:56:02Z",
+  "updated_at": "2026-09-10T14:01:49Z",
+  "closed_at": "2026-09-10T12:48:54Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17390",
+  "body": "Filed by the skills seat (session `session_01YKEjmbYNvYWJvWGSWx26zK`, GitHub `os-litant`) on the maintainer's direct instruction in this seat's chat, 2026-09-10T10:5xZ, verbatim and untranslated: 「申诉过，10天没回复了；账号都是免费的；板面快照这个应该谁来处理？分诊吗？」 — answered: this lane (PM-loop tooling), not triage. Routed `domain:skills` · `pm:queue` · `priority:p1` · `Task` under the maintainer direct-dispatch channel.\n\n## Why (measured, not inferred)\n\nThree fleet accounts were suspended in two months; the appeals are unanswered after ten days. #17374 F3 measured what a suspension destroys: every issue, PR and comment the account authored — while every branch and commit survives (they belong to the repository). The board (issue bodies, labels, `Claim:` / ACCEPT / ruling comments) is the fleet's only state by rule (「GitHub 之外永不维护任何跟踪状态」), so today one suspension erases state that nothing else holds: #17297 (a p1 security decision card), #17128, #17150, #17276, #17313, #17318 are gone and not yet rebuilt.\n\n## Deliverable\n\n1. **`scripts/pm/board-snapshot.mjs`** — reads, over repo-scoped REST with the token the caller supplies, every issue and PR of the repo (state `all`) updated since the previous run (`since` from the archive's own last-run stamp; the first run is full), and for each: the issue/PR object (number, title, body, state, `state_reason`, labels, assignees, type, milestone, timestamps, `closed_by`), the full comment thread, and for PRs the reviews and review comments. Writes one JSON file per number under a deterministic layout (e.g. `issues/<n>.json`, `comments/<n>.jsonl`, `reviews/<n>.jsonl`) plus a `manifest.json` (run stamp, counts, the `since` used, `open_issues_count` read at run time). Idempotent: a re-run with nothing changed writes nothing.\n2. **`.github/workflows/board-snapshot.yml`** — scheduled at the half-state patrol's cadence (read its `cron:` and copy it), runs the script with the workflow's own `GITHUB_TOKEN` (identity `github-actions[bot]` — not a fleet account, cannot be suspended with one), and commits the result to an **orphan branch `board-archive`** in this repository (no new repo, no new credential; `contents: write` + `issues: read` + `pull-requests: read` only). Concurrency group so two runs never race the branch. The adoption rule from `half-state-patrol.yml` applies: a sibling repo adopts by copying the workflow, not by pointing this one at it.\n3. **`--restore <n>`** — prints (does not post) the recreate payload for a destroyed card from the snapshot: the original body under a provenance header stating the original number, author, timestamps and 「rebuilt from the board snapshot at <run stamp>; the original was destroyed with its author's account」, the labels to re-apply, and the comment thread as a second block — the #17374 F3.4 rule that a rebuilt record must say it is a rebuild. Posting stays a seat's act.\n4. **Self-test** (`--self-test`, offline fixtures) covering: incremental `since` selection, idempotence, the manifest counts, the restore header, and the refusal to run without a token.\n\n## Acceptance\n\n- One real run on this repository (via the workflow or locally with `GH_TOKEN`) whose manifest count of open issues equals the repo's `open_issues_count` minus open PRs at the same stamp — the count check the REST channel table already requires of every enumeration; a mismatch is a red run, never a warning.\n- A **restore drill**: pick one closed low-value card, run `--restore`, compare the printed body byte-for-byte with the live body — proof the recipe can be followed.\n- **Negative control**: no seat reads the archive for state — the archive is a read-only backup (the one-board rule stands); the PR body says so and the script has no write path to GitHub.\n- Budget: the scheduled run must fit the `GITHUB_TOKEN` per-repo rate limit at the measured update rate (the half-state anchor reports ~154–415 closed-issue updates/day); state the per-run request count in the PR body.\n\n## Governing text\n\n`.claude/skills/pm-dispatch/SKILL.md` 全体座位的不变量 (「GitHub 之外永不维护任何跟踪状态」 — an archive is not a tracker; nothing here reads it for state); #17374 F3 (branches survive, records do not; a rebuilt record must self-declare); `rest-channel.md` (an enumeration without a count check is not a reading).\n\n## Not in scope\n\nThe identity architecture (GitHub App for fleet writes vs. paid machine accounts) — a maintainer decision, filed separately. Rebuilding the six destroyed cards named above — the services seat's, from its own container's fetched payloads where they survive; this tool prevents the next loss, it cannot recover this one.\n\n## Dedup\n\nOpen `domain:skills` titles scanned 2026-09-10T10:5xZ for snapshot / archive / backup / 快照 / 归档 / 备份: zero hits (control: the half-state anchor #9857's title carries \"generated view\"). Nearest: #17374 (the incident card; asks 3–5 are discipline text, this card is the tool).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

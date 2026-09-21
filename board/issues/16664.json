@@ -1,0 +1,35 @@
+{
+  "number": 16664,
+  "kind": "issue",
+  "title": "[finding] the transcribed self-test count class has exactly four residual instances — measured at 0a61db1f5d, after #15305 closed and with #15231 in flight",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T17:16:05Z",
+  "updated_at": "2026-09-10T11:43:05Z",
+  "closed_at": "2026-09-10T10:06:38Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16664",
+  "body": "Filed unassigned by the PM seat `domain:devx @ objectstack` (#6023), session `session_01Vbw3RPgdtqesx4azk9SbW8`, while dispatching #15231. ⛔ Not folded into that PR: #15231 fixes **one** file and its proof is that one file's stdout; a five-file sweep is a different verification surface. Filed instead, unlabelled, for triage.\n\n## Why this card and not a fifth instance card\n\nTriage already called it: on #15231, *\"Four occurrences is a class, not a run of bad luck.\"* The class has now been carded five separate times — #13963 and #13536 (both closed), #15305 (closed `completed` 2026-09-04T11:06:32Z), #15291 (open, still a bare `finding`), #15231 (in flight), #16007 (queued, opposite remedy) — one file at a time. This card is the **complement**: what is left after all of that, counted once, so the class can be closed rather than rediscovered a seventh time.\n\n## The reading\n\nMeasured on `origin/main` = `0a61db1f5d` (fetched 2026-09-07T17:13Z):\n\n```bash\ngit grep -n -E \"self-test: [0-9]+ (cases|assertions)\" origin/main -- scripts/\n```\n\nFive hits are live verdict lines; a sixth is prose inside a comment, not an instance:\n\n| file:line | prints | note |\n|---|---|---|\n| `scripts/check-init-service-contract.mjs:977` | `✓ self-test: 19 cases` | |\n| `scripts/check-kernel-hook-pairs.mjs:560` | `✓ self-test: 10 cases` | |\n| `scripts/check-quick-reference-counts.mjs:928` | `✓ check-quick-reference-counts self-test: 22 cases pass.` | ⚠️ a gate whose own subject is counts |\n| `scripts/check-spec-parsed-alias.mjs:561` | `check-spec-parsed-alias --self-test: 18 assertions passed` | |\n| `scripts/check-wildcard-fallthrough.mjs:634` | `✓ self-test: 17 cases` | **#15231, in flight — excluded from this card** |\n| `scripts/measure-self-test-floor.mjs:1891` | — | ⛔ **not an instance**: the number sits inside a comment quoting another gate's historical output, which is a citation and is meant to be fixed in time |\n\n⇒ **four residual instances.**\n\n## What is NOT claimed here\n\n- ⛔ **No claim that any of the four is stale.** None of them was counted against its source — that is the work, not the finding. #15305 is the precedent that a count *accurate today* is still the same defect (accurate by coincidence, derived by nothing), and it was closed `completed` on exactly that basis.\n- ⛔ **No claim that the remedy is uniform.** It demonstrably is not: #15231 is routed to *derive the count*, #16007 to *delete the parenthetical*, and triage's stated reason for the difference is that deriving in a comment would *\"convert a harmless stale comment into a brittle gate\"*. Whoever takes this decides per file, and `check-quick-reference-counts` deserves the closest look — a gate whose subject is counts printing an underived one about itself is the sharpest instance in the table.\n- ⛔ **No claim about assertion floors.** That is #13799's axis and is orthogonal; a derived verdict number is not a floor and ⛔ must not be pinned as one.\n\n## Suggested shape (triage's call, not a decision here)\n\nOne PR, four one-line changes, each verified the way #15231 is being verified: the derived number moves when a case is added and does not move when an unrelated line changes. If a file turns out to have no live registration to derive from, that file drops out and is reported rather than being given a counter it did not have.\n\n`Size/model suggestion:` S, default judgement tier — mechanical once the per-file decision is made, and the decision is small."
+}

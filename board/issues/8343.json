@@ -1,0 +1,33 @@
+{
+  "number": 8343,
+  "kind": "issue",
+  "title": "OS_CLOUD_URL=off unmounts the air-gapped install-local endpoint — the offline install path is gated on the cloud URL it is designed not to need",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T06:39:16Z",
+  "updated_at": "2026-09-10T10:05:02Z",
+  "closed_at": "2026-09-10T10:05:02Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8343",
+  "body": "Restart-when: `docker run --rm ghcr.io/objectstack-ai/objectos-ee:$TAG sh -c \"grep -rc OFFLINE_CONTROL_PLANE node_modules/@objectstack/cli/dist/commands/serve.js\"` returns non-zero, where $TAG is the newest published objectos-ee tag (the tag originally measured here was 4.0.5-rc.1) — i.e. a published objectos-ee image bundles an @objectstack/cli carrying `Serve.OFFLINE_CONTROL_PLANE` (PR #8358, already on main).\n\n`os package install ./dist/objectstack.json` is documented as the air-gapped path — \"the compiled artifact is read locally and sent inline — no catalog round-trip, **works fully offline**\" (`packages/cli/src/commands/package/install.ts`). The plugin that serves it agrees: `marketplace-install-local-plugin.ts:463` — \"Bypass the cloud-fetch entirely; **no OS_CLOUD_URL required**\".\n\nBut the plugin is only *registered* when a cloud URL exists (`packages/cli/src/commands/serve.ts:1652`):\n\n```ts\nconst marketplaceUrl = resolveCloudUrl();\nif (marketplaceUrl) {\n  await kernel.use(new MarketplaceProxyPlugin({ controlPlaneUrl: marketplaceUrl }));\n  await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: marketplaceUrl }));\n  …\n  await kernel.use(new RuntimeConfigPlugin({ controlPlaneUrl: '', singleEnvironment: true, installLocal: true }));\n}\n```\n\nWith `OS_CLOUD_URL=off` — the value the self-hosted EE compose file documents as \"完全自托管填 off\" — `resolveCloudUrl()` is empty, the whole block is skipped, and the endpoint never mounts. So the deployment that most needs offline install is the one that cannot have it.\n\n## Measured\n\n`objectos-ee-deploy` (image `ghcr.io/objectstack-ai/objectos-ee@sha256:c93b4937…`, tag 4.0.5-rc.1), `OS_CLOUD_URL=off`, container command `node node_modules/@objectstack/cli/bin/run.js start` (which forks `serve`):\n\n```\nGET  /api/v1/marketplace/install-local → 404 {\"error\":\"Not found\"}\nPOST /api/v1/marketplace/install-local → 404 {\"error\":\"Not found\"}\n```\n\nThere is no other package-install surface: the served OpenAPI document contains **no** path matching `package|marketplace|install`, and the container mounts only `/data` (the artifact is baked into the image at `OS_ARTIFACT_PATH=/repo/cloud/apps/objectos-ee/dist/objectstack.json`). `OS_ARTIFACT_PATH` takes a single artifact, not a directory or a list (`packages/runtime/src/default-host.ts:49`), so there is also no \"drop another bundle in\" workaround. The deployment simply cannot install a package by any route.\n\n## Second symptom: the Console is told the feature is live\n\n`GET /api/v1/runtime/config` on the same deployment returns:\n\n```json\n{\"cloudUrl\":\"\",\"singleEnvironment\":true,\n \"features\":{\"installLocal\":true,\"marketplace\":true,\"aiStudio\":true,\"autoPublishAiBuilds\":true}, …}\n```\n\n`installLocal: true` with no endpoint behind it. Whatever supplies runtime-config in the EE image is not the `RuntimeConfigPlugin` from the skipped block, so the flag and the route now disagree — the Console will offer an install affordance that 404s.\n\n## Expected\n\nRegistration of `MarketplaceInstallLocalPlugin` should not depend on `resolveCloudUrl()`. Only the *catalog* branch needs a control plane, and it already degrades correctly on its own (`marketplace-install-local-plugin.ts:494` → `503 MARKETPLACE_UNAVAILABLE, \"OS_CLOUD_URL not configured.\"`). Mounting it unconditionally therefore costs nothing and restores the documented offline path; `MarketplaceProxyPlugin` (a pure cloud proxy) can stay behind the URL check.\n\nAnd whichever component reports `features.installLocal` should report what is actually mounted.\n\n## Impact\n\nThis is the blocking issue for installing any first-party or customer application into a self-hosted EE deployment — the concrete case here was installing HotCRM (`app.objectstack.hotcrm`) into a running multi-org EE stack, for which no supported path currently exists.\n\n## Environment\n\n`objectos-ee-deploy` (Caddy → app → postgres:16), `NODE_ENV=production`, `OS_TENANCY_POSTURE=isolated`, `OS_MODE=standalone`, `OS_CLOUD_URL=off`, on `http://localhost:8080`, observed 2026-08-13. Source references are the current `framework` main checkout."
+}

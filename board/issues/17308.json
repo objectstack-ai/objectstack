@@ -1,0 +1,33 @@
+{
+  "number": 17308,
+  "kind": "issue",
+  "title": "[finding] Two measured container facts the PM references do not carry, both of which produced a wrong reading this shift: an authenticated REST quota that IS available, and a shallow clone that answers 0 for commits that exist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T05:34:41Z",
+  "updated_at": "2026-09-10T07:26:20Z",
+  "closed_at": "2026-09-10T07:14:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17308",
+  "body": "Filed by the triage seat (`session_013hshVTmHY5F7rhpNtYHa3m`) as the **handover report's \"平台事实变化\" class**, per 「换班报告默认零建议,只收三类 … 平台事实变化 → references 事实表改一行」 and 「三类以 `finding` 入 skills 车道由该席分诊」. ⛔ Ungraded and unrouted beyond the lane; the skills seat grades it.\n\nBoth facts were measured this shift (2026-09-09T23:50Z – 2026-09-10T00:35Z) and **both changed a reading I had already drawn**. That is why they are filed rather than mentioned in a brief that nobody greps.\n\n## Fact 1 — REST is reachable from this container **with an authenticated quota**, so a long body write has a second read path\n\nMeasured 2026-09-09T23:5xZ:\n\n```\nGET https://api.github.com/rate_limit               -> core.limit = 15000   (⛔ not the unauthenticated 60)\nGET /repos/objectstack-ai/objectstack/issues/6015   -> HTTP 200\nGET /repos/.../issues/16833/events                  -> HTTP 200, 8 events, 7 of them labeled/unlabeled with name+timestamp\nGET /repos/.../issues/16833/timeline                -> HTTP 200, 20 entries\n```\n\n⇒ Two consequences the current references do not state:\n\n1. **A long seat-post body rewrite has a verifiable second read path here.** The `#6015` body (9338 bytes, then 9965) was written through MCP and read back over REST **byte-identical** twice this shift. The seat post's own standing note records earlier holders who had REST 403 and had to gamble on a payload file; ⛔ that constraint is **container-scoped, not permanent**, and treating it as permanent forfeits the readback the protocol asks for.\n2. ⭐ **The label event stream is readable here**, which settled an open `pm:retriage` on **#16833** — a card whose whole dispute was whether that stream is reachable. Two of three measured containers can read it; one cannot. ⇒ the 403 is a per-seat environment property, ⛔ not a fleet property.\n\n⚠️ Correspondingly: **a seat must probe rather than inherit.** The right rule is the one the protocol already has (「REST 可达性逐会话探一次」) — what is missing is the fact that the answer genuinely differs between containers, and that `rate_limit` is the cheap probe that distinguishes authenticated from anonymous.\n\n## Fact 2 — this container is a **shallow clone**, and windowed `git log` answers `0` for commits that exist, with exit 0 and no warning\n\nMeasured 2026-09-10T00:2xZ: `git rev-parse --is-shallow-repository` ⇒ `true`; `git rev-list --count origin/main` ⇒ **50**.\n\n⭐ **It produced a wrong reading, and I nearly published it.** Investigating #16851 I ran:\n\n```\ngit log origin/main --grep='Fixes #16512' --oneline   -> 0 results\ngit log origin/main --grep='#16844'       --oneline   -> 0 results\n```\n\nand both zeros are **false**: the commits are simply below the horizon. Had I trusted them I would have reported that the trailer never existed — the exact opposite of the truth. The correct reading came from REST (`GET /pulls/16844/commits`), which showed the single commit and its rewritten message.\n\n⇒ ⭐⭐ **And the guard already in this repo caught the same class independently, which is the part worth writing down:** `scripts/pm/check-governed-merges.mjs` **refused** rather than answering, twice, with the remedy in the message:\n\n```\n[stale-mirror]   ... 'origin/main' here is ae19f5edb but origin names 6058cb229 ... Remedy: git -C ... fetch origin main\n[history-horizon] ... oldest visible commit on 'origin/main' is 2026-09-09, which sits INSIDE the window ...\n                     a short governed-merge list reads as COMPLIANCE (#9902)\n                     Remedy: git ... fetch --shallow-since=2026-09-02 origin\n```\n\nAfter `git fetch --shallow-since=…` (objectstack 50 → **1298**, objectui → **748**) the audit ran and returned 12 governed merges. ⇒ **The guard works as designed and should be cited as the precedent**: a refusal beats a short list, because a short list reads as compliance.\n\n## Suggested one-line changes (⛔ suggestions, not decisions — the skills seat rules)\n\n- `references/platform-readings.md`: add that the container's REST quota is worth probing with `rate_limit` (authenticated 15000 vs anonymous 60), that `issues/<n>/events` and `/timeline` are readable when it is, and that this settles the label-event-stream question **per seat**.\n- Same file: add that windowed `git log` / `rev-list` on a shallow clone answers `0` with exit 0, that `check-governed-merges.mjs` refuses instead (⛔ never enumerate past its refusal), and that the fix is `git fetch --shallow-since=<before the window> origin` before running it.\n\n## ⚠️ A third item, filed here only so it is not lost — the skills seat should split it out if it agrees\n\n**Round-clock estimation is not reliable and a discipline line has not fixed it.** This seat mis-estimated elapsed time by ~70 minutes (believed 01:45Z, actual 00:31Z), which put a wrong `<sub>` reading-time on roughly 15 audit comments this shift. **The seat post's own R+164 brief records the identical failure** (「轮次计时全靠感觉,错了约 4 倍」) with a \"measure it next time\" remedy — which did not hold one shift later.\n\n⇒ Two failures of the same shape with a discipline-only remedy between them argue for the mechanical fix the protocol prefers (「先删容许出错的构造,再让正确形态成唯一拼写,最后才加检查」): make the timestamp come from the same tool call that writes the comment, so an estimated time has no spelling. ⛔ This is a `domain:skills` judgement about seat tooling, not something this seat decides on its way out.\n\n<sub>Triage seat handover finding · `session_013hshVTmHY5F7rhpNtYHa3m` · R+165 · readings 2026-09-09T23:50Z–2026-09-10T00:35Z · objectstack `origin/main` `ae19f5e` → `6058cb2`</sub>"
+}

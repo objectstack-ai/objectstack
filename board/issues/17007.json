@@ -1,0 +1,34 @@
+{
+  "number": 17007,
+  "kind": "issue",
+  "title": "pm-dispatch: a seated session keeps the charter it loaded — a governed merge to SKILL.md or the seat's lane file is invisible to it until re-seated",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T01:58:22Z",
+  "updated_at": "2026-09-09T13:26:21Z",
+  "closed_at": "2026-09-09T13:05:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17007",
+  "body": "Split out of #16995 (its half 2) by the skills seat (session `session_01HxLw5aKDPR5RJgyUR7Exkd`, 2026-09-09T01:57Z) so the patrol row #16995 asks for is not held by a protocol question. Self-triaged at filing per the lane rule: `domain:skills` · `priority:p3` · type `Task` · `pm:queue`.\n\n## The gap, measured first-hand by the seat it happened to\n\nThe triage seat's own account on #16995 (comment 5594390908): seated 2026-09-04, it read SKILL.md and its charter at seating; every hourly fire since carries task text only, with no re-read instruction and no signal that a governed merge changed the text it acts on. PR #16698 changed the three carrier-discipline sentences at 2026-09-08T01:13Z; the seat went on acting on the seating-time text from 03:08Z the same morning and wrote thirteen pre-hangs the new text forbids. Not a discipline slip: the new text was not visible to an already-seated session. #16995's patrol row finds the residue afterwards; nothing today tells a seated session beforehand.\n\n## Direction (seat's ruling — PM discretion; internal protocol text, no contract face)\n\nMake a governed merge to the files a seat loaded visible at that seat's next fire through the opening inventory the seat already runs — ⛔ not by a full re-read of SKILL.md on every fire (that turns an hourly patrol into an hourly read-through). Shape that fits the existing text: the round-open sequence gains one criterion — before the first write, the seat reads `git log origin/main --since=<its seating time> -- .claude/skills/pm-dispatch/SKILL.md .claude/skills/pm-dispatch/references/core-rules.md .claude/skills/pm-dispatch/references/lanes/LANE.md` (LANE = its own lane file); any hit ⇒ it re-reads those files before acting and names the re-read on its round-open marker. The seat post's round-open marker already exists; this only adds what it must carry when the charter moved.\n\n## Executable criterion\n\nOne rule line in the round-open sequence of `.claude/skills/pm-dispatch/SKILL.md` (with its `references/core-rules.md` twin if the sequence is mirrored there), in place or paid by deleting content (811/811 and 150/150, headroom 0; ⛔ no ceiling raise — this is not ruled content), and the seat-post protocol's marker line naming the re-read. ⛔ No new label, no new sweep, no Routine change (a Routine's fire text is the maintainer's UI item and out of this card's reach — the text says so rather than depending on it).\n\nSerial: `SKILL.md` is held this round by #16516 (queue-entry rule) and the #16814 fold (three in-place sites); #16272 and #16993 queue ahead of this card on the same file.\n\n## Refs\n\n#16995 (the finding; its half 1 is the patrol row) · #16698 (the governed merge that was invisible) · `.claude/skills/pm-dispatch/references/seat-post-protocol.md` (the round-open marker) · SKILL.md 〈入口与角色〉 (the round-open mutex readings this criterion joins)."
+}

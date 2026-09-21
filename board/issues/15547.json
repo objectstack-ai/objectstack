@@ -1,0 +1,35 @@
+{
+  "number": 15547,
+  "kind": "issue",
+  "title": "[finding] `resolveConfigPath` prints human text to STDOUT then `process.exit(1)`s — 9 commands' `--json` face emits unparseable bytes when the config file is missing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T20:29:12Z",
+  "updated_at": "2026-09-09T14:33:22Z",
+  "closed_at": "2026-09-09T14:32:16Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15547",
+  "body": "Filed **unassigned**, recording only — measured while running the phase-1 reachability probe for #14974 (`os lint --eval --json` has no JSON face for an uncaught throw). Different mode, different exit, different helper, so it is recorded separately rather than folded in.\n\n## The measurement\n\nDriven on `origin/main` at `ed9d87653eb` through the **published** entry point `packages/cli/bin/run.js` (not the `bin/run-dev.js` shim), `NO_COLOR=1`, stdout and stderr captured to separate files, exit code read before any pipe.\n\n```\n$ os lint ./nope-does-not-exist.ts --json\nexit 1 · stdout 286 bytes · stderr 0 bytes\n\nstdout, verbatim:\n  ✗ Config file not found: /abs/path/nope-does-not-exist.ts\n\n  Hint: Run this command from a directory with objectstack.config.ts\n  Or specify the path: objectstack COMMAND path/to/config.ts\n```\n\n`JSON.parse` on that stdout throws. The identical shape reproduces on `os validate ./nope-does-not-exist.ts --json` and `os build ./nope-does-not-exist.ts --json` — exit 1, stdout 286 bytes, not JSON, stderr empty in all three.\n\n## Where it comes from\n\n`packages/cli/src/utils/config.ts`, `resolveConfigPath()` at L47:\n\n- L51-54 emit the message through `printError` and `console.log` — **both write to stdout**\n- L55 calls `process.exit(1)` directly\n\nSo this path **never throws**. Every command's catch-all `--json` error exit sits downstream of a throw; with no throw, no catch runs and no payload is emitted. `resolveConfigPath` has no `--json` awareness at all — the flag is not in scope there.\n\nThe same helper does it a second time at L72-75, for the auto-detect miss (`No objectstack.config.{ts,js,mjs} found in current directory`).\n\n## Why this is a stronger shape than a missing payload\n\n⚠️ This is not \"no JSON document on stdout\". It puts **human text on stdout** — the exact stream `--json` reserves for the machine. The consumer gets 286 bytes that parse as nothing, on the channel it was told to read.\n\n## Blast radius\n\n9 command modules both declare a `json` flag and reach `loadConfig` / `resolveConfigPath`:\n\n`validate.ts` · `info.ts` · `diff.ts` · `lint.ts` · `migrate/meta.ts` · `compile.ts` · `verify.ts` · `i18n/check.ts` · `i18n/extract.ts`\n\nThree of those faces were driven (`lint`, `validate`, plus `build`, which reaches the helper as well); the rest is the static reading, ⛔ not measured.\n\n## Not already covered\n\n- `packages/cli/test/json-stdout-purity.e2e.test.ts` pins \"stdout is exactly one JSON document\", but its family is DISCOVERED as the commands that call `bootSchemaStack`. These commands reach the config helper **without booting a kernel**, so that pin never sees this path.\n- `packages/cli/src/utils/schema-migration-plugins.ts` L189 already records that the helper `process.exit(1)`s, and deliberately avoids calling it for that reason. The `--json` consequence of the same behaviour is recorded nowhere.\n\n## ⛔ What is NOT claimed\n\nNo route is proposed. Whether the helper should throw a typed error, accept a `json` option, or be replaced at each call site is a design question this card does not settle — and any answer touches 9 published `--json` faces at once.\n\n## Refs\n\n- #14974 — the phase-1 probe this was measured beside; that one is about `--eval` mode and stands on its own terms\n- `packages/cli/src/utils/config.ts` L47-76"
+}

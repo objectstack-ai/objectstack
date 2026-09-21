@@ -1,0 +1,34 @@
+{
+  "number": 16335,
+  "kind": "issue",
+  "title": "spec: ADR-0112 error envelope gains an explicit producer-side refusal declaration so a deliberate 5xx refusal can keep its caller-authored message (spec half of #16146)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T14:38:03Z",
+  "updated_at": "2026-09-09T22:45:47Z",
+  "closed_at": "2026-09-09T22:36:24Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16335",
+  "body": "Spec half of #16146, split by director ruling (decision batch #58, 2026-09-06, option C — the refusal/fault distinction is a producer-side declaration on the published envelope, not a status heuristic and not a second allow-list).\n\n## Why\n\n`declaredServerFaultAnswer` (`packages/rest/src/error-response.ts`) withholds the message of every error that declares `status >= 500`. `declaresServerFault` (`packages/types/src/error-leak.ts`) is `status >= 500 && code` — a deliberate refusal such as the `/references` 501 written under ADR-0110 D3 *also* satisfies it, so switching the gate to `declaresServerFault` (the reframing in triage comment 5556832849) withholds exactly the same messages. Nothing on the wire today lets a producer say \"this 5xx is a refusal whose prose is for the caller\". PR #16143 patched one route locally; #16146 shows the class recurs on every gate.\n\n## Scope\n\n- Add one optional field to the ADR-0112 error envelope schema (name to be settled in the PR, e.g. `disclose: true` or `refusal: true`) meaning: the producer authored this message for the caller; boundaries keep it verbatim.\n- Default stays the #5811 / #5667 behaviour: an undeclared or fault-declared 5xx has its detail withheld from the body and logged for the operator.\n- Document, in the envelope's TSDoc, the three cases side by side: undeclared 5xx (heuristic), declared fault (withheld), declared refusal (kept).\n- No allow-list, no second table — one field on the one published envelope.\n\n## Consumer half\n\n#16146 (relay change in `error-response.ts`, retire the route-local patch from #16143) is `pm:blocked` on this card. #14656's logging question is expected to fall out of the same field.\n\n## Acceptance\n\n- [ ] envelope schema declares the field with a stable TSDoc\n- [ ] api-surface baseline regenerated\n- [ ] changeset present"
+}

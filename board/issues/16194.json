@@ -1,0 +1,36 @@
+{
+  "number": 16194,
+  "kind": "issue",
+  "title": "The `adr-0030-notification-event` migration has no operator path: no production caller and no `os migrate` sub-command, while its two sibling attested ids have both",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T05:26:55Z",
+  "updated_at": "2026-09-10T07:48:08Z",
+  "closed_at": "2026-09-10T02:40:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16194",
+  "body": "## What is missing\n\n`migrateSysNotificationToEvent` — the `adr-0030-notification-event` data migration — **has no way to be run.** It is exported, tested, documented and now has a ruled `sys_migration` receipt contract, and there is no path by which an operator can invoke it.\n\nTwo independent measurements tonight, from two seats that were not looking for the same thing:\n\n**① No production call site.** Every non-CHANGELOG reference to the symbol, re-measured on today's `origin/main`:\n\n| site | what it is |\n|---|---|\n| `packages/metadata/src/migrations/migrate-sys-notification-to-event.ts:71` | the definition |\n| `packages/metadata/src/migrations/migrate-sys-notification-to-event.ts:26-27` | its own usage docblock |\n| `packages/metadata/src/migrations/index.ts:50` | the barrel export |\n| `packages/metadata/src/migrations/driver-exec.ts:14` | a **comment** mentioning it, not a call |\n| `packages/spec/src/system/migration.zod.ts` | the id's docblock |\n| `migrate-sys-notification-to-event.test.ts`, `real-driver-exec-surface.test.ts` | tests |\n\n⇒ zero callers in `packages` / `apps` / `examples`. The instrument is alive — the same grep finds the symbol in **13 files** — so this is a zero about the *production-caller* subset, not a dead grep. (Triage on #16100 measured the same thing at `a4816a7` and additionally excluded both candidates the card had named: `sys_migration` occurs **0 times in all of `packages/metadata``, and `serve.ts`'s only occurrence is an unrelated comment.)\n\n**② No `os migrate` sub-command.** `packages/cli/src/commands/migrate/` contains `apply.ts`, `duplicates.ts`, `files-to-references.ts`, `index.ts`, `meta.ts`, `multi-value-columns.ts`, `plan.ts`, `recorded-by.ts`, `resume.ts`, `summary-nulls.ts`, `value-shapes.ts` — and nothing for this migration. The directory listing is its own control: the two **siblings** are there.\n\n⭐ The sharpest form of it: `CREATION_ATTESTED_MIGRATION_IDS` has exactly **three** members —\n\n```\nFILE_REFERENCES_MIGRATION_ID,      → os migrate files-to-references\nVALUE_SHAPES_MIGRATION_ID,         → os migrate value-shapes\nNOTIFICATION_EVENT_MIGRATION_ID,   → (nothing)\n```\n\n**Two of the three have a sub-command. The third does not.** That asymmetry inside a set the spec declares as one class is the finding.\n\n## Why it matters now rather than whenever\n\nThe `sys_migration` receipt contract for this id was ruled and landed (`a7da4de6f`, #15710), and #16100 is implementing the writer. That contract's execution sentence is *\"after a completed non-`error` run of the migration, the caller that owns the datastore handle writes…\"* — ⇒ **there is no run to hang it on.** The receipt writer will be correct, pinned, and unreachable by any operator on the day it lands.\n\nA third seat measured the same gap from the other side: the #16067 round chose the wording *\"it never reaches this branch at all\"* over inventing a remedy sentence for this id **precisely because** it measured, with a firing control, that no such sub-command exists.\n\n## What this card is NOT\n\n- ⛔ **Not #16100.** That card writes the receipt row inside the runner and is fenced against this; triage on it explicitly refused to fold this in, and named it *\"an unruled CLI feature\"*.\n- ⛔ **Not a licence to add the sub-command.** Whether this migration should be operator-runnable at all is a **decision**, not an implementation detail — the other two members' sub-commands each carry a dry-run posture, an `--apply` gate and a documented consequence, and none of that has been ruled for this one. Landing a bare sub-command to close an asymmetry would ship an unruled operator door.\n\n## The question a maintainer has to answer\n\n**Is `adr-0030-notification-event` meant to be operator-runnable, or is it a migration the platform runs on its own (or never runs again)?**\n\n- **Operator-runnable** ⇒ it needs an `os migrate notification-event` sub-command shaped like its two siblings (dry-run default, `--apply`, the receipt written per the ruled matrix), and that is a `domain:cli` card.\n- **Platform-run** ⇒ it needs an invoker somewhere in boot or in `os migrate apply`, and the ruled receipt matrix tells that invoker exactly what to write.\n- **Neither / retired** ⇒ then the receipt contract, the ledger pin and its membership in `CREATION_ATTESTED_MIGRATION_IDS` are all describing something that cannot happen, and **that** should be said out loud rather than left as three landed artefacts around an unreachable function.\n\n⛔ This card takes no position between the three. It records that the gap exists, that it is measured from three independent directions, and that the receipt work now landing makes it visible.\n\n## Provenance\n\nTriage on #16100 (comment `5556315594`) measured ① and ②, judged it *\"an independent defect worth its own card\"*, and left it unfiled with 145 bare cards in the queue, inviting the engine seat to open it. The #16067 round measured ② independently. Both readings re-run on today's `origin/main` by the PM dispatch seat before filing.\n\nRelated: #16100 (the receipt writer, in flight) · #15710 (the ruled contract, landed) · #16067 (the round that measured ② from the other side).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

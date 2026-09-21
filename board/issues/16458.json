@@ -1,0 +1,35 @@
+{
+  "number": 16458,
+  "kind": "issue",
+  "title": "spec: the dashboard authoring form has no channel for ITEM-level property names — `header.actions[]` columns render as raw keys in every locale, and `columns` documents a default it never declares",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "i18n",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T02:23:39Z",
+  "updated_at": "2026-09-09T22:46:17Z",
+  "closed_at": "2026-09-09T22:44:53Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16458",
+  "body": "Upstream half of objectui#8218 (Studio 「界面」 property panel de-developerization). Filed from that card after measuring where the fix actually belongs; the rendering-side half stayed in objectui.\n\nNot on any release path — objectui#8218 is explicitly decoupled from the cloud#1955 v1 launch, and so is this.\n\n## What the maker sees\n\nStudio's interface property panel renders `dashboardForm` + the `DashboardSchema` JSONSchema through the console's generic `SchemaForm`. The 「页眉 → 操作按钮」 array renders as a table whose column headers are `label` / `actionUrl` / `actionType` / `icon` — raw machine keys, sitting inside an otherwise fully Chinese panel.\n\n## Three separable upstream gaps, measured\n\n### 1. The item property schemas carry no `title` — so the keys leak in `en-US` too\n\n`DashboardHeaderAction`'s fields carry `.describe(...)` but no title, so `z.toJSONSchema(DashboardSchema, { io: 'input' })` emits, verbatim:\n\n```json\n\"label\":      { \"description\": \"Action button label\",              \"type\": \"string\" },\n\"actionUrl\":  { \"type\": \"string\", \"description\": \"URL or target for the action\" },\n\"actionType\": { \"description\": \"Type of action\", \"type\": \"string\", \"enum\": [\"script\",\"url\",\"modal\",\"flow\",\"api\",\"form\"] },\n\"icon\":       { \"description\": \"Icon identifier for the action button\", \"type\": \"string\" }\n```\n\nThe console's table header is `items.properties[k].title ?? k`. With no `title` on any of the four, that fallback is the arm that ALWAYS runs — for every locale, English included. So this is not primarily a translation gap: it is a missing authoring label in the contract.\n\nSame shape applies to every repeater item schema, not only this one; `header.actions` is just where it was caught.\n\n### 2. There is no localization channel that can reach those headers at all\n\nThe only localization path for these forms is `resolveMetadataFormLabels` (`packages/spec/src/system/i18n-resolver.ts`), which decorates the FormView field specs — `label` / `helpText` / `placeholder` on `FormFieldSpec` nodes, synthesizing composite/repeater children from bundle entries.\n\nThe array table headers come from a DIFFERENT object: the JSONSchema, which no overlay touches. So the fix the objectui card originally guessed at — adding `dashboard.fields['header.actions[].label']` to the generated catalogs — would land on a `FormFieldSpec` the console's master-detail widget never reads (its props do not even include `fieldSpec`). Necessary-but-not-sufficient at best, and today not even reachable.\n\nDeciding this needs a spec-side call on which of these the item-level name is:\n\n- **A.** the JSONSchema's `title`, authored on the Zod item schema, with the resolver learning to overlay titles onto a derived JSONSchema; or\n- **B.** a `FormFieldSpec.fields` enumeration that the repeater widget is taught to prefer over the schema-derived columns.\n\nA is the smaller change and fixes the English surface immediately; B keeps all authoring copy in one object but needs the console change too. Recommend **A**, with B available later if item columns ever need per-column widgets.\n\n### 3. `zh-CN.metadata-forms.generated.ts` is stale for this very form\n\n`packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts`, `dashboard.fields`:\n\n- ⛔ **THIS LINE WAS WRONG AND IS WITHDRAWN (corrected 2026-09-09 by the `domain:spec` seat).** It said the catalog names `refreshIntervalSeconds` while the spec's field is `refreshInterval`, so the entry can never match. **The opposite is true.** Measured on `origin/main`: `dashboard.zod.ts:957` declares the LIVE field `refreshIntervalSeconds`, and `:960` declares `refreshInterval` as a `retiredKey(` tombstone that refuses at parse — renamed in `@objectstack/spec` 17 (#15680, ruling B on #14478). The catalogs already name the live key, so ⛔ **there is nothing to fix here** and acting on the original line would write a parse-erroring tombstone into four catalogs. The bad reading came from a bare-substring control: `refreshInterval` \"occurs 6×\" counts every `refreshIntervalSeconds`. PR #17227 carries a pin that turns that edit red. See card comment `5607984335`;\n- it carries no `header.showTitle` / `header.showDescription` / `header.actions` entries at all, so the composite's children are unlocalized in the platform's own catalog. objectui currently ships a private overlay of its own for exactly those three, which is why the panel reads 显示标题 / 显示描述 / 操作按钮 today despite the catalog being silent.\n\n## 4. Related: `columns` documents a default it does not declare\n\n`DashboardSchema.columns` emits `{ description: \"Number of grid columns (default 12)\", type: \"integer\", minimum: 1, maximum: 24 }` — no `default` key. The 12 exists only as prose plus a renderer-side fallback.\n\nobjectui#8218 made numeric fields gray `schema.default` in as a placeholder, so an empty box reads \"using the default\" rather than \"unknown\". For `columns` / `gap` / `refreshInterval` that placeholder is empty, because the contract declares no default to show. Declaring `.default(12)` on `columns` (and auditing sibling props whose describe text names a default) makes the documented value machine-readable rather than prose. A number invented on the renderer side would be a second source of truth, so it was deliberately not hard-coded there.\n\n## Acceptance\n\n- `z.toJSONSchema(DashboardSchema).properties.header.properties.actions.items.properties.label.title` is a human string, and the same holds for the other three;\n- a locale bundle can name an item-level property, by whichever of A / B is chosen, with the mechanism written down;\n- ⛔ **WITHDRAWN, see the correction above**: this asked the catalogs to name `refreshInterval` rather than `refreshIntervalSeconds`, which is backwards — the first is a retired tombstone. What is genuinely owed is only the second half: all four generated catalogs (`en`, `es-ES`, `ja-JP`, `zh-CN`) carry the `header.*` children;\n- `columns` declares the default its own description advertises.\n\nBack-link: objectui#8218.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

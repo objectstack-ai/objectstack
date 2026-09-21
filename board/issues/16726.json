@@ -1,0 +1,35 @@
+{
+  "number": 16726,
+  "kind": "issue",
+  "title": "[Decision] Which names should `os generate` ACCEPT? — a gate, a sanitiser, or both, and whose charset",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T02:02:56Z",
+  "updated_at": "2026-09-10T13:32:44Z",
+  "closed_at": "2026-09-10T13:32:04Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16726",
+  "body": "## 维护者速读\n\n`os generate object <名字>` 以前对名字**不做任何检查**。你给它 `foo.bar`,它报成功,然后写出两个编译不了的文件。这个**流血已经止住了**——PR #16724(卡 #16541)让它在写盘前把要写的代码交给 TypeScript 编译器,不通过就报错退出、一个字节都不写。\n\n但止血没有回答一个问题:**这个命令到底应该接受哪些名字?**\n\n今天三扇门三个答案:`os create` 卡 npm 的字符集;`os generate` 什么都不卡(现在只卡\"写出来的东西编译不过\");`os init` 在上游先把名字洗过一遍。同一个产品里,给对象起名这件事有三套规矩。\n\n三个选项:\n\n- **A ── 只加闸**:声明一个字符集,不合规的名字当场拒绝,把\"能不能编译\"留作兜底。名字不合规时用户会看到明确的拒绝。\n- **B ── 只加改写**:像 `os create` 那样,把你给的名字自动改成一个合法标识符。用户不用改名字,但**他给的名字和最终生成的代码里的名字会不一样,而且不告诉他**。\n- **C ── 两个都做**:先用闸拦掉一批,剩下的再改写。\n\n**本席推荐 A**,并且建议**直接复用 spec 已经给对象名声明的那套字符集**(`^[a-z_][a-z0-9_]*$`),而不是照搬 npm 的——`os generate object` 的名字不是 npm 包名,两者本来就不是一回事。\n\n⚠️ 一句必须讲清楚的:**B 是三个里最危险的一个**。它让\"你写的名字\"和\"系统里真实存在的名字\"悄悄分叉,而这正是 AI 批量写元数据时最容易踩、也最难发现的那类坑。\n\n**请选:A、B,还是 C?**\n\n---\n\n## Provenance\n\nFiled by the `domain:cli` execution PM seat (#6024), session `session_015QE8qk46e5CHJxyQEUjbf8`, R71.\n\nThis question was surfaced by the **delivery of #16541** (PR #16724). Triage had written on #16541 that it would route the acceptance surface into the decision inbox **if the taker stopped and reported** — verbatim: 「若承接者判断连这条拒绝都绕不开字符集裁定,⛔ 停下来在卡上报,我把接受面问题…路由进决策箱」. The taker correctly did **not** stop: it found the parseability refusal buildable without settling acceptance, so that condition never fired and the question would otherwise have been left unrouted. ⇒ Filed here rather than dropped.\n\n⛔ `domain:*` and `type` deliberately left unset — those are triage's to grade.\n\n**Dedup**: one semantic repo-scoped search returned **0** for the acceptance question. ⭐ Positive control on the same index returned **6** (#15892, #15816, #16373, #14705 and #16541 itself), so the zero is a reading, ⛔ not a silent index miss. #15892 (closed) ruled `os create`'s identifier under maintainer option 2; #15816 (closed) is `os create`'s npm-charset acceptance; #13838 (open) is `os build`'s acceptance, deliberately untouched. **None covers `os generate`.**\n\n`Governing text:` the four-axis decision framework in `.claude/skills/pm-dispatch/SKILL.md` (「声明即强制」, 「响亮拒绝优于静默容忍」) and the startup-stage ruling of 2026-08-04.\n\n## What already landed, and what it deliberately did not decide\n\nPR #16724 makes `os generate` refuse to exit 0 when the TypeScript it would write does not parse. It asks the **compiler** about the actual emitted bytes — ⛔ not a charset opinion — and it ⛔ does **not** port `sanitizeIdentifier` from #15892. So today's accepted set moved **only** by the names whose emission was already broken.\n\n⚠️ Attribution: the measurements below are the **delivering dev's**, reported on #16541 and in PR #16724's body; this seat verified the PR's file surface, form and rulings but did ⛔ **not** independently re-drive these commands.\n\n| driven | verdict |\n|:--|:--|\n| `os g object class` | exit 1 — `const class:` is not a declaration |\n| `os g view class` | **exit 0** — that generator emits `const classViews:`, which parses |\n| `os g object order-line` | exit 0, unchanged |\n\n⭐ **That middle row is the decision in miniature**: `os generate view class` is accepted today and writes a barrel line binding the reserved word `class` as a module export alias. It parses, so the landed refusal does not touch it — and it is exactly the case an acceptance gate would rule on.\n\n## 四棱\n\n**① 实际业务需求.** ⚠️ No measured pull for any particular charset. The harm that was real — a command reporting success while writing broken files — is **already fixed**. What remains is a consistency and predictability question, not an outage. ⇒ This axis does not, on its own, justify building a new vocabulary; it does justify not leaving three doors with three answers.\n\n**② 项目长远合理性.** Contract-first says a scaffolder has **one declared accepted set**, stated once. Today `os create` gates on npm's charset, `os generate` gates on nothing, `os init` sanitises upstream (`sanitizeNamespace`, `^[a-z][a-z0-9_]{1,19}$` — the dev's reading). Three doors, three answers is the divergence class this repo keeps paying to burn down. ⇒ Points at **A**: one declared gate. **B** entrenches the divergence and adds a silent transform on top of it.\n\n**③ 防 AI 写元数据犯错 — the axis that decides this one.** 「声明即强制,绝不让 AI 声明一个运行时不兑现的能力」 and 「契约收紧优于消费端宽容 —— 宽容恰是 AI 批量犯错被掩盖的温床」. **B is consumer-side tolerance in its purest form**: the author writes `foo.bar`, the system silently stores `fooBar`, and every later reference the author writes by hand is wrong in a way nothing announces. For an agent generating metadata in bulk, that divergence multiplies silently. **A refuses loudly at the door.** ⇒ Strongly **A**.\n\n**④ 创业阶段不扩散需求.** 「能力扩张默认从紧」. ⛔ Do not mint a third charset. The spec already constrains an object `name` to `^[a-z_][a-z0-9_]*$` (the dev's reading of the schema), so **A can be built by pointing at a constraint that already exists** — zero new declared surface. Adopting npm's charset instead would import a rule from a domain this name does not live in. ⇒ **A, reusing the spec's own charset.**\n\n**四棱同向 (A).** ① is neutral-to-weak, ②③④ all point at A, and the long-term axis (②) leads the recommendation as the weighting requires. ⛔ This is still escalated rather than self-adjudicated: it sets a **published command's accepted set**, which is the manual floor (contract/acceptance change), ⛔ not the auto-adjudication lane.\n\n## Options\n\n- **A — gate only (recommended).** Refuse names outside a declared charset before deriving anything; the landed parse check stays as the backstop. Loud, and reuses `^[a-z_][a-z0-9_]*$` rather than minting a rule.\n- **B — sanitiser only.** Derive a legal identifier the way `os create` has since #15892, keeping today's wide acceptance. ⚠️ Silently decouples the authored name from the emitted one.\n- **C — both.** A narrow gate plus derivation for what it admits.\n\n⚠️ Whichever is chosen, it can be added **on top of** the landed refusal without moving it — PR #16724 was built so this stays open."
+}

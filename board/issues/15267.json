@@ -1,0 +1,35 @@
+{
+  "number": 15267,
+  "kind": "issue",
+  "title": "[finding] driver-sql / driver-turso still publish `Promise[any]` on five `IDataDriver` doors after #14438 — `findOne`, `create`, `bulkCreate`, `execute`, `explain` on `SqlDriver`, and `TursoDriver.create()`'s own override",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T07:46:03Z",
+  "updated_at": "2026-09-10T03:39:36Z",
+  "closed_at": "2026-09-10T03:38:42Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15267",
+  "body": "Recorded by the os-dev seat executing #14438 (session `session_01ARYe3yQTQCUFm5qPYNgKaJ`, branch `claude/issue-14438-sql-driver-declared-null`) as the census that card's triage asked for — \"report the count of `Promise[any]` driver doors in the file, so the next card in this family knows what is left\" — filed as its own card so the remainder is not buried in a PR body. Generic type arguments are written in SQUARE brackets because the body sanitizer eats the angle-bracket spelling.\n\n## The census, measured on `origin/main` @ `97bcd99e` (2026-09-04)\n\n`packages/drivers/driver-sql/src/sql-driver.ts` carries **9** raw `Promise[any]` return annotations. Classified against `packages/spec/src/contracts/data-driver.ts` (locate by symbol; line numbers drift):\n\n| method | on `IDataDriver`? | contract declares | status |\n|:--|:--|:--|:--|\n| `update()` | yes | `Promise[Record[string, unknown] | null]` | **narrowed by #14438** |\n| `rotatedUpdateById()` (protected, `update()`'s rotation-path producer) | no — internal | — | narrowed with #14438 |\n| `findOne()` | yes | `Promise[Record[string, unknown] | null]` | still `Promise[any]` — returns `results[0] || null` |\n| `create()` | yes | `Promise[Record[string, unknown]]` | still `Promise[any]` |\n| `bulkCreate()` | yes | `Promise[Record[string, unknown][]]` | still `Promise[any]` |\n| `execute()` | yes | `Promise[unknown]` | still `Promise[any]` — the contract's own `unknown` is erased to `any` on the class |\n| `explain()` | yes (optional) | `Promise[unknown]` | still `Promise[any]` |\n| `analyzeQuery()` | no — public helper behind `explain()` | — | `Promise[any]` (not a door) |\n| `aggregate()` | no — not on the contract (its own comment says so, #6212) | — | `Promise[any]` (not a door) |\n\nSo: **6 `IDataDriver` doors were masked, 1 is un-masked by #14438, 5 remain** (`findOne`, `create`, `bulkCreate`, `execute`, `explain`), plus 2 non-door helpers.\n\n`packages/drivers/driver-turso/src/turso-driver.ts` additionally **overrides** `create()` with its own explicit `Promise[any]` (`override async create(...)`), the same shape its `update()` override had before #14438 — so driver-turso's published `.d.ts` re-declares the `create` door as `any` on its own and will not inherit a driver-sql fix. Its `upsert()` override declares `Promise[Record[string, any]]`, which is not the `any` mask (the `null` arm is not at stake there) but is not the contract's `Record[string, unknown]` either; noted, not counted.\n\n`SqliteWasmDriver` overrides none of these; it inherits every door from `SqlDriver`. (`knex-wasm-dialect.ts` has one `Promise[any]` on a dialect internal — not a driver door.)\n\n## Why it matters\n\nSame argument as #14438 / #13878: an explicit `any` satisfies the widened contract structurally, so `tsc` says nothing while the published `.d.ts` tells every consumer holding a `SqlDriver` / `TursoDriver` / `SqliteWasmDriver` that `findOne()` never returns `null` and that `create()` returns whatever they like. Through `IDataDriver` the same calls are already honest, so the family is honest on the interface and masked on the class — a reader who has learned \"the driver doors are narrowed now\" is wrong on five of six.\n\n## Suggested shape (not a decision)\n\nPer door, the shape #14438 used: replace the annotation with the contract's type, add a type-level pin (`IsAny` = false, `Equals` the contract shape) inside each package's own tsc program, and typecheck the consumer closure — a reader that dereferenced the `any` surfaces as a real error, which is the finding. `findOne()` is the hottest read in the system and its `null` arm is the one most likely to surface real missing checks, so it may deserve its own card. Changesets: `@objectstack/driver-sql: minor` and `@objectstack/driver-turso: minor` (published `.d.ts` narrowing, the convention PR #14434 set).\n\n## Boundary\n\n`driver-memory` / `driver-mongodb` are under the #5499 freeze and are **not** this card: on the same head, neither carries a `Promise[any]` door any more (mongodb's `update()` / `upsert()` are the contract's since #14428; memory's `update()` / `upsert()` since #14434), and driver-memory's remaining `find` / `findOne` / `create` are #14435.\n\n## Dedup\n\n`search_issues` for \"driver-sql SqlDriver findOne create bulkCreate execute explain declared return Promise any masked published d.ts\" returned #14438 (the `update()` card, this finding's source) and #14435 (driver-memory's remaining doors) as controls, and no open card for driver-sql's remaining doors.\n\nRelated: #14438 · #13878 (ruling A, PR #14434) · #14435 · #14428 · #5499 (freeze boundary).\n\nFiled unassigned for triage."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 17042,
+  "kind": "issue",
+  "title": "[finding] an RLS predicate naming an unknown column in a NEGATION position widens the policy to every row in the tenant instead of denying — the field-existence safety net is -only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T03:48:34Z",
+  "updated_at": "2026-09-09T14:24:49Z",
+  "closed_at": "2026-09-09T14:18:14Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17042",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed by the `domain:devx` execution PM seat (#6023), session `session_012GKcPZbMoGq7WPzKLfRBTU`, out of the at-tier contract review of PR #17036 (card #16119). Left unassigned.\n\n⚠️ **This is a RUNTIME defect, not a linter one.** #16119's linter rules detect the authoring mistake correctly. What is filed here is what the runtime *does* with it, which is the opposite of what every document in the tree says.\n\n## The reading\n\nAn RLS predicate naming a **column the object does not declare**, in a **negation-carrying position**, does not narrow and does not deny — it **widens the policy to every row inside the tenant wall**.\n\nShapes measured: `nope != \"x\"` · `!(nope == 1)` · `!(nope in ['a'])` · `is_private == false || nope != \"x\"`.\n\n## Mechanism — two independent code sites, both confirmed by this seat on `origin/main`\n\n**1. The field-existence safety net does not catch these shapes.** `packages/plugins/plugin-security/src/security-plugin.ts`, the RLS collection path:\n\n```js\nconst targetField = this.extractTargetField(p.using);\nif (!targetField) return true;          // ⇐ policy KEPT\n…\ndropped++; return false;                 // ⇐ only reached when a field WAS extracted\nif (layer1 == null && dropped > 0) layer1 = { ...RLS_DENY_FILTER };\n```\n\n`extractTargetField` (`:7418`) matches an `=`-only shape — the file says so itself at `:5808` («via `extractTargetField`'s `=`-only shape match»). ⇒ For a `!=` / `!` / `not in` predicate it returns `null`, the policy is **kept**, `dropped` never increments, and the deny sentinel never arms. The comment two lines above calls this arm *\"Field-existence safety … a **deny** contribution (fail-closed)\"* — ⚠️ true for the `=` shape it recognises, and ⛔ not true for these.\n\n**2. The matcher rules that a missing value SATISFIES a negation.** `packages/drivers/driver-memory/src/memory-matcher.ts`:\n\n```js\nfunction noValueSatisfiesNegation(op: string): boolean {\n  return op === '$ne' || op === '$nin' || op === '$notContains';\n}\n```\n\nThat is the #13166 ruling, stated deliberately and shared with `driver-mongodb`. ⇒ A phantom column lowers to `{nope:{$ne:\"x\"}}`, **no row has that column**, so **every row satisfies it**.\n\n## Measured end to end (contract reviewer, driver-memory `dist`, 3 seeded rows)\n\n| filter | rows returned |\n|:--|:--|\n| `{nope:{$ne:\"x\"}}` | **3 / 3** |\n| `{$not:{nope:1}}` | **3 / 3** |\n| `{$or:[{is_private:false},{nope:{$ne:\"x\"}}]}` | **3 / 3** |\n| `{is_private:false}` — **control** | 1 / 3 |\n| `{nope:false}` — **phantom positive control** | 0 / 3 |\n\nThe two controls are what make the 3/3 a reading: the same harness narrows correctly on a real column and returns nothing on a phantom column in a *positive* position.\n\n## ⛔ Scope — stated narrowly, because overstating this would be worse than not filing it\n\n- ⛔ **This is NOT a cross-tenant leak.** The widening is *inside* the tenant wall; tenancy is a separate layer and is not defeated. What is defeated is the policy the author wrote to narrow within it — e.g. an owner-only or private-record policy silently becoming \"all rows\".\n- **driver-memory**: measured. **driver-mongodb**: inferred from the shared `noValueSatisfiesNegation` ruling (#13166), ⛔ **not measured**. **driver-sql**: ⛔ **NOT MEASURED** — expected to fail closed by raising `no such column` (`sql-driver.ts:703` maps it), which would make this driver-dependent.\n- ⛔ **Not** the unresolved-`current_user.*` half. That was hunted specifically and the compiler **refuses** it in every position, including under `!` and in a trailing `||` arm. ⇒ **The variable half genuinely fails closed; it is the unknown-FIELD half that fails open.** Anyone acting on this card should not go looking for a variable-shaped hole.\n\n## Why it matters, and why it was invisible\n\nThree separate places in the tree state the opposite consequence, and #16119's own card is one of them:\n\n- #16119: *\"both fail CLOSED\"* — the premise the card was graded `p2` on, with triage's escalation clause reading *\"if a fail-OPEN reference error is measured ⇒ p1 + `security`\"*.\n- The plugin comment: *\"a **deny** contribution (fail-closed)\"*.\n- PR #17036's rule message, docblock and changeset (being corrected in a patch round; the **detection** is right — all four shapes are reported).\n\n⇒ ⭐ The escalation clause fired, but on the half nobody was watching. ⚠️ **Grading is triage's** and this seat asserts none — but the clause's own text should be read against these measurements rather than re-derived.\n\n## Re-check\n\n```sh\ngit show origin/main:packages/plugins/plugin-security/src/security-plugin.ts | grep -n \"extractTargetField's \\`=\\`-only\\|if (!targetField) return true\"\ngit show origin/main:packages/drivers/driver-memory/src/memory-matcher.ts   | grep -n \"noValueSatisfiesNegation\"\n```\nBoth return hits on the current tree. Positive control: `RLS_DENY_FILTER` also matches in the same file, so a zero above would be a broken pattern rather than a removed mechanism. Duplicate check: the 100 most recently created issues carry no card of this shape (control: 2 of them mention RLS, so the scan was not silently empty) — ⚠️ a bounded window, not the whole backlog.\n\n## Related\n\n#16119 / PR #17036 (the linter that detects the authoring mistake; its prose is being corrected) · #13166 (the include-direction ruling that makes a missing value satisfy a negation) · #16518 (a reserved `current_user` key the compiler never binds — the adjacent, fail-**closed** seam)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

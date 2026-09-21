@@ -1,0 +1,34 @@
+{
+  "number": 15773,
+  "kind": "issue",
+  "title": "objectql: refuse a text operator (`$contains` family) over a field whose DECLARED type can never store a string — `INVALID_FILTER` 400 at the engine's field-aware door beside `INVALID_FIELD` (lane 2 of the #15661 C-deny ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T07:13:54Z",
+  "updated_at": "2026-09-10T12:14:27Z",
+  "closed_at": "2026-09-10T12:13:23Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15773",
+  "body": "Blocked-by: #15661\nRelated: #14079\n\nFiled by the `domain:spec` execution seat (`session_01M59rPZZFzqhfMUPFqqZTkf`, 2026-09-05T07:13Z) as **execution lane (2)** of the maintainer ruling on #15661 (`5548768100`, director seat, decision batch #43, verbatim 「同意」), quoted verbatim:\n\n> **Execution, two lanes, contract-first:** (1) `domain:spec` — `door-refusal` rows for the refused classes in `filter-comparand-type-conformance.ts` or a same-shaped sibling table, referencing the existing sets (⛔ no new set), plus the `formula`-deferred note (`Clause-②: yes`, `@objectstack/spec` **minor** + BREAKING banner: a text operator over a numeric/boolean/temporal/JSON field is now refused at the engine door instead of answering `[]` or a dialect accident). (2) `domain:engine` — the door in `packages/objectql/src/engine.ts` beside `INVALID_FIELD`, judged against the object's real field map, before any driver dispatch; pins per refused class and per passing class, and the direct-driver path still answering #14079's A row (`@objectstack/objectql` **minor**). Sequencing: after PR(s) for #14079 land. Zone 2 (report, not block): whether objectui's filter builder emits such conditions today (the seat cannot measure host apps; say so).\n\nLane (1) is dispatched on #15661 (spec seat claim on that card). **This card is lane (2)** and lands in `packages/objectql/src/engine.ts` — the engine lane's; `domain:*` routing and the priority are the triage seat's (the director read #15661 as p3: no incident, a loud-vs-silent question). Named reader: the `domain:engine` execution seat, at dispatch time; the `Blocked-by:` line above is the unlock scan's — it returns this card to the queue when #15661 closes (the spec rows merged).\n\n## The ruled behaviour\n\nA text operator (`$contains` / `$notContains` / `$startsWith` / `$endsWith` / `$icontains` / `$like` / `$ilike`) over a field whose DECLARED type can never store a string — `NUMERIC_VALUE_TYPES` ∪ `BOOLEAN_VALUE_TYPES` ∪ `CALENDAR_DATE_TYPES` ∪ `INSTANT_TYPES` ∪ `CLOCK_TIME_TYPES` ∪ `STRUCTURED_JSON_TYPES` (existing sets in `packages/spec/src/data/field-value.zod.ts`) — is refused at the engine's field-aware door with `INVALID_FILTER` 400 naming the field and its declared type. String-valued classes (`STRING_VALUE_TYPES`, `autonumber`, option codes, reference ids) pass. `formula` is judged only when its declared return type is readable at the seam. Direct driver calls never pass the engine seam and keep answering #14079's option-A row (`FILTER_TEXT_CASES`, landed in PR #15686 `a646120dc`).\n\n## Landing facts (`origin/main` `b25a5fc32`, 2026-09-05T07:11Z; re-locate by symbol)\n\n- The existing field-aware door: `packages/objectql/src/engine.ts` raises `INVALID_FIELD` for an unknown field in `where` / `$filter` (`:1098` region; docblock `:1009-1185`) — the ruled door sits beside it, judged against the object's real field map before any driver dispatch. Re-check: `git grep -n \"err.code = 'INVALID_FIELD'\" origin/main -- packages/objectql/src/engine.ts` (control: the same file hits `INVALID_FILTER`, 2 sites today).\n- The consumption pattern to mirror: `packages/objectql/src/engine-comparand-type-door.test.ts` reads the spec's comparand conformance table and asserts the engine's door per row — the lane-(1) table (or sibling) is shaped to be consumed the same way.\n- Engine-lane overlap to read before claiming: in-flight engine cards #15225, #15064, #14147 declare `engine.ts` in their file faces; `engine.ts` last moved on main at `3bd9b3498` (#15343).\n\n## Deliverables (for the engine seat's dispatch)\n\n- The door beside `INVALID_FIELD`: refused classes ⇒ `INVALID_FILTER` 400 with the field name and its declared type in the message (the ADR-0112 envelope; assert code + status + message substance, not `toThrow()` alone); passing classes unchanged; `formula` deferred unless its return type is readable at the seam (measure first, say which).\n- Pins per refused class and per passing class through `findData` (and the REST `where` / `$filter` doors that reach it), plus the direct-driver path still answering the option-A row.\n- Zone 2, report only: whether objectui's filter builder (pinned tree) emits such conditions today; host apps cannot be measured from this repo — say so.\n- `@objectstack/objectql` **minor** changeset; `Clause-②: yes` (a published behaviour narrows) ⇒ `needs:contract-review` on the PR.\n- Closing keyword: `Fixes` this card; #15661 is referenced verb-less.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

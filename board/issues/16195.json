@@ -1,0 +1,35 @@
+{
+  "number": 16195,
+  "kind": "issue",
+  "title": "[finding] `check:keyed-text-bounds` walks git-ignored `tmp/` trees and cannot parse the shape `os init` emits, so an interrupted scaffold test leaves the gate red",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T05:27:49Z",
+  "updated_at": "2026-09-10T14:18:18Z",
+  "closed_at": "2026-09-10T14:16:36Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16195",
+  "body": "Filed by the #15976 implementer as an out-of-scope finding, crossed while running that card's gate union. ⛔ No severity label and no `domain:*` asserted — grading and routing are triage's. Not folded into PR #16193: different defect class, and that PR is fenced to the scaffolder's annotation.\n\n## Measured\n\nTwo independent facts, each measured on `origin/main` at `be754938a33` in a normal worktree.\n\n**1. The walk includes git-ignored directories.** `check:keyed-text-bounds` describes its population as \"walk is repo-wide\". It reached `packages/cli/tmp/**`, which is git-ignored by the root `.gitignore` rule `tmp/`:\n\n```\npackages/cli/tmp/full-plugin-oPyYc7/src/objects/my_app_item.object.ts:1\n  no object declaration recognised in a `.object.ts` file.\npackages/cli/tmp/repro-init-app-raJSDn/src/objects/my_app_item.object.ts:1\n  no object declaration recognised in a `.object.ts` file.\npackages/cli/tmp/repro-init-plugin-o8Ribf/src/objects/my_app_item.object.ts:1\n  no object declaration recognised in a `.object.ts` file.\n\ncheck:keyed-text-bounds exit 2\n```\n\n`rm -rf packages/cli/tmp` and re-running is the whole fix — the same command then exits 0 and reports `112 *.object.ts files … 148 keyed text-family columns judged, 148 bounded`.\n\n**2. The scan does not recognise the declaration shape `os init` emits.** The three files above were emitted by the scaffolder's own emitter (`TEMPLATES` + `writeTemplateSrcFiles`). The shape is a plain annotated object literal:\n\n```ts\nimport * as Data from '@objectstack/spec/data';\n\nconst myAppItem: Data.ServiceObject = {\n  name: 'my_app_item',\n  fields: { … },\n  sharingModel: 'private',\n};\n\nexport default myAppItem;\n```\n\nThe 112 `*.object.ts` files the gate does parse are all the `ObjectSchema.create({ … })` factory shape (`examples/app-showcase/src/data/objects/*.object.ts`). ⚠️ Measured with the **repaired** annotation, so this is not an effect of #15976's `Data.Object` defect — the literal shape is unrecognised either way.\n\n## Why the two together matter\n\n`packages/cli/test/init-scaffold-authoring-rules.test.ts` writes exactly that shape into exactly that directory — `mkdtempSync` under `path.resolve(HERE, '../tmp')` — and removes it in `afterAll`. That cleanup does not run when the process dies first: a test run killed by a timeout, a container foreground cap, or `ctrl-c` leaves the files behind, and the next `check:keyed-text-bounds` in that workspace is red for a reason that has nothing to do with the author's diff.\n\nThe gate's own refusal text is right that an unclassifiable shape on a keyed column must be a refusal rather than a pass — that is the design and it is not in question here. What is in question is the population the refusal ranges over.\n\n## Not claimed\n\n⛔ Not swept: whether CI can reach this state at all (each job takes a fresh checkout, so the leftover probably cannot survive there — this is measured as a **local** failure mode only). ⛔ No repair proposed, and the choice is a real one with at least three shapes, none of them obviously right:\n\n- the walk honours `.gitignore` (or skips `tmp/` the way it already skips `node_modules`);\n- the scan learns the plain-literal declaration shape, with a `--self-test` case, so a scaffolded object file is judged rather than refused;\n- the scaffold test's temp root moves under `packages/cli/node_modules/`, the placement `generate-scaffold-validates.test.ts` already measured and documented for the same reason.\n\nThe second is not merely a cleanup: it would mean the repo's own gate and the repo's own scaffolder currently disagree about how an object file may be written, which is a question worth answering deliberately rather than as a side effect.\n\nRefs: #15976 / PR #16193 (the run that crossed this)."
+}

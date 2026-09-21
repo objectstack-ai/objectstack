@@ -1,0 +1,35 @@
+{
+  "number": 16760,
+  "kind": "issue",
+  "title": "client SDK `auth.me` / `auth.refreshToken` declare the REST `{ success, data }` envelope for `/get-session`, which answers the bare `{ user, session }` — and `refreshToken` never captures a token because of it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "auth",
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T03:55:56Z",
+  "updated_at": "2026-09-09T21:44:59Z",
+  "closed_at": "2026-09-09T21:43:51Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16760",
+  "body": "Found while implementing #16568 (per-organization addressing for `organizations.getActiveMember`), which needed the caller's own user id off `/get-session`. Out of that card's ruled scope — it is runtime addressing on one `organizations.*` method — so recorded here rather than fixed there. No assignee, no label: left for triage.\n\n## The contract the SDK declares\n\n`packages/client/src/index.ts`, both methods annotate their return as `SessionResponse`:\n\n- `auth.me` — `GET /api/v1/auth/get-session`\n- `auth.refreshToken` — the same route (the JSDoc says so: better-auth has no separate refresh endpoint)\n\n`SessionResponse` is `packages/spec/src/api/auth.zod.ts`'s `SessionResponseSchema`, which is `BaseResponseSchema.extend({ data: { session, user, token? } })` — the REST envelope, i.e. a `success` flag with the payload parked under `data`.\n\n## What the route answers\n\nbetter-auth owns the `/api/v1/auth/*` bytes (the plugin mounts one catch-all straight onto better-auth's handler), and better-auth does not use ObjectStack's REST envelope. Measured through a real `AuthManager` (better-auth 1.7.2, organization plugin, teams enabled) over a real `SqlDriver` (better-sqlite3 `:memory:`):\n\n```\nGET /api/v1/auth/get-session   (signed in)   -> 200 {\"user\":{...,\"id\":\"...\"},\"session\":{...,\"activeOrganizationId\":null}}\nGET /api/v1/auth/get-session   (anonymous)   -> 200 null\n```\n\nBare. No `success`, no `data`. And the anonymous answer — the literal `null` at 200 — is outside the declared type in a second, independent way.\n\n## Class\n\nDeclared contract not delivered (b). Two consequences, and the second is not a type-only complaint:\n\n1. `(await client.auth.me()).data.user` type-checks and is `undefined` at runtime; `.user`, which is the real payload, does not type-check. The annotation points every caller at the wrong key.\n2. `auth.refreshToken` acts on that annotation: its body reads `data.data?.token` and only then assigns `this.token`. Against the measured body that read is always `undefined`, so the method never captures a token — it is a no-op that returns successfully. A bearer-mode client calling it to refresh keeps whatever token it already had, with nothing said.\n\n## Not the same card as #14313\n\n#14313 (`auth.*` family binding, card 2 of 3 of the #12104 family) binds the 14 methods that have **no** return annotation and end `return res.json()`, and its own text says to delete exactly that family's ledger entries and no others. These two methods are annotated already — annotated **wrongly** — so they are outside that enumerated set. They do sit in the same lane and the same hard-serial hot file (`packages/client/src/index.ts`), so scheduling them together is natural even though the scopes are distinct.\n\n## Options seen, not decided\n\n- Bind both methods to the bare shape better-auth actually sends, and widen for the anonymous `null`, the way the `organizations.*` family bound its wire types (a published return-type change, so contract review applies).\n- Or decide that `/get-session` should be enveloped like the rest of `/api/v1` and fix it at the producer — a much larger call, since better-auth owns those bytes and every other `/auth/*` method is bare too.\n\nEither way `refreshToken`'s `data.data?.token` read is wrong today and can be corrected on its own.\n\nRefs: #16568 (where it was measured), #14313, #12104 (family head).\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 17031,
+  "kind": "issue",
+  "title": "skills: 说明书与实现脱节的卡默认改文档,不进决策箱 —— 维护者 2026-09-09 裁定(objectui#8318),写入 pm-dispatch 的分诊与决策箱入箱判据",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T03:05:54Z",
+  "updated_at": "2026-09-09T08:08:19Z",
+  "closed_at": "2026-09-09T08:07:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17031",
+  "body": "由项目总监席立卡(summon #18,`session_017Js5kTpTtxieBjPyScgxJ3`,2026-09-09),执行维护者对 objectui#8318 的裁定中「写入技能」的那一半。skills 车道;本席 ⛔ 不写技能文本、⛔ 不派发。\n\n## 维护者原话(总监席现场对话,2026-09-09,答批 #104 第 4 张 objectui#8318「结构性(说明书与实现脱节)」)\n\n> 所有这种文档错的都应该改文档,没有什么好决裁的,这个应该写入技能。\n\n## 要落的原则(措辞归 skills 席四维之后定,⛔ 本卡不替它写)\n\n说明书类文本(JSDoc `@default`、README、参考文档、docblock)与实现不一致,而实现行为本身没有被裁为错 ⇒ 缺陷在文档,修文档,走 `pm:queue`,⛔ 不立 `needs-user-decision`、⛔ 不呈报决策箱。分诊席与派发席按此判,总监席在决策箱入口按此退回。\n\n## 两条已有裁决给出边界,skills 席措辞时一并读\n\n- **objectui#8318**(本裁定):41 个去默认值的键复测后,2 个 `loading` 键的 `@default true` 是 07-13 批量 JSDoc 复制 zod 旧默认值的产物,实际默认 `false`;7 个键的 `@default` 没有任何渲染器读。裁:改标签(A1 + B1),⛔ 不在这张卡上退役键、⛔ 不改组件行为。键本身该不该存在归 ADR-0049 liveness 工作簿(objectui#4631、#7963),不归决策卡。\n- **objectstack#16549**(2026-09-08 裁 1):Setup 页承诺「connect as yourself」,引擎做的是交集;维护者选改引擎不改文案。区别在于那句文案是被裁定的意图(ADR-0090 D10 的 on-behalf-of 模型),实现偏离了它。\n\n⇒ 判据的形状大致是:文档句有裁定出处(ADR / 维护者裁决)而实现偏离 ⇒ 实现错;文档句无出处、只是描述(含复制来的默认值)⇒ 文档错。哪一边都不需要决策卡,前者进队列修实现,后者进队列修文档。⚠️ 这一段是本席的读法,不是裁定;skills 席按四维定稿。\n\n## 落点(供 skills 席定位,⛔ 不限定)\n\n- `.claude/skills/pm-dispatch/SKILL.md` 决策形状 / 决策箱入箱判据一段,以及 `finding` 三类的 (b)「违背已声明契约」的注脚:说明书与实现脱节不自动等于 (b)。\n- `references/lanes/triage.md` 分诊判据;`references/lanes/director.md` 决策箱入口的退回条款;`references/decision-analysis.md`。\n- 机械化项(SKILL.md 282 行「可机械化项 → 门禁/脚本卡」):若 `check-half-states` 能识别「`needs-user-decision` 且卡题含 说明书/文档/JSDoc/README 与实现脱节」的形状,可另立脚本卡;⛔ 本卡不含。\n\n## 验收\n\n- 一条规则、有具名读者(分诊席、派发席、总监席入箱),自含失效模式与边界(上面两条先例的区别),⛔ 不引 issue 编号进操作文本(id-lint)。\n- 复核时回答「谁在读这一行」;经验教训散文 ⛔ 不入技能文本。\n\nRelated: objectui#8318(裁决评论见该卡),objectstack#16549,ADR-0049,ADR-0078,SKILL.md 「决策形状 ⇒ 决策箱带四棱块,⛔ 永不自裁」一节。"
+}

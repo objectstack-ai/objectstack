@@ -1,0 +1,36 @@
+{
+  "number": 17027,
+  "kind": "issue",
+  "title": "publish-smoke / packed-tarballs is RED ON MAIN: the new boot scan fails on a vendor-handled UNIQUE constraint line — and it is blocking the release",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T02:57:49Z",
+  "updated_at": "2026-09-10T07:48:11Z",
+  "closed_at": "2026-09-10T02:36:22Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17027",
+  "body": "`publish-smoke / packed-tarballs` has been **failing on `main`** since ~2026-09-09T01:07Z. It is a status check on the Version Packages PR (#15334), so **it currently blocks the release** — and that release is the one open action on **#16500** (the published on-ramp is broken for every new user until it ships).\n\n⛔ Filed by the seat that hit it while verifying #16500's release path. Main-red is shared damage, so it is filed rather than worked around. **`domain:*` and `priority:*` are triage's to set** — deliberately not set here.\n\n## The failure\n\nRun [`34304339043`](https://github.com/objectstack-ai/objectstack/actions/runs/34304339043), job `Packed-tarball smoke (release candidate)`, on `main` @ `d127f9b`:\n\n```\n16:...ERROR Insert operation failed {\"object\":\"sys_oauth_resource\",\"error\":{\"message\":\n  \"UNIQUE constraint failed: sys_oauth_resource.identifier [statement and bound values redacted]\",\n  \"stack\":\"SqliteError: ... at _SqlDriver.create (.../@objectstack/driver-sql@...17.4.0.tgz/...)\n           at _ObjectQL.createWithAutonumberResync (.../@objectstack/objectql@...17.4.0.tgz/...)\"}}\n##[error]error-level log lines during BOOT, before any probe ran (see above)\n```\n\n**No probe ever ran** — the job exits on the boot scan.\n\n## ⭐ The line is a caught, by-design no-op — quoted from the vendor\n\n`@better-auth/oauth-provider@1.7.2`, `dist/introspect-*.mjs`, docblock over the resource seeder (read from the published tarball):\n\n> `\"insertOnly\"` (default, safe): inserts rows whose `identifier` is not already present. Existing rows are untouched …\n>\n> **Race-safety: the `identifier` column carries a UNIQUE constraint, so two processes booting simultaneously can each attempt the insert — one wins, the other catches the constraint error and treats it as a no-op.**\n\n⇒ The vendor **deliberately** uses the UNIQUE violation as its race-safety mechanism and swallows it. Our SQL driver logs the exception at **ERROR** on the way out, *before* the vendor catches it, and the boot scan then reads that line as a failed boot.\n\n⚠️ So the most likely reading is a **false positive**: a handled exception rendered as an unhandled-looking ERROR line. ⛔ Not asserted as certain — see NOT MEASURED below.\n\n## Why it appeared now — the gate is 5 hours old\n\n| when | what |\n|:--|:--|\n| 2026-09-08 **22:19:31Z** | `b810fd0` — *test(publish-smoke): judge the boot before the probes run* (#16976) lands, adding the boot-window error scan |\n| 2026-09-09 **~01:07Z** onward | `packed-tarballs` red on main, repeatedly |\n\nFailing runs on `main`, all same job: `34297886522` (01:07Z) · `34298625221` (01:18Z) · `34299337307` (01:28Z) · `34300907710` (01:52Z) · `34302122333` (02:10Z) · `34304339043` (02:43Z). Interleaved runs show `cancelled` because the next push superseded them.\n\n⇒ The defect is **not** in the release candidate's product code. The gate started asserting something new, and this pre-existing benign log line fails it. ⛔ The maintainer's merge attempt did not cause this.\n\n## ⭐ What this run DOES prove: the better-auth fix works\n\nSame log, boot summary:\n\n```\nPlugins: 34 loaded\n  ObjectQL, SqlDriver, ..., HonoServer, Metadata, Marketplace, PlatformObjects, Auth, ...\n```\n\n`Auth` is **loaded**. There is no `AuthPlugin failed to load`. The exact-pin fix (#16634) does clear #16500's root cause in the packed 17.4.0 artifacts — measured, not inferred.\n\n## NOT MEASURED\n\n- ⛔ **Whether the auth + CRUD probes pass.** They never executed. The vendor's own contract says the row survives (one inserter wins), but this seat did not run them.\n- ⛔ **Why two seeders race on a fresh DB at all.** A single-process `objectstack dev` boot colliding with itself is worth understanding; it may be a second `betterAuth()` instance rather than a true two-process race.\n\n## Suggested shape (for whoever picks this up)\n\nThree candidate repairs, in the order this seat would try them:\n\n1. **The scan's population is wrong, not its severity.** A driver-level ERROR for an exception a caller catches is not a failed boot. The narrow fix is for the boot scan to judge *unhandled* boot failures — the class #16793/#16976 were built for (`failed to load`) — rather than every error-level line.\n2. **The log level is wrong.** `_SqlDriver.create` logs ERROR and then throws; the throw is the real signal and the caller handles it. Logging ERROR for an exception you are about to hand to a caller double-reports it.\n3. **Avoid the collision.** If the seed genuinely runs twice in one process, one of the two attempts should not exist.\n\n⛔ Do **not** simply add `sys_oauth_resource` to an ignore list — that suppresses the specimen without answering which of the three above is true, and the next benign-but-noisy boot line reopens this.\n\n## Related\n\n- **#16500** — blocked on the release this red gate is holding up.\n- **#16976** / `b810fd0` — the PR that added the boot scan.\n- **#16793** — the finding that motivated it (closed `completed`).\n- **#15334** — the Version Packages PR carrying `@objectstack/plugin-auth@17.4.0` with the exact `1.7.2` pin."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 16773,
+  "kind": "issue",
+  "title": "analytics: chart category labels drawn from a `select` field's options render untranslated on a SAME-object dataset dimension, while the identical values translate on a dotted cross-object one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "i18n",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T04:45:49Z",
+  "updated_at": "2026-09-09T14:24:45Z",
+  "closed_at": "2026-09-09T14:15:30Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16773",
+  "body": "Split off #16735 (finding 4) by the triage seat. It is its own card because — unlike findings 1–3 — **it has no workaround**, and because triage's own reading puts its mechanism in `packages/services/service-analytics`, a different lane from its siblings.\n\nOriginal provenance: filed from an app repo (`objectstack-ai/hotclm`, `@objectstack/*` 17.3.0, `@objectstack/console` as shipped) after translating it end to end into `en` + `zh-CN` — `objectstack-ai/hotclm#32`, PR `objectstack-ai/hotclm#33`.\n\n## The finding\n\nOn dataset-backed charts, category and series labels drawn from a `select` field's option values render the **inline English** option label, while the identical values render the translation in the list grid on the same console.\n\nThe correlation is exact and is the useful part:\n\n| dataset dimension | declared as | renders |\n|---|---|---|\n| `contract_metrics.direction` | `field: 'direction'` (same object) | `Purchase` / `Sales` ❌ |\n| `payment_metrics.direction` | `field: 'contract.direction'` (dotted, cross-object) | 采购 / 销售 ✅ |\n\nSame option values, same console, same session. Also affects a `status` funnel (`Draft/Submitted/In Review/…`) and a `currency_code` bar (`EUR — Euro`).\n\nA widget has **no authoring surface for category labels**, so unlike findings 1–3 this one cannot be worked around. It is the residue left visible on two of that app's three dashboards.\n\n## ⭐ Triage's own reading — a mechanism the card did not have\n\nThe same-object dimension's labels are resolved by `packages/services/service-analytics/src/dimension-labels.ts`, which reads the option label **straight out of the field metadata**:\n\n```\npackages/services/service-analytics/src/dimension-labels.ts:32\n  /** Select options — the value→label source. */\n:33   options?: Array<{ value: unknown; label?: string }>;\n:146      if (Array.isArray(meta.options) && meta.options.length > 0) {\n:148        for (const opt of meta.options) {\n:312      if (Array.isArray(meta.options) && meta.options.length > 0) {\n:314        for (const opt of meta.options) {\n```\n\n**That file consults no translation bundle at all.** Measured on `origin/main`:\n\n```\ngrep -n 'i18n|translat|locale|bundle'  dimension-labels.ts                    -> 0\ncontrol, same package, non-test sources                                       -> 9 files\n  (analytics-service.ts, cube-registry.ts, like-pattern.ts, plugin.ts,\n   preview-evaluator.ts, read-scope-sql.ts, native-sql-strategy.ts,\n   objectql-strategy.ts, text-match-sql.ts)\n```\n\n⇒ the zero is a **reading, not a silence**: i18n vocabulary demonstrably reaches this package, and this one file has none of it. So the same-object arm returns `opt.label` verbatim — the authored English — with nothing in the path that could ever translate it.\n\n⚠️ **Not verified by triage:** *why the dotted cross-object arm works.* The hypothesis is that a dotted dimension resolves through the object-metadata pipeline, which **is** translated, so it never reaches this file's option branch. That would explain the correlation exactly, but it is a hypothesis — ⛔ do not build on it without measuring. **Establishing which path the dotted arm takes is the first step of this card**, because it also names where the fix belongs: teaching this file the bundle, or routing the same-object arm through whatever the dotted arm already uses.\n\n⭐ Prefer the second if it is available. A second copy of \"how to translate a select option\" is the multi-copy failure mode this repo keeps burning down.\n\n## Relationship to #16390 — adjacent, ⛔ neither subsumes the other\n\n#16390 (`domain:services`, `Bug`, `p2`) is about the **same file** and the same `LOOKUP_TYPES` neighbourhood: there, `user` and `tree` dimensions are not label-resolved at all because `LOOKUP_TYPES` is a two-member subset of the spec's four-member `REFERENCE_VALUE_TYPES`.\n\nDifferent axis:\n\n- **#16390** — *which field types* get label resolution (reference class incomplete).\n- **this card** — *whether a resolved label is translated* (select options resolved, but from raw metadata).\n\nSame file, same lane, no overlap in the change. ⇒ **schedule them in the same window** so two PRs do not collide on `dimension-labels.ts`; ⛔ do not merge the cards.\n\n## Etiquette note if both land together\n\n#16390's acceptance requires widening `LOOKUP_TYPES` **and** the #3602 read-scope resolution together. If this card lands first and teaches the file a bundle, that bundle plumbing must be carried into the widened arms too, or `user`/`tree` labels arrive untranslated the day #16390 lands.\n\n## Acceptance\n\n- A same-object `select` dimension on a dataset-backed chart renders its option labels in the console's locale, matching what the list grid renders for the identical values.\n- The dotted cross-object arm is unchanged (it works today — it is the control).\n- Whatever mechanism is chosen, there is **one** copy of \"translate a select option label\", not two.\n\n## Provenance and boundaries\n\n- ⚠️ Measured in a browser by the reporting app's implementation run; the filer states plainly *\"I did not personally re-drive these four.\"* They also record that a **fifth** finding from the same run was independently re-measured and came back **inverted** (#16695).\n- ⚠️ Triage independently verified only the code reading above (`dimension-labels.ts` reads `meta.options[].label` and consults no bundle, with a firing control). The browser observations, the object names and the counts are **not** triage's readings.\n- ⛔ Dedup could not be run from the reporting session: `search_issues` returned `total_count: 0` for the app's own repo even on a control term certainly present in an open issue's title. ⚠️ Re-run the duplicate search at claim.\n- One app, one console build, one dialect. Re-confirm before acting.\n\n## Split siblings\n\n- **#16735** — finding 1, `_views.VIEW.description` declared, walked, counted as covered, never rendered. `repo:objectui`. **The one with a gate consequence.**\n- **#16772** — findings 2 and 3, two surfaces a bundle cannot address at all. `domain:spec`.\n\nhttps://claude.ai/code/session_01SwJQDFKe8tVit3BXQ9EfR5"
+}

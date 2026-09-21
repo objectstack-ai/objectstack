@@ -1,0 +1,36 @@
+{
+  "number": 16218,
+  "kind": "issue",
+  "title": "The draft-preview evaluator's `count` over a FIELD counts rows, nulls included — live counts the non-null values, so the same measure answers 2 there and 1 on the engine",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T06:14:33Z",
+  "updated_at": "2026-09-09T19:48:02Z",
+  "closed_at": "2026-09-09T15:00:45Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16218",
+  "body": "Found while working #16203 (the preview evaluator's numeric-operand assumption). ⛔ Not that card's defect class — that one is about the TYPE of the operand, this one is about NULLs — and ⛔ deliberately not taken there.\n\n## The divergence, driven\n\n`packages/services/service-analytics/src/preview-evaluator.ts`, `aggregate()`:\n\n```ts\nif (metricType === 'count' || field === '*') return rows.length;\n```\n\nA dataset measure `{ aggregate: 'count', field: 'payer' }` compiles to a cube metric `{ type: 'count', sql: 'payer' }`, so the declared FIELD is carried and then never read: the preview answers the ROW count. Every SQL face lowers the same measure to `COUNT(\"payer\")`, which is defined over non-null values.\n\nMeasured on one dataset, one row set, two `AnalyticsService` instances differing only in `draftRowsResolver` (the live half is `NativeSQLStrategy`'s generated SQL executed on a real SQLite through sql.js, seeded from the same rows):\n\n```\nrows:    {category: 'meals', payer: 'bob'}, {category: 'meals', payer: null}\nLIVE     [{\"category\":\"meals\",\"payer_count\":1, ...}]\nPREVIEW  [{\"category\":\"meals\",\"payer_count\":2, ...}]\n```\n\n⇒ a drafted chart shows a different number than the published one, silently, and the number it shows is the one a `count(*)` would give — so the author's choice to count a specific column has no effect on the preview path.\n\n## Why this is a real population rather than a corner\n\n`DatasetMeasureSchema.field` is optional for `count` precisely so both spellings are authorable, and `count(field)` is how \"how many rows actually have a value here\" is written. The identical defect was measured on `driver-mongodb` and cleared there: the `AGGREGATION_CASES` DEBT ledger in `packages/spec/src/data/aggregation-conformance.ts` records \"`count(col)` ignored `field` and answered the ROW count (6 for the standard's 4)\" as one of three divergences that enrolment found. The shared table's fixture is built so that `count(*)`, `count(stage)` and `count_distinct(stage)` are three different numbers, exactly so this collapse cannot pass by coincidence.\n\n## Suggested shape (not a decision — triage's)\n\nEither give `count` with a real field the non-null count (one arm beside the `count_distinct` arm that #16203 restored), or enrol `evaluateAnalyticsQueryOverRows` in `AGGREGATION_CASES` so the whole vocabulary is held to one standard on this face too. The second is larger: the table's `AggregationExpectation.value` is typed `number`, so it can express this case but not the temporal `min`/`max` values the preview path now returns.\n\n## Dedup\n\nSearched (`search_issues`, repo-scoped; repo-scoped REST answers 403 for this session). The zero-match is a reading rather than a silent zeroing — the same query returned #15546, #11065, #11151 and #6815, four adjacent aggregate-divergence cards known to exist, so the channel was answering. ⛔ Not a duplicate of #15546 (that is `sum` over an all-null group, driver-sql vs the objectql in-memory tier — different faces, different aggregate) and ⛔ not of #16203 (the operand's TYPE, on the same file).\n\n## Related\n\n#16203 (the card this was found under, fixing `min`/`max` and `count_distinct` on the same function) · #16097 / #16098 / #16099 (the adjacent preview/live analytics cards).\n"
+}

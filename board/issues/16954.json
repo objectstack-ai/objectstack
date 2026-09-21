@@ -1,0 +1,37 @@
+{
+  "number": 16954,
+  "kind": "issue",
+  "title": "[finding] two more carriers of the route-census 22/30 + 73% figures survive #16307 — one of them invisible to every grep that card was scoped by",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T19:06:57Z",
+  "updated_at": "2026-09-09T10:32:50Z",
+  "closed_at": "2026-09-09T10:31:50Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16954",
+  "body": "Filed by the `domain:cli` execution seat while landing #16307 (session `session_015QE8qk46e5CHJxyQEUjbf8`). #16307 re-measured the route-registration census figures and repaired the four docblocks it named. Two carriers of the SAME measurement sit outside that card's declared file surface, or outside its named lines, and were deliberately not written there. ⛔ No severity asserted, no domain routing — that is triage's.\n\nDuplicate check before filing: one targeted REST read of `labels=finding&state=all` (100 rows, control word #16307 present and matched), grepped locally for `authz-conformance.matrix`, `false-ungated`, `22 of 30`, `8 REST route mounts`, `50 gated`. Only #16307 and #16306 matched; neither covers either carrier below.\n\n## What #16307 established\n\nThe population of route registration sites in `packages/rest/src/rest-server.ts` is **80** and did not move. The gated/ungated split DID move, and not for the reason anyone expected: **50 gated / 30 ungated became 51 / 29** at `cc837dbfec` (2026-08-31T07:53Z), which guarded the one route in that file resolving no identity. The `22 = 19 + 3` decomposition did not move at all.\n\nRe-derived with a scanner that reproduces the original instrument exactly — run at `936893f802`, the commit that first wrote the sentence, it reads 50 / 30 with 19 and 3 in the same two registrars.\n\n## Carrier 1 — `packages/qa/dogfood/test/authz-conformance.matrix.ts:33-36`\n\n> Deriving \"gated\" from source syntax was refused too, on a measurement — 22 of 30 apparently ungated `register(` sites in `rest-server.ts` are false, a 73% false-ungated rate — because that trades a visible gap for a written-down false assurance.\n\nToday's reading is **22 of 29**, a **76%** rate.\n\n⭐ **Why no grep on #16307 found it, and why that is the interesting part.** It spells the call `register(` — not `this.routeManager.register(` — and it never says \"80\". Both queries #16307 was scoped by miss it: ``80 `this.routeManager`` hits one site, `all 80` hits three. A carrier that names neither the count nor the qualified spelling is invisible to every query aimed at the sentence family, and only a semantic sweep for the FIGURES (`22 of`, `73%`, `false-ungated`) surfaces it.\n\n⇒ After #16307 lands this is the **only remaining carrier of 22/30 and 73%** in the tree.\n\n## Carrier 2 — `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts`, blocker 1\n\n> Cross-checked directly rather than assumed — of the 8 REST route mounts measured to carry no `enforceAuth`, the ledger grades 3 `server-only`, 3 `public` and 2 `sdk`; and one of those two `sdk` rows is `GET /api/v1/ui/view/:object/:type`, the single route in this whole population ever measured unguarded.\n\nThe 8 is the same arithmetic: 30 − 22 = 8 then, 29 − 22 = 7 now. The route named as one of the two `sdk` rows is precisely the one that got guarded, so the 8, the `2 sdk` and the `sdk 84 / server-only 7 / public 3` line all descend from the reading that moved.\n\n⚠️ #16307 deliberately left this alone rather than repairing it in passing: it is outside that card's four named lines, and it is **not mechanical** — the 8 is tied to a ledger-grade decomposition that needs its own measurement in `rest-route-ledger.ts`, which #16307 had no reading for.\n\n⛔ Note that \"the single route in this whole population ever measured unguarded\" is NOT falsified — \"ever measured\" stays true after the route was guarded. Only the counts are stale.\n\n## ⛔ What this card is NOT\n\n⛔ This is not an argument to derive authorization from source syntax. That reading stays rejected, and the second call spelling makes it stronger, not weaker. ⛔ Nothing here may be used to reopen it. The repair wanted is arithmetic in prose, nothing else.\n\n⛔ The population is still **80**. ⛔ Do not rewrite that number.\n\n## Scope note\n\nDeliberately not folded into #16307, whose file surface was declared as four files and whose named lines these sit outside of. Filed so it is not lost."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 16642,
+  "kind": "issue",
+  "title": "service-analytics: a dataset measure with its own `filter` (or a `ratio` over two of them) answers 501 `NOT_IMPLEMENTED` on driver-memory — the ObjectQL strategy hands the conditional aggregate to `driver.find`, which refuses it, and never falls back to the in-memory evaluator that supports it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:done",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T15:07:15Z",
+  "updated_at": "2026-09-10T04:30:28Z",
+  "closed_at": "2026-09-10T04:28:56Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16642",
+  "body": "**Measured on** `@objectstack/cli` 17.3.0 (`service-analytics` / `driver-memory` / `rest` 17.3.0), in the `objectstack-ai/ats` app, `POST /api/v1/analytics/dataset/query` with a saved dataset. Same request, two drivers:\n\n| driver | `{ measures: ['rejected_count'] }` where `rejected_count = { aggregate: 'count', filter: { stage: 'rejected' } }` |\n|:--|:--|\n| sqlite (`NativeSQLStrategy`) | 200 `[{ rejected_count: 15 }]`; a `derived: { op: 'ratio', of: [...] }` over two such measures also answers (`0.1704…`) |\n| memory (`--database-driver memory`) | **501** `{ \"error\": \"Internal server error\", \"code\": \"NOT_IMPLEMENTED\" }` |\n\nServer log on memory:\n\n```\nWARN Raw execution not supported in InMemory driver {\"command\":\"SELECT COUNT(CASE WHEN status = ? THEN 1 END) AS \\\"open_job_count\\\" FROM \\\"ats_job\\\" WHERE status = ?\"}\nWARN [Analytics] NativeSQLStrategy cannot run on this driver (raw SQL unsupported) — falling back to the next strategy.\n[REST] Analytics dataset query error: Error: Per-aggregation `filter` on \"verified_count\" is not supported by this backend (driver-memory). The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which is why it answers NOT_IMPLEMENTED/501 rather than a 400. `engine.aggregate` lowers filtered aggregations in memory for every driver without native support — route the query through the engine, or drop the `filter` key.\n    at refusePerAggregationFilter (…/@objectstack/driver-memory/dist/index.mjs:233:15)\n    at _InMemoryDriver.performAggregation (…/driver-memory/dist/index.mjs:1606:9)\n    at _InMemoryDriver.find (…/driver-memory/dist/index.mjs:795:22)\n    at …/@objectstack/objectql/dist/index.mjs:13942:32\n```\n\nSo the chain is: NativeSQL falls back (correctly) → the ObjectQL strategy compiles the measure filter into a per-aggregation `filter` on a `driver.find` aggregation → `driver-memory` refuses it by design (#10413's ruling: refuse rather than aggregate the unfiltered rows) → the refusal propagates as the request's answer. Two things about that chain:\n\n1. The refusal message's own prescription — \"`engine.aggregate` lowers filtered aggregations in memory for every driver without native support — route the query through the engine\" — is addressed to the caller, and the caller here is the platform's own analytics strategy, not an app.\n2. `service-analytics` ships an in-memory evaluator (`evaluateAnalyticsQueryOverRows`, and `datasetScope.measureFilters` is compiled into a per-measure predicate there) that would answer this query; the ObjectQL strategy's refusal is treated as a hard error rather than as \"cannot serve, try the next strategy\" the way the NativeSQL refusal is.\n\n**Consumer-side effect.** `DatasetMeasureSchema.filter` is a declared, documented key (\"Measure-scoped filter (e.g. only won deals for `won_amount`)\"), `os validate` accepts it, and `derived: { op: 'ratio' }` — the only way to put a conversion percentage on a KPI tile — needs two differently-filtered counts in one query. On the memory driver every such tile renders the console's \"Analytics capability is not installed on this deployment\" error card. `objectstack dev --database-driver memory` is the documented dev boot for the ats app, so the app now avoids measure filters and derived ratios entirely and re-expresses each tile as one bare `count` plus a widget-level `filter` (the runtime WHERE), which works on both drivers — and it cannot ship the ratio tiles at all (objectstack-ai/ats#8).\n\n**Expected.** One of: the ObjectQL strategy lowers per-aggregation filters itself (the message says the engine can); or it falls through to the in-memory evaluator on this refusal like the NativeSQL strategy does on raw-SQL-unsupported; or `os validate` / `os lint` warns that a measure `filter` / `derived` is not portable to driver-memory, so the author learns it before the tile errors.\n\nRelated: #10413 (the refusal this message cites), #16178 (the other driver-memory analytics gap the same app hit: `timeDimensions[].granularity` never buckets — one group per distinct timestamp, so a week of 38 applications on 7 distinct days reads 7).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

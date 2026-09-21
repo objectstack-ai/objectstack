@@ -1,0 +1,36 @@
+{
+  "number": 16431,
+  "kind": "issue",
+  "title": "[finding] Five filter operators ($gt/$gte/$lt/$lte/$between) reach NO published reference page — `build-schemas.ts` skips their whole schema over an unrepresentable `z.date()`, and the skip is silent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:spec",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T00:24:51Z",
+  "updated_at": "2026-09-09T11:42:30Z",
+  "closed_at": "2026-09-09T11:41:52Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16431",
+  "body": "Filed by the `domain:spec` dev seat (`session_01T6HeZvT9wdSJD1ZxJb5Eno`) while implementing #15059 (PR #16432). Out of scope there by that card's own fence — #15059 is prose on `.describe()`, and the remedy here is a change to the generator or to a schema shape, which #15059 forbids. Unassigned, bare, for triage.\n\n## Measured on `origin/main` @ `0a038cc06d92ba3ae663f9f1e12c52e72dbc7d39`\n\n`packages/spec/scripts/build-schemas.ts` emits one JSON Schema per exported `z.ZodType`. When `z.toJSONSchema()` throws for a known-unrepresentable type it retries with `io: 'input'`, and when that throws too it **skips the export with a `console.warn` and continues**. Four exports of `packages/spec/src/data/filter.zod.ts` take that path. From my own run of `pnpm --filter @objectstack/spec build`:\n\n```\n⊘ Data.ComparisonOperatorSchema: Date cannot be represented in JSON Schema (skipped)\n⊘ Data.FieldOperatorsSchema: Date cannot be represented in JSON Schema (skipped)\n⊘ Data.NormalizedFilterSchema: Date cannot be represented in JSON Schema (skipped)\n⊘ Data.RangeOperatorSchema: Date cannot be represented in JSON Schema (skipped)\n```\n\nThe `Date` is real and deliberate: `orderingComparandSchema` is `z.union([z.number(), z.date(), z.string(), FieldReferenceSchema])`, and `rangeEndpointSchema` is `z.union([z.number(), z.date(), z.string()])`. Nothing is wrong with the schemas; the generator simply cannot project them.\n\n`content/docs/references/**` renders from `packages/spec/json-schema/`, so a skipped export has no section. Measured with lit controls on the same tree:\n\n```\ngrep -c 'ComparisonOperator' content/docs/references/data/filter.mdx   -> 0\ngrep -c 'RangeOperator'      content/docs/references/data/filter.mdx   -> 0\ngrep -c 'FieldOperator'      content/docs/references/data/filter.mdx   -> 0\ngrep -c 'SpecialOperator'    content/docs/references/data/filter.mdx   -> 2   (control: the file IS live and the pattern CAN hit)\n\ngrep -rn 'ComparisonOperator|RangeOperator|FieldOperators' content/docs/  -> no hits in ANY tree\ngrep -rln 'SpecialOperator' content/docs/                                -> 2 files (control)\n```\n\n`packages/spec/json-schema.manifest/data.json` agrees from the other side: it lists eight `filter.zod.ts` schemas (`EqualityOperator`, `FieldReference`, `FilterArray`, `FilterCondition`, `QueryFilter`, `SetOperator`, `SpecialOperator`, `StringOperator`) and not these four.\n\n## What that costs\n\nFive operators have **no published reference row at all** — not a blank Description cell, no row:\n\n| operator | where it is declared | prose that reaches no page |\n|:---|:---|:---|\n| `$gt` `$gte` `$lt` `$lte` | `ComparisonOperatorSchema` | ~1050 characters of `.describe()` each — the whole #5685 comparand contract: which comparand forms are guaranteed, that ordering non-temporal text is permitted but NOT promised, and that `null` is not a comparand |\n| `$between` | `RangeOperatorSchema` | ~1010 characters — the #6571 endpoint contract and the #7596 no-`{ $field }`-in-a-list rule |\n\nSo the reference page teaches the equality, set, string and null/exists families and is silent on the entire ordering family — including the `{ \"$gte\": \"2026-01-01\" }` shape the platform's own date-macro resolver produces, which is exactly what #5685 wrote that prose to correct.\n\nThe `## TypeScript Usage` import line on the page is driven by the export surface rather than by the emitted schemas, so it does not name them either and nothing on the page hints anything is missing.\n\n## Why it is worth recording rather than repairing in passing\n\n- **The skip is silent to CI.** It is a `console.warn` in a build that exits 0. The disappearance ratchet in `build-schemas.ts` (#2978 / #4725) catches a schema that STOPS being emitted; it cannot see one that has never been emitted, so these four have simply never entered the published set.\n- **The remedy is a decision, not an edit.** At least three shapes exist and they are not equivalent: (a) teach the generator to project `z.date()` — it already has an `io: 'input'` fallback, and since an author writes an ISO string the input shape may well be representable if that fallback applied per-branch rather than per-schema; (b) narrow the comparand unions so `Date` is not in the projected shape, which is a **schema** change with runtime consequences the #5685 docblock argues against at length; (c) accept the gap and make it loud — a ratchet over \"exported schema with no emitted JSON Schema\", so the next one is caught on the PR that introduces it.\n- Option (c) is worth weighing independently of (a)/(b): 23 exports are skipped repo-wide in one build, across `Data`, `Automation`, `Cloud`, `Kernel`, `System` and `UI`. Nobody is told which published surfaces those 23 hollow out.\n\n## Relationship to #15059\n\n#15059 fills the blank Description **cells** on `filter.mdx` — the cells that render because their schema is emitted. This card is about **sections that do not render at all**. The two do not overlap and the remedy sites are different files. PR #16432 also corrects one sub-claim of #15059's body in passing: that card says `FieldOperatorsSchema`'s restated `$null` / `$exists` leave \"the `FieldOperator` table\" blank, and there is no `FieldOperator` table on the page, for the reason measured above. PR #16432 describes those members anyway, so the two copies cannot drift.\n\nRefs: #15059 · PR #16432 · #5685 · #6571 · #2978 · #4725\n"
+}

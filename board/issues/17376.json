@@ -1,0 +1,33 @@
+{
+  "number": 17376,
+  "kind": "pull_request",
+  "title": "docs(protocol): plugin-spec package.json example prints the scaffolder's TypeScript floor",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T10:07:37Z",
+  "updated_at": "2026-09-10T10:34:10Z",
+  "closed_at": "2026-09-10T10:34:08Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-10T10:34:08Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17376",
+  "body": "Fixes #16756\n\n## What changed\n\n`content/docs/protocol/kernel/plugin-spec.mdx` line 708, in the \"NPM Package\"\ndistribution-format `package.json` example:\n\nBefore:\n```\n    \"typescript\": \"^5.0.0\"\n```\n\nAfter:\n```\n    \"typescript\": \"^5.3.0\"\n```\n\n...plus a new sentence immediately after the code fence:\n\n> The `typescript` floor above mirrors `SCAFFOLD_TYPESCRIPT_RANGE` in\n> `packages/cli/src/commands/init.ts` — that constant, not this snippet, is the\n> authority the scaffolders emit from.\n\n## Handling chosen, and why\n\nChose **print the scaffolder's current value + name the authority in the\nadjacent sentence**, not \"drop the range\". The surrounding block is a\n`devDependencies` example alongside `@objectstack/cli` — removing `typescript`\nalone would leave that block looking incomplete (a real plugin `package.json`\ndeclares both), where the sibling fix on the same class of finding\n(#16763, `skills/objectstack-platform/SKILL.md`) also kept the key and\nrestamped the value. Printing the value plus naming\n`packages/cli/src/commands/init.ts`'s `SCAFFOLD_TYPESCRIPT_RANGE` as the\nauthority satisfies acceptance clause 3 (no second drifting authority minted\nsilently) directly.\n\n## Generated-page reading\n\n**Not generated.** `scripts/regen-artifacts.mjs`'s routing table (the\n`check:generated` ledger) only routes `content/docs/references/**` as a\ngenerated tree; `content/docs/protocol/kernel/plugin-spec.mdx` is not listed\nin it anywhere, and the file carries no generation marker. The only script\nthat emits scaffolder version pins into a tracked file\n(`scripts/sync-scaffold-emission-policy.mjs`, `gen:scaffold-emission-policy`)\ntargets `packages/create-objectstack/src/templates/blank/package.json`, not\nthis doc page. Hand-editing the `.mdx` directly is correct here.\n\n## Probe (measured on this checkout, before → after)\n\n```\n$ grep -c '\\^5\\.0\\.0' content/docs/protocol/kernel/plugin-spec.mdx   # before this PR's commit\n1\n$ grep -c '\\^5\\.0\\.0' content/docs/protocol/kernel/plugin-spec.mdx   # after\n0\n```\nPositive control: the pre-edit probe read **1** (the line at old `:708`), confirming\nthe probe matches real content rather than a pattern that stopped matching\nanything. Post-edit `git diff` for this file touches only lines 705-724 (the\n`typescript` value and the four new prose lines) — nothing at or after `:758`\n(#15952's `@objectstack/testing` section) was touched.\n\n## `content/docs/**` gate family (39 commands derived by `dispatch-gates.mjs --commands`)\n\nAll 39 green (`exit 0`) on the final commit. 34 passed on the first pass; 5\ninitially reported `PREREQUISITE NOT MET` (packages not built — NOT MEASURED,\nnot a finding) and went green after building their declared prerequisites\n(`@objectstack/formula`, `@objectstack/lint`, `@objectstack/spec`, and the\n`@objectstack/client` → `@objectstack/client-react` closure via\n`pnpm exec turbo run build --filter=@objectstack/client-react`):\n\n- `check:doc-formula-expressions` — 0 → 0 after building formula+lint\n- `check:doc-security-posture` — 0 → 0 after building formula+lint\n- `check:docs` (spec) — 0 → 0 after building spec\n- `check:docs-transcript-drift` — 0 → 0 after building lint\n- `check:skill-examples` (spec) — 0 → 0 after building the client-react/client closure\n\nEverything else (`check-ci-filter-parity`, `check-closing-keyword-parity` (+\nself-test), `check-comment-mask-corpus`, `check-doc-frontmatter` (+\nself-test), `check-doc-route-spelling --advisory` (+ self-test),\n`check-docs-section-name` (+ self-test), `check-section-landing-index` (+\nself-test), `report-test-timings --self-test`, `check:empty-state`,\n`check:liveness`, `check:strictness-ledger`, `check:variant-docs`,\n`check:yaml-examples`, `check:corpus-claim-drift`,\n`check:cross-package-test-inputs`, `check:doc-anchors`, `check:doc-authoring`,\n`check:docs-audit-scope`, `check:docs-redirects`, `check:docs-single-h1`,\n`check:driver-memory-census`, `check:nul-bytes`,\n`check:published-readme-links`, `check:react-page-adapter-contract`,\n`check:refd-timer-probe`, `check:role-word`, `check:skill-identifier-liveness`,\n`check:vendor-version-stamps`, `check:watch-hint-literal`) passed clean on the\nfirst pass, no rebuild needed.\n\n## Changeset\n\n`skip-changeset` — measured, not assumed. `apps/docs` (the site that reads\n`content/docs/**`) is `\"private\": true`; no published package's `files[]`\nreferences `content/docs/**`; the only `.mdx`-touching gen script\n(`sync-scaffold-emission-policy.mjs`) targets a different file. Nothing this\nPR moves ships in an npm tarball. Applying the `skip-changeset` label on this\nPR.\n\n## Boundaries respected\n\nOnly `content/docs/protocol/kernel/plugin-spec.mdx` touched; nothing at/after\n`:758` (#15952's territory); `skills/objectstack-platform/SKILL.md` and\n`packages/create-objectstack/src/templates/blank/package.json` untouched; the\nthree `formats`-enum `typescript` hits under `content/docs/references/**`\nuntouched.\n\n**Clause-②**: no\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_"
+}

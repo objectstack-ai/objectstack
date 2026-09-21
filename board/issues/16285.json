@@ -1,0 +1,35 @@
+{
+  "number": 16285,
+  "kind": "issue",
+  "title": "dispatch-gates routes no `packages/qa/dogfood/**` change to any gate family — a full derived-family run is green while the Dogfood Regression Gate is red",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T12:04:22Z",
+  "updated_at": "2026-09-09T12:28:06Z",
+  "closed_at": "2026-09-09T12:25:08Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16285",
+  "body": "Measured on PR #16243 (head `484601894`), where it produced a false \"authored to green\" claim that stood for about three hours.\n\n## The reading\n\n`scripts/pm/dispatch-gates.mjs` maps a change set's paths to the `check:*` families that watch them. It maps `packages/qa/dogfood/**` to **nothing**.\n\nOn that PR the change set included `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts`:\n\n```\n$ node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack | wc -l\n102\n$ node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack | grep -i 'dogfood\\|qa'\n(no output)\n```\n\n102 families derived, 102 runnable, and not one of them runs a dogfood test. On the same head `Dogfood Regression Gate (3/3)` was **red** (run `34019739422`, job `101450083462`, failed 07:50:38Z) on `test/authz-probe-blind-spot.test.ts`.\n\nSo a dev can follow the documented loop exactly — derive the families, run all of them, reconcile with `--ran`, get `102 derived famil(ies) accounted for, 102 run, 0 NOT-MEASURED` — and truthfully report a full green while a test **in the very package they edited** is failing in CI. The reconciliation cannot catch it: `--ran` reconciles against what the derivation produced, and the derivation never named the gate.\n\n## Why this is not the same as the known family\n\nThere is a family of derived-coverage findings (#13813, #15501, #15553, #13511, #15312 and others) where a gate exists but a particular change set does not reach it. This one is wider in a way worth separating: the derivation has **no edge at all** from a first-party test package to the CI job that runs its tests. It is not a missed path literal inside a routed family — `packages/qa/dogfood` is routed nowhere, so every card that touches it inherits the blind spot, not just cards with an unusual shape.\n\nThe general shape is also worth stating once: `packages/**` test suites are run in CI by sharded workflow jobs (`Dogfood Regression Gate`, `Test Core`) rather than by a `check:*` script, and the derivation's vocabulary is `check:*` families. Any package whose CI coverage is a workflow job rather than a gate script is invisible to it the same way.\n\n## Suggested direction (not a decision)\n\nEither teach the derivation to emit a package-test command for a changed package (`pnpm --filter PKG test`) alongside the `check:*` families, or have it name the workflow job that covers the path so the dev at least knows what they have not run. The second is cheaper and keeps the tool's vocabulary honest — it is a derivation of *what watches this path*, and a workflow job watches it just as much as a gate script does.\n\n⛔ Not fixed in #16243 — that PR's scope is the `metadata.endpoints.*` switch radii. Filed per the out-of-scope rule; unassigned for PM triage.\n\nFound while repairing #16243 (cards #15542 / #15854)."
+}

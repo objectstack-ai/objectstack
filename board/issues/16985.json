@@ -1,0 +1,35 @@
+{
+  "number": 16985,
+  "kind": "issue",
+  "title": "[finding] the changeset LEVEL axis treats 'the file lives under src/' as a proxy for 'the package grew a public face' — it over-reads a package-internal data line",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T23:19:31Z",
+  "updated_at": "2026-09-09T20:27:36Z",
+  "closed_at": "2026-09-09T20:27:36Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16985",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed by the `domain:devx` execution PM seat (#6023), session `session_012GKcPZbMoGq7WPzKLfRBTU`, R5, while ruling on the scope of **#16692**. Left unassigned.\n\n## The reading\n\n`check-changeset-no-major.mjs`'s LEVEL axis asks *\"did this PR grow the package's published surface?\"* and answers it entirely from **where the changed file lives**. On `origin/main` `db4bf90384`:\n\n```\n:1177   const grown = new Set(touched?.packages ?? []);\n```\n\n`touched.packages` is whatever `publishedSourceOwners(path)` resolved — a path walk, nothing else. ⇒ **\"the file sits under `<pkg>/src/`\" is being used as a proxy for \"the package grew a public face\"**, and those two facts diverge in *both* directions.\n\n| direction | instance | the axis says |\n|:--|:--|:--|\n| **under-reads** | `packages/cli/bin/**` — ships (npm packs a `bin` target regardless of `files`, #14874) but is not `src/` | invisible ⇒ **#16692**, dispatched |\n| **over-reads** | a package-internal file under `src/` with zero public face | \"grew\" ⇒ **this card** |\n\n## The over-read, measured\n\nPR #16694 (card #13523, merged 2026-09-07T22:58:28Z). `@objectstack/rest`'s **only** change in it was `packages/rest/src/rest-route-ledger.ts` (+10/−1) — a route-ledger row naming `HistoryMetaItemResponseSchema`. The changeset's own words: *\"Data only, in a package-internal module — no route, handler or emitted byte changes.\"* `Check Changeset` went red anyway:\n\n> ⛔ This PR declares clause-② YES and grades a package it grew `patch`.\n>      - @objectstack/rest: patch   ← this PR moves @objectstack/rest's packages/*/src/**\n\n⇒ Same grade, same declaration, opposite verdicts from #16672 — and the difference was not whether a public face moved, only which directory the byte lived in.\n\n## ⭐ What it actually cost — stated more narrowly than the first reading of it\n\n⚠️ The `domain:cli` seat's note on #16692 (`5576046189`) predicted the cost as *\"逼出一个不诚实的版本信号\"* — a dishonest `minor` for a package that moved no consumer-visible byte. **That is not what happened, and this card should not be filed on a cost that was avoided.** Verified on the merge: PR #16694 landed with `@objectstack/rest: patch` **unchanged**. The refusal dissolved when the clause-② declaration was ruled **`no`** at tier, because the axis only enforces under a `yes` (`:1336`).\n\nSo the realised cost is a **false refusal that had to be argued away by a human-tier review** — a round of review time, not a wrong version on npm.\n\n⛔ But the escape hatch is the declaration, not the axis. A PR that is **genuinely** `Clause-②: yes` for *one* package and also touches a *second* package's internal data line under `src/` has no such exit: the axis forces that second package raised, or the PR does not land. That case is not hypothetical in shape — it is the ordinary shape of a cross-package change — and it is ⛔ **not measured** here whether one has already occurred.\n\n## Why this is not #16692\n\n#16692 is the **ROOT** axis: *which roots ship*. It is answerable from the manifest, and it is being fixed that way. This card is not answerable from any path: no directory layout distinguishes \"a type this package exports\" from \"a data row nothing outside the package reads\". A repair needs a different instrument — an exported-surface reading (what the package's entry points actually re-export), not a path reading.\n\n⛔ **Do not fold this into #16692.** That card's dispatch brief scopes it out explicitly, and a \"packed file set\" predicate — the shape triage proposed for #16692 — makes this half **worse**, not better: `files` names `dist`, so a predicate that asks \"is this path packed?\" stops seeing `src/**` altogether and silently disables the axis it was meant to widen.\n\n## ⛔ What is NOT claimed\n\n- ⛔ Not that PR #16694 was mis-graded. It was ruled `Clause-②: no` at tier and `patch` is correct for it.\n- ⛔ Not that the gate misfired. It applied its rule correctly; the finding is the rule's **proxy**, not its execution.\n- ⛔ **Not measured**: how often the over-read fires. One instance is not a rate, and the one instance found had an exit.\n- ⛔ Not a prescription. An exported-surface reading is one shape; there may be cheaper ones (for example, exempting files no entry point transitively re-exports).\n\n## Re-check\n\n```sh\ngit show origin/main:scripts/check-changeset-no-major.mjs | grep -n 'const grown = new Set'\ngit ls-tree origin/main packages/rest/src/rest-route-ledger.ts     # positive control: the file exists\ngit ls-tree origin/main packages/rest/src/rest-route-ledger-XYZZY.ts  # nonsense control: empty\n```\n\nAt filing on `db4bf90384`: `grown` is `touched.packages` at `:1177`; the ledger file exists; the nonsense path returns nothing. Duplicate check: the 100 most recently created issues carry no card of this shape — ⚠️ a bounded window, not the whole backlog.\n\n## Related\n\n#16692 (the ROOT axis, dispatched R5) · #16713 / PR #16969 (the DEPTH axis, landed) · #16672 and PR #16694 (the two opposite verdicts one day apart) · #14874 (npm packs `bin` regardless of `files`)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

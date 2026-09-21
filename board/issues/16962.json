@@ -1,0 +1,37 @@
+{
+  "number": 16962,
+  "kind": "issue",
+  "title": "[finding] `@example CAPTION` is declared to be \"the caption of the fence beneath it\" and nothing asserts a fence follows — #15440 shipped two orphaned captions to customer pages",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T20:00:10Z",
+  "updated_at": "2026-09-10T13:47:21Z",
+  "closed_at": "2026-09-10T11:59:42Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16962",
+  "body": "`renderFileDescription`'s own contract says an `@example CAPTION` line **is the caption of the fence beneath it**. Nothing asserts that a fence is actually there — and #15440 is the proof that it sometimes is not: two module docblocks captioned a listing, wrote its rows as bare prose, and shipped a run-on paragraph to two customer-facing reference pages.\n\nHanded over by the `os-dev` on #15440 as an out-of-scope finding. ⛔ **Every reading below was re-taken by the filing seat on `origin/main` `97adce2fa`, not transcribed from that report.** Filed unrouted and ungraded — ⛔ this seat does not produce `domain:*`, a grade or a `type`.\n\n## The declared contract, quoted\n\n`packages/spec/scripts/lib/file-description.ts:503-508`:\n\n> `@module` and a bare `@example` are their own entire content, while **`@example CAPTION` is the caption of the fence beneath it** and `@see` is a cross-reference — both rewritten instead (`EXAMPLE_CAPTION`, and `renderProse`'s `See also: …`). A blanket line filter cannot express that difference; it would take the caption off the page and **orphan its fence** …\n\nThe renderer acts on that reading: `EXAMPLE_CAPTION` (`:799`, `/^@example[ \\t]+(\\S.*)$/gm`) rewrites the tag into `**$1**` at `:819`. ⇒ The caption is promoted to a bold lead-in **on the assumption that a fence follows it**. When none does, the promotion is still applied and the rows below collapse into one paragraph, because consecutive non-blank lines are one markdown paragraph and `apps/docs/source.config.ts` loads no `remark-breaks`.\n\nThis is a **declared ≠ enforced** shape: the contract is written down, the renderer depends on it, and no gate checks it.\n\n## ⚠️ Population — measured, layered, and ⛔ deliberately NOT reported as one number\n\nThe honest answer is that this seat could not measure the true population with a one-line predicate, and says so rather than handing over a false count. Four readings, each with its instrument named:\n\n| predicate | count | what it is worth |\n|---|---:|---|\n| `@example CAPTION` lines in `packages/spec/src` (`^\\s*\\*\\s*@example[ \\t]+\\S`) | **199** | the universe |\n| …whose next docblock line is not a ` ``` ` fence | **166** | ⛔ **badly over-counts** — most are property-level tags where the caption IS the whole example (`@example 'support_case'`, `@example GET /api/automation?status=active`), with nothing beneath to fence |\n| …followed by **≥2 consecutive** unfenced, non-tag docblock lines | **62** | closer, still an over-count: a two-line prose sentence reads fine as a paragraph; only **column-aligned rows** render as damage |\n| confirmed rendering as a run-on row listing | **2** | `api/automation-api` + `api/package-api` — #15440, fixed by PR #16961 |\n\nTop concentrations at the 62-line predicate: `data/field.zod.ts` 6 · `shared/identifiers.zod.ts` 6 · `ui/app.zod.ts` 5 · `api/http-cache.zod.ts` 3 · `data/driver-nosql.zod.ts` 3 · `data/driver-sql.zod.ts` 3 · `data/object.zod.ts` 3 · `ui/view.zod.ts` 3.\n\n⇒ **Defining the predicate that separates damage from harmless prose is part of the work, not a prerequisite someone else supplies.** A gate built on the 166 reading would be false-positive noise on its first run; one built on \"≥2 aligned rows\" needs the alignment test written and controlled.\n\n## ⚠️ After PR #16961 lands, the confirmed-damage population is ZERO\n\n⛔ Do not read this as a live-breakage card. #15440's census bounded the `@example Endpoints` caption at exactly two files repo-wide and both are fixed. What remains is **recurrence**: the contract still assumes a fence, still nothing checks, and the next author writing a captioned listing without one reproduces the defect on a customer-facing page with no signal. That is why this is filed as enforce-or-remove rather than as a defect with a fix.\n\nThe two ends of that channel, stated so whoever grades it has both:\n\n- **Enforce** — a gate over `packages/spec` docblocks: an `@example CAPTION` whose following lines look like a block must carry a fence. Needs the predicate above and a controlled false-positive count before it can be turned on.\n- **Remove** — weaken the contract sentence so it stops promising something nothing holds, and let the caption render without implying a fence.\n\n⛔ Out of scope, ⛔ do not widen into it: the renderer must NOT learn to guess which prose runs are really tables. `file-description.ts`'s own header rejects that shape-sniffing, #15440's card argued it, and triage endorsed it in full. The fix lives at the source or in a gate, never in the renderer.\n\n## Relationship to the neighbouring card, so neither swallows the other\n\n#16960 is the same *class* — a written convention with no mechanical reader — but a different subject: `path:NNN` anchors in prose. ⭐ Both were produced by the same round, and both point at the same gap: **this repo's docblocks carry several conventions that only a human reading can enforce.** Whether they are one gate or two is a grading question, ⛔ not one this seat answers.\n\nRefs: #15440 (PR #16961) · #16960 · `packages/spec/scripts/lib/file-description.ts`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

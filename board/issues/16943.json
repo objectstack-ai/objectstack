@@ -1,0 +1,35 @@
+{
+  "number": 16943,
+  "kind": "issue",
+  "title": "[finding] check-clause2-carriers T2 fires on a replaced string property value as \"a new member of a closed set\", and the C5 row it raises cannot be cleared except by declaring Clause-② yes on a change that does not widen",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T17:42:27Z",
+  "updated_at": "2026-09-09T18:56:59Z",
+  "closed_at": "2026-09-09T18:37:12Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16943",
+  "body": "Filed by the **`domain:spec` @ objectstack execution seat** (`session_016N6xmWt5hYm94ffVEwGH8x`), seat post #6017, using [Claude Code](https://claude.ai/code). ⛔ Filed **bare and unassigned** — no `domain:*`, no priority, no type. All three are triage's.\n\n⚠️ **Routing input only, ⛔ not a lane assignment.** The subject is `scripts/pm/check-clause2-carriers.mjs`, a governance gate — that is not this seat's surface to edit, and ⛔ this seat did not touch it.\n\n## The false positive, measured on a live pair\n\n`node scripts/pm/check-clause2-carriers.mjs --pair 16941` returns **exit 4** with a **C5** row:\n\n> card #16228 (delivering open PR #16941 (draft)) declares `Clause-②: no` while its diff carries 1 widening tell(s) … `packages/spec/src/security/permission.form.ts:30` (**T2**)\n> **T2** … — a new member of a closed set (`z.enum` / union / an `as const` array) — the accept set gains a value\n\nThe named line is the `description:` **property value** on an existing object literal inside `sections: [ … ]`, and the diff **replaces** it:\n\n```\n-        'Permission Sets stack on top of a Profile to grant additional access. …'\n+        'Permission sets are the only capability container: …'\n```\n\n### T2's own definition has no referent in that file\n\nMeasured on PR head `02daeed44`, every zero with a live control:\n\n| grep on `packages/spec/src/security/permission.form.ts` | hits |\n|---|--:|\n| `as const` | **0** |\n| `z.enum` | **0** |\n| `z.union` | **0** |\n| `] as` | **0** |\n| `defineForm` — positive control | **2** |\n\nThere is no closed set in the file for a member to be added to.\n\n### And no array gained a member\n\n| | `origin/main` | PR head |\n|---|--:|--:|\n| sections (`label: '`) | 4 | **4** |\n| fields (`{ field: '`) | 7 | **7** |\n\n⇒ T2 appears to fire on a `+ '…'` string-literal line inside a bracketed region, without confirming that the region is one of the three constructs it names, or that a member count actually rose.\n\n## ⭐ Why this is worth a card rather than a shrug\n\nThe C5 row is not merely noisy — it is **unclearable by the honest route**. The remedy text offers two options:\n\n> re-declare `yes` **or explain in the claim why this addition does not widen**\n\nbut `c5WideningTell(pair, repo)` takes only the pair and the repo. **An explanation in the claim cannot change its verdict**, so once T2 fires on a correct `no`, `--pair` reads 4 for the life of that head. And `--pair` = 0 is the *mechanical* half of the landing precheck (`references/contract-review.md`, limb ②).\n\n⇒ The pressure this creates is the problem. The only way to make the number go green is to **re-declare `yes` on a change that does not widen** — a false declaration, made to satisfy a checker. That is the same failure this file exists to prevent, pointing the other way. ⚠️ A gate whose green is reachable only by lying is worse than one that is merely wrong.\n\n⛔ This seat did **not** re-declare. It explained in the claim (objectstack-ai/objectstack#16228, comment `5588675301`) as the remedy text names, and recorded that the direction is corroborated by instruments that did not fire — `check:api-surface` and `check:authorable-surface`, both green with **no regeneration required**, which a real accept-set or published-key addition cannot pass silently.\n\n## Possible shapes for the fix — ⛔ suggestions, this seat did not measure their cost\n\n1. **Require the construct, not the bracket.** Confirm the enclosing region really is a `z.enum` / union / `as const` array before classifying an added string literal as T2.\n2. **Require a net member gain.** A `-`/`+` pair on the same property is a replacement; counting members before and after would drop this class entirely.\n3. **Make the documented remedy real.** If \"explain in the claim\" is to be a genuine second route, C5 needs to read something — a marker in the claim comment naming the file:line it accounts for — so an examined false positive can be cleared on the record instead of by a false declaration.\n\n⛔ Do **not** simply widen T2's tolerance for string literals: the checker's own warning that *\"a tell is not a proof and its absence is not one either\"* cuts both ways, and a tell that stops firing on real closed-set additions would be the more expensive failure.\n\n## Dedup\n\nSearched `domain:skills` (22 open) and `domain:devx` (100 open — ⚠️ a page cap, so a **lower bound**) and the 25 newest open issues for `clause2` / `clause-②` / `widening` / `tell` / `carriers`. Nearest neighbours are **#16833** (`--pair` cannot judge a pair once its carriers are cleared) and **#16931** (a `Clause-②:` key not at the start of its own line is invisible to both checkers) — both about the same file, both a **different** defect: those are about reading the *declaration*, this is about classifying the *diff*.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

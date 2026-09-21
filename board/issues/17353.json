@@ -1,0 +1,35 @@
+{
+  "number": 17353,
+  "kind": "pull_request",
+  "title": "fix(ci): quote workflow step name YAML truncates at \" #\", add guard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T08:22:51Z",
+  "updated_at": "2026-09-10T09:19:47Z",
+  "closed_at": "2026-09-10T09:19:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-10T09:19:46Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17353",
+  "body": "Fixes #15149\n\n## What\n\nTwo halves, both in scope per PM ruling (issue comment, `baozhoutao`, 2026-09-10):\n\n**Half 1** — `.github/workflows/lint.yml`: quoted the one step name that is an\nunquoted plain scalar containing ` #` (space + hash), which YAML reads as\nstarting a comment. Before this fix the step's real parsed name was the\nthree-letter string `The`, not the text an author wrote.\n\n```diff\n-      - name: The #13419 name-fold fixture has no non-test loader\n+      - name: 'The #13419 name-fold fixture has no non-test loader'\n```\n\n**Half 2** — a new grep-level guard, `check:workflow-step-name-quoting`\n(`scripts/check-workflow-step-name-quoting.mjs`), wired as the last step of\nthe `lint` job (append-only, per the job's prose-only step-ordering contract,\n#10572) and as a `check:*` script in `package.json`. It uses the criterion\ntriage wrote (issue comment, R+152, and restated in the dispatch comment):\nlook only at the first non-blank character after `- name:`; `'`/`\"` means\nalready quoted (skip); otherwise search the remaining text for ` #`.\n\n## Delivery order is the proof\n\nThe guard reads `.github/workflows/*.yml`. Run against the pre-fix tree\n(`origin/main` `cca1dc0bfb`, via `git archive`, no working-tree mutation) it\nis **RED**, naming exactly the offending line; run against the post-fix tree\nit is **GREEN**.\n\n**RED, before Half 1** (scanned via `scan()` over a temp copy of `origin/main`'s\n`.github/workflows/`):\n\n```\ncheck-workflow-step-name-quoting: 1 unquoted step name contain ` #`, which YAML reads as a comment -- the parsed step name is NOT the text you see\n\n  • .github/workflows/lint.yml:746\n      - name: The #13419 name-fold fixture has no non-test loader\n\nscanned 35 workflow file(s), 667 step name(s) total (positive control)\n```\n\n**GREEN, after Half 1** (`node scripts/check-workflow-step-name-quoting.mjs`,\nrun for real against this branch):\n\n```\ncheck-workflow-step-name-quoting: OK (scanned 35 workflow file(s), 668 step name(s) -- 8 already quoted, 660 unquoted-and-safe).\n```\n\n(667 → 668 step names because the guard's own new step name is counted too;\n668 total lines up with the repo-wide hit count the PM measured — exactly 1\nviolation before, 0 after, and it is the line being fixed here.)\n\n## Negative control\n\n`check-links.yml:187` is a real, **legal**, unquoted step name containing an\nembedded `\"` — triage self-inflicted a false positive on exactly this shape by\nnaively stripping quote characters before judging. The guard's `--list` output\nagainst this branch confirms it is **not** flagged:\n\n```\nok        .github/workflows/check-links.yml:187  - name: Report a setup failure as \"the link check did not run\"\n```\n\n## Repo-wide hit count + positive control\n\n| | files | step names scanned | violations |\n|---|---:|---:|---:|\n| before (origin/main `cca1dc0bfb`) | 35 | 667 | **1** (`lint.yml:746`) |\n| after (this branch) | 35 | 668 | **0** |\n\n667/668 step names scanned (non-zero) is the positive control that the probe\nreads something — a scanner that stopped matching would report 0 either way.\n\n## `--self-test` against the raised floor\n\nMandatory per the dispatch comment, plus the floor-raising cases (#13799):\nflags this card's shape; does not flag an already-quoted `'… #123 …'`; does\nnot flag the check-links.yml unquoted-name-with-embedded-`\"` negative control;\ndoes not flag a normal trailing YAML comment on a **non**-`- name:` line\n(the boundary a naive \"line contains ` #`\" scan would get wrong).\n\n```\n✓ check-workflow-step-name-quoting --self-test: 18 assertions across 6 batteries (real scan() path, temp fixture roots).\n```\n\n## Changeset\n\n`skip-changeset` — measured, not asserted. All three changed paths are\nstructurally outside anything a published package ships:\n\n- `.github/workflows/lint.yml` — CI workflow, never published.\n- `package.json` (repo root) — `\"private\": true`.\n- `scripts/check-workflow-step-name-quoting.mjs` — repo-root `scripts/`, not\n  inside any package directory.\n\nChecked every workspace package's `package.json` `files[]` array for any entry\nreferencing `../`, `scripts`, or `.github` — zero hits across all publishable\npackages (`packages/cli`, `packages/client`, `packages/client-react`,\n`packages/cloud-connection`, `packages/console`, …), confirming no publishable\n`files[]` can reach outside its own package directory to any of the three\nchanged paths.\n\n## Gates run\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`\nderived 62 commands for this diff (33 `pnpm`, 29 direct `node`). All 62 ran\ngreen — see the structured report for the full list and per-command exit\ncodes.\n\n**Clause-②**: no\n\n## 验收备注\n\n- The step immediately before this PR's new step (\"Duration-shaped spec keys\n  carry their unit in the key name\") carries a comment claiming it is\n  \"Placed LAST in this job on purpose... nothing behind it would be masked by\n  its red.\" This PR appends after it (per the job's append-only step-ordering\n  contract, #10572), which makes that comment stale by one step. Not filed —\n  doc nit, no reproducible defect, no contract violated (the ordering contract\n  is about relative order of *existing* steps, not about which step is\n  textually last). 承接者:无 — noted here for whoever next appends to this job.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_"
+}

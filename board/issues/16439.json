@@ -1,0 +1,38 @@
+{
+  "number": 16439,
+  "kind": "issue",
+  "title": "service-automation: `evaluateValueEnvelope(null)` throws a raw `TypeError: Cannot read properties of null (reading 'source')` — the one shape its shared refusal does not cover",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "pm:done",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T01:25:45Z",
+  "updated_at": "2026-09-10T04:30:31Z",
+  "closed_at": "2026-09-10T04:28:56Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16439",
+  "body": "Found while implementing #16038 (PR #16438), outside that card's ruled surface and deliberately not fixed there. Filed by the `os-dev` execution seat, session `01XpTx2tbq3pZRYAdoGt6E6Y`. Not assigned; `domain:*`, type and priority are triage's.\n\n## The gap\n\n`AutomationEngine.evaluateValueEnvelope(envelope, variables, where)` in `packages/services/service-automation/src/engine.ts` is the run-time half of #15137's ruling, and it is a genuinely good one: it derives its verdict from `valueEnvelopeRefusals`, the **same call** `registerFlow` makes, so the reject set of registration and the reject set of evaluation are one set by construction. Its docblock says so.\n\nThat shared refusal covers every malformed **envelope**. It does not cover `null` / `undefined`. After `valueEnvelopeRefusals` returns no findings, the method reads\n\n```ts\nconst source = envelope.source ?? '';\n```\n\nand on `null` / `undefined` that read is a bare `TypeError` — no `where`, no source, no rule.\n\n## Measured, driven (worktree at `origin/main` `3e7ef9c23`)\n\n```\nnew AutomationEngine(logger).evaluateValueEnvelope(null, new Map(), 'probe')\nnew AutomationEngine(logger).evaluateValueEnvelope(undefined, new Map(), 'probe')\n```\n\n```\nTypeError: Cannot read properties of null (reading 'source')\nTypeError: Cannot read properties of undefined (reading 'source')\n```\n\nEvery other shape driven in the same run threw an **attributed** `Error` instead, which is what makes this one the outlier rather than the rule:\n\n| Input | Result |\n|---|---|\n| `{ source: 1 }` | attributed — leads with `ASSIGNMENT_VALUE_ENVELOPE_REFUSAL` |\n| `{ dialect: 'cel', source: 1 }` | attributed |\n| `{ dialect: 'cel', source: {} }` | attributed |\n| `{ ast, source: 1 }` | attributed |\n| `{ dialect: 'cel' }` | attributed |\n| `42` / `['a']` / `{}` | attributed — located CEL fault, carries the source |\n| **`null` / `undefined`** | **raw `TypeError`** |\n\n## Why it is not urgent, stated rather than left implicit\n\nUnreachable from the only production call site. `packages/services/service-automation/src/builtin/logic-nodes.ts` guards the call with `isExpressionEnvelopeShaped(value)`, which `null` and `undefined` do not satisfy, so the assignment executor cannot deliver either. What is left is a **direct caller**: `evaluateValueEnvelope` is a public method on an exported class, the same property that made #16038 worth its own card.\n\n## Why it was not fixed in passing on #16038\n\nThe maintainer's ruling on #16038 (decision batch #57, option A) is specifically that **`evaluateCondition`** must refuse a malformed condition shape with `STRUCTURAL_CONDITION_SHAPE_REFUSAL`. This site is the sibling **value** path, whose refusal vocabulary is a different published sentence — `ASSIGNMENT_VALUE_ENVELOPE_REFUSAL`, derived by `valueEnvelopeRefusals`. Applying the condition refusal here would be wrong; applying the value refusal here is a question about a reject set the ruling does not name, so it is triage's, not the implementing seat's.\n\nNote also that `null` / `undefined` are **admitted** on the condition side on purpose — \"not authored\" is not a malformed predicate, and `structuralConditionRefusal` returns nothing for them. Whether the value path should say the same thing, or should refuse an absent envelope outright, is exactly the decision here.\n\n## Two defensible shapes, for whoever triages\n\n- **A** — `valueEnvelopeRefusals` refuses `null` / `undefined` with `ASSIGNMENT_VALUE_ENVELOPE_REFUSAL`, so registration and evaluation keep sharing one set and both refuse an absent envelope. Costs: `registerFlow` would start refusing an authored `null` in a declared `value` slot, which nothing measures today.\n- **B** — `evaluateValueEnvelope` treats an absent envelope the way the condition path treats an unauthored condition, returning `undefined` rather than throwing. Costs: a silent `undefined` in a variable surfaces three nodes later as an empty notification, which the method's own docblock argues against for computed values.\n\n⚠️ Un-measured, stated as a gap: whether any caller outside this repo passes an absent envelope, and whether a `value` slot can hold an authored `null` after `FlowSchema.parse`.\n\nRelated, not a duplicate: #16038 is the predicate path and a different refusal sentence.\n"
+}

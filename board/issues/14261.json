@@ -1,0 +1,33 @@
+{
+  "number": 14261,
+  "kind": "issue",
+  "title": "[Decision] `os validate --json` / `os compile --json` 的 `specVersionGap` 键是否重命名为 `protocolVersionGap`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T16:41:08Z",
+  "updated_at": "2026-09-09T21:58:27Z",
+  "closed_at": "2026-09-09T21:57:29Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14261",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), R64, session `session_015YPiiDdw96RGS25WLctCQP`, out of the #13860 delivery (PR #14260). Raised by the implementing dev as an open question; ⛔ not adjudicated by this seat.\n\n⚠️ **`domain:*` / `type` / priority are triage's to produce** — filed without them deliberately. The triage seat is currently vacant (#6015).\n\n## 背景:#13860 刚刚退役了 `specVersion` 这条轴,但**输出键名留了下来**\n\nPR #14260 实施总监席裁决 B:`checkSpecVersionGap` 改读 `manifest.engines.protocol`,`specVersion` 从 stack config 的 CLI 词汇中退役,三个命令(validate / doctor / compile)同笔。\n\n但 `--json` 载荷的**已发布键名** `specVersionGap` 原样保留(值形状不变)。实施者刻意没动它,理由成立:重命名一个有 pin 消费者(三个 e2e 套件)的机器面是**破坏性变更,没有任何裁决覆盖**。本卡就是把那个被正确推迟的问题独立提出来。\n\n## 选项\n\n- **A — 保持 `specVersionGap`(现状,PR #14260 所做)。** 零破坏;三个 e2e 套件与一份既有 changeset 继续 pin 它不变。**代价**:agent 读到这个载荷,会看到一个以 `specVersion` 命名的键,并可能据此推断存在一个可写的 `manifest.specVersion` —— 而**这正是 #13860 本身的成因机制**(一份已发布技能曾叫读者去读 `manifest.protocol`,一个不存在的幽灵键)。\n- **B — 重命名为 `protocolVersionGap`。** 一条轴一个名字。**代价**:对有 pin 消费者的机器面的破坏性变更,需改三个 e2e 套件。\n- **C — 双键并发一段过渡期。** ⛔ **实施者当场否决,本席同意**:重复键正是 contract-first 禁止的宽容消费端扩张,且它**加倍**了防 AI 犯错这条轴正在努力缩小的面。且维护者 2026-08-27 已裁「项目在创业阶段…短期不考虑渐进」——分阶段窗口默认不设。\n\n## 四维分析\n\n- **实际业务需求** — **零实测拉动**。无人提出过。`specVersionGap` 的消费者只有仓内三个 e2e 套件,未测到任何外部消费者受此名困扰。⇒ 指向 **A/defer**。\n- **项目长远合理性(权重 ≥50%,维护者 2026-09-01 裁)** — **指向 B**。一条已声明的版本轴优于两条,而现在输出面上留着一条已退役轴的名字,是 #9264 刚刚付清过的那种歧义在**输出侧**的残留。这条轴按其本义读(缩小特例与契约增生),B 是缩小。\n- **防 AI 写代码犯错** — **指向 B,而且这是本卡存在的唯一理由**。声明即强制的反面就是「输出里出现一个运行时不接受的键名」。#13860 的病根正是幽灵键面包屑;留着 `specVersionGap` 等于在输出面上留一枚同款面包屑。⚠️ 但要诚实:输出键**写不进 config**,所以危害强度低于当初那条被修正的技能行 —— 它误导的是读者的推断,不是直接产生一个被静默丢弃的授权键。\n- **创业阶段不扩散需求** — **中性偏 A**。重命名是面的修正而非增长,不扩散;但它是**破坏性动作**,而破坏性动作在创业阶段从紧。\n\n## 本席推荐:**A(defer),记录在案,重开自由**\n\n按分歧推荐序(维护者 2026-08-27)——**零实测拉动 ⇒ 荐不扩散**:没有人被这个键名绊倒过,而 B 要付一次破坏性变更 + 三个 e2e 套件的编辑。长远轴虽指向 B 且权重 ≥50%,但它**设的是推荐的下限,不是授权**;在零拉动下它不足以买下一次破坏。\n\n⇒ 建议**保持 A**,把残留记录在本卡上,并在下一个 major 边界(那时破坏是免费的)重新提出 B。届时重开这张卡即可,⛔ 无需重新论证。\n\n⛔ **无论四棱是否同向,本席都不代裁**:重命名已发布的机器面是**协议/公开契约变化类**,坐在人工地板上。置信门②不成立 ⇒ 原样进箱。\n\n## 四棱卡面\n\n| 棱 | 读数 | 指向 |\n|:--|:--|:--|\n| 实际业务需求 | 零实测拉动,无人提出;消费者仅仓内三个 e2e 套件 | **A / defer** |\n| 项目长远合理性(≥50%) | 一条轴一个名字;输出面留着已退役轴名是 #9264 类歧义的残留 | **B** |\n| 防 AI 写代码犯错 | 幽灵键面包屑,与 #13860 的成因同款;⚠️ 强度较低(输出键写不进 config) | **B** |\n| 创业阶段不扩散需求 | 重命名不扩散,但属破坏性动作,创业阶段从紧 | **A / defer** |\n\n**四棱分裂(2 : 2,长远轴权重领起指向 B,拉动定向指向 A)** ⇒ ⛔ 置信门①不成立,叠加人工地板 ⇒ 必须由维护者裁。\n\n**维护者只需回答一句:** 现在为「一条轴一个名字」付一次破坏性重命名,还是留到下一个 major 边界一起做?\n\n## Refs\n\n- #13860 — 退役 `specVersion` 读取的母卡(总监裁 B,维护者「同意」)\n- PR #14260 — 实施;保留了 `specVersionGap` 键并把本问题挂旗\n- #9264(已关)— 相邻的 template 侧双协议版本歧义修复\n- #14192 — `ManifestSchema` 静默丢弃未知键(authored 侧的一般类,与本卡的 output 侧互补)"
+}

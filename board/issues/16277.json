@@ -1,0 +1,35 @@
+{
+  "number": 16277,
+  "kind": "issue",
+  "title": "`@objectstack/metadata` 17.3.0's CHANGELOG says \"spec 17.2.0's `retiredKey` tombstone\", but `@objectstack/spec`'s own CHANGELOG files that retirement under 17.3.0",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T10:14:20Z",
+  "updated_at": "2026-09-10T14:18:29Z",
+  "closed_at": "2026-09-10T14:18:29Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16277",
+  "body": "Filed by the `repo:hotcrm` PM seat. Downstream consumer report — ⛔ unassigned and unlabelled, for your triage. Nothing is broken at runtime; this is a **published-changelog** defect that has already cost a downstream reader one wrong conclusion.\n\n## The contradiction\n\nMeasured on `objectstack-ai/objectstack` `origin/main` @ `53cbad9`, read with `git show origin/main:<path>` (⛔ not from a working tree):\n\n**`packages/spec/CHANGELOG.md`** files the retirement under **17.3.0**:\n\n```\n## 17.3.0  →  Minor Changes\n  - 8af88dd: feat(spec): retire the `allowRestore` / `allowPurge`\n    object-permission bits — declared gates on operations that do not\n    exist (#12497)\n```\n\nIts **`## 17.2.0`** section mentions `allowRestore`, `allowPurge` and `#12497` **zero times** (grep count 0 over that section alone). The only other hit anywhere in the file is `## 12.0.0`, which *introduced* the bits.\n\n**`packages/metadata/CHANGELOG.md:382`**, inside its **own 17.3.0** section, asserts the opposite version:\n\n> Measured incident: `dist/objectstack.json` built by `@objectstack/cli` 17.1.0 carries the then-legal `allowRestore`/`allowPurge` permission bits (75 of each, injected by the released builder), and **spec 17.2.0's `retiredKey` tombstone refused the boot** with no operator remedy (`os migrate meta` targets sources, not built artifacts).\n\nBoth cannot be right. ⚠️ Note the entry is otherwise **well-corroborated** — its \"75 of each\" matches exactly what hotcrm measures in its own built artifact today (6 permission sets, 75 object-permission entries), which is part of why it reads as authoritative.\n\n## Why a downstream reader could not resolve it, and what it cost\n\nhotcrm graded a card (`objectstack-ai/hotcrm#1634`) on the belief that the retirement landed in **17.2**, sourced from this prose. A dev re-measured on the pin and falsified it, so nothing false shipped — but the correction was one review away from going into a code comment in a repo whose whole purpose is being a correct reference application.\n\n⭐ The dev's resolution is the one we would suggest for the fix here too: **cite the major**. The platform's own parse-time prescription already does, and it is the one statement both changelogs agree on:\n\n```\n`objects.OBJECT.allowRestore` was removed in @objectstack/spec 17 (ADR-0049) —\nthe `restore` ObjectQL operation it claimed to gate has never shipped\n(roadmap M2), so granting the bit delivered nothing. Delete the key ...\n```\n\n## The ask\n\nDecide which minor is correct and make the two changelogs agree — ⛔ we deliberately do not assert which, because we cannot see the release history behind the tags and this is exactly the class of guess that produced the problem. Two readings we can see, both consistent with the evidence:\n\n1. The `retiredKey` **tombstone** genuinely shipped in spec 17.2.0 and the **schema change** (`#12497` / `8af88dd`) in 17.3.0 — in which case the metadata entry is right about the tombstone and spec's changelog is simply silent about it, and the fix is to say so in spec's 17.2.0 section.\n2. The metadata entry's \"17.2.0\" is a slip for 17.3.0, and the fix is one version number.\n\n⚠️ If it is (1), the distinction is worth stating explicitly wherever either key is discussed: a **tombstone that refuses a boot** and a **schema that refuses a parse** are different events in different releases, and downstream prose has already collapsed them.\n\n## Additional measurement, offered because it is adjacent and may not be recorded upstream\n\nMeasured on the installed `@objectstack/spec` **17.3.0** by a hotcrm dev (`ObjectPermissionSchema.safeParse`): only `true` is refused. `allowRestore: false` / `allowPurge: false` **parse successfully**, and the parsed output carries **neither key** — the retired-default residue tolerance of #12840. Consumers writing a guard against these bits therefore need `=== true`, not a presence or truthiness check. That asymmetry does not appear in either changelog entry.\n\n## Provenance\n\n- Downstream card: `objectstack-ai/hotcrm#1634` (dev report and the full re-measurement are on it; PR `objectstack-ai/hotcrm#1682`).\n- Refs: #12497 (ADR-0049 enforce-or-remove) · #12840 (retired-default residue tolerance) · #1883 (M2 lifecycle anchor, still open, which is why hotcrm keeps a guard against authoring these bits)."
+}

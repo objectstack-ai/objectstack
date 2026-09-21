@@ -1,0 +1,30 @@
+{
+  "number": 19601,
+  "kind": "issue",
+  "title": "[Decision] 裁决批 #132 item 2 ② 的「a per-app bundle carrying `settings` was inert」被实测推翻 —— 「不做渐进弃用窗口」是否重裁,以及 Studio 那道门要不要一起收",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-21T14:40:01Z",
+  "updated_at": "2026-09-21T18:13:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19601",
+  "body": "Path: P2 | none | 对向事实 — 裁决批 #132 item 2 letter ② 的一句前提被实测推翻\n\n⏱️ Filed by the `domain:spec` execution seat 2 (session `session_01UDXER3sdqfeVYpEWZs5mZx`) at 2026-09-21T14:40Z, under the standing clause: 裁决明令的动作实施中测出对向事实 ⇒ 照字面执行,冲突立成 `needs-user-decision` 卡,该 PR ⛔ 不挂 auto-merge 留异议窗口. PR #19600 is therefore ⛔ NOT enqueued and ⛔ NOT auto-merged pending your word.\n\n⛔ The ruled DIRECTION was executed literally and is not in question. Two linked questions follow from one measurement.\n\n> ⚠️ **本正文于 2026-09-21T16:20Z 按第一手实测重写过一次。** 初版的测量段说应用包的 `settings` 会**覆盖**平台文案 —— 那是错的,来源是一份后来因跑在已退役档位而**整体作废**的复审记录(台账 #19603)。现在的测量段来自 dev 在 PR 头 `b33ea66cb3` 上亲手跑的证伪器与两个亮控,⛔ 不再引用任何作废记录。更正说明见本卡评论。\n\n## The measurement — first-hand, ⛔ not adopted from any review record\n\nRuling ② (comment `5653315643` on #15178, decision batch #132 item 2) item 4 reads: 「a per-app bundle carrying `settings` **was inert**, so the conversion drops the group and records a note; no deprecation window」.\n\n**「Inert」 is still false** —— 那个键确实生效、确实被服务。但它做的事不是覆盖:\n\n| 读数 | 结果 |\n|:--|:--|\n| **主结论** —— 真实加载顺序(app 在 kernel Phase 2、平台在 Phase 3 的 `kernel:ready`),两边都定义的键 `mail` | **平台的值胜出** ⇒ app 那份 **不是** override |\n| **亮控 ①(仪器对顺序敏感)** —— 同一脚本把顺序反过来 | 同一个键变成 **app 的值** ⇒ 主结论是关于顺序的事实,不是夹具产物 |\n| **亮控 ②(仪器活着)** —— 平台不翻译的命名空间 `app_only_ns` | 返回 **app 的值**(不是 manifest 字面量)⇒ app 那份真的被加载、真的在服务,空结果无处藏身 |\n| **删掉之后本 PR 实际发生什么** | 两边都有的键:**屏幕上不变**;只有 app 有的键:回落到 **manifest 自己的英文字面量** |\n\n机制:`packages/core/src/kernel.ts` 先 Phase 2「Start plugins」再 Phase 3 `kernel:ready`;`AppPlugin.start()` 直接调 `loadTranslations`(无 hook),而 `service-settings` 把自己的 `loadTranslations` 包在 `kernel:ready` 钩子里;`deepMerge` 把叶子给**后到**的那一份。\n\n⇒ 应用包里的 `settings` 是一个**补缺者**(gap filler):只在平台包对那个 key、那个语言没有字符串时才显示。\n\n## Question 1 — does the corrected fact reopen 「no deprecation window」?\n\nThe ruled remedy is unchanged either way; what moves is how visible the removal is.\n\n- **A.** Keep the ruling as issued. 「Inert」 was a supporting belief, not the subject; the subject is the namespace separation. The shipped records (ADR-0087 entry, conversion docblock, changeset) are written on the MEASURED reason rather than reciting the false one, which is already done on the branch. — *seat's lean, and the dev's*\n- **B.** Re-rule item 4 on the corrected fact, because 「no deprecation window」 (「创业阶段不渐进」) was decided against a belief that nothing would visibly change.\n\n⭐ **本次重写把天平推向 A。** 初版基于「覆盖」时,删键意味着所有这么用的部署**屏幕文案回到平台版本**;实测之后,两边都有的键**根本不变**,只有 app 独有的键回落到 manifest 的英文字面量。可见面比初版小得多,所以 B 的理由也比初版弱。\n\n## Question 2 — the refusal reaches one door and not the other\n\nFrom the moment #19600 lands, `packages/spec` declares `settings` platform-only on the **file-authored bundle**, while **`TranslationItemSchema`** — the Studio metadata door — still accepts it.\n\n⭐ **这一问被实测**加强**了,不是削弱。** 两道门的机制不同:Studio 那道门经 `authored-translation-sync` 的 `replaceAuthoredTranslations` 写进一个**独立图层**,`getTranslations` 以 `deepMerge(static, authored)` 服务、authored 作 source ⇒ **不论启动顺序,authored 恒胜**。也就是说:本 PR 关掉的那道门只能补缺,而**真能覆盖平台文案的那道门还开着**。\n\n- **A.** Leave the item door open. The ruling names the per-app BUNDLE only; a follow-up card decides the item door on its own evidence.\n- **B.** Narrow the item door too, as a ruled follow-up: `settings` leaves `TranslationItemSchema`, its liveness row goes, the D2 conversion learns the item shape, and the accept-set narrowing is declared a second time. — *the dev's lean, strengthened by the measurement above; the file's own docblock records that retiring at one door and not the other is the asymmetry #3778 got wrong*\n- **C.** Rule the item door deliberately OPEN — platform settings copy IS admin-overridable at runtime by design — in which case the file door's refusal owes a sentence saying so, rather than reading as an oversight.\n\n## 维护者速读\n\n**发生了什么** — 你在批 #132 裁的「把翻译包拆成平台包和应用包」已按字面实现,PR #19600 在飞。执行时实测发现裁决里的一句依据不成立:原话说应用包写 `settings` 是「没用的」,实际上它**生效**。\n\n⚠️ **这张卡先前告诉你它会「覆盖平台文案」,那句是错的,现已按第一手实测改正**:它只在平台没有对应文案时才补空;两边都有的键,**平台永远赢**。\n\n**为什么还要问你** — 方向不受影响,但两处跟着动:①「不做渐进弃用窗口」当初是基于「反正没影响」决定的;现在的实测是「影响比原先说的小得多,但不是零」—— 只有平台没翻译的那些键会回落到英文字面量。②这次只堵了文件那道门;Studio 那道门还开着,而实测表明**那道门才是真能覆盖平台文案的**,绕一下就到。\n\n**风险与代价** — ①选 A 零成本(记录已按实测原因写好);选 B 要补窗口、延后落地,而实测把 B 的理由削弱了。②选 A 零成本、留一张后续卡;选 B 是第二次收窄加一次账本编辑,是决策不是实现;选 C 只要补一句话。\n\n**你要做的** — 两个字母即可:**Q1 选 A 还是 B;Q2 选 A、B 还是 C。**\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

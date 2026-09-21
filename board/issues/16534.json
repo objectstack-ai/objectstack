@@ -1,0 +1,35 @@
+{
+  "number": 16534,
+  "kind": "issue",
+  "title": "client SDK: a bearer-mode `ObjectStackClient` is silently signed out by `auth.twoFactor.disable()`, the enrolment-lane `twoFactor.verifyTotp()` and `changePassword({ revokeOtherSessions: true })` — the server rotates the session and the SDK stores neither the echoed token nor `set-auth-token`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "auth",
+    "domain:cli",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-07T07:49:56Z",
+  "updated_at": "2026-09-09T16:17:14Z",
+  "closed_at": "2026-09-09T16:16:07Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16534",
+  "body": "Found while binding the `auth.*` return types for #14313 (not fixed there: that card is scoped to narrowing published return types, and this is a runtime behaviour of the SDK's credential handling).\n\n## Reproducible defect\n\n`ObjectStackClient` authenticates every request with `Authorization: Bearer` from the token `auth.login()` stored (`this.token`). Three better-auth routes ROTATE the caller's session on success — they mint a new session, install it in `Set-Cookie` (and the bearer plugin's `set-auth-token` response header), and delete the old row:\n\n- `POST /two-factor/disable` — answers `{ status: true }` only; the new token rides the cookie / `set-auth-token` header.\n- `POST /two-factor/verify-totp` on the ENROLMENT lane (a signed-in user confirming a new factor) — answers `{ token, user }` with the live token (plugin-auth's `two-factor-rotated-token-echo` repairs the vendor's stale echo).\n- `POST /change-password` with `revokeOtherSessions: true` — answers `{ token, user }` with the new token.\n\nThe SDK reads none of them: `packages/client/src/index.ts` has zero reads of the `set-auth-token` header (measured with `grep`), and `twoFactor.disable`, `twoFactor.verifyTotp` and `changePassword` all `return res.json()` without touching `this.token`. So after any of the three, the SDK keeps presenting the DELETED session's token and its next call answers `401 UNAUTHORIZED`.\n\nMeasured on 2026-09-07 against the real `AuthPlugin` mounts over a real Hono app with a real `AuthManager` (better-auth 1.7.2) on a real `SqlDriver` (better-sqlite3), driven THROUGH the real `ObjectStackClient` with only the socket stood in for (`fetch: (u, init) => app.request(u, init)`):\n\n```\nclient.auth.login({ email, password })          -> RESOLVED { token: \"hz8l…\", user }   (SDK stores the token)\nclient.auth.twoFactor.enable({ password })       -> RESOLVED { totpURI, backupCodes }\nclient.auth.twoFactor.verifyTotp({ code })       -> RESOLVED { token: \"wXqy…\", user }   (rotated; SDK still holds \"hz8l…\")\n   (the probe re-set client.token by hand here to continue)\nclient.auth.twoFactor.disable({ password })      -> RESOLVED { status: true }           (rotated again; nothing echoed)\nclient.auth.deleteUser({ password })             -> REJECTED 401 UNAUTHORIZED           (the very next call)\n```\n\nThrough the raw route with a cookie jar the same `disable` call stages a fresh `session_token` cookie (one `Set-Cookie`), so a browser caller is fine; only the bearer path — the SDK's own mode — is signed out.\n\n## Expected\n\nThe SDK keeps the session it was just handed: store the token echoed by `changePassword` / `verifyTotp` when present (the way `login()` and `refreshToken()` already do), and read the bearer plugin's `set-auth-token` response header for the routes that echo no token (`twoFactor.disable`) — or document that bearer callers must re-login after these calls.\n\n## Where\n\n- `packages/client/src/index.ts` — `auth.changePassword`, `auth.twoFactor.verifyTotp`, `auth.twoFactor.disable`, and the `fetch` wrapper (no `set-auth-token` read).\n- Vendor mechanism: `better-auth/dist/plugins/two-factor/index.mjs` (`disableTwoFactor` creates a new session and deletes the caller's), `two-factor/totp/index.mjs` (enrolment rotation), `api/routes/update-user.mjs` (`changePassword` with `revokeOtherSessions`).\n\nDedup: open `domain:cli`, `domain:services` and `domain:runtime` cards listed via REST and grepped for `set-auth-token`, `twoFactor.disable`, `two-factor/disable` and bearer/rotation — zero hits, with the control terms `exported-any-returns` and `better-auth` answering."
+}

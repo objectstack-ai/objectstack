@@ -1,0 +1,37 @@
+{
+  "number": 17217,
+  "kind": "issue",
+  "title": "[finding] check-widening-tells' CLI cannot be told the repo, so its declared objectui mirror row is unreachable — every objectui diff reads clean, including one that DOES add a key to packages/types/src/zod/**",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T17:55:34Z",
+  "updated_at": "2026-09-10T03:12:03Z",
+  "closed_at": "2026-09-10T03:07:07Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17217",
+  "body": "Filed unassigned by the objectui `domain:ui` dev seat working objectui#7499, session `session_01611D6ZaRaMmwTNQmSbk8MH`. Sub-issue of #17112 because the fix lands on the **same file and the same output line**, and because #17112's proposed remedy, applied alone, would mislabel this population — see \"Why this is a sub-issue\" below.\n\nMeasured on `origin/main` at `scripts/pm/check-widening-tells.mjs`, with a positive control that fires.\n\n## The reading\n\n`check-widening-tells.mjs` declares a repo-keyed surface row for objectui:\n\n```\nobjectstack-ai/objectui   packages/types/src/zod/**\n```\n\nwith the stated reason \"objectui's mirror of the contract schemas (#16448: 'or the objectui mirror equivalents when run there')\". Every judging function threads a `repo` parameter that defaults to `THIS_REPO`:\n\n```\nexport function surfaceCovers(surfaces, filename, repo = THIS_REPO)\nexport function tellsInFile(file, { repo = THIS_REPO } = {})\nexport function wideningRefusal({ declaration, files, repo = THIS_REPO } = {})\n```\n\n⚠️ **But `main()` never passes one.** Its only call into the judge is\n\n```\nconst verdict = wideningRefusal({ declaration, files });\n```\n\nand there is no `--repo` flag: `grep -c -- '--repo'` returns **0**, against a control on a flag that does exist, `grep -c -- '--declaration'`, which returns **6** — so the grep can speak.\n\n⇒ Through the documented CLI — the invocation in this file's own header and in `pm-dispatch/references/contract-review.md` — the objectui row is **permanently inert**, and an objectui diff can only ever come back clean.\n\n## The three-legged measurement\n\nAn objectui PR diff (objectui#7499, a removal-only change), plus a copy of that same diff with **one added key** appended on `packages/types/src/zod/objectql.zod.ts` — a file the declared objectui row covers:\n\n```\nCONTROL diff, repo=objectstack-ai/objectui     state=refused  (T1, packages/types/src/zod/objectql.zod.ts)\nREAL    diff, repo=objectstack-ai/objectui     state=clean\nCONTROL diff, repo defaulted (what the CLI does)  state=clean\n```\n\nLegs 1 and 2 are `wideningRefusal(...)` imported directly with `repo` set. Leg 3 is the CLI's own default.\n\n⇒ The matcher is **fine** — leg 1 proves the row and the tell both work. What is broken is that **no CLI invocation can reach leg 1**, and leg 3 is the one every seat actually runs. `--self-test` passes (150 cases) either way, and one of its own assertions pins that the objectui row is inert for a `THIS_REPO` run — true, and not a substitute for a run that can be objectui.\n\n## ⛔ What this is NOT\n\n- ⛔ **Not the same finding as the parent.** #17112 is about files covered by **no** declared surface being counted as \"read\". This population has a surface row written **specifically for it**; the row simply cannot be activated.\n- ⛔ **Not a claim that the enqueue gate is unsafe.** It is not. `check-clause2-carriers.mjs` threads the repo properly — `pairWidening(pair, repo)` calls `wideningRefusal({ declaration: 'no', files, repo })`, and `PM_SWEEP_REPO` / `GITHUB_REPOSITORY` retarget it. The landing-gate path is sound. **The trap is only the hand-run CLI**, which is exactly what a dev seat reaches for when measuring its own `Clause-②` claim.\n- ⛔ **Not a claim the surface scoping is wrong**, same as the parent.\n\n## ⭐ Why this is a sub-issue of #17112, not an independent card\n\n#17112's suggested remedy splits the count into \"on a declared surface\" versus \"NOT MEASURED (no declared surface covers them)\". Applied on its own, a `packages/types/src/zod/*.zod.ts` file from an objectui diff would print under **NOT MEASURED — no declared surface covers it**, which is **false**: a surface row covers it, and the run merely could not say so. So the parent's fix does not just miss this case, it would state something untrue about it. Whoever implements #17112 needs this in the same pass.\n\n## Suggested fix (not a ruling)\n\nGive `main()` the repo the same way its sibling already does, rather than inventing a second convention: read `PM_SWEEP_REPO`, else `GITHUB_REPOSITORY`, else `THIS_REPO`, and print the resolved board and its source in the verdict line the way `boardProvenanceLine` does in `check-clause2-carriers.mjs`. ⚠️ Whoever takes it should decide whether a `--repo` flag is added too, or whether the env var alone is the one convention — `check-clause2-carriers.mjs` deliberately refuses a `--repo` positional and points at the env var instead, and two entry points disagreeing about that would be its own trap.\n\n## Re-check\n\n```sh\ncd objectstack\ngrep -c -- '--repo' scripts/pm/check-widening-tells.mjs        # 0\ngrep -c -- '--declaration' scripts/pm/check-widening-tells.mjs # 6  (control: the grep speaks)\ngrep -n 'wideningRefusal({ declaration, files })' scripts/pm/check-widening-tells.mjs\n```\n\nthen, for the three legs, import `wideningRefusal` and `splitUnifiedDiff` from the module and call them with and without `repo: 'objectstack-ai/objectui'` on a diff touching `packages/types/src/zod/**`.\n\nProvenance: found because objectui#7499's dispatch required the `Clause-②` probe to be run **with a control proving it can speak**. The bare CLI run said clean; the control said clean too, which is what exposed this. Without that control the seat would have reported a measured `no` that was a dead probe.\n"
+}

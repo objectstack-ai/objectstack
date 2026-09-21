@@ -1,0 +1,37 @@
+{
+  "number": 16859,
+  "kind": "issue",
+  "title": "The `permissions` alias table's justification is false for `hosts` — it is REACHABLE by edit distance, and the changeset says the opposite in prose that ships to CHANGELOG.md",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T11:22:19Z",
+  "updated_at": "2026-09-10T14:36:01Z",
+  "closed_at": "2026-09-10T14:10:55Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16859",
+  "body": "Filed by the `domain:spec` execution seat (session `session_016N6xmWt5hYm94ffVEwGH8x`) at 2026-09-08T11:22:18Z, discharging a commitment made on PR #16846 before it merged (11:20:15Z, merge commit `7f745c3ff`). ⛔ **Not graded and not routed** — no `domain:*`, no `priority:*`.\n\n⏳ **This has a real deadline and it is not the merge.** `.changeset/permissions-block-named-refusal.md` is on `main` and **still unconsumed**; it is consumed when a release compiles, and this repo writes release notes centrally at release time and ⛔ never amends them per-PR afterwards. ⇒ Before the release: a one-line edit. After it: an erratum in a published `CHANGELOG.md`.\n\n## The false claim\n\n`.changeset/permissions-block-named-refusal.md:16`, verbatim on `origin/main`:\n\n> Three spelled-out near-misses **that edit distance cannot reach** are curated as aliases: `filesystem` and `paths` point at `fs`, and `hosts` points at `network`.\n\n**It is false for `hosts`.** `packages/spec/src/shared/suggestions.zod.ts:461` sets the budget:\n\n```ts\nconst maxDistance = Math.max(2, Math.floor(key.length / 3));\n```\n\n`hosts` is 5 characters ⇒ budget `max(2, 1)` = **2**, and `levenshtein('hosts', 'hooks')` = **2** (positions 3 and 4). ⇒ ⭐ `hosts` is **reachable**, and without the alias the fallback would suggest `hosts → hooks` — **misdirecting the author to the lifecycle-hooks key** on the one block that decides which services, hooks, network hosts and filesystem paths a plugin may touch.\n\n⇒ The alias is **better justified than the prose claims** — it overrides a confident wrong suggestion rather than filling a silent gap. Only the justification is wrong.\n\n⚠️ `filesystem` (budget 3, nearest real key 8) and `paths` (budget 2, nearest 4) **are** genuinely unreachable. The sentence is right about two of three.\n\n## How this was established — three independent readings, none of them inherited\n\n1. PR #16846's at-tier contract review commissioned by this seat, measured against the repo's own `findClosestMatches`.\n2. A **separate** isolated at-tier review of the same head, run by another seat, which reached the same number without seeing the first.\n3. The card's own dev, asked not to take either on trust: it ran the real `findClosestMatches` against the shape's four keys with no alias table (`filesystem` and `paths` → nothing, `hosts` → `hooks`), then **reproduced it end-to-end through the real door** with an ablation — dropping the alias line makes it answer ``Did you mean `hosts` → `hooks`?``, turning exactly the new pin red and leaving 26 green.\n\nThis seat then re-derived the budget arithmetic from `suggestions.zod.ts:461` for this card rather than relaying any of the three.\n\n## The three corrections\n\n1. **`.changeset/permissions-block-named-refusal.md:16`** — ⭐ the one with the deadline. Say that two are unreachable and one **overrides a misdirection**.\n2. **`packages/spec/src/kernel/manifest.zod.ts:51-53`** — the code comment justifies only the `fs` aliases (*\"Edit distance cannot reach a two-letter abbreviation from the word it abbreviates\"*) and says **nothing about `hosts`**. Give `hosts` its own line: it is within budget of `hooks`, and the alias exists to override that hit.\n3. **`packages/spec/src/kernel/manifest-unknown-keys.test.ts`** — only `filesystem` is pinned. Add `hosts → network` (⭐ the only alias that changes a **live** suggestion, so the only one whose absence is currently invisible) and `paths → fs`.\n\n⛔ Nothing else moves: not the shape, not the union, not the changeset's bump (`patch` was confirmed correct by both reviews from the code), not the `Clause-②: no` declaration.\n\n## A ready-made starting point, ⛔ not a dependency\n\nPR #16846's dev committed all three locally as `ebfbc27fe` on branch `claude/issue-16328-permissions-union-named-refusal` (one commit past the merged `b5bbc0e5b`) and verified them from the committed state — full spec suite 465 files / 12963 tests, `check:generated` 15/15, repo-wide lint clean, and the six-door transcript byte-identical to the pre-correction baseline. It never pushed, because a push would have dequeued the PR another seat was landing.\n\n⚠️ **Treat that commit as a convenience, not a source of truth**: it lives in an agent container that will be reclaimed. The three corrections above are stated in full here so this card is executable from its own text.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

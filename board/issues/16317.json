@@ -1,0 +1,35 @@
+{
+  "number": 16317,
+  "kind": "issue",
+  "title": "[finding] `os generate migration` emits no declared index at all — a generated table carries none of the object's `unique` constraints, while driver-sql creates them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T14:06:26Z",
+  "updated_at": "2026-09-09T18:07:29Z",
+  "closed_at": "2026-09-09T18:06:08Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16317",
+  "body": "Found while closing the keyed half of #16091 (PR #16298). Not fixed there: that card is about the COLUMN, this is about the INDEX.\n\n## The measurement\n\nLive PostgreSQL 16.13, one object driven through all three producers — `driver-sql` via `initObjects`, `os generate migration --format sql` via `db.raw`, and the typescript format by importing the emitted module and calling `up(db)`. Object:\n\n```ts\n{ name: 'probe', fields: { keyed_unique: { type: 'text', unique: true, maxLength: 100 } } }\n```\n\n`pg_indexes` for each producer's schema afterwards:\n\n```\ndriver   probe_pkey, uniq_probe_keyed_unique\nsql gen  probe_pkey\nts gen   probe_pkey\n```\n\nThe column itself now agrees in all three (`character varying(100)`, after #16298). The CONSTRAINT does not exist in either generated table.\n\n## Why it matters, and why it is sharper now\n\nTwo rows with the same `keyed_unique` value are refused by the platform's table and accepted by both generated ones. A scaffold that creates the table for an object silently drops a uniqueness guarantee the object declares, and nothing reports it — the same shape as #16091's own hard-failure class, one declaration over.\n\nIt is sharper after #16298 because the generators now READ `field.unique` and `indexes[]` to size the column (`indexedKeyColumns`' key set is what the driver's text-family arm branches on). The key set is therefore already computed in `generate.ts`; the index it implies is still not emitted. `driver-sql`'s own normalizers are `uniqueIndexesFromFields` (field-level `unique`, ADR-0120 D1/D3 scoping) and `normalizeDeclaredIndex` (object-level `indexes[]`), both exported from `@objectstack/driver-sql`.\n\n## Not free to answer, which is why this is filed rather than fixed\n\n- The ADR-0120 organization-scoped form is `COALESCE(organization_id, '__global__')` as a key part — an expression index. Whether the SQL format should emit that expression, and whether the typescript format can express it through knex at all, is a decision.\n- `packages/cli` production modules may not statically value-import a driver (#5726), so the naming and scoping rules would be transcribed and pinned, as the widths already are.\n- `--format sql` is PostgreSQL-only (#15521); index DDL is more dialect-divergent than column DDL.\n\n## Reproduce\n\nDrive the object above into three PostgreSQL schemas, one per producer, and read `pg_indexes` for each."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 16322,
+  "kind": "issue",
+  "title": "Analytics drivers (memory, SQL) align `dateRange` string handling to the closed preset vocabulary (driver half of #16041)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T14:18:18Z",
+  "updated_at": "2026-09-09T12:11:30Z",
+  "closed_at": "2026-09-09T11:53:28Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16322",
+  "body": "Driver half of #16041, split by director ruling (decision batch #57, 2026-09-06, option A — contract first).\n\n**Blocked-by:** #16041 (spec half — `AnalyticsQuerySchema.dateRange` string arm closes to the `date-range-presets.ts` vocabulary plus `today`; unrecognised strings are refused with the ADR-0112 envelope; the spec example is corrected). This card unblocks when the spec change lands.\n\n## Scope\n\nOnce the contract is closed:\n\n- `driver-memory` analytics: an unparseable / unrecognised `dateRange` string is refused with the ADR-0112 envelope emitted by the schema, never silently accepted as \"matches everything\".\n- SQL drivers (postgres, sqlite, mysql — whichever implement the analytics path): same refusal, same envelope; the preset vocabulary lowers to the same window boundaries the memory driver uses, so results agree across drivers.\n- Conformance: one shared test fixture that runs the preset list plus a handful of unrecognised strings through every analytics driver and asserts identical accept/refuse outcomes and identical window boundaries for the accepted presets.\n\n## Out of scope\n\n- Changing the vocabulary itself — that is #16041 (spec).\n- Any new preset. If a driver needs one, it is a spec card, not a driver patch (「本项目以协议为基准。所以开发应该对其协议，协议有问题应该立卡修改协议」).\n\n## Acceptance\n\n- [ ] memory driver refuses unrecognised `dateRange` strings with the ADR-0112 envelope\n- [ ] SQL drivers refuse identically\n- [ ] shared conformance fixture passes on every analytics-capable driver\n- [ ] changeset present"
+}

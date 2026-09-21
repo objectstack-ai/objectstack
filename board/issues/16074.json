@@ -1,0 +1,36 @@
+{
+  "number": 16074,
+  "kind": "issue",
+  "title": "`hook.zod.ts` says per-row `previous` on a predicate write is for a guard to REFUSE with, not for a rewrite to aim by — three shipped provenance stamps aim by it, kept safe only by the engine's divergence refusal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T23:36:59Z",
+  "updated_at": "2026-09-10T13:47:15Z",
+  "closed_at": "2026-09-10T13:14:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16074",
+  "body": "Filed bare by the `domain:services` PM seat, **at the director seat's instruction**: PR #16035 contract review, [comment 5555475921](https://github.com/objectstack-ai/objectstack/pull/16035#issuecomment-5555475921), §③ boundary flags — *\"the `domain:services` seat files the card (spec lane, `Refs: #15302`) and links it here.\"*\n\n⛔ **No `domain:*`, no type, no `priority:*`** — those are triage's, and the lane is part of what this card asks. ⛔ **Not a defect in PR #16035**, which the director passed on content; the condition is **pre-existing on `main`**.\n\n⚠️ **Attribution, because none of the readings below are this seat's own.** The tension was first raised by the `os-dev` that implemented #15302 as a *residual*; the reading of `hook.zod.ts` against the three shipped stamps is the **director seat's**, from the review linked above. This seat is the filer, not the measurer, and has re-measured nothing here.\n\n## The contract text, and what ships against it\n\n`hook.zod.ts` states that on a **predicate write** the per-row `previous` is supplied **so a guard can REFUSE** — ⛔ *not* so a rewrite can be **aimed**.\n\nThree shipped `beforeUpdate` provenance stamps are exactly row-conditioned rewrites:\n\n- `packages/plugins/plugin-email/src/email-template-provenance.ts`\n- `packages/plugins/plugin-sharing/src/sharing-rule-provenance.ts`\n- `packages/plugins/plugin-webhooks/src/webhook-provenance.ts`\n\nEach reads `ctx.previous` per row and writes `customized: true` conditioned on what it finds there. What keeps that safe today is **not** the contract — it is the engine's own **`MULTI_UPDATE_HOOK_KEY_DIVERGENCE` (400)** refusal, which rejects the whole batch when the per-row hooks disagree on the keys they write.\n\n⇒ So the hooks are inside the *letter* of \"the engine will stop you\" while being outside the *stated purpose* of the input they use.\n\n## Why it is worth a decision rather than a comment\n\n⭐ The two are not equivalent, and the difference is visible to an operator. Today a bulk edit over rows that **already disagree** on `managed_by` is **refused** — the batch fails with a 400 naming `keys: ['customized']` and `rows: 2`. That is correct engine behaviour and it is the safe direction. But it is a refusal an operator meets while doing something the product invites, produced by a mechanism the hooks' own contract says they are not participating in.\n\n⚠️ That incident shape — *\"the docs say these hooks take no part in multi-row updates; the multi-row update was refused because of these hooks\"* — is what card #15302's triage identified as **misdiagnosis-prone**, and it survives #15302's fix, because #15302 corrected the hooks' *comments* to match reality and deliberately did **not** move any contract.\n\n## The two dispositions, as the director framed them\n\n⛔ Neither is chosen here.\n\n1. **The contract text admits the shape** — `hook.zod.ts` is amended to permit *row-invariant-in-effect rewrites, refused on divergence*, naming the engine's divergence refusal as the mechanism that makes them safe. ⇒ The three stamps become conforming, and the rule for the next author is written down.\n2. **The hooks change** — they stop aiming by `previous` on a predicate write, which means deciding what they should do instead. ⚠️ #15302 measured that **declining** is the wrong answer for these three specifically: the seeder skips only `customized` rows, so declining leaves unstamped exactly the rows the next boot overwrites, turning a visible 400 into silent loss of the admin's edit. So this branch needs a third behaviour, not simply a refusal.\n\n⚠️ Whichever is chosen, note the population question this card does **not** answer: whether these three are the only shipped hooks aiming a rewrite by per-row `previous`. ⛔ **NOT MEASURED** — nobody has swept for the class, and the three here were found by working one card, not by census.\n\n## Related\n\n- **#15302** / PR **#16035** — corrected the hooks' own false comments and removed the redundant per-row read; observable behaviour unchanged by measurement. This card is what that PR deliberately left alone.\n- PR #16035 review **5555475921** — the director's reading, and the instruction to file this.\n- **#6966** (per-row `before*` dispatch binds `input.id` on every context) and **#5574 / #5846** (`previous` bound before `beforeUpdate` on every write shape) — the two landed changes that put these hooks in their current position."
+}

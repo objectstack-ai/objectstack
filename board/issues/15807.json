@@ -1,0 +1,36 @@
+{
+  "number": 15807,
+  "kind": "issue",
+  "title": "spec/automation: `FlowEdgeSchema.condition` still accepts an envelope the engine cannot evaluate (`ast`-only, whitespace-only `source`) — the evaluated-slot rule of #15430 has not reached the edge condition",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T08:49:24Z",
+  "updated_at": "2026-09-10T06:31:58Z",
+  "closed_at": "2026-09-10T06:25:47Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15807",
+  "body": "Split out of #15430 by its `os-dev` seat (PM session `session_01M59rPZZFzqhfMUPFqqZTkf`): the half of that card this seat could not execute inside its file surface. Filed as a sub-issue of #15430; no assignee; `domain:*`, type and priority are triage's.\n\nThis card was parked behind PR #15792, which **merged 2026-09-05T09:42:20Z** — that gate is discharged, and the card was released to `pm:queue` on 2026-09-09 (see the release comment). The directive line that carried the wait is removed rather than reworded: it named a PULL REQUEST, and this lane's vocabulary requires the target of a block to be an ISSUE that closes at the moment the wait ends.\n\nThe substance it carried still stands as work: #15792's `structuralConditionRefusal` admits an `ast`-carrying envelope **on purpose**, through a `rec.ast !== undefined` clause naming #15430, and that admission is the line to revisit together with this narrowing (see #15430's comment 5550509137).\n\n## The remaining evaluated slot\n\nThe #15430 PR narrows the ledger's **`value`** slot (`assignment.assignments.*`, `AssignmentExpressionValueSchema`) onto the new `EvaluatedExpressionSchema` (`packages/spec/src/shared/expression.zod.ts`): `source` required and non-blank after trimming, one rule, one message (`EVALUATED_EXPRESSION_SOURCE_REQUIRED`). The ledger's **`predicate`** slots (`screen.fields[].visibleWhen`, `decision.conditions[].expression`) are typed `z.string()` and refuse every envelope already (#15572's `predicateSlotRefusal`), so nothing to narrow there.\n\nOne evaluated predicate surface IS typed by an expression envelope and is not in the ledger (it is a structural surface, \"deliberately not listed\"): **`FlowEdgeSchema.condition: ExpressionInputSchema.optional()`** (`packages/spec/src/automation/flow.zod.ts`, the `condition` key of the edge schema). `evaluateCondition` reads it at run time (`engine.ts`, the `edge.condition` walk) as `expression.source ?? ''`, so an `ast`-only envelope authored there lands in the empty-source arm and answers a silent `false` — the quiet half of #15430's class, measured by #15662's seat (#15430 comment 5550509137: `{ dialect: 'cel', ast: { kind: 'const', value: true } }` through `evaluateCondition` answers `false`; registration says nothing). A whitespace-only `source` there is the same seam through the other key.\n\n`start.config.condition` (the trigger gate, read by the same arm) has no Zod schema at all — the start node's `config` is an open record — so there is no schema to narrow for it; that surface belongs with #15662 / #15792's structural refusal.\n\n## What this sub-issue does\n\n- `packages/spec/src/automation/flow.zod.ts`: type `FlowEdgeSchema.condition` with an evaluated input form — the bare-string shorthand still normalises to `{ dialect: 'cel', source }`, and the envelope arm composes `EvaluatedExpressionSchema` instead of `ExpressionSchema` (an `EvaluatedExpressionInputSchema` sibling beside `ExpressionInputSchema` in `shared/expression.zod.ts` is the one-spelling way to say it). `ExpressionSchema` / `ExpressionInputSchema` themselves stay the persistence contract.\n- Reproduction pins on `FlowEdgeSchema` for both spellings (`ast`-only, whitespace-only `source`) asserting issue `code` / path / message substance, the accepted envelope unchanged, and the control that `ExpressionInputSchema` still accepts both.\n- Consumer readings: `service-automation` (`registerFlow` on such an edge), `lint` (`objectstack validate`), `cli`.\n- Revisit #15792's `rec.ast !== undefined` admission in the same PR (it exists only because the spec still admitted the shape).\n- Changeset: `@objectstack/spec` minor, BREAKING banner, ADR-0087 disposition (the #15430 census found zero in-repo instances of either spelling on any evaluated slot; re-run it for edges).\n\nWhy not in the #15430 PR: `flow.zod.ts` was held by #15716 when the card was dispatched (landed since as 52804cdb4), and the structural-condition surface is being changed by #15792 in the same window; landing two refusal rules on one surface from two lanes at once is how a consumer ends up with two notions of \"malformed\".\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

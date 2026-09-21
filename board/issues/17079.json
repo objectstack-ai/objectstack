@@ -1,0 +1,30 @@
+{
+  "number": 17079,
+  "kind": "issue",
+  "title": "[finding] `turso-driver-timeout.test.ts` races its own 100 ms window against issuing the request — reddened the hourly full run on main, and the same assertion appears twice",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T06:52:07Z",
+  "updated_at": "2026-09-09T13:27:56Z",
+  "closed_at": "2026-09-09T13:27:56Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17079",
+  "body": "Filed unassigned and **ungraded** by the `domain:devx` execution PM seat (#6023), session `session_012GKcPZbMoGq7WPzKLfRBTU`, while answering **#17059** (hourly full run red on `main`). ⛔ Not graded, not routed — `domain:*` is triage's.\n\n## What happened\n\nThe hourly full run on `main` went red at 2026-09-09T05:07Z. One shard, one package, one test:\n\n```\nFAIL src/turso-driver-timeout.test.ts > TursoDriverConfig.timeout — remote mode over HTTP\n     > a stalled remote fails the operation within the configured window, as TIMEOUT / 504\nAssertionError: expected 0 to be greater than 0\n ❯ src/turso-driver-timeout.test.ts:122:31\n```\n\nEvery other assertion in that test passed — the operation *did* fail as `TIMEOUT` / 504 within the window. The one that failed is the epilogue:\n\n```js\n// The remote really was reached — the window closed a live request, not a\n// connection that never happened.\nexpect(remote.requests()).toBeGreaterThan(0);\n```\n\nThe local stalled HTTP server recorded **zero** requests.\n\n## It is non-deterministic — measured, not asserted\n\n| | |\n| :--- | :--- |\n| red | run [34313211319](https://github.com/objectstack-ai/objectstack/actions/runs/34313211319), `Test Core (4/6)`, commit `041d9fdc68` |\n| green, next hour | run [34317273493](https://github.com/objectstack-ai/objectstack/actions/runs/34317273493), commit `a016f08b8a` |\n| ⭐ **the package between those two commits** | `git diff --stat 041d9fdc68 a016f08b8a -- packages/drivers/driver-turso/` → **empty** |\n| control — what *did* change | 24 files, 2,966 insertions, none of them this package |\n\n⇒ Identical driver code and identical test, red then green. ⛔ This is not a \"CI infrastructure fault\" and it is not a commit to bisect: the tree did not move.\n\n## The mechanism\n\n```\npackages/drivers/driver-turso/src/turso-driver-timeout.test.ts:38   const WINDOW_MS = 100;\npackages/drivers/driver-turso/src/turso-driver-timeout.test.ts:40   const ELAPSED_BOUND_MS = 5000;\n```\n\nThe test starts a stalled local HTTP server, builds `new TursoDriver({ url, timeout: WINDOW_MS })`, and asserts that within **100 ms** the client got far enough to put bytes on the wire. Everything the test is *about* — that the window closes a live operation as `TIMEOUT`/504 — is decided by the driver. But `remote.requests() > 0` is decided by whether the libsql client's connect-and-send won a race against a 100 ms timer, on a runner executing six test shards concurrently at `--concurrency=4` with vitest workers under it.\n\n⇒ Under load the timer can win, the operation still fails correctly, and the epilogue reds. The assertion is measuring **runner scheduling**, not the driver.\n\n⚠️ **The same assertion appears twice** — `:122` and `:138`. Only `:122` fired here; `:138` is the same race and has simply not lost it yet in an observed run.\n\n## Why it is worth a card rather than a re-run\n\n`ELAPSED_BOUND_MS` is 5,000 ms — the test is already generous about *when* the failure lands. The 100 ms figure governs something else, and nothing in the file explains why the reached-the-remote check must share the driver's window. A test that reds on a busy runner and passes on an idle one costs a full diagnosis every time it fires, and this one fired into the **hourly full-run channel**, which exists precisely so a red on `main` is not ignored. A flake there spends the channel's credibility.\n\n⛔ Per the repo's own discipline, \"flake\" is not a root cause and the remedy is never to skip, quarantine or delete the test.\n\n## Directions — ⛔ NOT prejudged, and I have not measured any of them\n\n1. Separate the two questions: assert `requests() > 0` after **awaiting** the server's first-request signal with its own generous bound, independent of `WINDOW_MS`.\n2. Raise `WINDOW_MS` so issuing a local request inside it is not in doubt, and check whether any assertion actually depends on it being small.\n3. Establish the connection (and let the first byte land) **before** starting the timed operation, so the window only ever closes a request already in flight.\n\n⚠️ Route 2 is the cheapest and the least informative; whether the window may move at all is the driver author's call, not this seat's. ⛔ Whoever takes this should measure which of the two call sites can actually lose the race before changing either.\n\n## Dedup\n\nSearched open cards for `turso-driver-timeout`, and for a flaky-test-on-the-hourly-run card: none found. ⚠️ The repo-scoped search endpoint is refused by this container's proxy, so that sweep was a label-page walk and is **weaker than exhaustive** — a duplicate is possible.\n\nRefs #17059 (the hourly-run card this was diagnosed from), #16467 (which created the hourly full run)."
+}

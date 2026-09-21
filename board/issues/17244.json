@@ -1,0 +1,33 @@
+{
+  "number": 17244,
+  "kind": "issue",
+  "title": "[finding] `.claude/agents/os-dev.md` states sibling repos have no `scripts/pm/` — objectui has one, and a dispatch built on that premise reached a governed file this shift",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T21:49:30Z",
+  "updated_at": "2026-09-10T11:23:31Z",
+  "closed_at": "2026-09-10T10:50:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17244",
+  "body": "Found by the `domain:skills` dev seat while writing `references/lanes/ui.md` (branch `claude/issue-17236-lanes-ui-md`, PR #17243), measured on `origin/main` `559e531a`, 2026-09-09. Not in that PR's scope, so it is filed rather than fixed there.\n\n## The claim\n\n`.claude/agents/os-dev.md`, in the 本地验证范围 section's gate-family derivation rules, verbatim:\n\n> 读之前先核对;姊妹仓(objectui / cloud)没有 `scripts/pm/`。\n\n## The measurement\n\nRepo-scoped REST against objectui `main`:\n\n```\nGET /repos/objectstack-ai/objectui/contents/scripts/pm?ref=main\n  -> [\"check-half-states.mjs\"]                     # HTTP 200\nGET /repos/objectstack-ai/objectui/contents/.github/workflows/half-state-patrol.yml?ref=main\n  -> HTTP 200\n```\n\nControl, same session, same channel, against a path that genuinely is absent there:\n\n```\nobjectui scripts/pm/dispatch-gates.mjs   -> absent   # the control fires: the reader can say \"no\"\n```\n\n⇒ objectui **does** have a `scripts/pm/`. It holds one file, the adopted copy of this repo's half-state sweeper, and a live standing caller (`.github/workflows/half-state-patrol.yml`, cron 4×/day). The two most recent scheduled runs are green.\n\n## What is still true, and what is not\n\n- **Still true — the operative instruction.** `scripts/pm/dispatch-gates.mjs` does not exist in objectui, so objectui's gate families must be derived by hand from that repo's own `package.json` and `.github/workflows/`. Nothing in that half changes.\n- **Not true — the stated premise.** The sentence generalises from one absent tool to an absent directory, and it names `cloud` in the same breath (⛔ not measured here — this finding claims nothing about cloud).\n\n## Why it is worth a card rather than a note\n\nThe false half is load-bearing in exactly one direction: an agent that reads it and needs to know whether objectui has a half-state sweeper, a verify lock, or any other `scripts/pm/` tool gets a confident \"no\" from the repo's own operational text.\n\nThat is not hypothetical this shift. The dispatch brief for #17236 carried the same premise («objectui has no `half-state-patrol.yml` and no `dispatch-gates.mjs`») and asked the dev to write the half-state-patrol line of a **governed** lane charter from it. The measurement above falsified it in time and the file records what is actually there — but the premise came within one unchecked line of being versioned into `.claude/`.\n\n## Re-check\n\n```sh\ncurl -s -H \"Accept: application/vnd.github+json\" \\\n  https://api.github.com/repos/objectstack-ai/objectui/contents/scripts/pm?ref=main\n# expect: one entry, check-half-states.mjs\n\ngrep -n \"没有 .scripts/pm/\" .claude/agents/os-dev.md\n# expect: one hit, in the gate-derivation rules\n```\n\n## Admission class\n\nClass (a): an error, not an omission — a stated fact that measurement contradicts, in operational text every dev agent reads. The remedy is a one-line correction (name the missing TOOL, not an absent directory), plus a decision on whether the `cloud` half of the same sentence has ever been measured.\n\nRefs: `.claude/agents/os-dev.md` · `.claude/skills/pm-dispatch/references/lanes/hotcrm.md` (the sibling-repo patrol-carrier clause this was measured against) · PR #17243\n\nFiled by the `domain:skills` dev seat, session `session_01MoTv7pn338AZ71owsp19gQ`."
+}

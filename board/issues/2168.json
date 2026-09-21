@@ -1,0 +1,30 @@
+{
+  "number": 2168,
+  "kind": "issue",
+  "title": "Implement ADR-0063/0064: split ask/build agents by surface; tool scoping",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T03:47:26Z",
+  "updated_at": "2026-09-10T08:49:44Z",
+  "closed_at": "2026-06-22T09:40:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2168",
+  "body": "Implementation tracking for **[ADR-0063](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0063-two-kernel-agents-skills-are-the-extension-primitive.md)** (two agents bound by surface) and **[ADR-0064](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0064-tool-scoping-to-agent.md)** (tool scoping). Decision PR: #2167. Landscape: `docs/audits/2026-06-ask-build-agent-development-assessment.md`.\n\n### Split the personas (reverse ADR-0040 unified assistant)\n- [x] Remove the unified `ask`-carries-all-skills definition + per-turn intent preamble (`service-ai/src/agents/data-chat-agent.ts`); `ask` carries only `surface:'ask'` skills.\n- [x] Delete the `buildRegisterActive` degradation shim (`service-ai/src/agent-runtime.ts:179`) — no longer needed once surfaces are separate.\n- [x] Bind agent → surface in `../objectui` (data console → `ask`, Studio → `build`); keep the picker hidden/builder-only.\n\n### Naming (finish both sides of the rename)\n- [x] `service-ai/src/agents/data-chat-agent.ts` → `ask-agent.ts`; `DEFAULT_DATA_AGENT_NAME` → `ASK_AGENT_NAME` (keep `LEGACY_DATA_AGENT_NAME='data_chat'`).\n- [x] `../cloud/service-ai-studio`: make `build` the **canonical** id (currently still `metadata_assistant`); register `metadata_assistant` as the permanent alias.\n- [x] Prose sweep: \"Data/Metadata Assistant\" → `ask`/`build`; aliases live only in the alias table.\n\n### Skill ↔ agent affinity (ADR-0063 §3)\n- [x] Add `surface: 'ask' | 'build' | 'both'` to `SkillSchema` (`spec/src/ai/skill.zod.ts`); backfill the four built-in skills.\n\n### Tool scoping (ADR-0064)\n- [x] Remove the global fall-through in tool resolution; resolve wildcards against skill-claimed names only (kill the `actions_executor` empty-array + fall-through hack).\n- [x] Add a `surface:'both'` `schema_reader` skill owning `describe_object`/`list_objects`/`query_data`; stop dual-listing by comment.\n- [x] Make incompatible skill↔agent binding a fast load error in `resolveActiveSkills`.\n- [x] Tests: `tools(ask)` contains no `create_*`/`*_metadata`/blueprint tools (cloud + OSS); authoring tools present only under `build`.\n\n### Withdraw tenant custom agents (ADR-0063 §2)\n- [x] `spec/src/kernel/metadata-plugin.zod.ts`: set `agent` type `allowRuntimeCreate:false, allowOrgOverride:false`.\n- [x] Filter custom agents from the runtime catalog; drop the `app.defaultAgent` custom-agent guidance in the cloud plugin.\n\n### Deferred\n- D4 deployment guardrail-floor schema — defer (no tenant agent to floor once the above lands).\n"
+}

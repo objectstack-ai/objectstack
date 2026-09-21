@@ -1,0 +1,37 @@
+{
+  "number": 16960,
+  "kind": "issue",
+  "title": "[finding] three `objectql/engine.ts:NNNN` anchors in the doc block #16441 just repaired are off by up to 5,677 lines — outside that card's census, so they survived it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T19:47:35Z",
+  "updated_at": "2026-09-10T04:15:08Z",
+  "closed_at": "2026-09-10T03:51:35Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16960",
+  "body": "Three `objectql/engine.ts:NNNN` citations in the **same published doc block** #16441 just repaired point 513 to 5,677 lines away from the text they quote. They were outside #16441's census, which enumerated `record-validator.ts` anchors only, so they survived that repair untouched — and the next PR to touch this doc block inherits them silently.\n\nHanded over by the `os-dev` on #16441 as an out-of-scope finding (承接者 named as the PM). ⛔ **Every reading below was re-taken by the filing seat on `origin/main` `97adce2fa`, not transcribed from that report.** Filed unrouted and ungraded — ⛔ this seat does not produce `domain:*`, a grade or a `type`; that is triage's.\n\n## Measured\n\n`packages/spec/src/kernel/functional-completeness.ts`, module doc block, on the post-#16441 head `85bb9dad9f` (so this is what lands, not what was there before):\n\n```\n:31  * - `summary` w/o `summaryOperations` → `objectql/engine.ts:3001`\n:33  * - `formula` w/o `expression` → `objectql/engine.ts:346` builds the formula\n:35  * - `lookup`/`master_detail` w/o `reference` → `objectql/engine.ts:3191`\n```\n\n`packages/objectql/src/engine.ts` is **15,020** lines. Each cited text occurs **exactly once** in it:\n\n| citation | text it claims lives there | actual line | drift |\n| --- | --- | --- | --- |\n| `engine.ts:3001` | `if (d?.type !== 'summary' \\|\\| !d.summaryOperations) continue;` | **8520** | **5,519** |\n| `engine.ts:3191` | `if (!referenceObject) continue;` | **8868** | **5,677** |\n| `engine.ts:346` | the formula-plan build, `def?.type === 'formula' && def.expression` | **859** | **513** |\n\nUniqueness control, so \"the text is at line N\" is a reading and not an artefact — `grep -cF` on `origin/main`: **1 / 1 / 1**.\n\n## ⭐ Why this is class (a) wrong-not-incomplete, in the shape triage already graded on #16441\n\nWhat sits at the cited lines **today**:\n\n```\n346:   * `populate`'s name list) that belongs to the RPC/protocol layers, so folding\n3001:    * asked the reader to keep them in step; sharing the function is what\n3191:     for (let index = 0; index < rows.length; index++) {\n```\n\nTwo are prose inside a comment block; the third is the head of an indexed `for` loop. `:3191` is the dangerous one — it **reads as plausible code**, so a reader following the citation lands somewhere that looks like a real answer and never learns they were sent to the wrong place. That is the same \"plausible-neighbour shape of citation rot\" the liveness ledger names and that triage cited when grading #16441 `Bug`.\n\nThese citations do the same job the repaired ones did: they are the only limb tying a **rule's justification** to the runtime that implements it, and that limb is executed by a human reading the citation. The assertions in the module cannot notice that the runtime moved.\n\n## ⭐ The drift is an order of magnitude worse than the card that just landed\n\n#16441's anchors were off by 373/374 lines. These are off by up to **5,677** — 15× worse — in a file 15,020 lines long. Nothing detects either: `check:system-context-census` enforces `path:NNN` anchors only for its own elevation-read population, and this block is not in it.\n\n## Scope, and the fence that kept them out of #16441\n\n⛔ **This is not rework on #16441 and must not be read as one.** That card's census was explicitly `record-validator.ts`-only; its dev measured these three read-only, left them, and reported them rather than widening a seven-site repointing into an eleven-site one. That was the correct call — the fence held, and this card is the intended way for the remainder to survive.\n\n## Executable criterion\n\nThe three citations name the enclosing **symbol** and, where load-bearing, quote a **verbatim snippet**, instead of a line number — the convention `packages/spec/liveness/field.json` already uses and the one #16441 applied to all seven of its sites. All three snippets above are unique in `engine.ts` today, so the convention is satisfiable here without loss of precision; the seven-for-seven result on #16441 is the precedent.\n\n⛔ Out of scope, ⛔ do not widen into it: whether prose/comment `path:NNN` anchors deserve a repo-wide gate. That is #16441's closing question and needs its own population count and its own card.\n\n⭐ One datum for whoever writes that gate card, produced free by #16441 and confirmed here: **all seven** sites on that card, and **all three** here, had a symbol or a unique snippet available. That argues for a *convention* gate (cite a symbol or a snippet, never a line) over a *line-number-freshness* gate. Observation only — no population count was taken.\n\nRefs: #16441 · `packages/spec/src/kernel/functional-completeness.ts` · `packages/objectql/src/engine.ts`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16718,
+  "kind": "issue",
+  "title": "After ADR-0132 the open tree still calls `@objectstack/organizations` enterprise/closed-source in 65 places — including `tenancy-service.ts`, the file that decides the posture",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T00:42:00Z",
+  "updated_at": "2026-09-10T13:47:36Z",
+  "closed_at": "2026-09-10T10:50:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16718",
+  "body": "Found while implementing #16137 (the open-only wall acceptance for the #16130 migration). Not a rider on that PR: it is a 45-file prose sweep across seven packages, and the acceptance PR is a test-only diff.\n\n## The measurement\n\nADR-0132 moved the `org-scoping` registrar into the open core: `packages/plugins/organizations` is Apache-2.0, on `main` since PR #16215, and its own header states the boundary — \"This package carries NO licence check of any kind\". #16137 measures that an open-only composition really does raise the wall, and it does.\n\nThe open tree's own prose has not followed. Measured at `2e6a2ea4c`:\n\n```\ngit grep -c -E \"enterprise (`?@objectstack/organizations|multi-org|organizations)|closed-source `?@objectstack/organizations|cloud-private `?@objectstack/organizations\" -- 'packages/**/*.ts' \\\n  | grep -v '^packages/plugins/organizations/'\n```\n\n**65 occurrences across 45 files**, seven packages. The heaviest, by count:\n\n| file | hits |\n|:--|--:|\n| `packages/verify/src/harness.ts` | 6 |\n| `packages/cli/src/commands/serve-organizations-message-spelling.test.ts` | 5 |\n| `packages/plugins/plugin-dev/src/dev-plugin.ts` | 3 |\n| `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | 3 |\n| `packages/cli/test/serve-organizations-host-resolution.e2e.test.ts` | 3 |\n| `packages/cli/src/commands/serve.ts` | 3 |\n| `packages/plugins/plugin-auth/src/tenancy-service.ts` | 2 |\n\n## Why this is not cosmetic\n\nThe single worst site is `packages/plugins/plugin-auth/src/tenancy-service.ts` — open core's own source of truth for \"what tenancy posture is this deployment in?\". Its header still reads:\n\n> Both walled postures require the enterprise `@objectstack/organizations` package (the `org-scoping` service) to ACTIVATE ... multi-organization operation is a commercial capability (ADR-0105 D12).\n\nand `isolationActive`'s docblock still argues \"Open code, entitled activation ... ENABLING a multi-organization posture is an entitlement\". ADR-0132 settled that the other way for the open package: an open install is entitled to both walled postures by construction, which is exactly what the open `OrganizationsPlugin.supportedPostures` now declares.\n\nSo the maintainer's stated goal for #16130 — 「迁移之后的效果应该是开源版就可以把元数据应用使用单库多租户的方式运行。」 — is now true in code and denied in the comments an open-source reader meets first. Someone reading `tenancy-service.ts` to answer \"can my open install run isolated?\" is told no, by the file that decides it.\n\n`packages/cli/src/commands/serve.ts` is the same shape one layer out: the block that mounts the package still says the multi-org runtime \"lives in the closed-source `@objectstack/organizations` package\".\n\n## Scope, and what should NOT be swept\n\nNot every hit is wrong, and a blanket rewrite would break real facts. Three populations, and they need separating before anything is edited:\n\n1. **Now false** — prose describing the open registrar as commercial/closed-source/cloud-private. `tenancy-service.ts` and `serve.ts` lead this one.\n2. **Still true, about the OTHER package** — the commercial repo genuinely ships a private package of the same name that subclasses this one and calls its own licence gate. Text about *that* is correct and must stay, in `no-framework-dependents.pin.test.ts`'s terms.\n3. **True but stale as a reason** — `packages/verify/src/harness.ts` skips its cross-tenant proofs because \"the enterprise package is not installable in this workspace\". It is installable now, which is a live capability question rather than a wording one, and probably its own card.\n\nRefs: #16130 (the move) · PR #16215 (the open package landing) · #16137 (the acceptance that measures the claim, and where this was found) · #16539 (a dogfood control whose premise died from the same move — adjacent, narrower) · ADR-0132 · ADR-0105 D12 (the passage several of these sites cite, as amended)."
+}

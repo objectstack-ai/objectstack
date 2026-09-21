@@ -1,0 +1,33 @@
+{
+  "number": 16836,
+  "kind": "issue",
+  "title": "pm-dispatch: a contract-review verdict without the label handoff is invisible to every seat — name the FAIL end-state in one sentence, and add H51 for \"verdict posted on this head, carrier still on\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T09:50:17Z",
+  "updated_at": "2026-09-09T15:53:03Z",
+  "closed_at": "2026-09-09T15:50:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16836",
+  "body": "Filed by the director seat (`session_01TezFG8ZMrNH6n5VTNpPpdH`) at the maintainer's instruction, 2026-09-08 09:5xZ, verbatim: 「立一张 domain:skills 卡（一句终态 + 一条 H 检查）」. ⛔ Not claimed; `domain:skills` lane; governed text (`.claude/skills/pm-dispatch/**`) ⇒ draft PR, maintainer merge. The script half (`scripts/pm/check-half-states.mjs`) is non-governed.\n\n## What was measured today\n\nBetween 03:59Z and 07:34Z the director seat posted contract-review verdicts on twelve PRs (objectstack #16730 #16778 #16783 #16780 #16796 #16761 #16755 #16805 #16777 #16825, objectui #8501 #8164) as `## Contract review (…) — PR #N @ \\`sha\\`` comments and left `needs:contract-review` on both carriers. **No owning seat responded on any of them for 2–5 hours.** The maintainer noticed first (「已审 9 个 objectstack PR，为什么还是挂着待契约复审的 label」 / 「项目经理会知道吗？」). The seats' sweeps read labels, not PR prose — so a verdict recorded only as a comment reached nobody. Corrected by hand at 09:0xZ (ledger on #12708, comment 5582327267).\n\nThe rule already exists and was not followed: `references/lanes/director.md` 「大的错误(FAIL/REWORK)⇒ 改标签即交接……散文点名不是交接 —— 标签才是收件箱」; `references/state-machine.md` 「交接即标签:只写交接评论而不同笔挂标 = 空交接」; `references/contract-review.md` 「审计 FAIL 按状态机 label-flip 交回派发席补丁轮」. Two gaps made the miss easy and invisible:\n\n1. **The FAIL end-state is never named.** The text says \"转回相应工作态(重派/返工)\", but the six states have no rework state, and nothing says what the label set looks like after a FAIL. The PASS branch is precise (「PASS ⇒ 同席同笔剥双载体,清标同笔留 provenance 评论引该 PASS」); the FAIL branch is not.\n2. **No H row catches the half-state.** H31 compares the two carriers with each other; nothing compares a carrier against the review comment already posted on the same head. A PR can sit \"genuinely pending review\" by label for hours after its review concluded.\n\n## Deliverable 1 — one sentence (governed, `references/contract-review.md` §载体纪律, mirrored in `lanes/director.md` 职责一)\n\n> **FAIL / CHANGES REQUIRED ⇒ 同席同笔剥双载体**（PR 与卡），卡上留一条交接评论（复审链接、`Reviewed-by:` / `Implemented-by:`、欠改清单），卡保持 `pm:dispatched`、assignee 不动；承接席补丁推头后**重挂双载体**再审。⛔ 只贴复审评论不改标签 = 空交接。\n\n(Exact wording is the skills seat's; the content is the ruling. The PASS-governed branch is already stated: carriers cleared, card → `pm:awaiting-maintainer`.)\n\n## Deliverable 2 — H51 in `scripts/pm/check-half-states.mjs`\n\n**H51** — an OPEN PR carrying `needs:contract-review` whose thread holds a contract-review comment for the **current head** — title shape `## Contract review (\\`CONTRACT_REVIEW_TIER\\`, isolated seat) — PR #N @ \\`<sha>\\`` where `<sha>` is a prefix of the PR's head sha — older than the threshold. Verdict-agnostic on purpose: any verdict on this head should have produced a label stroke within the window (PASS ⇒ carriers off; FAIL ⇒ carriers off + handoff). Threshold: 60 minutes (a review-to-handoff stroke is measured in minutes; today's misses were 2–5 h). Remedy sentence: \"verdict recorded, handoff not written — apply deliverable 1\". Self-test cases: gated PR + review comment on the head, aged ⇒ finding; gated PR + review comment on an OLDER head ⇒ clean (head moved, re-review genuinely pending); gated PR + no review comment ⇒ clean; ungated PR + review comment ⇒ clean. The title format is the one every isolated-seat review in this repo already uses (e.g. 5580313505, 5582135982, 5582418933), so the anchor is structural, not a prose match.\n\n## Not in this card\n\n- ⛔ No change to H31 or to the PASS branch.\n- ⛔ No new label or state.\n\n## Refs\n\n#12708 (director ledger: 5582327267 correction, 5582395140 batch #88) · `references/lanes/director.md` · `references/contract-review.md` · `references/state-machine.md` · H31 (#11179)."
+}

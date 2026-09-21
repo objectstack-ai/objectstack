@@ -1,0 +1,35 @@
+{
+  "number": 16744,
+  "kind": "issue",
+  "title": "[finding] on a .sh source the JS comment masker swallows real shell code — a `/*` inside a `#` comment opens a phantom block comment that runs to the next terminator",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T03:09:55Z",
+  "updated_at": "2026-09-09T13:57:48Z",
+  "closed_at": "2026-09-09T13:57:19Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16744",
+  "body": "Found while landing #16132 (which masks `#` comments on shell-kind sources). Filed separately: #16132 is about `extractWatchHints` **fabricating** hints out of shell prose; this is the same file kind failing in the **opposite** direction, and it is a defect in `js-comment-mask.mjs` applied to shell rather than in the hint scan. Fixing it inside #16132 is exactly the widening that card's dispatch forbids — it is *how* the composition order #16132 rejected adds its hints — so it is filed rather than folded in.\n\n## The defect\n\n`maskComments` is a JavaScript scanner. `PROGRAM_TEXT_TARGET` admits `.sh`, so it is run over shell sources too, and shell prose is not JavaScript prose. A `#` comment that spells `@objectstack/*`, a glob, or any other two-character block-comment opener is not a comment to that scanner — it is the start of a block comment that runs to the next terminator, blanking every line of **real shell code** in between.\n\nMinimal fixture, against `scripts/x.sh`, on `main` at `b729acf`:\n\n```\nhints  source\n    0  # published @objectstack/* packages\n       DEST=\"node_modules/@objectstack/spec/dist\"\n\n    1  # published packages                          (control: same code, no opener in the comment)\n       DEST=\"node_modules/@objectstack/spec/dist\"\n```\n\nThe two differ only in four characters of prose, and the second row is the firing control: the code line is admissible, and only the phantom comment above it removes it. Reachable from `extractWatchHints(src, 'scripts/x.sh', { tree })`.\n\n## Measured blast radius, tree-wide\n\nBytes of source the JS masker blanks on a tracked `.sh` file that are **not** shell comments — i.e. real shell code handed to a caller as prose. Measured on `b729acf`, comparing `maskComments` against `maskShellComments` per byte:\n\n```\n73,859  scripts/pm/os-verify-lock.sh\n17,482  scripts/pm/os-regen-merge.sh\n 6,015  scripts/create-scaffold-smoke.sh\n 4,438  scripts/publish-smoke.sh\n 1,278  .claude/hooks/guard-tree-enum.sh\n 1,095  scripts/downstream-smoke.sh\n 1,094  scripts/vercel-ignore-docs.selftest.sh\n 1,021  scripts/gen-sdui-manifest.sh\n 1,001  .claude/hooks/guard-main-checkout.sh\n   773  .claude/hooks/guard-main-checkout-bash.sh\n   464  .claude/hooks/guard-governed-enqueue.sh\n```\n\n11 of 27 tracked `.sh` files. Two live hints are lost to it today: `node_modules/@objectstack/spec/dist` in `scripts/downstream-smoke.sh` (spelled at `DEST=...`, swallowed by the `@objectstack/*` in the header comment) and one site in `.claude/hooks/guard-tree-enum.sh`.\n\n`scripts/bump-objectui.sh` is **not** affected — checked because it is the file #14290 would make the first family-to-`.sh` population edge reach.\n\n## Why this is the cheap direction, and why it is still worth a card\n\nThis under-reads: it produces a **missing lead**, which is the direction `spawnedProgramTargets` and `readProgramTargetsInSource` both state this tool errs in on purpose. So it is not urgent, and it is not the inverse of #16132 in severity.\n\nWhat makes it a card rather than a shrug is the size and the silence. 73,859 bytes of one file is not a lead trimmed at the edges; it is most of a script that a follow would believe it had scanned, and nothing in the output says a region was skipped. The failure is also self-similar to the two families `js-comment-mask.mjs`'s own header prices — its \"naive regex\" family opens a phantom comment out of a glob and reports clean over code it never looked at — except here the scanner is correct and the *language assumption* is wrong.\n\n## Remedy shape (not prescribing)\n\nTwo shapes exist and they are not equivalent.\n\n1. Mask `#` comments **before** `maskComments` on a shell-kind source, so shell prose never reaches the JS scanner. This is exactly the composition order #16132 measured and rejected *for that card*, because it **adds** hints — 2 on this tree, both of them the genuine code sites above. Adding hints is correct here and was out of scope there.\n2. Do not run the JS comment scanner over a non-JS kind at all. This is larger: it would also drop the `//` masking that #16132's fourth fixture pins as working on a `.sh` source, so the two cards would have to be reconciled.\n\nEither way the check is the same: the fixture above must read 1, and the control must keep reading 1 rather than becoming the only row that fires.\n\nNo assignee, per the finding convention. Related: #16132 (the fabricating half, landing first), #14290 (would create the first family-to-`.sh` edge; unaffected by this one).\n"
+}

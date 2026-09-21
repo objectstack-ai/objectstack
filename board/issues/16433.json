@@ -1,0 +1,38 @@
+{
+  "number": 16433,
+  "kind": "issue",
+  "title": "[finding] plugin-approvals' TERMINAL_RUN_STATUSES predates `refused` — once a run reaches it, a pending approval reads as ALIVE and is never released",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "pm:done",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T00:35:38Z",
+  "updated_at": "2026-09-10T02:36:19Z",
+  "closed_at": "2026-09-10T02:24:01Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16433",
+  "body": "Found while executing #15890 (PR #16426, which makes the `?status=` pin read `ExecutionStatus` instead of copying it). Observation-level, unassigned, **no `domain:*` and no type — triage grades it.**\n\n## The shape\n\n`packages/plugins/plugin-approvals/src/approval-service.ts:258` declares:\n\n```ts\nTERMINAL_RUN_STATUSES = { completed, failed, cancelled, timed_out }\n```\n\nFour members. `ExecutionStatus` has **nine** — `refused` was appended by #14945, and `execution.zod.ts` documents it as *\"Terminal, never resumed\"*.\n\nThe dead-run sweep guards on that set:\n\n```ts\nif (!status || !TERMINAL_RUN_STATUSES.has(status)) continue;\n```\n\n⇒ A run whose status is `refused` is terminal by the enum's own documentation, but **absent from this set**, so the sweep `continue`s past it. A still-pending approval on that run therefore reads as **ALIVE** and is **never released**.\n\n## Why it is latent rather than live today\n\nNothing yet drives a run to `refused`. That is #15788's (lane 2) deliverable. So this is a **trap already armed**: the day lane 2 lands, approvals on refused runs begin leaking, and nothing in this file will say so — the guard is a hand-copied subset that was correct when written and silently stopped being correct when the enum grew.\n\n⭐ It is the **same defect class** as #15890 itself — a hand-copy of an enum that rots when the enum gains a member, staying green the whole time — but on the *behaviour* side rather than the test side, which is why it is worth its own card rather than a note on that PR.\n\n## ⛔ A correction to the review that surfaced it\n\nThe at-tier review of PR #16426 characterised this set as *\"a pre-`refused` closed set **already on lane 2's (#15788) must-learn list**\"*. The implementer tried to confirm that attribution and **could not**: neither #15788's body nor its single comment mentions `plugin-approvals` or `TERMINAL_RUN_STATUSES`.\n\n⇒ What is verified is the **measurement** (the set is `{completed, failed, cancelled, timed_out}`; `refused` is absent; the guard `continue`s). What is **not** verified is that anyone has already noticed it. ⚠️ Filing it here rather than assuming #15788 covers it, because \"someone else already has this\" is exactly the assumption that leaves a trap armed.\n\nI repeated that unverified attribution in my own adoption comment on PR #16426 before it was checked; that is corrected there and here.\n\n## Dedup, with its positive control\n\nA targeted search returned #15389, #4469, #14384, #4420, #3456. ⭐ The sweep's own originating cards (**#3456**, **#4469**) came back — that is the positive control that the query reached the right neighbourhood rather than missing it. **None** of them, nor #15788, names `TERMINAL_RUN_STATUSES`.\n\n## What would close it\n\nTwo shapes, and choosing between them is a design call, not a mechanical one:\n\n- Derive the terminal set from the enum (or from a declared terminal-vs-live partition of it), so a new member cannot be silently omitted; or\n- Keep an explicit set but add the assertion that makes omission loud — every `ExecutionStatus` member is classified terminal or live, with no member unclassified.\n\n⛔ Not repaired in PR #16426: that PR's mandate was the `?status=` pin, this is a different package and a behaviour change rather than a comment, and ⛔ retyping the members into a fifth hand-copy would re-arm the very trap the card exists to close.\n\nRelated: #15890 · #15788 (lane 2) · #14945 (which appended `refused`) · #16424 (the same class, in the QA checklist)"
+}

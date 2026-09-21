@@ -1,0 +1,33 @@
+{
+  "number": 16779,
+  "kind": "issue",
+  "title": "[finding] platform-readings.md eighth increment — carrier for four readings taken 2026-09-08 (the create-cell footer discriminator, a title-only edit leaving the footer alone, github.com pages 403 through the proxy, the PR-native head-filter read-back leg)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T05:12:22Z",
+  "updated_at": "2026-09-09T08:12:40Z",
+  "closed_at": "2026-09-09T08:12:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16779",
+  "body": "Filed by the `domain:skills` execution seat (session `session_01P58euzUXCVJNwmhuPC9DXY`, hotlong, 2026-09-08T05:1xZ) as the carrier card for the EIGHTH readings increment of `.claude/skills/pm-dispatch/references/platform-readings.md`; self-triaged at filing per the lane rule: `priority:p3` · `Task` · `pm:queue`. Governed surface (`.claude/**`); one fact per line, ≤120 bytes, under the STANDING one-file exception (ceiling raised to the landed count, `ruledRaises` record quoting the exception, ⛔ no decision card). Dedup: `search_issues` for the increment/carrier shape returns only the closed ceiling cards of increments three to five (#15192, #15960, #16386) — no open carrier exists.\n\n## Serial\n\n`platform-readings.md` and the ratchet's ceiling row are held by PR #16764 (the seventh increment, #16641 + #16703; 402/402 on its head, at the governed terminal). ⛔ Dispatch after that PR is on `main`; re-derive the ceiling and every line number then.\n\n## Readings (each with its n and its source; none is on the ledger yet — the flight deduplicates against the file before writing)\n\n1. **Create-cell footer discriminator, n=1 each side.** MCP `create_pull_request` with a body ending in the block form (blank line, rule line, session-URL footer) stored exactly ONE footer (PR #16771, 04:42Z; dev report 5579396442 on #16633). The same call with a body whose footer had NO rule line above it got a whole block appended under it (PR #16764, 04:06Z; report 5579036456 on #16641). ⇒ On create, the rule line in the SENT body looks like the discriminator, not the channel alone. Confounded, not contradicted; the ledger's create row today attributes the append to bare REST `POST /pulls` only. ⛔ Not generalised beyond n=1 each side — the row must say so.\n2. **Title-only edit leaves the footer state alone, n=1.** MCP `update_pull_request` carrying `title` + `draft: true` and no body neither stripped nor synthesised a footer (PR #16764, 04:5xZ; addendum on #16641, patch round 2) — the body stayed footerless, exactly as the earlier body edit had left it.\n3. **`github.com` pages answer 403 through the container proxy, n=2.** `curl` of two Actions job pages (`/actions/runs/<id>/job/<id>`) returned HTTP 403 with a 249-byte body at 04:55Z, so the \"zero-quota public page\" read a dev used for a label read-back the same hour is not a channel every session has — probe before relying on it; CI state in this container is an MCP-only read.\n4. **PR-native head-filter read-back leg, n=3.** `list_pull_requests` with `head: \"objectstack-ai:<branch>\"` and `fields` naming `draft`, `labels`, `assignees`, `requested_reviewers` returned all four populated in one call on PR #16771 (05:03Z, after the label write and after the review request) and on PR #16764 (04:56Z) — a one-call read-back for the governed terminal's four pieces, cheaper than `pull_request_read get` (which omits `requested_reviewers` when empty and can return `labels` stale).\n\n## Acceptance\n\n- Each reading grepped against the ledger (a Chinese and an English keyword, each zero-hit grep with a positive control that hits); tally candidates / landed / already-present / refused in the PR body and in the seat's ACCEPT.\n- One line per landed reading, in the file's voice, ≤120 bytes; ceiling row moves to the landed count with a `ruledRaises` record quoting the standing exception verbatim; ⛔ no re-wrap counted as payment; ⛔ no prescription changed (the standing \"read the body back after every write\" rule already covers 1 and 2 — the lines record the readings, not a new rule).\n- `check-skill-line-ratchet`, `check-skill-id-lint`, `check-governed-merges --test` exit 3; draft PR at the governed terminal (in-seat review, `needs-user-decision` + 速读, os-zhuang requested, human merge or approval ⇒ the seat arms).\n\nRiders taken after filing are recorded as comments on this card, in the shape the seventh increment's card used."
+}

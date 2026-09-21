@@ -1,0 +1,33 @@
+{
+  "number": 15245,
+  "kind": "issue",
+  "title": "measure: score #14423 step-2's RULED option as a fourth row — `listNames` with per-loader fault parity plus a new `loadManyKeyed`, `loadMany` untouched",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:57:38Z",
+  "updated_at": "2026-09-10T08:10:27Z",
+  "closed_at": "2026-09-10T08:10:27Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15245",
+  "body": "Blocked-by: #14423\n\n**Measurement only. ⛔ No fix, no refactor, no contract change — the deliverable is a reading posted on #14423.**\n\n## Why\n\n#14423's step-1 census (comment `os-decision-facets`, 2026-09-04) tabled three mechanisms and scored them. **None of the three is the mechanism the maintainer ruled** (comment 5535694564, verbatim 「同意」):\n\n> **C, additive**: `listNames` **gains** `loadMany`'s per-loader fault parity (closes C3), a new `MetadataManager.loadManyKeyed(type)` feeds both halves of the D5 bijection on the store key (closes C2/C6; **`loadMany`'s return shape untouched**), C4 pinned as a boundary, Clause-② yes.\n\n- The table's row **A** is `listNames` **as it stands today** and is scored ❌ on C3 because it has no per-loader catch. The ruling's first clause is exactly *\"give it that catch\"*.\n- The table's row **C** is *\"change `loadMany`'s published return shape\"*. The ruling says `loadMany`'s shape is untouched and `loadManyKeyed` is a **new** method beside it.\n\nVerified independently on `origin/main` by the seat that recorded the ruling: `MetadataManager.listNames` (`packages/metadata/src/metadata-manager.ts`, around line 1579) loops `for (const loader of this.loaders.values()) { const result = await loader.list(type); … }` with **no** per-loader `try`/`catch`; `loadMany` (around 2668) has one. So the parity gap is real and the census's C3 reading is sound — it is the *scoring of the ruled option* that is missing, not the measurement.\n\n## What to measure\n\nAdd the ruled option to the census table as a **fourth row** and score it on the same four axes (C2/C6, C3, C4, contract cost), with the same rigour the existing three got — real builds, real drivers, quoted numbers, positive controls:\n\n1. **C3**: with the per-loader `try`/`catch` added to `listNames` (a local, throwaway change for the measurement — ⛔ not committed as the fix), does a failing plural read still collapse the audit to `standalone=[]`, or does the audit now see the surviving loaders? Quote the before/after.\n2. **C2/C6**: does a new `MetadataManager.loadManyKeyed(type)` — keyed on the store key, `loadMany` untouched — feed both halves of the D5 bijection? A prototype is fine; the reading is what matters.\n3. **C4**: expected ❌ for every option, including this one (`ctx.getService('metadata')` throws `Service metadata is async` before any read method runs). Confirm rather than assume, and say so plainly.\n4. **Contract cost**: Clause-② for the **new** method only; the four existing `loadMany` consumers untouched — verify by enumerating them and showing none changes.\n\n⛔ If the fourth row **also** fails C3 for a reason other than the missing catch, that is a real falsification: report it, quote it, and say so — do not soften it. That outcome is a legitimate result of this card.\n\n## Deliverable\n\nOne comment on **#14423** carrying the four-row table with the fourth row filled in, each cell backed by a quoted command and its output. ⛔ Do not change #14423's state, do not re-rule, do not implement step 2. `needs-user-decision` stays until the maintainer rules against the complete table.\n\n`Blocked-by:` nothing. This card exists so #14423 is not presented incomplete.\n\nRefs: #14423 (the ruling, the census, and the correction comment) · `packages/metadata/src/metadata-manager.ts` · #14205 (identity = store key).\n\n"
+}

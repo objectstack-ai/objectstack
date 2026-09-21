@@ -1,0 +1,37 @@
+{
+  "number": 17203,
+  "kind": "issue",
+  "title": "finding(spec): `page.zod.ts`'s `visibleWhen` `.describe()` still names `app` among the roots the shipping renderer mounts — objectui removed that binding (option B, batch #67)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T16:41:02Z",
+  "updated_at": "2026-09-10T10:55:55Z",
+  "closed_at": "2026-09-10T10:50:56Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17203",
+  "body": "**Class (c) — a published `.describe()` that sends an author to a root the shipping renderer no longer mounts.** Filed by the `domain:ui` seat while clearing the post-merge audit residue on objectui#8155 (audit verdict: objectui PR #8164 comment 5602158340, finding **F4**). Cross-repo change is out of that PR's scope, so this is the record here. Refs: objectui#8155, objectui#8164, objectstack#16420, objectstack#11256.\n\n## The coordinates\n\n`packages/spec/src/ui/page.zod.ts`, read verbatim on `origin/main` when this card was filed:\n\n- **`:326`** — the published `.describe()` on `PageComponentSchema.visibleWhen`:\n\n  > … The shipping renderer additionally mounts `app`, `features`, `os.user` and binds `data` to the data-source ADAPTER here — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). …\n\n- **`:303`** — the sibling docblock line, same claim:\n\n  > The shipping renderer additionally mounts `app`, `features` and `os.user`\n\n⚠️ Both line numbers have since moved (PR #17257 landed in this file); the implementing round found the sites by **content** and located **six**, not two — see PR #17342.\n\n## Why it is now false\n\nDecision batch #67 (2026-09-07, objectui#8155 comment 5564935834) ruled **option B**: the engine's `SCOPE_ROOTS` is the contract and ObjectUI aligns to it. objectui PR #8164 shipped that — `buildExpressionScope` in `packages/app-shell/src/providers/ExpressionProvider.tsx` no longer binds `app`, and `ROW_PREDICATE_ROOTS` no longer advertises it. The producer-side option-A card, objectstack#16420, was closed `not_planned` in the same ruling (2026-09-07T04:16:22Z).\n\nSo \"the shipping renderer additionally mounts `app`\" describes a renderer that stopped mounting it. `features` and `os.user` in the same sentence are still true — the correction is one token, not the sentence.\n\n## Why it is worth a card rather than a note\n\nThis is the `.describe()` an authoring tool reads. It is the only place in the protocol that has ever named `app` in a predicate-root position — `@objectstack/formula`'s `SCOPE_ROOTS` never declared it and ADR-0068 never declared it — so it is now the last surface anywhere that can teach an author (or a metadata-generating agent) to write `app.tier == 'pro'`. What that predicate then does in the shipping renderer is **not** a uniform error: measured per surface on the objectui merged head, a field `visibleWhen` and a nav / area `visible` **fail OPEN** (the gate stops hiding), while a conditional-formatting `condition` and a row-action `visible` / `disabled` **fail CLOSED** (the rule silently stops matching). Both directions are silent to the author except for a console line.\n\nThe mirror image of this card is objectstack#11256 (closed), which is what put `app` into this `.describe()` in the first place — the renderer bound seven roots and the describe named three. The binding it documented is the one that has since been removed.\n\n## Suggested shape (not a ruling — the seat filing this does not own `packages/spec`)\n\nDrop the single token `app` from both `:303` and `:326`, leaving `features`, `os.user` and the `data` sentence untouched, and keep the \"renderer behaviour, NOT contract-guaranteed\" framing exactly as it stands. ⛔ Do **not** widen `SCOPE_ROOTS` to match the old text: that is option A, and it was closed `not_planned` by the ruling above.\n\nWhoever takes this should check for the same statement elsewhere in `packages/spec` before editing — the objectui half of this class turned out to be 20 files, not the 2 the audit named.\n\n---\n\nFiled by an agent seat working objectui#8155 under Claude Code, session `session_01611D6ZaRaMmwTNQmSbk8MH`."
+}

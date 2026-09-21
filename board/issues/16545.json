@@ -1,0 +1,36 @@
+{
+  "number": 16545,
+  "kind": "issue",
+  "title": "hono adapter: render an escaped throw that carries a declared ADR-0112 `status` + registered `code` as that envelope, not as bare `500 INTERNAL_ERROR \"No response from handler\"` — #15999's shared half",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T08:15:41Z",
+  "updated_at": "2026-09-10T13:32:24Z",
+  "closed_at": "2026-09-10T13:25:54Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16545",
+  "body": "Split from #15999 by the director seat (2026-09-07) — the `domain:cli` half that the #15999 ruling (decision batch #55, maintainer 「同意」, comment 5559668176) said triage would split and that sat unsplit for 14 hours under `pm:retriage`. The ruling is the specification; this card carries item 2 of it.\n\n## What is ruled (verbatim from the #15999 ruling, item 2)\n\n> **Shared half** (`domain:cli`, hono adapter / registrar wrapper): an escaped throw carrying a declared ADR-0112 `status` + registered `code` is rendered by them, not as a bare `500 INTERNAL_ERROR \"No response from handler\"`. This changes what an escaped throw means for every direct-mount route; the PR pins that an escaped **non**-envelope throw still answers 500 with no cause in the body.\n\n## Measured starting point (from #15999)\n\n- `packages/services/service-datasource/src/admin-routes.ts` — `requireDatasourceAdmin` re-raises `AuthzStoreUnavailableError` (declared `status: 503` / `code: SERVICE_UNAVAILABLE`, `packages/core/src/security/authz-store-unavailable.ts:65-73`); the call is not inside a `try`; the Hono adapter (`adapter.ts`, \"route handler threw — request answered 500 with no cause in the body\") renders it as `500 { code: \"INTERNAL_ERROR\", message: \"No response from handler\" }`.\n- The declared code never reaches the caller and the message names the wrong component. #13279's discipline (an unreadable authz store licenses no verdict) is correct and stays; only the rendering moves.\n\n## Landing shape\n\n- One place: the adapter (or the registrar wrapper it already funnels through — measure which one every direct-mount route actually passes) recognises an escaped error whose `status` is a declared ADR-0112 status **and** whose `code` is registered in `ERROR_CODE_LEDGER` / `StandardErrorCode`, and answers that envelope. ⛔ An escaped throw that is not such an envelope keeps today's behaviour exactly — 500, no cause in the body — and that is pinned in the same PR (both directions).\n- ⛔ No new error code, no ledger row (the codes involved are already registered) ⇒ `Clause-②: no` as a contract door; the response for an already-declared envelope becomes what its declaration says. If measurement shows a code on this path is **not** registered, stop and report — that is a ledger gap under the #16404 ruling, not something to register in passing.\n- Serial with the per-family half on #15999 (settings' three route catches; storage's `authorizeDownload` inner `catch { deny }`): that half makes the brand *reach* this render; this half makes the render *correct*. Either may land first; the datasource family is the one that exercises this card end-to-end today, so the pin drives `GET /api/v1/datasources` with a `tenancy` service registered through a throwing factory and asserts `503 SERVICE_UNAVAILABLE` on the wire.\n- Existing security pins assert the outage **class** (status ∈ {500, 503}, never 200, never 403) and stay green.\n\nRefs: #15999 (ruling, measurements for datasource / settings / storage) · #13279 · #6504 (`badRequest` already relays a service-thrown 503 envelope in the same file) · #16018 (docs page blocked on the outage status being promisable)."
+}

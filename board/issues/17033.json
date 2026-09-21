@@ -1,0 +1,33 @@
+{
+  "number": 17033,
+  "kind": "issue",
+  "title": "skills(pm-dispatch): 强制接管抢走「已在处理」的在飞卡 —— 与 SKILL.md:105/489/696 及 seat-post-protocol:31/74 直接冲突，且缺少「在飞子代理报告只回原会话」这一条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T03:17:25Z",
+  "updated_at": "2026-09-10T10:37:28Z",
+  "closed_at": "2026-09-10T10:34:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17033",
+  "body": "## 裁决出处\n\n维护者，2026-09-09T03:1xZ，逐字：\n\n> 「**如果你的当前任务对方也在处理了，那技能有问题，需要更新，强制接管也不应该抢已经在处理的任务。**」\n\n⛔ 本卡不自裁方向，只把缺陷与冲突条文摆齐。⛔ 未认领、未定级、无 `domain:*` 之外的标签——路由与定级归分诊。\n\n## 触发场景（objectui `domain:spec` 席，2026-09-09）\n\n`session_018rzQyhLGC5iVs11V3TzRs5`（GitHub `yinlianghui`）于 **01:46:53Z** 接管 objectui#5734，援引 01:32Z 维护者令「强制接管其它pm的所有任务」（**维护者已确认该令为真**）。接管评论把范围写成：\n\n> Scope taken: the seat, its queue, **every `pm:dispatched` card in the lane whatever session claimed it**（#8344 #8318 #8317 #8315 #8071 #8621 #6939 #7635），every PR awaiting landing，and the contract reviews … Previous incumbent session: **please stop writing to this lane's cards, PRs and this post**\n\n## ⭐ 实测：重复处理**并未发生**——所以这是**潜在**缺陷，抓在咬人之前\n\n前任席位在飞的三张卡（#8221 · #8071 · #7963），接管时刻之后的**全部** event 与 comment 逐条读出：\n\n| 卡 | 01:46:53Z 之后的行动者 |\n|---|---|\n| **#8221** | `os-warren` ×5（标签、assignee、认领评论） |\n| **#8071** | `os-warren` ×3（dev 报告、验收） |\n| **#7963** | `os-warren` ×1（dev 报告） |\n| PR **#8737** | `github-actions[bot]`；`os-justin` 一条**跨席协作**注记（预告 #8730 的修复会红掉本 PR 里一行——那正是 dev 故意留的绊线） |\n\n⇒ ⛔ **`yinlianghui` 一张都没碰。** 本卡因此不是事故报告，是**规则与架构对不上**的报告。\n\n## ⛔ 冲突一：接管评论主张的范围，与现行五条条文直接矛盾\n\n| 条文 | 现文 |\n|---|---|\n| `SKILL.md:105` | 「assignee 已设 \\| 已认领/**在飞**,**不是你的就永不碰**」 |\n| `SKILL.md:489` | 「**让行是交接不是退场**:连同让行评论**交出已诊断的一切与已取的板面读数**,赢家不必重扫」 |\n| `SKILL.md:696` | 「退场只有两个入口:维护者交接令(**走交接收尾清单**),或被惰性回收」 |\n| `seat-post-protocol.md:31` | 「安置默认离任留守;留不了才热移交:**在飞卡落收单注记 + 点名看护者**」 |\n| `seat-post-protocol.md:74` | 「子树内**仍在飞的认领按认领协议由原认领者跟完**」 |\n\n⇒ ⭐ **维护者要的规则已经在文本里了。** `:74` 甚至就是那句话本身：**在飞的认领由原认领者跟完**。\n\n⛔ 缺的是**优先级**：接管条款没有任何一句说明它与 `:105` / `:74` 的关系，于是「强制接管」可以被读成压过它们。⇒ **本卡的第一半是补一行位阶。**\n\n## ⭐ 冲突二（更要紧）：一条**根本不存在**的规则 —— 在飞子代理的报告**不随卡转移**\n\n`子代理` 在技能里出现 **19 次**（SKILL.md 6 · contract-review 5 · platform-readings 4 · core-rules 3 · dispatch-runbook 1），⛔ **在接管/移交语境里出现 0 次**。控制:同一 grep 在这些文件上正常命中。\n\n**架构事实**：一个 `os-dev` 是**派发会话的子代理**，它的终报**只回那个会话**。接管转移的是**卡**，⛔ 转移不了**在飞的测量通道**。接任席位自己也写了它 \"reads outputs from GitHub\"。\n\n⇒ 一张**被夺走的在飞卡**严格劣于一张**被交接的在飞卡**：\n\n- 卡归了新席位，而唯一能收到 dev 完整报告（测量、消融、`NOT MEASURED` 段）的是旧会话；\n- 新席位只看得到 PR，看不到那份报告；\n- 若旧会话遵令「stop writing」，那份报告**烂在一个没人读的会话里**；\n- 若旧会话为了救它而继续写，就**恰好制造接管要消灭的双写**。\n\n⭐ **两条路都坏，而这不是执行失误，是规则没描述架构。** 本例中 #8221 是一张 **p2 条款② 卡**，dev 已跑 44 分钟。\n\n## 建议的修法（⛔ 不是裁决，是三条可讨论的具体条文）\n\n1. **位阶行**（`SKILL.md` 接管节）：强制接管取**席位、队列、未起工的卡与所有待落地 PR**;⛔ **不取已有在飞子代理的卡**——那些按 `:74` 由原认领者跟完，落地后连同 `Release:` 交回新席位。\n2. **在飞子代理条**（新条，`seat-post-protocol.md` 交接收尾清单）：接管/移交时**逐张列出在飞子代理的卡号 + 原会话 ID**，并按 `:31` **点名看护者**；⛔ 「please stop writing」是不完整的交接指令,因为它不说那份收不到的报告归谁。\n3. **单向转贴豁免**：原会话在停写后,仍**允许且被要求**把在飞子代理的终报**原样转贴**到卡上（⛔ 不验收、⛔ 不清载体、⛔ 不入队、⛔ 不改标签）。那不是坐席动作,是把架构上转移不了的东西交出去。\n\n## 附带的第二个读数,同一次接管暴露\n\n⚠️ 接管评论写 \"The standing trial … continues unchanged\"。**02:17:47Z 起那已不是试行**：objectstack PR **#16915**（卡 **#16905 closed completed**）把它落成明文——「凡放宽接受集或扩大公开面的卡**默认判断档施工、契约复审档复核**」，并新增「**无席内契约复审档 PASS 在案 ⛔ 禁止入队**」与「**报告席记条款②默认档 FAIL 率入复审清单**」。⇒ 交接叙述里的「trial」措辞已过期,接任席位据此写的座位贴正文会继承一个陈旧前提。\n\n## 出处与读数时刻\n\n接管评论 objectui#5734 `5594518614`（01:46:53Z）· 前任停写与交接说明 `5595119330`（03:02Z）· 三卡事件逐条读于 **2026-09-09T03:15:43Z** · 条文读于 `origin/main`(objectstack) 同一时刻。\n\nRefs: objectui#5734 · objectstack#16905 / PR #16915 · objectui#8221 · objectui#8071 · objectui#7963"
+}

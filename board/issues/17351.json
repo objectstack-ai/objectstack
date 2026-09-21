@@ -1,0 +1,35 @@
+{
+  "number": 17351,
+  "kind": "issue",
+  "title": "docs site: drop the count-based claims from the objectstack.ai homepage (token counts in the hero, description and JSON-LD; the \"1,600+ / 5 / 7 adapters\" strip, which is also false)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T08:19:20Z",
+  "updated_at": "2026-09-10T09:10:24Z",
+  "closed_at": "2026-09-10T09:09:25Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17351",
+  "body": "## Maintainer instruction (verbatim, untranslated)\n\n> 建议首页也是非必要不强调数字，省的一直要改。\n\nGiven 2026-09-10 in the maintainer's PM session, after the same ruling was applied to `README.md` (\"数量 相关的统计都去掉\"). The README rewrite that implements it for the repo is objectstack-ai/objectstack#17347; this card is the homepage half.\n\n## Where the numbers are\n\nFile: `apps/docs/app/[lang]/page.tsx` on `origin/main` at `706ad0f` (read 2026-09-10T08:16Z). Every occurrence, so nothing is left behind:\n\n1. `HOME_DESCRIPTION` (used by `metadata.description`, `openGraph.description`, `twitter.description` **and** the JSON-LD `SoftwareSourceCode.description` via `homeGraph()`): \"…into typed metadata: a complete CRM in under 150k tokens, one context window.\"\n2. The hero paragraph under the `<h1>`: the same sentence, \"typed metadata: a complete CRM in under 150k tokens, one context window. Agents read it whole…\".\n3. The two-column prose section right after the video (`{/* ── the claim the video makes, in prose ── */}`): the left column reads \"The business logic alone — every object, workflow and permission — is under 100k tokens; the UI adds just 50k more.\"\n4. The strip at the end of the `03 · The vocabulary` section: `1,600+ typed schemas | 5 database drivers | 7 framework adapters | MCP built-in`. The third cell is false on this tree: `packages/adapters/` contains exactly one adapter (`hono`).\n5. `GATES[2].copy`: \"not fifty thousand lines of glue\" — rhetorical, but the README (#17347) already reads \"not a pile of generated glue\"; align.\n\nEverything else on the page stays: the structure, the video, the loop, the gates, the vocabulary list, the closing card, the structured data.\n\n## The change\n\n- (1) and (2): replace the sentence with the wording the README now uses — \"ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata that fits in a single context window. Agents read it whole, reason it whole, refactor it whole.\" `HOME_DESCRIPTION` and the hero paragraph must keep saying the same thing (the file's own comments insist the page cannot describe itself one way to a crawler and another to a reader).\n- (3): delete the left-column paragraph; let the ontology paragraph (right column) become the single full-width paragraph of that section, or drop the two-column grid and keep one `<p>`.\n- (4): delete the strip entirely. Do not replace it with a number-free strip; the \"Browse the full vocabulary in the docs\" link that follows is the section's exit.\n- (5): \"not a pile of generated glue\".\n\nNo other edits. Not in scope: nav links, hero CTA count, the `npx create-objectstack` vs `npm create objectstack@latest` spelling in `STEPS` (note it in `## Acceptance notes` if you want; do not change it here).\n\n## Constraints\n\n- `apps/docs` is `private: true`; no changeset. Confirm with the repo's changeset gate rather than assuming.\n- Keep the file's existing comments accurate: the long comment above `metadata` and `homeGraph()` describe how the description is shared — they stay true after the edit; delete or amend only a comment the edit falsifies.\n- No new numbers, no \"N+\" anywhere on the page after the change (`grep -nE '[0-9]+k|[0-9],[0-9]{3}\\+|\\b[0-9]+\\+' apps/docs/app/\\[lang\\]/page.tsx` should show only the `01/02/03` section numerals and the `90 Seconds` video title).\n\n## Gates\n\nRe-derive with `node scripts/pm/dispatch-gates.mjs --commands <changed paths>` in the worktree (this checkout is shallow, so the PM's own derivation was refused). Expect at least: the docs-site typecheck (`pnpm --filter @objectstack/docs typecheck` or the workspace `pnpm typecheck` scoped to it), `pnpm lint` on the file, and one `pnpm docs:build` under `bash scripts/pm/os-verify-lock.sh -c '…'` to prove the page still compiles.\n\n## Acceptance\n\n- The five sites above are gone or rewritten as specified; the page otherwise renders identically.\n- The grep in Constraints shows no count-shaped token left.\n- Draft PR against `main`, first body line `Fixes #<this issue>`.\n\nAlso for the maintainer, not for this PR: the GitHub repository **description** field still carries \"a complete CRM in under 150k tokens, one context window\" (visible on every PR head/base payload). That is a repository setting, not a file; it needs a hand edit in the repo settings."
+}

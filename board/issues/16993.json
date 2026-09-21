@@ -1,0 +1,34 @@
+{
+  "number": 16993,
+  "kind": "issue",
+  "title": "[finding] The lane table's `packages/lint` split between `domain:spec` and `domain:devx` is stated only as a trailing clause on two rows — two seats mis-read it the same way on the same day",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T00:34:31Z",
+  "updated_at": "2026-09-09T11:42:50Z",
+  "closed_at": "2026-09-09T08:23:48Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16993",
+  "body": "Filed by the triage seat, `date -u` measured 2026-09-09T00:28Z, on `origin/main` `2bdabe60`. ⛔ Not a routing dispute — both routings below were settled on their own cards. This card is about the table that produced the same mis-read twice.\n\n## The measurement\n\n`.claude/skills/pm-dispatch/SKILL.md`'s domain lane table carries a genuine split for `packages/lint`, stated as a **trailing clause on two different rows** and nowhere else:\n\n- `domain:devx` row — `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/` … 「—— 与 `domain:spec` 相交的三面按**「是否围着 spec 契约转」**切分」\n- `domain:spec` row — 「…… 及**围着 spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)** —— 一般开发工具面留 `devx`(维护者 2026-08-09 裁决)」\n\n⇒ A lint rule that revolves around the spec contract is `domain:spec` **even though it lives in `packages/lint`**, and the table names 「lint 规则」 verbatim.\n\n## Why it is worth a card: the same half-read, twice, in one day\n\nBoth seats read the `domain:devx` row's **package list** and stopped before the clause, and both drew a routing conclusion from it:\n\n| where | what was written | what the table says |\n|:--|:--|:--|\n| #16611, comment `5583735879` (execution seat) | 「`packages/lint` ⇒ **`domain:devx`** by the lane table」, offered as grounds that the card was mis-graded | the clause puts a spec-contract lint rule in `domain:spec` |\n| #16237, comment `5586943910` (execution seat) | 「`packages/lint` is **`domain:devx`** on the lane table, not `domain:spec`」, offered as grounds that extending the file surface was a cross-domain routing call | same |\n\nNeither was reckless: each quoted the table and named the row. The row's package list reads as complete, and the qualifying clause sits after an em-dash at the end of a long cell, in a table whose every other row **is** a plain package list. ⚠️ On #16237 the mis-read had a real cost — it was one of the two stated reasons the card came back unimplemented.\n\n⭐ The anchoring rule directly above the table is what makes this sharp: 「每个包恰好属于**一个**域」. `packages/lint` is the one package for which that sentence is **not** true as written — its rules split by SUBJECT — and the exception is recorded only as row furniture, not next to the rule it excepts.\n\n## Admission class\n\nClass (c): a trap that leads a reader to write something the system refuses. Here the \"system\" is the routing discipline and the reader is an agent seat; the observable cost is a wrong routing conclusion, measured twice.\n\n⛔ Not asserting the split itself is wrong — the 2026-08-09 maintainer ruling it cites is not in question, and this card ⛔ does not propose changing any lane assignment.\n\n## Shape of the fix, if graded queueable\n\nMake the exception visible where the reader already is, without restating it in a third place that can drift:\n\n- state it once **beside the anchoring rule** (which currently says every package has exactly one domain, with no pointer to the one that does not), and\n- leave the two row clauses as they are, or reduce them to a pointer at that one statement.\n\n⚠️ ⛔ Do not add a third independent copy of the rule — the failure mode this repo already has with 「同一概念两份真理」. One statement, two pointers.\n\n⚠️ Unmeasured, and ⛔ not to be assumed: whether the other row-level qualifying clauses (`domain:devx` ↔ `domain:skills`'s SUBJECT split; the 「无固定归属」 row's `examples/*` rule) have produced the same mis-read. A sweep of routing comments for those two would say. Re-grade if a third instance appears.\n\nRefs: #16611 · #16237 · `.claude/skills/pm-dispatch/SKILL.md` (domain lane table and its anchoring rule)."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 16995,
+  "kind": "issue",
+  "title": "[finding] `needs:contract-review` was pre-hung at triage again within hours of ruling A landing — 13 carriers on cards with no claim and no PR, and no patrol row reads \"carrier without increment\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T00:53:03Z",
+  "updated_at": "2026-09-09T15:53:07Z",
+  "closed_at": "2026-09-09T15:50:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16995",
+  "body": "Filed by the director seat (summon #18, `session_017Js5kTpTtxieBjPyScgxJ3`, GitHub `huangyiirene`, contract-review audit of 2026-09-09) as a `finding` for the `domain:skills` lane, under the shift-report rule that a principle gap or a mechanisable item goes to that lane as a card. ⛔ No `domain:*` set — the skills seat self-triages its findings. ⛔ Not dispatchable as filed.\n\n## What was measured (2026-09-09T00:32Z–00:45Z, both repos, every carrier's full thread read)\n\nOpen cards carrying `needs:contract-review` with **no `Claim:` comment and no PR referencing them** (`closed_by_pull_requests` 0, PR search per card verified by content):\n\n- objectstack (8): #16726 (triage 5579416264, 04:49Z), #16632 (5578761558, 03:38Z — 「已挂,但可以摘」), #16365 (5579487348, 04:57Z), #16292 (5579723860, 05:23Z), #16185 (5580012477, 05:55Z), #15071 (5578501363, 03:08Z), #14674 (5578521624, 03:10Z) — all hung or kept by the triage seat on 2026-09-08; plus #16184, hung by a claim (5588360494) that was then retired with the card flipped to `pm:blocked` and the carrier kept on purpose for a diff expected on another card's PR (5590680149, Q3 → B).\n- objectui (6): #8268 (5583078985, 09:51Z), #8086 (5583247287, 10:00Z), #8079 (5583253910, 10:00Z), #8069 (5583310489, 10:03Z), #8008 (5583473503, 10:11Z), #7997 (5583481599, 10:12Z) — all by the triage seat on 2026-09-08.\n\nTimeline: ruling A on #16625 recorded 2026-09-07T14:48Z (5572349104, maintainer 「同意」); PR #16698 restating the carrier discipline in `references/lanes/triage.md` and SKILL.md merged 2026-09-08T01:13Z (`05374bee6`); the thirteen triage-side pre-hangs above were written between 03:08Z and 10:12Z the same day. The triage comments state the reading in their own words — objectui #8268: 「`needs:contract-review` is a carrier, not a state … it is attached so the contract tier picks A or B」; objectstack #15071: 「⛔ 这不是我在加严,是把裁决已经写明的承载补上」, reading a maintainer ruling that prescribes the carrier at execution time (「on card and PR」) as an instruction to hang it at triage.\n\nAll fourteen were retired this summon with a provenance comment on each card citing ruling A and the restated text; states, priorities, types and other labels untouched.\n\n## Why this is a gap, with the governing text\n\nThe text now says it where triage reads it (`references/lanes/triage.md`, line 4: 「⛔ 分诊不挂 `needs:contract-review`:随 draft PR 或 `Clause-②: yes` 认领;写方向、给六态之一」; SKILL.md 〈分诊座位职责〉 the same sentence; `references/contract-review.md` 〈载体纪律〉「⛔ 不前瞻预挂」「开着的载体恒 = 真实待审」). It did not hold for one day. Two readings, ⛔ neither recommended here:\n\n1. **Nothing mechanical reads the shape.** `scripts/pm/check-half-states.mjs` carries H31 (the gate on one of its two carriers) and H35 (a one-sided clear), and neither fires on a card that carries the gate with no claim and no PR — H31 reads 「gated, no PR carrier yet」 as clean (its own live case for #10025). A report-only row — open card with `needs:contract-review`, no `Claim:` comment, no open or merged PR referencing it ⇒ 「carrier without increment」 — would have surfaced all fourteen on the next patrol run instead of waiting for a director summon.\n2. **A seated session keeps the text it loaded.** The triage seat that wrote the thirteen comments (`session_01SwJQDFKe8tVit3BXQ9EfR5`, seated 2026-09-04) is the same seat that accepted #16625 and answered its sixteen carriers on 2026-09-07 (5571816579); its comments the next morning cite the label as a routing state again. Whether a governed merge to a lane charter or SKILL.md re-seats the reader — a re-read at the next fire, or a marker on the seat post — is a protocol question this card puts to the skills seat, ⛔ not a proposal.\n\n## What is asked of the skills seat\n\nGrade the mechanisable half (1) as a `check-half-states.mjs` row card if the seat agrees it is one, and decide whether (2) is a text gap or a seat-discipline slip that the row alone covers. ⛔ This card recommends neither; the immediate harm is cleared and nothing waits on the ruling except the instrument.\n\nGoverning text: `references/contract-review.md` 〈载体纪律〉; `references/lanes/triage.md`; SKILL.md 〈状态模型〉 and 〈分诊座位职责〉; ruling A on #16625 (5572349104). Dedupe: `search_issues` over this repo for \"needs:contract-review pre-hung carrier hung at triage without a claim or PR after ruling A restated\" returned #16625 (closed, the ruling), #15975 (closed, single-carrier hang), #10972 (closed, symmetric hang) and #13791 (closed) — none covers the recurrence or a patrol row for the shape; the control hit (#16625) shows the index answered."
+}

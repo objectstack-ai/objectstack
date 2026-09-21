@@ -1,0 +1,35 @@
+{
+  "number": 16946,
+  "kind": "issue",
+  "title": "[finding] pr-automation.yml's \"WHICH LEVEL\" prose still says \"no check computes it\" and \"the two remaining levels are yours\" — the clause-② level axis has computed it since #16055, and the refusal message points authors at this sentence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T17:57:48Z",
+  "updated_at": "2026-09-09T17:56:42Z",
+  "closed_at": "2026-09-09T17:40:54Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16946",
+  "body": "Filed by the dev seat on #16361 (session `session_012GKcPZbMoGq7WPzKLfRBTU`, PR #16945) as an out-of-scope finding. ⛔ **No severity asserted, no domain routing — that is triage's.** ⛔ Nothing was routed around: #16945 leaves this sentence exactly as it found it.\n\n## The sentence\n\n`.github/workflows/pr-automation.yml`, the `Check Changeset` step, closing the \"WHICH LEVEL\" prose block (measured at `9a89a0040d`, around line 725):\n\n```\n               ... The 64 historical `patch` precedents are\n               pre-rule and nothing is retro-fixed. This is prose, not a gate -- no\n               check computes it; `check-changeset-no-major.mjs` refuses `major` and\n               says why in its header, and the two remaining levels are yours.\n```\n\n## Why it is false, and what following it costs\n\nBoth clauses were true when written. #16055 landed the LEVEL axis in `scripts/check-changeset-no-major.mjs`, and since then:\n\n- **\"no check computes it\"** — a check does. `judgeLevel` mechanizes the maintainer ruling of 2026-09-04 (decision batch #35, on #15294) for every PR that declares clause ② `yes`.\n- **\"the two remaining levels are yours\"** — they are not, on a clause-②-declaring PR. `patch` on the wrong package is refused with exit 1.\n\n⇒ An author who reads this block, takes the last sentence at its word, and grades `patch` on a clause-②-declared PR is **refused by a gate the prose told them does not exist**. That is the ordinary shape of a stale docblock: the instruction is followed and the outcome fails.\n\n⭐ **It is on the path a refusal creates, which is why it is worth a card rather than a shrug.** The refusal message names this exact prose as the rule's home — `written out in full under \"WHICH LEVEL\" in the Check Changeset step of .github/workflows/pr-automation.yml` — so the reader most likely to arrive at this sentence is the one who has *just been refused by the check it denies*. #16361's whole subject is what a false premise in a refusal message costs; this is the same failure one hop along the pointer, and it survives #16361's fix untouched.\n\n## What it is NOT\n\n⛔ Not a request to weaken or restate the ruling — the ruling is right and #16361 did not contest it either. The correction is one clause: say that the axis computes the rule **for PRs that declare clause ②**, and that the two levels remain the author's everywhere else. The scope of what the gate does and does not judge is stated precisely in `check-changeset-no-major.mjs`'s own header and in `judgeLevel`'s verdict table.\n\n⚠️ Not measured by this seat: whether any other prose in that step, or in `AGENTS.md`, carries the same pre-#16055 claim. Only the sentence above was read.\n\n## Adjacent, not duplicated\n\n- **#16361** (this seat's card) — the *grain* the level rule is applied at. Landed as PR #16945; ⛔ does not touch this workflow prose.\n- **#16713** — the same axis is blind to nested packages (`packages/*/src/**` matches one path segment). A different defect in the same predicate; ⛔ neither subsumes this one."
+}

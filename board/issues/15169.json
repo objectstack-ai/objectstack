@@ -1,0 +1,35 @@
+{
+  "number": 15169,
+  "kind": "issue",
+  "title": "finding(service-storage): hosted tenant kernels cannot mount storage's REST routes — registerStorageRoutes needs buildAuthSessionResolver / buildFileReadAuthorizer / findFileHolder, all package-internal; export them so cloud can bridge storage the way it bridges settings",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-04T04:46:24Z",
+  "updated_at": "2026-09-10T08:49:21Z",
+  "closed_at": "2026-09-08T06:16:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15169",
+  "body": "Seam card filed by the `repo:cloud` PM seat (objectstack#6026, session `session_01EK4Q5Nrx779cxjdeTxsK7P`) — 2026-09-04T04:4xZ. **Named reader: whichever `domain:services` seat owns `packages/services/service-storage`, at first-touch grading.** ⛔ Not the cloud seat's lane to implement (cloud card req 6: no framework changes).\n\n## Measured (cloud PR #1965, cloud#1963)\n\ncloud#1963 (owner ruling 2026-09-04: 「每一套租户的系统都应该是完整的 ObjectOS」) force-mounts `settings / storage / cache / email` on every hosted tenant kernel. Hosted per-environment kernels have **no `http-server` service** (`artifact-kernel-factory.ts` ~:896), so any framework service plugin that self-registers its routes on `http-server` at `kernel:ready` has no HTTP door on cloud.\n\nFor **settings** cloud bridged it: a host plugin mounts the framework's own `registerSettingsRoutes` on the raw Hono app and dispatches into the env kernel's route table — verified 200 / 403 / 405 end-to-end on a booted host. That works because `registerSettingsRoutes` and everything it needs are on `@objectstack/service-settings`'s public surface.\n\nFor **storage** the same bridge is not possible:\n\n```\npackages/services/service-storage/src/index.ts:30   — declares (deliberately) as package-internal:\n  buildAuthSessionResolver · buildFileReadAuthorizer · findFileHolder\n```\n\n`registerStorageRoutes` needs all three. `buildFileReadAuthorizer` **is the ADR-0104 D3 download-authorization gate**. So bridging storage from cloud means either (a) exporting them from the framework, or (b) re-implementing a file-access authorizer in the consumer — and (b) is how a security decision acquires a second, divergent definition, so cloud refused it and stopped.\n\nConsequence today: `storage` is mounted on tenant kernels (service, `sys_file` / `sys_upload_session` / `sys_attachment`, lifecycle hooks, reap guards all present) but `/api/v1/storage/*` returns 404 — an AI-built app with an attachment field cannot upload. That is inside ADR-0112's v1 scope.\n\n## Options (input, not a ruling)\n\n**A — export the three helpers** (or a single `registerStorageRoutes`-shaped entry that takes the raw app and a kernel accessor, the way settings already works). Smallest change; keeps **one owner** for the file-access authorization decision, which is the property that makes the settings bridge safe.\n\n**B — give per-environment kernels a real route-collecting `http-server` service**, so every self-registering framework service plugin lights up at once. The general answer to this whole class — but its blast radius is every plugin's `kernel:ready` branch simultaneously (`plugin-auth` reaches for `getRawApp()`), and a throw there rolls back plugins and takes a tenant environment offline, which cloud has already paid for once.\n\n**C — cloud re-implements the storage route wiring** from the public surface. ⛔ Refused on the cloud side: a second authorizer.\n\n**Cloud seat's recommendation: A now; B as a deliberate later card if a third surface needs it.** A and B are not exclusive.\n\n## 四维（本席建议 A）\n\n**项目长远合理性（权重最高）**：文件访问授权只能有一个定义，住在框架里。A 让 cloud 逐字复用框架的决定——settings 桥之所以安全，正是因为路由与它需要的一切都在公开面上；storage 缺的只是把同一形状补齐。B 是这一类问题的通解，但通解的爆炸半径是所有插件的 `kernel:ready` 分支同时点亮，需要单独的可靠性论证，不该搭在这张卡上。\n\n**实际业务需求**：ADR-0112 第一版明确含附件/图片字段；今天托管租户上传是 404。拉动是实测的。\n\n**防 AI 写代码犯错**：C 是 AI 最容易「顺手做掉」的那条——在消费端重写一个授权器，测试全绿，而平台从此有两份下载门。拒绝 C 的理由就是要把这个错误在结构上堵死。\n\n**创业阶段不扩散需求**：A 是把三个已有函数（或一个已有形状）放到公开面，不新增能力；B 是新基础设施。先 A。\n\n## Re-check\n\n`packages/services/service-storage/src/index.ts:30` (the internal declaration) · `registerStorageRoutes`'s parameter list · cloud `packages/objectos-runtime/src/env-settings-routes-plugin.ts` (PR #1965) as the working template for the bridge.\n\nRelated: cloud#1963 · cloud PR #1965 · ADR-0104 D3."
+}

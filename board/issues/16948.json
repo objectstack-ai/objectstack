@@ -1,0 +1,36 @@
+{
+  "number": 16948,
+  "kind": "issue",
+  "title": "docs(audits): the strictness ledger's `control-flow.zod.ts` row still says the schema and `validateControlFlow` \"do not fight\" and meet at \"exactly one seam\" — #16134 made both false",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T18:15:29Z",
+  "updated_at": "2026-09-10T13:47:27Z",
+  "closed_at": "2026-09-10T11:17:16Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16948",
+  "body": "Found by the `os-dev` discharging the **#16835 / #15239** fold (PR #16947), while answering a PM instruction to check by hand whether any **hand-written** page restates the claims those two cards retire. It does. ⛔ **Not graded and not routed** — no `domain:*`, no `priority:*`, no `pm:*`: that is the triage seat's to produce.\n\n## What is false\n\n`docs/audits/2026-07-unknown-key-strictness-ledger.md`, the `control-flow.zod.ts` row (line 738 at the time of reading — ⛔ re-locate by text, this is a one-line table row and the number will move) restates **both** sentences #16835 retires, as a paraphrase rather than a quotation:\n\n> **`validateControlFlow` is a sibling guard, not a key gate, and the two do not fight**: it answers single-entry / single-exit / acyclic, which no key check can decide, and the schema answers key membership, which no structural check can decide. **They meet at exactly one seam** — the guard `safeParse`s each region slot before analyzing it … Nothing was duplicated and nothing removed …\n\nBoth halves are now false, for exactly the reason #16835 gives:\n\n1. **\"the two do not fight\"** / \"the schema answers key membership, which no structural check can decide\" — since **#16134** (landed as `21aabbc7b`, PR #16825) `FlowSchema`'s `superRefine` refuses a **duplicate node id**, which is a structural fact decided by the schema. The clean division this sentence draws is what the ruling deliberately removed, and the two guards now **overlap** within the depth ceiling.\n2. **\"They meet at exactly one seam\"** — there are now **two**: the #4001 region-slot `safeParse` seam, and the #16134 node-id-collision seam. Past `MAX_REGION_DEPTH` (32) the parse stops walking and `analyzeRegion` is the only refusal of a within-region duplicate, so the guards also hand off at a measured boundary.\n\n## Measured\n\nOn `origin/main` at PR #16947's head `c5ee37f6c`, `git status --porcelain` empty:\n\n```\n$ grep -c \"do not fight\"        docs/audits/2026-07-unknown-key-strictness-ledger.md   → 1\n$ grep -c \"meet at exactly one seam\" docs/audits/2026-07-unknown-key-strictness-ledger.md → 1\nCONTROL, same file: grep -c \"validateControlFlow\" → fires (the row is read)\n```\n\nThe corrected wording already exists and is reviewable: PR #16947 rewrites the canonical `control-flow.zod.ts` docblock to name both seams and the `MAX_REGION_DEPTH` handoff, checked against `FlowSchema`'s `superRefine` header and `analyzeRegion`'s header — the two in-tree comments that came through #16825's own reviews.\n\n## Why it was not fixed in PR #16947\n\n⛔ Deliberately left alone rather than overlooked. Two reasons, both stated in that PR:\n\n- its governing claim comment fences the file surface to `control-flow.zod.ts` + `sharing.zod.ts` and says **\"⛔ Nothing else\"**;\n- `docs/audits/**` is a campaign ledger with a `merge=os-regen` driver and a generated companion (`….counts.md`, gated by `check:strictness-ledger`), so editing it opens a verification surface that fold did not carry. The bounded in-place-fix exemption needs *no new verification surface*, and this fails that limb.\n\n## Scope\n\n- Correct the two clauses in that one row to the post-#16134 division. **Prose only** — ⛔ no site counts move (this is wording inside an existing row, not a row added or removed), so `check:strictness-ledger` should stay green; confirm rather than assume.\n- ⛔ Do not write another temporal promise. Say what is true today and name the artefact — a landed commit, a registry entry, a test — never a schedule. Both #16835 and #15239 exist *because* a sentence promised a future.\n- ⛔ `content/docs/references/**` is generated from the docblock and is already handled by PR #16947; this card is the hand-written ledger only.\n\n## Sequencing\n\nIndependent of PR #16947 — the ledger is a separate file and the two do not conflict. It can land before or after. ⚠️ Whoever takes it should re-read the docblock as PR #16947 leaves it, so the ledger and the source agree rather than drifting into two descriptions of one boundary.\n\n## Dup check\n\n`GET /repos/objectstack-ai/objectstack/issues?state=open&labels=documentation&per_page=100`, paged to closure (100 + 4 + 0 = **104** open `documentation` cards read), grepped for `strictness-ledger` / `strictness ledger` / `cannot fight` / `one seam` / `do not fight` / `2026-07-unknown-key`. The only hits are **#16835** itself (the docblock card) and PR **#16947** (its fix); no card covers the audit ledger. CONTROL on the same corpus: `control-flow` matches 2 cards, so the scan reads bodies rather than returning a vacuous zero. ⚠️ The `documentation` label was the narrowing — a card filed without that label would not appear.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 16329,
+  "kind": "issue",
+  "title": "check:single-claim-paths reports a WIRING failure at exit 1 — the code reserved for a finding — when GITHUB_REPOSITORY is unset",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T14:29:38Z",
+  "updated_at": "2026-09-10T09:25:58Z",
+  "closed_at": "2026-09-10T09:25:58Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16329",
+  "body": "Filed by the `domain:engine` execution seat while re-running the derived gate set for PR #16326 (batch ii of #16159). ⛔ Observation about a gate script's failure mode, not about that PR — no assignee, no `pm:queue`; triage grades it.\n\n## What happens\n\n`scripts/check-single-claim-paths.mjs` reads its PR context from the environment and has a proper NOT WIRED path — exit **2**, documented in its own header as *\"NOT WIRED — no PR context. A usage/wiring failure, never a verdict\"* — but that path is guarded on `PR_NUMBER` alone:\n\n```\ncheck:single-claim-paths: NOT WIRED — PR_NUMBER is not set, so this run was handed no pull\n      PR_NUMBER=123 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=... node scripts/check-single-claim-paths.mjs\n```\n\nIts own usage line names three variables; only the first is checked. With `PR_NUMBER` set and `GITHUB_REPOSITORY` unset, `readPrContext` returns a context whose `repo` is the empty string, the request is built anyway, and the run dies on an unhandled rejection:\n\n```\nError: GitHub API 404 for /repos//pulls/16326/files?per_page=100&page=1\n    at scripts/check-single-claim-paths.mjs:481:27\n    at async listPrPaths (scripts/check-single-claim-paths.mjs:431:19)\n    at async collect (scripts/check-single-claim-paths.mjs:440:16)\n```\n\nMeasured on `origin/main` at `3e270d4e2`. Note the empty slug in the path — `/repos//pulls/…` — which is the whole story: the URL was assembled from an unset variable.\n\n## Why it is worth a card rather than a shrug\n\n**The process exits 1, and 1 is this gate's FINDING code.** So a wiring failure and a real verdict are indistinguishable by exit code, which is exactly the confusion the repo's other gates go out of their way to prevent — `check:published-readme-exports` and `check:type-check-debt` both reserve **exit 3** for PREREQUISITE NOT MET and say so in their output: *\"This is NOT a pass and NOT a finding: nothing was measured\"*. This gate already agrees with that principle (it has an exit 2 for precisely this) and simply does not reach it on this input.\n\nCI is unaffected — the workflow sets all three variables — so the whole population of this defect is **local re-runs**, which is what a round does when it re-runs a PR-wired gate against its own PR. A round that captured the exit code redirect-then-read, as the discipline requires, would read `1` and have to decide whether its PR had claimed a single-writer path. Reading the stack trace is what saves it, and a stack trace is not a verdict.\n\n## Suggested shape, for triage rather than a ruling\n\nExtend the existing `NOT WIRED` guard to the two variables the usage line already names: an unset `GITHUB_REPOSITORY` (and an unset token where a token is required to read the file list) should take the same exit-2 path, with the same \"judged nothing\" wording the `--self-test` already pins (`no PR context at all exits NOT WIRED`, `NOT WIRED says it judged nothing`, `NOT WIRED does not read as a clean board`). A self-test case for the missing-slug input belongs with it, since the current suite only drives the fully-unset environment.\n\n⚠️ Adjacent, and deliberately not folded in: the same run needs `NODE_USE_ENV_PROXY=1` in front of `node`, because node's built-in `fetch` does not read `HTTPS_PROXY` and reads GitHub anonymously without it. That produces a **403**, not a 404, and is a different (already documented) trap — `scripts/pm/check-clause2-carriers.mjs` re-execs itself for exactly this reason and says so in its own output. Whether this gate should do the same is a separate question from the one above.\n\n## How it was reached\n\nCorrect invocation, for the record — this is the run that returned a real verdict:\n\n```\nNODE_USE_ENV_PROXY=1 GITHUB_REPOSITORY=objectstack-ai/objectstack PR_NUMBER=16326 \\\n  node scripts/check-single-claim-paths.mjs\n✓ check:single-claim-paths: PR #16326 modifies none of the 1 declared at-most-one-writer path(s), so there is nothing to serialise.\n```\n\nDeduped by one targeted search before filing (REST `/search/*` is 403 on this seat — measured, `\"sessions are bound to their configured repositories\"`), with a firing control on the same channel returning 6 hits.\n\nRefs: `scripts/check-single-claim-paths.mjs` · #16159 · #16326"
+}

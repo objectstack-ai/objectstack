@@ -1,0 +1,35 @@
+{
+  "number": 13014,
+  "kind": "issue",
+  "title": "[finding][class] A gate that reads a site with the wrong extractor passes VACUOUSLY instead of failing — two instances measured in one day, both in gates whose text claimed the coverage they did not have",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T14:48:09Z",
+  "updated_at": "2026-09-09T09:43:49Z",
+  "closed_at": "2026-09-09T09:27:00Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13014",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` execution PM seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`. Both instances were surfaced by **dev seats** and **re-measured by this seat** with positive controls before filing. ⛔ Not graded, not routed — this is a class card, not an instance.\n\n## The class\n\nA repo gate enumerates sites and reconciles each against a source of truth. When the gate cannot actually **read** a site — wrong extractor, or a key it never looks up — the failure mode is not an error. It is an **empty reading that reconciles against everything**, so the gate reports no drift and exits 0.\n\n⇒ The site is unguarded, and the gate's output is indistinguishable from real coverage.\n\n## Two instances, measured 2026-08-28, independently\n\n### 1. `check-stack-collection-maps` silently skipped `SECURITY_FIELDS`\n\nSurfaced by the **#12894 dev** (PR #13009) while trying to satisfy an acceptance criterion I set — *\"deleting the dead pointer must leave something that reds if it is re-added.\"* It discovered the criterion was **not satisfiable by the existing gate**.\n\nRe-measured by this seat on `origin/main` before PR #13009:\n\n| probe, in `scripts/check-stack-collection-maps.mjs` | hits |\n| :--- | ---: |\n| `SECURITY_FIELDS` | **0** |\n| control `ARTIFACT_FIELD_TO_TYPE` | **5** |\n\n⭐ The mechanism, in the gate's own new words:\n\n> it is the ONLY one of the eight that pairs its keys as `[collection, kind]` TUPLES, so the two extractors this gate already had (object keys, flat string arrays) could not read it and the site was skipped instead of failing … Reading a tuple site with the flat extractor returns an empty list at depth 0 — **which reconciles against everything and reports no drift**.\n\n⚠️ Concrete cost, not theoretical: that site was carrying a `policies` **dead pointer** — the same retired kind that is *waived by name* on two other sites. Deleting the twin from the artifact door while leaving this one unpinned would have produced exactly \"both sides look clean, one side is unwatched.\"\n\n### 2. `check-dual-build-cjs-loads` never consults a ledger key that left the population\n\nSurfaced by the **#12985 dev** (PR #13001), filed by this seat as **#13012**. The only `staleLedger` push sits inside the loop over **collected rows**; nothing iterates ledger keys against that row set (probed: the only `Object.keys(ledger)` uses are `--self-test` shape checks, against a live control of 32 `ledger` mentions). An exemption whose subpath stopped declaring a `require` condition is never looked at again.\n\n⭐ Measured, not inferred: with the exports fixed and both entries restored, the gate exits **0** and does not even list them.\n\n## What makes it a class rather than two bugs\n\nBoth gates **assert the coverage they do not have**, in prose, next to the code that fails to deliver it:\n\n- `check-dual-build-cjs-loads` line 96: *\"The ledger reconciles in both directions\"* — it does not.\n- `check-stack-collection-maps` enumerated eight-looking sites and read seven.\n\n⇒ A reader auditing either gate would have concluded the site was covered. That is the property that makes this expensive: **the gate is the thing people trust instead of re-measuring.**\n\n⚠️ Note the direction. This is not the repo's existing *\"a self-test that runs nowhere in CI\"* family (#8162, #9348, #9898, #10196 — all closed), where the check plainly never executes. Here the check **runs, is green, and is reported as green.** It is strictly harder to notice.\n\n## Suggested remediation shape — and why the shape matters\n\n#12911 ranks remediation shapes: **(a) remove the construct** > **(b) make the correct form the only one spelled** > **(c) add a check to remember**. This class has an **(a)**-shaped fix available, which is why it is worth a card:\n\n> **An extractor that returns nothing must be an ERROR, not a reading.**\n\nA site that yields zero enumerated keys is either a site the gate cannot parse or a site that genuinely lists nothing — and the second is almost never true for these tables. Failing closed on an empty extraction **deletes the silent-pass construct** instead of asking each future gate author to remember to add a case. Sites that legitimately enumerate nothing then declare that explicitly, which is a statement someone can review.\n\n⛔ Not prejudged: whether every such gate can fail closed without noise needs measuring per gate, and PR #13009 chose the narrower **(c)/(b)** fix for its own instance (a new `tupleFirstItems` extractor plus a self-test case) because that was in scope for a card about dead pointers. This card is the general question.\n\nWorth auditing on the same axis: any gate with more than one extractor or an id-keyed ledger — `check-stack-collection-maps`, `check-dual-build-cjs-loads`, `check-engine-double-contract`, `check-type-check-coverage`.\n\n## Dedup\n\nSearched for an existing card on vacuous/silently-skipped gate coverage: no open card. Closest relatives, all closed and all distinct: **#6376** (a ledger *surplus* mutes a pin — same family of \"an asymmetry weakens a check\", different mechanism), and the self-test-never-runs family above. Neither covers a gate that runs and passes vacuously on a site it appears to enumerate.\n\n## Refs\n\n- #13012 — instance 2, filed separately\n- #12894 / PR #13009 — instance 1, and the extractor fix for it\n- #12985 / PR #13001 — where instance 2 was measured\n- #12911 — the remediation-shape ranking this card's suggestion is drawn from\n- #6376 — the closest relative"
+}

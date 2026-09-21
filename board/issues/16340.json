@@ -1,0 +1,36 @@
+{
+  "number": 16340,
+  "kind": "issue",
+  "title": "lint: a field-typed rule cannot see registry-injected temporal columns (`created_at` / `updated_at`) — the object graph carries their names, not their types",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T14:40:44Z",
+  "updated_at": "2026-09-10T14:38:48Z",
+  "closed_at": "2026-09-10T14:36:49Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16340",
+  "body": "Found while implementing #16106 (the field-typed arm of `filter-preset-comparand`; PR pending on branch `claude/issue-16106-preset-comparand-field-typed`). Read-only observation, report-first, unassigned, no label — triage decides.\n\n## What\n\n`@objectstack/lint`'s object graph (`packages/lint/src/object-graph.ts`, `GraphObject.injected`) records the registry-injected system columns by NAME only: `injectedColumnsFor` returns `resolveInjectedSystemColumns(def).names` (`packages/spec/src/data/injected-system-columns.ts`). A `resolveFieldPath` verdict on such a leaf is `{ kind: 'ok', injected: true }` with no `meta.type`, and `FieldPathVerdict`'s own contract says a second question about that leaf (\"is it temporal?\") is unanswerable there.\n\nConsequence for the arm #16106 lands: on a dashboard widget bound to a dataset on `crm_opportunity`, `close_date: 'last_30_days'` (an author-declared `date` column) is refused at lint time with the window named, while `created_at: 'last_30_days'` on the same widget passes lint and the runtime publish gate — and `created_at` / `updated_at` are the most common temporal filter columns an author reaches for.\n\n## Measured\n\nWorktree at `origin/main` `4a1a3b0c25`, `ObjectQL` + `@objectstack/driver-memory`, an object declaring no `created_at` of its own (the registry injects it):\n\n| `where` | engine |\n|:--|:--|\n| `{ created_at: 'last_30_days' }` | REFUSED `INVALID_FILTER` / 400 — `… compares a declared datetime field against \"last_30_days\" at where.created_at …` |\n| `{ updated_at: { $in: ['last_30_days'] } }` | REFUSED `INVALID_FILTER` / 400 — `… at where.updated_at.$in[0] …` |\n| `{ created_at: { $gte: '{30_days_ago}' } }` | 200, 30 rows (positive control) |\n\nSo the engine door refuses it with the registry's field map in hand; only the authoring-time layer cannot see the type. Failure direction: a MISSED CATCH — the authoring gap #16106 closes stays open for exactly these columns — never a false refusal.\n\n## Where a fix would go (not decided here)\n\n`resolveInjectedSystemColumns` is the one derivation the registry's `applySystemFields` consumes. If its plan carried each injected column's declared type (the same `datetime` the registry injects), `object-graph.ts` could expose it on `GraphObject.injected` (or on `meta` for an injected leaf) without lint hand-copying \"created_at is a datetime\" — the second copy `system-fields.ts`'s header forbids. Every field-typed rule, this one and any later one, would inherit it in one edit.\n\n## Dedupe\n\nSearched \"lint object graph registry-injected system columns created_at updated_at carry no field type\": 5 hits (#16119, #15922, #16083, #16118, #8116). #8116 (closed) is the provenance-marker sibling — whether an injected anchor is unprovisioned — not its type. None names this.\n\nFollow-up to #16106; not blocked by it."
+}

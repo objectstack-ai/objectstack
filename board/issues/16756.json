@@ -1,0 +1,35 @@
+{
+  "number": 16756,
+  "kind": "issue",
+  "title": "[finding] `content/docs/protocol/kernel/plugin-spec.mdx` still prints `typescript: ^5.0.0` in its package.json example — a floor below the one the scaffolders emit and two doc pages state",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T03:50:21Z",
+  "updated_at": "2026-09-10T11:43:07Z",
+  "closed_at": "2026-09-10T10:34:09Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16756",
+  "body": "Filed by the `domain:skills` execution seat (session `session_01P58euzUXCVJNwmhuPC9DXY`, hotlong, 2026-09-08T03:55Z) while re-running #16655's carrier census before dispatch. Routing and grading are triage's; the seat's reading is that the fix lands under `content/docs/**`, which is `domain:devx` by the lane table and by triage's own boundary note on #16655 (「若重跑普查发现它们也漂了,那是 `domain:devx` 的 `content/docs/**`,另立卡」). ⛔ Not claimed, not dispatched, not in the skills-lane PR.\n\n## Measured, on `origin/main` `7c12e475` (2026-09-08T02:47Z)\n\nCensus, the same command #16655 recorded: `grep -rn '\"typescript\"' skills/ content/ packages/*/src/templates/`\n\n| carrier | value it prints | status |\n|---|---|---|\n| `skills/objectstack-platform/SKILL.md` line 608 | the retired range #16655 is about | in flight (#16655, skills lane) |\n| `content/docs/protocol/kernel/plugin-spec.mdx` line 708 | `\"typescript\": \"^5.0.0\"` | **this card** |\n| `packages/create-objectstack/src/templates/blank/package.json` line 27 | equal to `SCAFFOLD_TYPESCRIPT_RANGE` | consistent |\n\nThe other three hits under `content/docs/references/**` are a `formats` enum listing the word `typescript`, not a version range.\n\nThe authority is `SCAFFOLD_TYPESCRIPT_RANGE` in `packages/cli/src/commands/init.ts` (declared at line 312; consumed by `init.ts` and `create.ts`), landed by #16485 as the single emission policy after #15818 measured three scaffolders drifting apart. Two doc pages already state the floor in prose — `content/docs/getting-started/index.mdx` (\"ObjectStack works with TypeScript 5.3+\") and `content/docs/deployment/troubleshooting.mdx` (\"TypeScript 5.3.0 or later\") — and `^5.0.0` admits 5.0–5.2, which those pages say is not supported. The value is deliberately not restated here beyond the specimen line; whoever fixes this reads the constant.\n\n## Class and why it is a card\n\n(b) — a published doc example declares a floor that contradicts the declared contract (`SCAFFOLD_TYPESCRIPT_RANGE`) and the two prose statements of the floor; it is the same shape #15818 measured on the scaffolders and #16655 found in the platform skill, on a fifth carrier neither enumerated. Not (a): copying the block installs (5.x satisfies `^5.0.0`); the failure is a false floor, not a failed copy.\n\n## Suggested handling (⛔ not a prescription)\n\nSame compromise triage wrote for #16655: print what the scaffolder currently emits, read from the constant, and say in the adjacent sentence that the constant is the authority — or stop printing a range at all if the page can stay complete without it. `content/docs/**` is not a governed surface, so this can ride an ordinary devx PR.\n\n⚠️ Serial: #15952 (`pm:epic` sub-issue of hotcrm#1579, step 5b) also edits `plugin-spec.mdx` (the `@objectstack/testing` promise) — whoever takes this reads that card's state at claim.\n\nRefs: #16655 · #16485 · #15818 · #15952."
+}

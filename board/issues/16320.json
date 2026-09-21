@@ -1,0 +1,36 @@
+{
+  "number": 16320,
+  "kind": "issue",
+  "title": "spec: retire the seven cron-typed positions nothing reads — export schedules, `ScheduleState.cronExpression`, `DataSyncConfig.schedule`, `CacheWarmup.schedule`, backup/DR schedules — under ADR-0049 (#15954 ruling, option A per family)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T14:11:07Z",
+  "updated_at": "2026-09-10T13:47:18Z",
+  "closed_at": "2026-09-10T13:11:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16320",
+  "body": "Work card for the #15954 ruling (director seat, decision batch #56, maintainer 「其他同意」 on the per-family recommendation, 2026-09-06). This card carries the **retire** half; the `PromptTemplate` marking half is its sibling card (linked from #15954). Sequencing: **after** the #15028 / #15035 narrowing PR on `shared/expression.zod.ts` lands.\n\n## Positions to retire (seven positions, six key names)\n\n| file:Schema.field | line (at `origin/main` `f1e91595f`, re-locate by text) | reachable from a stack manifest |\n|:--|:--|:--|\n| `api/export.zod.ts` `ScheduledExport.schedule.cronExpression` | :576 | no — API contract |\n| `api/export.zod.ts` `ScheduleExportRequest.schedule.cronExpression` | :706 | no — API request |\n| `automation/execution.zod.ts` `ScheduleState.cronExpression` | :454 | no — runtime state |\n| `integration/connector.zod.ts` `DataSyncConfig.schedule` | :257 | **yes** — `Connector.syncConfig`, `defineStack({ connectors })` |\n| `system/cache.zod.ts` `CacheWarmup.schedule` | :156 | no |\n| `system/disaster-recovery.zod.ts` `BackupConfig.schedule` | :57 | no |\n| `system/disaster-recovery.zod.ts` `DisasterRecoveryPlan.testing.schedule` | :238 | no |\n\nNot in scope: `system/job.zod.ts` `CronSchedule.expression` (read by `croner`), `ai/knowledge-source.zod.ts` `KnowledgeRefreshPolicy.cron` (experimental-marked), `Object.titleFormat` (read by objectui; #15947), and the `PromptTemplate` pair (sibling card).\n\n## Shape — the #14477 / PR #15514 precedent, `spec-property-retirement` playbook\n\n- `RETIRED_KEYS_BY_MAJOR[18]` entries + `retiredKey()` tombstones at each position; refusal pins (an author who writes the key gets the tombstone's did-you-mean, never silent acceptance).\n- **One ADR-0087 D3 semantic entry per family**: export API schedules; automation `ScheduleState`; connector sync schedule; cache warmup; backup / DR testing. The connector entry states the measured population (zero in-repo authors — examples, docs, skills, objectui pin all swept with controls; out-of-repo stacks NOT MEASURED) since it is the only stack-collection member.\n- Regenerate: authorable-surface shards, JSON schema, api-surface, reference pages; retire the D7 `cron-declared-unwired` ledger rows for these positions (`packages/qa/dogfood/test/expression-conformance.ledger.ts`).\n- Changeset: `@objectstack/spec` `minor`, `**BREAKING**` banner, `<!-- adr-0087: registered <entry-ids> -->`. Immediate retirement, no deprecation window (2026-08-27 ruling).\n- `Clause-②: yes` on both carriers; contract review at tier.\n\n## Re-check before claiming\n\n```\ngit grep -n \"CronExpressionInputSchema\" origin/main -- packages/spec/src | grep -v test\ngit grep -n \"cron-declared-unwired\" origin/main -- packages/qa/dogfood/test/expression-conformance.ledger.ts\n```"
+}

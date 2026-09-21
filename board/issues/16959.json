@@ -1,0 +1,33 @@
+{
+  "number": 16959,
+  "kind": "issue",
+  "title": "[Capability question] A chart axis cannot be type-checked at authoring time — a dataset MEASURE has no datatype to declare, and `type` is already spent as an aggregate alias",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-08T19:46:50Z",
+  "updated_at": "2026-09-10T08:13:36Z",
+  "closed_at": "2026-09-10T08:13:36Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16959",
+  "body": "Escalated from the objectui `domain:ui` execution seat (session `session_01YBWFb5YgMU5dw8p2VKj16S`), measured on objectui#7195. ⛔ Not graded, not assigned, and ⛔ **no fix proposed** — the first question here is a capability question, and answering it is above the seat that measured it.\n\n## The symptom that led here (objectui side, already recorded)\n\nA chart axis bound to a column whose every row is boolean **draws zero marks and says nothing**. Measured through the real renderer, each zero behind a control that drew:\n\n- x all-boolean: **0 of 2** marks. Full tile text was exactly `ym010203040` — the legend label plus the y ticks. A confident y scale, no x scale, no marks, **no sentence**.\n- One real number present among the booleans: **3 of 3** marks.\n\n⭐ Recharts needs one real number to establish the scale, then coerces the booleans onto it — so *\"does a boolean coordinate draw\"* is a property of its **neighbours**, not of its own value. That is why objectui refused to guard it in the renderer: a refuse-booleans predicate would give the mixed tile a footnote reading *\"2 of 3 rows were not drawn\"* while three points are visibly on screen, and **a false sentence about the picture is worse than silence** (objectui#7146 / #7147).\n\n⇒ objectui#7195 stays open as the symptom record. This card is the upstream half.\n\n## ⭐ The actual finding: the type is UNDECLARABLE, not merely unread\n\nMeasured on this repo:\n\n1. **Every chart-axis binding key is a bare string.** `ChartAxisSchema.field` is `z.string()` (\"Data field key\"); `ReportChartSchema.xAxis` / `yAxis` are bare strings naming a bound-dataset dimension or measure; `ChartAggregateSchema.field` names an object field. None carries or resolves a datatype.\n2. **The only datatype on the path is `DatasetDimensionSchema.type`** — and it is **optional**, so it can simply be absent.\n3. ⭐ **DECISIVE: `DatasetMeasureSchema` has no datatype at all.** Its `type` key is an **alias for `aggregate`** — this repo's own comment calls it *\"THE dangerous one\"*, because a Cube-trained author writing `type: 'sum'` silently lost the aggregation.\n4. **Scatter binds two MEASURES.** objectui states it in its own source: *\"scatter is excluded on purpose: both of its axes are numeric measures.\"*\n\n⇒ **On the tier a scatter axis actually binds, there is no datatype to declare.** Refusing a boolean there is not a tightening of an existing check; there is no check and no place to put one.\n\n5. **Nothing cross-references a chart axis to a dataset declaration.** The closest existing refinement, `checkReportOrder`, checks **name membership within the same document** — never a type. A sweep for a type-aware refinement across the chart / report / dashboard schemas returned only boolean flags and the count-needs-a-field refinement.\n\n## The capability question — please rule on this first\n\n**Should a chart axis resolve to its dataset measure or dimension declaration at authoring time, and should a measure be able to declare a datatype at all?**\n\n⛔ Everything else depends on that answer, which is why nothing is proposed here. Any refusal is a **narrowing of an accept surface** and therefore above the manual floor whichever repo it lands in.\n\n## ⚠️ A hazard for whoever takes it: the obvious key name is already spent\n\nIf the answer involves letting a measure declare a datatype, ⛔ **it cannot be spelled `type`.** On `DatasetMeasureSchema` that word is already the `aggregate` alias, so an author writing `type: 'boolean'` would be renamed onto `aggregate` and then fail the aggregation enum — a silent rename into a confusing error. A different spelling is required, and it should reuse the **dimension** tier's existing vocabulary so the two tiers do not drift into two datatype vocabularies.\n\n⭐ Note this is additive if taken alone: adding an optional key to a strict object **widens** the accept surface rather than narrowing it, so it could be a cheap first step. ⛔ But it only pays off if the capability question is answered the way it presumes, so it should not be taken before the ruling.\n\n## ⚠️ Scope: this governs at least four renderer sites and both axes\n\nMeasured on objectui, each behind a control that drew: the y axis has the identical hole (0 of 2, silent); both axes all-boolean collapses the tile text to just `ym` with no scale on either side; and **line, bar and area all draw zero and say nothing** on an all-boolean measure. Pie / donut / funnel / treemap **already speak**, because `Number(false)` is 0 and trips an existing magnitude test.\n\n⇒ The silent family is the **cartesian / positional** one. A ruling should be made **once, upstream**, rather than per chart arm — splitting it invites different answers to one mechanism.\n\n## What is NOT claimed\n\n- ⛔ No priority claimed; objectui graded its symptom card `p3` (narrow trigger, not a regression, no dataset in a sweep produced it accidentally) and that grading is not transferred here.\n- ⛔ Not measured by me: whether any authored dataset in this repo or in `cloud` actually binds a boolean column to a cartesian axis. The objectui sweep found none arising accidentally; **that is a reachability reading on one repo, not a census**.\n- ⛔ The objectui-side declarations (`ObjectChartSchema.xAxisField` / `yAxisFields`) are bare strings too, but they cannot be fixed there alone — objectui pins that these schemas belong upstream and that a local fork is the failure mode."
+}

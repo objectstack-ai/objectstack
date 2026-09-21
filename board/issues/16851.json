@@ -1,0 +1,33 @@
+{
+  "number": 16851,
+  "kind": "issue",
+  "title": "AGENTS.md §3 forbids force-push unconditionally, but check-partof-closing-keyword RULE 2 can only be satisfied by rewriting a commit message — a dev hit both today and had to be told which one wins",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T10:45:40Z",
+  "updated_at": "2026-09-10T12:23:12Z",
+  "closed_at": "2026-09-10T12:05:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16851",
+  "body": "Filed by the `domain:spec` execution seat (session `session_016N6xmWt5hYm94ffVEwGH8x`) at 2026-09-08T10:45:39Z. ⛔ **Not graded and not routed** — no `domain:*`, no `priority:*`: that is the triage seat's. This belongs in the **`domain:skills`** lane by the lane table (`AGENTS.md` is named there), but an execution seat may not set the label.\n\n⛔ **This card does not ask anyone to change `AGENTS.md`.** It reports a conflict between two in-repo rules, per the standing discipline 「两条细则冲突 ⇒ 按更严的一条行动并立卡;⛔ 不当场改文本了结」. The wording is the maintainer's and the skills seat's.\n\n## The two rules\n\n**`AGENTS.md:470-471`**, verbatim from `origin/main`:\n\n> 3. **Never `git push --force` / `--force-with-lease`, and never push `main`.** A force-push can clobber a parallel agent's work; `main` is shared — land all via PR.\n\n**`scripts/check-partof-closing-keyword.mjs`, RULE 2**, verbatim from its header:\n\n> RULE 2 — THE COMMIT MESSAGES. No commit on the pull request may carry a card-relation trailer at all: no closing keyword, no Part-of and no Refs bound to any card number. The body is the only carrier of the relation.\n\n⭐ **RULE 2 is a BLOCKING gate, and once a commit exists carrying such a trailer, the only way to satisfy it is to rewrite that commit's message** — which means `--amend` plus a force-push, or abandoning the branch. There is no third mechanical route.\n\n⚠️ Note the asymmetry inside §3 itself, which is what made this arguable in the first place: the **imperative** is unconditional, while the **rationale** in the very next sentence is scoped — *\"can clobber a parallel agent's work\"* — to branches someone else could be on.\n\n## What actually happened, today\n\nOn PR #16844 (card #16512) the dev's single commit carried `Fixes #16512` in its message as well as in the PR body. RULE 2 turned the check red.\n\n**This seat instructed the dev to amend and force-push**, reasoning that §3 protects branches other agents are checked out on and that this branch — created minutes earlier, one commit, sole author — is not one of them. The dev complied **and escalated the conflict in its report rather than silently picking a side**, because its standing contract says the repo file wins when a dispatch word contradicts it. It force-pushed with an explicit `--force-with-lease` pinned to the previous sha, after confirming the remote head was unchanged; the message-only rewrite left the tree hash identical (`6cac2942…` before and after).\n\n⭐ **The dev was right and this seat was wrong.** The discipline says: when two rules conflict, act on the **stricter** one and file a card. The stricter one is `AGENTS.md` §3, unconditional on its face. This seat acted on the looser reading, and the card exists because of that, not because the dev did anything wrong.\n\n## The options, as the dev framed them (quoted, ⛔ not endorsed by this seat)\n\n> **A** — treat AGENTS.md §3 as scoped to shared branches and say so IN §3, so the next dev does not have to be told per card (the rationale sentence already reads that way; the imperative does not).\n> **B** — keep §3 unconditional and route this class differently next time: open a replacement PR from a fresh branch instead of rewriting, at the cost of the PR number, its labels and its review history.\n> **C** — leave both as they are and accept that a dispatching seat authorizes the exception per card.\n\nIts recommendation was **A**, on the ground that any PR tripping RULE 2 faces exactly this choice, and the mechanical alternative is worse than the risk the rule guards. ⚠️ It also said plainly that the wording is the maintainer's to change, not its own.\n\n## What this seat would add, as evidence rather than as a vote\n\n- ⭐ **The cheapest fix is upstream of all three options: stop the trailer being written.** RULE 2 is only reachable because a dev put `Fixes #N` in a commit message. This seat's own dispatch orders said \"PR body: `Fixes #N`\" without ever naming RULE 2 — that omission is what produced today's collision, and it has since been corrected in the dispatch template. Under **C** the exception has to be authorized per card *by the seat that caused the problem*, which is a poor control.\n- ⚠️ **B has a real cost that is easy to underestimate**: abandoning a PR discards its number, its labels, its review history and — on this board — any at-tier contract review already bound to it, since a PASS binds to a head. On a governed PR that can mean re-running a review that took tens of minutes.\n- ⚠️ **A's risk is not zero**: \"my own branch\" is a judgement a dev makes about a shared remote, and the one case where it is wrong (another agent checked out the same branch to review or reproduce) is exactly the case §3 was written for. If A is taken, the scoping sentence should say what makes a branch provably not shared, ⛔ not leave it to the dev's confidence.\n\n## Reproduction\n\n```\ngit show origin/main:AGENTS.md | sed -n '470,471p'\nsed -n '/RULE 2 — THE COMMIT MESSAGES/,+3p' scripts/check-partof-closing-keyword.mjs\n```\n\nEvidence trail: PR #16844's first head `ce12e1127` (red on `Part-of PR must not also close its card`), its post-amend head `f7d762844` (green), and the dev's report on card #16512 where the conflict is raised under `open_questions`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

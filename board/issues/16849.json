@@ -1,0 +1,34 @@
+{
+  "number": 16849,
+  "kind": "issue",
+  "title": "gate/AGENTS: the Documentation Guardrails table has no row for `packages/*/CHANGELOG.md` — a released, consumer-shipped, generated file that is neither `.changeset/` input nor `content/docs/releases/`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T10:38:13Z",
+  "updated_at": "2026-09-09T08:08:16Z",
+  "closed_at": "2026-09-09T08:07:49Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16849",
+  "body": "Filed by the triage seat while answering the `pm:retriage` objections on **#15058** and **#15026**. Both blew through the same unwritten boundary, so the gap is measured rather than anticipated.\n\n⛔ Filed under SKILL.md's conflict rule — 「两条细则冲突 ⇒ 按更严的一条行动并立卡;⛔ 不当场改文本了结」. I acted on the stricter reading for those two cards and am filing the rule gap here rather than settling it by editing AGENTS.md on the spot.\n\n## The gap\n\n`AGENTS.md`'s **Documentation Guardrails** table (`:672` onward) has exactly four rows:\n\n| row | disposition |\n|:--|:--|\n| `content/docs/references/` | AUTO-GEN — ❌ never hand-edit |\n| `content/docs/releases/` | RELEASE-OWNED — ❌ never edit in a code PR; factual error → **dedicated docs-only PR or an issue** |\n| `**/translations/*.generated.ts` | AUTO-GEN structure |\n| `content/docs/<tree>/` (all others) | hand-written |\n\n**`packages/*/CHANGELOG.md` is in none of them**, and it is not a corner case:\n\n- It is **generated** — `changeset version` compiles it from `.changeset/*.md`, the same way `content/docs/releases/` is compiled. Structurally it belongs with the auto-gen / release-owned rows.\n- It is **published to consumers**. AGENTS.md `:1039` says so in its own words, in the breaking-changeset rule: *\"this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the tombstone error.\"*\n- ⭐ So the one place AGENTS.md **does** describe this file establishes that it is consumer-facing and **agent-read**, while the table that says what may be edited does not mention it at all.\n\n## Why the gap has teeth: the two cards that fell into it\n\nBoth **#15058** and **#15026** were filed as *\"correct one line in a pending `.changeset/*.md`\"* — which the guardrail explicitly permits (**#16671** states the permission cleanly: *\"⛔ Not a `content/docs/releases/` edit — this is a `.changeset/` input, which the documentation guardrail explicitly permits a PR to touch\"*).\n\nThen a release consumed both changesets, and each false sentence moved from an editable input to a shipped CHANGELOG. Verified on `origin/main c5ea982d`, using the line-count form (⚠️ `git ls-tree <ref> -- <path>` exits **0** on no match, so an `&& echo PRESENT` idiom reports PRESENT for a file that does not exist):\n\n```\n.changeset/field-rows-and-option-description-declared.md -> 0 line(s)   (#15058's target)\n.changeset/react-tier-vocab-converge.md                  -> 0 line(s)   (#15026's target)\ncontrol  .changeset/README.md                            -> 1 line\ncontrol  files in .changeset/                            -> 369\n```\n\n⇒ a real absence, not an empty read. The sentences now live at `packages/spec/CHANGELOG.md:1497` (#15058) and at **both** `packages/lint/CHANGELOG.md:436` **and** `packages/spec/CHANGELOG.md:3641` (#15026).\n\n⇒ **The route each card prescribed no longer exists, and the successor route is unwritten.** That is this card.\n\n## What to decide and write\n\nOne row in the Documentation Guardrails table for `packages/*/CHANGELOG.md`, stating:\n\n1. **May a code PR edit it?** The stricter reading — the one I applied to #15058/#15026 — is **no**: it is generated, released, consumer-shipped text, so it takes the `content/docs/releases/` disposition. ⚠️ But that is my reading of an unwritten rule, not a quotation of one.\n2. **What is the correction route for a factual error in a *released* entry?** The `content/docs/releases/` row's answer is *\"dedicated docs-only PR or an issue, never a rider on code changes\"*, and #16671 independently calls the post-release form **\"an erratum\"**. Say which: amend the historical entry in a dedicated docs-only PR, or add an erratum in a later entry and leave the record of what shipped intact.\n3. **What is a PR's input, and until when?** The `.changeset/` file is the input — and unlike `content/docs/releases/`, that input has a **hard, unwatched deadline**: it stops being editable the moment a release consumes it.\n\n⚠️ Point 2 is the one with a real trade-off and it should not be waved through: rewriting a shipped entry makes the CHANGELOG accurate but no longer a record of what was actually published; an erratum keeps the history honest at the cost of a reader having to find it. ⛔ Pick one and say why, rather than leaving both available.\n\n## ⛔ Scope\n\n- ⛔ **Not** the changesets themselves. #15058 and #15026 own their own sentences; this card owns the rule that says how they may be corrected. Both stay `pm:queue` at p3 — they are executable under the stricter reading today, and this card only removes the ambiguity.\n- ⛔ **Not** the detection mechanism. *\"Nothing notices when a card's named `.changeset/` path is consumed\"* is a separate, `domain:devx` question — filed separately.\n- ⛔ Not a licence to sweep every CHANGELOG for stale prose.\n\n## Refs\n\n#15058 · #15026 (the two that fell through) · **#16671** (a live instance of the same class whose window is **still open** — its `.changeset/stack-refusal-envelopes.md` is present on `origin/main`, sentence at `:24`; ⚠️ it is editable **now** and will not be after the next release) · `AGENTS.md:672` (the table) · `AGENTS.md:1039` (the consumer-shipped statement)."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 16526,
+  "kind": "issue",
+  "title": "[Decision] Does cloud re-create the four consumer-less control-plane schemas, or does step 3 just delete them? (follow-on to the #16325 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T07:08:47Z",
+  "updated_at": "2026-09-10T08:23:12Z",
+  "closed_at": "2026-09-10T08:23:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16526",
+  "body": "Narrow follow-on to the #16325 ruling (option B, director batch #62, comment `5563914257`, maintainer verbatim 「同意」). Raised by the step-1 dev while implementing objectstack-ai/cloud#2037; ⛔ not self-adjudicated by the PM seat because answering it **narrows the literal text of a ruling made the day before** — that ruling says the six control-plane files \"become the cloud repo's own declarations\".\n\nReadings 2026-09-07T07:1xZ. objectstack `origin/main` `d5d8d50db`, cloud branch `claude/issue-16450-cloud-owns-control-plane-contracts`.\n\n## The measurement that raises it\n\nOf the six control-plane files the ruling moves, **only two have any consumer in cloud**:\n\n| file | consumers in cloud | lines |\n|---|---|---|\n| `environment.zod` | yes — `Environment`, `EnvironmentCredential`, `EnvironmentDriver`, `ProvisionEnvironment*`, `ProvisionOrganization*`; incl. the runtime `.parse()` at `environment-provisioning.ts:750` | live |\n| `tenant.zod` | yes — `TenantPlan(Schema)`, `TenantRoutingConfig*`, `ProvisionTenant*`, `TenantDatabase` | live |\n| `developer-portal.zod` | **zero** | ~1,266 |\n| `marketplace-admin.zod` | **zero** | (combined) |\n| `app-store.zod` | **zero** | for the |\n| `environment-package.zod` | **zero** | four |\n\nFour files, ~1,266 lines, 90 exported symbols, measured by symbol name across the cloud repo — plus the\nzero-consumer members of the two live files (`EnvironmentType(Schema)`, `EnvironmentRole`, `EnvironmentMember`,\n`PackageInstallation(Status)Schema`). cloud#2037 did not re-declare them and says so in its report.\n\n⚠️ One of the four is not conceptually dead even though its code is: **`environment-package.zod` describes\n`GET /cloud/environments/:environmentId/packages`, a live route**. Dropping it leaves that route with no\ndeclaration anywhere — which is today's status quo in effect, since nothing parses it.\n\n## The question\n\nThe `./cloud` subpath is deleted from `@objectstack/spec` either way — that is already ruled. This asks only\nwhether cloud re-creates a copy of the four.\n\n- **A — do not host (dev's recommendation, and this seat's).** Step 3 (#16325) deletes them; if one is ever\n  needed it is recovered from history (`git show d5d8d50db:packages/spec/src/cloud/…`). Zero dead code lands.\n- **B — host verbatim** in cloud with their upstream tests, as a literal reading of \"six files become cloud's\n  own declarations\". 1,266 lines nobody parses, kept green by tests pinning nothing the runtime does.\n- **C — host only `environment-package.zod`** (the one whose concept is live), after making it agree with what\n  `GET …/packages` actually emits (`packageId` **and** `package_id` for one value). A small follow-up card.\n\n<!-- os-decision-facets -->\n\n- **① 项目长远合理性（权重 ≥50%，领起推荐）** —— 一个没有解析器的声明不是契约,是看起来像契约的注释。Prime Directive #12 要的是 contract-first,不是 declaration-first;把 1,266 行无人解析的 schema 从一个仓搬到另一个仓,不产生任何契约,只把「声明与执行脱节」这件事换了个地址。①指向 **A**。⚠️ 但 C 有一条真实的①论据:`environment-package.zod` 描述的路由是活的,删掉它等于承认那条路由永远没有声明 —— 只是它今天本来就没有(没有任何代码解析它),所以 C 是**新增工作**而非防止倒退。\n- **② 实际业务拉动** —— 零。四个文件在 cloud 的引用数实测为 0,在 objectstack 侧也只有包格式那半边有真实依赖。⛔ 没有任何一方在等这四个文件。②对 A/B/C 都不产生拉力,它只是把 B 的成本坐实为纯支出。\n- **③ 防 AI 犯错** —— 这一棱同时反对 B 和为 C 说话,但结论仍是 A。反对 B:一个\"存在但无人强制\"的 schema 是 AI 写元数据时最危险的东西 —— 它读到 `AppStoreListingSchema` 存在,以为声明了就会被兑现,而运行时根本不看。这正是「声明即强制,绝不让 AI 声明一个运行时不兑现的能力」所禁止的形状,搬迁不改变它,只是让它换个仓继续存在。为 C 说话:那条活路由的同值双键(`packageId` + `package_id`)确实是个诱骗读错的形状。但修它属于 enforce,不属于 move —— 该单独立卡,不该塞进这次搬迁。\n- **④ 创业阶段不扩散** —— 最直接。1,266 行零消费代码进入一个商业控制面仓,是纯粹的沉没成本豁免请求:「既然已经写了就留着吧」。创业阶段聚焦原则明确否掉这个理由。ADR-0049 enforce-or-remove 对同一形状的既定答案也是 remove。④指向 **A**,且反对把 C 混进本次窗口。\n\n**推荐:A —— 不搬,step 3 直接删。** ①领起(没有解析器的声明不是契约);③指出搬迁不消除「声明不被兑现」只是换个仓;④按 enforce-or-remove 的既定答案办;②确认没有任何一方在等。\n**若选 C:** 建议拆成 A + 一张独立的 `environment-package` enforce 卡(让声明与 `GET …/packages` 的实际输出一致,含同值双键的处置),⛔ 不要塞进本次搬迁窗口 —— 那是 enforce 工作,与 move 混在一起会让两者都没法单独复核。\n**⛔ 不荐 B。** 它是四棱一致反对的唯一选项:零拉动、纯支出、把 declared≠enforced 原样换仓保存。\n**置信缺口:** 本分析只量了 cloud 与 objectstack 两仓的消费。⚠️ 这四个 schema 今天从 `@objectstack/spec/cloud` 公开发布,**仓外消费者无法从这里测量** —— 若你知道有外部使用者依赖 `AppStoreListing` / `DeveloperPortal*` / `MarketplaceAdmin*` 这几族类型,A 的代价会变,请在回复里点名。\n\n**Governing text:** `AGENTS.md` Prime Directive #12 (contract-first); ADR-0049 enforce-or-remove; 维护者 2026-08-04\n「我们是一个创业项目，应该先专注于核心能力」.\n\n## Downstream\n\n- #16325 (step 3) cannot execute its deletion half until this is answered — `Blocked-by` added there.\n- objectstack-ai/cloud#2037 (step 1) is **not** blocked on this: it moved the two live files only, and the PM has\n  told its dev ⛔ not to act on this question in that PR.\n\n---\n\n## 维护者速读\n\n**这是什么事** —— 你昨天裁的是「云控制面那六个 schema 文件搬去云端」。实施时量出来:**六个里只有两个真的有人用**,另外四个(开发者门户、市场后台、应用商店、环境已装包,合计约 1,266 行)在云端仓库里**一次都没被引用过**。\n\n**要你拍的只有一件事** —— 这四个文件从开源包里删掉是已经定了的,不用再问。现在问的只是:**云端要不要照抄一份留着?**\n\n**选项** —— **A:不留,直接删**(要用时从 git 历史里翻出来)。**B:照抄留着**(1,266 行没人解析的代码,靠一堆什么都验证不了的测试养着)。**C:只留其中一个**(「环境已装包」那个,因为它描述的接口是活的 —— 但那个接口今天本来就没人按它校验)。\n\n**我的意见** —— 推荐 **A**。一个没有任何代码去解析的 schema 不是契约,是长得像契约的注释;把它从一个仓搬到另一个仓,不会让它变成契约,只是换个地方继续误导人。如果你觉得 C 有道理,我建议拆开做:先按 A 删,再单独开一张卡去真正兑现那个接口的声明 —— 把\"搬家\"和\"补契约\"混在一次改动里,两件事都会没法单独验收。\n\n⚠️ **一个我测不到的风险,你可能知道**:这四个类型今天是公开发布的,仓外如果有人在用,我从这里看不见。如果你知道有,说一声。\n\n**你要做的** —— 选一个:**A / B / C**。\n"
+}

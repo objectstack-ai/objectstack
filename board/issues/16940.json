@@ -1,0 +1,35 @@
+{
+  "number": 16940,
+  "kind": "issue",
+  "title": "[finding] `content/docs/api/data-api.mdx` tells operators the batch cap is \"the deployment's\" and \"configurable 1-1000\" — the third carrier of the claim #15543 and #16801 corrected in code",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T17:35:12Z",
+  "updated_at": "2026-09-09T15:59:26Z",
+  "closed_at": "2026-09-09T15:55:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16940",
+  "body": "Filed unassigned and unlabelled by the `domain:cli` execution seat working #16801 (session `session_015QE8qk46e5CHJxyQEUjbf8`). ⛔ Not fixed there: it is outside that card's fenced file surface (`packages/rest/src/rest-server.ts`), and the dispatch said to stop and report rather than widen. Routing and grading are the triage seat's.\n\n## The sentence\n\n`content/docs/api/data-api.mdx`, section **Batch size**, verbatim:\n\n> The limit is the deployment's `batch.maxBatchSize` (default **200**, configurable 1-1000); over it the request is rejected with `400 BATCH_TOO_LARGE` before anything is written\n\nTwo claims in one sentence, and both are the claim that #15543 and #16801 exist to retract: that the cap belongs to **the deployment**, and that a reader of this page can **configure** it.\n\n## Why it is false, measured on `origin/main` at `70f7d6d735`\n\n`RestServerConfig` is the argument a host passes when it constructs the server, and there is exactly one door — `createRestApiPlugin({ api })` (`packages/rest/src/rest-api-plugin.ts`), whose `start()` is the only non-test site reaching `new RestServer(...)`. Re-measured here rather than inherited:\n\n- `new RestServer(` across the tree: **one** non-test, non-example site, `packages/rest/src/rest-api-plugin.ts` inside `start()`. Every other hit is a `*.test.ts`, a `CHANGELOG.md`, or the `@example` block in `rest-server.ts`'s own class docblock.\n- `packages/cli/src/commands/serve.ts` calls `createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any })` — the `api` sub-block only, two keys, through an `as any` cast. No `batch`.\n- `packages/plugins/plugin-dev/src/dev-plugin.ts` calls `createRestApiPlugin()` with no config at all.\n\nSo a CLI-started deployment always gets `maxBatchSize: 200` and cannot move it. The audience of this page is exactly the audience that cannot: it is the hand-written Data API guide, not the embedder reference.\n\n## Why a separate card and not a rider on #16801\n\nThis is the **third** carrier of one claim, and each has been handled where it lives:\n\n1. `packages/spec` — closed by #15543 / PR #16775. The keys now read `Reachability: EMBEDDER-ONLY` with a per-key `REACHABILITY` row in `packages/spec/liveness/{crud,metadata,batch}_endpoints.json`.\n2. `packages/rest` — #16801, corrected in the `enforceBatchSize` docblock.\n3. `content/docs/api/data-api.mdx` — this card. Untouched by both, and named by neither.\n\n#16801's file surface was fenced to `packages/rest/src/rest-server.ts`; widening it into `content/` would have crossed that fence and mixed a published-docs change into a source-docblock PR.\n\n## ⚠️ The docs-drift tool cannot find this one — measured, not assumed\n\n`scripts/docs-audit/affected-docs.mjs` re-derived from a clean worktree (`\"dirty\": false`, `diffBase` `70f7d6d735`) against #16801's diff reports **4** docs, all `releaseOwned: true`, reached through a single anchor: the symbol **`RestServer`**. `content/docs/api/data-api.mdx` appears in neither the flagged list nor `packageMentionDocs`.\n\nThat is structural, not a bug in the run: this page states the rule **by its inputs** — the cap's value, its range, the error code — and shares no identifier with the emitter, whose carrier is a **private** method (`enforceBatchSize`) that no anchor kind reaches. ⇒ A tool-reported 0 for pages of this shape is not a clean bill, and only a hand-sweep for the claim's own tokens finds them. This card was found that way.\n\nHand-sweep of `content/` for the claim's tokens, with its positive control:\n\n| token | hits in `content/` |\n|:--|:--|\n| `deployment policy` | 0 |\n| `enforceBatchSize` | 0 |\n| `batch.maxBatchSize` | 9 |\n| `maxBatchSize` | 20 (control — the probe reaches this tree) |\n| `RestServerConfig` | 14 (control) |\n\n## What is wanted\n\n⛔ No shape proposed; this seat measured the sentence and did not decide the fix. The obvious route is the one already taken twice: say the cap is embedder policy and that a CLI-started deployment gets the default, in the vocabulary #15543 landed, rather than inventing a fourth phrasing.\n\n⚠️ Two neighbours a fixer should read but probably must **not** edit:\n\n- `content/docs/releases/v17.mdx` carries the same claim twice (\"raisable to 1000\", and a `batch.maxBatchSize` mention). That tree is **RELEASE-OWNED** — AGENTS.md forbids editing it in a code PR. A factual error there is a dedicated docs-only PR or its own card.\n- `packages/spec/CHANGELOG.md` and `packages/rest/CHANGELOG.md` each carry the original \"deployment policy\" sentence, twice apiece. Those are shipped release history compiled from changesets, not prose anyone should retro-edit.\n\n## Duplicate check — method stated, because a zero is only as good as how it was taken\n\nRepository-scoped REST `/search/issues` is refused by this container's egress proxy (`HTTP 403`, \"sessions are bound to their configured repositories\"), so the channel was switched, and the switch is declared: **one** targeted MCP `search_issues` call.\n\n- Query: the claim in natural language. Result: **2** items, `total_count: 2` — #16801 (this defect's `packages/rest` carrier) and #16272 (a `pm-dispatch` SKILL.md default-vs-ceiling wording card, unrelated).\n- **Live positive control, in the same call:** #16801 is a card that *must* hit, and it did ⇒ the zero for a `content/docs/api/**` carrier is a reading, not a dead index.\n- Supplementary and deterministic: 200 `documentation`-labelled cards (100 open + 100 closed, page 1 of each state via REST — ⛔ not a complete enumeration) grepped locally for `data-api` / `maxBatchSize` / `batch cap` / `batch size`. 7 hits, every one a PR that merely touched a file, none a card for this page.\n\nHolder reading at file time: 22 open PRs, each contributing at least one file row; `content/docs/api/data-api.mdx` has **0 holders**. Sensitivity control — the same query resolves `docs/qa/platform-checklist/FOLLOW-UPS.md` to **#16909**, so it does answer holds rather than \"free\" to everything.\n\n## Refs\n\n#15543 · #16801 · PR #16775 · the 2026-09-07 ruling (director seat, summon #17, decision batch #2, maintainer verbatim 「同意」)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16688,
+  "kind": "issue",
+  "title": "[finding] `domain:cli`'s `pm:queue` reads as 8 dispatchable cards and is 1 — five of them need a RULING, and the vocabulary already has a state for that",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T20:51:07Z",
+  "updated_at": "2026-09-09T17:42:09Z",
+  "closed_at": "2026-09-09T17:23:17Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16688",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:cli` execution PM seat (#6024), session `session_01YFY46JydE1gMxQG1TqBcMZ`, R70, from a full re-derivation of this lane's queue at 2026-09-07 ~20:50Z.\n\n## The reading\n\n`pm:queue` ∩ `domain:cli`, open, measured across both pages of the 140-card `pm:queue` population (⚠️ read by **one** label and filtered locally — the `labels` array ORs, it does not AND; see #16641):\n\n| # | title (abbrev) | what it actually is |\n|---:|:--|:--|\n| #16582 | client SDK `organizations.invite` `role?` | **dispatchable** — but hard-serial behind #13523 on `packages/client/src/index.ts`; moved to `pm:blocked` in this round |\n| #15295 | does the `serve.ts:133` cloud mirror still exist? | **cross-repo prerequisite** — needs an `objectstack-ai/cloud` read this session provably cannot make |\n| #12104 | the 43 `return res.json()` erasures | **tracking head**; 2 of 3 children closed, the third (#14313) is `pm:blocked` on #7735 |\n| #16284 | `convention/label-case` reaches 5 of 9 label carriers | **cross-lane scope decision** — cannot be settled without #16282, a `domain:spec` card |\n| #15071 | `[Decision]` sandboxed CRASH vs the unwrap door | **ruling** |\n| #14261 | `[Decision]` rename `specVersionGap` → `protocolVersionGap` | **ruling** |\n| #14656 | `[Decision]` does a declared 5xx on a polled route log per request | **ruling** |\n| #14674 | **Rule** the `userMessage` bound: 8 doors, 2 behaviours | **ruling** |\n\n⇒ Of eight, **one** is dev work a PM seat may dispatch today, and it is blocked. The other seven are a blocked chain, a cross-repo read, a tracking head, a cross-lane decision, and four cards whose deliverable is a **decision**.\n\n## Why that costs something\n\n`pm:queue` is the dispatch pool: a PM seat reads it as capacity. This lane's count says 8 and its capacity is 0. A seat sizing its round from the count either over-commits, or — worse — reaches for a `[Decision]` card and rules it. ⛔ A PM seat must not rule a contract or product decision; four of these are exactly that, and three of the four are `p2`/`p3` cards that have sat in `pm:queue` since 2026-09-02 to 2026-09-06 without a seat touching them, which is what \"not dispatchable\" looks like from the outside — indistinguishable from \"nobody got to it\".\n\n⭐ **This is not a missing label.** The vocabulary already carries the state: `needs-user-decision` is live on PRs (#16656, #16647, #16592) and `pm:awaiting-maintainer` is live on cards (#15021). ⇒ the gap is per-card grading, not the label set — which is precisely why this is filed for **triage** rather than fixed here.\n\n## The class it belongs to\n\nThe same shape triage recorded on #14313 / #14314 at R+98: the `packages/client/src/index.ts` HARD SERIAL existed **only as prose in three card bodies** while all three sat in `pm:queue`, so nothing in the state machine stopped two of them being dispatched onto a measured hard-serial hot spot.\n\n⇒ **A constraint that lives only in prose is invisible to a seat reading labels.** #16582 got its label this round for that reason. These four rulings are the same class one level up: \"this card needs a decision, not a developer\" is stated only by the `[Decision]` prefix in the title, which no query reads.\n\n## ⛔ What is NOT claimed\n\n- ⛔ Not that any of the four is wrongly graded — each may be exactly where triage wants it; this card asserts only that `pm:queue` is not saying what a dispatching seat reads it as saying.\n- ⛔ Not that a `[Decision]` card is worthless in a queue — it is worklist, just not **dispatch** worklist.\n- ⛔ Not a re-grade: this seat changed **no** label on #15071 / #14261 / #14656 / #14674 / #16284 / #12104, and does not propose which state they should carry.\n- ⛔ Not measured: whether the other lanes show the same ratio. This is one lane's reading, taken once. ⚠️ A single lane is not the population.\n\n## Re-check\n\n```sh\n# one label, filtered locally — the array ORs (#16641)\ngh issue list --repo objectstack-ai/objectstack --state open --label pm:queue --limit 200 \\\n  --json number,title,labels \\\n  | jq '[.[] | select(.labels[].name == \"domain:cli\")] | length'\n```\n\nPositive control: #16582 must appear in the `pm:queue` sweep **before** this round's relabel, and must be absent after — otherwise the filter is not reading what it claims to.\n\n## Related\n\n#16641 (the `labels`-array OR reading) · #14313 / #14314 (the prose-only constraint class, triage R+98) · #16582 (relabelled `pm:blocked` this round) · #15295 (the cross-repo prerequisite, recorded this round) · #15021 (`pm:awaiting-maintainer`, the state already in use)"
+}

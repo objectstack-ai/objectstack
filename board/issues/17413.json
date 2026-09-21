@@ -1,0 +1,33 @@
+{
+  "number": 17413,
+  "kind": "pull_request",
+  "title": "Pin check-test-source-alias's codeOnly projection with a literal-brace fixture",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T12:41:13Z",
+  "updated_at": "2026-09-10T13:38:03Z",
+  "closed_at": "2026-09-10T13:38:01Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-10T13:38:01Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17413",
+  "body": "Fixes #16299\n\n**Clause-②**: no\n\n## What\n\nAdds fixture (26) to `check-test-source-alias.mjs`'s `--self-test`: a dynamic\n`import('@fx/core')` inside an `it()` callback, preceded by a template\nliteral whose interior contains a stray `` ` }` `` character. This pins the\n`codeOnly` half of `maskedProjections` — the projection `functionBodyRanges`\nreads to decide module-scope vs CLOCKED — which #16299 measured as pinned by\nnothing.\n\nWhy this shape: `functionBodyRanges` walks `codeOnly` character by character,\npushing a frame on every `{` and popping (closing a range) on every `}`. Under\ncorrect masking, `maskCommentsAndLiterals` blanks the template's interior\n(delimiters survive, content does not), so the stray `}` never reaches the\nscanner and the callback's real closing brace is what pairs with its real\nopener — the import lands inside `[open, close]` and is reported CLOCKED.\nUnder an under-masking `codeOnly` (either ablation below), the literal `}`\nis read as real code: it pops the callback's frame early, right there inside\nthe template, *before* the dynamic import two lines down. The range this\nscanner records is `[open, thatEarlyClose]`, the import falls outside it, and\nthe violation goes silently unreported — the same \"silent exemption\" failure\nmode fixture (25) already pins for the brace scanner's backward walk, but for\nthe forward brace-count instead.\n\nTwo assertions added to the existing \"the clocked-window rule (#10126)\"\nbattery (floor raised 10 → 12 per #13799): the fixture's one CLOCKED finding\nis reported, at the correct line, naming the correct specifier.\n\n## Ablation proof (temporary, not committed)\n\nBoth directions #16299 named, applied to `scripts/js-comment-mask.mjs`'s\n`maskCommentsAndLiterals`, then reverted:\n\n| ablation | `--self-test` before revert |\n|:--|:--|\n| `flags[k] = comment[k]` (degrades to `maskComments`) | **RED** — `a \\`}\\` inside a template literal closed the real function body early — the dynamic import went unreported` |\n| `return source` (identity — blanks nothing) | **RED** — same failure |\n\nAfter each ablation: `git checkout HEAD -- scripts/js-comment-mask.mjs`,\nconfirmed via `git status --short` / `git diff --stat` (both empty) and\n`git hash-object scripts/js-comment-mask.mjs` matching the pre-ablation\n`HEAD` blob hash (`7956343dd85bdef8924372cb2cdec45fcd54501d`) both times.\n\nUn-ablated, after revert: `node scripts/check-test-source-alias.mjs\n--self-test` → `check-test-source-alias --self-test OK` (exit 0), and the\nplain run's output is byte-identical to the pre-change baseline\n(`check-test-source-alias OK — 73 packages with tests scanned; 61 registered\nas still resolving a workspace dep through \\`dist/\\`; 49 published\nsubpath(s) resolved through every alias table.`) — the reverse control: the\nnew fixture is green un-ablated, red under both ablations.\n\n`scripts/js-comment-mask.mjs` was never committed to — it is a shared file\nand #16299 states it is only touched by the ablation, which is reverted.\n\n## Scope\n\nOnly `scripts/check-test-source-alias.mjs` changed (fixture + 2 assertions +\nfloor bump). No change to `scripts/js-comment-mask.mjs` (shared, out of\nscope). Not re-proving #15776's conversion — that proof (6,204 files /\n107,177,732 chars byte-for-byte, with a 6,174-file-distinguishing control)\nalready lives in that PR's body; this card supplies the pin this gate itself\nlacked.\n\n## Changeset\n\n`skip-changeset`: `scripts/check-test-source-alias.mjs` is a root dev/tooling\nscript — it is not part of any published package's `files[]` (root package\n`@objectstack/spec-monorepo` is `\"private\": true`; `grep -rl` for the file\nacross every `packages/*/package.json` `files` entry returns nothing), so\nnothing published moves. Label applied to the PR.\n\n## Local verification\n\n- `node scripts/check-test-source-alias.mjs --self-test` and the plain run:\n  both green, both before and after the ablation-and-revert cycle.\n- `scripts/pm/dispatch-gates.mjs --commands` derived 32 commands for this\n  diff (1 changed path, `scripts/check-test-source-alias.mjs`); run directly\n  (not through turbo — none is a package build/test), all green so far\n  (`pnpm check:pm-dispatch-gates` still running per its own documented\n  detach-and-poll guidance for this container).\n- No workspace package closure (①): the changed file is a root `scripts/`\n  script, not part of any package. `pnpm turbo ls --affected` reports the\n  full 80-package list for this diff, which is `turbo`'s documented blind\n  spot for root-level, non-package changes (AGENTS.md: \"仓根包不在 `turbo ls`\n  里,根级套件整个在图外\") rather than a real per-package signal, so ② is\n  also N/A — no package's own `test`/`typecheck` is implicated.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_"
+}

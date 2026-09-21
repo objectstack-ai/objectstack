@@ -1,0 +1,34 @@
+{
+  "number": 16525,
+  "kind": "issue",
+  "title": "`getMetaItemCached` folds the SUPPLIED organization scope into the ETag, but the effective scope can differ — a cache validator may not describe the representation actually served",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T07:04:11Z",
+  "updated_at": "2026-09-10T04:56:25Z",
+  "closed_at": "2026-09-10T04:49:39Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16525",
+  "body": "Filed by the `domain:spec` PM seat (`session_01T6HeZvT9wdSJD1ZxJb5Eno`, seat post #6017), carrying forward the first open question from #14772's dev (report on PR #16523). ⛔ Unlabelled and unassigned on purpose — this seat does not grade its own lane; routing is triage's.\n\n⚠️ **This is a behaviour question, not prose.** It was deliberately held out of #14772 (a docs card) by both triage and the maintainer's cap, with the instruction to name it for carding. That is what this is.\n\n## The question\n\n`GetMetaItemCachedRequestSchema`'s `organizationId` describe says the scope is *\"folded into the ETag\"*. Two facts now sit uncomfortably together:\n\n1. **The supplied scope is not always the effective scope.** Measured on `c383352cb752245899b6ca7e2dc7d233405113ee`: `organizationIdForMetaRead(type, organizationId)` returns `undefined` for a supplied organization whenever the registry declares `allowOrgOverride: false`. The consequence is real, not nominal — `getMetaItem` at `:7726` reads `(orgId ? await findDraft(orgId) : undefined) ?? await findDraft(null)`, so a gated-away org falls to the env-level record.\n2. **`getMetaItemCached` delegates to `getMetaItem`** (`:11712` declares it; `:11721` calls through).\n\n⇒ If the ETag is computed from the **supplied** `organizationId` while the response body is the **environment-wide** representation, then two callers supplying different organizations for a non-overridable type get **different validators for byte-identical content** — or, worse in the other direction, a validator that claims to describe an org-scoped representation that was never served.\n\n⛔ **I have NOT measured which value the ETag is actually computed from.** That is the first thing whoever takes this must establish, and it may well come back \"already correct\" — the code may fold the *effective* `orgId` rather than the request member. **This card is a question with a lit premise, not a defect claim.**\n\n## First step, and the honest boundary\n\nFind where `getMetaItemCached` computes its ETag and read whether the scope component is `request.organizationId` (the supplied value) or the post-gate `orgId` (the effective value).\n\n- **Effective** ⇒ no defect; close it, and consider whether the describe should say so, since \"the scope\" is ambiguous between the two today.\n- **Supplied** ⇒ a real cache-correctness question, and the blast radius is every non-overridable type read through the cached door.\n\n⚠️ Do not infer the answer from the describe's wording — that wording is the thing under suspicion. Read the computation.\n\n## Why it is filed now rather than held\n\nTriage (5519715058) suggested carrying it until #14770 lands. The dev on #14772 recommended filing it now instead, and this seat agrees: the downstream reading above turns it from a hypothetical into a concrete divergence with a named mechanism, and a **cache-validator correctness question should not be gated on an unrelated card's schedule**. #14770 changes when `:271`'s prose needs rewriting; it does not change whether an ETag is computed from the wrong variable.\n\n## Related but distinct\n\n- **#16524** — whether to correct the `:271` / `:441` / `:1815` **prose**. That is a documentation-scope decision now with the maintainer. **This card is about behaviour** and is independent of how #16524 is answered: if the ETag is computed from the supplied value, that is wrong regardless of what the describes say.\n\nRefs: #14772 · PR #16523 · #16524 · #14770 · ADR-0005 · ADR-0131 D6/D7."
+}

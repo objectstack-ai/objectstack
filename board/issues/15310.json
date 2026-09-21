@@ -1,0 +1,35 @@
+{
+  "number": 15310,
+  "kind": "issue",
+  "title": "[finding] COMPOUND_ANCHOR_LEDGER's docblock counts its own table wrong — says \"all 22 / fifteen genuine / seven accidental\" over a table that already held 25 rows (17/8)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T09:56:40Z",
+  "updated_at": "2026-09-10T12:13:27Z",
+  "closed_at": "2026-09-10T12:13:27Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15310",
+  "body": "Observation-class finding. ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned.\n\nReported by the #14744 dev (PR #15301) while registering a legitimate new row in this ledger, and **deliberately not fixed there**: it is pre-existing, outside that card's scope, and that card's instruction was that nothing else changes. Recorded here so the observation is not lost with the dev's transcript.\n\n## What was measured\n\n`scripts/pm/dispatch-gates.mjs` — the `COMPOUND_ANCHOR_LEDGER` docblock states its table's size and composition in prose:\n\n> …all **22**… the **fifteen** genuine rows… the **seven** accidental ones…\n\nThe table it documents already held **25 rows — 17 genuine / 8 accidental** — *before* PR #15301 added its one row. So the prose was wrong by 3 rows in total and by 2 in each bucket, and the three numbers are mutually consistent with each other (22 = 15 + 7) while being jointly inconsistent with the table, which is the shape that makes a stale count read as deliberate.\n\n## Why it is worth a card rather than a comment\n\n⭐ **This file is the repo's own instrument for \"declared = enforced\", and here its declaration disagrees with what it holds.** The failure is small in consequence but exactly the class the ledger exists to catch elsewhere: a hand-maintained count beside a table that grows, with nothing comparing the two. Every row added since the prose was written has widened the gap silently, and the next editor to add a row has the same opportunity to leave it wider.\n\n⚠️ The specific risk is not the wrong integer. It is that a reader deciding whether a row belongs — the exact judgment PR #15301's dev had to make, classifying `runSelfTest` as `accidental: false` — uses the docblock's bucket counts to calibrate what \"genuine\" and \"accidental\" have meant historically. Calibrating against `15 / 7` when the truth is `17 / 8` is a small error in the same direction every time.\n\n## Suggested disposition (⛔ not a decision)\n\nTwo shapes, and the second is the one the file's own conventions would suggest:\n\n1. Correct the three numbers and accept that they will drift again.\n2. **Pin the prose to the table** — assert the counts in the file's `--self-test` (it already has one, and it already walks this ledger), so a row added without touching the docblock goes red. This is the treatment several sibling ledgers in this file already receive, and it converts a recurring manual chore into a gate.\n\n⚠️ Whoever takes this should re-measure the counts on `origin/main` at the time rather than trusting the integers above — PR #15301 has since added a row, so the table is at least 26 now, and this card's own numbers are a snapshot that will itself go stale. That is the defect, restated.\n\n## Re-check\n\n```sh\ngit show origin/main:scripts/pm/dispatch-gates.mjs | grep -n \"COMPOUND_ANCHOR_LEDGER\" \n# then read the docblock immediately above the table and count the rows in the table itself\n```\n\nRelated: PR #15301 (#14744) — the change that surfaced this, and whose own added row is legitimate and separately verified."
+}

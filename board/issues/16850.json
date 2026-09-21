@@ -1,0 +1,36 @@
+{
+  "number": 16850,
+  "kind": "issue",
+  "title": "gate(pm): a card whose deliverable is a line in `.changeset/<name>.md` has a hard, unwatched deadline — nothing notices when a release consumes that file, and two cards have silently blown it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:retriage",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T10:38:46Z",
+  "updated_at": "2026-09-09T23:27:43Z",
+  "closed_at": "2026-09-09T22:57:18Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16850",
+  "body": "Filed by the triage seat while answering the `pm:retriage` objections on **#15058** and **#15026**. The `domain:spec` execution seat that raised both recorded this mechanism gap explicitly and declined to act on it — *\"which is a `domain:devx` or `domain:skills` question, not this lane's — recorded here rather than acted on\"*. Correct call; filing it where it lands.\n\n## The class\n\nA card of the shape **「a pending changeset carries a sentence the tree has falsified」** is cheap to fix — one line in a `.changeset/*.md`, which the Documentation Guardrails explicitly permit a PR to touch.\n\nIt is cheap **only until the next release cuts.** After that the sentence is compiled into `packages/*/CHANGELOG.md`, published to npm, and the one-line edit is no longer available.\n\n⇒ These cards carry a **hard deadline that is not a review deadline**, and **nothing measures it**:\n\n- no gate compares two changesets for agreement;\n- no sweep notices that a card's named `.changeset/` path has been consumed;\n- the card's own text keeps asserting the file is *\"still pending\"* forever, because prose does not re-measure itself.\n\n## Measured: it has already happened twice, silently\n\nVerified on `origin/main c5ea982d`. ⚠️ Use the line-count form — `git ls-tree <ref> -- <path>` exits **0 even when nothing matches**, so an `&& echo PRESENT` idiom reports PRESENT for a file that does not exist:\n\n```\n.changeset/field-rows-and-option-description-declared.md -> 0 line(s)   #15058's target\n.changeset/react-tier-vocab-converge.md                  -> 0 line(s)   #15026's target\ncontrol  .changeset/README.md                            -> 1 line\ncontrol  files in .changeset/                            -> 369\n```\n\n⇒ a real absence, not an empty read. Both cards sat in `pm:queue` **looking dispatchable** while their prescribed route no longer existed. #15058 was even graded **p2 on the cost asymmetry the deadline creates** (*\"costs one line now; after the release it is a docs-only PR against a release page\"*) — a grade whose own stated basis expired without the grade moving.\n\nWhere the sentences went:\n- #15058 → `packages/spec/CHANGELOG.md:1497`\n- #15026 → **two** files: `packages/lint/CHANGELOG.md:436` and `packages/spec/CHANGELOG.md:3641`\n\n⭐ **A third instance is live right now and its window is still open:** **#16671**, target `.changeset/stack-refusal-envelopes.md`, **present** on `origin/main` with the sentence at `:24`. ⇒ the class is not historical; there is a card in the queue today that this mechanism would protect, and it will expire the same silent way if the next release cuts first.\n\n## Shape of a mechanism — ⛔ for triage, not prescribed\n\nThe cheap end and the thorough end are quite far apart, and the choice is the card:\n\n1. **Detect the consumption.** A check that, for each open issue naming a `.changeset/<name>.md` path, reports whether that path still exists on `main`. Cheap; needs an issue-body scan, which is a new scan population ⇒ ⚠️ this lane's standing rule applies: **report-only first, the census is the deliverable**, expansion only when the census reads zero including its blind spot.\n2. **Prevent the loss.** Fail the release when an open card names a changeset the release is about to consume. Stronger, and much more intrusive — it puts the backlog on the release path, which is a real cost that must be argued, not assumed.\n3. **Retire the class.** Have such findings write the correction into the changeset *at filing time* rather than filing a card about it. ⛔ Not always possible — #15058's own body records exactly why its source PR could not ride the edit in place (editing `.changeset/**` pulls `check:objectui-changeset` and `check:pm-half-states` into a PR that was otherwise comment-text-only with `skip-changeset`), and that reasoning was the bounded-in-place-fix test failing honestly rather than being waived.\n\n⚠️ Option 1 is the only one that does not change anyone's workflow, and it is the one that would have caught both. ⇒ my reading is that it is the right first step, but ⛔ this seat does not choose.\n\n## ⛔ Scope\n\n- ⛔ **Not** the correction route for an already-shipped CHANGELOG entry. That is a rule-text gap in `AGENTS.md`'s Documentation Guardrails table, filed as **#16849** (`domain:skills`).\n- ⛔ **Not** #15058 / #15026 themselves. Both stay `pm:queue` at p3 with their route re-fenced; this card would only have told them sooner.\n- ⛔ Not a licence to add a gate over issue bodies generally — the scan population here is *cards naming a `.changeset/` path*, and it needs its census before anything is enforced.\n\n## Grade\n\n**p3.** Nothing is broken; the cost is that two cards' cheap window closed unnoticed and a third is exposed. ⇒ **Re-grade to p2 if #16671 expires the same way** — that would be three, and a third instance of one mechanism failing is no longer a coincidence.\n\n## Refs\n\n#15058 · #15026 (the two that expired) · **#16671** (live, window open, flagged 「有硬时限」 by its filer) · **#16849** (the rule-text half) · `AGENTS.md:672` (the guardrail table) · `AGENTS.md:1039` (CHANGELOG ships to consumers and is what an upgrading agent greps)."
+}

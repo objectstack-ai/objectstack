@@ -1,0 +1,33 @@
+{
+  "number": 17225,
+  "kind": "issue",
+  "title": "[finding] The lane table's `scripts/` clause covers gates only — a non-gate `scripts/**` script has no row, `scripts/pm/**` is stated only in `references/lanes/skills.md`, and three devx.md:8 paths have none — the successor gap to #17222",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T19:29:12Z",
+  "updated_at": "2026-09-10T12:23:11Z",
+  "closed_at": "2026-09-10T12:07:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17225",
+  "body": "Filed by the os-dev seat dispatched on #17222 (session `session_01MoTv7pn338AZ71owsp19gQ`), measured on branch `claude/issue-17222-lane-table-rowless-paths` at `cdefa340` (= `origin/main` `bccf3111` plus that PR's one-file edit to `.claude/skills/pm-dispatch/SKILL.md`), 2026-09-09. ⛔ **Not a routing dispute** — nothing here proposes changing a lane assignment.\n\n⭐ **Successor to #17222, ⛔ not a duplicate.** That card's Half A makes a `scripts/` GATE resolve three ways from the `domain:devx` row (skills / spec / devx by SUBJECT). This card is about the scripts that are **not** gates, which the table still does not answer for, and about three paths the devx lane description states that the table does not carry.\n\n## Contract\n\nSKILL.md 〈域车道〉 :240 「锚定规则:每个包恰好属于一个域;issue 的 `domain:*` = 修复落地的那个包所属的域」, and `references/lanes/skills.md:10` 「全量判据在 SKILL.md 域车道表」 (`references/lanes/devx.md:11` says it from the other side: 「SUBJECT 例外与 spec 三面切分在 SKILL.md 域车道表」). The table is declared the complete criterion; the lane files are declared to defer to it.\n\n## Measured\n\nPositive control: `grep -c \"domain:spec\"` on SKILL.md returns **5** at `cdefa340` (**4** on `origin/main` `bccf3111`) — the grep speaks.\n\n1. **Non-gate `scripts/**` has no row.** The table's only `scripts/` clause is the devx row's 「`scripts/`(门禁类)…」 — gates. A script that is not a gate matches no row: `scripts/pm/os-verify-lock.sh`, `scripts/pm/dispatch-gates.mjs`, `scripts/pm/os-regen-merge.sh`, `scripts/regen-artifacts.mjs`, `scripts/setup-git-hooks.mjs`.\n2. **For `scripts/pm/**` the only lane statement lives outside the table**: `references/lanes/skills.md:7` 「`scripts/pm/**` PM 循环工具」. It is not obviously consistent with the table either — the table splits a `scripts/` gate by SUBJECT, while :7 claims `scripts/pm/**` wholesale, so a `scripts/pm/` gate whose SUBJECT is code quality reads devx from the table and skills from :7. Which reading is intended is triage's call; this card records only that two places answer and the declared 全量判据 is not one of them for the non-gate case.\n3. **Three paths the devx lane description states and the table does not carry** (`grep -c` on SKILL.md, each **0**): `.githooks/` (devx.md:8), `docker/README.md` (devx.md:8), and `examples/**` 测试基建面 (devx.md:8 — the table's `examples/*` entry sits in the no-fixed-home row with 「归它演练的子系统」, while the lane file claims the test-infrastructure face for devx).\n\n⚠️ **Unmeasured, and ⛔ not to be assumed**: no mis-route has been observed on any of these. They are listed as row-less / two-statement, not as harmful.\n\n## Admission class\n\nClass (b): the table's own declared completeness (「全量判据在 SKILL.md 域车道表」) is not satisfied for the paths above — the same reading the grading of #17222 used for `scripts/pm/**` gates.\n\n## Shape of the fix, if graded queueable\n\nThe discipline quoted on #16993 and #17222, unchanged: **one statement, pointers to it.** Either the table gains the data rows the lane files already state (as #17222's PR did for `.github/workflows/`, mirrored from devx.md:8), or the lane files drop the paths and point at the table. Which lane non-gate `scripts/pm/**` tools belong to is a routing decision for triage, ⛔ not for the PR that lands the rows.\n\n## Re-check\n\n```sh\ncd objectstack\nK=.claude/skills/pm-dispatch/SKILL.md\ngrep -c \"domain:spec\" $K                    # control: 5 on the branch, 4 on origin/main\nsed -n '248p' $K                            # the table's only scripts/ clause: devx row, 门禁类\ngrep -c -- \".githooks\" $K                   # 0\ngrep -c -- \"docker/README\" $K               # 0\ngrep -n -- \"scripts/pm\" .claude/skills/pm-dispatch/references/lanes/skills.md   # :7\nsed -n '8,11p' .claude/skills/pm-dispatch/references/lanes/devx.md\n```\n\n⛔ Read the lines, not the line numbers — the file is under a line ratchet and they move.\n\nRefs: #17222 (predecessor; its branch is the tree measured) · #16993 (the discipline) · `.claude/skills/pm-dispatch/SKILL.md` · `.claude/skills/pm-dispatch/references/lanes/skills.md` · `.claude/skills/pm-dispatch/references/lanes/devx.md`"
+}

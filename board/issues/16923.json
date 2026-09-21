@@ -1,0 +1,37 @@
+{
+  "number": 16923,
+  "kind": "issue",
+  "title": "[finding] `FieldReferenceSchema`'s FIRST TSDoc `@example` spells a `$field` comparand as the relation path `order.owner_id` — the same block's prose says a dotted path is refused with INVALID_FILTER",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T16:36:01Z",
+  "updated_at": "2026-09-10T13:47:24Z",
+  "closed_at": "2026-09-10T11:57:57Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16923",
+  "body": "Found while delivering #15778 on branch `claude/issue-15769-stale-contract-prose-trio`. Out of scope there: #15778's acceptance criterion names the SECOND `@example` only, and correcting this one is not mechanical — see \"Why it is filed rather than ridden in\". Filed unassigned; no severity asserted.\n\n## Measured on `origin/main` `70f7d6d73` (2026-09-08)\n\n`packages/spec/src/data/filter.zod.ts`, the `FieldReferenceSchema` TSDoc block, first `@example`:\n\n```\n:34   @example\n:35   // user.id = order.owner_id\n:36   { \"$eq\": { \"$field\": \"order.owner_id\" } }\n```\n\nThe same block's \"Execution support\" prose states the boundary, in the same TSDoc block:\n\n```\n:62   rulings bound what compiles: same-table columns only (a dotted path is\n      refused -- no JOIN planning, no alias contract) ... Every position outside\n      that boundary is refused with `INVALID_FILTER` (HTTP 400), never bound as a\n      literal.\n```\n\nSo the block's first example spells a `{ $field }` comparand as a RELATION path, and the block's own prose says a dotted path is refused on SQL push-down. That is the same shape #15778 records for the second `@example`, at a site #15778 does not name.\n\nGrep readings on that file, each with a live positive control on the same file:\n\n| measured | hits | positive control, same file | hits |\n| --- | --- | --- | --- |\n| `order.owner_id` | 2 (`:35`, `:36`) | `FieldReferenceSchema` | 13 |\n| `duty.grace_days` (the #15778 site, for contrast) | 2 before the fix, 0 after | `FieldReferenceSchema` | 13 |\n\n## Why it is a trap and not a documentation nit\n\nThe harm channel is the one #15778's triage identified as the load-bearing one, and it does not depend on any generated page: an author reading the source or an IDE hover copies the dotted spelling, `matchesFilter` walks the path so it passes in memory, and SQL push-down answers `INVALID_FILTER` / 400. A filter comparand is stored, re-authored metadata (CEL permission and RLS rules, view and dataset filters), so this is metadata an author is led to write that a runtime door refuses.\n\nA dataset `include` does not rescue it. `content/docs/protocol/objectql/query-syntax.mdx` records that a `where` MEMBER on a joined relation column reads the joined column, but that a `{ $field }` COMPARAND takes a different road -- the native-SQL strategy declines it so the driver compiles it (#7598) -- so the same-table rule still applies to the comparand this example writes.\n\n## Why it is filed rather than ridden into #15778's PR\n\nNot mechanical, which is the bar for a bounded in-place fix. The second `@example` had one obviously correct replacement: the same-table spelling the hand-written guide already publishes at `content/docs/protocol/objectql/query-syntax.mdx:480-482`. This one has no such pinned answer, because its caption frames it as a JOIN ON clause (`user.id = order.owner_id`) rather than as a filter on one object. Choosing between (a) re-spelling it same-table, (b) dropping the join framing the block's own header still advertises (\"Used for joins (ON clause) and cross-field comparisons\"), or (c) keeping it and labelling the memory-only/dataset context, is a judgement about the join surface, not a rewrite. The seat that fixed #15778 declined to decide it alone.\n\n## Not claimed\n\n- **No behaviour defect.** The schema, both evaluators and the refusal are unchanged and correct. Only the example is at issue.\n- **Not published to a reference page.** Measured, with a live control: `content/docs/references/data/filter.mdx` is 169 lines and does carry a `## FieldReference` section at `:56` and the schema's import at `:35`, so the page was being read -- and `owner_id` returns 0 hits on it, as do `grace_days`, `completed_at` and `due_date`. Neither `@example` in this block reaches the generated page. The carrier is the source file, which `@objectstack/spec` ships: `files[]` includes `src/**/*.zod.ts`, confirmed with `npm pack --dry-run --json` (2073 published entries; `src/data/filter.zod.ts` is one of them, and the only non-`.zod.ts` entry under `src/` is a README).\n- **No count of the whole class.** This card records one site, not a sweep.\n\n## Dedup\n\nREST `/search/*` answers 403 in this container, so one targeted `search_issues` call was used and declared. Query naming this example returned 0. Live positive control on the same channel, one call earlier: a query phrased at #15778's own subject returned #15778 and #15769 as the top two hits out of 21, including the closed parent #15103 -- so the zero is a reading, not a dead channel. Related and checked, none recording this site: #15778 (the second `@example`), #15103 (parent ruling), #14282 (a list view's dotted field reference, closed, lint surface), #15059 and #15124 (other `filter.zod.ts` findings).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

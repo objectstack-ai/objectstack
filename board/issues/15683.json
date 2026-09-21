@@ -1,0 +1,33 @@
+{
+  "number": 15683,
+  "kind": "issue",
+  "title": "text operator over a temporal column: SQLite matches the stored ISO text, live Postgres refuses with SQLSTATE 42883, and the JS faces answer by stored representation — no face declares the cell",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T02:57:14Z",
+  "updated_at": "2026-09-10T09:36:29Z",
+  "closed_at": "2026-09-10T09:35:29Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15683",
+  "body": "Filed unassigned by the #14079 dev while landing the non-string-column contract row. Recording only — no severity asserted, routing is triage's. Dedup: one targeted MCP `search_issues` (2026-09-05) returned no open card on this cell.\n\n## Measured\n\nA text operator (`$contains` / `$startsWith` / `$endsWith` / `$icontains` / `$notContains` / `$like`) over a column whose DECLARED type is temporal (`Field.date` / `Field.datetime` / `Field.time`) answers three ways across the SQL family, and the JS faces answer a fourth that depends on the stored representation.\n\n| face | `{ d: { $contains: '2026' } }` over a `date` column holding `2026-01-05` | mechanism |\n|:--|:--|:--|\n| driver-sql / sqlite-wasm / turso local (SQLite) | the row | the column stores canonical ISO TEXT (`typeof(d)` = `text`, measured with better-sqlite3), so `GLOB '*2026*'` matches it |\n| driver-sql on live PostgreSQL 16.13 | REFUSED at query time — `ERROR: operator does not exist: date ~~ unknown` (SQLSTATE 42883), the same for `timestamp with time zone` and `time without time zone`; `d::text LIKE '%2026%'` answers the row | measured with psql on 2026-09-05 against the same server the #14079 live cell ran on; reaches the caller as `DATABASE_ERROR` 500 |\n| driver-sql on MySQL | NOT MEASURED (no server) — reads as coercion via `CAST(col AS BINARY) LIKE` |\n| driver-memory / formula / having | depends on what was STORED: a `Date` object is not a string and never matches (and satisfies `$notContains`); an ISO string matches | the JS faces type-gate on the value, and the memory driver stores whatever the caller wrote |\n\n`memory-driver-filter-logic-conformance.test.ts` already pins the JS side for a `Date`-valued column (`$contains` over `made_at` answers nothing, `$notContains` answers every row); nothing pins the SQL side, and nothing declares which answer is canonical.\n\n## Why #14079 did not decide it\n\nThe #14079 ruling (option A, type-gate) declares the answer for a stored value that is not a string, and the SQL faces implement it by DECLARED type via `NON_TEXT_STORED_VALUE_TYPES` — the numeric and boolean value classes only. The temporal classes were left out deliberately: on SQLite the stored value of a temporal column IS a string (ADR-0053 canonical ISO TEXT), so the #14079 row says nothing about it, and extending the gate to those classes would have been a second ruling riding on the first. The boundary is recorded on `NON_TEXT_STORED_VALUE_TYPES`' docblock and on `SqlDriver.isNonTextColumn`.\n\n## The decision this needs\n\nWhether a text operator over a temporal column is (a) type-gated like a number (never matches / `$notContains` always matches — makes Postgres's 500 a declared result, drops the SQLite ISO-text match some caller may lean on), (b) evaluated over the canonical ISO text on every backend (requires `col::text` casts on Postgres and a stored-form guarantee the JS faces do not have), or (c) refused at the door by declared type (the option-C card #14079 defers). Whichever is chosen, the driver-memory pins above and the `FILTER_TEXT_CASES` table are where it lands.\n\n## Related\n\n#14079 (the non-string-column row and its ruling) · #13166 (the no-value cells of `$notContains`) · ADR-0053 (temporal storage forms)\n\nBlocked-by: #14079 (PR #15686 — the `NON_TEXT_STORED_VALUE_TYPES` / `isNonTextColumn` mechanism this card's ruling (a) extends is on that branch, not on `main`; appended by the director seat 2026-09-05T04:0xZ with the ruling)"
+}

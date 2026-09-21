@@ -1,0 +1,35 @@
+{
+  "number": 16294,
+  "kind": "issue",
+  "title": "[finding] Both migration generators bind an authored column's NOT NULL to `required` — which ADR-0113 moved the driver OFF — never read `storage.notNull`, and drop `defaultValue` entirely: 4 of 6 probed columns diverge on live Postgres",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T12:35:14Z",
+  "updated_at": "2026-09-09T20:46:31Z",
+  "closed_at": "2026-09-09T20:45:30Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16294",
+  "body": "Found while implementing #16091 (`domain:cli`), which repaired the character-column WIDTH divergence between `os generate migration` and `driver-sql`. This is the same producer pair and the same \"the generator should reproduce the platform\" question, but a **different column property** — nullability and default rather than type/width — with a **different governing rule** (ADR-0113), so it was deliberately kept out of that diff and filed instead.\n\n⛔ Not graded or prioritised here. No labels applied, no assignee — this is for triage.\n\n## Driven, not read\n\nMeasured on a private PostgreSQL **16.13** cluster, all three producers run from ONE object and their columns read back out of `information_schema.columns`: `driver-sql` through its own `initObjects`, `os generate migration --format sql` through `db.raw` of the emitted DDL, and `os generate migration` (typescript, the default format) by importing the emitted module and calling `up(db)`.\n\n```\nfield                driver                          sqlgen                sqlgen==tsgen   verdict\nf_plain              null=YES default=-              null=YES default=-    yes             agree\nf_required           null=YES default=-              null=NO  default=-    yes             DIVERGED\nf_storage_notnull    null=NO  default=-              null=YES default=-    yes             DIVERGED\nf_required_and_st    null=NO  default=-              null=NO  default=-    yes             agree\nf_default            null=YES default='hello'::text  null=YES default=-    yes             DIVERGED\nf_default_required   null=YES default='hello'::text  null=NO  default=-    yes             DIVERGED\n\ndiverged: 4 of 6\n```\n\nBoth generators agree with each other and disagree with the platform in the same way, so this is one defect with two producers rather than two defects.\n\n## Three causes\n\n**1. `required` is read as a column constraint, and the driver stopped reading it that way.**\n\n`createColumn`'s tail says so in its own words:\n\n> ADR-0113: the physical NOT NULL comes from the EXPLICIT storage constraint, not from `required` — `required` is the write-time contract enforced by the record validator at the engine seam, and binding the DDL to it made every post-deploy tightening a destructive migration.\n\nThe line itself is `if ((field as { storage?: { notNull?: boolean } }).storage?.notNull) col.notNullable();`. Both generators still key on `required`: `generateMigrationSql` appends `' NOT NULL'` when `fieldDef.required`, and `generateMigrationTs` emits `.notNullable()` for the same. So a generated table constrains a column the platform leaves open — which is exactly the shape #15521 ruled against for the audit-stamp columns and corrected there, one column class to the left.\n\n**2. `storage.notNull` is never read at all.** The reverse direction, and the quieter one: an author who declares the constraint the platform actually honours gets a NULLABLE column from both generators. ADR-0113's own conversion (`field-required-notnull-explicit`) writes `storage.notNull` into pre-protocol-17 sources, so this is not a hypothetical spelling.\n\n**3. `defaultValue` produces no column DEFAULT in either generator.** `SqlDriver.applyDeclaredColumnDefault` is the single place a `defaultValue` becomes DDL, and it emits one for any scalar, non-runtime-token value — measured above as `default='hello'::text`. Neither generator emits anything, so a row inserted out of band into a generated table gets NULL where the platform's own table would have supplied the declared value.\n\n## Why it was not repaired under #16091\n\nThat card's ruled class is the **character column** — which type and how wide — and its four repaired members are all answers `createColumn`'s type switch gives. Nullability and default are decided AFTER that switch, by two different helpers, under an ADR that made the `required` question a settled decision rather than a value to correct. Repairing them there would have widened the verification surface past the card's own class and past its pin.\n\n## What a fix has to answer first\n\n⛔ Not answered here. #15521's ruling (\"the generator follows the driver\") reaches the audit columns and, via #16091, the character columns; whether it reaches this pair is the same question one property over, and the answer for `required` in particular is not free — a scaffold that emits no `NOT NULL` for a field the author marked required will read to that author as the scaffold losing their declaration, even though the write seam still enforces it. That is a decision about what a scaffold is for, and it looks like the same decision ADR-0113 already took for the driver.\n\n## Reproducing\n\nThe probe is one object with the six fields above, driven through all three producers into a live PostgreSQL 16.13 and read back from `information_schema.columns`. A `postgresql-16` server package is present in the standard dev container, so a private cluster can be stood up with `initdb` plus `pg_ctl` without any external service."
+}

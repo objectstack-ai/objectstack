@@ -1,0 +1,36 @@
+{
+  "number": 15840,
+  "kind": "issue",
+  "title": "[finding] plugin-security: three `find()` seams still report an un-happened read as `[]` — the invention half of #15598's DROP shape, left in place by that card's fence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T10:24:13Z",
+  "updated_at": "2026-09-09T19:47:59Z",
+  "closed_at": "2026-09-09T15:40:57Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15840",
+  "body": "Filed unassigned and ungraded by the `os-dev` seat working #15598 (PR #15838, branch `claude/issue-15598-plugin-security-dead-limbs`, session `session_01XpTx2tbq3pZRYAdoGt6E6Y`). `domain:*`, type and priority are triage's.\n\n## What was found\n\n#15598 asked for two things: remove six dead `{ records }` limbs, and repair the seventh block (`security-plugin.ts`'s `sys_permission_set` loader), which was **inventing an empty answer** for a read that did not happen. That repair landed: the read fault now propagates and an unreadable page refuses, so an outage is no longer reported as \"this principal has no permission sets\".\n\nWhile driving the other six seams, the same invention was measured in **three** of them — smaller, but the same shape:\n\n| site | invention |\n|---|---|\n| `packages/plugins/plugin-security/src/auto-org-admin-grant.ts:151` (`tryFind`) | non-array answers `[]`; the `catch` answers `[]` at `debug` |\n| `packages/plugins/plugin-security/src/claim-seed-ownership.ts:177` (`idsFrom`) | non-array answers `[]`, with no report at all |\n| `packages/plugins/plugin-security/src/normalize-managed-by.ts:53` (`tryFind`) | non-array answers `[]`; the `catch` answers `[]` silently |\n\nEach maps \"the read did not answer\" onto the same value as \"there is nothing there\". That is the read-seam invention rule in AGENTS.md — a storage read in a `try`, a path out returning an invented empty, never discriminating on the error's type — and it is exactly the direction #15092 named as the opposite of a dead limb.\n\n## Why it was NOT fixed in PR #15838\n\nDeliberate, and stated in that PR's body. Three reasons:\n\n1. **The card's face is the dead limbs plus the one site it names.** Removing an unreachable limb is behaviour-preserving; converting a seam that answers `[]` into one that gaps or refuses is a behaviour change with its own blast radius. PR #15838 keeps each of the six blocks' existing disposition for a non-array **exactly** as it was, precisely so the diff carries no unreviewed behaviour.\n2. **The consequence differs per site and needs reading, not sweeping.** The seventh block was repairable with confidence because its consumer already declared the handling — `PermissionEvaluator.resolvePermissionSets` catches a throwing loader, stays fail-closed, and reports it (#2565). These three have no such declared consumer contract, so what \"gap\" means at each one is an open question: `normalizeManagedByVocab` returning a count it cannot attest, `claimSeedOwnership` deciding whether an unreadable page should stop the pass, `reconcileOrgAdminGrant` deciding whether an unreadable membership read should skip or refuse.\n3. **A uniform sweep is the failure mode this family already warned about.** #15094's triage says to treat \"N instances\" as evidence the class is real, never as evidence one rule fits them all — and #15598's own triage says a uniform sweep would have got its seventh block backwards.\n\n## What this is not\n\n⛔ Not a request to widen any gate — #15094 ruled against that (precision 0.446 / 0.857, measured), and PR #15838 changed no gate's population.\n⛔ Not a claim that any of the three is currently causing a user-visible failure. The engine was driven and resolves a bare array at all three seams today (PR #15838's table), so the non-array arm is not reached; the `catch` arms are the reachable half.\n⛔ Not blocked on anything, and nothing is blocked on it.\n\n## Dedup\n\nOne targeted `search_issues` (REST is 403 for this seat and `gh` is absent, so the deterministic listing route was unavailable), with the control satisfied in the same call: the query returned **#15598 and #15597**, both known must-hits, so the empty result for this finding is a reading and not a false zero. Ten results total; the nearest neighbour (#12515, the two human-user predicates disagreeing on non-object rows) is closed and a different subject.\n\n## Refs\n\n#15598 (the card this was found from) · PR #15838 (the repair that fenced it out) · #15092 (gap-vs-drop, the direction) · #15094 (the census, and the ruling against one rule for all instances) · #14843 / #14460 · #2565 (the declared-consumer contract that made the seventh block's repair decidable)"
+}

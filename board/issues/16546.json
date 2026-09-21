@@ -1,0 +1,35 @@
+{
+  "number": 16546,
+  "kind": "issue",
+  "title": "A hook write-set finding on a handler-authored hook is reported at `hooks[i].body.source` — a key the author never wrote — on both `os build` and `os lint`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T08:15:43Z",
+  "updated_at": "2026-09-10T14:58:06Z",
+  "closed_at": "2026-09-10T14:58:06Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16546",
+  "body": "Filed unassigned from #16095 (branch `claude/issue-16095-hook-rules-reach-handler-authored-hooks`). Observed on `origin/main` @ `5d55afec4d` for `os build`, and on that branch for `os lint` once it judges the lowered view.\n\n## What the author sees\n\nGiven\n\n```ts\nhooks: [{\n  name: 'escalate',\n  object: 'crm_case',\n  events: ['afterUpdate'],\n  handler: async (ctx) => {\n    await ctx.api.object('crm_case').update({ id: ctx.input.id, is_escalated: true });\n  },\n}]\n```\n\n`os build` (and now `os lint`) reports `hook-api-update-readonly-field` with `where: hook \"escalate\" > body` and `path: hooks[0].body.source`. There is no `body` in the source file: the body exists only inside the lowered stack the command built. An author grepping their project for `body.source` finds nothing.\n\n## Why it is shaped this way\n\n`lowerCallables` replaces `handler: fn` with `handler: '<ref>'` plus `body: { language: 'js', source }`, and the validators (`validate-readonly-hook-writes.ts`, `validate-hook-body-writes.ts`) judge the stack they are given, so they cannot know the body was lowered. #16095 deliberately kept `os lint`'s output byte-identical to `os build`'s for the same hook (the repo's \"same wording on every command\" rule), so the remap belongs in one place, not in one command.\n\n## Options\n\n- A. Leave as is; document that a lowered hook's findings point at the lowered body (the `hook-bodies.mdx` write-set section now says lowering happens, but not where the path points).\n- B. Have the registry runner (`runAuthoringRules`) or `lowerCallables` carry a `lowered-from` marker per hook, and have the two hook validators say `path: hooks[i].handler` plus a message suffix (\"judged on the metadata body lowered from the inline handler\") when it is set — one implementation, both commands agree.\n- C. Emit both: keep `path` on the lowered body and add a `sourcePath` field pointing at `hooks[i].handler`.\n\nB keeps the finding actionable without a second dialect; C is additive but widens the finding shape (a published contract for `--json` consumers).\n\nRelated: #16095 · #13653 (the readonly hook rule) · #4271 (the write-set rule's original scope)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 17052,
+  "kind": "issue",
+  "title": "objectql: engine.insert logs `Insert operation failed` at ERROR inside a catch that rethrows — the case AGENTS.md names as \"not a degradation at all\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T04:39:16Z",
+  "updated_at": "2026-09-10T01:56:20Z",
+  "closed_at": "2026-09-10T01:40:11Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17052",
+  "body": "`packages/objectql/src/engine.ts` logs a failure it is about to hand back to its caller, at ERROR. AGENTS.md names that exact case and forbids it.\n\n⛔ Filed by the seat that hit it while repairing the publish-smoke boot gate (see the acceptance notes on PR #17051). It is out of that card's file surface and it reverses nothing recorded, so it is a card rather than a rider. **`domain:*` and `priority:*` are triage's to set** — deliberately not set here.\n\n## The site\n\n`insert`'s catch, `packages/objectql/src/engine.ts` (the line that emits `Insert operation failed`):\n\n```ts\nconst logged = e instanceof DuplicateRecordError ? e.cause : e;\nthis.logger.error('Insert operation failed', redactBoundStatement(logged) as Error, { object });\nthrow e;\n```\n\nThe rethrow is the next statement. `Update operation failed` in the sibling verb has the same shape, and `packages/objectql/src/engine-strict-readonly-warning-truthful.test.ts` pins the level (`l.level === 'error'`), so the class is at least two sites and is pinned.\n\n## The contract it violates\n\nAGENTS.md, *Degradation log levels — `warn` vs `error`*, verbatim:\n\n> **And a failure handed to the CALLER is not a degradation at all** — the third legal answer: a `catch` that answers `errorFromThrown(e, 400)`, or a batch whose contract IS a per-item outcome report, does not look normal from the outside — the requester was told. Do **not** bolt a `logger.error` onto such a site; declare **how it delivers** instead — `FAILURE_PROPAGATION_CALLEES` (repo-wide names) or the function-scoped `FAILURE_PROPAGATION_SITES` in the checker, which then proves structurally that *every* path out of the `catch` delivers.\n\nThe requester **was** told: `e` is rethrown one line down, and since #14095 the door hands the caller a `DuplicateRecordError` envelope. `pnpm check:durability-log-level` does not catch it because its log-level rule fires on a catch that logs **below** error without rethrowing — the opposite direction.\n\n## What it cost, measured\n\nA caller that catches the exception makes the ERROR line a false alarm that nothing downstream can distinguish from a real one.\n\n`@better-auth/oauth-provider@1.7.2` seeds `sys_oauth_resource` in `insertOnly` mode and documents the `identifier` UNIQUE constraint **as** its race-safety mechanism — \"one wins, the other catches the constraint error and treats it as a no-op\" (`dist/introspect-C6P1zrTr.mjs`, the docblock over `seedResources`, read from the installed tarball). Its catch tests the message for `unique|duplicate|UNIQUE`, logs the collision at **debug**, and continues. Our line is emitted before that catch ever runs, so a completely healthy first boot of every fresh `create-objectstack` project prints:\n\n```\nISO_TIMESTAMP ERROR Insert operation failed {\"object\":\"sys_oauth_resource\",\"error\":{\"message\":\n  \"UNIQUE constraint failed: sys_oauth_resource.identifier [statement and bound values redacted]\", ...}}\n```\n\nThat line is what red-lit `publish-smoke / packed-tarballs` on `main` for six consecutive runs and blocked a release (#17027) — on a candidate whose auth and CRUD probes were, once allowed to run, **all green**. The gate has been repaired to judge the boot by predicate rather than by level (PR #17051), so this card is no longer release-blocking; the misleading line is still emitted on every fresh boot.\n\n## What this card does NOT decide\n\n⛔ It does not prescribe the level, because the diagnosis the line carries is load-bearing and was deliberately shaped twice:\n\n- **#8682** cut the inlined statement and its bound values from both `message` and `stack`, keeping what the database itself said;\n- **#14095** kept the log on the `cause` rather than the envelope, because the platform logger serialises only `message` and `stack`, so logging the envelope would drop the failing column, MySQL's index name and the driver's own frames.\n\nNeither decided the **level**. The three shapes worth weighing:\n\n1. **Declare the propagation** — add the site to `FAILURE_PROPAGATION_SITES` / `FAILURE_PROPAGATION_CALLEES` and drop the level to `warn` or `debug`, which is what the contract text prescribes. The diagnosis survives at a level a healthy run may legitimately emit.\n2. **Keep ERROR and narrow it** — log at ERROR only where the caller cannot be told, e.g. only when the throw is swallowed upstream. Needs a way to know that, which the site does not have today.\n3. **Keep ERROR as-is** and record the decision in an ADR, so the next seat that reads AGENTS.md's rule against this exact shape finds the exemption instead of re-filing this card.\n\n## Not measured here\n\n- ⛔ How many other rethrowing catches in `packages/objectql` log at ERROR. Only `insert` and `update` were established; the class was not swept.\n- ⛔ Whether any consumer greps for the ERROR level of these two lines. The pinned test asserts the level, but no downstream reader was surveyed.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

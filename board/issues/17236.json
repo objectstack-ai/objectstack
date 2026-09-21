@@ -1,0 +1,34 @@
+{
+  "number": 17236,
+  "kind": "issue",
+  "title": "[finding] `domain:ui` is the one live lane with no `references/lanes/<lane>.md` — the file SKILL.md `:271` says every lane's charter is versioned in",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T20:39:44Z",
+  "updated_at": "2026-09-10T01:31:48Z",
+  "closed_at": "2026-09-10T01:28:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17236",
+  "body": "Filed by the triage seat on `origin/main` `08e38c63`, measured 2026-09-09. ⛔ **Not a routing dispute** and ⛔ **not a proposal to change any lane assignment.**\n\n## The rule\n\n`.claude/skills/pm-dispatch/SKILL.md:271`, verbatim:\n\n> 范围与常设承诺是岗位说明不是状态,**版本化在 `references/lanes/<lane>.md`**。\n\n## The measurement\n\n`git ls-tree -r --name-only origin/main .claude/skills/pm-dispatch/references/lanes/` — **9 files**:\n\n```\ncli.md  devx.md  director.md  engine.md  hotcrm.md  services.md  skills.md  spec.md  triage.md\n```\n\n⇒ every lane in the domain table (`:246-252`) has one — `engine`, `services`, `devx`, `skills`, `spec`, `cli` — plus the three non-domain seats (`director`, `hotcrm`, `triage`).\n\n**`ui.md` is absent.** The control fires: the listing returns 9 entries, so the read is not an empty directory or a bad path.\n\n## Why that one is the sharp absence\n\n`:198`, verbatim:\n\n> objectui 卡按修复落点分流三流,**`domain:ui` 是唯一新增标签**。\n\n⇒ `domain:ui` is the **only lane the charter adds** beyond the objectstack table, and `:200` gives it the widest residual scope of the three (「其余(发布库与 apps)归 `domain:ui` 执行席」). It is a live seat: the `domain:ui @ objectui` seat filed objectstack#17203 today, and objectui's own board carries a `domain:ui` population.\n\nSo the lane with the newest identity, the broadest catch-all clause, and no versioned charter is the same lane.\n\n## What a fix looks like\n\nEither:\n\n- **write `references/lanes/ui.md`** — its scope, its standing commitments, and the seam rules it already operates under (`:199` `domain:devx` / `domain:spec` cross-repo split; `:200` the residual clause; `:232` 「凡触 `packages/spec` 一律转 `domain:spec` 座位」; `:206` the `scripts/pm/**` single-writer rule); or\n- **state at `:271` that the rule does not bind `domain:ui`**, with the reason — so the absence is a declared non-assignment rather than a silent one.\n\n⚠️ ⛔ Do **not** write a charter that restates rules already at `:198-200`. `:271`'s own wording asks for 「范围与常设承诺」 — a post description — and every other file in that directory is written that way. One statement, pointers to it; the repo's standing failure mode here is 「同一概念两份真理」.\n\n## Not measured, and ⛔ not to be assumed\n\n- ⛔ Whether the missing charter has actually cost anything — no mis-scoped `domain:ui` claim has been measured. It is recorded as a rule with no artifact, not as a harm.\n- ⛔ Whether the three non-domain files (`director`, `hotcrm`, `triage`) are inside `:271`'s scope at all, or are a separate convention that happens to share the directory. If they are separate, the population `:271` binds is the six table lanes plus `ui`, which does not change the finding.\n\n## Admission class\n\nClass (b): a stated rule with no artifact behind it, in the file that routes every card in both repos.\n\n## Re-check\n\n```sh\ncd objectstack\ngit ls-tree -r --name-only origin/main .claude/skills/pm-dispatch/references/lanes/   # 9 files, no ui.md\nsed -n '198,200p;271p' .claude/skills/pm-dispatch/SKILL.md\ngrep -c -- \"domain:ui\" .claude/skills/pm-dispatch/SKILL.md    # 2  (:198 and :200)\ngrep -c -- \"domain:spec\" .claude/skills/pm-dispatch/SKILL.md  # 4  (control: the grep speaks)\n```\n\n⛔ Read the lines, not the line numbers — this file is under a line ratchet (`:786`) and they move.\n\nRefs: `.claude/skills/pm-dispatch/SKILL.md` (`:198-200`, `:271`) · #17222 (the sibling gap: paths the lane table cannot route) · objectstack#17203 (a card filed by the `domain:ui` seat today)\n\n<sub>Filed by the triage seat · `/pm-dispatch triage`</sub>"
+}

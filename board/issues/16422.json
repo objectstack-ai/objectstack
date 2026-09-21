@@ -1,0 +1,34 @@
+{
+  "number": 16422,
+  "kind": "issue",
+  "title": "Three `isoFromValidDate` copies still stand beside the now-total shared canonical-ISO spelling — the collapse their docblocks promise is a decision #14078 did not make",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T22:33:23Z",
+  "updated_at": "2026-09-10T00:41:51Z",
+  "closed_at": "2026-09-10T00:41:11Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16422",
+  "body": "Filed from the #14078 implementation seat while executing the maintainer ruling (comment `5504838971`, option B). ⛔ Not addressed there, and that card does not close this one.\n\n## What #14078 did, and what it left standing\n\n#14078 made the `Date` arm of the shared canonical-ISO spelling **total** on all five arms at once: `canonicalIsoInstant` in `sys-metadata-repository.ts` and in `database-loader.ts`, `canonicalIsoStamp` and `formatCsvCell` in `rest-server.ts`, and the `occurredAt` arm inside `auditMetaItem` in `protocol.ts`.\n\nIt did **not** touch a second, near-identical family that three separate cards landed beside those arms:\n\n| copy | landed by | call sites |\n|---|---|---|\n| `packages/metadata-protocol/src/sys-metadata-repository.ts` — `isoFromValidDate` | #14037 | 1 (`rowToEvent`) |\n| `packages/metadata/src/loaders/database-loader.ts` — `isoFromValidDate` | #14037 | 4 (`rowToRecord` ×2, two history adapters) |\n| `packages/metadata-protocol/src/protocol.ts` — `isoFromValidDate` | #14038 | 1 (`listCommits`) |\n\nThree copies, six call sites. All three docblocks say, verbatim: *\"When #14078 rules, this helper collapses into the shared spelling.\"*\n\n**#14078 ruled, and the collapse did not happen.** This card is that unclosed sentence, filed rather than performed, because the collapse is not the mechanical act the docblocks imply.\n\n## Why it is not mechanical — measured on `origin/main` `0ea5f9d9f`\n\nThe two helpers differ in more than the Invalid-`Date` shape, and after #14078 that is the ONLY shape on which they now agree:\n\n- `canonicalIsoInstant(value: unknown): string | undefined` — rewrites the whole domain: nullish becomes `undefined`, a valid `Date` becomes ISO text, a string passes through, **everything else becomes `String(value)`**.\n- `isoFromValidDate(value: unknown): unknown` — rewrites exactly one shape: a valid `Date` becomes ISO text, and **every other input is returned untouched**, `null`, a `number` and an opaque column included.\n\nSo swapping one for the other changes behaviour at six call sites for inputs nobody analysed during the #14078 ruling. Three specifics:\n\n1. **`MetadataHistoryRecord.recordedAt` has no ruled-valid terminal value.** It is a REQUIRED `z.string().datetime()` (`packages/spec/src/system/metadata-persistence.zod.ts`), fed at `database-loader.ts` from `isoFromValidDate(row.recorded_at) as string` in two places. Neither of the ruling's two answers validates there: the visible text `\"Invalid Date\"` fails the `datetime()` refinement, and `undefined` fails the required field. Today an Invalid `Date` object reaches it and also fails. That is a real defect, and it needs a third answer (a caller-side default, most likely) that only a decision can supply.\n2. **`protocol.ts`'s copy carries an explicit contrary contract.** Its docblock states that callers of `listCommits` \"are promised the RAW value back untouched when it is not a valid `Date` — an absent/opaque column must still reach `sort`'s fallback branch and any in-process reader exactly as before\". Collapsing it silently reverses that.\n3. **Three in-repo NEUTRALITY pins assert the un-collapsed behaviour and are written to go red on exactly this swap** — `sys-metadata-repository-14037-event-ts-canonicalisation.test.ts` §C, `database-loader-14037-adapter-boundary-iso.test.ts` §D, and `protocol-14038-list-commits-created-at-iso.test.ts` §D. They exist so the swap has to be a deliberate act with its own evidence, which is what this card asks for.\n\n## Also worth deciding while the family is open\n\n`database-loader.ts` `rowToRecord` assigns `isoFromValidDate(row.created_at) as string | undefined` into `MetadataRecord.createdAt` / `.updatedAt`, both `z.string().datetime().optional()`. An Invalid `Date` therefore arrives as a `Date` object wearing a `string | undefined` cast — the same class of unchecked assertion #14037 was filed to remove, surviving on the one input shape it deliberately did not decide.\n\n## Options\n\n- **A — collapse, with a per-call-site terminal value**, exactly as #14078 did for its five arms: follow each of the six sites to its declared schema and its reader, and choose text / `undefined` / a caller default per site. Rewrites the three neutrality pins as ruled pins. Largest, and the one that actually ends the family.\n- **B — collapse only where the two are already equivalent**, and leave `listCommits` alone under its stated pass-through contract. Smaller, leaves two spellings in the repo but with a documented reason each.\n- **C — keep both, permanently**, and correct the three docblocks to describe two deliberate helpers rather than one pending merge. Cheapest; the sentence about collapsing is then simply retired.\n\n⛔ No option removes the need to answer point 1 above — `recordedAt` is a required `datetime()` field with no valid terminal value today, whichever way the consolidation goes.\n\n## Re-check commands\n\n    git grep -n \"isoFromValidDate\" -- packages/metadata-protocol/src packages/metadata/src\n    git grep -n \"recordedAt\" -- packages/spec/src/system/metadata-persistence.zod.ts\n\nBacklinks: #14078 (the ruling, and where the docblocks' promise was made), #14037 and #14038 (which landed the three copies). None are addressed here."
+}

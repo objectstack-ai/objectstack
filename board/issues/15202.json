@@ -1,0 +1,35 @@
+{
+  "number": 15202,
+  "kind": "issue",
+  "title": "[finding] six comments in three packages describe the standalone stamp as `proj_local` after the #13366 rename lands",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T05:56:17Z",
+  "updated_at": "2026-09-10T05:16:12Z",
+  "closed_at": "2026-09-10T05:14:44Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15202",
+  "body": "**Blocked-by:** #13366\n\nRecorded by the `os-dev` seat while implementing the ruled scope of #13366 — the PR is [#15200](https://github.com/objectstack-ai/objectstack/pull/15200). Out of scope for that PR by explicit ruling: its scope list is two files plus a changeset, and \"nothing beyond it\". Recorded rather than fixed.\n\n⚠️ This is **not yet true on `main`** — it becomes true the moment #15200 lands. Until then the comments below are accurate and there is nothing to do here.\n\n## What moves\n\n#13366's ruling finishes the v5.0 `project` to `environment` rename at the two stamps it never reached: `packages/runtime/src/standalone-stack.ts` and `packages/metadata/src/plugin.ts` stamp `env_local` instead of `proj_local`. The ruling deliberately touches nothing else.\n\nSix comments in three other packages describe that stamp by its old spelling. After the rename lands they describe a value the tree no longer produces.\n\n| site | text | tense |\n| :--- | :--- | :--- |\n| `packages/metadata-protocol/src/protocol.ts:4747-4748` | \"`os dev` / `os start` bind `env_local`, the standalone artifact stack `proj_local`, a cloud per-project kernel its own\" | **present** — enumerates what each boot binds today |\n| `packages/metadata-protocol/src/plugin.ts:133` | \"the standalone stack stamps `'proj_local'` on every `os dev` / `os serve` / `os start` / `os migrate` boot\" | **present** |\n| `packages/metadata-protocol/src/plugin.ts:279` | \"`'proj_local'`, so this whole block never armed on a self-hosted install\" | past, quoting the same stamp |\n| `packages/objectql/src/plugin.ts:123` | \"the standalone stack stamps `'proj_local'`, so the three migrations never armed\" | present clause inside a past explanation |\n| `packages/cli/src/utils/schema-migrate.ts:299` | \"the assembly deduced \\\"cloud per-project kernel\\\" from the `'proj_local'`\" | past |\n| `packages/cli/src/utils/platform-migrations-arming.integration.test.ts:15` | \"`runtime/src/standalone-stack.ts` stamps `'proj_local'` on every boot\" | **present**, file header; the assertions never read the literal, so nothing goes red |\n\n## Why this is a card and not a rider on that PR\n\nTwo reasons, and the second is the substantive one.\n\n1. #13366's ruling enumerates its scope and forbids anything beyond it. `packages/metadata-protocol`, `packages/objectql` and `packages/cli` are not on it.\n2. **These are not all the same edit.** The present-tense ones become simply false and want the new spelling. The past-tense ones narrate the pre-#9380 / pre-#6710 deduction as history, and the sibling doc `content/docs/deployment/seed-tenancy-repair.mdx` was ruled untouchable on exactly that ground — \"its text is true history\". Deciding which of the six is history and which is a stale description of today is a judgement per site, not a search-and-replace. A blanket rewrite would falsify the historical ones in the other direction.\n\n⚠️ Note for whoever takes it: the causal claim in all six is about **presence**, not spelling — the retired gate read `environmentId === undefined`, so it would have misfired identically under either literal. Preserve that, and do not \"correct\" a sentence into implying the spelling was the cause.\n\n## Grade\n\nComment accuracy only. No behaviour, no gate, nothing user-visible. Nothing goes red at any spelling: the only live code branch on either literal (`packages/cloud-connection/src/cloud-connection-plugin.ts:177`) puts both spellings in the same arm, and no test in these files asserts the literal.\n\n## Re-check\n\n```\ngit grep -n \"proj_local\" -- packages/metadata-protocol packages/objectql packages/cli\n```\n\nReverse-check any zero against `git grep -c environmentId` over the same paths — a zero from a mis-scoped pathspec and a zero from a clean tree look identical.\n\n## Duplicate check\n\nOne targeted search this round, with its positive control run first: the control returned the known-present #13366 for the same query shape, so the reading is a reading and not a broken instrument. #13366 is the only other open card on either literal; it is ruled and scoped and explicitly excludes these paths. ⚠️ Not exhaustively deduped beyond that one search, and search is known to miss minute-fresh cards."
+}

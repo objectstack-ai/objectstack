@@ -1,0 +1,34 @@
+{
+  "number": 16662,
+  "kind": "issue",
+  "title": "Maintainer questions filed inside a dev report's `open_questions` array are invisible to every sweep — one sat 17 days, and it is not the only one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T17:02:23Z",
+  "updated_at": "2026-09-09T11:43:01Z",
+  "closed_at": "2026-09-09T08:29:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16662",
+  "body": "## The defect\n\nThe `os-dev` report contract has an `open_questions` array. A dev that hits a\nquestion only the maintainer can answer writes it there — with options and a\nrecommendation, exactly as intended.\n\n**Nothing sweeps that array.** The decision inbox is `label:needs-user-decision`,\nand a question inside a report comment's JSON body carries no label. So the\nquestion is filed, well-formed, and unreachable: it is not in the inbox, not in\nany candidate query, and not in any staleness alert. The card meanwhile keeps\n`pm:dispatched` and an assignee, which reads as *in flight* on every board.\n\nThe failure mode is the one this org keeps paying for: **three success signals\nand a wrong answer.** The dev did its job, the report validated, the PM accepted\nit — and a decision the maintainer was owed simply never arrived.\n\n## Two instances, both found on 2026-09-07, neither by design\n\n**cloud#1555 — 17 days.** A P0 card split from cloud#1535. Its delivering\nPR objectstack-ai/objectstack#1557 was **closed unmerged** on 2026-08-22, so the instrument that produced\nits measurements (`scripts/dev-local/bootstrap-curve.mjs`) is not in the tree —\nanyone re-running the analysis starts from zero. The card kept `pm:dispatched`\nand an assignee from 2026-08-21 until the `repo:cloud` R37 board sweep healed it\nat 2026-09-07T16:36Z. The two questions that sat unreachable:\n\n1. whether to serve the previous complete kernel while a rebuild runs (a\n   staleness policy the card itself says is the maintainer's call), and\n2. a one-`SELECT` prod reading only a maintainer can take, which separates \"the\n   database is slow\" from \"the path to it is slow\".\n\n⚠️ The urgency was real and is not spent: `jack.objectos.ai` served **503 for a\nday** (134 s bootstrap against a 20 s waiter). It serves today only because its\nkernel is cached — **the next eviction repeats the outage**, and the card's own\nstanding constraint is ⛔ do not delete or re-provision it, because it is the\nreproduction.\n\n**objectstack#13973 — same shape, caught early.** Its original question was\nruled B1 (narrow) on 2026-09-02 and executed (PR objectstack-ai/objectstack#16619). The execution then\nraised **three new residual questions**, which the dev again wrote into\n`open_questions` (comment 5573240453, 2026-09-07T16:10Z). The engine seat routed\nthem by **re-applying `needs-user-decision` to the already-ruled card** — which\nworks, but produces a second problem: the box now holds a card whose ruled\nquestion and whose open questions are different questions, and nothing in the\nlabel says which is which. A reader who trusts the label re-presents a ruling\nthat has already been executed.\n\n## Why this is worth fixing rather than remembering\n\nBoth instances were found by humans-in-the-loop noticing something, not by any\nmechanism. The `repo:cloud` seat found objectstack-ai/objectstack#1555 during a board sweep it runs for\nother reasons; I found objectstack-ai/objectstack#13973 because the inbox count changed between two\ncheck-ins. Neither route is reliable, and the inventory this hides in is large:\n`label:pm:dispatched is:open` is the lane's in-flight reading, and a card stuck\nthere for 17 days looks exactly like a card being worked on.\n\n## Shape of a fix (not a decision — a maintainer's call is not needed to start)\n\nThree parts, roughly independent:\n\n1. **Sweep the array.** A `check:*`-style script (or a PM-loop step) that scans\n   `os-dev-report` comments on open cards for a non-empty `open_questions` and\n   reports any whose card does not carry `needs-user-decision`. This is the load-\n   bearing half — it converts an invisible state into a listable one.\n2. **Staleness on `pm:dispatched`.** A card carrying `pm:dispatched` with no\n   branch activity and no live agent for N days is a half-state, not work in\n   flight. objectstack-ai/objectstack#1555 sat 17 days; the threshold that would have caught it is\n   generous.\n3. **Residual questions get their own card.** When executing a ruling raises new\n   questions, they belong on a new card that links the ruled one — not on the\n   ruled card re-flagged. This keeps \"what is open\" answerable from the label\n   alone. ⭐ It also protects the standing rule that a card with a ruling comment\n   is executed or contradicted with a reason, **never re-presented**.\n\n⛔ Nothing here proposes changing the `os-dev` report contract itself. The array\nis the right place for a dev to put the question; what is missing is the reader.\n\n---\n\nFiled by the director seat while auditing the decision inbox, 2026-09-07T17:01Z.\nRelated: cloud#1555 (the 17-day instance) · objectstack#13973 (the re-flag\ninstance) · cloud#1535 (the parent of objectstack-ai/objectstack#1555)."
+}

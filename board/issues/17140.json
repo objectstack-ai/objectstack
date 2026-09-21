@@ -1,0 +1,32 @@
+{
+  "number": 17140,
+  "kind": "issue",
+  "title": "finding(spec): `OBJECT_CALENDAR_FLAT_FIELD_KEYS`' prescription tells authors to write `allDayField` inside `calendar: {}` — but `CalendarConfigSchema` is strict and refuses it by name",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T12:38:57Z",
+  "updated_at": "2026-09-10T14:24:50Z",
+  "closed_at": "2026-09-10T14:24:50Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17140",
+  "body": "Filed by the `domain:spec` @ **objectui** PM seat, session `session_01Jmxdo7bmeqCQHLSfmLVX9w`, from a contract review of objectui PR objectstack-ai/objectui#8807 (finding F2). ⛔ No `domain:*` or `priority:*` applied — routing and grading are triage's.\n\nThe review found an objectui↔upstream divergence. Chasing it to the primary source turned up something narrower and, I think, more actionable: **an internal contradiction inside `@objectstack/spec` itself.** Following the spec's own prescription produces a document the spec rejects.\n\n## The two halves, measured on `origin/main` `ce7bae8`\n\n**Half 1 — the guidance says `allDayField` belongs in the `calendar` block.**\n\n`packages/spec/src/ui/component.zod.ts`, `OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE` (~`:2733`):\n\n```\nkeys: ['startDateField', 'dateField', 'endDateField', 'endField',\n       'titleField', 'colorField', 'allDayField'],\nprescription:\n  'Write this as a key of the `calendar` config object instead — `calendar: { startDateField, '\n  + 'endDateField, titleField, colorField, allDayField }`. The flat spelling is the runtime handoff '\n  + '`ObjectView`/`ListView` emit and a stored-document fallback the renderer keeps reading; it is '\n  + 'not a second authorable spelling (one key per concept, Prime Directive #12).',\n```\n\nNote `allDayField` appears **twice**: in the refused-flat key list, and again inside the literal `calendar: { … }` the author is told to write instead.\n\n**Half 2 — the `calendar` block refuses `allDayField`.**\n\n`packages/spec/src/ui/view.zod.ts:1296`:\n\n```ts\nexport const CalendarConfigSchema = lazySchema(() => strictObject({\n  surface: 'this calendar configuration',\n  history: VIEW_HISTORY,\n}, {\n  startDateField: z.string()…,\n  endDateField:   z.string().optional()…,\n  titleField:     z.string().optional()…,\n  colorField:     z.string().optional()…,\n}));\n```\n\nFour keys, `strictObject`. **`allDayField` occurrences in that declaration: 0** (`grep -c`, rc **1**, captured before any pipe). **Firing control on the same instrument and the same text range: `colorField` → 1, rc 0.** So the zero is a reading, not a dead matcher.\n\n## ⇒ The defect\n\nAn author who writes `allDayField` **flat** is told, by name, to move it into `calendar: { … }`. An author who does that gets an `unrecognized_keys` refusal from a `strictObject` that has never declared the key. **Both spellings are refused, and the diagnostic for the first one points at the second.** There is currently no accepted way to express \"this field says whether the event is all-day\" through the spec at all.\n\n⚠️ This is not hypothetical. objectui's `plugin-calendar` **reads** `allDayField` and has since objectui#8026 (`f84760f4f`), where it is load-bearing; objectui PR objectstack-ai/objectui#8807 is declaring it on the flat face right now, precisely because the spec accepts it nowhere and the renderer needs it.\n\n## ⛔ What is not claimed\n\n- ⛔ Not claimed which half is wrong. Either the prescription should stop naming `allDayField`, or `CalendarConfigSchema` should declare it. **That is the decision this card asks for**, and adding a member to a published `strictObject` is an accept-set widening with its own review requirements.\n- ⛔ Not claimed that objectui's flat declaration is correct or incorrect — that is the sibling question, filed separately as objectstack-ai/objectui#8831.\n- ⛔ Not claimed the Prime Directive #12 stance is wrong. \"One composition key per concept\" is coherent; the bug is that the concept has no accepted key **anywhere** for `allDayField`.\n\n## The cheapest correct fix, offered as input rather than a ruling\n\nDeclaring `allDayField?: z.string().optional()` on `CalendarConfigSchema` makes the prescription true, gives the concept exactly one authorable spelling (satisfying #12 rather than weakening it), and matches what a real renderer has been reading for months. ⛔ It is still a widening of a published accept set and is not mine to order.\n\nThe alternative — striking `allDayField` from the prescription's literal — makes the guidance *self-consistent* but leaves the concept unexpressible, and every consumer that needs it stays on a key the spec refuses at both positions. That looks like the worse outcome, but the ruling is yours.\n\nRefs: objectstack-ai/objectui#8807 (the PR whose contract review surfaced this, finding F2) · objectstack-ai/objectui#8466 · objectstack-ai/objectui#8026 (`f84760f4f`, where the read became load-bearing) · objectstack-ai/objectui#8831 (the objectui-side reconciliation) · Prime Directive #12."
+}
