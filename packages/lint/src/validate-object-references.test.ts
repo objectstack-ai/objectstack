@@ -574,7 +574,7 @@ describe('validateObjectReferences — an unreadable `reference` carrier is refu
     // object's name. One contract, so one reader.
     const run = () => validateObjectReferences(paramCarrier({ reference: { object: 'sys_user' } }));
     expect(run).toThrow(TypeError);
-    expect(run).toThrow(/referenceTargetOf/);  // [#19289] one contract, one arbiter
+    expect(run).toThrow(/validate-object-references action param target/);
     expect(run).toThrow(/`reference` is an object/);
   });
 
@@ -598,23 +598,29 @@ describe('validateObjectReferences — an unreadable `reference` carrier is refu
 });
 
 /**
- * [#19289] A `{ type: 'user' }` field or action param resolves its target from
- * the TYPE — the two ALIGNED sites of the implicit-target census.
+ * [#19289] The FIELD target comes from the type; the ACTION-PARAM target
+ * cannot, and the two halves of this file's census verdict are deliberately
+ * different.
  *
- * `RELATIONSHIP_TARGET_FIELD_TYPES` admits `user` and `ActionParamSchema.type`
- * is `FieldType`, so this rule DOES ask the target question about a `user`
- * field — and answered it from the carrier, which for that type is not the
- * target (`IMPLICIT_REFERENCE_TARGETS`: a CONSTANT OF THE TYPE,
- * `packages/spec/src/data/field-value.zod.ts`).
+ * `RELATIONSHIP_TARGET_FIELD_TYPES` admits `user`, so the field site DOES ask
+ * the target question about a `user` field — and answered it from the carrier,
+ * which for that type is not the target (`IMPLICIT_REFERENCE_TARGETS`: a
+ * CONSTANT OF THE TYPE, `packages/spec/src/data/field-value.zod.ts`). The
+ * OUTPUT was already right, for the wrong reason: absence answered `undefined`
+ * and `check` returns early, which is the same silence the resolved target
+ * produces, since `sys_user` is admitted at rung ③
+ * (`isPlatformProvidedObjectName`). The field site now reaches that silence by
+ * the same route for both legal spellings.
  *
- * ⚠️ The OUTPUT was already right, for the wrong reason: a spec-complete field
- * answered `undefined` and `check` returns early on absence, so the rule said
- * nothing — the same silence the resolved target produces, since `sys_user` is
- * admitted at rung ③ (`isPlatformProvidedObjectName`). These pins record the
- * site as JUDGED rather than missed, and hold BOTH halves: the two legal
- * spellings now reach that silence by the same route, and the rule still
- * reports a real miss. ⛔ No new finding is introduced for either spelling —
- * an assertion that one appeared would be a regression, not a fix.
+ * ⛔ The PARAM site stays on the carrier, and the last case here is why.
+ * `ActionParamSchema.type` is OPTIONAL — a field-backed param inherits its
+ * type at runtime — so the target question is unanswerable from a param alone,
+ * and asking it discards every carrier whose param declares no type. Nothing
+ * is owed there in the other direction either: a carrier-less `user` param
+ * already produces no finding.
+ *
+ * ⛔ No new finding is introduced for any spelling — an assertion that one
+ * appeared would be a regression, not a fix.
  */
 describe('[#19289] validateObjectReferences — a `user` target comes from the TYPE', () => {
   const userField = (extra: Record<string, unknown>) => ({
@@ -637,8 +643,23 @@ describe('[#19289] validateObjectReferences — a `user` target comes from the T
     expect(validateObjectReferences(userField({}))).toEqual(validateObjectReferences(userField({ reference: 'sys_user' })));
   });
 
-  it('a `user` PARAM with no `reference` produces no finding either', () => {
+  it('a `user` PARAM with no `reference` produces no finding either — `check` returns early on absence', () => {
     expect(validateObjectReferences(userParam({}))).toHaveLength(0);
+  });
+
+  it('⛔ REGRESSION GUARD: a param with NO `type` still has its carrier checked', () => {
+    // The case that refused the param-site swap, kept here beside the verdict
+    // it produced. `reference-integrity-suite.test.ts` carries the same shape
+    // in its corpus (`{ name: 'owner', reference: 'user' }` — 'user' being the
+    // classic miss for 'sys_user'); asking `referenceTargetOf` here answered
+    // `undefined` for it and `object-reference-unknown` vanished from that
+    // suite's findings altogether.
+    const findings = validateObjectReferences({
+      ...baseStack(),
+      actions: [{ name: 'mass_reassign', params: [{ name: 'owner', reference: 'zzz_nope' }] }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNKNOWN);
   });
 
   it('control: the rule still REPORTS a real miss — an explicit carrier naming an unknown object errors', () => {

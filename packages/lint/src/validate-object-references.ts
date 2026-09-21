@@ -79,7 +79,7 @@ import {
   isPlatformProvidedObjectName,
   PLATFORM_PROVIDED_OBJECT_NAMES,
 } from '@objectstack/spec/system';
-import { referenceTargetOf } from '@objectstack/spec/data';
+import { referenceCarrierOf, referenceTargetOf } from '@objectstack/spec/data';
 
 import { recordsOf, suggestName } from './object-graph.js';
 
@@ -341,18 +341,23 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       // "deliberately mirrors `FieldSchema.reference` so the same spelling"
       // carries the target object's name — one contract, so one reader.
       //
-      // [#19289] One contract means one ARBITER too, so the whole param is
-      // passed through to `referenceTargetOf`. `ActionParamSchema.type` is
-      // `FieldType`, so an inline param may be `type: 'user'` — and the schema
-      // requires `reference` only for inline `lookup` / `master_detail`
-      // (`action.zod.ts`'s refinement names those two and not `user`),
-      // precisely because `user` carries a CONSTANT OF THE TYPE. Reading the
-      // carrier answered `undefined` for such a param and `check` returned
-      // early; the target now resolves to `sys_user` and is admitted at rung ③.
-      // ⛔ No new finding for either spelling — what ends is the two spellings
-      // of one fully-specified param reaching that silence by different routes.
+      // ⛔ [#19289] This site STAYS on the carrier, and the census judged it
+      // rather than missing it. A param is NOT a field definition:
+      // `ActionParamSchema.type` is OPTIONAL, because a field-backed param
+      // inherits its type from the referenced field at runtime — "not visible
+      // at parse time", as that schema's own refinement comment says. So the
+      // target question is UNANSWERABLE from a param alone, and asking it
+      // discards every carrier whose param declares no type.
+      //
+      // Measured, ⛔ not reasoned: swapping this one arbiter deleted a live
+      // check. `reference-integrity-suite.test.ts` holds a corpus param
+      // `{ name: 'owner', reference: 'user' }` — no `type`, and `user` is the
+      // classic miss for `sys_user` — and `object-reference-unknown` vanished
+      // from the suite's findings entirely. Nothing is owed here either way: a
+      // `user` param that omits the carrier already produces NO finding,
+      // because `check` returns early on absence.
       check(
-        referenceTargetOf(param),
+        referenceCarrierOf({ reference: param.reference }, 'validate-object-references action param target'),
         where,
         `${actionPath}.params[${pi}].reference`,
         'record-picker target',
