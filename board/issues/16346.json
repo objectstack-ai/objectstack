@@ -1,0 +1,34 @@
+{
+  "number": 16346,
+  "kind": "pull_request",
+  "title": "docs(pm): the director seat is a decision function — concurrent summons, no handover",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T14:47:33Z",
+  "updated_at": "2026-09-07T02:17:21Z",
+  "closed_at": "2026-09-07T01:18:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-07T01:18:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16346",
+  "body": "Fixes #16172\n\nExecutes the ruling recorded on that card at 14:10Z — neither option the card proposed — as governance text in ONE file: `.claude/skills/pm-dispatch/references/lanes/director.md`, section 授权与形态. The director seat is a decision function: any number of summons run concurrently, no closing brief is owed before another starts, and a new summon neither waits for, stands down nor supersedes another. The takeover / incumbent notion is retired for this seat; what still holds is restated as rules about the artefacts, not about the seat.\n\nGoverned surface (`.claude/**`): draft PR, human merge. No seat flips this ready, enqueues it, or arms auto-merge.\n\n## Before to after, line by line\n\n| Before (`origin/main` 3e270d4e29) | After (this PR) |\n|---|---|\n| 7 `- 授权面 = 由人工定期指挥,负责处理 contract-review 类别的和需要决裁的。`<br>8 `- 人工召唤,⛔ 无 Routine、无 cron、无常设舰队位。` | 7 `- 授权面 = 人工定期召唤,处理 contract-review 与需决裁项;⛔ 无 Routine、无 cron、无舰队位。` (fold; pays for one new line) |\n| — | 8 `- 只出裁决不持在飞状态:多场并行、无交班,新场不等不停不替,⛔ 无接管无在任者。` (NEW — the ruling) |\n| — | 9 `- 裁决先记卡再动标签;同卡同笔只一场写,线程即顺序、后记者胜,裁前先读线程。` (NEW — the artefact rules) |\n| 10 `- 召唤间隔里决策卡与审计窗口停放是设计安全态;召唤节奏即决裁与审计节奏。`<br>11 `- 复核放行常设归派发席席内,不因本席未被召唤而停。` | 11 `- 召唤间隔里决策卡与审计窗口停放是设计安全态;复核放行不在其内,常设归派发席席内。` (fold; pays for the second new line) |\n| 15 ``- 双射 carve-out:一张 `pm:seat` 座位贴、四段协议照旧,与分诊席同款。`` | 15 ``- 双射 carve-out:一张 `pm:seat` 座位贴,四段照旧;状态块逐场一行,各记己锚,⛔ 无占席人。`` (rewrite) |\n\nUnchanged in the section, per the ruling: the entry line, the tier constant, the per-summon downgrade fuse, the 不达档 handling, 不占 `domain:*`, 永不认领 backlog. Nothing outside 授权与形态 moves; no other file is touched.\n\n## What each fold deletes\n\nThe ratchet's currency is deleted content, never a re-wrap, so both folds carry a real cut rather than only a join:\n\n- Fold 7+8 drops 「常设」 from 常设舰队位 (the stronger 无舰队位 subsumes it) and compresses 「负责处理 … 类别的和需要决裁的」 to 「处理 … 与需决裁项」; the scope it states is enumerated exhaustively by the four duty headings below it.\n- Fold 10+11 deletes the whole clause 「召唤节奏即决裁与审计节奏」, which restated the first half of its own line, and states the release rule as 「不在其内」 — the same fact as 「不因本席未被召唤而停」, which the file already carries twice more (line 29 in 职责一, line 71 in 与 skills 席的分界).\n- The line-15 rewrite deletes 「与分诊席同款」, the claim the ruling retires: the triage seat stays single-occupancy and this one does not.\n\nLine-neutral at the pinned ceiling: 72 lines before, 72 after (`check-skill-line-ratchet`: `director.md is 72 lines (ceiling 72; headroom 0)`). Widest line in the file is unchanged at 119 bytes (line 3, untouched); every rewritten line is at or under 118 bytes by `LC_ALL=C awk`. Register unchanged: rules only, no dates, no quotations, no issue numbers, no session ids, no model names.\n\n## Gates\n\nDerived on the final file list with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, every command run, reconciled with `--ran` at head `db7cc8f232`:\n\n```\nRun reconciliation — 14 derived, 14 run, 0 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 14 derived famil(ies) accounted for — 14 run, 0 NOT-MEASURED.\n```\n\nNamed beyond the derived union, all at `db7cc8f232`:\n\n- `pnpm check:pm-skill-ratchet` (self-test + live) — exit 0; `director.md is 72 lines (ceiling 72; headroom 0)`.\n- `pnpm check:pm-skill-id-lint`, `pnpm check:skill-frame-sync`, `pnpm check:pm-governed-prose`, `pnpm check:pm-half-states` (self-test) — exit 0 each.\n- `node scripts/pm/check-governed-merges.mjs --test .claude/skills/pm-dispatch/references/lanes/director.md` — exit 3, `GOVERNED — a human merge is the review record for this PR`.\n- Whole-repo `pnpm lint` (`eslint . --no-inline-config`) through `bash scripts/pm/os-verify-lock.sh` (slot `issue-16172`) — `VERDICT command-exit 0 · held the lock 110s`. Not a narrowed run: the whole tree was linted.\n- No H-row of `check-half-states` pins any sentence rewritten here — every deleted sentence was grepped over `scripts/` and `.claude/hooks`; the single hit is a descriptive comment, reported below.\n\nEvery exit code was captured before any pipe (`cmd > file 2>&1; EXIT=$?`), and each verdict above is the gate's own printed line.\n\n## Reported, not fixed\n\nFiled as #16343: the generic seat-post protocol (`references/seat-post-protocol.md`, its 状态词表 on line 9 and the 在任 / assignee / 接管 lines around it) and the seat-mutex sentences in `SKILL.md` and `references/core-rules.md` still describe a single-occupancy seat. Those files are held by other flights, so no sentence in them was touched here. The same card records that `scripts/pm/check-skill-line-ratchet.mjs:720` quotes the authorization sentence reworded above, so that comment is now a stale quotation — a comment, not a pin, and green either way.\n\n## 维护者速读(草稿)\n\n**事情**:你昨天裁的那条——总监席只是做裁决,开多少场都没关系,也不用交班——现在写进了总监席的岗位说明里。以前那份说明只写得下一个占席人:第二场召唤要么等前一场的收班简报,要么等你出面让前一场停下。这个 PR 把「接管」和「在任者」这两个说法从总监席删掉了。\n\n**为什么值得改**:规则空着的时候,分工只活在两个会话各自的评论里,下一场召唤读不到,于是每次并行都要你临场再说一遍。写进说明之后,新开的一场自己就知道:不用等、不用停、也不用替别人收尾。\n\n**改了什么**:一句话说清座位形态(只出裁决、不持在飞状态、多场并行、无交班),再一句话说清并行时怎么不撞车——裁决先记在卡上再动标签,同一张卡同一笔只由一场写,卡上的评论线程就是先后顺序,后记的算数,动手前先读线程。座位贴还是一张,状态块改成每场一行、各记各的审计锚,不再有「谁在任」这个字段。\n\n**没动什么**:档位保险丝、不达档只做免档整理、不占车道、永不认领 backlog,一个字没改。文件行数也没变(还是 72 行),两条新规则是靠同一节里两处合并腾出来的。总监席之外的通用座位规则(分诊席那些)仍然是一席一人,这次没碰——它们和新裁决的冲突另立了一张卡给 skills 席看。\n\n**你要做的**:这是受管面,要你人工合并。看一眼上面的改前改后表,认可就合。\n\n**席位意见**:\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_"
+}

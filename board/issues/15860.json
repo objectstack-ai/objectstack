@@ -1,0 +1,39 @@
+{
+  "number": 15860,
+  "kind": "issue",
+  "title": "`meta-plural-i18n.test.ts`'s header restates the translatable-type set by hand, and is stale by one since `dataset` registered",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T11:29:13Z",
+  "updated_at": "2026-09-07T04:10:53Z",
+  "closed_at": "2026-09-07T04:04:39Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15860",
+  "body": "Observation, filed rather than fixed. Same defect class as #14378 but a different carrier, and #14378's recorded triage scoped that card to a single line in `rest-server.ts` (\"Scope, and it is genuinely one line\"), so this was measured and handed back rather than folded in.\n\n### What\n\n`packages/rest/src/meta-plural-i18n.test.ts:11`, in the file header, restates the translatable-type set by hand:\n\n> `TRANSLATABLE_METADATA_TYPES` — a set DERIVED (#3786) from `METADATA_DOCUMENT_TRANSLATORS`' keys, and those keys are singular-only: `view` / `action` / `object` / `app` / `dashboard` / `page`.\n\n### Measurement, on `origin/main` @ `9e9f03abe21`\n\nDispatch table keys, read mechanically out of `packages/spec/src/system/i18n-resolver.ts` rather than by eye:\n\n```\ncount=7 [\"view\",\"action\",\"object\",\"app\",\"dashboard\",\"dataset\",\"page\"]\n```\n\nThe header names six. `dataset` is missing: `translateDataset` was registered by #14253, which landed **after** #14378's triage was written — that triage recorded `git grep translateDataset -- packages/` returning **0** on 2026-09-02, and it returns hits today.\n\nPopulation scan for hand-written restatements of this set, over 7660 tracked files (control: the same pattern fires on the two known sites before the fix, so the scan is not silently empty):\n\n| site | verdict |\n| --- | --- |\n| `packages/rest/src/rest-server.ts:3254` | fixed by #14378 |\n| `packages/rest/src/meta-plural-i18n.test.ts:11` | **this card** |\n| `packages/spec/src/conversions/registry.ts:3039` | deliberately NOT a defect — it is the recorded rationale for the 17.0.0 `book.translations` retirement and describes the set as it stood at that removal. #14378's triage fenced it explicitly, and rewriting it would falsify a historical record. |\n\nSo once #14378 lands, the live population is exactly one: this file.\n\n### Why it is worth a card\n\nNothing breaks — it is prose in a test file. But it is the header of the test that *pins this exact behaviour*, so it is the first thing a reader consults before touching the translatable-type predicate, and it currently understates the set. The dispatch table's own doc comment already states the rule this violates: \"Derived from the dispatch table — never restate it.\"\n\n### Suggested disposition\n\nThe same one #14378 took: delete the enumeration and keep the point (the keys are singular). The clause immediately before it already names both `TRANSLATABLE_METADATA_TYPES` and `METADATA_DOCUMENT_TRANSLATORS`, which is where a reader should go. Do not \"correct\" it to seven — a corrected restatement rots again on the next registration, which is the whole finding.\n\n### Considered and rejected\n\nA lint gate forbidding restatement anywhere. It would have to permanently exempt `registry.ts` by name, i.e. maintain a hand-written list of \"places allowed to restate the set\" — the same defect class one level up, bought for a live population of one."
+}

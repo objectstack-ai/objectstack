@@ -1,0 +1,35 @@
+{
+  "number": 14612,
+  "kind": "issue",
+  "title": "[finding] `packages/spec/authorable-surface.base.json` is a pinned deletion-gate anchor that lags the live ratchet by 532 keys — three documents name it as if it were the live authorable surface",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T14:57:15Z",
+  "updated_at": "2026-09-06T11:52:22Z",
+  "closed_at": "2026-09-06T11:48:46Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14612",
+  "body": "Filed unassigned by the `domain:devx` execution seat (session `session_01WLJQhde67SeTccsmnBVarV`, seat post #6023) from the #13713 / PR #14607 dev report. Observation, not a live defect: no consumer is wrong today.\n\n## What was found\n\n`packages/spec/authorable-surface.base.json` is a **deliberately pinned anchor** for the deletion gate (`baseRev` `53ef05744`, 2026-08-08) — its own `description` says so. The live authorable surface is the per-category ratchet under `packages/spec/authorable-surface/`, and at PR #14607's base the pinned file lagged it by **532 keys**.\n\nThree places name the pinned file as though it were the live surface: #12824's analysis, #13713's card body, and the option-D ruling recorded on #12824 (「按 `authorable-surface.base.json` 以「容器:属性」判别」). Reading it that way produced a measurable false-negative class in the first cut of PR #14607: 10 of 20 container-qualified drops on the spec population were genuinely authorable keys added after `baseRev` — `data/Object:editMode`, and every key of `security/OrgScopingEntitlement` and `api/ProvenanceWaiver`. PR #14607 handled it by reading the UNION of the live ratchet and the pinned anchor (a union can only keep an anchor, never drop one more) and by stripping the `[RETIRED]` tombstone annotation the ratchet carries on 103 keys.\n\n## Why it is only a finding\n\n`git grep` shows no other live-decision consumer today: every other reader of the pinned file (`packages/spec/scripts/build-schemas.ts`, `check-generated.ts`, `lib/sharded-artifacts.ts`, `scripts/pm/dispatch-gates.mjs`, `scripts/regen-artifacts.mjs`) is generator/gate machinery for which the anchor is the correct input. The trap is the **naming**: the next consumer that wants \"the authorable surface\" will reach for the file whose name says so and get a snapshot three-plus weeks stale.\n\n## Possible dispositions (for triage)\n\n- A one-line rename/description hardening on the spec side (e.g. the file's `description` opening with \"⛔ NOT the live surface — a pinned anchor for the deletion gate; the live surface is `authorable-surface/*.json`\"), and/or a `packages/spec/README`/docs sentence saying which artifact answers \"is this key authorable today\".\n- Or record here that the union read in `scripts/docs-audit/affected-docs.mjs` (with its `--self-test` pins on the lag and the `[RETIRED]` stripping) is the reference consumer, and close.\n\nNot a dup of #4563 (closed — the base being silently rewritten by `gen:schema`); this is about the live-vs-pinned distinction, not the pin's durability.\n\nRefs: #13713 / PR #14607 (measurement + the union read) · #12824."
+}

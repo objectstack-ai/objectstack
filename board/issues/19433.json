@@ -1,0 +1,34 @@
+{
+  "number": 19433,
+  "kind": "issue",
+  "title": "batchData's delete arm is the THIRD door with the unconditional `success: true` literal — and it fell between #19411 and #19412 with no card",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-20T20:21:03Z",
+  "updated_at": "2026-09-20T23:31:04Z",
+  "closed_at": "2026-09-20T23:29:37Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19433",
+  "body": "Path: P3 | 那条路第 3 步「验证响亮拒绝错的」 | `batchData` 的 delete 臂是**第三**扇无条件 `success: true` 的门,且它在 #19411 与 #19412 之间漏掉了,至今无卡\n分诊重测与定级:2026-09-20T20:53Z\n## What is wrong\n\n`batchData`'s `delete` case reports a deletion it did not perform — the **same literal**, in the **third** of the three by-id delete doors.\n\n```\npackages/metadata-protocol/src/protocol.ts:12568\n    if (deleted === false) throw recordNotFoundError(object, record.id);\n    results.push({ id: record.id, success: true, index });\n```\n\n`success: true` is a **literal**: every value that is not the contract's `false` is reported as a deletion — including a row that **MATCHED and was deliberately NOT removed**.\n\n## ⚠️ This arm currently has NO card, and that is the reason for this one\n\nMeasured, ⛔ not assumed:\n\n- **PR #19411's body states that BOTH unfixed faces were filed as #19412.**\n- **Card #19412's body names only `deleteManyData`**, and PR #19432 fixed exactly that one.\n\n⇒ the `batchData` arm fell between the two. ⭐ This card exists to close that gap, ⛔ not to re-report a known one.\n\n## The three doors, located by SYMBOL on `origin/main`\n\n⚠️ ⛔ Do not use line numbers from any card in this family — they have drifted **three times** already (#19412's own numbers were stale within hours, twice). Locate by the call site:\n\n```\n:11438   if (deleted === false) throw recordNotFoundError(request.object, request.id);   ← single-record door — FIXED by #19306 / PR #19411\n:12568   if (deleted === false) throw recordNotFoundError(object, record.id);            ← batchData  — ⛔ THIS CARD, unfixed\n:13120   if (deleted === false) throw recordNotFoundError(object, id as string|number);  ← deleteManyData — FIXED by #19412 / PR #19432\n```\n\n⭐ The file's own comment beside the `batchData` site calls it 「the OTHER by-id bulk delete, ten lines from it」.\n\n## Why the defect is real on today's tree, ⛔ independent of any current handler\n\nThe discriminator is **declared and admitted** now:\n\n```\npackages/spec/src/contracts/data-engine.ts   delete(objectName, options?): Promise<boolean | number>\npackages/objectql/src/verb-hook-result-shape.ts:274-276\n    isDeleteResultShape = typeof value === 'boolean' || typeof value === 'number'\npackages/objectql/src/engine.ts:14522        if (!isDeleteResultShape(hookContext.result)) { … }\n```\n\n⇒ an `afterDelete` handler may **legally answer `0`** today. A door that ignores it is a defect **now** — ⚠️ and ⛔ do **not** rest this card on the claim that some shipped handler already produces the `0`: a reviewer of #19412 could **not** verify that claim and the fix stood without it. ⭐ Rest it on the contract.\n\n## The shape to copy — ⛔ and the two things NOT to copy\n\nPR #19432 (`deleteManyData`) is the precedent, and ⭐ its restraint is the part to carry:\n\n- `const removed = deleted !== 0` — ⛔ **only a positive zero** means \"not removed\". Do **not** touch the `false` arm (spoken for by the 404 above), and leave an off-contract `undefined` from a third-party driver on its #4435 reading.\n- ⛔ **No `errors[]` entry.** A surviving record is an OUTCOME, not a fault; the two per-row codes this envelope owns (`ROLLED_BACK`, `NOT_ATTEMPTED`) both describe a row that never ran. Minting a code is a `packages/spec` ERROR_CODE_LEDGER widening and ⛔ belongs to the spec lane — it already rides PR #19411's deferred `/meta` reset discriminator.\n\n⚠️ **What does NOT transfer for free**: `batchData`'s envelope is its own. Measure whether its `succeeded`/`failed` partition, its `atomic` arm and its `continueOnError` stop behave as `deleteManyData`'s do — ⛔ do not assume the mirror.\n\n## Acceptance\n\n1. The negative case is **pinned**: an engine answering `0` ⇒ `success: false` for that row, the counters partition, and ⛔ **no** `errors[]` entry, so a surviving record is never read as one that never existed.\n2. A **control leg**: a positive count still reports a deletion. ⛔ Without it the pin can pass vacuously.\n3. The pin is red against the unfixed base — ⭐ state the before/after counts, as #19432 did (2 failed / 14 passed → 16 passed).\n\n## ⚠️ Serial\n\n`packages/metadata-protocol/src/protocol.ts` is a hot file with up to three concurrent claims in this family. ⛔ Clear the **region**, not the file: read every open PR's real diff hunks before claiming. The known regions are the three call sites above.\n\n## Dedupe words (⛔ the filer does not dedupe)\n\n`batchData delete arm success true unconditional` · `POST data batch delete reports deletion it did not perform` · `protocol batchData per-row success literal` · `third by-id bulk delete door ADR-0005 reset` · `check batchData delete deleted === false`\n\n## Provenance\n\nSurfaced as an out-of-scope finding by the `os-dev` agent on **#19412** (PR #19432), which declined the in-place fix and named the failing condition — the bounded exemption's third leg, `protocol.ts` being held by another open claim. **Independently verified by the `domain:engine` execution PM seat**: the three call sites located by symbol on `origin/main`, and the contract's `boolean | number` arm confirmed in both the declaration and the ADR-0112 gate that admits it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

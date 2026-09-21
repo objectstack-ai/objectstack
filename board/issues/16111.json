@@ -1,0 +1,35 @@
+{
+  "number": 16111,
+  "kind": "issue",
+  "title": "lint: `flow-template-unknown-field` / `flow-template-lookup-traversal` never reach a `{record.FIELD}` template outside a node filter — the declared `warning` half is unreachable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T01:29:47Z",
+  "updated_at": "2026-09-06T21:12:16Z",
+  "closed_at": "2026-09-06T21:10:34Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16111",
+  "body": "Found while surveying which platform rules fire on `objectstack-ai/hotcrm` (its #1621, step 3 of epic #1579). Read-only survey, report-first, unassigned.\n\nMeasured against the **pinned `@objectstack/lint@17.3.0`**, hotcrm at `1670557`. Every injection proven on disk before a verdict was read; every one restored by blob hash verified by observation.\n\n## What the shipped rule declares\n\nBoth ids carry a per-position severity, keyed off `leaf.inFilter`:\n\n```\nseverity: inFilter ? \"error\" : \"warning\",\nrule: FLOW_TEMPLATE_UNKNOWN_FIELD,\n```\n\nand the message body branches the same way — `nodeType filter references '{record.…}'` versus `template references '{record.…}'`, the latter explaining that *\"the token resolves to an empty string on every run (silently)\"*. So the non-filter position is deliberately in scope, at `warning`.\n\n## Measurement — one file, four injections, same run design\n\n`src/flows/billing-handoff.flow.ts` carries both position kinds against the same triggering record: a `get_record` node with `filter: { id: '{record.crm_account}' }`, and a payload block that interpolates `{record.id}`, `{record.name}`, `{record.amount}`, `{record.close_date}`, … outside any filter.\n\n| injection | position | result | exit |\n|:--|:--|:--|--:|\n| `filter: { id: '{record.crm_account_nope}' }` | in filter | **`flow-template-unknown-field` at `error`, x2** | **1** |\n| `filter: { id: '{record.crm_account.owner_id}' }` | in filter | **`flow-template-lookup-traversal` at `error`, x2** | **1** |\n| `amount: '{record.amount_nope}'` | payload, not a filter | `passed: true`, no finding | **0** |\n| `amount: '{record.crm_account.name}'` | payload, not a filter | `passed: true`, no finding | **0** |\n\nThe first two rows are the working control: the file is walked, the node is walked, `recordRefsIn` resolves `{record.…}` shapes, and the object's field map is loaded. Only the non-filter leaves are absent from `leaves`.\n\n⚠️ Declared: my first attempt at the non-filter half used `{billingAccount.phone_nope}` — a *variable* ref, not a `record` ref — and so was **out of the rule's class**, not evidence of anything. It is reported here as a no-op rather than silently replaced; the table above is the redone measurement with `{record.FIELD}` in both positions.\n\n## Consequence\n\nThe half of these two rules that fires is the half whose consequence is loud — a filter token that resolves to nothing drops the condition and the node refuses at execution time. The half that is silent at authoring time is the half whose runtime consequence is *also* silent: per the rule's own message, the token renders as an empty string on every run. A hand-off payload that interpolates a renamed field ships an empty column to the billing system, and nothing anywhere says so.\n\n## Related, not duplicating\n\n- **#16096** (open) — `filter-token-unknown` never walks `flows` at all. Same family of walk-reach gaps in flow validation, different rule and opposite direction (that one reaches no flow position; this one reaches only the filter positions).\n- **#4389** (closed) — `registerFlow`'s validators walk top-level nodes only.\n- **#3426** (closed) — notify-node templates cannot resolve formula/lookup fields at render time; a runtime-side sibling of the same silent-empty-string symptom.\n\n## Dedupe\n\nTargeted search returned 4 on-topic results (the three above plus `#15793`) — non-zero and on-topic, which is the control that the search was not silently answering empty."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 16187,
+  "kind": "pull_request",
+  "title": "skills(objectstack-data): the `tree` rows state the landed `reference` contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T05:09:18Z",
+  "updated_at": "2026-09-07T02:02:57Z",
+  "closed_at": "2026-09-07T02:02:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-07T02:02:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16187",
+  "body": "Fixes #16083\n\n`refuseForeignTreeReference` (`packages/spec/src/data/object.zod.ts`, on `main` since `fb77aa541`) makes a `tree` field's `reference` **optional**, and — when written — equal to the declaring object's own `name` (the `extend` target on an extension). Any other object is refused at parse with one `custom` issue at `fields.FIELD.reference`. The published `objectstack-data` skill still listed `reference` as a bare key prop, so a client agent loading the skill had no way to know either half of the rule. `content/docs` already says it; these two rows were the last surface that did not.\n\n## Two rows, no new section\n\n| File | Before | After |\n|:--|:--|:--|\n| `rules/field-types.md` (Relational table) | key config was just `` `reference` `` | `` `reference` `` — optional; when written, this object's own name (any other object is refused at parse) |\n| `rules/relationships.md` (Relationship Types table) | the `Required` cell was a bare `Optional` | says **what** is optional, and contrasts \"refused at parse\" with the `master_detail` row's \"lint-warned\" in that same column |\n\nWording is taken from the refusal message and from the already-landed `content/docs` sentences (`validation-rules.mdx:297`, `field-type-decision-tree.mdx:183`), not re-invented — the card's acceptance asks for the words the spec's refusal uses.\n\n**Unchanged on purpose:** the `Hierarchical: tree (Self-Reference)` example. It already writes the object's own name (`reference: 'category'` on object `category`), which is all the ruling asks of it. I drafted a clarifying comment on that line and then dropped it: the row three screens up in the same file now states the rule, so the comment would have cost 28 bytes without changing what a client agent writes.\n\n## Ratchet accounting — and the deletion that paid for it\n\nThe token ratchet left `field-types.md` **27 bytes** under its ceiling, and the shortest faithful clause for that row is ~88 bytes. The deletion is therefore compelled by the ratchet, not elective tidying.\n\nWhat was spent: the Media section's two-line note *\"There is no per-field attachment config (size limits, allowed types, storage) — storage concerns live outside the field schema.\"* It restates the top-of-file blockquote, which sits **above every table** and already refuses the exact key by name:\n\n> Per-type display knobs beyond these do **not** exist — an unknown field key is REFUSED at parse (`unrecognized_keys`), so don't invent `theme`, `rows`, or `fileAttachmentConfig`.\n\n`grep` confirms the note appears nowhere else in `skills/`. Removing it changes nothing a client agent writes; the operative refusal and the exact invented key both survive.\n\n| File | tokens before | tokens after | ceiling | headroom now |\n|:--|--:|--:|--:|--:|\n| `rules/field-types.md` | 3578 | **3567** | 3584 | 17 |\n| `rules/relationships.md` | 3490 | 3522 | 3778 | 256 |\n\n`field-types.md` **shrinks**. The package moves +21 tokens net (140376 → 140397 of a 157650 ceiling) — stated plainly rather than rounded away, and paid for inside the two files the ruling names.\n\n## Gates — union re-run on the final commit `5a30844272`\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 20 families from the real changeset; all 20 run, reconciled with `--ran`:\n\n`✓ dispatch-gates --ran: 20 derived famil(ies) accounted for — 20 run, 0 NOT-MEASURED.`\n\nEvery exit code was captured by redirecting first, never through a pipe.\n\n- `✓ check-skills-token-ratchet: 36 authored bundle file(s) within their ceilings` — plus `✓ … self-test: 64 cases pass.`\n- `check-nul-bytes: OK (scanned 7932 text file(s) … no raw ASCII control bytes)`\n- whole-repo `pnpm lint` (`eslint . --no-inline-config`) — **exit 0, not narrowed**. It ran on this commit's exact tree (`git diff HEAD` and `git status --porcelain` both empty since).\n- `check:pm-governed-merges`, `check:skill-frame-sync`, `check:skill-compatibility`, `check:skill-identifier-liveness`, `check:doc-authoring`, `check-published-list-mirrors` (+ self-test) — all exit 0.\n- `check-governed-merges --test` on both paths — **exit 3, GOVERNED**, as expected: `skills/** ×2 — the published skills catalog`.\n- One gate first came back `PREREQUISITE NOT MET` (exit 3, nothing measured) because `@objectstack/formula` was unbuilt; after `turbo run build`, `check:doc-formula-expressions` is exit 0.\n\nTwo gates named in the brief, `check-doc-snippet-types` and `check-skill-examples`, **do not exist in this repo** — no script, no package.json entry. `check-skill-id-lint` exists but its corpus is `.claude/skills/pm-dispatch` plus `.claude/agents/os-dev.md` and `AGENTS.md`; the published `skills/**` roots are not in it, so it does not read these files. Run anyway: exit 0.\n\n**No changeset**, and `skip-changeset` is applied: `skills/` is not a workspace package and no `package.json` `files` array names it, so this diff releases nothing. Six landed `skills/**`-only commits carry zero changesets.\n\n## 维护者速读(草稿)\n\n发布给客户 agent 的 `objectstack-data` 技能里,`tree` 字段的 `reference` 一直只是裸列的一个键。契约那半边早已落地——写别的对象在 parse 就被拒——但技能文本没说。客户拿我们的 AI 写元数据 app 时,读到的是「tree 要配 reference」,于是写出指向另一个对象的 tree,一路到 publish 才被拒。这是沉默造成的返工,不是错误陈述。\n\n改动是两行表格,不加新章节:`field-types.md` 的 Relational 表 `tree` 行,和 `relationships.md` 关系类型表的 `tree` 行。措辞直接取自 spec 的拒收信封,以及 `content/docs` 上个 PR 已经落地的同一句话,没有另造一套说法——分叉的措辞就是下一张卡。\n\n要请您看一眼的是那处删除。token 棘轮把 `field-types.md` 卡在离天花板 27 字节,而把契约在那一行说清楚最少要 88 字节:删是被棘轮逼出来的,不是顺手清理。删掉的是 Media 段那句「没有 per-field attachment config」——它复述的正是文件开头那段引用块,而那段已经点名拒收 `fileAttachmentConfig`,位置还在所有表格之上。删完该文件净缩。\n\n没动的地方也请留意:`tree` 的示例一个字没改,它本来就写着对象自己的名字。示例行上我起过一句注释,又拿掉了——同一文件的表格行已经把规则说了,再写一遍只是多花字节,不改变客户 agent 写出来的东西。\n\n治理面:`skills/**` 在名册上,所以这是 draft PR、人工合并,席位不 flip ready、不入队、不 approve。纯散文改动,无契约移动,无 changeset。整包净增 21 tokens,已如实写在上面的表里。\n\n**席位意见:**\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 15984,
+  "kind": "issue",
+  "title": "docs(i18n): the translations guide never mentions inline `I18nLabel` locale maps — the one route it does not describe is the one the coverage gate now reports on",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T17:20:02Z",
+  "updated_at": "2026-09-06T08:55:44Z",
+  "closed_at": "2026-09-06T08:49:54Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15984",
+  "body": "Filed unassigned by the `domain:cli` seat while implementing #14749 (PR #15980), as an out-of-scope finding. Deliberately unlabelled — triage owns `domain:*` and the grading.\n\n## The gap\n\n`content/docs/ui/translations.mdx` is the user-facing guide for localising an app. Read end to end, it describes exactly one localisation route: a plain-string label on the metadata, translated in a bundle addressed by convention. It never mentions the **second** authorized form of an `I18nLabel` — the inline locale map, `label: { en: 'Members', 'zh-CN': '成员' }` — which `I18nLabelSchema` has authorized since #5728, which `pickLocalized` / `resolveI18nLabel` render, and which #5728 / #10926 / #14412 have three times ruled is the localisation route for props that have no bundle key at all.\n\nThe word \"inline\" appears on the page twice, both times about something else: \"your inline `label:`\" (a plain string, as that locale's source text) and \"action labels declared inline on an object\" (declared inline, not a locale map).\n\n## Why it is worth a card now rather than before\n\nUntil #14749 the omission cost an author nothing they could observe: a map was silently outside the coverage report, so a reader of this page and a reader of `os lint` saw the same nothing.\n\nThat is no longer true. After PR #15980 the gate reads a map's own locales — locales it carries count as covered, locales it omits are reported as gaps. So an author who writes `{ en, 'zh-CN' }` on a stack declaring `supportedLocales: ['en', 'zh-CN', 'ja-JP']` now gets a real `missing translation for locale \"ja-JP\"` finding about a prop this page gives them no vocabulary for. The three questions that finding raises — what is this form, why does `os i18n extract` scaffold nothing for it, and what do I do about the gap — are each answered in the code (`packages/spec/src/ui/i18n.zod.ts` and `packages/cli/src/utils/i18n-extract.ts`'s header, where the #14749 C3 ruling placed the normative prose) and nowhere a user reads.\n\n## Suggested shape, not a prescription\n\nMost likely a row in \"What you can translate\" plus a short subsection or a \"Current boundaries\" bullet stating: both forms are authorized; the map is rendered but never extracted, so a translator working from the bundle will not find those strings; coverage counts the locales the map carries; and no bundle key exists for it (nor will one be synthesised from a node path — #14749 Q3 = C3).\n\nSame class as #15435 (that table omitting the `bulkActions` and `datasets` groups), which was accepted and fixed.\n\n## How this was read\n\nPer-file, not by a tree-wide grep. `content/docs/ui/translations.mdx` and `content/docs/protocol/kernel/i18n-standard.mdx` were read in full; neither states any claim PR #15980 falsifies, and neither mentions inline maps at all. Positive control on the same command and scope: the phrase \"inline locale map\" fires on 12 files under `content/docs/`, and 0 of those 12 are outside `content/docs/references/` — the auto-generated tree, where every occurrence is a schema `.describe()` about rendering, none about coverage or extraction. So the null on the hand-written pages is a measurement, not a silent empty.\n\nRelated: #14749 (the ruling and the behaviour change), #14816, #14817, #15435.\n"
+}

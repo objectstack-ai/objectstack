@@ -1,0 +1,34 @@
+{
+  "number": 16072,
+  "kind": "issue",
+  "title": "`os migrate multi-value-columns` has no arm for a SINGLE-value JSON-class column — its repair wraps every value in a one-element array, so the new #15771 findings are deliberately routed to `remedy_not_recognized` instead",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T23:28:07Z",
+  "updated_at": "2026-09-07T00:42:29Z",
+  "closed_at": "2026-09-07T00:42:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16072",
+  "body": "Found while implementing #15771 (widening the base-type drift detector to the writer's own JSON-class predicate). Filed unassigned; no severity asserted.\n\n## The gap\n\n`manualJsonConversionSql` (`packages/drivers/driver-sql/src/schema-drift.ts`) repairs a stale textual column by WRAPPING each stored value in a one-element JSON array — the `ELSE json_build_array(col)` arm on Postgres, `UPDATE ... SET col = JSON_ARRAY(col) WHERE LEFT(col, 1) is not a bracket` on MySQL. That is the correct repair for a field whose declared value IS an array, and the wrong one for a field whose declared value is a scalar or an object.\n\nMeasured with the command's own planner (`planStaleColumnTargets`, `packages/cli/src/commands/migrate/multi-value-columns.ts`) before #15771's message split, on a synthesized single-value `file` finding carrying the multi-value message:\n\n```\ntargets: 1  refusals: 0\ndialect: postgres\n  ALTER TABLE \"proj_task\" ALTER COLUMN \"doc\" TYPE json USING (CASE WHEN \"doc\" IS NULL THEN NULL\n  WHEN \"doc\" = '' THEN NULL WHEN \"doc\" LIKE '[%' THEN \"doc\"::json\n  ELSE json_build_array(\"doc\") END)\n```\n\nThe stored value for a single-value `file` field is the JSON scalar the write path produces — measured byte-for-byte on an in-memory SQLite cell, the column holds `\"file_01HXYZ\"` including its quotes, identically for the stale `varchar(2048)` column and the driver's own column. Wrapping that yields a one-element array whose element still carries the quotes. Read back through the driver on the same cell:\n\n```\nok      : value=\"file_01HXYZ\"          typeof=string  isArray=false\nwrapped : value=[\"\\\"file_01HXYZ\\\"\"]    typeof=object  isArray=true\n```\n\n(The wrap itself is the repo's own live measurement, recorded in `manualJsonConversionSql`'s docblock from Postgres 16.13 and MySQL 8.0.46: a legacy single value becomes `['a']`. There is no live Postgres/MySQL cell in this container, so that limb is quoted, not re-measured.)\n\n## What #15771 shipped instead, and what is still missing\n\n#15771 does NOT point the new findings at that command. The array-valued half (`multiple: true`, plus the inherently-multi option types) keeps its message character for character and keeps the remedy. The single-value half gets a message carrying neither the command's name nor the statement, so `planStaleColumnTargets` recovers no dialect and REFUSES the entry with `remedy_not_recognized` — the command's own designed branch for a message it cannot read. Nothing wrong is executed, and the refusal's detail already tells the operator to run `os migrate plan` and apply the finding's statement by hand.\n\nWhat is still missing is an automated repair for the single-value population, and the finding's message says so in words rather than printing DDL nobody has run. The shape of that repair is a CAST rather than a wrap — rows written through ObjectStack already hold valid JSON text — but writing it is not a change that should ship unmeasured: `manualJsonConversionSql`'s two existing forms are EXECUTED against live servers by `schema-drift.base-type-mismatch.test.ts` over rows in every state a stale column can be in, and its own docblock records two arms that were corrected only by running an earlier version against a live database.\n\n## Options for whoever picks this up\n\n1. **Extend the existing command with a value-shape arm** — one command, two statement builders, the shape chosen from the finding rather than from the command's name. Costs the command's name accuracy (\"multi-value\" would no longer describe what it does).\n2. **A sibling command** for the scalar/object population, leaving `os migrate multi-value-columns` exactly as it is. Costs an operator one more thing to know about.\n3. **Leave it refused** and keep the by-hand route. Costs every affected deployment a manual conversion, which is the status quo #15771 ships.\n\nEither of the first two needs a live Postgres and MySQL cell to land, for the same reason the existing forms did.\n\nRelated: #15771 (the detector), #15041 (the `VARCHAR(2048)`-vs-json-column generator divergence that makes the stale column reachable)."
+}

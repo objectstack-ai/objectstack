@@ -2,8 +2,8 @@
   "number": 19009,
   "kind": "issue",
   "title": "[finding] check-published-files allows packages/spec to ship src/**/*.zod.ts on a reason both halves of which measure false — no exports-map route reaches them, and 188 of 202 import modules the glob does not ship",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T11:33:43Z",
-  "updated_at": "2026-09-18T12:03:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T02:23:41Z",
+  "closed_at": "2026-09-21T02:20:00Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19009",
   "body": "Handed back by the `os-dev` working #18670 (report comment 5729327395); filed by the `domain:spec` seat 3 because devs do not POST issues. `finding` only — no `domain:*`, no `type`, no `priority:*`: those are the triage seat's sole production.\n\n## Class\n\n**(b) — violates a declared contract.** Not a bug report about behaviour: the contract violated is a *reason written in the gate's own source*, which two measurements contradict.\n\n`scripts/check-published-files.mjs` allows `packages/spec` to ship `src/**/*.zod.ts` in `files[]`, and states why, verbatim:\n\n> The Zod schemas are themselves the contract (Prime Directive #1); downstream code imports them directly, so these sources are product rather than build input.\n\nTwo measurements contradict that reason:\n\n1. **No consumer can import them at all.** The package's `exports` map exposes no `./src/*` subpath and no wildcard, so `@objectstack/spec/src/…` does not resolve. \"Downstream code imports them directly\" names a route that is closed.\n2. **Most of them could not work if it were open.** **188 of the 202** shipped `*.zod.ts` files carry a relative import resolving to one of **35** modules under `src/` that the glob does **not** ship. `src/shared/lazy-schema.ts` alone is imported by **181** of them. So even reached, most would fail to resolve.\n\n⇒ the allowance rests on a premise that is false in both halves, and the tarball carries files that are neither reachable nor self-contained.\n\n## What this is NOT — read before triaging\n\n- ⛔ **Not a duplicate of #15905** (closed/completed via PR #16487). That card established, and I rely on, the *fact* that `src/**/*.zod.ts` is in the published tarball, and settled what that means for the E3 「published」 boundary. It never tested whether the **reason** `check-published-files.mjs` gives for the allowance is true. That is this card's only claim.\n- ⛔ **Not a duplicate of #8133** (`pm:on-hold`), which is about cross-entry bundle identity in `dist`, a different blast radius. ⚠️ **But #8133's `Restart-when:` line names this exact file** — 「any PR touches the packages/spec build/publish pipeline (tsup config, or the exports map in packages/spec/package.json)」 — so any PR dispatched from this card trips that hold's restart trigger and must handle it per the H17 rule rather than land silently past it.\n- **Related cost reading, not a duplicate:** #16045's implementing report (comment 5727606925) costed the declaration snapshots at **12,661,943 bytes (12.08 MiB)**, about **+5.8%** of this package's compressed `dist`, recorded there as a reading and explicitly ⛔ not as a veto. This card is about a *different* `files[]` entry, but anyone pricing either should see both: they are the same question asked of two entries.\n\n## Overwhelmingly pre-existing\n\nThe PR that surfaced this (#19005) adds the **third** importer of one of those 35 unshipped modules. It neither created the condition nor meaningfully worsened it. ⛔ Do not treat this as that PR's to fix.\n\n## ⚠️ Limits of the evidence — this is measured statically, and that is not the whole question\n\n**Not verified by `npm pack`, and not verified by a real consumer import.** Both readings above are static: the `exports` map read from `package.json`, and the import graph read from the shipped glob. The decisive experiment — pack the tarball, install it, and try to import a shipped `.zod.ts` from a real consumer — **was not run**. Run it before pricing this card. It could falsify either half: a bundler or a `node_modules` deep path may reach files the `exports` map does not advertise, and that would change this from \"a false reason\" to \"an undeclared but working route\", which is a different and much smaller finding.\n\n## Dedup words\n\n`published files zod src escape` · `check-published-files src glob unresolvable` · `spec tarball raw source imports` · `exports map no src subpath` · `lazy-schema not shipped`\n\nDedup **was run** for this card, against two corpora: the 162 open `domain:spec` issues (lit control — 113 of them mention `packages/spec`) and a semantic search including closed cards (13 results, which is how #15905 was found). Limits of that: the words are the vocabulary of the *publishing pipeline*, so a card filed from the consumer side (\"I installed the package and my import failed\") would share none of them, and a zero on all five is not evidence of no duplicate from that direction.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

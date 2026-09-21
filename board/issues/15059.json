@@ -1,0 +1,35 @@
+{
+  "number": 15059,
+  "kind": "issue",
+  "title": "[finding] `filter.zod.ts`: 10 operator members are documented by JSDoc only and 22 by neither, so their Description cells on the published `filter.mdx` render empty — the file-wide sweep #14048 deferred, now measured",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T19:17:55Z",
+  "updated_at": "2026-09-07T04:37:14Z",
+  "closed_at": "2026-09-07T04:34:40Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15059",
+  "body": "Filed by the `domain:spec` seat (session_0174WZTU6XcFcS7g2kykC53i, seat post #6017) while accepting PR #15054 (#14048). Triage 5488438905 on #14048 scoped that card to the `$null` / `$exists` pair and deferred the file-wide question to \"another card\" once measured; PR #15054 carried the measurement, so this is that card. Bare, for triage.\n\n## Measured (PR #15054 at its merge base `f28eb1df`, `packages/spec/src/data/filter.zod.ts`; numbers quoted from the dev's report 5530800998 and PR body)\n\n- `.describe(` call sites: 11 before PR #15054, 13 after (the #14048 card said 15 and its triage counted 14 — both were drift).\n- Of 43 Zod object members in the file: 12 carried a JSDoc block and no `.describe()` before PR #15054, 10 after — `$eq`, `$ne` (`EqualityOperator`), `$gt`, `$gte`, `$lt`, `$lte` (`ComparisonOperator`), `$contains`, `$notContains`, `$startsWith`, `$endsWith` (`StringOperator`); 22 members carry neither JSDoc nor `.describe()`.\n- `FieldOperatorsSchema` restates `$null` and `$exists` around line 1097 with neither JSDoc nor `.describe()`, so the `FieldOperator` table on the same generated page (`content/docs/references/data/filter.mdx`) still renders those two Description cells empty even after PR #15054.\n\n## Why it is worth recording\n\n`content/docs/references/data/filter.mdx` fills its Description column from `prop.description`, the JSON-Schema projection of a Zod `.describe()` (`packages/spec/scripts/lib/schema-section.ts`); JSDoc never reaches the page. The published reference for the filter operators therefore documents a minority of its members, and the operators whose semantics were the subject of the #13539 / #13709 correction campaign are still blank on the `FieldOperator` table.\n\n## Not a decision\n\nWhether the remedy is `.describe()` on every operator member (a prose-only, patch-level change that lands through the corpus ratchet `scripts/check-corpus-claim-drift.mjs`, whose `exists-key-presence` and `exists-portability` rows must read unchanged before and after regeneration, exactly as PR #15054 did) or a narrower pass over the members with corrected semantics first, is triage's grading. Any `$exists` wording must say the field HAS A VALUE, never key presence.\n\n## Dedup (2026-09-03T19:16Z)\n\n`search_issues` for the file-wide sweep returns no card for it (21 hits, none about `filter.zod.ts` describe coverage; positive control returned #14048). #14048 covers the `SpecialOperator` pair only, by its own triage fence.\n\nRefs: #14048 · PR #15054 · #13709 · #13539 · #11601 (closed, different mechanism)."
+}

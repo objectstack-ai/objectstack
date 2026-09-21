@@ -1,0 +1,36 @@
+{
+  "number": 15823,
+  "kind": "issue",
+  "title": "[finding] `ObjectQL.find` returns `hookContext.result` unguarded, so an `afterFind` hook can make a `find()` declared to resolve to `any[]` resolve to an envelope instead — measured",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T09:21:24Z",
+  "updated_at": "2026-09-06T08:36:48Z",
+  "closed_at": "2026-09-06T08:20:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15823",
+  "body": "Found by the dev round on #15597 (branch `claude/issue-15597-plugin-auth-dead-limbs`) while establishing, per the #14843 standard, that the fourteen `plugin-auth` envelope limbs were really dead. Filed bare with `pm:queue` only — `domain:*`, type and priority are triage's. Not ridden in on that card's PR: #15597 is fenced to `plugin-auth` and explicitly forbids a `packages/spec` or gate change, and this is an `objectql` engine question with its own reviewer.\n\n## The fact, measured rather than read\n\n`packages/objectql/src/engine.ts` declares:\n\n```\nasync find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise[any[]]\n```\n\n(spelled with brackets here on purpose — the angle-bracket form does not survive this body's sanitizer.)\n\nIt has two return paths. The ordinary one returns `opCtx.result as any[]`. The other, on the hook path, is:\n\n```\nhookContext.event = 'afterFind';\nawait this.triggerHooks('afterFind', hookContext);\n…\nreturn hookContext.result;      // never re-checked against the declared array\n```\n\nAn `afterFind` handler may assign `ctx.result`, and nothing between that assignment and the `return` asserts the value is still an array. Driven on a real `ObjectQL` over a real `SqlDriver`:\n\n| drive | observed |\n|---|---|\n| `find('sys_user', { limit: 10 })`, no hooks | `ARRAY(len=1)` |\n| same read, with an `afterFind` hook assigning `ctx.result = { records: [ … ] }` | `OBJECT{records}` |\n\nSo the declared return type is not enforced at the one seam that can break it, and the break is silent: no throw, no diagnostic, no log.\n\n## Why this is worth a card rather than a shrug\n\nNothing in this tree does it today — the only registered `afterFind` in `packages/**` is `plugin-audit`'s `read-audit.ts` read recorder, which calls `recordView(ctx)` and never touches `ctx.result`. The finding is not \"something is broken now\".\n\nIt is that **this is the seam the whole `{ records }` normalizer class keeps orbiting.** The #15094 census counted 104 array-or-envelope normalizer blocks, ~70 of them dead-limb shaped, across `packages/**` and `examples/**`. Every author who wrote one was defending against a shape the contract says cannot occur — and at this seam, they were not simply wrong. A reviewer asked to delete such a limb has to establish reachability, and the honest answer today is \"unreachable in practice, reachable in principle\", which is a much more expensive review than \"the engine guarantees an array\".\n\nTwo consequences, and they point opposite ways, which is why this wants a decision rather than a patch:\n\n1. **If `find()` is meant to guarantee an array**, the hook path should enforce it — reject (or loudly report) an `afterFind` that replaces the result with a non-array, the way other hook contract violations are handled. Then every remaining dead limb in the census is unambiguously dead and can be removed on the type alone, which is a large simplification across the class.\n2. **If a hook is meant to be able to reshape a read**, then `find()`'s declared return is wrong and the ~70 dead limbs are not dead — they are the only thing standing between a misbehaving hook and a `TypeError`, and the class should stop being swept.\n\n⛔ This card proposes neither. It records the measurement and the fork.\n\n## What #15597 did with it, so the two do not contradict each other\n\nThat PR removes its fourteen limbs, and argues removal is right *even given* this seam: a hook that corrupted `find()` into an envelope would be a contract violation, and the limb did not repair it — it silently absorbed it at fourteen sites while the ~140 other `find()` call sites in the same package broke anyway. Fourteen sites of false immunity is worse than one visible failure. That reasoning is about `plugin-auth`; whether the seam itself should be closed is this card's question.\n\n## Dedup\n\nREST is 403 for this seat and `gh` is absent, so one targeted MCP `search_issues`, with the control satisfied in the same call: the query returned #14460 and #13706 — both known must-hits, cited by #15597's own card — so the empty result for this seam is a reading rather than a false zero. Four results total; the other two (#15124 an `ActionEngineFacade.find` filter-slot question, #7321 a closed `findData` arity bug) are a different subject. No open card covers the hook seam.\n\n## Refs\n\n#15597 (the round that measured it) · #15094 (the census and its ruling) · #14460 · #14843 · #15092 · #13706 (the precedent that a `find()` need not resolve to an array)"
+}

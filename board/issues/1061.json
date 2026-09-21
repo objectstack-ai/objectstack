@@ -1,0 +1,39 @@
+{
+  "number": 1061,
+  "kind": "pull_request",
+  "title": "Implement metadata versioning, history tracking, and rollback capabilities",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "size/xl",
+    "size/xs",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T08:34:36Z",
+  "updated_at": "2026-09-07T04:48:50Z",
+  "closed_at": "2026-04-02T09:57:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-02T09:57:29Z",
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1061",
+  "body": "Adds comprehensive version history tracking for metadata items with rollback, diff, and automatic retention cleanup. Aligns with enterprise platforms like Salesforce Setup Audit Trail and ServiceNow Update Sets.\n\n## Core Implementation\n\n- **Schema & Data Model**\n  - `MetadataHistoryRecordSchema` with version, checksum, operation type, and audit fields\n  - `sys_metadata_history` system table with indexes for timeline queries\n  - SHA-256 checksum calculation with JSON normalization for change detection\n\n- **Service Layer**\n  - Extended `IMetadataService` with `getHistory()`, `rollback()`, and `diff()` methods\n  - Enhanced `DatabaseLoader` to automatically write history on create/update operations\n  - Checksum deduplication prevents storing identical versions\n\n- **REST API**\n  - `GET /api/v1/metadata/:type/:name/history` - Query version timeline\n  - `POST /api/v1/metadata/:type/:name/rollback` - Restore to specific version\n  - `GET /api/v1/metadata/:type/:name/diff` - Compare versions with JSON patch operations\n\n- **Retention Management**\n  - `HistoryCleanupManager` with age-based (maxAgeDays) and count-based (maxVersions) policies\n  - Automatic scheduled cleanup with configurable intervals\n  - Preview cleanup statistics before execution\n\n## Usage\n\n```typescript\n// Query history\nconst history = await metadataService.getHistory('object', 'account', {\n  limit: 50,\n  operationType: 'update',\n});\n\n// Rollback to version 5\nawait metadataService.rollback('object', 'account', 5, {\n  changeNote: 'Reverting problematic changes',\n});\n\n// Compare versions\nconst diff = await metadataService.diff('object', 'account', 5, 6);\nconsole.log(diff.summary); // \"2 fields added, 1 field modified\"\n\n// Configure retention\nconst cleanup = new HistoryCleanupManager({\n  maxVersions: 100,\n  maxAgeDays: 180,\n  autoCleanup: true,\n}, dbLoader);\ncleanup.start();\n```\n\n## Technical Details\n\n- History records written asynchronously; failures don't block metadata operations\n- Multi-tenant isolation via `tenantId` filter on all queries\n- Indexes optimize common patterns: `(metadata_id, version)`, `(metadata_id, recorded_at)`, `(type, name)`\n- Default 50-record pagination with `hasMore` indicator\n- Web Crypto API for SHA-256 with fallback for edge environments\n\nSee `docs/METADATA_HISTORY.md` for complete documentation."
+}

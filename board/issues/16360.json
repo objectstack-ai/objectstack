@@ -1,0 +1,34 @@
+{
+  "number": 16360,
+  "kind": "pull_request",
+  "title": "docs(plugin-approvals): recall's docblock summary line states the status, not an exclusive actor set",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T15:12:36Z",
+  "updated_at": "2026-09-06T16:14:16Z",
+  "closed_at": "2026-09-06T16:14:15Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T16:14:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16360",
+  "body": "Fixes #15643\n\n`ApprovalService.recall`'s docblock opened with `Withdraw a pending request (submitter only).` and then, three paragraphs down, stated the privileged override correctly — `The #3424 privileged override reaches a PENDING request only (#12775, maintainer ruling 2026-09-02).` Both cannot be true, and the code settles it in the paragraph's favour: `overrideAdmits` short-circuits the non-submitter guard on a `pending` row.\n\nNobody who reads the whole block is misled — it corrects itself before the reader leaves it. What is wrong is the **summary line**: the one an editor shows on hover and the one any single-line extraction takes, and often the only line that gets read.\n\n## The change\n\nOne line, inside the docblock:\n\n```\n-   * Withdraw a pending request (submitter only). Finalises the row as\n+   * Withdraw an undecided request. Finalises the row as\n```\n\nStatus becomes the axis instead of one general rule plus corrections, and the actor rules stay with the paragraphs that already state them correctly — the same structural move the `IApprovalService.recall` docstring makes on the spec side (#14670). \"Undecided\" is this contract's own vocabulary: `ApprovalRecallInput` is already documented as *\"Input for recalling (withdrawing) an undecided request\"*, and the two statuses the method accepts (`pending`, `returned`) are exactly the undecided ones — every other status throws `INVALID_STATE`.\n\n## Deliberately untouched\n\n- `overrideAdmits` and the non-submitter guard under it — not one character. No behaviour moves.\n- `isOverrideActor`'s docblock — it already names all four levers (approve / reject / reassign / recall). It is the evidence here, not the defect.\n- `packages/spec` — that half belongs to #14670 and is outside this PR's fence.\n\n## Evidence\n\n**Comment-only, mechanically.** `git diff -U0` is one hunk of one line; both sides begin with ` * ` and sit inside the docblock spanning lines 3148-3167 (`/**` .. `*/`). Changed non-comment lines: 0.\n\n**The same reading before and after, not merely green.**\n\n- before, on the unmodified tree at base `3e270d4e2`: `pnpm --filter @objectstack/plugin-approvals test` -> `Test Files  41 passed (41)` / `Tests  690 passed (690)`\n- after, on head `a6d91b289`: identical -> `Test Files  41 passed (41)` / `Tests  690 passed (690)`\n\n**Typecheck, with its coverage confirmed rather than assumed.** `pnpm --filter @objectstack/plugin-approvals typecheck` exits 0, echoing the script it ran (`tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json && pnpm check:test-typecheck`). `tsc -p tsconfig.json --listFilesOnly` lists 480 files, and `approval-service.ts` is one of them.\n\n**Gates.** The family was derived mechanically on the final head — `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` at `a6d91b289` — and all 51 commands were run, each exit code captured immediately after a single redirect, never through a pipe. 49 were green on the first pass. `check:dual-build-cjs-loads` and `check:i18n` returned exit 3 `PREREQUISITE NOT MET` (both read built output); after `turbo run build --filter='!@objectstack/docs'` both were re-run into real readings and are green — 103 published require entry points across 66 packages load, and 9 i18n packages report in sync. The four artifact-roster families the deriver flagged as keeping their roster under one of these paths were run too: `check-changeset-fixed`, `check:authz-resolver`, `check:error-code-casing`, `check:filter-alias-parity` — all exit 0.\n\n## Changeset: `patch`, and why not `skip-changeset`\n\nJudged, not defaulted. `skip-changeset` is for a diff that publishes nothing from any released package. `@objectstack/plugin-approvals` is published and ships `dist`, and this docblock sits on a public method of an exported class, so the prose ships: after the build, `packages/plugins/plugin-approvals/dist/index.d.ts` carries the new summary line. Repo practice agrees — documentation-only docstring corrections in a published package took a patch changeset in #16246 and #16191, and the spec-side correction from #14670 is a pending `@objectstack/spec: patch`; the comment-only change that carried no changeset (`b45c3f6c8`) edited comments **inside a method body**, which never reach the emitted declarations.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XpTx2tbq3pZRYAdoGt6E6Y)_"
+}

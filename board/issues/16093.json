@@ -1,0 +1,35 @@
+{
+  "number": 16093,
+  "kind": "issue",
+  "title": "lint: `flow-decision-unconditional-branch` skips the decision that gates on NOTHING — `if (gated.length === 0) continue` makes the fully-inert gateway the one case the rule cannot see",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T00:32:38Z",
+  "updated_at": "2026-09-06T18:37:35Z",
+  "closed_at": "2026-09-06T18:29:55Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16093",
+  "body": "Measured on the **pinned `@objectstack/lint@17.3.0`** artifact as installed by `objectstack-ai/hotcrm`, ⛔ not on the platform source tree. Filed unassigned by the hotcrm step-3 rule survey (hotcrm#1613); the local assertion that currently covers this stays in place there.\n\n## The gap\n\n`lintFlowPatterns` reports `flow-decision-unconditional-branch` only when a decision has BOTH gated and ungated out-edges. The scan is guarded by:\n\n```js\nconst gated = outs.filter((e) => e.condition || e.isDefault === true);\nif (gated.length === 0) continue;\n```\n\nSo the strictly worse shape — a `decision` whose out-edges carry **no** `condition` and **no** `isDefault`, and whose node declares **no** `config.conditions[]` — falls out of the loop before any finding is pushed. That decision branches on nothing: every successor runs on every pass, and the gateway is decoration.\n\nThe mixed case (some edges guarded, some not) is at least partially routed. The fully-inert case is not routed at all, and it is the one a reader is least likely to notice, because the node still says `type: 'decision'`.\n\n## Measurement, with a working control\n\nOne committed tree (hotcrm at `a0362a37`), one injection at a time, restored by blob hash after each.\n\n| injected defect at `opportunity_stagnation.check_not_nudged` | `pnpm lint` result |\n|:--|:--|\n| add `config.condition` to the decision node | `flow-inert-node-condition` **warning**, exit 0 |\n| add an unconditional out-edge **beside** the guarded one | `flow-decision-unconditional-branch` **warning**, exit 0 |\n| add two `isDefault: true` out-edges | `flow-multiple-default-edges` **warning**, exit 0 |\n| mark the guarded edge `isDefault: true` as well | `flow-default-edge-with-condition` **error**, exit 1 |\n| **remove the condition from the only out-edge** (decision now gates on nothing) | **nothing fires** — 0 errors, 17 warnings, exit 0, byte-identical to the clean baseline |\n\nThe first four rows are the control: the same command, the same flow, the same run design, all four naming their rule id. The fifth is therefore a reading about the rule, not about the harness.\n\nThe clean-tree baseline for that repo is `0 error(s), 17 warning(s), 12 suggestion(s)`, exit 0.\n\n## Site\n\n`objectstack-ai/hotcrm` — `src/flows/opportunity-stagnation.flow.ts`, decision `check_not_nudged` inside `loop_opps`. Region descent is NOT the problem here: `flow-inert-node-condition` fired on that same nested node, so the walk reaches it (the #5383 class is fixed on this pin).\n\n## Suggested direction, not a prescription\n\nEither drop the `gated.length === 0` short-circuit and report an all-unconditional decision under the same rule id, or give it its own id. A decision with exactly one unconditional out-edge and no `conditions[]` is indistinguishable from a `noop` node in behaviour, so a distinct message may read better than folding it into the mixed-branch wording.\n\n## Related, and why this is not a duplicate\n\n- #15429 (open) — a decision with no `config.conditions` takes **every** out-edge whose condition holds, in parallel; nothing enforces that intended-exclusive **conditional** edges partition. That is the multi-guarded-edge case. This card is the zero-guarded-edge case, which #15429's subject does not reach.\n- #4414 — the three-ways-to-route analysis this rule family came from.\n- #5383 — loop-body descent; fixed on this pin, confirmed above.\n\nRefs: hotcrm#1613 · hotcrm#1582 (the family card whose deletion half depends on this rule)"
+}

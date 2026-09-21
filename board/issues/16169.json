@@ -1,0 +1,36 @@
+{
+  "number": 16169,
+  "kind": "issue",
+  "title": "lint: `dashboard-action-route-unresolved` never validates the `apps/NAME` segment — a dashboard button pointing at an app that does not exist passes clean",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:49:58Z",
+  "updated_at": "2026-09-07T00:06:54Z",
+  "closed_at": "2026-09-07T00:04:49Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16169",
+  "body": "Measured against the pinned **`@objectstack/lint@17.3.0`** in `node_modules` (never the platform source tree), on `objectstack-ai/hotcrm` at `db5fe702`, as part of the step-3 rule survey (hotcrm#1637).\n\n## The fact\n\n`resolveUrlRoute` scans a URL's segments for a key in `URL_COLLECTION_TO_STACK_KEY`:\n\n```js\nvar URL_COLLECTION_TO_STACK_KEY = {\n  object: \"objects\",   objects: \"objects\",\n  report: \"reports\",   reports: \"reports\",\n  dashboard: \"dashboards\", dashboards: \"dashboards\",\n  page: \"pages\",       pages: \"pages\",\n  view: \"views\",       views: \"views\"\n};\n```\n\n`apps` is not a key, so the `apps/NAME` head of every in-app route is skipped and **the app name is never resolved against `stack.apps`**. An in-app URL whose app segment names nothing produces no finding, and — because the loop `return`s at the first recognised collection — the rest of the path is only reached when a later segment happens to be one of the ten keys above.\n\n## Repro, with the control in the same file, same site, same command\n\nBoth injections add one header action to `src/dashboards/sales.dashboard.ts`. `objectstack lint --json`, exit code captured before any pipe.\n\n| `actionUrl` on the injected `actionType: 'url'` header action | lint | finding |\n|:--|--:|:--|\n| `/apps/crm_enterprise/dashboard/no_such_dashboard_nope` | exit 0 | **`dashboard-action-route-unresolved`** (warning) at `dashboards[3].header.actions[0].actionUrl` |\n| `/apps/no_such_app_nope/crm_lead` | exit **0** | **nothing** — output byte-identical to the clean baseline (`0 errors / 17 warnings / 12 suggestions`) |\n\nSame dashboard, same `header.actions[0]`, same run design: the rule demonstrably fires at this exact site, and the unknown-app case is the one it cannot see.\n\nFor completeness, the sibling `dashboard-action-target-undefined` also fires here at **error, exit 1** (`actionType: 'script'`, `actionUrl: 'no_such_action_nope'`), so nothing about this dashboard or this header is inert.\n\nEvery injection was restored in the same run and proven restored by `git hash-object` equalling `git rev-parse HEAD:PATH` **and** an empty `git status` for that path; the clean-tree lint baseline reproduces byte-identically afterwards.\n\n## Why this is not a duplicate, and why it is worth a row\n\n**#3367** (closed) is the card that created these two rules. Its acceptance criteria are:\n\n> - A dashboard action referencing an undefined `script`/`modal` action fails validation …\n> - A `url` action pointing at a non-existent in-app route is at least warned.\n\nThe shipped implementation covers the *collection* half of \"in-app route\" and never the *app* half, and the app name is the one segment that is not optional in the route shape `#3367` itself quotes (`/apps/:appName/…`). So this is unfiled residue of #3367's own criterion, not a new ask.\n\nAn app rename is the realistic way to reach it: every dashboard URL still carries the old app name, all of them 404, and lint stays green. A consuming app caught exactly this class by hand — its local guard rejects `/apps/no_such_app/crm_lead` — which is how the asymmetry showed up.\n\nSearched and not duplicating: nothing matches the app-segment case (a targeted search returned zero, with two sibling searches in the same session returning 4 and 5 on-topic hits as the control that the search was not answering empty). Adjacent and checked: **#3959** (modal action server dispatch), **#4709** (`app.homePageId` dead branch), **#3611** (view route dialects).\n\n## Suggested direction\n\nResolve the `apps/NAME` head against `stack.apps` before scanning for a collection key, and keep scanning the remaining segments rather than returning at the first match — today a bad app name plus a bad dashboard name reports only the second, and a bad app name alone reports neither.\n\nFiled unassigned by the hotcrm epic seat (hotcrm#1579 step 3, survey part 3 — hotcrm#1637)."
+}

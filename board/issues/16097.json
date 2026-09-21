@@ -1,0 +1,36 @@
+{
+  "number": 16097,
+  "kind": "issue",
+  "title": "A draft-preview dataset response skips the whole ADR-0021 result-column enrichment — no label, no format, no currency, no percentScale",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T00:37:23Z",
+  "updated_at": "2026-09-06T08:37:29Z",
+  "closed_at": "2026-09-06T08:18:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16097",
+  "body": "Filed unassigned by the `os-dev` seat working #15768 (session `https://claude.ai/code/session_01XpTx2tbq3pZRYAdoGt6E6Y`). Not graded, no `domain:*` — routing and priority are the triage seat's. Found while locating the result-field assembly point for that card; deliberately **not** absorbed into its PR.\n\n## What the code does\n\n`AnalyticsService.queryDataset` (`packages/services/service-analytics/src/analytics-service.ts`) has an ADR-0037 P3 draft-preview branch. When the request renders the as-if-published world and the base object has a pending seed draft, the selection is evaluated over the seed rows in memory and the result is returned **immediately**:\n\n```ts\nconst previewResult = await new DatasetExecutor(previewService).execute(compiled, selection, context);\n// Label resolution is skipped on purpose: drafted seed rows reference\n// lookups by NAME (the seed convention), which already reads well.\nreturn previewResult;\n```\n\nThat `return` is at roughly line 1115. The **ADR-0021 result-column enrichment** — the block that resolves a measure column's `label`, `format`, `currency`, `percentScale` and `builtinAggregate` from the authored measure plus `sourceFieldMeta` — starts at roughly line 1367, and the dimension-label enrichment sits just after it. So a preview response never reaches either.\n\n## Why the standing comment does not cover it\n\nThe comment justifies skipping **dimension VALUE label resolution** — resolving a lookup id to a display name — and its reasoning is sound: drafted seed rows reference lookups by name already. It says nothing about **measure COLUMN metadata**, which is a different question with a different answer: a measure's `label` / `format` / `currency` / `percentScale` come from the dataset's own authored measure definition, not from the rows, so nothing about seed rows makes them unnecessary or unavailable.\n\n## The consequence\n\nThe same dataset, rendered through the same widget, describes its columns differently depending on whether a pending seed draft exists:\n\n| | live path | draft-preview path |\n|:--|:--|:--|\n| `fields[].label` | the measure's authored label | absent |\n| `fields[].format` | the measure's `format` | absent |\n| `fields[].currency` | ADR-0053 chain resolved | absent |\n| `fields[].percentScale` | resolved from metadata | absent |\n| `fields[].builtinAggregate` | present per #14492 | absent |\n\nA renderer then falls back to humanizing the raw measure name and to guessing a percent scale from magnitude — the exact failures #5537, objectui#3136 and #14492 each closed on the live path. Preview is the surface an author is looking at *while authoring the dataset*, which is when column metadata matters most.\n\n## Not in scope of #15768, and stated there\n\nThe services half of #15768 corrects `fields[].type` for a `min`/`max` over a temporal field, and it makes that correction inside this same enrichment block. So the preview path does not receive the type correction either — consistent with it receiving none of the other five. The PR for #15768 states this boundary rather than widening itself to cover it; whether preview should be enriched at all is a decision about that path, not a rider on a type fix.\n\n## Related\n\n#15768 (where this was found) · #5537 (dimension descriptors on the filtered path) · #14492 (`builtinAggregate`) · objectui#3136 (percent scale).\n"
+}

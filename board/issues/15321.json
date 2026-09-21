@@ -1,0 +1,35 @@
+{
+  "number": 15321,
+  "kind": "issue",
+  "title": "fix(release): the post-publish npm check races the registry and only ever looks at 1 of 69 packages — it red-flagged a release that had fully succeeded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T11:12:32Z",
+  "updated_at": "2026-09-06T13:47:08Z",
+  "closed_at": "2026-09-06T11:55:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15321",
+  "body": "Found on the **17.3.0 release**: Release run `8330`, job `100996109699` ([log](https://github.com/objectstack-ai/objectstack/actions/runs/33864464755/job/100996109699)). The release **succeeded completely** — all 69 packages plus `create-objectstack` are on npm, verified one by one — and the job still exited 1.\n\n## The failing step\n\n`.github/workflows/release.yml`, the last thing the `publish` job does:\n\n```bash\npnpm run release\n\n# `changeset publish` skips versions already on the registry, so a\n# re-dispatch over a partially-published release is a repair, not a\n# duplicate. What is NOT optional is that the version is on npm when\n# this step ends.\nif ! npm view \"@objectstack/cli@$VERSION\" version >/dev/null 2>&1; then\n  echo \"::error::publish ran but @objectstack/cli@$VERSION is still not on npm\"\n  exit 1\nfi\necho \"published=true\" >> \"$GITHUB_OUTPUT\"\n```\n\n## What actually happened, measured from npm's own `time` field\n\n`@objectstack/cli@17.3.0` was committed by npm at **10:53:25.108Z**. The check ran at **10:53:32** — **seven seconds later** — and reported it absent. npm's write path and its CDN-fronted read path are eventually consistent; seven seconds is well inside that window.\n\nThe wider fact the fix has to be designed against: **npm took ~8 minutes to commit the 69-package burst**, and `changeset publish` had already printed `Successfully published` for all of them at 10:53:25.\n\n| package | npm `time[17.3.0]` |\n|:--|:--|\n| `console` / `spec` / `types` / `core` | 10:52:39 – 10:52:55 |\n| `account` / `studio` / `client` / `metadata` / `plugin-security` / `rest` | 10:53:00 – 10:53:13 |\n| **`cli`** | **10:53:25.108** ← the check fired at 10:53:32 |\n| `objectql` / `setup` / `service-storage` / `hono` | 10:55:23 – 10:55:58 |\n| `formula` | 10:57:06 |\n| `verify` | 10:59:31 |\n| `runtime` | **11:00:32** |\n\nSo `Successfully published` is changesets' belief (the npm CLI returned success); `time[version]` is when the registry committed. Under a 69-package burst from one account those diverge by minutes.\n\n## Two defects\n\n**① No retry.** One shot, immediately after a burst publish. Every release is a bet on how fast npm's read path settles. This is the direct cause of the false red.\n\n**② It checks 1 package of 69.** The one thing it verifies is `@objectstack/cli`. Had a package genuinely failed to publish, this step would not have seen it — and the false red on `cli` would have *masked* it. That is the more expensive defect: it is the case the step exists for, and the case it cannot detect. Concretely, `@objectstack/runtime` was the last to commit at 11:00:32; between 10:53 and 11:00 the fixed group really was partially readable, and nothing in this step was looking.\n\n## Acceptance\n\n- **Retry with bounded backoff** before concluding absence. Absence after the budget is still a hard failure — ⛔ the step must keep failing CLOSED. No `|| true`, no dropping the `exit 1`, no downgrade to a warning.\n- **Verify every package the publish reports**, not just `@objectstack/cli` — derived from the publish output or the workspace's published-package set, ⛔ never a hand-transcribed list (this repo has 69 and the count moves).\n- **Name what is missing.** On failure the error must say *which* packages are absent, so the repair dispatch (`workflow_dispatch` with `force`) has something to act on. The current message names a package that was fine.\n- **Reproduce, then show green.** The regression is reproducible without npm: a version that exists but whose read is cold. Show the old shape failing and the new one absorbing it.\n- If the logic moves into `scripts/`, it carries a **self-test** with a registered case floor, per the #13799 recipe now in wide use — a verifier whose own cases can silently stop running is the same class of bug as the one being fixed.\n\n## ⛔ Out of scope, and load-bearing\n\n- **Do not touch the publish gating.** `environment: release` (Required reviewers, ADR-0125 D3), the `publish-pending` predicate, `force`'s dispatch-only semantics, and the `success() && (...)` parenthesisation are the \"ONLY A HUMAN PUBLISHES\" invariant (maintainer ruling, quoted verbatim at the top of the file after the rc.3 / rc.4 incident). This card touches the **verification after** publish, nothing about **whether** publish runs.\n- **Do not touch `release-integrity`.** Its `published` output is `image-missing` and it mints nothing; it is not part of this defect. (It is, however, why the GitHub Releases appeared at 11:00:23 — the no-mint backfill, working as designed.)\n- ⛔ **No auto-merge will be armed on this PR.** `release.yml` is the one file in the repository that publishes; a human reviews it whatever the Governed Surface Guard says about the path.\n\n## Not a defect, recorded so it is not re-investigated\n\nThe 17.3.0 release itself is **complete and correct**. All 69 packages + `create-objectstack` were checked individually against `registry.npmjs.org` and every one answers 200 for 17.3.0. There was exactly **one** publish, from the run the maintainer approved; the later Release runs (`8331`, `8332`) were push-triggered by ordinary merge-queue landings and their `publish` jobs were **skipped**, because by then `cli@17.3.0` was on npm and `publish-pending` was false. No second publisher existed."
+}

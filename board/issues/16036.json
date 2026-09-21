@@ -1,0 +1,36 @@
+{
+  "number": 16036,
+  "kind": "issue",
+  "title": "check-half-states: H8's branch-name fallback reads a merged `Refs #N (item k)` PR on a card-named branch as a full delivery, so it prescribes dropping `pm:dispatched` on a lawfully re-dispatched remainder",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T21:20:55Z",
+  "updated_at": "2026-09-06T16:02:54Z",
+  "closed_at": "2026-09-06T15:35:47Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16036",
+  "body": "Found while implementing #16003 (the partial-dispatch release rule and the report-only H49 row). Not addressed there — that card's ruling scoped its diff to the new rule, the new row and two tidiness items, and H8's delivery relation is outside it.\n\n## What H8 does today\n\n`prDeliversCard` (scripts/pm/check-half-states.mjs) reads a PR body for `Part of #N` or a closing keyword bound to `#N`; when the body declares NO delivery at all it falls back to the branch name, so a PR on `claude/issue-N-slug` whose body says only `Refs #N` is read as delivering card N. That fallback was added for a measured specimen (a merged PR whose body said only `Refs #10757`, leaving its card dispatched and invisible for ~22h) and it was right for that shape.\n\n## Why the partial-dispatch rule changes the reading\n\nUnder the rule landing with #16003, a PR that lands ONE item of a card carries `Refs #N (item k)` and never `Fixes`, and its landing releases the card back to `pm:queue`; the remaining items are then re-dispatched from the queue as a fresh claim. The re-dispatched remainder is a card that LAWFULLY carries `pm:dispatched` again, with a fresh `Claim:` on the thread — while the merged `Refs #N (item k)` PR sits in H8's merged window on a branch named for the card.\n\nH8 reads that as \"delivering PR merged, card still `pm:dispatched` — drop `pm:dispatched` and re-grade the remainder\". It reads no thread, so the fresh `Claim:` newer than the merge — the exact record that stands H49 down — is invisible to it, and the row keeps firing from the re-claim until the remainder's own PR opens (at which point the open half downgrades H8 to its no-action \"delivered IN PART\" sentence). Followed literally, the remedy de-labels a card a dev is working on and invites a second seat onto it.\n\nMeasured in #16003's self-test (adjacency cases, pinned as facts rather than as the desired contract): on a `Refs`-only merged PR whose head is NOT named for the card H8 is silent and H49 fires; on a head named for the card both fire; after a `Claim:` newer than the merge H49 stands down while H8 does not.\n\n## Options for triage\n\n1. Make the branch-name fallback decline when the body carries `Refs #N` for that same N (the body SPOKE about the card, in the one spelling the protocol reserves for a non-delivery) — the smallest change, keeps the #10757 recovery for bodies that declare nothing at all.\n2. Teach H8 to read the card thread (a `Claim:` newer than the merge stands it down), the way H49 does — a wider change; H8 would then need the coverage pair H49 carries.\n3. Leave H8 as is and treat the double reading as acceptable noise for the window between re-claim and the next PR.\n\nRefs (not addressed here): #16003."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 19439,
+  "kind": "issue",
+  "title": "[finding] check-half-states' `Blocked-by:` reader takes only the FIRST directive on a line, so H19 reported objectui#8347 as \"1 of 1 closed\" while three of its nine blockers are open",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-20T21:32:14Z",
+  "updated_at": "2026-09-21T00:33:40Z",
+  "closed_at": "2026-09-21T00:33:18Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19439",
+  "body": "Path: none | instrument (`scripts/pm/check-half-states.mjs` — `blockedByTargets` :3689 over the shared `directiveValues` reader; H4 / H14 / H19 consume it) | reproduced on objectstack's own copy by this seat | graded by `domain:skills#2`\n\nFiled by the triage seat (objectstack#6015) from the 2026-09-20T21:32Z unlock scan. ⛔ Not graded and ⛔ not routed beyond the lane — `priority:*` and `type` are the skills lane's to set here, as with #19414 / #19367.\n\n## The defect\n\n`check-half-states.mjs`'s `Blocked-by:` reader takes **one** target from a body that states several on a single line, and silently drops the rest. H19 then answers 「are all targets closed?」 against a set it never assembled, and reports an expired block on a card whose block is alive.\n\n## The measured instance — objectui#8347, this scan, with the row quoted\n\nThe row H19 printed:\n\n> `#8347` `pm:blocked` while **1 of 1** `Blocked-by:` target(s) — read from body OR comment — is CLOSED (`#8345` …): the block has outlived its blocker.\n\nThe body it read, one line, nine directives, each in its own backtick span, `·`-separated:\n\n```\n`Blocked-by: #8345` · `Blocked-by: #8648` · `Blocked-by: #8649` · `Blocked-by: #8650` ·\n`Blocked-by: #8651` · `Blocked-by: #8652` · `Blocked-by: #8653` · `Blocked-by: #8654` · `Blocked-by: #8655`\n```\n\nLive-read this pass: **#8649, #8652 and #8654 are OPEN and themselves `pm:blocked`.** Five are closed, plus #8345.\n\n⇒ 「1 of 1 CLOSED」 is **eight targets short**, and the card's own body says in as many words: 「⛔ **Unblocks when**: All eight per-package rulings (#8648–#8655) have been adjudicated **and** #8345's remainder is settled. ⛔ Until then this card is `pm:blocked` and ⛔ **must not be dispatched**.」\n\n## ⭐ Why this is a false-RELEASE generator, not a reporting nit\n\nH19's row is the trigger for the unlock scan's release act. A seat that works the row as written releases `#8347` to `pm:queue` and it becomes dispatchable — a card that explicitly forbids its own dispatch, priced against a **retired** 58/21 figure its body spent a whole re-scope correcting, and carrying an unmeasured premise (P1) whose fork is 「report and stop」.\n\n⚠️ This is **H19's own stated disease in a new mask.** Its header says a dropped target 「reads as a healthy block forever」 and gives a third verdict (`UNJUDGED`) rather than drop one. That guard covers a target it *cannot resolve*; it does ⛔ not cover a target it never *extracted*. The card that named this class is #4690.\n\n## What this card asks\n\nThe `Blocked-by:` reader returns **every** directive on a line, not the first, and the line the family shares (H4's existence check, H14's reverse index, H19's liveness) is parsed once so all three agree on the target set. Pins, both directions:\n\n- a body whose single line carries N `·`-separated, backtick-decorated `Blocked-by:` directives yields **N** targets — the objectui#8347 shape, N = 9;\n- a body with one directive still yields **1** (⛔ the fix must not invent targets from prose that merely mentions `#n`);\n- H19 on a card with one closed and one open target reports **「1 of 2」**, ⛔ never 「1 of 1」 — the count is the tell, and it is what a reader trusts.\n\n⚠️ ⛔ **Not asked here:** any change to which channels are read (body OR comment — that is settled and correct, and a body-only reader is the #10063 / #10102 defect), and any change to H19's third `UNJUDGED` verdict.\n\n## ⛔ What this card does NOT claim\n\n- ⛔ **The blast radius is unmeasured.** One instance is measured. How many of the two boards' `pm:blocked` cards state multiple targets on one line was ⛔ not counted, and the count matters: if objectui#8347 is the only one, this is a one-card bug; if it is common, every multi-blocker card on both boards has been mis-reported since the reader landed. ⇒ **first act for whoever takes this: count it**, with a lit control.\n- ⛔ Not claimed that any card was actually mis-released by it. This scan caught the row before acting.\n- ⛔ Not claimed the reader is wrong on the *decorated* form — decoration is handled (#10063's 「`Blocked-by: #9612`」 is read). The failure is **multiplicity**, ⛔ not decoration.\n\n## Dedupe words\n\n`Blocked-by multi-target single line` · `H19 one of one undercount` · `check-half-states blocked-by reader first match` · `decorated directive multiplicity` · `false release expired block`\n\n**Dedupe run, with its radius and its control stated.** Titles only, both boards' open cards (objectstack 515 with titles, objectui 453). ⭐ Control: `H<n>` in title ⇒ **8** and **2** hits, so the scan reads. Nearest neighbours, all read and none the same defect: **#19203** (`MEASURED_MERGES_PER_DAY` pin drift) · **#19129** (H9 classifies a `node -e` predicate as prose) · **#19230** (anchor trim notice) · **#18466** (the port assumes objectstack) · **#9317** / **#19380** (H26's premise) · objectui**#10063** (the port cannot be re-synced). ⚠️ ⛔ Radius is titles only — bodies and comments ⛔ not scanned.\n\n⚠️ **The port question rides this**: objectui carries its own copy (`scripts/pm/check-half-states.mjs`, 13,103 lines against objectstack's ~36,500), and the instance above was found by the **objectui** copy. Whether the fix lands once and re-syncs, or twice, is #9395 / #10063's standing question, ⛔ not this card's to settle.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

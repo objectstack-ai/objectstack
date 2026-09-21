@@ -1,0 +1,35 @@
+{
+  "number": 16246,
+  "kind": "pull_request",
+  "title": "docs(spec): name every accepted key in the two action convention docblocks",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T07:33:23Z",
+  "updated_at": "2026-09-06T11:47:55Z",
+  "closed_at": "2026-09-06T11:47:54Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T11:47:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16246",
+  "body": "Fixes #14708\n\n`_actions` and `globalActions` are built from one factory, `actionTranslationSchema(...)` — the file says so outright, \"Shared by object `_actions` and `globalActions`\" — so their hand-written convention lists carried the identical four addresses and the identical two omissions. An author reading either list to learn which keys exist saw a strict subset of what the schema has accepted all along.\n\nPlaceholders below are written as bare words (OBJECT / ACTION / PARAM / VALUE) because the body sanitizer eats angle-bracket fragments. The file itself keeps its own angle-bracket spelling, unchanged.\n\n## What changed\n\nTen added comment lines in one file, `packages/spec/src/system/translation.zod.ts`, plus a changeset. Both lists now name, in the factory's declaration order and in the spelling already landed in `i18n-resolver.ts`'s own file header (PR #14707):\n\n- `description`, after `label`\n- `params.PARAM.label`, `.helpText`, `.placeholder`, `.options.VALUE`, before `resultDialog.*`\n\nNothing else. No schema, no factory, no resolver. `resultDialog.*` keeps its position and its wildcard — its leaves are enumerated at `ActionResultDialogTranslationSchema`'s own docblock, which is the file's existing convention for a nested sub-schema that documents itself.\n\nBoth sites were re-located by pattern, not by the line numbers in the card or the claim comment; both of those had already rotted.\n\n## Does this move the contract? No — measured, not assumed\n\nThe keys were already declared and already accepted, so nothing about what a bundle validates to moves. The one measurable precondition on that verdict is whether the text projects into a generated artifact. It does not, and the control was reproduced on **this file's own** generated page, `content/docs/references/system/translation.mdx`:\n\n| probe | occurrences |\n|:---|---:|\n| lit control — the `.describe()` string \"Action translations keyed by action name\" | 3 |\n| lit control — the `.describe()` string \"Global action translations keyed by action name\" | 2 |\n| docblock prose — \"Convention (auto-resolved by\" | 0 |\n| docblock prose — \"Action translations keyed by action name (snake_case)\" | 0 |\n| docblock prose — \"Global (object-less) action translations keyed by action name (snake_case)\" | 0 |\n| the two address rows themselves (confirmText, successMessage) | 0 |\n\nThe third and fourth rows are the sharp pair: the `.describe()` string is a prefix of the docblock's opening sentence, so the same words score 3 as a describe string and 0 the moment the docblock-only suffix is included. `.describe()` reaches the page; the docblock does not.\n\nMechanically confirmed: `pnpm --filter @objectstack/spec check:generated` reports **all 15** checked-in generated artifacts up to date after the edit — `check:docs`, `check:api-surface`, `check:authorable-surface` and the rest — so zero regeneration is owed.\n\n**Where the text does land, which is why a changeset is owed.** `packages/spec` publishes `src/**/*.zod.ts` through its `package.json` `files` array, and the build output preserves JSDoc: 9 of 22 emitted `.js` chunks and 1 of 64 emitted declaration files carry the new lines. All three are comment positions, and `check:api-surface` is green, so no export signature moved. Documentation-only, `patch`.\n\n## Verification\n\nRun at `a6879f8b6`, the branch tip.\n\n| check | result |\n|:---|:---|\n| `pnpm --filter @objectstack/spec build` | exit 0, 34/34 declaration files present |\n| `pnpm --filter @objectstack/spec check:generated` | 15/15 artifacts up to date |\n| `pnpm --filter @objectstack/spec typecheck` | exit 0 (`tsc --noEmit`, `check:scripts-typecheck`, `check:test-typecheck`) |\n| targeted vitest (translation, translation-typegen, i18n-resolver, action, action-description) | 5 files / 538 tests passed |\n| gate families derived by `scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` | 67 of 68 run, all green; reconciled with `--ran` |\n| `pnpm check:nul-bytes` | exit 0 |\n| full-repo `eslint . --no-inline-config --format json` | 6196 files, 0 errors, 0 warnings, 64s |\n\n`check:i18n-walk-parity` is the family most directly about this file: green, \"11 declared group(s), 8 walked, 3 exempted — every declared group has an extractor face.\"\n\nTwo gates first returned `PREREQUISITE NOT MET` and were read as NOT MEASURED rather than as findings — `check:doc-formula-expressions` (exit 3, unbuilt `@objectstack/formula` and `@objectstack/lint`) and `check:i18n-walk-parity` (exit 1, unbuilt `@objectstack/cli`). Both prerequisites were built and both gates re-run green; the numbers above are the re-runs. Every exit code was captured before any pipe.\n\n**Declared narrowings**, both handed to CI:\n\n- `pnpm check:dual-build-cjs-loads` — the one derived family not run. Its prerequisite is a whole-repo `pnpm build`; it named 86 unbuilt packages and measured nothing. This diff changes no `exports` map, no package manifest and no emitted module format.\n- Package tests. `turbo ls --affected` against the merge base lists roughly 45 packages, all downstream of `@objectstack/spec` and all reached only through its build output. Ran the five translation and action test files rather than all 482 spec test files or any downstream package.\n\nThe lint reading needed no narrowing at all: the full population, 6196 files as counted by eslint itself, was linted.\n\n## Not in scope\n\nTriage names the mechanism behind this card: both lists are hand-maintained prose copies of what one factory declares, and nothing binds them, which makes the docblocks a fourth consumer of one declaration alongside the resolver and the i18n extractor. That class belongs to #14653, which is untouched by this PR and stays open. Out-of-scope findings from this run: none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T6HeZvT9wdSJD1ZxJb5Eno)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 16157,
+  "kind": "issue",
+  "title": "[finding] A single cancelled shard makes the required `Test Core` check green over untested packages — the attestation gate zeroes the whole roster on `cancelled`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:35:07Z",
+  "updated_at": "2026-09-06T15:58:01Z",
+  "closed_at": "2026-09-06T14:48:56Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16157",
+  "body": "Found while diagnosing a cancelled shard on PR #16131 (CI run 34007386254, head `c88895063`). ⛔ No severity asserted, no domain routing. Nothing here is about that PR's diff — the defect is repo-wide and affects every PR.\n\n## What happened\n\n`Test Core (2/6)` was terminated at 35m01s with `conclusion=cancelled`, its `Run this shard's tests` step still `in_progress`. The other five shards succeeded and published attestations. **The required check `Test Core` then reported `success`, two seconds later.**\n\n## Why the rollup went green\n\nFrom the rollup job's own log, verbatim:\n\n```\nOS_TEST_RESULT: cancelled\nTest Core: counting per-shard positive attestations (#6082), not absence of negatives.\n  filter job result: success\n  leg test (declared roster 1..6/6) — aggregate result: cancelled\n    satisfied (cancelled — run-lifecycle state, #3668; expected attestations: 0)\nTest Core: satisfied — no shard was expected to run, and none claimed to.\n```\n\n⭐ The log **contradicts itself in its own transcript**: the immediately preceding step downloaded five attestation artifacts (`shard-attest-test-1-of-6`, `-3-`, `-4-`, `-5-`, `-6-of-6`), and the verdict line then says `none claimed to` run. `scripts/check-shard-attestation.mjs:301` short-circuits the whole roster to `expected attestations: 0` as soon as the leg's aggregate result is `cancelled`.\n\n## The justification that does not cover this case\n\nThe script header states the reasoning it was built on:\n\n> `cancelled` still passes without counting (#3668). Cancellation is a run-lifecycle state: with cancel-in-progress on, every superseded push cancels the in-flight matrix, and #3668 measured (run 30271824408) that a real shard failure DOMINATES the aggregate over a cancelled sibling — it reads `failure`, never `cancelled`. So `cancelled` masks no regression\n\nThat is sound **for a shard that ran and failed** — failure does dominate. It does not cover a shard **cancelled while still executing**, which is what happened here: shard 2 produced *no verdict at all*, so there was no `failure` to dominate anything. An untested shard is not a passing shard, and `cancelled` is neither a pass nor a fail — it is no reading. The premise `cancelled masks no regression` silently changes meaning between the case it was measured on (whole matrix superseded, zero shards ran) and the case it is relied on here (one shard of six killed mid-suite while five attested).\n\n⛔ This was NOT cancel-in-progress. Measured: exactly one CI run exists on that branch, `run_attempt: 1`, and the head never moved. ⚠️ Note for whoever picks this up: `ci.yml`'s concurrency group is keyed on the **PR number**, not the head sha, so `the head did not move` is not on its own sufficient to exclude supersession — the decisive reading is that no second run exists in the group.\n\n## Why it is worth a card\n\nA required check is the thing branch protection consumes. In this shape one cancelled shard makes `Test Core` green over a package set that was never tested, and nothing anywhere is red. The failure is silent and repeats on every future single-shard cancellation.\n\n⚠️ Detection limit, stated: `--verify` is reading a real signal (five positive attestations were on disk). The gap is only the `cancelled` short-circuit ahead of the count, so the roster is discarded before those five are compared against the declared 1..6/6.\n\n## Suggested shape (input, not a decision)\n\nDistinguish `the whole leg was cancelled with zero attestations` from `the leg is cancelled but some shards attested`. In the second case the declared roster is still knowable, so the missing shards can be named rather than the count zeroed. ⛔ Not attempted here — this is a required-check semantics change and belongs to whoever owns `#3668`'s ruling, with its own review.\n\n## Not done\n\nNot fixed, not assessed for severity, and ⛔ the cancelled job was NOT re-run (the PM holds that decision). The shard's log was never finalised — the job is absent from the run's log archive while all 16 siblings are present — so **why** it hung is a separate open question from this rollup defect.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,39 @@
+{
+  "number": 1059,
+  "kind": "pull_request",
+  "title": "CLI: Add remote API commands for Data API and Metadata API",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "size/xs",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T07:53:49Z",
+  "updated_at": "2026-09-07T04:48:51Z",
+  "closed_at": "2026-04-02T09:10:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-02T09:10:17Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1059",
+  "body": "The CLI had 16+ local commands but only 1 remote API call (`plugin publish`). This adds 12 P0 commands to interact with running ObjectStack servers via REST APIs.\n\n## Commands Added\n\n**Authentication (3)**\n- `os auth login` - Store credentials in `~/.objectstack/credentials.json` (mode 0600)\n- `os auth logout` - Clear stored credentials\n- `os auth whoami` - Show current session via `GET /auth/get-session`\n\n**Data API (5)**\n- `os data query <object>` - Query with filters, sorting, pagination\n- `os data get <object> <id>` - Fetch single record\n- `os data create <object>` - Create from JSON string or file\n- `os data update <object> <id>` - Partial update\n- `os data delete <object> <id>` - Delete record\n\n**Metadata API (4)**\n- `os meta list [type]` - List types or items of a type\n- `os meta get <type> <name>` - Fetch metadata definition\n- `os meta register <type>` - Register from JSON file\n- `os meta delete <type> <name>` - Delete metadata item\n\n## Infrastructure\n\n**Common utilities**\n- `utils/api-client.ts` - Factory for `@objectstack/client` with auth resolution\n- `utils/auth-config.ts` - Credential storage management\n- `utils/output-formatter.ts` - JSON/table/YAML formatting\n\n**Shared patterns**\n- `--url` / `OBJECTSTACK_URL` for server configuration (default: `http://localhost:3000`)\n- `--token` / `OBJECTSTACK_TOKEN` for auth, or read from stored credentials\n- `--format json|table|yaml` for output formatting\n- Consistent error handling with helpful messages\n\n## Example Usage\n\n```bash\n# Login and store credentials\nos auth login --url https://api.example.com\nEmail: user@example.com\nPassword: ********\n\n# Query data with filters\nos data query project_task --filter '{\"status\":\"open\"}' --limit 10 --format table\n\n# Create record from file\nos data create project_task --data task.json\n\n# Register metadata\nos meta register object --data my-object.json\n\n# CI/CD usage\nexport OBJECTSTACK_TOKEN=${{ secrets.TOKEN }}\nos meta list object --format json\n```\n\n## Testing\n\n- 40+ unit tests covering command structure, flags, and utilities\n- Mocked tests for file I/O and API client operations\n- Convention compliance tests (env vars, output formats, examples)\n\n## Dependencies\n\n- Added `@objectstack/client` workspace dependency\n- Added `yaml` for YAML output support"
+}

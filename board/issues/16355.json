@@ -1,0 +1,33 @@
+{
+  "number": 16355,
+  "kind": "pull_request",
+  "title": "fix(showcase): contain the batch-reminders loop body per iteration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T15:04:46Z",
+  "updated_at": "2026-09-06T16:13:00Z",
+  "closed_at": "2026-09-06T16:12:58Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T16:12:58Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16355",
+  "body": "Fixes #14622\n\n`showcase_batch_reminders` (`BatchRemindersFlow`) ran its `notify` node\n`send_reminder` bare inside the `loop_tasks` body, with no `try_catch` between\nthe loop and it. A `loop` body has no error handling of its own — the container\niterates with a bare `await` — and `notify` returns `success: false` when every\nresolved recipient template comes back empty. One task with a blank `owner`\ntherefore ended the whole run: every later task was never reminded, and the run\nsummary reported `acted: 0` for work that had happened.\n\nThe showcase app is the first in-repo hit of the `flow-loop-body-uncontained`\nwarning that shipped with #14394 (PR #14617), and example apps are what AI\nauthors copy from.\n\n## What changed\n\nThe documented containment spelling from `content/docs/automation/flows.mdx`\nunder \"Per-iteration containment\", verbatim in shape:\n\n- a `try_catch` node (`guard_reminder`) inside the loop body;\n- `send_reminder` moved unchanged into its `try` region;\n- a `catch` of one bare `assignment` node (`reminder_failed`) — the shortest\n  handler that parses. `FlowRegionSchema.nodes` is `.min(1)`, so `catch: {}` and\n  `catch: { nodes: [] }` are both refused, and an omitted `catch` parses while\n  containing nothing.\n\nThe flow's docblock and `description` now name the guard, so a reader who copies\nthe flow copies the containment with it. The loop container, its\n`maxIterations`, its iterator/index variables and its `→ end` out-edge are\nuntouched, so the ADR-0031 loop demonstration the flow existed for is intact —\nit now demonstrates the per-iteration guard as well.\n\nOption 2 from the card (keep fail-fast and justify it in `description`) was not\ntaken: a reader who copies the flow does not copy the description.\n\n## Measurement — the warning histogram, not the build exit code\n\n`flow-loop-body-uncontained` is a **warning**, so `pnpm --filter\n@objectstack/example-showcase build` exits 0 on both trees. The reading is the\nhistogram, anchored on the `rule:` lines the linter prints:\n\n| rule | before | after |\n|:---|---:|---:|\n| `flow-loop-body-uncontained` | **1** | **0** |\n| `flow-try-catch-without-catch` | 0 | 0 |\n| `react-prop-deprecated` (control class) | 5 | 5 |\n| `approval-approvers-may-resolve-empty` | 10 | 10 |\n| all warnings, all rules | 23 | 22 |\n\nThe control class is unchanged, and the total moves by exactly one: the\nhistogram is real, and nothing else in the app moved. Both builds exited 0.\n\nThe single before-hit named this flow, by name and not by line number:\n\n```\nrule: flow-loop-body-uncontained  at flow 'showcase_batch_reminders' ·\n  loop 'loop_tasks' body · node 'send_reminder' (notify)\n```\n\nPremise re-verified on `origin/main` at `3e270d4e2` (the #16069 commit), as the\ntriage comment asked: the rule still fires on this flow. The two other\n`try_catch` nodes in this file belong to `ResilientSyncFlow` and\n`ProjectEscalationFlow`, not to this one.\n\n`examples/app-showcase/access-matrix.json` shows no drift — `git status` is\nclean after both builds. Adding a `try_catch` inside a flow body does not move\nthe authorization snapshot, which is what the card predicted.\n\n## Verification\n\nAll commands below ran on `f5e6ebf20`, the head of this branch.\n\n- `pnpm --filter '@objectstack/example-showcase^...' build` — dependency closure,\n  exit 0 (so the measurements above read rebuilt output, not stale `dist/`).\n- `pnpm --filter @objectstack/example-showcase typecheck` — `tsc --noEmit`,\n  exit 0 (the script name is echoed in the log, so this is not a zero-match\n  no-op).\n- `pnpm --filter @objectstack/example-showcase exec vitest run --maxWorkers=2` —\n  28 test files, 379 tests, all passing.\n- Gate family derived mechanically on this same head with\n  `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack\n  --commands` — 32 commands, all run, each exit code captured immediately after\n  its own redirect. All 32 green.\n  `pnpm check:dual-build-cjs-loads` first returned **exit 3 PREREQUISITE NOT\n  MET** (seven packages had no `dist/`); those were built and the gate re-run to\n  a real green, rather than recorded as a pass.\n- ESLint, narrowed and declared: the repo-wide `eslint . --no-inline-config`\n  scan belongs to CI. Locally the changed file was linted directly — 0 errors,\n  0 warnings; `--format json` reports **1** file linted; `--print-config`\n  resolves a governed config for that path (the instrument distinguishes this\n  from an ignored file: a control run on an ignored path returns \"File ignored\n  because of a matching ignore pattern\"). The narrowing excludes nothing,\n  because `eslint.config.mjs` **never enables type-aware linting for any file**\n  (no `parserOptions.project`, no typed `@typescript-eslint` rules — stated and\n  measured in that file's own header), so a one-file diff cannot change the\n  verdict of any file it does not touch.\n\n## Changeset\n\nNone, and this PR carries `skip-changeset`. The only edited file lives in\n`examples/app-showcase`, whose `package.json` declares `\"private\": true`\n(line 6), so nothing is published from this change and there is no version to\nbump. That is the rule the changeset job encodes — a PR that releases nothing\ntakes the label.\n\n## Scope\n\nOne file, one flow. `packages/services/service-automation/**` and\n`packages/lint/**` are untouched, and no other flow in the file was changed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XpTx2tbq3pZRYAdoGt6E6Y)_"
+}

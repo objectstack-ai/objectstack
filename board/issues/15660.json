@@ -1,0 +1,36 @@
+{
+  "number": 15660,
+  "kind": "issue",
+  "title": "service-automation: the suspend snapshot is shallow and the in-memory store keeps object identity, so a resumed node mutating its state in place also mutates the parked snapshot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T02:01:46Z",
+  "updated_at": "2026-09-06T19:46:13Z",
+  "closed_at": "2026-09-06T18:39:15Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15660",
+  "body": "Observed by the Clause-② contract review of **PR #15648** (card #15616) at `CONTRACT_REVIEW_TIER`, one layer past that PR's surface. Filed by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\n⛔ **Pre-existing. Not introduced by PR #15648 and outside its diff** — that PR changes one line on `map`'s terminal path and is unaffected either way.\n\n## ⚠️ NOT DRIVEN — this is a reading, not a measurement\n\n**Stated up front because it changes what this card is worth.** The reviewer reached this by reading the snapshot and store code, not by reproducing a wrong outcome on the real engine. ⛔ Do not treat the consequence below as established. **The first job for whoever takes this is to decide whether it reproduces at all** — and a card that closes as \"does not reproduce, here is why\" is a perfectly good outcome.\n\n## The shape\n\n`Object.fromEntries(variables)` takes a **shallow** snapshot of the flow scope when a run suspends (three sites: `engine.ts:4387`, `:5478`, `:8722`). The in-memory suspended-run store keeps the resulting object by **identity** rather than serialising it. So a node that holds a state object in the scope, suspends, resumes, and then mutates that object **in place** is mutating the same object the parked snapshot still points at.\n\n`map` is the concrete instance of the pattern — it keeps `${nodeId}.$mapState` and updates it as items complete — which is how the review arrived here.\n\n## Why it may not matter, and the one path where it might\n\nOn the ordinary resume path the snapshot has already been consumed to rebuild the scope, so mutating it afterwards changes nothing anyone reads again. The exposure the reviewer named is the **consumed-suspension restore** path — #13937 (`stranded`) — where a suspension that was already consumed is restored and the parked snapshot is read a second time. If the object was mutated in place after the first resume, that second read would see post-resume state rather than the state at suspend.\n\n⇒ **A serialising durable store is immune** — it copies at write. This is specifically an in-memory-store property, which narrows both the reachability and who would ever hit it.\n\n## What to establish, in order\n\n1. **Does it reproduce?** Drive a suspend → resume → in-place mutation → consumed-suspension restore against the in-memory store and see whether the restored snapshot carries post-resume state. If it does not, close the card with that reading.\n2. If it does: is the fix a deep copy at snapshot time, a copy at restore time, or a rule that node state is never mutated in place? ⚠️ A deep copy at snapshot time is the obvious candidate and is **NOT MEASURED** — snapshots are taken on every suspension and the cost is not known.\n3. ⛔ Do not enumerate \"which nodes hold mutable state in the scope\" from memory. PR #15648's census established by predicate that **`map` is the only executor persisting node-scoped progress state**; re-derive rather than recall if this card needs that set again.\n\n## Not to be folded in\n\n- **#15616 / PR #15648** — the `map` state *lifetime* fix. Different mechanism (a key outliving its execution vs. a snapshot aliasing a live object); that card is reviewed and landing.\n- **#15646** — the suspend-arm residue when `runRegion` refuses a pause. Adjacent, also about `$mapState`, but it is about a write that is never cleared, not about a snapshot sharing identity.\n\nRefs: PR #15648 / #15616 (the review that observed it) · #13937 (the `stranded` / consumed-suspension restore path that is the only named exposure) · #15646."
+}

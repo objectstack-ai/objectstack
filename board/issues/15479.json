@@ -1,0 +1,37 @@
+{
+  "number": 15479,
+  "kind": "issue",
+  "title": "driver-sql: the MySQL hash-shadow arm still takes the boot down on a PLAIN unique over duplicate rows — the same guard #14902 moved on the direct arm",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T17:22:35Z",
+  "updated_at": "2026-09-06T13:17:43Z",
+  "closed_at": "2026-09-06T13:16:23Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15479",
+  "body": "Found while implementing #14902 (PR #15477), which brought the DIRECT arm of `syncDeclaredIndexes`'s `catch` to parity: a plain unique index over existing duplicate rows now logs on the durability channel and lets the boot continue, instead of throwing the database's raw error. The **hash-shadow** arm, one branch above it in the same `catch`, still carries the guard that was moved.\n\n⚠️ Derived by reading the code, **not measured** — see \"Why this was not fixed in #15477\" below. Treat the reachability claim as an argument, not a reading, until someone drives it on a live MySQL.\n\n## Where\n\n`packages/drivers/driver-sql/src/sql-driver.ts`, inside `syncDeclaredIndexes`, in the `if (unkeyable)` block that handles MySQL's refusal of a TEXT/BLOB key part (#11627's hash-shadow route, made NULL-safe-aware by #12998):\n\n```ts\n} catch (shadowErr: any) {\n  ...\n  if (nullSafe.size > 0 && isUniqueViolationError(shadowErr)) {\n    // …log at `error`, name the conflicting groups, continue…\n  }\n  // falls through to the named refusal, which THROWS\n```\n\nThe sibling direct arm below it no longer asks `nullSafe.size > 0` — it asks `unique && isUniqueViolationError(e)` — so the two arms of the same `catch` now disagree about the same question.\n\n## The shape\n\nOn MySQL, a plain unique index (`tenancy: { enabled: false }`, or an explicit `unique: 'global'`) over a column whose declared width exceeds the keyable ceiling takes the shadow route. The shadow `ALTER` computes the generated column for the EXISTING rows, so a table that already holds duplicates fails there with a uniqueness violation. With `nullSafe.size` at zero the branch does not fire, the code falls through to `logDurabilityFailure(unkeyable, msg)` and then `throw`, and the boot dies — carrying a message about an unkeyable text column rather than about the duplicate rows, so it names neither the conflicting rows nor a remedy.\n\nThat is exactly the shape #14902 graded p1 on the direct arm, minus the `os migrate plan` half: the D4 pre-flight fix in #15477 is guard-free, so `os migrate plan` already reports this op `destructive` with the row report. What is left is only the fatal, unactionable boot.\n\n## Why this was not fixed in #15477\n\nThe branch is reachable only on a **live MySQL** with a key part over the 768-char ceiling. This package's unit suite boots SQLite only; the hash-shadow tests (`sql-driver-11627-hash-shadow-key.test.ts`, `sql-driver-12998-shadow-null-safe-key.test.ts`) are opt-in live cells behind `OS_TEST_MYSQL_URL`, and the dispatch container has no MySQL. Shipping an unmeasurable change to a durability path is worse than a named gap, so the gap is named here instead.\n\nThe change itself looks mechanical — the correct form is fixed by the sibling arm — but it is not only a guard deletion: the branch's message says \"existing rows violate the **NULL-safe** key (duplicates the previous void constraint admitted, **#5030**)\", and neither clause is true of a plain unique. Nothing admitted those rows; the constraint is simply newly declared over data that does not satisfy it. So the message needs the same two-arm split #15477 gave the direct path.\n\n## Suggested shape (engine lane's call)\n\nTake the guard to `isUniqueViolationError(shadowErr)` — the enclosing `if (unique)` already supplies the uniqueness limb — and branch the message the way the direct arm does. Verify on a live MySQL cell (`declareDialectCell(MYSQL_CELL, …)`) with a `maxLength` over the keyable ceiling and two duplicate rows: the boot must survive, the durability log must name the conflicting group and the remedy, and the index must be absent afterwards.\n\nRefs: #14902, PR #15477, #11627, #12998, #5030, ADR-0120 D4."
+}

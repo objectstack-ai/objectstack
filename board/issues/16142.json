@@ -1,0 +1,38 @@
+{
+  "number": 16142,
+  "kind": "issue",
+  "title": "docs: `packages/client/README.md` still documents `client.ai.nlq` / `.suggest` / `.insights`, removed in v17 — and that README ships inside the package",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:07:24Z",
+  "updated_at": "2026-09-06T08:25:42Z",
+  "closed_at": "2026-09-06T07:55:05Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16142",
+  "body": "Recording only — not claimed, no assignee. Found while working #14546 (payload reads in the same README code block); out of scope there and deliberately left untouched by that PR.\n\n## Where\n\n`packages/client/README.md` lines 262-264 on `origin/main` @ `1f2a02ba0`, inside the namespace tour:\n\n```ts\n// AI Services\nawait client.ai.nlq({ query: 'Show me all active contacts' });\nawait client.ai.suggest({ object: 'contact', field: 'industry' });\nawait client.ai.insights({ object: 'sales', recordId: dealId });\n```\n\n## Why it is wrong\n\nNone of the three methods exists on the client. `packages/client/src/index.ts` — the live `ai` namespace holds `chat`, `chatStream`, `complete`, `models`, `conversations`, `agents`, `pendingActions`; the only trace of the old three is the namespace docblock recording their removal: \"Until v17 `client.ai` held `nlq`, `suggest` and `insights`, building `/api/v1/ai/{nlq,suggest,insights}`. **No repo has ever mounted those paths**; every call 404ed from the first release that shipped them.\"\n\nThe docs site already carries the correction — `content/docs/api/client-sdk.mdx` states the same history in its `client.ai` block — so this is the package README alone, left behind by #3718's removal.\n\n## Why it is worth a card rather than a note\n\n`packages/client/package.json` declares `files: [\"dist\", \"README.md\", \"CHANGELOG.md\"]`, so this text is the front page of `@objectstack/client` on npm. A reader copying it gets TS2339 on a released package's own README, and a JavaScript reader gets a runtime `TypeError`. The three lines are also the only occurrence in the file, so the fix is a deletion or a replacement with the surface that exists.\n\n## Executable criterion\n\n`grep -n \"ai\\.nlq\\|ai\\.suggest\\|ai\\.insights\" packages/client/README.md` returns the three lines; the same grep over `packages/client/src/` returns only the historical docblock naming them as removed.\n\n## Not in scope for #14546\n\nThat card is one payload read per example for the analytics and automation calls; this is a different defect class (documented methods that no longer exist). #14546 remains open on its own terms and this is not addressed by its PR.\n"
+}

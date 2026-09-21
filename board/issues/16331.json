@@ -1,0 +1,34 @@
+{
+  "number": 16331,
+  "kind": "issue",
+  "title": "scaffold: `skills add --all` writes the bundle three times (~1.6 MB, byte-identical) and the template `_gitignore` excludes none of it, so every new project's FIRST commit vendors it in triplicate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T14:35:17Z",
+  "updated_at": "2026-09-07T01:59:16Z",
+  "closed_at": "2026-09-06T20:36:10Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16331",
+  "body": "`domain:*` / type / priority are triage's.\n\nFound while building a real app on the published scaffold (`objectstack-ai/ats`) — the duplication reached that repository's initial commit before anyone noticed it.\n\n## Measured (`origin/main` `3e270d4e`)\n\n- `packages/create-objectstack/src/index.ts:533`:\n  ```ts\n  execSync('npx -y skills add objectstack-ai/objectstack/skills --all', { … })\n  ```\n  `--all` is documented by the skills CLI as shorthand for `--skill '*' --agent '*' -y`. The `--agent '*'` half fans the catalog out to **every agent runtime the CLI knows**, and `src/index.ts:524` already records this as an assumption (\"assumed: `skills add --all` fans the catalog out to every agent\").\n- `packages/create-objectstack/src/created-summary.ts:17` measured the result on published `create-objectstack@17.1.0`:\n  ```\n  .agents/  49    agent/  49    .claude/  11\n  ```\n  `.claude/skills/*` are symlinks into `.agents/skills/`; `agent/skills/` is a **full second copy** for a different runtime.\n- `packages/create-objectstack/src/templates/blank/_gitignore` — complete contents:\n  ```\n  node_modules\n  dist\n  .objectstack/\n  *.log\n  .DS_Store\n  .env\n  .env.*\n  ```\n  Neither `.agents/` nor `agent/` is excluded.\n\nReproduced on a real project: the initial commit of `objectstack-ai/ats` carried **133 files**, of which 46 were `.agents/skills/**`, 46 a byte-identical `agent/skills/**`, and 11 symlinks — about **804 KB** of duplication. Removing the duplicate copy and reinstalling with `--skill '*' --agent claude-code -y` took the repository to 76 files and produced a clean 13,361-line deletion; `skills-lock.json` was unchanged, because it records source and hash, not paths.\n\n## What is and is not the defect\n\nInstalling for several runtimes is defensible — a project may be opened in Claude Code, Cursor and Codex. **The defect is that all copies are committed.** Three byte-identical trees in git review as noise forever: they bloat the first diff anyone reads, they re-appear in every `skills add` update as a three-way churn, and nothing tells the author which copy is canonical. The scaffolder's own summary comment already calls the phase-3 output \"two ~968 KB trees of agent instructions … landed on the user's disk unnamed\".\n\n## The ask\n\nPick one canonical committed location and keep the rest out of git. Either route is acceptable; state the choice in the changeset.\n\n- **Route A (minimal, recommended).** Keep `--all`, and add to the template `_gitignore`:\n  ```\n  .agents/\n  agent/\n  ```\n  `.claude/skills/` symlinks resolve into `.agents/`, so if `.agents/` is ignored the symlinks dangle for a fresh cloner — therefore Route A must also make `.claude/skills/` the **committed real copy**, or ignore all three and treat `skills-lock.json` as the source of truth with a one-line README instruction to run `skills add`. Decide and encode it; do not leave dangling symlinks in a fresh clone.\n- **Route B.** Install for one agent by default (`--skill '*' --agent claude-code -y`), print the one-line command for other runtimes in the closing summary. Smallest checkout; costs the multi-runtime default.\n\nWhichever route: a fresh `create-objectstack` run followed by `git add -A && git status` must show the skills bundle **once**, and a fresh clone of that commit must have working skill files (no dangling symlink).\n\n## Acceptance\n\n- A scaffolded project's first `git add -A` stages the bundle exactly once.\n- Cloning that commit into a clean directory yields readable `SKILL.md` files at whatever path the project committed.\n- `create-objectstack`'s scaffold test asserts the staged-once property (count the staged `SKILL.md` paths).\n- Changeset: `create-objectstack` **patch** for Route A, **minor** for Route B (behaviour change in what gets installed).\n\n## Not in this card\n\nThe missing CI workflow (separate card). The accuracy of the printed \"Created files\" summary — `created-summary.ts` already documents that problem and its reasoning; this card only changes what lands in git."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 16152,
+  "kind": "issue",
+  "title": "`plugin-email` keeps a private, drifted copy of `stripReadDecorations` that also strips the ADR-0010 provenance envelope its own schema allowlists",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:27:20Z",
+  "updated_at": "2026-09-06T09:25:35Z",
+  "closed_at": "2026-09-06T09:16:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16152",
+  "body": "Filed unassigned and unlabelled by the `domain:cli` execution seat while working #15591 — grading and `domain:*` are triage's to produce. ⛔ Not fixed there: a different defect class in a different package (a drifted private copy of a shared list, not a missing strip), so it was left alone rather than folded in as a rider.\n\n## The site\n\n`packages/plugins/plugin-email/src/email-plugin.ts` — a module-local function named `stripReadDecorations`, applied at the return of `readEffectiveTemplate`. Locate **by content**: the same name is exported from `@objectstack/spec/kernel`, so a grep for the identifier finds both.\n\n```js\nfunction stripReadDecorations(item) {\n  if (!item || typeof item !== 'object' || Array.isArray(item)) return item;\n  const out = {};\n  for (const [k, v] of Object.entries(item)) {\n    if (!k.startsWith('_')) out[k] = v;\n  }\n  return out;\n}\n```\n\n## What it drifts from\n\n`packages/spec/src/kernel/metadata-read-decorations.ts` owns the list and the helper of the same name, and its module header says the list lives in `spec` **precisely so the producer and the consumers cannot drift**: \"a decoration added to the read path but not to this list is a key no consumer knows to remove\". A second private copy is the other half of that failure mode — a consumer removing keys the list deliberately keeps.\n\nThe two disagree in both directions, and the spec states the disagreement explicitly:\n\n- `METADATA_READ_DECORATIONS` is `['_diagnostics', '_draft']`.\n- The same module names the ADR-0010 protection envelope — `_lock`, `_lockReason`, `_lockSource`, `_provenance`, `_packageId`, `_packageVersion`, `_lockDocsUrl` — as \"**Deliberately NOT** members, though they share the underscore spelling … envelope state the write path legitimately carries and merges, and the closed metadata schemas allowlist them precisely so a served document keeps its provenance on re-parse.\"\n\nThe private copy's own docblock asserts the opposite: it calls `_packageId` and `_provenance` \"read-time verdict[s] the protocol attaches, never an authored field\", and justifies the blanket sweep on the claim that `EmailTemplateDefinitionSchema` \"declares no underscore key\". Measured on `origin/main`, that justification does not hold: `packages/spec/src/system/email-template.zod.ts` imports `MetadataProtectionFields` and spreads it into the schema, so every one of those keys is declared and parses clean. The blanket strip is therefore removing keys the schema was deliberately widened to accept.\n\n## What is not settled here\n\n- **What the dropped provenance costs.** `readEffectiveTemplate`'s result is handed to `upsertDeclaredEmailTemplate`, which writes the row back. Whether anything downstream reads `_packageId` / `_provenance` off that written row was **not** measured by the seat filing this, so this is filed as a drift with an unproven consequence, not as a demonstrated data loss. Someone taking it should measure that first — if the answer is \"nothing reads it\", the repair is still the shared helper, just without the urgency.\n- **Which repair.** Either call the shared `stripReadDecorations` from `@objectstack/spec/kernel` (identical to the four consumers that already do: the dataset query in `rest-server.ts`, the cold-boot flow bind in `service-automation`, `saveMetaItem`'s verbatim persist, and — as of #15591 — the route-level seed apply), or, if this path genuinely needs the envelope gone as well, spell that as a second, named strip beside it so the two rules stay distinguishable. ⛔ What should not survive is one function that silently means both.\n\n## Refs\n\n- #15591 — the sibling defect in the other direction (a consumer that stripped **nothing** and choked on `_diagnostics`); its enumeration of read-back-envelope consumers is what surfaced this copy.\n- #15205 — the blocked ADR-0131 v18 card that retires `email-template-provenance.ts` and moves template resolution to the registry. Not a blocker for this one and not a duplicate — different defect class, and the current line still ships this helper — but triage may want to fold the two if that card lands first."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 14552,
+  "kind": "issue",
+  "title": "finding(spec): `defineStack`'s cross-reference refusals are bare `Error`s — no ADR-0112 `code` / `status` — so five REFUSED item classes in the ADR-0130 matrix are distinguishable only by message text",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T11:29:48Z",
+  "updated_at": "2026-09-07T01:56:01Z",
+  "closed_at": "2026-09-05T17:30:25Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14552",
+  "body": "Found while measuring #14454 (PR #14549). Same defect class as #14367 (`registerObject`'s bare `Error`) and #14474 (`NamespaceConflictError` without envelope), one door over.\n\n## What was measured\n\n`validateCrossReferences` (`packages/spec/src/stack.zod.ts`, reached through `defineStack`) refuses a stack whose item names an object the stack does not define. All five refusals measured in the ADR-0130 matrix are `new Error(message)` with `code === undefined` and `status === undefined`:\n\n| Item class | Message (verbatim shape) |\n|---|---|\n| action `objectName` | `Action 'NAME' references object 'OBJECT' which is not defined in objects.` |\n| view `data.object` | `View[0].list references object 'OBJECT' which is not defined in objects.` |\n| permission set `objects` | `Permission 'NAME' grants on object 'OBJECT' which is not defined in objects.` |\n| seed dataset `object` | `Seed data references object 'OBJECT' which is not defined in objects.` |\n| import mapping `targetObject` | `Mapping 'NAME' targets object 'OBJECT' which is not defined in objects.` |\n\nPinned, including the envelope's absence, in `packages/objectql/src/registry-cross-package-item-classes.test.ts` (`ENVELOPE ABSENCE — the authoring gate carries no ADR-0112 code / status`). A red on that pin means an envelope arrived: update the pin and the #14122 §4 row rather than deleting the assertion.\n\n## Why it matters\n\nADR-0112 makes `code`/`status` the machine-readable half of every refusal. Without them, `os validate`, `os build` and any AI author reading the refusal can only pattern-match prose — and the message text is now load-bearing for five pins, which is the fragile shape the envelope exists to remove.\n\n## Ask\n\nGive these refusals an ADR-0112 envelope (one `code` per rule family, e.g. `STACK_CROSS_REFERENCE_UNDEFINED_OBJECT`, `status: 422`) at the one place they are raised, keep the message text unchanged, and update the envelope-absence pin to assert presence. Fold `hooks[].object` (#14122 §4 rule R4, same raiser) into the same change.\n\nNot release-gating for the ADR-0130 chain."
+}

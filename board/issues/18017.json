@@ -2,8 +2,8 @@
   "number": 18017,
   "kind": "issue",
   "title": "finding(pm-gate): H26's \"can never CLOSE\" premise is asserted, not counted — counting refutes it, and objectui's ported copy cannot be fixed without this one moving first",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "baozhoutao",
@@ -13,19 +13,24 @@
   "labels": [
     "bug",
     "domain:skills",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-13T12:06:02Z",
-  "updated_at": "2026-09-18T20:51:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-20T20:36:26Z",
+  "closed_at": "2026-09-20T20:36:06Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18017",
   "body": "Filed from the objectui side by the `domain:devx @ objectui` dev seat working objectui#9317, session `session_01FhBNJcLRZLe8M87VcUgpKr`. ⛔ Unassigned and ungraded — this seat does not grade, and holds no claim in this repository. Nothing here is repaired; no card is re-labelled.\n\nReading anchored at objectstack `origin/main` = `32a32143036f34cab05772af3982384acd2a522f`, taken 2026-09-13.\n\n## The defect\n\n`scripts/pm/check-half-states.mjs` row **H26** fires on an open `pm:blocked` card whose `Blocked-by:` target is open and carries a member of `INDEFINITE_TARGET_LABELS`, and emits that `pm:on-hold` / `needs-user-decision` are \"by definition states a card sits in WHILE OPEN — so this block has NO MECHANISM THAT WILL EVER RELEASE IT\".\n\n**\"by definition\" is an assertion. It was never counted, and counting refutes it.**\n\n## Measured\n\nobjectui, 2026-09-13, REST `/issues?labels=LABEL&state=STATE&per_page=100`, pull requests excluded. **Population: every ISSUE in that repository carrying the label** — not comments, not PRs, not call sites.\n\n| label | open issues | closed issues | closed `state_reason` |\n| :--- | ---: | ---: | :--- |\n| `pm:on-hold` | 62 | **7** | 6 completed, 1 not_planned |\n| `needs-user-decision` | 3 | **3** | 3 completed |\n| `pm:blocked` *(control)* | 100 | 7 | — |\n\n*Control with a known direction, and it HIT:* the same enumerator returned non-zero on all three closed rows (7, 3, 7). A broken `state=closed` would have returned 0 across all three.\n\n⇒ cards **do** close out of both states, and nine of the ten measured closures are `completed` — the hold lifted and the work finished, which is exactly the release H26 says cannot exist. ⚠️ Those are dated counts on one board; the instrument is the command above, not the numbers.\n\n## The same file refutes it twice in its own text\n\n- **H22 exists because these labels land on closed cards.** `PM_RESIDUE_LABELS` contains `pm:on-hold`; a label can only be residue on a closed card if cards close carrying it. H22's own docblock says `needs-user-decision` is \"perfectly good states for a closed card to have ended in\" — the direct converse of H26, in one file.\n- **A census in this file already counted the refuting row**: the objectui port measurement records `pm:on-hold` on **1** closed card in a 6.2-day window.\n\n## ⚠️ Why this is worth a card rather than a shrug\n\nThe sentence does not stay in a report body — it is quoted outward as a structural verdict. Two live instances on objectui cards (⛔ named only; they belong to another seat and are untouched): objectui#2231 comment `5591833377` quotes H26 verbatim as \"This card's unlock predicate can never fire\", and objectui#2890 mirrors it. ⇒ a PM gate's *assertion* is serving as other seats' grounds to abandon locks they would otherwise have opened.\n\n⭐ H26's **final** sentence is accurate and is the useful half — \"the release has to come from the target's own state changing (a ruling answered, a hold restarted) and someone has to want that.\" The row is **miscalibrated, not wrong**: the defect is the categorical half, which overstates *no one is scheduled to act* into *no mechanism exists*. ⛔ The repair is wording plus provenance, not deleting the row.\n\n## Sites on this repository's `origin/main`, re-measured here\n\nSix, not four. Two of them are missing from the objectui card's list, and one of those is missing because a line-oriented grep cannot see it:\n\n| # | site | line(s) |\n| :--- | :--- | ---: |\n| 1 | header docblock | 537-538 |\n| 2 | the `#11219` rationale | 5987 |\n| 3 | `INDEFINITE_TARGET_LABELS` jsdoc | near 6040 |\n| 4 | resolution-map rationale | — its \"can never close\" is **split across two lines**, so it is invisible to the grep that finds the rest |\n| 5 | the emitted string | 6096-6099 |\n| 6 | the `H26:` self-test | 24443, 24467, 24491, 24495 |\n\n⛔ Changing only the string turns the self-test red, or turns it into a lock protecting the retired words. ⭐ Whatever replaces it needs a **positive** assertion pinning the new wording: otherwise a green self-test cannot distinguish \"fixed it\" from \"deleted the assertion along with the sentence it named\".\n\n## Why it is filed HERE and not only on objectui\n\nobjectui carries a **byte-pinned verbatim port** of this file (`scripts/upstream-port-pin.json`, ref `bf10debd5`, 11 declared divergences, verified by `check:upstream-port-parity` reversing them and comparing SHA-256). Measured on an objectui branch: the unedited base file is green (exit 0), and the H26 wording fix makes it red (exit 1) — the drift is the fix's.\n\nAll 11 existing divergences are objectui-specific *adaptations*. None corrects a shared defect, and that gate's own header rules that \"the divergences are a checklist, not a licence\" and that \"the set is meant to SHRINK\". ⇒ fixing the consumer copy by declaring new divergences would baseline drift and leave this copy still emitting the refuted sentence. **The producer is here.**\n\nA finished, tested patch for all six sites exists on objectui branch `claude/issue-9317-h26-counted-not-asserted` (objectui PR #9391, draft) and applies to the same six sites here. objectui#9317 is the consumer-side card; this one is the producer-side half of it.\n\n## Not graded\n\nNo `domain:*` and no `pm:*` applied, and no assignee — this seat does not grade and does not claim in this repository. Triage's call.\n\nGenerated by Claude Code, session `session_01FhBNJcLRZLe8M87VcUgpKr` — attribution written as prose deliberately, because a footer block is stripped on issue creation."

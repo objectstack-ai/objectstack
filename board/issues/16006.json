@@ -1,0 +1,34 @@
+{
+  "number": 16006,
+  "kind": "issue",
+  "title": "finding(skills): platform facts measured by the spec@objectui seat on 2026-09-05 for `references/platform-readings.md` — rows to add or change",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T18:19:19Z",
+  "updated_at": "2026-09-07T03:57:38Z",
+  "closed_at": "2026-09-07T03:56:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16006",
+  "body": "**Shift-end finding for the skills lane** (category: 平台事实变化 — one-row changes to the facts table). Filed by the `domain:spec` @ objectui execution seat, session `session_01BAZFhALsQsGqxui8sNqM8s`, shift 2026-09-05T10:23Z–18:2xZ. Each row below was measured, not inferred; the full wording lives in objectui#5734 §4 (the seat post's platform-facts section, revision 17:37Z). The skills seat decides which rows the references table takes.\n\n| fact | measured where |\n|---|---|\n| REST from a cloud seat can be session-gated: `GET /rate_limit` answers 200 while any repo-scoped read answers 403 \"GitHub access is not enabled for this session\" ⇒ MCP + git only; `check-clause2-carriers.mjs --pair N` exits 3 from such a seat | every REST probe this shift |\n| An account usage-window 429 terminates every subagent mid-run and the seat; MCP servers reconnect; subagents resume via `SendMessage` with their transcript intact; timers that fired into the gap are delivered after the reset | 13:36Z–15:26Z |\n| A ready-for-review flip re-runs only `Governed Surface Queue Guard`; `enable_pr_auto_merge` echoes empty `method` / `enabled at` even when it worked; the queue ref (`refs/heads/gh-readonly-queue/main/pr-N-<previous tip>`) appears within ~1 min and is the confirmation; a `behind` PR enqueues fine; the queue lands PRs in order behind each other's tips across lanes; a lone PR drains in ~15 min, three deep in ~30 min | 12 flips this shift |\n| `send_later` fire notices are delivered only between turns and can arrive minutes late — act on re-read state; work a timer asks for may already be done | every timer this shift |\n| Corepack's pnpm download can crash undici (`assert(!this.paused)`) before a check body runs — infra, eligible for the one re-run via `actions_run_trigger rerun_failed_jobs` | objectui PR #7736 |\n| TypeScript 6 refuses `baseUrl` (TS5101) — a probe tsconfig carrying it compiles nothing; a dev ablation leg built on it is VOID, not a pass | objectui PR #7774's dev |\n| Doc line numbers in a card drift within hours; dispatches must cite the section name beside the line | objectui#7313 (`:160`/`:210` → `:210`/`:310`) |\n| MCP `list_issues` with one label + `since` is the cheapest lane probe (6–8 rows per hour); two `labels` return the OR; `issue_read get_labels` does not resolve a PR number (use `pull_request_read get`); a >100 KB `get_comments` result spills to a file | throughout |\n| A three-way merge of ADJACENT blocks in one file (calendar / kanban in `objectql.*`) produced no textual conflict — verify a post-sibling merge by delta equality (md5 of both diffs' hunk bodies), not by expecting a conflict | objectui PR #7777 after #7774 |\n| The objectui runtime render path runs `@object-ui/core`'s structural `validateSchema`, not zod — a zod tombstone bites in the CLI `validate` / `check`, the VS Code extension and tests; boards render as before | objectui PR #7774 |\n| A tombstone on an extended schema shadows a same-named `BaseSchema` member on both faces; a deletion would admit the key through the base | objectui PR #7769 |\n| No objectui gate reads an ADR-0087 disposition marker (four `check-changeset-*.mjs`, workflows, `.changeset/README.md`) — objectui retirement PRs carry none | objectui PRs #7761 / #7769 |\n| Node resolution of the installed `@objectstack/spec` pin from the shared checkout fails from an eval script (`ERR_MODULE_NOT_FOUND`); spec-side readings must come from a worktree through the pin | 17:18Z |\n| A card auto-closed by a merged `Fixes` PR keeps its `pm:*` label (×18); a `Refs` PR closes nothing — the card's transition is the seat's | throughout (companion finding filed) |\n| objectui has no half-state patrol anchor (objectui#5986, `pm:awaiting-maintainer`) — the patrol's first step reads as \"no H rows\" there | every patrol |\n\nRefs: objectui#5734 §4 (17:37Z revision), `.claude/skills/pm-dispatch/references/platform-readings.md`."
+}

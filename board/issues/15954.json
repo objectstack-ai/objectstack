@@ -1,0 +1,34 @@
+{
+  "number": 15954,
+  "kind": "issue",
+  "title": "[Decision] nine cron- and template-typed keys in packages/spec are published, documented and read by nothing — retire them under ADR-0049 (the #14477 / #15513 shape), mark them experimental, or leave them?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:52:41Z",
+  "updated_at": "2026-09-06T14:11:47Z",
+  "closed_at": "2026-09-06T14:11:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15954",
+  "body": "Filed by the `domain:spec` execution seat (`session_01M59rPZZFzqhfMUPFqqZTkf`, 2026-09-05T16:00Z) from the census on #15035 / #15028 (report `5552934813`, readings on `origin/main` `f1e91595f`; seat position `5552964624` on #15035). Labels: `needs-user-decision`; `domain:*` routing is the triage seat's (every option lands in `packages/spec`). ⛔ Not dispatchable: the decision is the maintainer's — retiring published authorable keys is an ADR-0049 enforce-or-remove ruling, as #14477 and #15513 were. Sequencing: AFTER the narrowing PR for #15028 / #15035 (which touches only the two union definitions in `shared/expression.zod.ts` and leaves every site alone); nothing here blocks that PR.\n\n## The question\n\nEight of the twelve cron- and template-typed positions in `packages/spec` are declared on the published authorable surface, documented on the generated reference pages, carried by the D7 conformance ledger — and read by nothing: no scheduler, no service, no lint rule, no renderer. Their entire author corpus is spec's own tests and docblocks (zero example-app authors, zero objectui authors, zero customer-facing authors outside generated pages). Do they retire under ADR-0049 (`RETIRED_KEYS_BY_MAJOR`, the #14477 / PR #15514 shape), or do they stay as `[EXPERIMENTAL — not enforced]` declarations?\n\n| # | file:Schema.field | dialect | reachable from a stack manifest? | D7 row | reader |\n|:--|:---|:---|:---|:---|:---|\n| 3 | `api/export.zod.ts:576` `ScheduledExport.schedule.cronExpression` | cron | no — API contract | `cron-declared-unwired` | none |\n| 4 | `api/export.zod.ts:706` `ScheduleExportRequest.schedule.cronExpression` | cron | no — API request | `cron-declared-unwired` | none |\n| 5 | `automation/execution.zod.ts:454` `ScheduleState.cronExpression` | cron | no — runtime state | `cron-declared-unwired` | none |\n| 6 | `integration/connector.zod.ts:257` `DataSyncConfig.schedule` | cron | **YES** — `Connector.syncConfig`, `defineStack({ connectors })` | `cron-declared-unwired` | none |\n| 7 | `system/cache.zod.ts:156` `CacheWarmup.schedule` | cron | no | `cron-declared-unwired` | none |\n| 8 | `system/disaster-recovery.zod.ts:57` `BackupConfig.schedule` | cron | no | `cron-declared-unwired` | none |\n| 9 | `system/disaster-recovery.zod.ts:238` `DisasterRecoveryPlan.testing.schedule` | cron | no | `cron-declared-unwired` | none |\n| 10 | `ai/model-registry.zod.ts:121` `PromptTemplate.system` | template | no | `template-prompt` (experimental) | none |\n| 11 | `ai/model-registry.zod.ts:122` `PromptTemplate.user` | template | no | `template-prompt` (experimental) | none |\n\nNot in the question (the four positions that are read or marked): `system/job.zod.ts:15` `CronSchedule.expression` (read by `croner` at schedule time — the one wired cron slot); `ai/knowledge-source.zod.ts:45` `KnowledgeRefreshPolicy.cron` (D7 `cron-knowledge-refresh`, experimental-marked; its describe attribution is #15867); `data/object.zod.ts:2083` `Object.titleFormat` (read by objectui — with a dialect mismatch, #15947).\n\n## Options × real cost\n\n| option | what | real cost |\n|:--|:--|:--|\n| **A — retire the nine positions** (eight keys; rows 3 and 4 share one key name on two schemas) via `RETIRED_KEYS_BY_MAJOR[18]` + `retiredKey()` tombstones, D3 semantic entries per family, regenerated shards / reference pages, refusal pins | the #14477 / PR #15514 shape, S–M; `@objectstack/spec` minor with a BREAKING banner; **row 6 is a stack collection member** (`connectors[].syncConfig.schedule`) — measured zero example authors, out-of-repo stacks NOT MEASURED; the two `api/` rows retire from an API contract, not a manifest |\n| **B — `[EXPERIMENTAL — not enforced]` on all nine + ledger enrolment** | prose only | the human-only signal ruled out on #15513 for the same shape: an AI generating from the schema still writes `schedule: '0 0 * * *'` on a connector and believes a sync is scheduled |\n| **C — leave them** | nothing | the declared ≠ enforced surface stays on nine published keys; the narrowing PR makes their envelope arm honest but cannot make a scheduler appear |\n| **D — wire them** (a scheduler for connector sync, cache warmup, backups, DR testing; a prompt runtime) | product work, several cards, no ruling today | speculative capability with zero measured pull |\n\n## 四维分析(从业务角度)\n\n**一句话问题**:九个已发布、有文档、进了 D7 台账、却被任何代码都不读的 cron/模板类型键,是按 ADR-0049 退役,还是打 `[EXPERIMENTAL]` 留着,还是留着不动?\n\n- **实际业务需求** —— 实测零真实作者:仓内、示例、文档、技能、objectui pin 全部扫过(带对照),这九个位置的作者只有 spec 自己的测试与 docblock;其中只有一个(connector `syncConfig.schedule`)能从 stack manifest 写到,其余八个是 API 契约、运行时状态或从未挂载的系统配置。仓外 stack 未测。⇒ 拉动为零,这条轴只否定 D(为零拉动造调度器)。\n- **项目长远合理性(权重 ≥50%)** —— 声明即强制:一个键要么被执行、要么被标注、要么不存在。九个键今天是第四种(#15513 裁决时同一句话)。A 让它们不存在,B 让声明说真话但只对人有效,C 保留最大的一块「声明 ≠ 执行」cron 面。⇒ **A**;若维护者知道其中某个家族(备份/DR 调度、connector 同步调度)在近期路线图上且有日期,那一个走 B。\n- **防 AI 写元数据犯错** —— 一个 AI 读到 `BackupConfig.schedule: '0 0 * * *'` 或 `syncConfig.schedule` 会写下去并认为备份/同步已排程,没有任何反馈;#15513 的裁决已把 B 判为「人读才起作用的信号」。⇒ **A**,与 #15513 同理。\n- **创业阶段不扩散需求** —— 九个零消费键 = 九条永久义务(兼容、迁移、文档、日后必须按这个形状实现);2026-08-27 裁「不渐进」⇒ 退役即立即退休,不设窗口;D 是无拉动的能力扩张。⇒ **A**。\n\n**推荐:A(整体退役),按家族逐一答「是否在路线图上且有日期」** —— 与 #15513 的裁法同形:有日期的家族走 B,其余走 A。四轴同向;唯一需要维护者回答的是路线图问题(代码里没有答案)。裁 A ⇒ 一张 `domain:spec` 卡,`spec-property-retirement` 剧本,PR #15514 先例,条款② 复审;裁 B ⇒ 一张 spec 文档卡(标注 + 台账登记);裁 C ⇒ 关 not planned 并在 D7 行上记「accepted declared-unwired」。\n\n**置信缺口**:仓外 stack 是否写过 `connectors[].syncConfig.schedule` 或 `BackupConfig.schedule` 未测(本仓与 objectui pin 零命中);`api/` 两行是 REST 请求/契约面,是否有外部客户端发送 `schedule.cronExpression` 未测(路由侧读者为零是实测的)。\n\n<!-- os-decision-facets -->\n\n- ① 长远合理性(≥50%):声明即强制,九个键是「第四种」状态(#15513 同形)⇒ **A**;有日期的家族例外走 B。\n- ② 实际业务拉动:零真实作者(带对照的全面扫描);仅一个可从 manifest 写到;仓外未测。只否定 D。\n- ③ 防 AI 犯错:AI 写下 `schedule` 以为已排程,零反馈;B 是人读信号(#15513 已判)⇒ **A**。\n- ④ 创业阶段不扩散:九条零消费义务;不渐进 ⇒ 立即退役 ⇒ **A**。\n- 推荐:**A**,逐家族答路线图问题(有日期 ⇒ B);⛔ 不荐 C / D。排在 #15028 / #15035 收窄 PR 之后。\n- 置信缺口:仓外 stack / 外部 API 客户端未测。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 1134,
+  "kind": "pull_request",
+  "title": "Fix Studio server mode for app-host Vercel deployment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T06:58:12Z",
+  "updated_at": "2026-09-07T04:49:00Z",
+  "closed_at": "2026-04-14T07:04:32Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T07:04:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1134",
+  "body": "Studio was running in MSW mode after deploying app-host to Vercel, instead of connecting to the API server. The issue was that `VITE_RUNTIME_MODE=server` was not being set during the build process.\n\n## Changes\n\n- **Add `build.env` to `examples/app-host/vercel.json`**: Set `VITE_RUNTIME_MODE=server` and `VITE_SERVER_URL=\"\"` to configure Studio in server mode during Vite build\n- **Update deployment documentation**: Document build environment variables and add troubleshooting section for Studio MSW mode issues\n\n## Technical Context\n\nVite embeds environment variables at build time. The standalone Studio deployment (`apps/studio/vercel.json`) already had this configuration:\n\n```json\n\"build\": {\n  \"env\": {\n    \"VITE_RUNTIME_MODE\": \"server\",\n    \"VITE_SERVER_URL\": \"\"\n  }\n}\n```\n\nThe app-host deployment was missing this section, causing Studio to default to MSW mode regardless of the `.env.production` file (which is only used during local builds, not Vercel builds)."
+}

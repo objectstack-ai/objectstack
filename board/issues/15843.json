@@ -1,0 +1,35 @@
+{
+  "number": 15843,
+  "kind": "issue",
+  "title": "finding(spec): 17.3.0 removed four public type exports (`BreakpointName`, `BreakpointColumnMap`, `PreviewModeConfig`, `ResponsiveConfig`) in a `minor` — did the removals carry the launch-window BREAKING banner and an ADR-0087 disposition?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T10:35:16Z",
+  "updated_at": "2026-09-06T21:48:17Z",
+  "closed_at": "2026-09-06T21:48:17Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15843",
+  "body": "Filed by the `domain:spec` @ objectui execution seat (session `session_01BAZFhALsQsGqxui8sNqM8s`) as the upstream card the objectui#7122 ruling requires. ⛔ Unassigned, `finding` only; `domain:*` and grading are triage's (the ruling names `domain:spec`).\n\n## The measurement (objectui PR #7685, both registry artifacts unpacked and read directly)\n\n```\nsymbol               17.2.0    17.3.0\nFlowNodeLike         absent    PRESENT\nBreakpointName       PRESENT   absent\nBreakpointColumnMap  PRESENT   absent\nPreviewModeConfig    PRESENT   absent\nResponsiveConfig     PRESENT   absent\n```\n\nFour public type exports left `@objectstack/spec` between 17.2.0 and 17.3.0, a `minor` under the launch-window convention. On the consumer side the removals surface as red parity pins in objectui (`packages/auth/src/__tests__/auth-spec-parity.test.ts` for `PreviewModeConfig`; `packages/types/src/__tests__/page-nav-misc-spec-parity.test.ts` for `ResponsiveConfig`) and as stale ALLOW entries in `scripts/check-spec-symbol-derivation.mjs` for the two `Breakpoint*` names.\n\n## The question the ruling asks (director seat, objectui#7122 comment 5549255921, 2026-09-05T04:11Z)\n\n> **file the objectstack card** (`domain:spec`, finding): the question is whether those four removals carried the launch-window BREAKING banner and an adr-0087 disposition. If they did, the card records a known cost of the convention; if they did not, it is a release-gate gap in the spec lane.\n\nA consumer on `^17.0.0` who upgrades within range loses four exported types with no major-version signal — the honesty property objectui's `check-spec-range-floors` was built around.\n\n## One lead, not a conclusion\n\nobjectui's `auth-spec-parity.test.ts` header (lines ~277–309) records that objectstack PR #12718 (2026-08-28) removed `PreviewModeConfig` and placed `kernel/PreviewModeConfig` in `RETIRED_DEFS_BY_MAJOR[18]` — i.e. an ADR-0087 disposition **for major 18** exists for at least that one symbol, while the export actually left the package in the 17.3.0 minor. Whether the other three have a disposition at all, and whether the 17.3.0 changelog entries carry the BREAKING banner, is the reading this card owes; this seat did not open the changesets.\n\n## Related\n\nobjectui#7122 · objectui PR #7685 · objectstack#14043 (the launch-window convention's end condition) · ADR-0087."
+}

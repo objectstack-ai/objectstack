@@ -1,0 +1,35 @@
+{
+  "number": 15920,
+  "kind": "issue",
+  "title": "The better-auth admin family is absent on any composition that does not enable the admin plugin, and nothing on the wire says so — 404, identical to a path that never existed",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "enhancement",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:20:40Z",
+  "updated_at": "2026-09-07T02:52:59Z",
+  "closed_at": "2026-09-07T02:52:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15920",
+  "body": "Split out of #15417, whose triage recorded this split criterion in advance so the taker would not have to block on it. #15417's other half is addressed by PR #15918; this is the part that is a composition question rather than a framework one.\n\n## What was measured\n\nFramework-side boot (`@objectstack/verify` + the showcase app, `packages/qa/dogfood`), `origin/main` at `abdceef8c`, member and platform-admin sessions, both configurations of the same stack:\n\n**better-auth admin plugin OFF — the stock composition:**\n\n```\nauth.api /admin/ endpoints: 9  (all /admin/oauth2/*, all SERVER_ONLY: true)\n\nPOST /api/v1/auth/admin/update-user   member -> 404  len=0  ct=(none)\nGET  /api/v1/auth/admin/list-users    member -> 404  len=0  ct=(none)\nPOST /api/v1/auth/admin/set-role      member -> 404  len=0  ct=(none)\nPOST /api/v1/auth/admin/definitely-not-a-route-1989  member -> 404  len=0  ct=(none)   <-- CONTROL\n```\n\n**better-auth admin plugin ON** (`OS_SCIM_ENABLED=true`, which forces `admin` on via ADR-0071 — the one env knob that reaches it):\n\n```\nauth.api /admin/ endpoints: 24\n\nPOST /api/v1/auth/admin/update-user   member -> 403  {\"message\":\"You are not allowed to update users\",\"code\":\"YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS\"}\nGET  /api/v1/auth/admin/list-users    member -> 403  {\"message\":\"You are not allowed to list users\",\"code\":\"YOU_ARE_NOT_ALLOWED_TO_LIST_USERS\"}\nPOST /api/v1/auth/admin/set-role      member -> 403  {\"message\":\"You are not allowed to change users role\",\"code\":\"YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE\"}\n```\n\n## The finding, and what it is NOT\n\nThe three routes are **configuration-dependent**, exactly as designed. ⛔ **The ledger is not wrong, and no row should be deleted.** `BETTER_AUTH_MOUNTED_SURFACE` is pinned at the maximal `LEDGERED_PLUGIN_CONFIG` and its own header already says so in as many words — it answers \"what does the catch-all expose\", it is publication and not liveness, and \"a deployment running fewer plugins serves a subset; that is correct\". Removing a published entry would also make the exact-equality conformance test red and misreport the mounted attack surface, which is the one thing that list exists to keep honest.\n\nWhat is left over is a real gap, and it is narrower than #15417 read it:\n\n**On a composition that does not enable the admin plugin, three routes the SDK can build URLs for answer `404` with a zero-length body and no `content-type` — byte-identical to a path that never existed.** A caller cannot tell \"this deployment does not mount that family\" from \"you typed the route wrong\" from \"upstream renamed it\". The ledger knows the difference — `AUTH_ROUTE_LEDGER` carries `requires` for gated families precisely so a subset deployment is describable — but nothing on the wire carries it.\n\nThat matters most where it is least visible: better-auth is a third-party dependency on its own release cadence, and this repo has already chased 1.7 drift in #3624 / #3647. A renamed upstream admin route and an unmounted admin family are the same 404 to every caller.\n\n## Prior art worth reading before acting\n\n- **#7735** established the vocabulary for the neighbouring case: a route that is published but refused at runtime gets the `disabled` disposition with the switch named. That is the shape a \"published but not mounted at this configuration\" answer might want.\n- **#9969** (closed `not_planned`) ruled that consumer-less vendor `/admin/` routes are not re-implemented. Whatever is decided here should not re-open that.\n\n## What this is not\n\nNot a privilege leak, and #15417 disproves that itself: the platform admin receives the same 404, and nothing an ordinary member sent changed any row. Not a request to narrow the catch-all either — #15417's triage is explicit about why that is the wrong move, and PR #15918 keeps the mount exactly as wide as it is.\n\n## Open question for triage\n\nDoes an unmounted-by-configuration route deserve a distinguishable answer, and if so where does it come from — a `requires`-aware answer from the ledger, an ObjectStack-side envelope on the auth namespace's 404, or nothing at all because a 404 discloses correctly and the SDK is what should stop offering the family? The third reading is live: `vendor-admin-refusal-envelope.ts` already considered enveloping 404 on this surface and deliberately excluded it (\"a 404 discloses nothing that needs a code\"). Re-opening that narrowing is a maintainer call, not a lane decision — which is why this is filed rather than fixed.\n\nFiled with no assignee by the seat that took #15417."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 16046,
+  "kind": "issue",
+  "title": "[finding] @objectstack/cli's ./console subpath has no surface pin at all — it points at an internal barrel, so every export that module gains is published on landing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T21:42:59Z",
+  "updated_at": "2026-09-07T02:45:05Z",
+  "closed_at": "2026-09-07T02:34:01Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16046",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from a measurement handed back by the dev agent on #15630, using [Claude Code](https://claude.ai/code).\n\n## The finding\n\n`@objectstack/cli` declares a `./console` subpath in its `exports` map. It has **no surface pin at all** — neither names nor shapes. The only assertion that exists is that `./console` *is a declared subpath*.\n\nThe subpath points straight at an **internal barrel with 13 exports**. So every export that module gains is **published the moment it lands**, with nothing in the tree that would notice.\n\nThis is a strictly weaker position than the one #15630 just repaired on `./hook-body`. There, the pin at least held the four ratified names and the repair added shape conformance on top. Here there is no name floor either: an accidental `export *` widening, or a symbol added to the barrel for internal reasons, becomes public API silently.\n\n## Scope\n\nSame package as #15630, but outside that card's scope — #15630 is about `./hook-body`'s pin, and its dev correctly declined to widen into this rather than folding it in.\n\nRelated: **#16045** records the same class in `@objectstack/spec` at much larger scale (5309 exports pinned by name-and-kind, 27 by signature). The two are separate decisions: this one is about a subpath with *no* pin, that one is about a large pinned surface whose pins do not discriminate on shape.\n\nAlso measured in the same pass, as a negative result: **`@objectstack/console` does not share the gap** — it exports `./package.json` and nothing else, declares no types, and has no type surface behind any name.\n\n## What a fix would have to decide first\n\n⛔ Not graded by this seat. But the question that comes before any pin is whether `./console`'s 13 exports are *intended* to be public. If they are, they need a pin (and, on #15630's reasoning, one that discriminates on shape rather than only on names). If they are not, the subpath should not be in the `exports` map at all, and removing it is an ADR-0087 event rather than a pin change.\n\n## Provenance\n\n⚠️ Not verified by this seat independently — this is the dev agent's measurement, relayed from the `#15630` worktree at the head that became PR #16043. The count (13 exports) should be re-derived before anyone acts on it."
+}

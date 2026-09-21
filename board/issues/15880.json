@@ -1,0 +1,38 @@
+{
+  "number": 15880,
+  "kind": "issue",
+  "title": "`os lint` crashes with a bare `TypeError` on a localized `label` — `checkLabelCase` indexes a value `I18nLabelSchema` does not require to be a string",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T12:18:01Z",
+  "updated_at": "2026-09-06T13:43:33Z",
+  "closed_at": "2026-09-06T13:42:51Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15880",
+  "body": "Found while implementing #15658 (the swallowed-crash defect one module over) and deliberately not folded in: different file, different function, and fixing it here would have deleted the very input that made #15658's crash path reachable. Unassigned and bare, for triage.\n\n## What\n\n`packages/cli/src/commands/lint.ts`, `checkLabelCase` (located by content):\n\n```ts\nfunction checkLabelCase(label: string, path: string): LintIssue | null {\n  if (label && label[0] !== label[0].toUpperCase()) {\n```\n\nThe parameter is typed `string`, but every call site reaches it through `any`-typed config walking, and the spec does **not** require a label to be a string. `I18nLabelSchema` (`packages/spec/src/ui/i18n.zod.ts`) is a union of `z.string()` and an inline locale map, and it is the label primitive the whole `ui/` tree imports — `app.zod.ts`, `view.zod.ts`, `page.zod.ts`, `dashboard.zod.ts`, `chart.zod.ts`, `report.zod.ts`, `action.zod.ts`, `bulk-action.zod.ts`, `component.zod.ts`.\n\nFor the locale-map form, `label[0]` is `undefined` and `undefined.toUpperCase()` throws. There is no guard: the throw leaves `lintConfig` and lands in the command's catch-all, which prints the message and exits 1.\n\n## Driven\n\nBoth faces, on a config whose only content is a localized app label. Fixture: `apps: [{ name: 'todo_app', label: { en: 'Todos', 'zh-CN': 'DAI-BAN' } }]` (a real CJK string was used; transliterated here only to keep this body plain ASCII), plus a minimal `manifest`. Run against the CLI built from this tree.\n\n```\n$ os lint --score\n  ✗ Cannot read properties of undefined (reading 'toUpperCase')\nEXIT=1\n\n$ os lint --score --json\n{\"error\":\"Cannot read properties of undefined (reading 'toUpperCase')\",\"conversions\":[]}\nEXIT=1\n```\n\nThe stack is schema-valid: `ObjectStackDefinitionSchema.safeParse` returns `success: true` on it. So this is not a bad-input diagnostic degrading badly — it is a supported authoring shape the linter cannot walk.\n\n## How wide, measured rather than reasoned\n\nA single-value mutation sweep over `examples/app-todo`'s normalized config (every path, eight hostile values, 15,728 mutations) kept 3,064 mutations schema-valid. Exactly two of those crash `lintConfig`, and both are this defect:\n\n```\nHIT @ apps.0.label       := {}  -> TypeError: Cannot read properties of undefined (reading 'toUpperCase')\nHIT @ views.0.list.label := {}  -> TypeError: Cannot read properties of undefined (reading 'toUpperCase')\n```\n\nPositive control in the same run: 241 schema-INVALID mutations also crash `lintConfig`, so the detector fires and the two hits above are not an artefact of an always-empty scan. A second sweep over the four bundled eval-corpus fixtures (2,745 mutations, 241 schema-valid survivors, control 314 invalid crashers) found zero — those fixtures declare no `apps` and no `views`.\n\nMeasured asymmetry worth carrying into triage: `objects[].label` is `z.string()` and rejects the map outright (`objects.0.label: Invalid input: expected string, received object`), while `apps[].label` accepts it. So an author who localizes an object label is told so; one who localizes an app label crashes the linter.\n\n## Blast radius\n\n- `os lint`, every face, exits 1 with a message that names no rule, no path and no remedy. An author who localizes an app label cannot lint the project at all.\n- It is also the reachability proof for #15658: before that repair, `scoreMetadata` swallowed this exact throw and returned 100 / grade `A` / `valid: true`, and `os lint --eval --generator` on a generator emitting this stack reported `ok: true`, `meanScore: 100`, exit 0. #15658's repair makes the scorer refuse; it deliberately does **not** touch this crash.\n\n## Not decided here\n\nWhether the repair is to guard `checkLabelCase` on `typeof label === 'string'` (the rule then says nothing about localized labels), or to resolve the map's default-locale entry and case-check that (the rule keeps working, and would need to decide which entry is authoritative), is a product call this finding does not make. The asymmetry above may itself be the thing to settle first: two label carriers in one spec accepting different types is a contract question, not a lint question.\n\n## Not deduped beyond one search\n\nOne targeted search against this repository, with a positive control in the same session: the control query returned #15658, #15578, #10653, #10123 and #8855, so the channel was live rather than silently empty. The dedup query itself returned nothing open on this subject.\n"
+}

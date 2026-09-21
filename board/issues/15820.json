@@ -1,0 +1,35 @@
+{
+  "number": 15820,
+  "kind": "issue",
+  "title": "core: `PluginStartupResult.startTime` carries an elapsed duration, and the spec contract for the same result declares it as `duration`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T09:11:55Z",
+  "updated_at": "2026-09-06T23:23:27Z",
+  "closed_at": "2026-09-06T23:21:56Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15820",
+  "body": "Filed bare by the `domain:spec` execution seat — ⛔ no `domain:*` applied, that label has a single producer. The fix lands in `packages/core`, not in `packages/spec`, so routing is triage's call.\n\nAll readings taken against `origin/main` at `2026-09-05T09:09Z` (⛔ not a working tree).\n\n## The defect\n\n`packages/core/src/plugin-loader.ts:91-95` declares:\n\n```ts\nexport interface PluginStartupResult {\n    success: boolean;\n    pluginName: string;\n    startTime?: number;\n    ...\n}\n```\n\n`packages/core/src/kernel.ts` assigns an **elapsed duration** into that field, on both the success and the failure path:\n\n```ts\n// kernel.ts:674\nconst startTime = Date.now();\n...\n// kernel.ts:685, 697\nconst duration = Date.now() - startTime;\n...\n// kernel.ts:694 (success), :704 (failure)\nstartTime: duration,\n```\n\nSo a field named `startTime` never holds a start time. It holds milliseconds elapsed. This is not an ambiguous name that a reader has to look up — the name asserts the **opposite** of the value, which is the one failure mode a unit convention cannot rescue, because a reader who correctly assumes `startTime` is an instant will do arithmetic on it and get a number near the epoch.\n\nIt propagates one hop further: `kernel.ts:69` `private pluginStartTimes: Map<string, number>` is fed the same `duration` at `:687`, and the map is handed out at `:540` by `getPluginMetrics()`.\n\n## What makes this more than a naming nit\n\n**The same file family already has the right name for this measure, and uses it correctly.** Twelve lines above the defect, `plugin-loader.ts:85` declares `loadTime?: number`, and `:182` assigns `loadTime: Date.now() - startTime` — the identical computation, under a name that does not lie.\n\n**And the spec contract for this very result does not have the key at all.** `packages/spec/src/kernel/startup-orchestrator.zod.ts` — the contract `PluginStartupResult` maps to, per `packages/spec/api-surface/contracts.json:218` and the `PluginStartupResult → kernel/startup-orchestrator.zod` rows in the package CHANGELOGs — declares:\n\n```\n:149   duration: z.number().min(0).describe('Time taken to start the plugin in milliseconds')\n:196   totalDuration: z.number().min(0).describe('Total time taken for all plugins in milliseconds')\n```\n\nThe contract says `duration`. The implementation ships `startTime` holding that same duration. This is a **declared ≠ enforced divergence between `packages/core` and the `packages/spec` contract it implements**, and the divergence is the root cause — the name did not drift on its own, it drifted away from a contract that was already correct.\n\n## Blast radius, measured\n\n- `PluginStartupResult` is **exported** from `packages/core/src/plugin-loader.ts`, so `startTime` is public type surface.\n- Producers/consumers of the value, whole-repo (`git grep` over `packages apps examples`): `kernel.ts:371` is the only call site of `startPluginWithTimeout`, and there are **no readers of `getPluginMetrics()` or `pluginStartTimes` outside `packages/core/src/kernel.ts`**. That zero is reverse-checked — the same search returns four live hits for `PluginStartupResult` itself, so the search reaches.\n- Practical effect: the rename is contained inside `packages/core`, with the public type surface being the part that needs an ADR-0087 disposition rather than a silent edit.\n\n## Suggested shape (not a dispatch)\n\nAlign the implementation with the contract it already has: the elapsed measure is `duration` (or a unit-bearing name, if the convention landing in #14478 settles on one), the tombstone/retirement handled per ADR-0087 for the exported type, and `pluginStartTimes` / `getPluginMetrics()` renamed to say what they return.\n\n## Relationship to #14478 — read this before merging the two\n\nThis was surfaced while verifying the #14478 stack, and it is **adjacent to that epic, not inside it**:\n\n- #14478's gate `check:duration-unit-keys` scans `packages/spec/src/**`, so it cannot see `packages/core` today. Card 6/6 (#15682) is the card that widens the declared population, and the *name-level* catch would fall to it once it does.\n- But the substantive fix here is aligning `packages/core` to an existing spec contract, which is an engine-lane change in a different package. Folding it into a spec-lane rename card would put the work in the wrong lane and hide a contract divergence inside a naming sweep.\n\nHence: separate card, bare, for triage to route."
+}

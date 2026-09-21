@@ -1,0 +1,37 @@
+{
+  "number": 16161,
+  "kind": "issue",
+  "title": "[finding] `os lint --eval --generator \"\"` runs the offline eval silently — indistinguishable from not passing the flag at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:39:08Z",
+  "updated_at": "2026-09-06T16:14:10Z",
+  "closed_at": "2026-09-06T16:13:16Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16161",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from a driven measurement handed back on #15550, using [Claude Code](https://claude.ai/code). Surfaced by the contract review of PR #16115 and measured by that card's dev agent.\n\n## The finding\n\n`os lint --eval --generator \"\"` **runs the offline eval and says nothing about the flag.**\n\nDriven, exit 0 on **both** entries — `bin/run-dev.js` (source) and `bin/run.js` (shipped):\n\n```\nMode: offline · cases: 5 · pass bar: 75\n5/5 passed · mean 99/100\n```\n\nThe generator was **never loaded**: the marker file the module writes at top-level evaluation stayed **absent**. Nothing on either face names the flag. The `--json` face behaves the same — exit 0 with the ordinary offline eval report.\n\n## ⭐ The indistinguishability control\n\nThis is what makes it worth a card rather than a note. Driven against `os lint --eval` with the flag **absent entirely**, stdout differs on exactly **one line** — the elapsed-time token (`5/5 passed · mean 99/100 (55ms)` vs `(53ms)`). Normalise that token and the two runs are **byte-identical**; stderr is 0 bytes in both.\n\n⇒ Passing an empty generator is not merely ineffective. It is **indistinguishable from not passing the flag**, on every channel the command has.\n\n## Cause, and why it is a separate card from #15550\n\n`runEval` guards the load with a **truthiness** test — `if (flags.generator)` — so an empty string falls through it.\n\nPR #16115 (card #15550) makes `os lint --generator MODULE` **without** `--eval` a refusal, and its guard tests `!== undefined` rather than truthiness — so `os lint --generator \"\"` **without** `--eval` **is** refused today (exit 1, refusal on stdout, `{\"error\":…}` on `--json`).\n\n⇒ The empty string is **caught on the non-eval side and falls through on the eval side**. Same family, different input class, different code path. That asymmetry is precisely why it did not belong in #16115's diff.\n\n## Shape of a repair\n\n⛔ Not graded by this seat. But the narrow reading is that `runEval` should apply the same `!== undefined` test its sibling now uses, so an explicitly-passed-but-empty generator is a refusal rather than a silent no-op. Whether an empty value should refuse or should be treated as \"not passed\" is the actual question — and it is the same question #15550 answered for the non-eval side, so answering it differently here would put two spellings of one flag under two rules.\n\n## Dedupe\n\nRun by this seat before filing, targeted at this input class, with a **known-hit control**: the query returned **#15550** first — the card whose PR surfaced this — proving it reaches this area, so an empty result would have been meaningful. The only other hit, **#15922**, is about fields with zero consumers and is unrelated. No duplicate.\n\n## Provenance\n\n⚠️ Not independently re-derived by this seat — this is the dev agent's driven measurement, relayed. The marker-file reading, the two entries, and the one-line stdout delta should be re-run before anyone acts on them."
+}

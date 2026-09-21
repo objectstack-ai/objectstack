@@ -1,0 +1,36 @@
+{
+  "number": 16121,
+  "kind": "issue",
+  "title": "cli: `os i18n extract` reports a key count the emitted bundle does not have — 776 printed for a 2-leaf file, and the summary adds the metadataForms keys a second time",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:11:56Z",
+  "updated_at": "2026-09-06T10:02:33Z",
+  "closed_at": "2026-09-06T09:47:11Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16121",
+  "body": "Found while working #14894; unrelated to that card's defect and deliberately not fixed there.\n\n## What is wrong\n\n`extractTranslations` returns `counts[locale]` as the number of EXPECTED ENTRIES it walked — every entry, `metadataForms` included (`packages/cli/src/utils/i18n-extract.ts`, the `count += 1` in the per-locale loop). The command then uses that one number for two things it is not:\n\n1. **The per-file line.** `packages/cli/src/commands/i18n/extract.ts` pushes each emitted bundle with `keys: result.counts[locale]` and prints `Wrote PATH (N keys)`. Under the default `--objects-only` the file written holds only the `objects` sub-tree, so N counts keys that are not in it.\n2. **The skeleton summary.** The same `counts` value is printed as `N key(s) (of N expected)` and then `+ M metadataForms key(s)` is appended — but those M are already inside N, so the line reads as N+M.\n\n## Measured\n\nFixture: one object with one field, one app, `i18n.defaultLocale: 'zh-CN'`, `--locales=zh-CN`. Leaf counts taken structurally off the emitted modules.\n\n```\n$ os i18n extract FIXTURE --locales=zh-CN --no-metadata-forms --out=OUT\n  Skeleton summary\n    zh-CN      776 key(s)  (of 776 expected)  + 773 metadataForms key(s)\n  Wrote OUT/zh-CN.objects.generated.ts (776 keys)\n```\n\nThe file that run wrote has **2** leaves. The true split of the 776 is 2 objects + 1 app + 773 metadataForms, so the summary's `+ 773` is the same 773 counted twice, and `(776 keys)` describes no file the run produced.\n\nReproduced on `main` at 2648774b967 and unchanged by #14894's fix (that card moves which keys are EMITTED, never how they are counted).\n\n## Why it is worth a card rather than a shrug\n\nThe number is the operator's only feedback that the extract did what they asked. It is what a reader compares against `os i18n check`'s report and against the coverage ratchet, and it is off by two orders of magnitude on the common path (the default `--objects-only`, which all nine of this repo's extract configs use).\n\n## Not in scope of #14894\n\nThat card is about which keys are emitted; this is about which number is printed. Fixing this changes stdout for every extract invocation, which is a wider verification surface than that card's repair, so it is filed rather than ridden along.\n\n## Dedupe\n\nSearched before filing; the near neighbours are all different or closed — #14816 (a docstring's inline-locale-map count), #14728 (coverage double-counting an action key, closed), #13837 (`os i18n check --help` under-counting kinds, closed). No open card covers the extract command's own count lines."
+}

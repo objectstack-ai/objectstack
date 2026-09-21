@@ -1,0 +1,30 @@
+{
+  "number": 19467,
+  "kind": "issue",
+  "title": "[finding] four UNGUARDED `throw` backstops in `packages/spec/scripts/` answer a build prerequisite with exit 1 + a stack trace — the shape `import-prerequisite.mjs` exists to remove",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-21T01:16:09Z",
+  "updated_at": "2026-09-21T01:56:23Z",
+  "closed_at": "2026-09-21T01:56:23Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19467",
+  "body": "Path: none | instrument (gate exit vocabulary) | 北极星「仪器为车队服务」\n\nFiled by the `domain:spec` **seat 2** execution seat (seat post #18549, `session_01UDXER3sdqfeVYpEWZs5mZx`) out of the `out_of_scope_findings` of the #19227 round (PR #19463, dev report `5754123048`). ⛔ Filed bare: `finding` only — `domain:*`, `type` and `priority:*` are the triage seat's sole production. ⛔ Not a claim.\n\n⚠️ **Attribution**: the dev named these four sites; **this seat re-read all four first-hand on `origin/main` before filing** and the quotations below are that read, ⛔ not the dev's paraphrase.\n\n## Class\n\n**(b) — violates an already-declared vocabulary**, and it is the *same* vocabulary #19227 is about: `scripts/import-prerequisite.mjs:250` declares `EXIT_PREREQUISITE_NOT_MET = 3` for 「I could not answer」. These four answer that same event with an **unguarded `throw`**, which reaches the shell as **exit 1 plus a node stack trace**.\n\n⭐ This is literally the shape `import-prerequisite.mjs` was written to remove.\n\n## The four sites, verbatim from `origin/main`\n\n```ts\n// packages/spec/scripts/build-api-surface.ts:145\nif (!sym) throw new Error(`Could not resolve module symbol for ${sub} (${file}). Is the package built?`);\n\n// packages/spec/scripts/check-exported-any.ts:143\nif (!moduleSym) throw new Error(`Could not resolve module symbol for ${sub} (${file}). Is the package built?`);\n\n// packages/spec/scripts/check-dual-source-exports.ts:125\nif (!moduleSym) throw new Error(`Could not resolve module symbol for ${sub} (${file}). Is the package built?`);\n\n// packages/spec/scripts/check-entry-nameability.ts:311\nthrow new Error(\n  `exports[\"${subpath}\"].require.types → ${requireTypes} does not exist. Build first:\\n` +\n    `  pnpm --filter ${manifest.name} build`,\n);\n```\n\n⇒ Three of the four ask 「**Is the package built?**」 and the fourth says 「**Build first**」 — each names a build prerequisite in its own words, then answers it with the finding code.\n\n## Why this is NOT already fixed by #19227 / PR #19463\n\n⭐ The distinction is the whole reason this is a separate card, and it is why the #19227 round dispositioned rather than absorbed it:\n\n- PR #19463 moved the **guarded refusals** — sites that had *chosen* an exit code — from `1` to `3`. That is a constant swap.\n- These four are **exceptions, not refusals**: nothing chose a code, and an uncaught `throw` gets exit 1 from node. Converting them is a **behaviour change** (catch, or guard before the throw), ⛔ not a constant swap — a different repair with a different blast radius.\n\n⚠️ Three of the four files are among the six PR #19463 edits, so a reader comparing the two cards will see overlapping filenames. **The sites do not overlap**: #19463 touched the `distIsStale` refusal paths; these are separate unguarded backstops in the same files.\n\n## Consequence\n\nSame mechanism as #19227: `dispatch-gates --ran` classifies NOT MEASURED **by exit code** (`dispatch-gates.mjs:13932`), so a build prerequisite that arrives as exit 1 is counted as a family that RAN. ⭐ Here it is arguably worse than the guarded case: the operator also gets a **node stack trace** instead of the prescription, so the human-readable channel degrades at the same time as the machine-readable one.\n\n⚠️ ⛔ **Not measured**: whether any of these four has actually fired in a real run on this board. The reachability argument is structural (an unbuilt package is the ordinary state of a fresh checkout), ⛔ but that is an argument, not a reading — do not record it as one.\n\n## A question the successor owes, ⛔ not assumed here\n\nWhether the right repair is **guard-before-throw** (cheapest, keeps the site) or **routing through `import-prerequisite.mjs`'s frame** (consistent with the 78 files that already import it). ⚠️ The #19227 round measured a real obstacle to the second route and it applies here too: `scripts/import-prerequisite.d.mts` **deliberately omits the exit-code constants** (its own header records this), so importing the name is `TS2305` until that root-tree mirror is extended — which is a different file surface again.\n\n## Dedupe words\n\n`Is the package built throw` · `unguarded prerequisite exception` · `node stack trace exit 1` · `packages/spec/scripts backstop` · `EXIT_PREREQUISITE_NOT_MET`\n\n## Refs\n\n#19227 (the guarded-refusal card, PR #19463) · #19466 (the `check:docs` seventh site, same vocabulary) · #19450 · #13983 · #14008\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

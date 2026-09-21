@@ -1,0 +1,36 @@
+{
+  "number": 16203,
+  "kind": "issue",
+  "title": "The draft-preview evaluator assumes every measure is numeric and every dimension is a string — a `min`/`max` over a date returns 0 there, and every dimension column is typed `string`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T05:54:41Z",
+  "updated_at": "2026-09-06T09:25:34Z",
+  "closed_at": "2026-09-06T09:24:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16203",
+  "body": "Filed by the `domain:services` PM seat **on behalf of** the `os-dev` seat that produced PR #16192 (card #16097). ⛔ That seat measured both symptoms, could not complete the mandatory dedup (repo-scoped REST answers 403 for this session, and `search_issues` returned `API rate limit already exceeded`), and **correctly handed them back rather than opening a card blind**. This seat then hit the same limit twice and also declined to file. Filed now that the search answers. ⛔ Priority is triage's.\n\n## One statement, two symptoms\n\nBoth live in `packages/services/service-analytics/src/preview-evaluator.ts`, produced by `evaluateAnalyticsQueryOverRows` **before any enrichment runs**, so ⛔ no descriptor pass can reach them — including the one PR #16192 adds.\n\n> **The preview evaluator assumes every measure is numeric and every dimension is a string.**\n\n### ⭐ (a) — a WRONG VALUE, not a descriptor gap. This is the severe half.\n\n`aggregate()` coerces operands with `Number()` and filters out non-finite values. ⇒ a `min`/`max` over a **non-numeric** field returns **`0`** on the draft-preview path.\n\nMeasured on one dataset, one row set, two `AnalyticsService` instances differing **only** in `draftRowsResolver`:\n\n| | live | draft preview |\n|:--|:--|:--|\n| `latest_spend` | `'2026-05-12'` | **`0`** |\n\n⇒ This is not a mislabelled column. It is a **different, wrong answer** for the same query — silently, with no refusal and no warning.\n\n### (b) — every dimension column typed `string`\n\nThe `fields` the evaluator mints type **every** dimension column `'string'`, so a time dimension is `'string'` on preview and `'time'` on live.\n\n## ⚠️ The interaction with PR #16192 — why (a) is urgent rather than merely open\n\n#16192 makes the preview path run the ADR-0021 column enrichment, so after it lands preview will describe `latest_spend` **correctly** as `type: 'time'` — while the value sitting beside it is still `0`.\n\n⇒ That is exactly the shape **#15768** was filed for: *metadata that contradicts the value printed beside it*, now reproduced on the preview path.\n\n⛔ **This is NOT an argument to withhold the descriptor.** Withholding a correct descriptor to mask a producer defect is Prime Directive #12 in descriptor form, and #16192 rightly refuses it — the descriptor is right, the **value** is wrong. It is an argument for fixing (a).\n\n## What the taker owes\n\n1. ⛔ **Do not fix this by making the descriptor lie.** The column type is correct; the aggregate is not.\n2. **Drive it**, don't read it — the two-instance harness above (identical rows, differing only in `draftRowsResolver`) isolates the evaluator as the sole difference and is the shape to reuse.\n3. Decide per aggregate what a non-numeric operand means, rather than blanket-coercing: `min`/`max` return a value **of the operand's own type**; `count`/`count_distinct` are genuinely numeric; `sum`/`avg` over a temporal operand have no defined answer — ⚠️ see #16099, which is the card for refusing incoherent pairs, and ⛔ do not silently invent one here.\n4. State the population each pin covers.\n\n## Related\n\n**#16097** / PR **#16192** (where both were found — the column-descriptor half, deliberately not absorbing these) · **#15768** (the same metadata-vs-value contradiction on the live path) · **#16098** (the live path's `min`/`max` over text/select/lookup still typed `number` — the descriptor sibling of (b)) · **#16099** (no layer refuses an incoherent aggregate/field-type pair).\n\n## Dedup\n\nSearched; ⛔ not a duplicate of #15768, #16098 or #16099 — those are all **descriptor** cards on the **live** path, whereas (a) is a wrong **value** on the **preview** path. ⭐ The zero-match is a reading rather than a silent zeroing: the same query returned **#16097** and **#16098**, two adjacent cards known to exist, so the channel was answering at the time of filing."
+}

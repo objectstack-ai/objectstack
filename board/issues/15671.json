@@ -1,0 +1,36 @@
+{
+  "number": 15671,
+  "kind": "issue",
+  "title": "pm-dispatch: record the triage seat's alternating-repo pickup and its 4-hour starvation guard as a lane reference (`references/lanes/triage.md`) — execution of the #15476 ruling A",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T02:41:52Z",
+  "updated_at": "2026-09-06T07:47:05Z",
+  "closed_at": "2026-09-06T06:15:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15671",
+  "body": "Filed by the `domain:skills` seat (session `session_019RfFHiRCSs3JXLK4cwcfox`, os-steve) as the documentation half of the maintainer's ruling on #15476 (batch #41, recorded by the director seat in comment 5548638091, verbatim reply 「同意」). Self-triaged: `priority:p2`, governed surface, `pm:queue` until a slot frees.\n\n## The ruling (as recorded)\n\nThe triage seat stays single. Alternating-repo pickup is standing seat discipline: one round objectstack, one round objectui, one round objectstack …; within a repo, oldest-first. Starvation guard: if either repo's oldest un-routed card is older than 4 hours at the start of a round, that repo takes the round regardless of turn. No second seat, no fire-frequency change. The ruling's execution line: \"one paragraph in the triage lane reference under `.claude/skills/pm-dispatch/references/lanes/`\".\n\n## Placement (the seat's reading — the ruling's execution note assumed a file that does not exist)\n\n`references/lanes/` carries eight lane job descriptions (cli · devx · director · engine · hotcrm · services · skills · spec) and none for the triage seat; the triage seat's standing duties live in `SKILL.md`'s「分诊座位职责」section, which is at its ceiling (811 of 811) and already has two cards serial on it (#15666, #15404). ⇒ Create `references/lanes/triage.md` as the triage seat's lane reference, holding today only what the ruling asks for: the pointer line every lane file opens with (the SKILL.md section it details), then the pickup rule as rules — one rule per line, ≤120 bytes, plain Chinese with identifiers in backticks, ⛔ only on prohibitions, no dates, no quotations, no card numbers:\n\n1. 分诊每 fire 只取一个仓,两仓轮替:objectstack、objectui、objectstack……;仓内按最旧优先。\n2. 饥饿守卫:轮次开始时任一仓最旧未路由卡超过 4 小时,该仓本轮优先,不论轮到谁。\n3. ⛔ 不回退到跨仓全局最旧优先;⛔ 不因积压增设第二分诊席或改 fire 频率。\n\nPlus its `CEILINGS` row in `scripts/pm/check-skill-line-ratchet.mjs`, pinned at the landed count (headroom 0, the map's convention for a new file), and a `MAX_TABLE_ROW_BYTES` row at 0 (no table). ⛔ No edit to `SKILL.md` or any other lane file; the triage seat post (#6015) may point at the file afterwards — that is the triage seat's own edit, not this card's.\n\n## Serial and gates\n\nThe ratchet map is shared with PR #15641 (member 3 of #15379, re-merging `main` after being removed from the queue) on disjoint rows — this card dispatches after PR #15641 lands to keep the map's rows in one order. Gates: `check:pm-skill-ratchet`, `check:skill-frame-sync`, `check:pm-skill-id-lint`, `check:pm-governed-prose`, `check:nul-bytes`, whatever `dispatch-gates --commands` derives. Governed (`.claude/**`) ⇒ draft PR, in-seat review, `os-zhuang` + `hotlong`, human merge, `skip-changeset`. XS.\n\nRelated: #15476 (closed, the ruling) · #15379 (the rules-only programme this file is born under)."
+}

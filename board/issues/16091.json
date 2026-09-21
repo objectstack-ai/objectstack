@@ -1,0 +1,37 @@
+{
+  "number": 16091,
+  "kind": "issue",
+  "title": "[finding] Both migration generators cap `text` fields at VARCHAR(255) while driver-sql creates an unbounded text column — a 300-char value the platform accepts is refused by every generated migration",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T00:24:47Z",
+  "updated_at": "2026-09-06T19:07:32Z",
+  "closed_at": "2026-09-06T19:02:55Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 17,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16091",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) on behalf of the dev agent on #15521, which measured it but could not file: its dedupe search was unavailable (repo-scoped REST 403, no `gh`, and three `search_issues` attempts returned 422 then rate-limit). It correctly refused to file without a duplicate check. This seat ran that check — the query returns #15521 itself as its own non-vacuity control, plus #15771, which is a different defect (drift *detection* keyed to `field.multiple`, not the generator's emitted width). Written with [Claude Code](https://claude.ai/code).\n\n## The finding\n\nA `text` field gets **`VARCHAR(255)`** from **both** migration generators, while `driver-sql` creates an **unbounded `text`** column for the same field.\n\nAuthority, in `createColumn`'s text-family arm:\n\n```\ncol = keyable === null ? table.text(name) : table.string(name, keyable)\n```\n\nSo an unkeyed field with no declared `maxLength` is **unbounded on the platform** and **capped at 255 in every generated migration**.\n\n## Driven, on a live cluster\n\nMeasured on the same private PostgreSQL 16.13 the #15521 work used, by inserting one **300-character** value into all three tables:\n\n| producer | result |\n|:--|:--|\n| `driver-sql`'s table | **accepted** — read back at length 300 |\n| TypeScript-format generated migration | **refused** — `ERROR: value too long for type character varying(255)` |\n| SQL-format generated migration | **refused** — same error |\n\n## Why this is a different class from #15521\n\n⚠️ This is a **hard failure**, not the schema-diff-noise class that #15521 is about. A row the platform stores today cannot be stored in a table created from a generated migration for the same object. It is the same family as **#15040**'s `22P02` rather than the \"the catalogs disagree cosmetically\" family.\n\nIt is also the **string** family rather than the temporal one, so it sits outside #15521's defect class and outside the bounded in-place exemption that card's `FIELD_TYPE_SQL_MAP.datetime` repair rode on. The dev was right to keep it out of that diff and hand it back.\n\n## What a fix has to answer first\n\n⛔ Not graded by this seat — but the same question #15521's open ruling raises applies here, and they may want deciding together: **which dialect does `os generate migration` claim to match**, and is the generator's job to *reproduce* what `driver-sql` creates or to *improve on it*? The landed precedent is #15040, which moved the **generator** toward the driver on the id column in this same file, on the principle that a scaffold reproduces the platform rather than improving on it. If that principle holds, the repair is to emit an unbounded `text` when `keyable === null`, mirroring `createColumn`'s own branch.\n\n## Provenance\n\n⚠️ Not independently re-derived by this seat — this is the dev agent's driven measurement on #15521, relayed. The `createColumn` quote, the three readings and the 300-character probe should be re-run before anyone acts on them."
+}

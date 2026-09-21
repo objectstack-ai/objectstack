@@ -1,0 +1,33 @@
+{
+  "number": 16257,
+  "kind": "pull_request",
+  "title": "docs(check-type-source-resolution): name the `paths` precondition and the maintainer-only closure at the point of refusal",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T08:12:58Z",
+  "updated_at": "2026-09-06T09:16:14Z",
+  "closed_at": "2026-09-06T09:16:13Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T09:16:13Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16257",
+  "body": "Fixes #16000\n\n`check-type-source-resolution` names `paths` as its first remedy when a registered\npackage acquires a NEW dist-resolved type import. That remedy has a precondition the\nmessage never stated: the consuming program's `rootDir` has to contain the\ndependency's source. Where it does not, the author walks into a second wall that\nnothing at the point of refusal mentioned — and past that wall every remaining route\nis maintainer-only, so the message recommended a path and then named no remaining\nself-serve option.\n\nThe knowledge was already in this file the whole time — its header records the\nwith-`paths` red at `:27-28`, and the registry doc-block states that `paths` is\n\"additionally the WRONG tool, measured on PR #12570\". None of it was in the text an\nauthor actually reads. The #15978 round paid a full cycle discovering it.\n\n**Message only. The verdict is untouched**, per the card and its triage: what the gate\njudges, the shrink-only registry and every `tsconfig*.json` in the repo are unchanged.\n\n## The card's hard precondition: the `paths` leg, re-measured here\n\nThe card asks for the closure to be reproduced before it is written into a message\n(\"A message that overstates the closure would be worse than the current silence\").\nReproduced on this branch, on the same pair and through the same program —\n`@objectstack/runtime` reaching `@objectstack/service-realtime` via\n`tsconfig.test.json`, with this gate's own remedy applied to\n`packages/runtime/tsconfig.json` and one new cross-package `import type`:\n\n| leg | program | total errors | TS6059 |\n|:---|:---|---:|---:|\n| baseline, pristine tree | `packages/runtime/tsconfig.test.json` | 191 | 0 |\n| with the `paths` remedy | same | 204 | **13** |\n\n**+13, all of them TS6059, and not one new code error** — every other diagnostic\ncode's count is identical across the two legs (TS18048 x91, TS18046 x27, TS2339 x17,\nTS2493 x15, TS2345 x10, TS6133 x6, TS2322 x6 … unchanged). All 13 name\n`packages/services/service-realtime/src/**`, billed into `packages/runtime`'s\ntest-typecheck ledger, which `service-realtime` cannot see. That confirms the card's\nmeasured 13 exactly, and the 191 baseline matches the count `tsconfig.test.json`'s own\nheader records for this program.\n\nThe mutation was proven to land on disk before either reading (grep counts on both\ntouched files plus `git hash-object`), and restoration was proven byte-identical\nagainst the HEAD blob hashes with a scoped `git diff HEAD` of 0 bytes. Nothing from\nthe reproduction is committed.\n\n## What changed, and what deliberately did not\n\nAdded to the refusal's remedy paragraph, after the existing re-baseline limb: the\n`paths` precondition, the TS6059-into-the-ledger outcome it produces when the\nprecondition fails, and the remaining option stated plainly — do not take the\ndependency (reach the subject through in-package source), or escalate, because the\nledger and `rootDir` are both maintainer-only.\n\nWritten as a CONDITION, never as a blanket closure. `paths` stays the correct remedy\nwherever the consuming program's `rootDir` does contain the source; a message\noverstating the closure would turn an author away from a route that is open, which is\nworse than today's silence.\n\nThree literals were kept intact because they are a cross-gate contract:\n`widening the registry entry is not the fix` (the PREDICATION shape\n`check-ratchet-remedy-authority` classifies this file as `refused` from), the\n`SHRINK-ONLY` testimony, and the `ONBOARDED` exception. The new sentences are added\naround them, never in place of them, and the two new negations are bound to their\nverbs (\"Never widen that ledger\", \"never widen a `rootDir`\") so every offer this\nmessage makes is still refused. `check:ratchet-remedy-authority` confirms it: 6 gates\nstill turn the expanding remedy down outright, unchanged.\n\nTwo self-test pins added, in the existing `the registry, audited in BOTH directions`\nbattery — one that the failure text names TS6059, one that it names the\nmaintainer-only closure. They fail independently because the halves fail\nindependently. That battery's floor is raised 10 to 12 to match, never loosened.\n\n## Gates\n\nAll 31 commands derived by `node scripts/pm/dispatch-gates.mjs --changed --commands\n--repo objectstack-ai/objectstack` on the merged tree, reconciled with `--ran`.\nEvery one exit 0, exit codes captured before any pipe. The load-bearing verdict lines:\n\n- `check-type-source-resolution --self-test OK`\n- `check-type-source-resolution OK — 125 tsc program(s) across 78 packages scanned …\n  61 registered` (the production verdict, unchanged by this diff)\n- `OK  check-ratchet-remedy-authority: 213 scripts swept … 6 turn it down outright`\n- `check-nul-bytes: OK (scanned 7959 text file(s) … no raw ASCII control bytes)`\n\nNo publish surface, so `skip-changeset` is applied. #16215 remains open and is\nunrelated to this diff.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8)_"
+}

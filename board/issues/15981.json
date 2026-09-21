@@ -1,0 +1,38 @@
+{
+  "number": 15981,
+  "kind": "issue",
+  "title": "Four server-side readers derive platform authority from the NAME in `ExecutionContext.positions` — same species as #15948's blocked escalation, and already reachable on `main`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T17:17:52Z",
+  "updated_at": "2026-09-06T19:46:32Z",
+  "closed_at": "2026-09-06T14:16:09Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15981",
+  "body": "## The four sites\n\nEach derives platform-admin authority from a **name** in `ExecutionContext.positions` rather than from the capability rung:\n\n| file | line |\n|---|---|\n| `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` | `:254` |\n| `packages/plugins/plugin-approvals/src/approval-service.ts` | `:976` |\n| `packages/runtime/src/domains/activation-gate.ts` | `:149` |\n| `packages/plugins/plugin-security/src/explain-engine.ts` | `:117` |\n\n⚠️ **These are pre-existing and reachable on `main` today.** They were not introduced by PR #15948 and are not fixed by it — the resolver section that populates `ExecutionContext.positions` is untouched by that PR. ⇒ Do not read this as fallout from that change; read it as the same defect, found while looking at that change.\n\n## Why this is the same species as a blocked escalation\n\nPR [#15948](https://github.com/objectstack-ai/objectstack/pull/15948) was **failed** in Clause-② review for deriving `isPlatformAdmin` as an array-name read. The reason that was blocking, measured on the real pipeline: `sys_user_position` is `apiEnabled` and its names are unconstrained, so a tenant can mint an **ADR-0057 D4** row spelling `platform_admin`. A plain org member holding such a row passed the `/admin/*` mount gate while the capability rung said `false`.\n\nCore's own resolver states the rule, at `resolve-authz-context.ts:1125-1129`:\n\n> Read the RUNG — never `positions.includes(...)`; an ADR-0057 D4 `sys_user_position` row may spell that very name.\n\n⛔ **That is a comment, not a gate.** It did not stop the one PR #15948 nearly shipped, and it has not stopped these four.\n\n⭐ **`ctx.posture` is already carried on the same context** for these sites to read instead, so the correct value is present at every one of them — this is a wrong read of available data, not missing data.\n\n## What the taker owes, in order\n\n1. **Drive each of the four**, don't read them. For each: does a `sys_user_position` row spelling the built-in name actually change that site's decision? ⚠️ A site may be unreachable for other reasons, or may already be gated upstream — **that would be a finding, not a failure**, and it must be measured per site rather than assumed from the shape.\n2. ⛔ **Do not verify this class by string search.** PR #15948's instance was written through the **constant** `BUILTIN_IDENTITY_PLATFORM_ADMIN`, so a grep for the string literal returned **zero on both the broken and the fixed head**. I made exactly that mistake; a failing control is what caught it. Read the assignment, or drive it.\n3. **Fix by reading the rung**, matching what PR #15948 landed: `grants.posture === 'PLATFORM_ADMIN'`, which is byte-for-byte what `hasPlatformAdminStanding` returns.\n4. **Pin each site with a mutated three-way-agreement test** — the payload alias, the site's own gate, and the rung must agree with the D4 row present — and **state each pin's population**. ⭐ Round 1 of #15948 got through the author's own check because a green pin (`platform-admin-standing.consolidation.test.ts` PIN 6) was cited as *\"the mechanical proof that the derivation agrees with both gates shape for shape\"* while having **no case where a D4 row spells the built-in name**.\n\n## Scope note\n\n⚠️ **Four packages, and this seat is `domain:services`.** `runtime/src/domains/activation-gate.ts` may belong to another lane; split if so. ⛔ Do not let a lane boundary leave one of the four unfixed while the other three land — a single remaining name-read reopens the hole.\n\n## Dedup\n\nChecked by the reviewer that found them: no existing card matches. The nearest, **#11978**, is a different census.\n\n## Related\n\n- **#15972** — the class at its source: nothing stops a tenant minting the colliding row in the first place. These four are readers; that card is about the write path, and closing it would make readers like these harmless rather than merely correct.\n- **#15136** / PR #15948 — the instance that surfaced the rule, the ruling that made it live, and the three-way-agreement pin shape to copy.\n- **#15943** — the same confusion in the opposite direction, in a showcase object."
+}

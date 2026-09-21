@@ -1,0 +1,34 @@
+{
+  "number": 16269,
+  "kind": "pull_request",
+  "title": "docs(api): INVALID_FIELD's searchFields clause covers the two value-shape refusals (#15882)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T09:00:42Z",
+  "updated_at": "2026-09-06T12:19:09Z",
+  "closed_at": "2026-09-06T12:19:08Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T12:19:08Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16269",
+  "body": "Fixes #15882\n\n## What changed\n\nExtended the `searchFields` parenthetical inside the `### INVALID_FIELD` entry of `content/docs/api/error-catalog.mdx` (lines 71-80 on `origin/main`) so it also names the two value-**shape** refusals on that axis, alongside the existing \"real field outside the searchable set\" clause. No other entry in the file was touched.\n\n## Producer sites (verified on `origin/main` at dispatch tip `0e16fc454`, re-read on the branch base `77781151d`)\n\nBoth live in `packages/metadata-protocol/src/protocol.ts`, inside `assertSearchFieldsAreSearchable` (function starts `:9788`):\n\n- `:9800-9807` — array-entry-not-a-string: `'${param}' entry #${badShape + 1} on object '${object}' is not a field name. '${param}' narrows which columns 'search' scans, as a comma-separated string or an array of field names.` Sets `err.code = 'INVALID_FIELD'` (line 9804), `err.status = 400` (9805), `err.param = param` (9807).\n- `:9813-9821` — value neither string nor array: `'${param}' on object '${object}' must be a comma-separated string or an array of field names, received ${...}.` Sets `err.code = 'INVALID_FIELD'` (9818), `err.status = 400` (9819), `err.param = param` (9821).\n\nBoth confirmed: `code = 'INVALID_FIELD'`, `status = 400`, and the offending name lands in `param` (not `field`) — matching the catalog's existing framing for this axis.\n\n**`:9556` classification**: that line (`'${param}' entry #${badShape + 1} on object '${object}' is not a field name.`) lives in `assertProjectionFieldsExist`, not `assertSearchFieldsAreSearchable` — it is the **`fields`/projection** axis's own array-shape refusal (the retired nested-select object form, `{ field, fields, alias }`), a structurally identical message reused on a different parameter. It is **not** a third `searchFields` site. The card's \"two\" producer sites for `searchFields` stands; the fix covers exactly those two.\n\n## Denominator re-run\n\n```\n$ git grep -nE \"code(: | = )'INVALID_FIELD'\" -- 'packages/**/*.ts' | grep -v '\\.test\\.ts' | wc -l\n22\n```\n\nUnchanged from triage's reading — 22 `INVALID_FIELD` assignment sites, of which the two above are the `searchFields`-axis shape refusals this PR's clause now names.\n\n## Framing\n\nPer triage (endorsed and carried into this PR): the shape refusal is still *field-name*-flavoured — the value being refused is a list of field names. This is a **coverage gap in one clause of the Cause text, not a second meaning for the code**. The code, status, and `param` field are unchanged; only the Cause prose is extended to describe both refusals this axis already raises. `packages/metadata-protocol` was not touched.\n\n## Gates\n\n39 commands derived via `node scripts/pm/dispatch-gates.mjs --commands content/docs/api/error-catalog.mdx` at branch base `77781151d`, all run to completion, all passing at head `7f49c35a6` (identical file content between the pre-commit working tree and the commit — no further edits after the gate run):\n\n- `node scripts/check-ci-filter-parity.mjs` — 0\n- `node scripts/check-closing-keyword-parity.mjs` (+ `--self-test`) — 0 / 0\n- `node scripts/check-comment-mask-corpus.mjs` — 0\n- `node scripts/check-doc-frontmatter.mjs` (+ `--self-test`) — 0 / 0\n- `node scripts/check-doc-route-spelling.mjs --advisory` / `--self-test` — 0 / 0\n- `node scripts/check-docs-section-name.mjs` (+ `--self-test`) — 0 / 0\n- `node scripts/check-section-landing-index.mjs` (+ `--self-test`) — 0 / 0\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — 0 (after building `@objectstack/spec`+`@objectstack/lint` dependency closure through the shared verify lock; first attempt returned `PREREQUISITE NOT MET` exit 3 pre-build)\n- `pnpm --filter @objectstack/lint run check:doc-security-posture` — 0 (same prerequisite)\n- `pnpm --filter @objectstack/spec run check:docs` — 0 (same prerequisite; needs `gen:schema`'s output, produced by the `spec` build)\n- `pnpm --filter @objectstack/spec run check:empty-state` — 0\n- `pnpm --filter @objectstack/spec run check:liveness` — 0\n- `pnpm --filter @objectstack/spec run check:skill-examples` — 0 (needed `@objectstack/client-react` built too; first two attempts were `PREREQUISITE NOT MET` exit 1 for missing `.d.ts` — built via the shared lock, then green)\n- `pnpm --filter @objectstack/spec run check:strictness-ledger` — 0\n- `pnpm --filter @objectstack/spec run check:variant-docs` — 0\n- `pnpm --filter @objectstack/spec run check:yaml-examples` — 0\n- `pnpm check:corpus-claim-drift` — 0\n- `pnpm check:cross-package-test-inputs` — 0\n- `pnpm check:doc-anchors` — 0\n- `pnpm check:doc-authoring` — 0\n- `pnpm check:docs-audit-scope` — 0\n- `pnpm check:docs-redirects` — 0\n- `pnpm check:docs-single-h1` — 0\n- `pnpm check:docs-transcript-drift` — 0 (same lint-build prerequisite as above)\n- `pnpm check:driver-memory-census` — 0\n- `pnpm check:error-status-conformance` — 0\n- `pnpm check:nul-bytes` — 0 (re-run after commit, at head `7f49c35a6`)\n- `pnpm check:published-readme-links` — 0\n- `pnpm check:react-page-adapter-contract` — 0\n- `pnpm check:refd-timer-probe` — 0\n- `pnpm check:role-word` — 0\n- `pnpm check:skill-identifier-liveness` — 0\n- `pnpm check:vendor-version-stamps` — 0\n- `pnpm check:watch-hint-literal` — 0\n\n`TURBO_SCM_BASE=\"$BASE\" pnpm exec turbo ls --affected` reports **0 affected packages** for this diff (pure `content/docs` prose, no package build graph edge) — no dependency-closure build was owed for the diff itself; the three builds above were pulled in only as prerequisites of otherwise-unrelated whole-tree doc gates that read compiled `dist/`, not because this change touches those packages' sources.\n\n## Changeset\n\n`content/docs/**` publishes nothing from any released package → `skip-changeset` label applied to this PR.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 16417,
+  "kind": "pull_request",
+  "title": "fix(lint): validateFormLayout resolves a list-bound view's object for its default form",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T21:33:42Z",
+  "updated_at": "2026-09-06T22:44:04Z",
+  "closed_at": "2026-09-06T22:44:03Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T22:44:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16417",
+  "body": "Fixes #16168\n\n## What\n\n`validateFormLayout` now falls back to the container's `list` binding (`list.data.object` / `list.object` / `list.objectName`, via the shared `viewObjectName`) when resolving the bound object for a form site, whenever the container itself carries no `object` / `objectName` / `data.object` of its own. This is the same third rung `validate-translatable-sections.ts:178-179` already carries for its own sites (`recordObject` / `listBinding`) — carried, not duplicated, into `validate-form-layout.ts:132/142`.\n\nBefore: a view container that binds its object only through the `list` block (HotCRM's own shape, all 14 of its views) had `containerObject === undefined`, so every site under it — including its own default `form` — could never resolve an object, and `form-field-unknown` / `form-section-group-unknown` never fired there, however wrong the section content was.\n\n`packages/lint/src/validate-form-layout.ts` — the fix (2 new lines + 1 changed line + comments).\n`packages/lint/src/validate-form-layout.test.ts` — new describe block (\"falls back to the container list binding\"): P1/P2 (red-first on unmodified code, confirmed), N1 positive control (byte-identical `where`/`path` with `object` also on the container), N2 clean list-bound container, N3 a `formViews[]` entry with its own binding (unchanged), N4 no binding anywhere stays silent (unchanged), plus a pin proving `absolute-colspan-discouraged` was never gated on the object binding (see \"colspan\" below).\n`.changeset/lint-form-layout-list-binding.md` — `@objectstack/lint` patch.\n\n## Why\n\nFiled by the hotcrm epic's rule-survey seat (hotcrm card 1637): on hotcrm at `db5fe702`, 49 of 49 authored form sections across 14/14 views were unreachable by this validator because every one of those views binds its object only via `list.data.object`. Triaged (comment 5556877712) against `origin/main`: the diagnosis holds on the platform source, and the fix shape already exists one validator over — this PR carries that same ladder into `validate-form-layout.ts`, and only there (the package's other two ladder lengths are a separate convergence card per that triage, out of scope here).\n\n## Colspan — measured, not assumed\n\nThe filing seat's own scope correction (comment 5556746408) flagged `absolute-colspan-discouraged` as **unmeasured** on the \"never fires\" claim. Measured here: the colspan check (`validate-form-layout.ts`'s `(b)` block) sits **outside** the `known`-gated block — it needs only `entry.colSpan != null`, never `objName` / `known`. So it was never actually dead on a list-bound container; it already fired regardless of whether the object resolved. This PR's fix therefore changes only `form-field-unknown` and `form-section-group-unknown`.\n\n## Risk & cost (rollback)\n\nAdvisory-only (`severity: 'warning'`) — nothing is blocked. A stack whose list-bound container's default `form` (or an unbound `formViews.*` entry) references a real dangling field/group now surfaces a warning it did not surface before; a clean stack of the same shape produces no new output (N2/N4 pin this). Patch-level change to `@objectstack/lint`, single-file source diff, revert is a straight `git revert`.\n\n## Open questions for the maintainer\n\nSee report JSON `open_questions` (posted as a comment on this issue) — notably what the `groups` legacy-bucket alias (card 6926) now surfaces once this binding resolves, per the triage seat's ask; reported there for information, not acted on here.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8"
+}

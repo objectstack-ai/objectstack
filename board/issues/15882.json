@@ -1,0 +1,35 @@
+{
+  "number": 15882,
+  "kind": "issue",
+  "title": "`error-catalog.mdx`'s `INVALID_FIELD` Cause does not cover the two `searchFields` SHAPE refusals that raise it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T12:23:11Z",
+  "updated_at": "2026-09-06T12:24:51Z",
+  "closed_at": "2026-09-06T12:19:09Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15882",
+  "body": "Found while rewriting the `INVALID_FIELD` block of `content/docs/protocol/kernel/error-handling.mdx` for #15800 (that card's scope is that one block; `error-catalog.mdx` is explicitly out of scope there, so this is filed rather than fixed).\n\n⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by an `os-dev` seat.\n\n## The gap\n\n`content/docs/api/error-catalog.mdx:71` publishes `INVALID_FIELD`'s Cause as *a field NAME that does not exist on the target object*, and enumerates the read axes it covers, including:\n\n> `searchFields` (a real field outside the searchable set gets its own message)\n\nTwo producers raise `INVALID_FIELD` on the `searchFields` axis for a condition that enumeration does not describe — **the parameter's own value shape**, not a name that fails to resolve:\n\n```\npackages/metadata-protocol/src/protocol.ts:9610\n  `'<param>' entry #<n> on object '<object>' is not a field name. `\n  + `'<param>' narrows which columns 'search' scans, as a comma-separated string or an array of field names.`\n\npackages/metadata-protocol/src/protocol.ts:9624\n  `'<param>' on object '<object>' must be a comma-separated string or an array of field names, `\n  + `received <typeof value>. ...`\n```\n\nBoth set `code = 'INVALID_FIELD'`, `status = 400`, and `param` (not `field`). The first fires when an array entry is not a string; the second when the parameter is neither a string nor an array.\n\n## Why it is worth a row\n\nThese are the only two of the 22 repo-wide `INVALID_FIELD` assignment sites that refuse a **value shape** rather than an unresolvable name. An integrator reading the catalog's Cause has no way to predict them, and an operator who hits one reads a Cause text describing a different condition. They are also the sites most likely to be mistaken for the meaning #15800 removes from `error-handling.mdx` («Field value has wrong type») — so leaving them undocumented keeps a fragment of that removed meaning alive with no published home.\n\nThe shape is still *field-name*-flavoured: the value being refused is a list of field names. This is a **coverage** gap in one clause of the Cause text, not a second meaning for the code, and ⛔ no claim is made here that the runtime code choice is wrong.\n\n## Two ways to close it (⛔ not decided here)\n\n- **A** — extend the catalog's `searchFields` clause to name the shape refusal alongside the outside-the-searchable-set refusal. One clause, no code change.\n- **B** — leave the catalog alone and treat the shape refusal as belonging to another code. That is a runtime contract change, needs an ADR-0112 reading, and is much larger than the observation.\n\nA is the cheap reading; the measurement above does not settle which is right, so this is filed unassigned and ungraded for triage.\n\n## Re-check\n\n```\ngit grep -nE \"code(: | = )'INVALID_FIELD'\" -- 'packages/**/*.ts' ':!**/*.test.ts'   # 22 sites / 5 files\nsed -n '9604,9630p' packages/metadata-protocol/src/protocol.ts\nsed -n '71,80p' content/docs/api/error-catalog.mdx\n```\n\n**Dedup:** one semantic `search_issues` for this condition returned 4 issues, all closed and all about a different defect (#7534, #6897, #6674, #4830); no open card names this gap.\n\nRelated: #15800 (the `error-handling.mdx` block this was found under), ADR-0112, ADR-0114.\n"
+}

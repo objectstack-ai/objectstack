@@ -1,0 +1,35 @@
+{
+  "number": 15922,
+  "kind": "issue",
+  "title": "lint: a field declared on an object with zero consumers (no view, form, page, flow, translation or seed reads it) passes `os validate` and `os lint` — HotCRM's retired local scanner is the design input",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:36:42Z",
+  "updated_at": "2026-09-06T15:43:08Z",
+  "closed_at": "2026-09-06T15:12:27Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15922",
+  "body": "Filed by the director seat (#12708, summon #15, `session_01TezFG8ZMrNH6n5VTNpPpdH`) as the platform half of the hotcrm#1543 ruling (**F**, maintainer, 2026-09-05, verbatim 「1543 选 F」). Unlabelled on purpose — `domain:*`, type and priority are triage's. Not claimed.\n\n## The gap\n\nAn authored field that nothing in the app consumes — no view column, no form section, no page block, no flow node, no translation entry, no seed row — is schema-valid and passes `os validate`, `os lint`, `tsc` and the app's test suite. The declaration is inert and nothing in the toolchain says so.\n\nThis is the \"declared but never read\" class of #4698 applied to *fields*. #4698 closed via PR #4985 with the sharing-rule instance only (a `has(...)` condition the seeder skips); its own review recorded that the general \"unread key\" diagnostic was not built, and the tenant-unique instance went to the engine lane. The field-level detector has never existed in the platform.\n\n## Measured, on the one app that built its own\n\nHotCRM (`objectstack-ai/hotcrm`, `origin/main` `b1599507`) carried `scripts/scan-field-consumers.ts` (573 lines) + `test/field-consumer-scan.test.ts` (318 lines) to answer exactly this question. The 2026-08-31 ruling in that repo's `AGENTS.md` (\"Lint, validation, gates and diagnostics belong to the platform, uniformly … ⛔ Do not grow a gate farm\") and hotcrm#1543's ruling F retire it there; this card is where the capability lands instead.\n\nWhat that scanner measured, worth carrying over as design input rather than re-deriving:\n\n- It walks the **registered metadata stack** only (six roots), never `test/` — so its ledger cannot see test fixtures, which is what made hotcrm#1543 a decision.\n- It distinguishes **consumer kinds**: display roots (`views`, `pages`, `apps`) vs carrier roots (`translations`, `data`, `mappings`), yielding verdicts `live` / `display-only` / `carrier-only` / `inert`. Whether the platform diagnostic keeps that taxonomy or reports a single \"zero consumers\" verdict is the first design question.\n- It is **object-aware**: the same field name on two objects gets two verdicts (HotCRM measured `tax_rate`, `line_number`, `description` as such pairs). A name-only scan misreports both.\n- Its live ledger on HotCRM read 15 inert rows (1 on `crm_product`, 14 more adjudicated on hotcrm#1199), all of which passed every platform check.\n\n## What is asked\n\nAn `os lint` rule (or `os validate` diagnostic — triage/devx to place it) that reports a declared field with zero consumers across the registered metadata stack, loudly, with the field's object and the roots scanned. Whether the report is a warning or a refusal, and whether `display-only` / `carrier-only` are separate verdicts, are the design questions for the implementing lane; the retired scanner's source (HotCRM git history before the #1543 retirement PR) is reference material, not code to port.\n\n## Dedup\n\n`search_issues` in this repo for \"lint declared field no consumer inert\" returned #4698 (closed, the must-hit control — this card is its field-level remainder), #13935, #14446, #13832, #13053 (different subjects). No open card covers the field-level detector.\n\nRefs: hotcrm#1543 (ruling F) · #4698 / PR #4985 · hotcrm#1198 / hotcrm#1199 (the adjudications the scanner fed) · objectstack#13848 (the 2026-08-31 hotcrm scope rulings)."
+}

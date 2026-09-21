@@ -1,0 +1,36 @@
+{
+  "number": 15964,
+  "kind": "issue",
+  "title": "#15395's engine-side readonly strip runs AFTER the audit binder, so a plain REST caller's created_at survives on an object that declares it readonly",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T16:37:40Z",
+  "updated_at": "2026-09-06T16:14:06Z",
+  "closed_at": "2026-09-06T16:13:16Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15964",
+  "body": "Measured while verifying the cloud-side fallout of #15395 (cloud#2010), on a live rig at framework `e581457baaaf`.\n\n## What a plain REST caller can now do\n\nA normal authenticated REST caller `POST /api/v1/data/OBJECT` with a\ncaller-supplied `created_at` **keeps that value on the stored row**, on an object\nthat declares `created_at` as `readonly: true`:\n\n```\nPOST /api/v1/data/ai_conversations   HTTP 201\n  sent    id = conv_REST_FORGED   created_at = 1999-01-01T00:00:00.000Z\n  stored  id = jYMDEP-Y3ZIfzpBZ   created_at = 1999-01-01T00:00:00.000Z\n```\n\nTenant DB, same row:\n\n```\nsqlite> select id, created_at, updated_at from ai_conversations;\njYMDEP-Y3ZIfzpBZ|1999-01-01T00:00:00.000Z|2026-09-05T16:31:57.760Z\n```\n\nReproduced on three objects in one request sequence (`ai_conversations`,\n`ai_messages`, `ai_eval_cases` — all declare `created_at` with `readonly: true`).\n\n## Two in-experiment controls, so this is not a reading of one field\n\nSame request, same path, same object family:\n\n| field | declaration | sent | stored | verdict |\n|---|---|---|---|---|\n| `id` | `readonly: true` | `conv_REST_FORGED` | `jYMDEP-Y3ZIfzpBZ` | stripped ✓ |\n| `ai_eval_runs.run_at` | `readonly: true`, datetime | `1999-01-01T…` | `2026-09-05T16:31:57.937Z` | stripped ✓ |\n| `updated_at` | `readonly: true`, datetime | `1999-01-01T…` | `2026-09-05T16:31:57.760Z` | stripped ✓ |\n| `created_at` | `readonly: true`, datetime | `1999-01-01T…` | **`1999-01-01T…`** | **kept ✗** |\n\nSo the create-side strip IS running on this path and DOES take other\nauthor-declared `readonly` datetimes. `created_at` is the one that gets through.\n\n## Mechanism (read from source, not inferred from the symptom)\n\n`packages/objectql/src/plugin.ts`, the audit binder's beforeInsert stamp:\n\n```ts\nif (isInsert) {\n  record.created_at = record.created_at ?? now;\n}\nrecord.updated_at = preserveAudit ? (record.updated_at ?? now) : now;\n```\n\n`created_at` is stamped with `??` (client-preferred), `updated_at` with a plain\nassignment. Since #15395 the static-`readonly` strip runs INSIDE `engine.insert`,\n**after** the beforeInsert hooks, and its #14259 guard treats a key a\n`beforeInsert` hook ASSIGNED as the hook's write rather than a caller forgery\n(`rowHookWrittenKeys`). The `??` therefore launders the caller's value: the hook\n\"wrote\" `created_at`, so the strip spares it — with the caller's bytes still in it.\n`updated_at`'s unconditional assignment overwrites the forgery first, which is\nexactly why it is the control here rather than a second symptom.\n\nThe deleted ingress copy did not have this problem, and that is the delta. At the\nprevious pin `5b2ad1b41af2`, `stripReadonlyForInsert` (metadata-protocol) ran\nBEFORE the engine and before any hook, and deleted every author-declared\n`readonly` key the caller sent:\n\n```ts\nfor (const name of Object.keys(fields)) {\n    if (!fields[name]?.readonly) continue;\n    if (RUNTIME_OWNED_FIELD_TYPES.has(String(fields[name]?.type ?? ''))) continue;\n    if (!(name in out)) continue;\n    delete out[name];\n}\n```\n\n`created_at` is `datetime`, not a runtime-owned type, so the old ingress copy took\nit. The new engine-side strip is strictly better-informed about hooks and\nstrictly worse here, because the audit binder is one of those hooks.\n\n## Why it is worth a card\n\n`created_at` is the audit stamp. #15395's own doc argues the create-side strip\nexists so a forged column cannot be seeded in one POST, and the 2026-08-08 ruling\nnarrowed `preserveAudit` to UPDATE precisely so an ordinary REST import could not\n\"seed the approval/status columns the strip exists to protect\". A caller-preferred\n`created_at` is the same shape of hole, reached without any flag at all.\n\n⛔ Not proposing a shape — the two candidates pull opposite ways (make the audit\nbinder's `created_at` unconditional like `updated_at`, and lose the historical\nimport's ability to reinstate an original timeline; or teach the strip that an\naudit-binder stamp which merely PRESERVED a caller value is not a hook write).\nThat is a maintainer call, which is why this is a card and not a PR.\n\n## Scope note\n\nNot addressed in cloud#2010's PR, which is a cloud-side change with no framework\nedit and no REST-path edit; the table above is from that PR's negative control.\nThe `id` half — the one cloud#2010 was about — is closed on all seven of cloud's\n`ai_*` tables.\n\n## Repro\n\n```\nbash scripts/dev-local/run-stack.sh --with-ui --prod-like --seed --keep --workdir DIR   # in cloud\n# open an env session via sso-open, then:\nPOST http://HOST:PORT/api/v1/data/ai_conversations\n  {\"id\":\"conv_REST_FORGED\",\"title\":\"x\",\"created_at\":\"1999-01-01T00:00:00.000Z\"}\n```\n\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

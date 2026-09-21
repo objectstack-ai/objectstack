@@ -1,0 +1,34 @@
+{
+  "number": 16266,
+  "kind": "pull_request",
+  "title": "docs(ui): a dashboard global filter's field resolves against the dataset object, not its dimensions (#16167)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T08:49:16Z",
+  "updated_at": "2026-09-06T09:56:31Z",
+  "closed_at": "2026-09-06T09:56:29Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T09:56:29Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16266",
+  "body": "Fixes #16167\n\nAdds one section — `### Where a Filter's field Resolves` — to `content/docs/ui/dashboards.mdx`, inside `## Global Filters`, between the `name` paragraph and `### Date Filter Defaults`. Docs only; no source, no schema, no behaviour change.\n\n## What the gap actually was\n\nTriage (comment 5556889150) corrected the card's premise, and re-reading `origin/main` confirms the correction: two of the four facts are already written down, on `content/docs/deployment/validating-metadata.mdx`.\n\n- `validating-metadata.mdx:44-47` — \"A dashboard widget points at a `dataset` and reads `dimensions`/`values` from it.\" (dimensions resolve against the **dataset**)\n- `validating-metadata.mdx:49-58` — \"`os validate` fails when a filter's effective field — after any per-widget `filterBindings` re-target — is absent on the widget's **dataset object** … Opt a widget out with `filterBindings` set to false for that filter.\"\n\nSo the gap is not \"unwritten\". It is that the two resolution targets sit in adjacent paragraphs on a **validation reference** page and their asymmetry is never named — nobody states that filter `field` and widget `dimensions` are two different namespaces, which is why the same field can be filterable and not group-by-able on one dataset. The new section states that side by side on the page authors read when writing `globalFilters`, and links out to the validation page rather than duplicating it.\n\n## Readings taken on `origin/main` (0e16fc454), platform side\n\n`packages/lint/src/validate-widget-bindings.ts`:\n\n| Reading | Location |\n| :--- | :--- |\n| `const datasetObject = typeof dataset.object === 'string' ? dataset.object : undefined;` | `:857` |\n| `const verdict = resolveFieldPath(graph, datasetObject, field);` — the filter field resolves against `dataset.object`, never `dataset.dimensions` | `:877` |\n| `DASHBOARD_FILTER_FIELD_UNKNOWN`, `severity: 'error'` (dotted-path arm) | `:900` / `:901` |\n| `DASHBOARD_FILTER_FIELD_UNKNOWN`, `severity: 'error'` (bare-name arm) | `:917` / `:918` |\n| Dimension lookup: `dimensionNames` built from `recordsOf(dataset.dimensions)` by `name`; a widget dimension is accepted iff `dimensionNames.has(...)` | `:1057-1060`, `:1068-1070` |\n| `WIDGET_DIMENSION_UNKNOWN`, `severity: 'error'` — hint reads \"Widgets select dataset dimensions BY NAME.\" | `:1072` / `:1073` |\n\nAlso read and reflected in the wording: a dotted `relationship.field` filter path resolves hop by hop and additionally requires its prefix to be declared in the dataset's `include` (`WIDGET_FILTER_FIELD_NOT_INCLUDED`, `:1040-1053`) — so the section says \"the object's own fields, or a dotted path whose prefix is in `include`\" rather than the flatter \"the object's own fields\".\n\nThe card's query-layer readings (`ObjectQLStrategy.resolveFieldName`, `planCrossObject`, `combineFilters`) were **not** re-derived here and are **not** cited in the doc. The query layer appears only as the layering caveat below.\n\n## Why the layering caveat is there\n\nThe card asked for it and triage required it: the \"cannot group by\" rule holds at the **authoring** layer, enforced by `widget-dimension-unknown`; at the raw analytics-query layer an object's own field may be used as a dimension without the dataset declaring it. The section therefore closes by scoping itself to the authorable surface explicitly, so it cannot be read as a claim about the query API.\n\n## Scope\n\n- One file: `content/docs/ui/dashboards.mdx`, +36 lines, no deletions.\n- No code block added, so the `os:check` transcript surface is unchanged.\n- `content/docs/references/ui/dashboard.mdx` is auto-generated from the spec `.describe()` strings and was **not** touched; #16256 remains open for that lane.\n- No changeset — docs-only, publishes from no package; `skip-changeset` applied.\n\n## Gates — all pinned to head `940152c1c`\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands content/docs/ui/dashboards.mdx` → 38 commands. All 38 run, all exit 0. Highlights: `check:doc-anchors` 0 (validates the three new links, including the cross-page `validating-metadata#2-dangling-widget-bindings` anchor), `check:docs-single-h1` 0, `check:docs-section-name` 0, `check:doc-authoring` 0, `check:docs-transcript-drift` 0, `check:nul-bytes` 0, `pnpm --filter @objectstack/spec run check:docs` 0, `check:skill-examples` 0.\n\nThree gates first returned exit 3 `PREREQUISITE NOT MET` (`@objectstack/lint` unbuilt) and `check:skill-examples` exit 1 for an unbuilt `@objectstack/client-react` — none of those was a finding; after `pnpm --filter '@objectstack/lint...' --filter '@objectstack/formula...' --filter '@objectstack/spec...' build` and `--filter '@objectstack/client-react...' build` (both through `scripts/pm/os-verify-lock.sh`, `VERDICT command-exit 0`), all four re-ran to 0.\n\nRepo-wide scans (`pnpm lint` and the rest of the lint workflow) are left to CI.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8)_"
+}

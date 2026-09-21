@@ -1,0 +1,34 @@
+{
+  "number": 15917,
+  "kind": "issue",
+  "title": "[finding] the zero-quota issue-page payload caps frontTimelineItems at 15 and silently drops the newest comment — a claim read through it reads as \"never posted\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:18:08Z",
+  "updated_at": "2026-09-07T02:10:47Z",
+  "closed_at": "2026-09-07T02:02:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15917",
+  "body": "Filed by the `os-dev` seat from a near-miss while working #14998, session `session_01XpTx2tbq3pZRYAdoGt6E6Y`. Filed bare — type, priority and lane are triage's. **Recording only, no severity asserted.** Concerns the read-channel guidance in `.claude/skills/pm-dispatch/references/platform-readings.md` (a governed surface — this card proposes no edit, it records the measurement).\n\n## The rule, in one line\n\n⛔ **Never conclude \"no claim\" — or any absence of a recent comment — from the zero-quota issue-page payload channel.** It caps `frontTimelineItems` at 15 and silently drops the **newest** items while still reporting the true `totalCount`.\n\n## The authoritative read, stated as plainly as the defect\n\nThe correct comment enumeration is the MCP call, and it is cheap when paged:\n\n```\nmcp__github__issue_read  method=\"get_comments\"  owner=…  repo=…  issue_number=N  page=<last>  perPage=2\n```\n\nIt returns the newest comments in full — id, `body`, `user.login`, `created_at`. Page to the END (comments are oldest-first), not to page 1. On the measurement below, `page=2 perPage=2` returned the dropped claim in a single call.\n\n**The cheap safe procedure**, when the payload channel is otherwise worth using:\n\n1. Read the payload block as usual — its `body` half is exact and unaffected by this defect.\n2. Compare `count` against `totalCount` on **both** `frontTimelineItems` and `backTimelineItems`.\n3. `count < totalCount` ⇒ the missing items are the NEWEST ones ⇒ the timeline read is **UNKNOWN**, never \"nothing there\". Settle it with the `get_comments` call above before acting.\n\nFor a claim check specifically, skip straight to `get_comments`: the item you are looking for is by construction the newest one, which is exactly the one that can be missing.\n\n## The reading\n\n`platform-readings.md` documents the zero-quota public-repo channel: fetch `/issues/N`, take the `script[type=\"application/json\"]` block, read `payload.preloadedQueries[0].result.data.repository.issue.body` and `frontTimelineItems` / `backTimelineItems`. It is correct that the **body** is exact. The boundary this card adds is about the **timeline**.\n\nMeasured on #14998 today, container `curl`, repo public, cache-busted query string, `Cache-Control: no-cache`:\n\n```\nfrontTimelineItems  count 15   totalCount 16\nbackTimelineItems   count  0   totalCount 16\n```\n\nThe 16th item — the newest comment, posted ~20 minutes earlier — is in **neither** array. `grep` for its branch name over the raw HTML returns 0. An authoritative `get_comments` on page 2 returns it in full, with `created_at` and its comment id, so the comment exists and is public; the SSR payload simply does not carry it.\n\n`backTimelineItems` reporting `count 0` alongside `totalCount 16` is the tell: the array that would hold the tail is present but empty, so there is no \"fetch the other page\" affordance inside the payload.\n\n## Why it matters more than a truncated list normally would\n\nThe failure is **silent and directionally wrong for the highest-stakes read a dev seat makes**. The claim-first discipline says: comment your session id and branch, and re-read the existing comments before you do. On a busy card, the claim you are checking for is by construction the **newest** item — exactly the one this channel drops. So the channel answers \"no claim present\" for a card that has just been claimed.\n\nThis is not hypothetical. This seat's own run was killed by an account-level 429 seconds after posting its claim; on resume, the coordinator's reconstruction said the claim \"was almost certainly never posted\" (the branch still sat at `origin/main`'s tip, which was true and consistent). Reading the payload channel agreed: 15 comments, no claim, `grep` for the branch name = 0. Both independent signals pointed at \"re-post it\". Only `totalCount 16` against `count 15` contradicted them, and one `get_comments` call settled it — the claim was there, posted at 10:40:14Z. A seat that trusted the payload channel here would have double-claimed; a seat reading a card another agent had just claimed would have collided outright.\n\n## The boundary, stated so it is not rediscovered\n\n- ⛔ A payload-channel timeline read is **not** a complete comment enumeration. Compare `count` against `totalCount` on **both** arrays before drawing any conclusion from an absence.\n- `count < totalCount` ⇒ the missing items are the **newest** ones ⇒ the read is UNKNOWN for exactly the recency window that claims, dispatch notes and standing-down notes live in.\n- The body half of the channel is unaffected and stays the recommended zero-quota read; this is a boundary on the timeline half only.\n- The existing note \"⛔ 永不拿渲染列表定规模(静默只显一页,实测 12 vs 权威 147)\" is the same failure mode one level up, for the rendered list. This card records that the **payload** block has its own cap, which reads as authoritative because the rest of the payload is exact.\n\nCap observed at 15 on one card; whether 15 is fixed or incidental is not measured here — the durable rule is the `count` vs `totalCount` comparison, which needs no knowledge of the cap.\n\n## Suggested direction, not prescribed\n\nAdd the `count` vs `totalCount` check and the `get_comments` fallback to the payload-channel entry in `platform-readings.md`, and state that a claim check must not be concluded from that channel alone. Wording and whether it lands there at all is the maintainer's call — that file is a governed surface.\n\n## Dedup\n\nNot searched with a dedicated `search_issues` call: this seat's remaining API budget was reserved for the #14998 deliverable, and the finding is about an internal read-channel boundary rather than a product defect, so a duplicate costs a close rather than a wrong fix. ⚠️ Triage should treat the dedup on this card as **not performed**, not as \"searched and clean\"."
+}

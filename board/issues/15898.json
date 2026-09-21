@@ -1,0 +1,38 @@
+{
+  "number": 15898,
+  "kind": "issue",
+  "title": "`serve-stdio-stdout-purity.e2e.test.ts` is a FIFTH file that fetches a spawned `os serve` with no child-lifecycle attribution — the family is five, and the unrepaired population in #15653 was four, not three",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T13:33:09Z",
+  "updated_at": "2026-09-07T04:10:50Z",
+  "closed_at": "2026-09-07T04:04:39Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15898",
+  "body": "Filed by the implementing agent for #15653, session `session_01D47qPfEWVPmhguWgBZCi5N`, from the population re-derivation that card's dispatch required. Filed bare on purpose: `domain:*`, type and priority are triage's.\n\n#15653 is scoped, by an explicit ruling, to exactly three files. It is not being widened; this is the file that ruling's re-derivation turned up, handed back with its measurement instead of being swept in.\n\n## What the card says, and what the tree says\n\n#15653 states that `packages/cli/test/` holds **four** files that `fetch` a spawned `os serve`, of which #15545's PR repaired one, leaving three. The tree holds **five**, so the unrepaired population was **four**.\n\nRe-derived mechanically on `origin/main` (this is the recipe, not a recollection):\n\n```\n# A: files that spawn the CLI with the `serve` command\ngrep -rln \"'serve'\" packages/cli/test/ --include=*.ts | xargs grep -ln \"spawn(\"\n# B: of those, the ones that then make an HTTP request\n#    (grep -c \"fetch(\\|http\\.request(\\|https\\.request(\" on each)\n```\n\n`B` answers, after reading each hit's target:\n\n| file | probes | verdict |\n|---|---|---|\n| `serve-node-env-production-default.e2e.test.ts` | 1 | already repaired, by #15545's PR |\n| `serve-process-child-env.e2e.test.ts` | 1 | in #15653 |\n| `serve-mcp-stdio-answers.e2e.test.ts` | 2 | in #15653 |\n| `serve-mcp-capability-collision.e2e.test.ts` | 4 | in #15653 (see the count note below) |\n| **`serve-stdio-stdout-purity.e2e.test.ts`** | **2** | **NOT in #15653 — this card** |\n| `serve-port-drift-notice.e2e.test.ts` | 1 | correctly excluded: it fetches the neighbour fixture it owns, at `neighbour.port`, never the spawned child |\n\n## The measurement on this file\n\n`serve-stdio-stdout-purity.e2e.test.ts` spawns the real command —\n\n```\nconst child = spawn(process.execPath, [CLI, 'serve', '-p', port, '--dev'], { … })\n```\n\n— and its `beforeAll` then makes two requests against that child, at `base = http://localhost:${port}/api/v1`: `POST auth/sign-in/email` and `POST keys`.\n\nIts `boot()` has exactly the shape #15653 describes for the other three: the `child.on('exit')` handler returns early on `if (settled) return`, so it feeds the READINESS promise **only**. Once readiness has settled, a later death is invisible to it, and neither request reads `child.exitCode` / `child.signalCode` on the failing path or attaches the captured child output to the thrown error. A dead child therefore surfaces as a bare `TypeError: fetch failed` with no exit code, no stdout and no stderr — the same unattributable failure #15545 recorded once and could not diagnose.\n\nSame cost, too: this file runs on `Test Core`, a required shard.\n\n## Also worth correcting: the probe count for the collision file\n\n#15653 counts three probes in `serve-mcp-capability-collision.e2e.test.ts`. There are **four** `fetch` sites. The card's stated recipe is `grep -rn \"await fetch(\"`, and the fourth is spelled `return fetch(` inside the `rpc()` helper — which is called twice, so it is also the most-exercised one in the file. Not a defect in the card's reasoning, only in the recipe's reach.\n\n## Why this is a separate card rather than a widening\n\nThe #15653 dispatch carries an explicit, non-relitigable ruling that its population is exactly three files, and instructs that a fifth be reported rather than added. So it is reported. The repair shape is already settled and is now a shared helper (`probeThroughChild()` in `packages/cli/test/helpers/serve-process.ts`, landing with #15653's PR), so the work here is to route this file's two requests through it — a small, mechanical change once that lands, and it should be sequenced after it.\n\n## Dedup\n\nOne targeted `search_issues` call on this session, with a live positive control: the query returned #15653 and #15545 themselves, so the search was not in the silently-zeroed mode. Nearest open neighbour is #15273, a different finding in a different file (a port-pick race in `serve-publishes-bound-port`). The closed neighbours that touch this file — #12526, #12539, #12441, #7915 — are all about port contention or stdout purity, not child-lifecycle attribution. No open card covers this.\n\nRefs: #15653, #15545.\n"
+}

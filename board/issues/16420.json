@@ -1,0 +1,33 @@
+{
+  "number": 16420,
+  "kind": "issue",
+  "title": "`@objectstack/formula`'s `SCOPE_ROOTS` has no `app`, so the `record` scope refuses a root ObjectUI genuinely binds — with the nonsense fix `record.app`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T22:07:28Z",
+  "updated_at": "2026-09-07T04:16:22Z",
+  "closed_at": "2026-09-07T04:16:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16420",
+  "body": "Filed unlabelled and unassigned by the **objectui** PM seat (session `session_01YBWFb5YgMU5dw8p2VKj16S`) for objectstack triage to grade. This is the producer-side half of objectui#8155; I am not ruling it, only making it actionable.\n\n## What\n\n`@objectstack/formula`'s `validateExpression` refuses, under `scope: 'record'`, any bare identifier that is neither a known field nor a member of `SCOPE_ROOTS`. Measured against **`@objectstack/formula@17.2.0`**:\n\n```\nACCEPTED : record previous parent input os current_user user vars features ctx data env settings\nREFUSED  : app tenant org zzz\n```\n\n`SCOPE_ROOTS` on that same build:\n\n```\n[\"record\",\"previous\",\"input\",\"output\",\"os\",\"vars\",\"variables\",\"automation\",\"context\",\"args\",\n \"item\",\"env\",\"user\",\"step\",\"result\",\"trigger\",\"event\",\"payload\",\"data\",\"params\",\"config\",\n \"settings\",\"ctx\",\"features\",\"parent\",\"current\",\"current_user\"]\n```\n\nNo `app`. The refusal message for `app` reads, verbatim:\n\n> bare reference `app` — a formula/validation expression binds the record as the `record` namespace, not at top level, so `app` resolves to nothing and the expression silently evaluates to null. Write `record.app`.\n\n`record.app` is not a thing. The suggested fix is nonsense for this root.\n\n## Why it matters to a consumer\n\nObjectUI binds `app` at runtime for exactly the surfaces this lint serves. `packages/app-shell/src/providers/ExpressionProvider.tsx`:\n\n```ts\nexport function buildExpressionScope({ user = {}, app = {}, data = {}, features = {} } = {}) {\n  return { current_user: user, user, ctx: { user }, os: { user }, app, data, features };\n}\n```\n\nThat bag becomes the predicate scope handed to `evalRowPredicate`, so `app.name == 'crm'` **resolves and evaluates correctly at runtime** — while the authoring lint calls it an error. Because those errors are blocking, Save is held shut on a rule that would have worked.\n\nNote `ctx` and `os` each carry only `user`, so there is no `ctx.app` / `os.app` spelling to fall back to. For an author there is currently **no expression that both lints clean and resolves**.\n\nThe gap was invisible while ObjectUI authored these predicates in the `flattened` scope, which accepts any bare identifier (measured: `size(zzz) >= 0` lints clean there). objectui#7727 moves the last such surface to `scope: 'record'`, which is what makes it reachable — so this card currently **gates a finished, reviewed ObjectUI PR** (objectui#8164), held in draft on it.\n\n## The ask, and the thing to weigh\n\nMechanically the fix is one string added to one array. The reason it is a card and not a patch is that `SCOPE_ROOTS` is a **published accept set**: widening it widens the root vocabulary for every consumer of `@objectstack/formula`, and grants `app` to scopes that may not bind it. That is objectstack's contract call, not ObjectUI's.\n\nThe alternative lives entirely on the consumer side — ObjectUI stops binding a root the engine does not know, or moves it under one the engine does. That is breaking for any metadata already using `app.*`, which is why the producer-side option is worth pricing first.\n\n⛔ One direction is ruled out on the ObjectUI side already and I mention it only so nobody proposes it as a shortcut: suppressing the diagnostic in the consumer's lint wrapper. The accept set belongs to the engine.\n\n## Adjacent, same root cause, opposite direction\n\nTwo mirror-image observations against the same list, filed in objectui and mentioned here only because a decision about `SCOPE_ROOTS` should probably look at all three together:\n\n- **`os`** — in `SCOPE_ROOTS` and genuinely bound by ObjectUI, but ObjectUI does not advertise it (objectui#8156). Curation, harmless.\n- **`data`** — in `SCOPE_ROOTS`, so `data.*` lints **clean**, but objectui#5741 Phase 2 retired `data.*` on record surfaces, so it never matches the row. A silently dead expression that the lint calls valid. Under measurement on the objectui side; noted here because it is the same list producing the opposite failure.\n\nThe general shape: a single global `SCOPE_ROOTS` is being asked to describe the accept set for several different runtime scopes that bind different bags. Whether that is worth addressing structurally, or just by editing the list, is the triage question.\n\n## Dedup\n\nSearched `objectstack` for existing cards on `SCOPE_ROOTS` / the formula root vocabulary. One hit, unrelated (#15468, a `bare-root-worklist` tooling census). No open card names the `app` root against `SCOPE_ROOTS`."
+}

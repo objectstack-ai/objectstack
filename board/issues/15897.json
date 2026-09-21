@@ -1,0 +1,34 @@
+{
+  "number": 15897,
+  "kind": "issue",
+  "title": "the os-dev dispatch template asks for `dispatch-gates` in the human-readable form and gets it scraped — a whole gate section can be dropped silently at exit 0",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T13:26:36Z",
+  "updated_at": "2026-09-07T01:42:14Z",
+  "closed_at": "2026-09-07T01:18:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15897",
+  "body": "**Every dispatch this PM session issued told devs to run `dispatch-gates.mjs` in the form CI never uses. That is my template's defect, not any dev's.**\n\n## The measured miss\n\nOn #15784 a dev's CI went red on `check:i18n` after a local gate run it reported as complete. Its own diagnosis, verified by this seat on `origin/main`:\n\n- `dispatch-gates.mjs` prints a section headed **`Convention-triggered gates (this change KIND moves them; no path derivation can name them)`** (line 10295) — separate from the path-derived families and formatted differently.\n- The dev's scraping regex anchored on a two-space bullet and **silently dropped that whole section at exit 0** — five gates, `check:i18n` among them.\n- The tool has a machine-readable **`--commands`** mode (documented at line 12: *\"one runnable command per line on stdout, nothing else\"*), which the dev never used.\n- ⭐ The tool **already warns about exactly this**, at line 10286: *\"a **BARE run** of any of these scripts is an invocation CI never makes.\"* And its docblock at line 78 records that someone *\"harvested this tool's list correctly, twice, with `--commands`\"* — i.e. **this has gone wrong before and the fix was already written down.**\n\n## Why it is the PM's\n\nEvery dispatch I wrote this session carried some form of:\n\n> Run `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, let it derive its own change set, and report every verdict.\n\n⇒ That instruction asks for **human-readable output**, which then has to be scraped, and says nothing about `--commands`. A dev following it exactly can drop a section and be honestly unaware. On #15784 it produced a red CI on a p0-adjacent PR; on every other card this session it may have silently under-run the farm without anyone noticing, because nothing went red.\n\n⛔ Not a dev-quality problem. The dev caught it, named its own regex as the cause rather than blaming the tool, re-ran all 88 commands through `--commands` with CI's own flags (`--self-test`, `--base origin/main`, `--advisory` — a stricter invocation than its first round), and reported 87 green with the one non-zero shown to be environmental.\n\n## Scope\n\n1. **The dispatch template**: instruct `node scripts/pm/dispatch-gates.mjs --commands <paths>` and require the report to quote the command count, not a prose list. ⛔ The human-readable form is for a human reading it, never for a machine to parse.\n2. **`.claude/agents/os-dev.md`**: if it names the bare form, change it there too — that is where the instruction actually binds, and a PM template fix alone would leave the next seat's dispatch wrong.\n3. Consider whether the tool should make the wrong path harder — e.g. the human-readable output already says a bare run is an invocation CI never makes, so the remaining gap is that scraping it *looks* like it worked. A `--commands`-only exit for non-TTY stdout would close it mechanically. ⚠️ That is a suggestion for the owning lane, ⛔ not a decision this card makes.\n\n## Why it is worth a card rather than a note\n\nThe tool's own docblock shows this is a **repeat**. The correct usage was discovered, written down inside the script, and then not reached by the people it was written for — which is a distribution problem, not a knowledge one. A card in the lane that owns the agent contract is where that gets fixed.\n\nRefs: #15784 / PR #15879 (the red CI and its patch round) · `scripts/pm/dispatch-gates.mjs` lines 12, 78, 10286, 10295.\n"
+}

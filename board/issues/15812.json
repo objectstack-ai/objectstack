@@ -1,0 +1,37 @@
+{
+  "number": 15812,
+  "kind": "issue",
+  "title": "service-automation: a caller-provenance check that proves its negative by `Object.is` is defeated by the durable store, which restores the context through `JSON.parse`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T08:53:09Z",
+  "updated_at": "2026-09-06T19:46:15Z",
+  "closed_at": "2026-09-06T18:30:12Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15812",
+  "body": "Filed by the `domain:services` PM seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`) from the Clause-② review of **PR #15787** (card #15705, comment 5550698677). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\n⛔ **Not a defect in PR #15787 and ⛔ not an argument against it.** That PR's provenance check is what makes headless screen satisfaction safe at all, and its record-column reasoning was driven and holds. This card is the **one input to that check that the durable store silently removes**, deliberately left out of #15787's scope because the remedy is a different change.\n\n## The shape\n\nPR #15787 lets a screen continue when the **caller** answered its required fields. It cannot simply read `params`, because `seedFlowActionParams` spreads the whole subject record into `params` before the caller's own values — so \"the key is in `params`\" does not mean \"the caller supplied it\". It therefore proves the negative: a key is **not** caller-supplied when the record carries it and `params` holds the ***same object***, compared with **`Object.is`**.\n\n⭐ That identity is real in memory and **is destroyed by persistence.** `suspended-run-store.ts:673 / :691` persists `context` as `context_json`; `resumeInternal` (`engine.ts:5412-5423`) continues the run with the `JSON.parse`d value. ⇒ After a durable pause, `params.tags` and `record.tags` are **equal but no longer identical**, the record leg cannot disprove them, and the field reads as caller-supplied.\n\n## Measured (review of PR #15787)\n\nActions-door context, all-optional screen whose field `tags` collides with the array column `tags: ['a','b']`, **no caller params**:\n\n| context | result |\n|---|---|\n| as built in memory | **paused** ✅ |\n| after `JSON.parse(JSON.stringify(ctx))` — the transform the store applies | **skipped**, output `{tags:['a','b']}` ❌ |\n\n⚠️ **Primitive columns are unaffected** — `Object.is('x','x')` is true across a round-trip. Only object/array-valued columns lose identity. ⚠️ **NOT MEASURED:** the store was not wired end to end; the review applied the store's **own** JSON transform to the context rather than driving a real suspend/resume. ⇒ **Confirming that against a wired store is the first job here**, and \"does not reproduce end to end\" is a perfectly good outcome.\n\n## Reachability — narrow, and worth stating precisely\n\nAll of these must hold together: the **actions door or the record-change trigger** (so the record is spread into `params`), **a durable store wired**, **a later screen in the same run** entered after a durable resume, a **non-primitive** colliding column, and **no other required field** on that screen to force the pause anyway.\n\n⇒ Low. But the failure direction is the one #15705 exists to prevent: an **interactive** run skipping a screen it should have rendered.\n\n## Suggested shape (⛔ not a decision)\n\nCompare **by value** rather than by identity for the record leg — a structural equality that survives serialisation. ⚠️ Two things to weigh, neither settled here: deep equality on every screen entry has a cost that identity does not, and value equality **widens** the not-caller-supplied set, so a caller who genuinely re-sends a value identical to the row's would move from \"continue\" to \"pause\". ⭐ That widening is in the safe direction (`#15705`'s module resolves every ambiguity to pausing), which is an argument for it, not against.\n\n## Related but distinct\n\n- **PR #15787 / #15705** — the fix this rides on. Its own separately-measured hole (**dispatcher-seeded id keys**: `recordId` / `<objectName>Id` / `recordIdParam` are not record columns, so the record leg cannot disprove them) is **being fixed in that PR** and is ⛔ not this card.\n- **#15646** — the pausing-`map` residue: also about state surviving a suspend, but the other way round (state that outlives what wrote it, rather than identity that does not).\n\nRefs: PR #15787 / #15705 · comment 5550698677 (the review that measured it) · `suspended-run-store.ts:673/691` · `engine.ts:5412-5423`."
+}

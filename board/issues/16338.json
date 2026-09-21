@@ -1,0 +1,33 @@
+{
+  "number": 16338,
+  "kind": "pull_request",
+  "title": "chore(devx): migrate the 7 freed scripts/** line citations to file-level anchors (#15809, residual 2 of 3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T14:38:17Z",
+  "updated_at": "2026-09-06T15:29:18Z",
+  "closed_at": "2026-09-06T15:29:17Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T15:29:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16338",
+  "body": "Part of #15809.\n\nSecond dispatch of the `scripts/**` unresolvable-citation follow-up (PR #16301 residual). Migrates the 7 of the 15-citation residual whose holding files freed since: `check-docs-section-name.mjs` and `docs-audit/affected-docs.mjs` (PR #16300, merged 13:49Z), `check-type-check-coverage.mjs` (PR #16295, merged 13:49Z). ⛔ Does not touch the 8 still held by open PRs #16215 and #16202.\n\n## Enumeration (`node scripts/check-scripts-symbol-anchors.mjs --list-unresolvable`)\n\n| | before | after |\n|---|---:|---:|\n| `unresolvableLineCitation` | 15 | 8 |\n\n## Per-file migration (PR #15806 / #16301 method — file-level anchor, number kept beside it as data, no digit repaired or repointed)\n\n| file | citations | resolution |\n|---|---:|---|\n| `scripts/check-docs-section-name.mjs` | 3 | `concept.mdx:426` → `content/docs/protocol/objectui/concept.mdx` (only tracked file of that basename); `doc-pages.mdx:257` → `content/docs/ui/doc-pages.mdx` (only tracked file of that basename); `forms.mdx:183` → `content/docs/ui/forms.mdx` (basename is ambiguous — two tracked files share it — but only this one has a line 183 carrying the cited `\"sections\": [/* … */]` shape; the other, `content/docs/capabilities/forms.mdx`, is 30 lines long) |\n| `scripts/docs-audit/affected-docs.mjs` | 3 | all three `rest-server.ts` citations → `packages/rest/src/rest-server.ts` (the only tracked file of that name) |\n| `scripts/check-type-check-coverage.mjs` | 1 | `engine.test.ts:2547/2577` → `packages/services/service-automation/src/engine.test.ts` (named directly by the surrounding prose, \"service-automation's note\") |\n\nZero citations were ambiguous; every resolution above was reachable either because the basename is unique in the tree or because the surrounding prose already named the owning package/file.\n\n`scripts/check-scripts-symbol-anchors.mjs`'s header prose was also updated to record this round's dated reading (residual 15 → 8, both by exclusion) beside the first round's, following the precedent PR #16301 set for a header stating its residual as a dated reading rather than a stale live claim.\n\n## Residual (8, unchanged scope — not touched here)\n\n- `scripts/check-system-context-census.mjs` ×4 + `scripts/cross-package-test-inputs.mjs` ×3 — held by open PR #16215\n- `scripts/pm/check-half-states.mjs` ×1 — held by open PR #16202\n\nNone is an ambiguity. `judgeUntrackedLineAnchors` stays `false` per the #15809 fence (flips only when the residual reads 0 and a self-test pins the flip).\n\n## Corpus counts after (`node scripts/check-scripts-symbol-anchors.mjs`)\n\n```\n2898 anchors across 223 scripts resolve — 27 symbol (27 declaration, 0 literal), 2871 file-level,\n0 cross-repo, 1 exempt, 2 continuation. 0 line anchors on tracked targets survive\n(8 citations name no tracked file and are not judged; 0 dated allowance finding(s)).\n```\n(Before, same tree: 2886 anchors, 2859 file-level, 15 unresolvable.)\n\n## Gates, pinned to `a5fb43463`\n\n`turbo ls --affected` against the branch's base (`3e270d4e2`) returns **0 packages** — every edit is prose inside `scripts/**` audit/gate scripts themselves, no package's `src/`.\n\nByte-identical `--self-test` output before/after for every gate whose comment prose was edited (compared against a second worktree pinned to the same base `3e270d4e2`):\n- `scripts/check-docs-section-name.mjs --self-test` — identical (85 cases)\n- `scripts/docs-audit/affected-docs.mjs --self-test` — identical (585 cases)\n- `scripts/check-type-check-coverage.mjs --self-test` — identical\n- `scripts/check-scripts-symbol-anchors.mjs --self-test` / plain run — residual count moved 15 → 8 as intended, every other line (2898 vs 2886 anchors etc.) reflects the new file-level anchors added, not a behavioural change\n\n`node scripts/pm/dispatch-gates.mjs --changed --commands --repo objectstack-ai/objectstack` derived 38 commands for this diff; 37 are EXIT 0. The one exception, `check:type-check-debt`, is a legitimate `PREREQUISITE NOT MET` (exit 3, not a finding) -- its `--re-measure` mode needs the full workspace build closure on disk (`pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'`), which this scripts/**-only diff (0 affected packages per `turbo ls --affected`) does not warrant; the gate's own text says explicitly that measuring without the closure \"would not fail, it would silently measure a DIFFERENT WORLD\" and must not be entered anywhere. The plain `check:type-check-coverage` (same script, ledger-comparison mode) passed EXIT 0 in the same run.\n\n`skip-changeset` applied — no `.changeset/*.md` needed (no package publishes; every changed line is comment prose inside `scripts/**`), no `content/docs/releases/` touched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

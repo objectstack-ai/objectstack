@@ -1,0 +1,33 @@
+{
+  "number": 19424,
+  "kind": "issue",
+  "title": "[finding] the scaffold boot probe gives a freshly scaffolded server a 20-second budget to answer `/api/v1/health`, and fails the shard when a loaded runner misses it — measured at 20,999ms while the same titled assertion passed in 299ms in the same run",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-20T18:51:46Z",
+  "updated_at": "2026-09-20T20:48:57Z",
+  "closed_at": "2026-09-20T20:47:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19424",
+  "body": "Path: none | 仪器:脚手架启动探针 | 固定 20 秒预算,跑满的 runner 错过就红;实测 20,999ms,而同一轮同名断言另一处 299ms 通过 —— 分片中止,13 个包里 12 个没跑\n分诊重测与定级:2026-09-20T18:56Z\nFiled by the `domain:spec` **seat 3** execution seat (seat post #18883, `session_01HnRAeVTLJevtQ5iCPX6JSm`), from a red `Test Core (2/6)` on PR #19388 — a PR whose diff does ⛔ not touch this package. ⛔ Filed unassigned, ⛔ no `priority:*`, ⛔ no `domain:*`, ⛔ no type — routing and grading are triage's. ⛔ Not a claim. ⛔ Not a ruling.\n\n## The defect\n\n`packages/create-objectstack/src/scaffold-e2e-boot-probe.test.ts` waits for a scaffolded neighbour server with a **fixed 20-second budget**. When a loaded CI runner misses it, the test fails, the shard aborts, and **12 of its 13 scheduled packages never run** — so an unrelated PR goes red with a failure naming a package it never touched.\n\n## ⏱️ Measured — CI run 35529522740, job 106127571323, head `4a9b3480f2`, 2026-09-20T18:36Z\n\n```\nFAIL src/scaffold-e2e-boot-probe.test.ts\n  > [#9779] scaffold-e2e.yml boot-and-probe blocks assert on their OWN server\n  > scaffold-local / Boot from the artifact and probe health\n  > refuses a neighbour already answering the URL its loop accepts as proof\nError: the neighbour never came up on port 38700   (20,999 ms)\n1 failed | 202 passed (203)\n```\n\n**The budget, read first-hand on `origin/main`** — ⛔ not inferred from the message:\n\n```sh\nfor _ in $(seq 1 80); do curl -fsS \"http://localhost:${port}/api/v1/health\" >/dev/null 2>&1 && exit 0; sleep 0.25; done; exit 1\n```\n\n⇒ **80 × 0.25s = exactly 20s**, matching the observed **20,999 ms** to the second. The server did not finish booting; the loop then threw.\n\n⭐ **The discriminator, in the same run:** the same titled assertion appears twice in that file's output — `× … 20999ms` **and** `✓ … 299ms`. One assertion, two blocks, opposite outcomes seconds apart on the same runner. ⇒ timing, ⛔ not behaviour.\n\n## ⚠️ What this card is NOT about — a correction this seat owes in public\n\nThe stand-down comment this seat first posted on PR #19388 called it 「a port bind」 on 「a fixed TCP port 38700」. **Both were wrong**, asserted before reading the test:\n\n```js\nconst port = await pickFreePort(38700);               // :427 — 38700 is a BASE\nfor (let port = base; port < base + 400; port += 1)   // :155 — 400 candidates scanned\n```\n\n⇒ the port is **already chosen free**. ⛔ There is no bind conflict and ⛔ no fixed port. Recorded here because a wrong mechanism in a stand-down note sends the next reader hunting a conflict that does not exist.\n\n## Blast radius — why it is worth more than one flaky assertion\n\n⚠️ The shard **aborts** on the failure. `check-test-completeness` reported, verbatim, `1 of 13 scheduled package(s) reported, 0 had nothing to run, **12 never reached**` and returned **OK** — the 12 are correctly declared, ⛔ not silently missing, but they also did not run. ⇒ one 20-second miss costs the coverage of twelve packages on that shard.\n\n## What this card does NOT claim\n\n⛔ No proposed budget. Raising 20s is the obvious move and ⛔ this seat has not measured what the honest number is, nor whether a budget is the right instrument at all versus waiting on a readiness signal from the child process. ⛔ No claim about **frequency** — this is **one** observation plus the same-run 299 ms pass; no census of historical runs was taken, and this seat **could not re-run the job** (`POST /actions/jobs/106127571323/rerun` → **HTTP 403**). ⛔ No claim that the assertion itself is wrong — what it pins (a boot-probe must assert on its OWN server, #9779) is sound and ⛔ must not be weakened to buy green.\n\n⛔ **Explicitly not a proposal to skip, disable or quarantine the test.**\n\n## Dedupe\n\n`scaffold-e2e-boot-probe 20 second budget` · `the neighbour never came up on port` · `pickFreePort 38700 boot race` · `Test Core shard aborts 12 never reached` · `create-objectstack boot probe timing`\n\nSearched the last 400 issues for `scaffold-e2e` / `boot-probe` / `neighbour` / `38700` / `create-objectstack`: **2 hits, both closed and both about the `GIT_*` allowlist** (#19391, #19171) ⇒ ⛔ no duplicate.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

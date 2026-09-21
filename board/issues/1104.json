@@ -1,0 +1,37 @@
+{
+  "number": 1104,
+  "kind": "pull_request",
+  "title": "[WIP] Add SysUserPreference system object to plugin-auth",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "size/xs",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-10T04:04:34Z",
+  "updated_at": "2026-09-07T04:48:52Z",
+  "closed_at": "2026-04-10T08:40:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-10T08:40:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1104",
+  "body": "Thanks for asking me to work on this. I will get started on it and keep this PR's description up to date as I form a plan and make progress.\n\n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>在 plugin-auth 中添加 SysUserPreference 系统对象，支持用户偏好存储</issue_title>\n> <issue_description>## 背景\n> \n> 框架当前缺少用户偏好（theme、locale、timezone、sidebar 状态等）的持久化能力。Config Resolution 文档（`content/docs/protocol/objectos/config-resolution.mdx`）已定义了 User Preferences 作为配置分层体系的第 2 层（Runtime > **User Preferences** > Tenant > Env），但代码层面尚未落地对应的 object schema。\n> \n> ## 方案\n> 直接将 `user_preference` 作为系统对象放入 `plugin-auth`——与 `SysUser`、`SysSession` 等同属 identity 领域，遵循已有的 `sys` namespace 规范。\n> export const SysUserPreference = ObjectSchema.create({\n>   namespace: 'sys',\n>   name: 'user_preference',\n>   label: 'User Preference',\n>   pluralLabel: 'User Preferences',\n>   icon: 'settings',\n>   isSystem: true,\n>   description: 'Per-user key-value preferences (theme, locale, etc.)',\n>   titleFormat: '{key}',\n>   compactLayout: ['user_id', 'key'],\n> \n>   fields: {\n>     id: Field.text({\n>       label: 'Preference ID',\n>       required: true,\n>       readonly: true,\n>     }),\n> \n>     created_at: Field.datetime({\n>       label: 'Created At',\n>       defaultValue: 'NOW()',\n>       readonly: true,\n>     }),\n> \n>     updated_at: Field.datetime({\n>       label: 'Updated At',\n>       defaultValue: 'NOW()',\n>       readonly: true,\n>     }),\n> \n>     user_id: Field.text({\n>       label: 'User ID',\n>       required: true,\n>       maxLength: 255,\n>       description: 'Owner user of this preference',\n>     }),\n> \n>     key: Field.text({\n>       label: 'Key',\n>       required: true,\n>       maxLength: 255,\n>       description: 'Preference key (e.g., theme, locale, plugin.ai.auto_save)',\n>     }),\n> \n>     value: Field.json({\n>       label: 'Value',\n>       description: 'Preference value (any JSON-serializable type)',\n>     }),\n>   },\n> \n>   indexes: [\n>     { fields: ['user_id', 'key'], unique: true },\n>     { fields: ['user_id'] },\n>   ],\n> \n>   enable: {\n>     trackHistory: false,\n>     searchable: false,\n>     apiEnabled: true,\n>     apiMethods: ['get', 'list', 'create', 'update', 'delete'],\n>     trash: false,\n>     mru: false,\n>   },\n> });\n> \n> ### 客户端使用方式\n> \n> ```ts\n> import { SystemObjectName } from '@objectstack/spec/system';\n> \n> // 读取偏好\n> const theme = await engine.findOne(SystemObjectName.USER_PREFERENCE, {\n>   where: { user_id: currentUserId, key: 'theme' },\n> });\n> \n> // 写入偏好\n> await engine.upsert(SystemObjectName.USER_PREFERENCE, {\n>   user_id: currentUserId,\n>   key: 'theme',\n>   value: JSON.stringify('dark'),\n> });\n> \n> // 批量读取某用户所有偏好\n> const allPrefs = await engine.find(SystemObjectName.USER_PREFERENCE, {\n>   where: { user_id: currentUserId },\n> });\n> ```\n> </issue_description>\n> \n> ## Comments on the Issue (you are @claude[agent] in this section)\n> \n> <comments>\n> </comments>\n"
+}

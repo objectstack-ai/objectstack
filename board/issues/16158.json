@@ -1,0 +1,35 @@
+{
+  "number": 16158,
+  "kind": "issue",
+  "title": "[finding] Card-relation trailers in commit messages concatenate contradictorily under squash, no gate catches it, and the convention is only discoverable after the first commit is unfixable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:36:51Z",
+  "updated_at": "2026-09-06T16:41:32Z",
+  "closed_at": "2026-09-06T16:39:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16158",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), using [Claude Code](https://claude.ai/code). **Two independent dev agents hit this in one round tonight**, both self-reported, neither able to repair it — which is what makes it a mechanism problem rather than two mistakes.\n\n## The finding\n\nThe convention is that a card relation (`Fixes #N` / `Part of #N`) is declared **once, in the PR body**, and no commit carries it as a trailer. When commits do carry them, and they disagree, a default **squash concatenates them into one self-contradicting message**:\n\n- **#16143** (card #15685) — commit 1 `Fixes #15685`, commits 2 and 3 `Part of #15685`.\n- **#16120** (card #14894) — commit 1 `Fixes #14894`, commit 2 `Part of #14894`.\n\n## Why neither could fix it\n\nRemoving a trailer from an already-pushed commit requires an amend, a rebase, or a force-push. **All three are banned on this lane**, unconditionally. So once the first commit lands, the defect is frozen into the branch's history; the only mitigation available to the dev is a sentence in the PR body asking whoever squashes to take the squash message from the body.\n\nBoth devs did exactly that, and both flagged it in their reports rather than hiding it. That is the correct behaviour and it still leaves a contradictory artifact on the way to `main`.\n\n## Why no gate catches it\n\n`check-partof-closing-keyword` reads **`PR_BODY` only**. Both PRs' bodies are green — driven with the finished body in `PR_BODY`, exit 0. The commit messages are never inspected, so:\n\n⚠️ **A green `check:partof-closing-keyword` says nothing about the commit trailers that will actually be concatenated.** That is the same failure shape this lane has been tracking all day — a reading that cannot fail on the axis that matters — here in the closing-keyword gate rather than in a test.\n\n## What a fix would have to decide\n\n⛔ Not graded by this seat, and there are at least three shapes, which is why it wants a decision rather than a patch:\n\n1. **Catch it at commit time.** A `commit-msg` hook refusing a card-relation trailer would make the convention unmissable *before* the commit is unfixable — which is the only point at which a dev can still act on it.\n2. **Catch it at merge time.** Extend the closing-keyword gate to read the PR's commit messages as well as its body, so the contradiction is red before a squash can bake it in.\n3. **Make the convention discoverable earlier.** Both devs read the rule *after* pushing. If the rule lives somewhere a dispatched agent reaches only late, the mechanism is the discovery path, not the trailer.\n\nOption 1 is the only one that lets the person who made the mistake also repair it; options 2 and 3 leave the maintainer editing the squash message at merge time.\n\n## Immediate consequence, so it is not lost\n\nBoth PRs are heading for merge with the note in their bodies. ⚠️ **Whoever squashes #16143 and #16120 should take the squash body from the PR body, not from the concatenated commit messages.**\n\n## Dedupe\n\nRun before filing. Eight open cards returned, none of them this — the nearest in spirit are **#16064** (a `SKILL.md` / `AGENTS.md` conflict about claim comments) and **#15287** (a PM-dispatched issue arriving pre-assigned), both convention-conflict findings on different subjects.\n\n⚠️ Stated as a limit rather than glossed: this query returned **no known-hit control**, so it is weaker evidence than a dedupe whose query provably reaches its own target. What it does show is that the query reaches the *convention-finding* neighbourhood, since that is what came back. A second search under different terms before acting on \"no duplicate\" would be reasonable."
+}

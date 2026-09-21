@@ -1,0 +1,34 @@
+{
+  "number": 13852,
+  "kind": "issue",
+  "title": "[finding] `DeleteDataRequestSchema` is declared in packages/spec but never validated against — the DELETE data route bypasses request-schema validation entirely",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T14:50:18Z",
+  "updated_at": "2026-09-06T11:52:19Z",
+  "closed_at": "2026-09-06T11:48:46Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13852",
+  "body": "Filed unassigned — recording only, no severity asserted, routing is triage's. Surfaced while implementing #13576 (A2.2/A2.3 measurement), unrelated to that fix and not touched by its PR.\n\n## What's declared\n\n`packages/spec/src/api/protocol.zod.ts` declares `DeleteDataRequestSchema` (`object`, `id`, `expectedVersion`), documented and exported, sitting right beside `UpdateDataRequestSchema`.\n\n## What's enforced\n\n`UpdateDataRequestSchema` is `safeParse`'d against the assembled PATCH request in `packages/rest/src/rest-server.ts` before the request reaches the engine — a non-conforming body 400s with a structured `fields[]` envelope (search `UpdateDataRequestSchema` in that file, the `/data/:object/:id` PATCH handler).\n\n`DeleteDataRequestSchema` has **zero** `safeParse`/validation call sites anywhere in the tree. Confirmed with:\n\n```\ngrep -rln \"DeleteDataRequestSchema\" packages/ content/\n```\n\nThe only hits are `packages/spec/src/api/protocol.zod.ts` (the declaration itself), `packages/spec/src/type-alias-convention.pin.test.ts`, the two generated export-surface trackers (`packages/spec/export-origins/api.json`, `packages/spec/api-surface/api.json`), and the generated docs page (`content/docs/references/api/protocol.mdx`). No route, no handler, nothing under `packages/rest/src` or `packages/metadata-protocol/src` ever calls `DeleteDataRequestSchema.safeParse(...)` or equivalent.\n\nThe DELETE route (`packages/rest/src/rest-server.ts`, `DELETE /data/:object/:id`) builds its own ad hoc request shape (`object`, `id`, `expectedVersion` from `If-Match`/query) and hands it straight to `protocol.deleteData(...)` with no schema gate in front — unlike its PATCH sibling.\n\n## Why this looks like a real gap, not a design choice\n\nThis is the same shape ADR-0049 (enforce-or-remove) and Prime Directive #10 (\"declared ≠ enforced\") care about elsewhere in this repo: a schema that exists, is exported, is documented, and validates *nothing*. Practically the blast radius looks narrow today — `object`/`id` are path params Express already type-checks as strings, and `expectedVersion`'s ad hoc handling (`refuseRepeatedQueryParams`, the `If-Match`/query-precedence logic) covers some of what the schema would — but the schema itself is not what's doing any of that work, and a future field added to `DeleteDataRequestSchema` would silently be unenforced on this door while looking enforced everywhere the type is referenced.\n\n## What I did NOT do\n\nDid not fix this — out of scope for #13576, unrelated defect class, and #13576's own fix (the OCC malformed-token check) lives *inside* `packages/metadata-protocol`'s `assertVersionOf`/`assertVersionMatch`, which both PATCH and DELETE reach regardless of whether `DeleteDataRequestSchema` is ever parsed — so this gap does not affect #13576's correctness.\n\n## Not claimed\n\nDid not check whether other DELETE-shaped routes in this repo have the same gap (this is scoped to the single `/data/:object/:id` DELETE data route found while tracing #13576). Did not assess severity or decide the fix (add the `safeParse` call to mirror PATCH, or retire the unused schema) — that's triage's call.\n"
+}

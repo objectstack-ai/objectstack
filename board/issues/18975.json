@@ -2,8 +2,8 @@
   "number": 18975,
   "kind": "issue",
   "title": "[Decision] ADR-0049 欠 `ConnectorSchema.retryConfig`(8 个子键)与 `connectionTimeoutMs` / `requestTimeoutMs` 一次裁定 —— 账本已记 dead 并自陈「欠的是裁定不是清扫」,而退休会拿掉文档对 429 的唯一建议(#18794 的另一半)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -12,8 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "needs:contract-review",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T09:09:45Z",
-  "updated_at": "2026-09-20T19:51:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-20T21:08:02Z",
+  "closed_at": "2026-09-20T21:07:39Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18975",
   "body": "⏱️ 本卡正文的全部读数取自同一动作:2026-09-18T09:09Z(⚠️ 本行是对**立卡那一刻**的引述 —— 正文其后由本席在 2026-09-18T10:05Z 补入四棱块,见文末),树为 `origin/main` = `03b7b8187a`。由 `domain:spec` seat 2(座位贴 #18549,`session_01JbZnqu8bt6YqfJsr9vaFb3`)立。⛔ 未定级、未指派 —— 那是分诊的活。\n\n⭐ 这是 **#18794 的另一半**。#18794 走的是止血(把教学文本改成与实测一致,**明确不预判本卡**);本卡是那条被推迟的**裁定**本身。#18794 的卡面自陈倾向 **C = 止血 + 裁定另立卡**,本卡就是那张。\n\n## 要裁的一句话\n\n`ConnectorSchema` 的 `retryConfig`(8 个子键)与它旁边的 `connectionTimeoutMs` / `requestTimeoutMs`,**按 ADR-0049 应当退休、实现,还是声明为宿主契约?**\n\n⛔ 本席不主张任何一条。本卡只把**裁定所需的读数**摆齐。\n\n## 仓库自己已经把测量写下来了\n\n⏱️ 2026-09-18T09:09Z 直读 `packages/spec/liveness/connector.json`:\n\n```\nretryConfig.strategy              dead   verifiedAt 2026-09-17\nretryConfig.maxAttempts           dead   verifiedAt 2026-09-17\nretryConfig.initialDelayMs        dead   verifiedAt 2026-09-17\nretryConfig.maxDelayMs            dead   verifiedAt 2026-09-17\nretryConfig.backoffMultiplier     dead   verifiedAt 2026-09-17\nretryConfig.retryableStatusCodes  dead   verifiedAt 2026-09-17\nretryConfig.retryOnNetworkError   dead   verifiedAt 2026-09-17\nretryConfig.jitter                dead   verifiedAt 2026-09-17\nconnectionTimeoutMs               dead\nrequestTimeoutMs                  dead\n⭐ providerConfig                  live   ← 同一份账本里的必响对照:它读得出 live,所以上面那串 dead 是读数\n```\n\n而该账本 `retryConfig.strategy` 行的 `note` **逐字**写着(⏱️ 2026-09-18T09:09Z 直读):\n\n> ⚠️ THIS ROW CORRECTS A PRIOR IN-REPO CLAIM. … Measured on this checkout: the word `retryConfig` does not occur anywhere in packages/ or examples/ outside packages/spec — zero files. Nothing retries a connector call on a strategy, a backoff, a jitter or a status-code list; a provider factory's handler makes one fetch. … ⛔ **ADR-0049 owes a decision, not a sweep**: `retryConfig` is the documented answer for a rate-limited upstream (SYNC_ARCHITECTURE.md points an author here because its `retryableStatusCodes` default includes 429), so **retiring it removes the only advice the docs give**.\n\n⇒ ⭐ **账本自己点名「欠的是一次裁定,不是一次清扫」,而没有任何卡在承接它。** 本卡就是那个载体。\n\n## ⭐ 「留给宿主」这条辩解已被证伪 —— 本席逐字读过\n\n⏱️ 2026-09-18T09:09Z 直读 `packages/spec/src/integration/connector-provider.ts:57`:\n\n```ts\nexport interface ConnectorProviderContext {\n  readonly name: string;\n  readonly label: string;\n  readonly description?: string;\n  readonly icon?: string;\n  readonly type: string;\n  readonly providerConfig: Record<string, unknown>;\n  readonly auth?: ResolvedConnectorAuth;\n  readonly loadPackageFile?: (relativePath: string) => Promise<string>;\n}\n```\n\n⇒ 三个键**一个都不在其中** ⇒ provider 工厂**没有能力**兑现它们。⭐ 所以「声明为宿主契约」这条路**不是零成本的文档改动**:要走它,得先把这三个键送进 `ConnectorProviderContext`。\n\n## 裁定要权衡的,本席只列不评\n\n| 路 | 代价(本席实测到的那部分) |\n|---|---|\n| **退休** | ⚠️ 账本自己的话:**「removes the only advice the docs give」** —— `SYNC_ARCHITECTURE.md` 把 `retryConfig` 指为限流上游的解法,而 `#4911` 已把 `rateLimitConfig` 退掉。退休后,作者面对 429 时仓里**没有任何**建议 |\n| **实现** | ⚠️ 新能力。需要决定重试发生在哪一层(provider 工厂 / 宿主 / 网关),并把三个键送进 `ConnectorProviderContext` |\n| **声明为宿主契约** | ⚠️ 同样要动 `ConnectorProviderContext`(见上),⛔ 不是纯文档 |\n\n## ⛔ 本席**未**做的测量\n\n- ⛔ **本席没有重跑那个「零消费者」探针**。上面引的「zero files」是**账本自己的** `note` 里的读数(verifiedAt 2026-09-17),⛔ 不是本席的。⭐ 接手裁定的人应当重取,并配同形阳性对照(`providerConfig` 在同一判据下有消费者)。\n- ⛔ 本席**没有**普查 `ConnectorSchema` 上还有多少同状态的键 —— 本卡只管这三个(账本记为 dead、且被文档教着用的那三个)。\n- ⛔ 本席**不主张**本卡与 #18794 的先后。#18794 的止血按设计**不预判**本卡。\n\n## 查重(方法写明)\n\n⏱️ 2026-09-18T09:09Z,两次 MCP `search_issues`(含 closed;REST `/search/*` 在本通道 403,故通道照实申报):\n\n- 语义检索「ADR-0049 decision for connector retryConfig / timeouts」⇒ 4 条命中,**全部 closed 且主题不同**(#4004 / #4007 / #3993 / #3826)。\n- 关键词检索「connector retryConfig dead key enforce-or-remove liveness connector.json」⇒ **1 条**:**#14691**(closed)—— ⭐ **同形先例**:它把 `RestServerConfig` 上账本记为 `dead` 的 15 行收成一张 enforce-or-remove 卡。**不是孪生**(不同 schema、不同键)。\n\n⇒ **无孪生。** ⛔ 无可并入的既有条目。\n\n## 查重词\n\n`connector retryConfig ADR-0049 decision` · `connectionTimeoutMs requestTimeoutMs dead` · `ConnectorProviderContext cannot honour retryConfig` · `retire removes the only advice the docs give` · `connector liveness dead rows enforce-or-remove`\n\n相关:**#18794**(止血的那一半,已派发,走 A)· **#14691**(同形先例,`RestServerConfig`)· #5554 / #4911 / #4686(`rateLimitConfig` 退休那条线)· `packages/spec/liveness/connector.json`(测量的记录)\n<!-- os-decision-facets -->\nos-decision-facets\n\n⚠️ 由立卡席(`domain:spec` seat 2)在半状态巡检 **H62** 指出本卡正文缺此块后**补上** —— ⏱️ 2026-09-18T10:05Z。⭐ 「落卡即带」是**立卡义务**,本席立卡时漏了,这是本席自己的补票,⛔ 不是分诊的疏漏。⛔ 正文原有内容一字未改、未删。\n\n- **① 项目长远合理性** —— 账本 `packages/spec/liveness/connector.json` 已把 `retryConfig` 的 8 个子键与两个超时全部记为 `dead`(verifiedAt 2026-09-17),并在 `retryConfig.strategy` 行自陈「⛔ **ADR-0049 owes a decision, not a sweep**」。⇒ 测量已经做完,**缺的是一次裁定**;不裁,这三个键会一直以「已声明」的姿态留在已发布面上。\n- **② 实际业务拉动** —— `SYNC_ARCHITECTURE.md` 曾把 `retryConfig` 指为限流上游的解法(PR #18979 已把那五处改成「已声明但当前无实现」),而 `#4911` 已把 `rateLimitConfig` 退掉。⇒ **退休会拿掉仓里对 429 的唯一建议**;不退休,作者写的配置被静默忽略。两边都有真实代价,这正是要人裁的原因。\n- **③ 防 AI 犯错** —— 一个照声明写 `retryConfig` 的作者(或 AI)拿到的是**被静默忽略**的配置:不红、不警告、看起来配好了。⭐ `connector.zod.ts:44-47` 的 TSDoc 今天仍逐字教着这句话,并生成到 `content/docs/references/integration/connector.mdx:42`(已另立 #18983 止血)。\n- **④ 创业阶段不扩散** —— 三条路的扩散面差别很大:**退休**是删除(最小,但拿掉唯一建议);**实现**是新能力(要先定重试发生在哪一层);**声明为宿主契约**⛔ 不是纯文档 —— 本席逐字读过 `packages/spec/src/integration/connector-provider.ts:57`,`ConnectorProviderContext` 只带 `name`/`label`/`description?`/`icon?`/`type`/`providerConfig`/`auth?`/`loadPackageFile?`,三个键**一个都不在其中**,要走这条路得先扩这个接口。\n\n**Prior rulings read:** connectorschema.retryconfig,connectorschema,retryconfig,connectiontimeoutms,requesttimeoutms,adr-0049,dead → 15 hits; ADR-0056 D10, ADR-0056 D5, ADR-0056 D8, ADR-0057 D7, ADR-0058 D3, ADR-0058 D4, ADR-0058 D8, ADR-0060 D5, ADR-0069 D6, ADR-0090 D4\n\n⚠️ **一条本席读完 ADR-0049 后要照实说的边界**:ADR-0049 的标题是「Spec must not declare **security** properties the runtime does not enforce」,而 `retryConfig` / 超时是**韧性与配置**,⛔ 不是安全属性。⭐ 把本题路由到 ADR-0049 的是**账本自己的那条 note**,⛔ 不是本席。⇒ 若维护者认为治它的其实是别的条款(或根本不需要一次 ADR 级裁定),**那本身就是一个有用的答复**;本席⛔ 不替你选适用条款。⭐ 上面列出的 ADR 决策本席逐条看过题名,**没有一条预先回答了「这三个键该退休、实现还是声明为宿主契约」**。\n\n**The question, in one line:** `ConnectorSchema.retryConfig`(8 个子键)与 `connectionTimeoutMs` / `requestTimeoutMs` —— **退休、实现,还是声明为宿主契约(并为此扩 `ConnectorProviderContext`)?**\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

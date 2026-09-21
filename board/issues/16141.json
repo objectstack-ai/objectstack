@@ -1,0 +1,36 @@
+{
+  "number": 16141,
+  "kind": "issue",
+  "title": "docs: the Data API page's `fields[]` callout is stale — `AnalyticsResult.fields` now declares `label` / `format` / `currency` / `percentScale`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:07:11Z",
+  "updated_at": "2026-09-06T07:58:19Z",
+  "closed_at": "2026-09-06T07:55:05Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16141",
+  "body": "Recording only — not claimed, no assignee. Found while working #14546 (SDK payload reads on the same page); out of scope there and deliberately left untouched by that PR.\n\n## Where\n\n`content/docs/api/data-api.mdx`, the `Callout type=\"info\"` under `POST /analytics/query` (lines 421-433 on `origin/main` @ `1f2a02ba0`).\n\n## What it says\n\n> **`fields[]` describes columns, not presentation.** Each entry carries exactly `name` and `type` — that is the whole descriptor `AnalyticsResultResponseSchema` declares, and every strategy answering this endpoint emits those two keys and nothing else.\n>\n> Display name and number format live one layer up, in the **cube's metric/dimension definition** ... Reading `data.fields[i].label` or `data.fields[i].format` off a query result yields `undefined`; a client that renders table headers or formats amounts reads them from the cube metadata instead.\n\n## Why it is false today\n\nBoth halves of the claim are contradicted by the tree it names:\n\n- `packages/spec/src/api/analytics.zod.ts` — `AnalyticsResultResponseSchema.data.fields[]` declares `name`, `type`, `label?`, `format?`, `currency?`, `percentScale?` (and `builtinAggregate?` since #14492). Its own docblock states the change: \"#13078 restored the parity: this schema used to declare only `rows` / `fields{name,type}` / `sql?`, a strict subset of what the route relays, while the wire really carries `fields[].label` ... `format` / `currency` / `percentScale` ... and `totals`.\"\n- `packages/spec/src/contracts/analytics-service.ts` — the `AnalyticsResult` interface declares the same members, each with the renderer chain it feeds (ADR-0053 currency, percent scale).\n- The wire half is measured, not argued: the client docblock on `analytics.query` cites `packages/client/src/analytics-automation-json-erasure.test.ts` measuring `fields[].label` on a real `AnalyticsService`, and `packages/spec/src/api/analytics.test.ts` binds `AnalyticsResultResponse['data']` to `AnalyticsResult` at compile time, so the two cannot drift apart silently.\n\nSo a reader is told to ignore members the producer ships specifically for them, and to go fetch cube metadata instead — the opposite of what the ADR-0053 / percent-scale chains were built for.\n\n## History — the callout was true when it was written\n\n#6369 (closed) wrote this callout at a time when the runtime really did emit `{ name, type }` only. #13078 then moved the SCHEMA to the contract rather than the contract to the schema, which inverted the callout without touching the page. This is drift from a landed correction, not an original error.\n\n## Executable criterion\n\n`grep -n \"percentScale\\|currency\\|label\" packages/spec/src/api/analytics.zod.ts` inside `AnalyticsResultResponseSchema` returns the four optional members; the callout says the descriptor is `name` + `type` \"and nothing else\". Positive control today: both statements are in the tree at the same time.\n\n## Not in scope for #14546\n\nThat card is one payload read per example, on three named sites; it is scoped and this is a different defect class (false prose about a descriptor). #14546 remains open on its own terms and this is not addressed by its PR.\n"
+}

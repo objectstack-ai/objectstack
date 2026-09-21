@@ -1,0 +1,35 @@
+{
+  "number": 16396,
+  "kind": "pull_request",
+  "title": "fix(service-automation): a restored suspension carries the pause, not the failed attempt",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T17:47:51Z",
+  "updated_at": "2026-09-06T18:39:16Z",
+  "closed_at": "2026-09-06T18:39:14Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T18:39:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16396",
+  "body": "Fixes #15660\n\nThe card was filed as a **reading, not a measurement**, and its first job was to decide whether it reproduces at all. **It reproduces** — but not by the mechanism the card named. Both halves are below.\n\n## It reproduces\n\nDriven end to end against the real engine, exactly the path the card named as the only exposure (the #13937 consumed-suspension restore):\n\n| reading | value |\n| --- | --- |\n| the durable row at the pause | `started: 1` |\n| what `restoreConsumedSuspension` put back | `started: 99` |\n| what the node was handed on the repair resume | `started: 99` |\n\nAn operator repairing a stranded run got a snapshot stamped as \"the pause\" that carried state written by the attempt that failed.\n\n## The mechanism is NOT the one the card named\n\nThe card attributed the aliasing to \"the in-memory suspended-run store keeps the object by identity rather than serialising it\". **It does not.** `InMemorySuspendedRunStore` JSON round-trips on both `save` and `load` — pinned in this PR, because the next reader should not re-derive a fix from a premise that is false.\n\nThe aliasing is minted on the **resume**, not at the suspend. `resumeInternal` rebuilds the flow scope as `new Map(Object.entries(run.variables))`: that copies the keys and **shares every value object** with the parked snapshot. `journalConsumedSuspension` then shallow-copies `run` and journals it as the pause \"verbatim\" — a guarantee it delivered for top-level keys only. So an executor that keeps state in the scope and updates it **in place** writes straight through into the snapshot the operator exit hands back.\n\n`map` is the concrete instance (`nodeId.$mapState`) and, by a census re-derived here rather than recalled, still the only executor in-repo that does this.\n\n## Both proposed fix placements are refuted by that same measurement\n\nThe card offered three candidates and asked that the choice be made after the repro, with cost measured. Two of them are refuted:\n\n- **\"deep copy at snapshot time\"** — with a store configured the snapshot **already is** a private deep copy before a single downstream node runs, and it reproduced anyway. It cannot fix a link that is minted later.\n- **\"copy at restore time\"** — the node mutates and *then* throws, so the journal is already corrupt when it is written. Anything copied at or after that point copies the corruption.\n- **\"node state is never mutated in place\"** — the remaining candidate, and it is a convention the engine cannot verify. A third-party executor reintroduces the defect silently, and the failure mode is an operator told a run is repairable and handed a snapshot that misstates its progress. Rejected for that reason, not on cost.\n\nThe copy has to be taken **before the failed attempt runs**. That is the line that already captures `stepCountAtPause`, for the same reason, so the fix sits beside the code that had the same problem and solved it.\n\n## The cost the card flagged NOT MEASURED\n\n| scope | one clone |\n| --- | --- |\n| typical (8 node outputs) | 5.8 us |\n| map mid-run (100 results) | 32 us |\n| map worst case (10,000 results = `MAX_MAP_ITEMS`) | 3.3 ms |\n\nMeasured against what the same path already spends: **one suspend+resume round trip against a configured store already performs four full clones of this same payload** (`save` x1, `load` x2, `recordTerminal` x1 — counted, not read). This adds a fifth, on a path whose production cost is a durable round trip. The existing objection to a JSON clone was that it would run *inside a catch arm already handling a failure*, where a circular value would throw the operator's repair away; on the happy path it is just a value we decline to copy, and the fallback is the previous behaviour with a warning.\n\n## Verification\n\n`git rev-parse --short HEAD` = **d3ab06776** — every result below is from that tree.\n\n- **Ablation, red before green.** With the fix reverted to `origin/main` (mutation confirmed on disk: blob hash equals the `origin/main` blob, marker count 3 to 0), the new pin is **2 failed | 27 passed**; both control arms and all 24 tests of the existing `consumed-suspension-restore.test.ts` stay green. With the fix: **29 passed**. Restore proved by an empty `git diff HEAD` **and** disk hash equal to the HEAD blob.\n- **Controls in the file, not in a scratch buffer.** Each in-place arm is paired with a replace-and-set arm that must stay green. Without them, a harness that reported the right value for a trivial reason would read exactly like a fixed engine.\n- Package suite: **1431 passed (122 files)**. Typecheck: green, and both changed files confirmed present in the tsc program via `--listFiles` (1 hit each) rather than assumed.\n- Gate family derived mechanically on this head — `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` — and all 56 run. Two returned exit 3 `PREREQUISITE NOT MET` (`check:dual-build-cjs-loads`, `check:type-check-debt`); both were re-run after `turbo run build` and returned real greens.\n\n## Scope\n\nNo contract surface: no `packages/spec/**`, no exported type or signature changed. The resume ordering is untouched, and a running flow sees exactly the scope it saw before — only what gets journalled changes.\n\nNot folded in, per the card's boundaries: #15616 / PR #15648 (the `map` state *lifetime*) and #15646 (the `runRegion` suspend-arm residue) remain open and are not addressed here.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01XpTx2tbq3pZRYAdoGt6E6Y\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XpTx2tbq3pZRYAdoGt6E6Y)_"
+}

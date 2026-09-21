@@ -1,0 +1,29 @@
+{
+  "number": 19458,
+  "kind": "issue",
+  "title": "Stock cleanup under ruling #202 B (maintainer 「B(荐)A + 清理存量」, amended to close): the triage seat closes the 90 listed tooling `pm:queue` cards `not_planned`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:retriage",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-20T23:37:45Z",
+  "updated_at": "2026-09-21T00:01:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19458",
+  "body": "Path: none — an execution order for the triage seat, not a dev card. ⛔ Not for dispatch to a dev; ⛔ not to be claimed by an execution seat.\n\nRuling: batch #202 item 1 · letter B · maintainer 「B(荐)A + 清理存量」 2026-09-20T23:25Z (chat; the minute is approximate, the wording is verbatim)\nAmendment, same exchange: 「p2 的 47 张转 pm:on-hold 带机器条件 有价值吗？卡片只要open就要一直被扫描。」 — close, never hold. Executor named by the maintainer: 「重点是分诊」 / 「立章程卡并把 90 张的关闭交分诊席」.\n\nDirector seat, summon #25 (`session_012GcsUbuqFGBibkEDMRC1eE`). The seat prepared this closure as its own sweep and the runtime's write policy refused the 90-card batch; per the maintainer's words above it is the triage seat's act — triage is the charter's producer of closures and `not_planned` reasons. `pm:retriage` on this card is the summons; the seat post (#6015) carries the accelerator comment.\n\n## The order\n\nFor each card below, **in this order per card**, ⛔ re-reading the card's current state first (any list snapshot is void): skip the card if it is not open, has an assignee, carries any pm-state other than exactly `pm:queue`, carries `pm:retriage`, or has an open PR referencing it — and list every skip with its reason in the completion comment here. Otherwise: (1) post the closing comment below through `scripts/pm/post-stamped.mjs`; (2) `scripts/pm/label-write.mjs --remove pm:queue` (four-step, read back); (3) close with `state_reason: not_planned`. Log `#N → closed` per card; when done, post the log here and close this card `completed`.\n\n### Closing comment (post verbatim, with the executing seat's session id in place of the director's)\n\n```\nClosed `not_planned` by the director seat (`session_012GcsUbuqFGBibkEDMRC1eE`), <UTC of the closing act>, under ruling batch #202 letter **B** (maintainer, in chat: 「B(荐)A + 清理存量」, amended in the same exchange from 「p2 转 pm:on-hold」 to close — 「卡片只要 open 就要一直被扫描」).\n\n**Why**: this card is tooling / gate / process work with no customer-visible pull. `docs/NORTH-STAR.md` 〈优先级〉 rule 2 (「不在路上、不在清单上 ⇒ p3 或不做」) and rule 3 (「产品 P0/P1 开着时不做 p2/p3 工具卡」 — objectstack carries 3 product P0 and 29 product P1 cards open today), plus the maintainer's standing principles 「不希望一直开发门禁」 and 「零拉动默认 defer 或 remove」. Closing is the cheaper form of deferral: an open card is read by every sweep, a closed one costs nothing and stays searchable.\n\n**Reopen is free**, on exactly two readings, stated by whoever reopens: (1) this defect is now blocking a **product** card's landing (name the PR); or (2) it protects a **customer-visible** contract (name the published surface). ⛔ 「A gate is imprecise」 or 「a self-test could be stricter」 is not a reopen reason under this ruling. The measurements on this card stay valid as a record; nothing here disputes them.\n```\n\n### p3 — 48 cards\n\n#19440 #19408 #19404 #19396 #19395 #19390 #19343 #19336 #19325 #19319 #19309 #19243 #19239 #19231 #19222 #19179 #19176 #19146 #19129 #19043 #19032 #19015 #18964 #18954 #18937 #18936 #18807 #18665 #18341 #18333 #18329 #18214 #18210 #18104 #17866 #17492 #17163 #17127 #16928 #16770 #16767 #16644 #15926 #15809 #15740 #15468 #15296 #13503\n\n### p2 — 42 cards\n\n#19420 #19386 #19244 #19240 #19238 #19233 #19230 #19224 #19203 #19189 #19172 #19127 #19124 #19114 #19106 #19105 #19104 #19070 #19069 #19063 #19052 #19023 #19001 #18995 #18988 #18919 #18900 #18773 #18761 #18744 #18743 #18624 #18375 #17673 #16949 #16529 #16468 #16465 #16303 #15082 #15009 #13799\n\n## ⛔ Not in this order — listed for the maintainer's own look, untouched by this card\n\n**17 cards the classifier could not call** (tool words and product words in the same title):\n#19393 #19346 #19341 #19329 #19328 #19324 #19300 #19299 #18818 #18508 #18459 #18377 #17926 #17735 #16906 #16612 #14640\n\n**2 tooling cards at p1** and **5 with no priority** in `pm:queue`: #19289 #19279 · #19339 #19087 #19068 #19065 #19061\n\n**33 tooling cards outside `pm:queue`** (blocked / on-hold / awaiting-maintainer / decision box / bare), p2 and p3, unassigned — a second batch if the maintainer says so:\n#18929 #19441 #19443 #19450 #19444 #18965 #19330 #18065 #18460 #18469 #18886 #19361 #16094 #17458 #17512 #18124 #18466 #18623 #18915 #19188 #15642 #17682 #18290 #18914 #19221 #19333 #15936 #13776 #14944 #16222 #4676 #13838 #14290\n\n## Method of record\n\n`prs/queue-census.py` and `prs/sweep-classify.py` in the director's scratchpad; REST list of `pm:queue` open issues read 2026-09-20T23:0xZ; title/label classifier (`tooling` / `domain:skills` label, or a gate/script/skill/PM-process signal in the title, minus docs and product signals); the 90 titles were read by the seat one by one before this order was written. 44 of the 97 tool-class queue cards already carry `tooling`; 0 of the 100 product cards do.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

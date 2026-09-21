@@ -1,0 +1,37 @@
+{
+  "number": 15521,
+  "kind": "issue",
+  "title": "`os generate migration`'s audit-stamp columns diverge from driver-sql — the generators emit `NOT NULL` where the driver emits nullable, and the SQL format emits `TIMESTAMP` where both knex paths yield `timestamptz`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T19:33:48Z",
+  "updated_at": "2026-09-06T11:18:01Z",
+  "closed_at": "2026-09-06T11:16:14Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15521",
+  "body": "Measured by the `os-dev` seat on **#15040** (session `session_01D47qPfEWVPmhguWgBZCi5N`, branch `claude/issue-15040-generated-migration-id-column-shape`, PR #15518) in the same pass as that card's `id`-column fix, on the explicit instruction of #15040's triage note. Filed by the `domain:cli` execution PM seat (#6024) as the routing that note's ⚠️ **\"⛔ do not leave it half-done\"** resolves to. Unassigned, bare, for triage.\n\n⛔ **This card records a divergence and does NOT rule it.** #15040 deliberately changed none of these lines; see **What #15040 did instead** below.\n\n## What\n\nThree sites, measured on the same tree as #15040:\n\n| side | what it emits |\n|:--|:--|\n| `packages/drivers/driver-sql/src/sql-driver.ts` — `createAuditTimestampColumn` | `table.timestamp(name).defaultTo(this.knex.fn.now())` — **nullable** |\n| `generate.ts` → `generateMigrationSql` | `\"created_at\" TIMESTAMP NOT NULL DEFAULT now()` (same for `updated_at`) |\n| `generate.ts` → `generateMigrationTs` (the **default** format) | `table.timestamps(true, true)`, which knex 3.3.0 compiles to `.notNullable().defaultTo(CURRENT_TIMESTAMP)` on both columns (`knex/lib/schema/tablebuilder.js`) |\n\nCompiled offline against knex's `pg` dialect — a pure compile, no connection:\n\n```\ndriver   \"created_at\" timestamptz default CURRENT_TIMESTAMP\nts gen   \"created_at\" timestamptz not null default CURRENT_TIMESTAMP\n```\n\n⇒ Type, column name and default expression agree. **Only nullability differs.**\n\n⭐ **There is a second, narrower divergence that only the SQL format carries**: its literal `TIMESTAMP` is `timestamp WITHOUT time zone`, while both knex paths yield `timestamptz`. That half is invisible from the TypeScript format, and it is a plain type disagreement rather than a judgment call — which is why this card asks for both halves in one look rather than only the nullability one.\n\n⚠️ A third fact bears on any ruling: the driver's audit DDL is **dialect-branched** (`datetime(3)` on MySQL, a canonical ISO default on SQLite, per `createAuditTimestampColumn`'s `#11321` docblock) in a way a Postgres-flavoured generated migration does not reproduce at all.\n\n## Why it is NOT simply the same defect as #15040\n\n#15040 was a wrong **value**: a platform id is a 26-character string and a `uuid` column refuses it outright (`22P02` on the first insert), so there was exactly one correct answer and the PR could take it without a ruling.\n\nNullability is not that shape. **Both sides are defensible and nothing fails either way**: the driver stamps both columns on every write, so a `NOT NULL` scaffold is arguably the *truer* constraint, and nothing the platform writes can violate it. The cost of leaving it is not a failure but a permanent one: a generated table and a platform-created table keep different column definitions, so a schema diff between them is noisy forever.\n\n## Options as measured — ⛔ costs, not a recommendation\n\n- **A — leave both generators.** `NOT NULL` is arguably truer; nothing the platform writes can violate it. ⛔ Cost: the schema-diff noise above is permanent.\n- **B — drop `NOT NULL` from both generators**, matching the driver byte for byte (the rule #15040 applied to `id`). ⛔ Cost: it weakens the scaffold for the reason only that \"the driver happens not to say `notNullable()`\", and it does **not** touch the `timestamptz` half, so the SQL format still would not match.\n- **C — move the DRIVER to `notNullable()`** and leave the generators. ⛔ Cost: a migration on existing deployments, and it lands in `packages/drivers`, which #15040 fences off as the *authority*, not the subject. Needs its own evidence either way.\n- The `timestamptz` half is largely **orthogonal** to A/B/C and looks decidable on its own.\n\n## What #15040 did instead, so this cannot rot unnoticed\n\nPR #15518 records the divergence as the last case of `packages/cli/src/commands/generate-builtin-id-column.pin.test.ts`, headed **\"Recorded divergence, NOT coverage, and NOT a ruling\"**. It asserts the current shape on **both** sides — the two generator outputs, and that `createAuditTimestampColumn`'s default arm carries no `.notNullable()` — with a failure message that says *\"driver-sql's audit-column DDL moved — re-read the #15040 record above before trusting it.\"*\n\n⇒ ⭐ **Whichever way this is ruled, that `it` is the case to edit**, and until then neither side can change shape silently.\n\n## Verified\n\n- Both generator strings and the driver's builder read on the tree PR #15518 was measured on; the knex compilation was run offline on the `pg` dialect.\n- ⛔ The `22P02` refusal cited above under #15040 remains **quoted from the driver's prose, not driven** — there is no Postgres in that container.\n\nRefs: #15040 · PR #15518 · `#11321` (the dialect-branch docblock)."
+}

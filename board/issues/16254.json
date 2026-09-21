@@ -1,0 +1,34 @@
+{
+  "number": 16254,
+  "kind": "pull_request",
+  "title": "docs(permissions): the attachments 401 row covers the posture-driven key refusals",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T07:57:36Z",
+  "updated_at": "2026-09-06T09:11:39Z",
+  "closed_at": "2026-09-06T09:11:38Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T09:11:38Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16254",
+  "body": "Fixes #16018\n\nThe attachments download gate's `AUTH_REQUIRED` (401) row listed only the anonymous case. Now that the four tenancy-posture doors have landed, the same 401 is also the answer for two more credentials. This extends the row **once for the whole family** rather than writing the same paragraph on four cards.\n\n## What changed\n\nOne file, one section — `content/docs/permissions/attachments-access.mdx`, the \"Download — authenticated & parent-scoped\" table (the `AUTH_REQUIRED` row) plus a follow-on passage under it. The enforcement-summary row further down is untouched: its wording does not contradict the extended row.\n\n## It is an addition, not a correction\n\nThe row was already a simplification before this family — an unknown, revoked or expired API key has always produced the same 401 — so no published claim was false. This is an extension of a simplifying row, not a repair of one.\n\n## The two measured non-uniformities are stated, not flattened\n\nRe-verified on the merge base against the door this page actually documents (`service-storage`), not assumed:\n\n- `postureEnforcesWall(posture)` is `posture !== 'single'`; `postureUsesUnionScope(posture)` is `posture === 'group'` (`packages/spec/src/security/tenancy-posture.ts:53` and `:80`).\n- `organization_membership_ended` is gated on `postureEnforcesWall` alone (`packages/core/src/security/resolve-authz-context.ts:480`) so an ex-member's org-stamped key is refused under **both** `group` and `isolated`.\n- `organization_required` additionally requires `!postureUsesUnionScope` (`packages/core/src/security/api-key.ts:370`) so an organization-less key is refused under `isolated` **only** — under `group` it stays admitted.\n- The door's own pins agree, at the wire: `packages/services/service-storage/src/file-read-tenancy-posture-admission.test.ts` section 6 asserts **401** for the ex-member's key and **200** for the organization-less key under `group`.\n\nSo the page says \"refused under both `group` and `isolated`\" for one key kind and \"refused under `isolated` only\" for the other. It never says \"under `group` these keys are refused\".\n\n**No outage status is documented.** The outage answer differs per door and is not the declared 503 anywhere measured; #15999 remains open for that divergence and is not addressed here.\n\nThe 401 also stays the *generic* answer on the wire: both refusals leave `userId` unset, so the response is byte-identical to sending no credential at all and the reason goes to the server log only. The page says that, because it is why the refusal is a 401 rather than a 403.\n\n## Verification\n\nAll 39 gate families derived for this diff were run locally and are green:\n\n`node scripts/pm/dispatch-gates.mjs --changed --ran RAN_FILE` reports `39 derived famil(ies) accounted for — 39 run, 0 NOT-MEASURED`.\n\nThat includes the docs corpus gates (`check:doc-anchors`, `check:doc-authoring`, `check:docs-single-h1`, `check:docs-redirects`, `check:docs-audit-scope`, `check:docs-transcript-drift`, `check:role-word`, `check:nul-bytes`, `check-doc-frontmatter`, `check-doc-route-spelling`, `check-docs-section-name`, `check-section-landing-index`), the two lint-owned docs gates (`check:doc-formula-expressions`, `check:doc-security-posture`) and the spec docs gates (`check:docs`, `check:skill-examples`, `check:liveness`, `check:empty-state`, `check:strictness-ledger`, `check:variant-docs`, `check:yaml-examples`), each after `@objectstack/spec` / `@objectstack/lint` / `@objectstack/client-react` were built under the shared verify lock.\n\n`pnpm lint` was narrowed to the changed file, and the narrowing is measured rather than asserted:\n\n- population: `eslint --no-inline-config --format json` on the changed file returns `File ignored because no matching configuration was supplied` — `.mdx` is in no `files:` glob of `eslint.config.mjs`, whose population is `{ts,tsx,mts,cts,js,jsx,mjs,cjs}`;\n- count: 1 file in the diff, 0 of them inside eslint's population, `errorCount: 0`;\n- invariance: this repo's config never enables type-aware linting (no `parserOptions.project`, no typed rules — stated in `eslint.config.mjs` and confirmed by grep), so a docs-only diff cannot move the verdict on any untouched file.\n\n`skip-changeset`: the diff publishes from no package (`content/docs/**` only).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8)_"
+}

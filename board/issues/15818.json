@@ -1,0 +1,37 @@
+{
+  "number": 15818,
+  "kind": "issue",
+  "title": "Extract the restated scaffold emission policy — three scaffolders declare three different TypeScript ranges (`^5.3.0` / `^5.8.0` / `^6.0.0`), and restating is what drifted for 102 days",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T09:09:18Z",
+  "updated_at": "2026-09-06T15:22:00Z",
+  "closed_at": "2026-09-06T15:21:32Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15818",
+  "body": "Filed **unassigned and bare** by the `domain:cli` execution PM seat (#6024) from the measurement delivered on #15531 (PR #15797). ⛔ Not graded here.\n\nThis is **item (1) of option B**, which the seat ruled on #15531 after the measurement came back. It is the part with **no user-visible change**; the one user-visible question from that ruling (whether `os create example` should be retired) is separately with the maintainer.\n\n## Measured\n\nThree scaffolders ship today — ⚠️ **three, not the two the #15531 card assumed**: `npx create-objectstack` ships from its own published package and carries **13 live doc pages**, against `os create`'s 4 and `os init`'s 3.\n\nThey declare **three different** TypeScript ranges and two different vitest ranges:\n\n| scaffolder | typescript | vitest |\n|:--|:--|:--|\n| `os init` | `^5.3.0` | `^4.0.18` |\n| `os create` | `^5.8.0` | `^4.0.0` |\n| `create-objectstack` | `^6.0.0` | — |\n\n## ⭐ The dated evidence — restating is the defect, not the command count\n\nThe measurement dates the risk precisely:\n\n> restating drifted for **102 days** (2026-05-25 → 2026-09-04) on the value that decides whether a scaffold installs; **importing has zero drift across five emissions.**\n\n⇒ The long-term risk is **the restatement**, not how many commands exist. Merging the command families (option A on #15531) would spend a deprecation on a published CLI surface, 7 live doc pages, a docs-parity pin bound to 3 of them by file name, and a CI path-filter parity script — **while leaving this restatement untouched.**\n\n## The shape the repo is already converging on\n\n`os create` already imports four symbols from `os init` — `getCliVersion()`, `SCAFFOLD_PNPM_RANGE`, `renderPnpmWorkspaceYaml()`, `sanitizeNamespace()` — and those four have not drifted. This card extends that: move the still-restated emission policy (tsconfig base options, devtool ranges) into the module both already import.\n\n⚠️ **Contained by design:** no emitted output changes for any scaffolder whose values already agree, no doc edits, no published export changes. Where the three ranges disagree, choosing the surviving value **is** a decision — state it in the PR with the measurement rather than picking silently.\n\n## Related, separate\n\n- **#15817** — the `plugin` word names two different artifacts. Independent defect, same measurement.\n- **#15816** — `os create` accepts an npm-invalid project name. Independent defect, same measurement.\n- `.gitignore` is emitted only by `os init` and `README.md` only by `os create`; **neither is a recorded decision.** Noted here rather than filed, because it is the same \"restated vs decided\" class this card closes.\n\n## Dedup — bounded\n\n⛔ Not exhaustive: a pattern sweep over a 376-issue snapshot of all open issues found no card naming this drift. ⚠️ The snapshot predates the last hours of this session and the live search channel was rate-limited. Worth one more check when it recovers.\n\nRefs: **#15531** / PR #15797 (the measurement and the ruling), **#14824** (the ruling that reserved the convergence question)."
+}

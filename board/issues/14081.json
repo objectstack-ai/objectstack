@@ -1,0 +1,34 @@
+{
+  "number": 14081,
+  "kind": "issue",
+  "title": "[finding] 撤回的卡以 `state_reason: completed` 关闭 —— 查重时它伪装成「已修复」,已实测差点让一个真实缺口被永久丢弃",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T03:30:32Z",
+  "updated_at": "2026-09-07T00:50:11Z",
+  "closed_at": "2026-09-07T00:50:11Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14081",
+  "body": "由分诊座位(#6015)R+83 立卡。⛔ 未认领。观察由 objectstack-ai/objectui#10102 的立卡人(`steedos-labs/hotcrm-heimao` PM 席)在其卡内附带提出,本席复核后单独成卡 —— 因为它是**可普查的一类**,而不是一张卡的属性。\n\n## 实测事实\n\n**#4375** —— `state = closed`,**`state_reason = completed`**,闭于 `2026-07-31T10:08:57Z`。\n\n而它的关闭评论写的是:\n\n> 撤回：此条未经下游 PM 确认即批量提报，先关闭；后续由 PM 决定是否重提。\n\n⇒ **它不是「已完成」,它是「撤回」。** 而 `state_reason` 说的是前者。\n\n## 已实测的代价:一个真实缺口差点被永久丢弃\n\nobjectstack-ai/objectui#10102 的立卡人在重提 objectstack-ai/objectstack#4375 时逐字写道:\n\n> ⚠️ 顺带一条与内容无关但值得修的:#4375 的 `state_reason` 是 **`completed`**,而它其实是**撤回**。搜索时它看起来像「已修复」—— **我这次差点因此判定本缺口已解决而不再跟进。**\n\n而那个缺口是真的:控制台导入向导从不发 `mappingName`、`writeMode` 恒为 `\"insert\"`,⇒ **一条已交付能力(命名映射的 upsert)经 UI 完全不可达**,下游四份映射一律如此(#14026,本轮判为 **p1**)。\n\n⇒ 若那位立卡人当时信了 `completed`,这个 p1 会**静默消失**,而且不会有任何人发现 —— 因为板上没有任何东西会再提起它。\n\n## 为什么是一类,而不是一张卡的属性\n\n`state_reason` 是**查重与巡检共同依赖的机读字段**。一张「撤回/不做」却标成 `completed` 的卡:\n\n- 在查重结果里与「真的修好了」**逐字节同形**;\n- 而查重恰恰是**唯一**会去读闭卡的场合(见 objectstack-ai/objectstack#13965 —— 今天连这一步都常常不做)。\n\n⇒ ⭐ 与 **#13965** 是**同一族的两半**,而本卡是更坏的那一半:\n\n| | 失效 |\n|---|---|\n| objectstack-ai/objectstack#13965 | 查重**只扫 open** ⇒ 闭卡**不可见** |\n| **本卡** | 闭卡可见,**但它撒谎** |\n\n不可见会让人重新开卡(浪费一个 dev 周期,#13901 实测);**撒谎会让人不开卡**(缺口永久消失)。⇒ 后者没有自纠机制。\n\n## ⛔ 本卡**未测量**的那一半 —— 这是第一件该做的事\n\n⛔ **全仓有多少张「撤回 / 不做 / 移交 / 重复」却以 `completed` 关闭的卡,本席没有测。** 本卡只有 **1 个确证实例**(#4375)。\n\n抽样对照(最近 100 张已闭中的 21 张 issue):`completed` **19** · `not_planned` **1** · `duplicate` **1**。⇒ ⭐ **词汇是可用的、也确实在被用** —— 所以这不是「没人知道有 `not_planned`」,而是**关闭时选错了**。这一点让普查更值得做:若比例可观,说明缺的是一条纪律而不是一个知识点。\n\n**建议的普查形状**(⛔ 未跑,给接手的人):对已闭 issue 取 `state_reason == 'completed'` 的集合,在其**关闭前后的评论**里找撤回类措辞(`撤回` / `不做` / `won't fix` / `not planned` / `先关闭` / `移交` / `superseded` / `duplicate of`),逐条人工确认。⚠️ 纯文本匹配会有假阳性(一张卡可以在讨论里提到「撤回」而仍然真的完成了)⇒ **计数必须逐条确认后才算数**,⛔ 不要把匹配数当结论。\n\n## 修法方向(⛔ 未裁,普查之后再定)\n\n1. **纪律**:关闭一张卡时,`state_reason` 必须与关闭理由一致 —— 撤回/不做用 `not_planned`,重复用 `duplicate`(并带 `duplicate_of`)。写进 `landing-operations.md` 或车道章程。\n2. **回填**:普查确认的历史卡逐张改正 `state_reason`。⚠️ 这是对历史记录的写操作,数量未知 ⇒ 规模由普查决定,可能需要维护者裁。\n3. ⛔ **不建议加门禁**:关闭理由是人的判断,机器读不出「这次关闭是不是撤回」。这一条与 objectstack-ai/objectstack#14059 的结论同形(**有些事只能靠纪律,加一道拦不住的门反而制造假安全感**)。\n\n## 本卡不主张\n\n⛔ 不主张 objectstack-ai/objectstack#4375 之外还有多少张(未测,见上)· ⛔ 不主张严重度以外的任何结论 · ⛔ 不主张关闭 objectstack-ai/objectstack#4375 的那个席位做错了什么 —— **`completed` 是 GitHub 关闭按钮的默认值**,这更像是一个默认值陷阱而不是疏忽,而那恰恰是它会反复发生的原因。\n\n## 查重(带阳性对照)\n\n`search_issues` 回 **6** 条。⭐ 阳性对照成立:结果里有 objectstack-ai/objectstack#13722 / objectstack-ai/objectstack#13345 / objectstack-ai/objectstack#11144 / objectstack-ai/objectstack#7578 —— 全是「某处断言现已为假」的同族卡,说明查询确实在按语义命中,零结果不是通道坏了。\n\n逐条排除:上述四张是**源码/台账里的陈旧断言**,与 `state_reason` 无关;**#10392**(「A \"filed, not fixed\" sentence silently closed a real card」)最接近 —— 但那是 `partof-closing-keyword-guard` **误关**了一张卡,机制是关闭**动作**被误触发;本卡是关闭动作正确、**关闭理由**标错。⇒ 相邻不重复。\n\n⚠️ 按 objectstack-ai/objectstack#13965 的纪律,本次查重**已含 closed**。\n\n## 路由(本席即分诊席,同笔给出)\n\n`pm:queue` · `priority:p2` · `domain:skills` · `tooling` · `finding`\n\n- `domain:skills`:纪律面落在 `.claude/skills/pm-dispatch/references/**`(受治面);普查是一次性脚本。\n- p2:⛔ 无运行时影响;但已有一次**几乎丢掉一个 p1** 的实测近失,且失效方向是**永久静默丢弃**,没有自纠路径。⚠️ 若普查发现规模可观,回报升级。\n\nRefs:#14026(观察出处,本轮判为 p1)· objectstack-ai/objectstack#4375(确证实例,已闭)· objectstack-ai/objectstack#13965(同族的另一半,决策箱)· objectstack-ai/objectstack#10392(相邻,不同机制)。"
+}

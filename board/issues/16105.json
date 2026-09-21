@@ -1,0 +1,35 @@
+{
+  "number": 16105,
+  "kind": "issue",
+  "title": "lint: validateChartBindings never checks a report without a `chart` — a chartless report's `dataset` is unvalidated, and `rows`/`columns` are unvalidated on every report",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T01:28:07Z",
+  "updated_at": "2026-09-06T19:21:10Z",
+  "closed_at": "2026-09-06T19:10:26Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16105",
+  "body": "Found while surveying which platform rules actually fire on `objectstack-ai/hotcrm` (its #1621, step 3 of epic #1579). Read-only survey, report-first, unassigned.\n\nMeasured against the **pinned `@objectstack/lint@17.3.0`** in that app's `node_modules` (never the platform source tree), hotcrm at `1670557`. Every injection was proven to reach disk by blob hash before any conclusion was drawn, and restored by blob hash verified by observation.\n\n## Fact 1 — a report with no `chart` key is never validated at all\n\n`validate-chart-bindings.ts` reaches a report only through `checkReportChart`, which opens:\n\n```\nconst checkReportChart = (chart, dataset, values, where, path) => {\n  if (!isRec(chart)) return;\n```\n\nThat closure is the **only** entrance that receives `report.dataset`. A report authored without a `chart` therefore never has its dataset resolved.\n\n- **Injection**: on `pipeline_coverage_by_quarter` (a `type: 'matrix'` report that declares no `chart`), `dataset: 'opportunity_metrics'` to `dataset: 'opportunity_metrics_nope'`.\n  `objectstack lint --json` gives `passed: true`, `errors: 0`, **exit 0**, no new finding.\n- **Working control, same file, same harness, same run design**: the identical edit on `opportunities_by_stage`, which *does* declare a chart, produces **`chart-dataset-unknown` at `error`, exit 1**.\n\n## Fact 2 — `rows` / `columns` are never checked on any report, charted or not\n\n`checkReportChart` forwards `values` as the measure selection and the two chart axes. The report's dimension selection (`rows`, `columns`) is never passed to `check()`.\n\n- **Injection**: on the **charted** `opportunities_by_stage`, `rows: ['stage']` to `rows: ['stage_nope']` gives **exit 0**, no finding.\n- **Working control, same report, same run**: `values: ['total_amount', 'avg_probability']` to `values: ['total_amount_nope', 'avg_probability']` produces **`chart-measure-unknown` at `error` plus `chart-axis-not-selected` at `warning`, exit 1**.\n\nSo on one and the same report object, the measure selection is validated and the dimension selection is not.\n\n## Consequence\n\nA report bound to a dataset that does not exist, or grouping on a dimension its dataset does not declare, publishes clean — `os lint` exits 0 and names nothing. On hotcrm the local test `test/analytics-integrity.test.ts` catches both cases, which is how the asymmetry was found; that assertion consequently cannot be retired against these rule ids.\n\n## Dedupe\n\nNearest existing cards, both read in full, neither duplicating this:\n\n- **#15734** (closed) — which set `chart-axis-not-selected` resolves against on the report surface. Same function, different branch; it presumes the chart entrance is taken.\n- **#15462** (closed) — the widget-side gap for empty measure/dimension selections.\n\nNeither addresses the chartless-report entrance or the `rows`/`columns` omission."
+}

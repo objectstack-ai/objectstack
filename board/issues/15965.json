@@ -1,0 +1,34 @@
+{
+  "number": 15965,
+  "kind": "issue",
+  "title": "[finding] the line ratchet's lane roster self-test enumerates eight lane files by name — a ninth lane file's ceiling row is pinned by nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T16:40:57Z",
+  "updated_at": "2026-09-07T03:56:48Z",
+  "closed_at": "2026-09-07T03:28:20Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15965",
+  "body": "Found while landing the triage lane reference (PR #15958, which adds `.claude/skills/pm-dispatch/references/lanes/triage.md` and its two map rows). Not fixed there: that card's ruling scopes the ratchet edit to the two map rows, and the fix below also moves a pinned self-test label.\n\n## What the roster does today\n\n`scripts/pm/check-skill-line-ratchet.mjs`'s self-test carries one case for the lane job descriptions:\n\n```js\n['all eight lane/seat job descriptions are covered', ['engine', 'services', 'cli', 'devx', 'skills', 'spec', 'hotcrm', 'director'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/lanes/${n}.md`)), true],\n```\n\nIt is an `.every` over a hand-written list of eight names, so a ninth lane file added to `CEILINGS` keeps it green and is not itself named by it. After the triage file lands there are nine lane files and the roster still names eight.\n\n## Why it matters, and how much\n\nThe case exists because enforcement cannot hold coverage: a lane file with no ceiling row simply is not read by the gate, and nothing turns red. That is exactly the defect two earlier findings closed for `references/` files. For the eight named lanes, deleting a `CEILINGS` row fails this case by name. For a lane file that is not in the roster, deleting its row is caught only by the map-wide cases (`every covered file has a positive ceiling`, `every ceilinged file carries a pin`) — which say nothing about a row that is simply gone.\n\nSo the gap is bounded: the new file is metered normally on every run; what is missing is the pin against silent removal.\n\n## Why it is not a one-line fix\n\nThe case label is itself pinned in the self-test's expectation table (`'all eight lane/seat job descriptions are covered': 1`), which is half of the duplicate-label refusal. Extending the roster means editing three places in step: the name list, the label (eight → nine), and that table entry.\n\n## The shape worth considering\n\nA roster that cannot go stale would be better than a longer literal: derive the lane names by reading the `lanes/` directory (the same idiom the compile-surfaces finding used to find the last uncovered references file — enumerate the directory against the map), and assert every file found there has a `CEILINGS` row. That turns \"the author remembered to extend a list\" into \"the tree and the map agree\", and it removes the label arithmetic entirely.\n\nSurface: `scripts/pm/check-skill-line-ratchet.mjs`. Repo tooling only; no runtime or published surface is involved.\n"
+}

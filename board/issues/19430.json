@@ -1,0 +1,30 @@
+{
+  "number": 19430,
+  "kind": "issue",
+  "title": "A metadata-form tooltip spells a strict enum's legal values in translated locales, so the value an author is shown is one the schema refuses",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-20T20:01:45Z",
+  "updated_at": "2026-09-20T20:54:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19430",
+  "body": "Path: P1 | 那条路第 1 步「写元数据」 | 严格枚举的合法值被翻译成本地词:在译文区工作的作者被告知写 `下拉`,而 schema 拒收它\n分诊重测与定级:2026-09-20T20:53Z\n## What is wrong\n\nA metadata-form tooltip names the **legal values of a strict enum**, and all three translated locales render those values as **ordinary words**. ⇒ an author — or an AI — working in a translated locale is told the option is `下拉`, writes it, and the schema **refuses it**. ⚠️ That tooltip is the **only** place the panel names them.\n\n⭐ This is the **inverse** of #19403's defect: there, English leaked into translated UI; here, translation leaked into a **machine token** that must stay English to be writable.\n\n## Measured on `origin/main`\n\n| surface | reading |\n|:--|:--|\n| the contract | `packages/spec/src/ui/view.zod.ts:1506` — `element: z.enum(['dropdown', 'tabs', 'toggle']).default('dropdown')` |\n| `en` tooltip (⭐ correct — names the writable tokens) | `\"Quick-filter bar: element style (dropdown / tabs / toggle) + exposed fields or tab presets\"` |\n| `zh-CN` | `\"快速筛选栏:控件样式(下拉 / 标签页 / 开关)+ 暴露的字段或标签页预设\"` |\n| `ja-JP` | `要素スタイル(ドロップダウン / タブ / トグル)` |\n| `es-ES` | `estilo de elemento (desplegable / pestañas / interruptor)` |\n\n⇒ the English tooltip spells what an author may write. The three translations spell what an author **may not**.\n\n`Seam: spec:UserFiltersSchema.element (packages/spec/src/ui/view.zod.ts:1506) → renderer: objectui plugin-list/src/UserFilters.tsx`\n\n## ⚠️ There are TWO `element` enums — ⛔ do not assume one schema\n\nMeasured by this filer, ⛔ not present in the originating report:\n\n```\npackages/spec/src/ui/view.zod.ts:1506   element: z.enum(['dropdown', 'tabs', 'toggle']).default('dropdown')\npackages/spec/src/ui/view.zod.ts:4193   element: z.enum(['dropdown', 'toggle']).default('dropdown')\n```\n\n⇒ the second has ⛔ **no `tabs`**. Whoever takes this card must establish which schema each tooltip describes before rewriting either, and check whether a tooltip on the second surface has the same defect **or a worse one** (naming a value its own enum does not accept).\n\n## Why it is a card rather than a rider\n\nFound during **#19403 round 2** (PR #19428), whose dev declined the in-place fix and **named the failing condition**: the bounded-fix exemption requires the **same** defect class as the card, and this is the **opposite** one. ⭐ That refusal is also what made that round deliberately keep `None / Tabs / Dropdown` **in English** — the decision and this finding are one reading.\n\n## The class, and its boundary — ⛔ both recorded so the taker does not over-reach\n\n⚠️ **In class**: a tooltip that spells a strict enum's values in a translated locale, so the spelled value is unwritable.\n\n⛔ **NOT in class, and measured as the boundary**: `page.fields.interfaceConfig.appearance.helpText` writes renderer tokens capitalised (`Grid / Kanban / Calendar`) while `page.fields.type.helpText` on the **same panel** writes them lower-case, matching `VisualizationTypeSchema`. ⭐ That is softer — the sentence reads as display names, and the neighbouring helpText spells the values correctly one row up. ⇒ recorded as the **edge** of this class, ⛔ deliberately not swept in.\n\n## Suggested shape (⛔ not a ruling)\n\nKeep the enum values **verbatim and English** inside the translated sentence, exactly as #19403 round 2 did for `None / Tabs / Dropdown`, and translate the prose around them. ⚠️ Then ask whether a pin can see this class at all — ⛔ no existing pin does, and a census over `.label` leaves ⛔ cannot reach a `helpText`.\n\n⭐ The instrument that would work, and its control: for each schema key whose tooltip names enum values, assert the tooltip contains each value **verbatim** in every locale, with a positive control (a tooltip that legitimately translates its prose) so the assertion cannot pass vacuously.\n\n## Dedupe words (⛔ the filer does not dedupe)\n\n`helpText translates enum values` · `userFilters element dropdown tabs toggle` · `translated locale names illegal value` · `metadata form tooltip enum spelling` · `strict enum rejects translated token`\n\n## Provenance\n\nSurfaced as an out-of-scope finding by the `os-dev` agent on **#19403 round 2** (PR #19428) with a `Seam:` line, and **independently verified by the `domain:engine` execution PM seat** — the enum at `view.zod.ts:1506`, the `en` tooltip naming the writable tokens, and the `zh-CN` tooltip naming untranslatable ones, all read on `origin/main`. The second enum at `:4193` is this filer's own additional reading.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

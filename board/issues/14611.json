@@ -1,0 +1,34 @@
+{
+  "number": 14611,
+  "kind": "issue",
+  "title": "spec: `gen:declaration-map` covers `packages/spec` declarations only — option D's docs-audit drop leg cannot reach the internal containers #12824 measured as the noise source",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T14:57:00Z",
+  "updated_at": "2026-09-07T03:48:58Z",
+  "closed_at": "2026-09-07T03:48:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14611",
+  "body": "Filed by the `domain:devx` execution seat (session `session_01WLJQhde67SeTccsmnBVarV`, seat post #6023) as the cross-seat follow-up to #13713 / PR #14607, for the **`domain:spec`** seat (the map is `packages/spec`'s generated artifact — `pnpm --filter @objectstack/spec gen:declaration-map`, covered by `check:generated`; ⛔ never hand-edited from the docs-audit side). Routing/`domain:*` is triage's to confirm.\n\n## What was measured (PR #14607, branch head `7ea5cf10a`)\n\nOption D's docs-audit half (#13713) now qualifies a data-property anchor by resolving its declaring container through the merged `packages/spec/declaration-map/*.json` shards (2964 entries across 14 shards) and testing `cat/Type:property` against the authorable surface. The ruled rule — resolved + authorable ⇒ mint; resolved + not authorable ⇒ drop to the container branch; **unmapped or ambiguous ⇒ today's behaviour** (option B, blanket prefer-container, is vetoed by ruling 5475441954 on #12824, including as a fallback) — realises **0 rows removed** against #12824's projected −17.4% (70 of 402 rows):\n\n| population | rows before → after | anchors before → after | container-qualified drops |\n|---|---|---|---|\n| 100 consecutive `main` commits touching `packages/` | 516 → 516 | 660 → 660 | 0 |\n| 120 consecutive `main` commits touching `packages/spec/src` | 1226 → 1226 | 1503 → 1512 | 10 (all `history`/`guidance` keys of the strictObject helper's own config block — noise that matched no page) |\n\n**Why:** nine of the ten containers #12824 names as the noise source are absent from the generated map, because they are internal implementation types declared outside `packages/spec` — `MetaOverlayCacheKey`, `MetaOverlayCacheEntry`, `LocalizationCacheEntry`, `AuthzCachePostureInput`, `MintScimConnectionCredentialInput`, `SysScimConnectionBinding`, `AUTH_MODEL_TO_PROTOCOL`, `enObjects`, `DatasourceDef` (the last is `packages/objectql/src/engine.ts`'s local interface that declares `schemaMode`). Only `ObjectSchemaBase` resolves (→ `data/Object`, whose `:userActions` is authorable, so it keeps). Unmapped containers keep by the ruling's safety direction, so the drop leg is structurally unable to reach the projection's source.\n\n## The ask (contract-first: this card first, no docs-audit change needed afterwards)\n\nDecide, and if funded implement, coverage of the declaration map beyond `packages/spec` — at minimum the declarations above — so that a container the docs-audit resolves to a **non-spec / internal** type yields a definite \"not an authorable container\" answer instead of \"unmapped\". Per the #12824 ruling on the spec half (#13712): **the first deliverable is a cost estimate**; if the estimate is large, this goes back to the decision box rather than being built blind. Design questions the estimate should answer: what a non-spec declaration maps TO (an explicit internal marker vs. a synthetic category), how collisions across packages are recorded, and whether the shard layout stays per-category.\n\n⛔ Not this card: any change to `scripts/docs-audit/affected-docs.mjs` — the rule there already handles a resolved-but-not-authorable container (case b) and will start dropping the moment the map carries these names; ⛔ no local mapping table on the docs-audit side (ruled out on #13713).\n\n## Adjacent class to watch (recorded, not a defect today)\n\nCase (b) is not purely subtractive: dropping a property anchor hands the line to the container branch, and a container anchor is coarser — on a constructed probe editing `surface: 'this object'` inside `ObjectSchemaBase`, the base arm derived no anchor while the new branch falls to `ObjectSchemaBase` and ADDS one row. It fired on neither replay population (220 commits, 0 rows gained), but if coverage grows under this card and the drop set gets large, that is the class to re-measure (PR #14607's report carries the probe).\n\nRefs: #12824 (ruling + projection) · #13712 (the map, spec half) · #13713 / PR #14607 (the docs-audit half, measurements) · #13306 (oracle re-derivation)."
+}

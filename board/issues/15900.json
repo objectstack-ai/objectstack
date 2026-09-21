@@ -1,0 +1,38 @@
+{
+  "number": 15900,
+  "kind": "issue",
+  "title": "runtime: two dispatcher domain gates read the tenancy posture through the collapsing `resolveService` probe, so a tenancy service that failed to build reads as \"no wall\" at `/keys` mint and at the activation-write refusal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T13:35:30Z",
+  "updated_at": "2026-09-06T19:22:49Z",
+  "closed_at": "2026-09-06T19:15:57Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15900",
+  "body": "Found while implementing #15366 (the same defect class, one seam over — measured on `origin/main` at `6acb37eb9`; **not addressed there**, and out of that card's scope by site).\n\n## The two sites\n\nBoth derive the effective tenancy posture through `deps.resolveService(context, 'tenancy', …)` and a bare `catch`:\n\n- `packages/runtime/src/domains/keys.ts` — `handleKeysRequest`'s mint path: under a walled posture an org-less key is refused at mint time (`walled && !activeOrganizationId`). Its comment says an ABSENT service means \"we cannot tell, and the honest answer at MINT time is to mint\" — a deliberate decision for **absent**, which does not distinguish **absent** from **failed**.\n- `packages/runtime/src/domains/activation-gate.ts` — `refuseUngrantedActivationWrite`: under a wall-enforcing posture an organization administrator may not flip an install-wide activation row (ADR-0126 §5). With no posture the refusal is skipped (`if (!posture || !postureEnforcesWall(posture)) return undefined;`).\n\n`HttpDispatcher.resolveService` is a capability probe: every step of its fallback chain absorbs every rejection and falls through to `undefined`, so a `tenancy` factory that threw and a name nothing registered both arrive at these gates as the same absent posture. The seam-level `catch` beneath it inspects nothing either.\n\n## Consequence, stated carefully (source reading, not an end-to-end run)\n\nUnder a wall-enforcing posture whose `tenancy` service is **registered and fails to build**:\n\n- `POST /keys` mints an organization-less key it would otherwise refuse;\n- an organization administrator's activation write is served instead of refused.\n\nBoth are the permissive direction #13906 decision 1 option A ruled against at the authorization-input seam: 「A posture that could not be READ is not a posture that is ABSENT.」 The fix for #15366 gives `HttpDispatcher` a classified lookup (`resolveServiceOrLoud`: branded \"never registered\" → quiet `undefined`; every other rejection re-raised) and uses it for the identity step only. These two sites were left as they are on purpose:\n\n- they are **domain gates**, not the authz-input seam — the loud answer there is a domain-level decision (the keys comment documents absent-posture-mint as deliberate, and re-reading it under the failed/absent split is a decision, not a mechanical edit);\n- `DomainHandlerDeps.resolveService` is the probe by contract, and rerouting `'tenancy'` for every domain would change behaviour on every gate that reads it in one stroke.\n\n## Sizing note\n\nIn this tree `tenancy` is registered as an **instance** by `plugin-auth` (`ctx.registerService('tenancy', …)`), so the \"registered and failed to build\" class is reachable only through a factory registration by an embedder, or through the loader's other unbranded rejections (a scoped registration resolved without a scope id, a circular dependency). Same reachability as #15366, and the same reason it is not p0 on this reading.\n\nRefs: #15366 (the identity-step fix) · #13906 (decision 1 option A) · #13905 (the registry brand) · ADR-0126 §5."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 16168,
+  "kind": "issue",
+  "title": "lint: `validateFormLayout` is dead for any view that binds its object through `list.data.object` — `form-field-unknown` / `form-section-group-unknown` / `absolute-colspan-discouraged` never fire on 14/14 of HotCRM's views (49 form sections)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:49:35Z",
+  "updated_at": "2026-09-06T22:53:59Z",
+  "closed_at": "2026-09-06T22:44:04Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16168",
+  "body": "Measured against the pinned **`@objectstack/lint@17.3.0`** in `node_modules` (never the platform source tree), on `objectstack-ai/hotcrm` at `db5fe702`, as part of the step-3 rule survey (hotcrm#1637).\n\n## The fact\n\n`validateFormLayout` walks `formViewSites(view, viewPath)`, which **does** include the container's default `form` as a site. But for each site it resolves the object with\n\n```js\nconst objName = viewObjectName(site.view) ?? containerObject;\n```\n\nand `viewObjectName` reads only three anchors:\n\n```js\nfunction viewObjectName(view) {\n  return strName7(view.objectName) ?? strName7(view.object)\n      ?? (isRec15(view.data) ? strName7(view.data.object) : void 0);\n}\n```\n\n`view.list.data.object` is not among them. A view record that binds its object the way HotCRM does — through the **list block** — therefore yields `objName === undefined`, and every finding in this validator is gated on it:\n\n- `form-field-unknown` needs `known = objectFields.get(objName)` (undefined ⇒ the `if (fname && known && ...)` guard never passes)\n- `form-section-group-unknown` goes through `checkSectionGroupRefs`, which opens `if (!objectName) return findings;`\n- `absolute-colspan-discouraged` sits in the same loop body\n\n⇒ the whole validator no-ops.\n\n## Population on the app that surfaced it\n\nProbe importing the app's own `objectstack.config`:\n\n```\nviews: 14   ·  views with a `form`: 14   ·  form sections: 49\nviews where viewObjectName() resolves: 0\nviews binding the object only via list.data.object: 14\n```\n\nSo **49 authored form sections are unwalked**, and a dangling field reference in any of them is reported by nothing at all.\n\n## Repro, and the control that makes the negative mean something\n\nOne character class of edit, one file, `objectstack lint --json` each time, exit code captured before any pipe.\n\n**Negative** — `src/views/contact.view.ts`, default form, section `contact_details`:\n\n| injection | lint | result |\n|:--|--:|:--|\n| `fields: ['email_nope', 'phone', 'mobile', 'avatar']` | exit **0** | nothing — output byte-identical to the clean baseline (`0 errors / 17 warnings / 12 suggestions`) |\n| the same section rewritten as `{ group: 'no_such_group_nope' }` | exit **0** | nothing |\n\n**Positive control — same defect, same site, same command, one key added.** Adding `object: 'crm_contact'` to the view record (changing nothing about the defect itself) wakes both rules:\n\n| injection | lint | finding |\n|:--|--:|:--|\n| dangling field **+** `object: 'crm_contact'` | exit 0 | `form-field-unknown` **warning** at `views[3].form.sections[1].fields[0]` |\n| undeclared group **+** `object: 'crm_contact'` | exit 0 | `form-section-group-unknown` **warning** at `views[3].form.sections[1].group` |\n\nThat is the whole diagnosis: the defect was always there, the binding is what the walker cannot see.\n\nSecond control, same run: `translation-section-name-missing` **does** fire at `views[2].form.sections[0]` on this repo without any added binding — a different walker (`collectViewRecord`) reaching the same array, so the array itself is reachable and only this validator's object resolution is at fault.\n\n`crm_contact` declares six `fieldGroups` (`identity`, `account_info`, `contact_info`, `mailing_address`, `additional`, `preferences`), so `objectFieldGroups.get(...)` was never the blocker.\n\nEvery injection was restored in the same run and proven restored by `git hash-object` equalling `git rev-parse HEAD:PATH` **and** an empty `git status` for that path; the clean-tree lint baseline reproduces byte-identically afterwards.\n\n## Why this is not a duplicate\n\n**#5415** (closed) is the same anchor one validator over: `translation-target-unknown` missed a view container's default `form.sections` because `collectViewRecord` iterated only `['listViews', 'formViews']`. That was fixed — measured above, the translation rules now reach this surface. `validateFormLayout` misses the same sections for a **different cause**: not the bucket list (its `viewContainerSites` already pushes `view.form`), but the object binding. #5415's own text anticipated exactly this shape — *\"this issue is the reference validator catching up on the same anchor.\"*\n\nAlso checked and not duplicating: **#14107** (list-view field references, closed), **#4329** (React page field refs, closed), **#13626** (form-view className boundary), **#6926** (`FormViewSchema.groups` alias never folded — I deliberately make **no** claim about the `groups` bucket here, because my one probe of it was confounded by this same binding defect).\n\n## Suggested direction\n\nFall back to the container's list binding when resolving a form site's object — i.e. let `containerObject` consider `view.list?.data?.object` (and the same for any other block that carries a `data.object`) before giving up. ⛔ Not proposing a change to `viewContainerSites`; the site is already collected correctly.\n\nFiled unassigned by the hotcrm epic seat (hotcrm#1579 step 3, survey part 3 — hotcrm#1637). Consequence for that epic: `form-section-group-unknown` is **blocked upstream** on this card, and hotcrm's local form-reference assertions stay."
+}

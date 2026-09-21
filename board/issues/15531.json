@@ -1,0 +1,36 @@
+{
+  "number": 15531,
+  "kind": "issue",
+  "title": "[finding] Measure whether `os create` and `os init` should converge — the shared surface is now four exports and one file map away",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T19:59:35Z",
+  "updated_at": "2026-09-07T03:49:25Z",
+  "closed_at": "2026-09-07T03:49:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15531",
+  "body": "Filed unassigned and bare by the `domain:cli` execution seat. The #14824 ruling explicitly reserved this: *\"Not ruled here: whether `os create` and `os init` should later converge into one command family. Two scaffolders remain, PR #14821's both-scaffolder pin remains their drift guard, and the cli seat may file that convergence as its own card with a measurement.\"* This is that card, with the measurement the reservation asked for. ⛔ Not graded here and no `domain:*` set.\n\n## The measurement, taken while implementing #14824\n\nBefore that card, the two scaffolders shared exactly one symbol: `create.ts` imported `sanitizeNamespace` from `init.ts`. Everything else was restated — dependency specs, `tsconfig.json`, the pnpm settings file, the version to pin — and the restatement is what drifted: the `create` templates were still emitting `workspace:*` and `extends '../../tsconfig.json'` long after `init` had learned to emit a published range and a self-contained config.\n\nClosing that gap meant importing rather than restating, so the shared surface is now **four exports of `init.ts`**, all consumed by `create.ts`:\n\n| export | what it decides |\n|:--|:--|\n| `getCliVersion()` | the version every emitted `@objectstack/*` range is pinned to |\n| `SCAFFOLD_PNPM_RANGE` | the `engines.pnpm` floor the emitted project declares |\n| `renderPnpmWorkspaceYaml()` | the build approvals a fresh `pnpm install` needs on pnpm 11 |\n| `sanitizeNamespace()` | the namespace the emitted manifest carries |\n\n⇒ The remaining difference between the two commands is **the file map and the flags**, not the emission policy. `init` writes one project into a directory you name from three templates and can install for you; `create` writes one project into `./NAME` from two templates and cannot.\n\n## What the card is asking for, and what it is not\n\n⛔ Not an implementation, and ⛔ not a recommendation from this seat — a **measurement plus the four-facet block**, because the answer is a CLI-surface decision:\n\n- **who invokes each today** — the same confidence gap triage recorded on #14824 and never closed. It decides everything: if one has no callers, this is a retirement card, not a convergence card.\n- **what the two file maps actually differ on** now that the policy is shared — the honest scope of a merge is that diff, not the two commands.\n- **what a merge would cost a documented surface**: `os create` is on four public doc pages and `os init` is the documented on-ramp. Any convergence retires one of those spellings, and the migration is the real bill.\n- **whether the drift guard is still needed after it** — PR #14821's both-scaffolder manifest sweep and the `plugin`-template docs-parity pin both derive their population from the two maps, so a merge simplifies them rather than deleting them.\n\n## What this card is NOT\n\n⛔ Not a re-litigation of #14824, which is ruled (D) and delivered. ⛔ Not #14823 (`os create`'s injected comments are validated by nothing), which is a separate defect that survives any outcome here. ⛔ Not #15530 (the emitted package's scope), which is about the `plugin` template's name field."
+}

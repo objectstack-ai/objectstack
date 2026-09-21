@@ -2,8 +2,8 @@
   "number": 19177,
   "kind": "issue",
   "title": "finding(scripts/pm): H59 calls a deliberately REOPENED card a FALSE OPEN — `state_reason: 'reopened'` is on the payload it already reads, and H22 in the same file reads it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-tesla",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-19T07:13:15Z",
-  "updated_at": "2026-09-20T05:15:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-20T20:18:24Z",
+  "closed_at": "2026-09-20T20:17:59Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19177",
   "body": "Path: none | instrument (`scripts/pm/check-half-states.mjs` H59) | 北极星「优先级」2\n\n`check-half-states.mjs`'s **H59 FALSE OPEN** row reports 「GitHub did not perform the closure the PR declared」 for a card that **was** closed by that PR and then **deliberately reopened**. The discriminator — `state_reason: 'reopened'` — is already on the payload the row reads, and H59 does not consult it.\n\n## The live instance\n\n```\nH59 #9874 FALSE OPEN: merged PR #9936 binds `Fixes #9874` in its body, and the card is\nSTILL OPEN after that merge — GitHub did not perform the closure the PR declared.\n```\n\nRead on the API in this act:\n\n```\nobjectui#9874   state: open   state_reason: \"reopened\"\nobjectui#9936   merged: true  2026-09-18T19:53:15Z   body carries `Fixes #9874`\n```\n\n⇒ ⭐ the closure **did** fire. The card was then reopened on purpose, to carry a residual question into the decision box — it holds `needs-user-decision` today. ⇒ H59's sentence is **false** for this card, and it is false in a way that sends a reader to look for a platform failure that did not happen.\n\n## ⭐ The discriminator is already in hand, and a lit control proves the file can read it\n\n`state_reason` is a field of the same issue payload H59 already has. And the file **does** read it elsewhere — `scripts/pm/check-half-states.mjs:25298`–`:25314` builds `closedCard(labels, state_reason = 'completed')` and asserts H22's behaviour when `state_reason` is `null`:\n\n```\n:25313  t('H22: a missing state_reason changes nothing it selects', h22labels({ …, state_reason: null }), 'pm:queue');\n```\n\n⇒ ⭐ CONTROL: H22 reads `state_reason`, H59 does not. The field is available, the file knows how to use it, and this row is the one that needs it and lacks it. A grep for `state_reason` across the file returns **only** those H22 fixture lines — the absence in H59 is a reading, ⛔ not a failed search.\n\n## Class (a) — a reproducible wrong statement, with a failing probe\n\nThe probe is the row itself, on today's board: it fires on objectui#9874 and its sentence is refuted by one field on the payload it already holds.\n\n⚠️ ⛔ **Not a claim that the row's population is wrong.** A declared-and-unfired closure is a real thing worth watching; this card is about the **sentence**, which asserts a cause the data contradicts. Two dispositions are possible and ⛔ this filing picks neither:\n- suppress the row when `state_reason === 'reopened'` — a deliberate reopen is not a platform failure;\n- keep the row and **change the sentence** to say 「closed by that PR and reopened since」, so a deliberate reopen is still visible to whoever is auditing the chain but is not mis-attributed.\n\n⭐ The second may be better: a reopened card that a merged PR claims to fix is still worth a human glance — it is just not the failure H59 names.\n\n## ⚠️ The cost is not theoretical\n\nThis seat read the same row on the 2026-09-18T22:20Z sweep, investigated it, and left comment `5736877891` on objectui#9874 saying 「read, and ⛔ deliberately not acted on」. It fired again on the 2026-09-19T07:05Z sweep, and was investigated again. ⇒ ⭐ a row that costs a full investigation **every sweep** and can never be cleared by any legal act on the card, because the card's state is correct as it stands.\n\n⛔ Distinct from objectstack#19160, which reports that **H52** has no clearing act on a `pm:on-hold` card. Same family of defect — a row with no available remedy — but a different row, a different cause, and this one has a **fix in hand** (one field) where that one needs a design decision.\n\n## Dedupe words\n\n`H59 FALSE OPEN reopened` · `state_reason reopened half-state` · `h59DeclaredCloses state_reason` · `false open deliberate reopen` · `closure fired then reversed`\n\n## Cross-references, each resolved by a read in THIS act with its title printed\n\n- objectui#9874 — *finding(react): `useNavigationOverlay` still reads `navigation.view` — removed…* (open, `reopened`, `needs-user-decision`; the live instance)\n- objectui#9936 — the merged PR binding `Fixes #9874`\n- objectstack#19160 — *finding(scripts/pm): H52 has no clearing act on a `pm:on-hold` card…* (the sibling defect, ⛔ not a duplicate)\n\n<sub>filed by the `domain:ui#2` execution seat · `session_018HrVaotisyhgmot9o2MLRq` · ⛔ this seat does ⛔ not grade or route: no `priority:*` and no `domain:*` set here · objectui#9874's `state_reason`, objectui#9936's merge and `Fixes` line, the H22 fixture lines and the whole-file `state_reason` grep were all read in this act; the H59 row text is quoted from the 2026-09-19T07:05Z sweep whose 490 rows reconcile against its own footer.</sub>\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

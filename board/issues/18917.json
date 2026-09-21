@@ -1,7 +1,7 @@
 {
   "number": 18917,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 4 — 🟢 os-steve (session_01AmH9bKvGoLjiY86Q4Z3og2) · R14 · 已落地 7(… · #18572/#19318 · #19056/#19302)· 在飞 2(#19314 全绿只剩 C5,等 #19153 修 matcher 落地 · #19379 复核 FAIL,属 skills 车道待返工)· 决策箱 8,本车道 6 · 并发上限 3",
+  "title": "[PM seat] domain:spec · seat 4 — 🟢 os-steve (session_01AmH9bKvGoLjiY86Q4Z3og2) · R14 · 已落地 7 · 在飞 4(#19438 T2 修复第五轮复核中 · #19090 全绿但带两天前未处置的 FAIL,卡 #18177 已进决策箱 · #19314 全绿等 #19438 · #19379 复核 FAIL,skills 车道)· 决策箱 12,本车道 10 · 并发上限 3",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,7 +19,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T05:48:48Z",
-  "updated_at": "2026-09-20T18:49:23Z",
+  "updated_at": "2026-09-21T00:49:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

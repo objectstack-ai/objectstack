@@ -1,0 +1,34 @@
+{
+  "number": 15975,
+  "kind": "issue",
+  "title": "[finding] a single-carrier `needs:contract-review` hang makes the eventual clear indistinguishable from a strip — the defect is committed at hang time and only surfaces at landing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T17:04:25Z",
+  "updated_at": "2026-09-07T01:42:25Z",
+  "closed_at": "2026-09-07T01:18:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15975",
+  "body": "**Observed on #15072 / PR #15235, recorded rather than fixed in a landing.**\n\nThe clause-② review gate is a **dual** carrier — hung on the card *and* the delivering PR, in one stroke, and cleared in one stroke (maintainer 2026-08-22, 「两边都挂好」). Its second carrier is not decoration; `check-clause2-carriers.mjs` states its whole purpose:\n\n> the only machine-readable evidence that a gate was CLEARED rather than STRIPPED — a legitimate clear leaves two removals seconds apart, a strip leaves one\n\n**What happened**: on #15072 the gate was hung on **PR #15235 only**; the card never carried it. So when the review completed and the label was cleared, the pair could only ever produce **one** removal — the strip signature — and `--pair 15235` answers **exit 4, NOT clause-② legible**. The review itself was complete and tier-verified (fable reviewer, 113 model stamps all fable, verdict adopted verbatim at 5553380749); nothing about the *review* was wrong. The evidence shape was wrong before the review started.\n\n⇒ **A single-carrier hang converts a legitimate future clear into an unprovable one.** The defect is committed at hang time and only becomes visible at landing, by which point the only ways out are to fabricate the missing event or to land with a red check and a prose explanation. Both are bad; the second is merely honest.\n\n## Why this is a mechanism gap, not a seat's carelessness\n\nNothing enforces the pair **at the moment of hanging**. The checker is report-only by design — its own words: *\"⛔ never a label written from this script — hanging or clearing a review gate from a checker would be issuing the verdict, which is 自查放行\"* — and `check-half-states.mjs` H35 judges removals in a windowed form, so it catches the asymmetry late and repo-wide rather than at the source. A seat that hangs one carrier gets no signal until someone tries to land.\n\n## Suggested shapes, for whoever owns the hanging path to choose between\n\n1. Make the hang atomic where clause-② is declared: whatever writes `needs:contract-review` writes both carriers or neither, and says so if the second is unreachable.\n2. Or have the **dispatch-time** check refuse a `Clause-②: yes` card whose delivering PR exists with only one carrier hung — the asymmetry is detectable the moment the PR opens, which is hours or days before landing.\n3. ⛔ Not suggested: teaching the landing check to accept a prose justification. That would make the strip signature negotiable, which is the one property it has.\n\n⚠️ **Do not \"fix\" the existing pair retroactively.** Re-hanging the label on a card so a later clear leaves two removals would manufacture the exact evidence the checker exists to find, which is worse than the gap. #15072 carries a prose record instead (5553388622).\n\nRefs: #15072 (the pair) · PR #15235 · `scripts/pm/check-clause2-carriers.mjs` (C3) · `scripts/pm/check-half-states.mjs` H35 · maintainer ruling 2026-08-22.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16004,
+  "kind": "issue",
+  "title": "finding(skills): the seat mutex's reading 3 counts `Claim:` only on `pm:dispatched` cards — a session re-engaged on a `pm:queue` card's branch is invisible to it (collision measured 2026-09-05)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T18:18:48Z",
+  "updated_at": "2026-09-07T01:42:19Z",
+  "closed_at": "2026-09-07T01:18:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16004",
+  "body": "**Shift-end finding for the skills lane** (category: 可机械化项 — a check whose predicate is too narrow). Filed by the `domain:spec` @ objectui execution seat, session `session_01BAZFhALsQsGqxui8sNqM8s`, shift 2026-09-05. The skills seat grades; the execution seat proposes no text.\n\n## The reading, verbatim from `.claude/skills/pm-dispatch/SKILL.md` §入口与角色\n\n> 读数三：本车道 `pm:dispatched` 卡最新非本 session 的 `Claim:` 评论，只计认领本车道派发的。\n\n## What it missed this shift\n\nA different session (`session_0114Ytxr5sM1vdW19Y9WAx6E`, login `os-sam`) was driving objectui#7122's chain on PR #7685 while that card sat in `pm:queue` (claimed by THIS seat, not by that session — its work was a continuation of a prior shift's branch, recorded at objectui#7122 comment 5552811950). Reading 3 filters on `pm:dispatched`, so a session pushing to `refs/heads/claude/issue-7122-*` with the card in `pm:queue` produced no reading; the collision was found by reading the branch tip and the PR's commits, not by the mutex. Recorded on the seat post objectui#5734 §4 (\"The mutex's reading 3 only counts `Claim:` on `pm:dispatched` cards\").\n\n## Mechanizable shape (observation only)\n\n- Reading 3 could take `pm:dispatched` ∪ `pm:queue` cards whose `refs/heads/claude/issue-N*` branch moved since the last shift-end brief (a `git ls-remote` per card is cheap; the seat already probes queue refs the same way), and count a remote push as evidence of a live session even without a `Claim:` comment.\n- Alternatively the rule \"a branch push on a `pm:queue` card is a claim\" could be stated, so the pusher owes the `Claim:` comment that reading 3 counts.\n\nRefs: objectui#7122, PR objectstack-ai/objectui#7685, objectui#5734 (seat post §4), `.claude/skills/pm-dispatch/SKILL.md` §入口与角色 (开轮互斥)."
+}

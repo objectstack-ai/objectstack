@@ -1,0 +1,35 @@
+{
+  "number": 16217,
+  "kind": "issue",
+  "title": "check-half-states: H22's closed-card pass is TRUNCATED at the 12-page quota ceiling on this board, so the closed-residue census is silently short",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T06:14:31Z",
+  "updated_at": "2026-09-06T18:44:10Z",
+  "closed_at": "2026-09-06T18:29:55Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16217",
+  "body": "Observed while running the live half-state sweep read-only, twice, as the verification for the flight on #16036 / #16170 / #16037 (PR #16202). Not addressed there — that flight's ruling scoped its diff to one file and three named readers, and this is a window policy in the same file's H22 leg.\n\n## The measurement\n\nBoth `objectstack-ai/objectstack` sweeps (2026-09-06, ~05:20Z and ~05:35Z) printed, verbatim:\n\n> H22's closed-card window is a TIME cap of 3 day(s), read in 12 page(s) — TRUNCATED at the 12-page quota ceiling BEFORE reaching that horizon, so this pass is a page cap and a card that closed earlier than what those pages reached is invisible; the ceiling needs raising.\n\nSo the row DECLARES its own shortfall, in its own words, on every run — and the remedy sentence (\"the ceiling needs raising\") is already written. What is missing is a card that carries it, which is why the state has persisted through however many patrol runs have printed it.\n\nThe clause also explains the mechanism, and it is worth quoting because it is the reason a bigger page budget is genuinely needed rather than merely nice: the row selects on `closed_at` while paging is bounded by `updated_at`, so the stream is consumed by closed-issue ACTIVITY (~188.3/day, measured 2026-08-31) rather than by closures (~11/day). A 3-day CLOSURE horizon therefore costs many more than 3 days' worth of closure pages.\n\n`objectstack-ai/objectui` in the same session did not print the truncation clause, so this is a board-volume effect rather than a universal one — the ceiling is adequate on a quiet board and not on this one.\n\n## What it costs\n\nH22 is the closed-card `pm:*` state-residue census. Under the 2026-08-31 ruling it files no row at all, but it is COUNTED into the sweep's census line, so a truncated pass makes the census silently short: a card that closed earlier than the pages reached is invisible, and nothing in the summary distinguishes \"no residue\" from \"not read\". That is the shape this file treats as worse than a finding.\n\nDeliberately NOT proposed here, because the trade is a request budget and that is the owning lane's call: whether the remedy is a higher page ceiling, a narrower `updated_at` filter, a `closed_at`-ordered listing where the API supports it, or a coverage clause that reports the reached horizon as a date so a short pass is legible rather than merely declared.\n\n## Dedup\n\nThe complete open enumeration was read via the REST list endpoint and reconciled against `open_issues_count`: 680 rows read (646 issues + 34 PRs) against `open_issues_count` 680, exact. Firing controls on the same corpus: \" the \" 665, \"claim\" 253. Grepped for `quota ceiling` / `page cap` / `H22` / `closed-card window` / `closed-issue ACTIVITY`: 3 hits, all read — #9857 (the patrol anchor, which is the generated view CARRYING this sentence rather than a card about it) and #7623 (a seat post). Neither is this card.\n\nRefs (not addressed here): #16036, PR #16202.\n"
+}

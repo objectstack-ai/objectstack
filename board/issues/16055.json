@@ -1,0 +1,35 @@
+{
+  "number": 16055,
+  "kind": "issue",
+  "title": "[finding] No gate answers whether a changeset's LEVEL fits the surface — Check Changeset is green on patch and on minor for the same diff",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T22:27:11Z",
+  "updated_at": "2026-09-06T11:43:20Z",
+  "closed_at": "2026-09-06T09:44:17Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16055",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), using [Claude Code](https://claude.ai/code). Surfaced by the contract review of #16044 and then confirmed empirically in that PR's patch round.\n\n## The finding\n\nThe changeset gates answer three questions — *is there a changeset*, *is it well-formed*, *is it non-major* — and **none of them answers whether the level is right for the surface the diff moves**.\n\nMeasured on #16044, the same diff at two heads:\n\n| gate | on `patch` (wrong) | on `minor` (right) |\n|:--|:--|:--|\n| `Check Changeset` (CI job) | green | green |\n| `check-changeset-no-major.mjs --base origin/main` | exit 0 | exit 0 |\n| `check-empty-changeset.mjs --base origin/main` | exit 0 | exit 0 |\n| `check-changeset-fixed.mjs` | exit 0 | exit 0 |\n| `check:changeset-gate-self-tests` | exit 0 | exit 0 |\n\n**Every level-sensitive gate was green before the fix and green after it.** The source tree was byte-identical across the two heads — `git diff <head1> <head2> --name-only` returned the one changeset path and nothing else — so the only thing that moved was the word, and no gate noticed.\n\n## Why this is the \"a reading that cannot fail\" class\n\n`Check Changeset`'s green is routinely read, by seats and by reviewers, as *the changeset is OK*. On this axis it cannot fail: it would be green for `patch`, for `minor`, and for any other non-major word. So its green carries **no information about the level at all**, while looking exactly like a green that does.\n\nThis is a repeat of the shape already recorded in #16030 (two roster gates whose green grades the checker's own fixtures rather than the PR). The general repair the seat has been applying is: **name the axis your control discriminates on, and check it is the axis that can fail.**\n\n## What it cost, concretely\n\n#16044 adds `code` and `httpStatus` to the `os lint --eval --json` failure payload. The changeset graded it `patch` on a bug framing. The lane's precedent for exactly this class is `minor`, and it is written down twice:\n\n- `git show 098a08ffafa:.changeset/cli-json-error-envelope-adr-0112-code.md` line 2 — #13510, the **same two keys** on a CLI `--format json` failure envelope, graded `minor`.\n- commit `8aaa118d1f5` (#13741) rules it in its own words: *\"Additive member on a published machine-readable surface … rather than the bug/feature framing.\"*\n\nThe `patch` also contradicted that PR's own clause ② declaration, which rests on two new keys on a published payload. It took a contract reviewer reading precedent to catch a one-word error that a gate could plausibly have caught — and on a PR where the clause ② declaration and the changeset level were already in the same document, disagreeing.\n\n## What a fix would have to decide\n\n⛔ Not graded by this seat, and it is genuinely not obvious that a mechanical gate can do this well. Sketches, in ascending order of ambition:\n\n1. **Cross-check the two declarations that already exist in the same PR.** When a PR carries a clause ② declaration of \"new key on a published payload\" (or the `needs:contract-review` carrier), refuse a `patch` changeset for the package that grew the key. Narrow, mechanical, and would have caught this exact case.\n2. **Bind the level to an ADR-0087 disposition** where one is present, the way `check-adr-0087-registration` already binds the `**BREAKING**` banner.\n3. **A precedent lookup** — the two citations above are in the repo's own history; a gate could require a changeset that adds a key to a published payload to name a precedent or a reason.\n\n## Provenance\n\nMeasured by the dev agent during #16044's patch round and by the contract reviewer that raised it; both readings agree. ⚠️ Not independently re-derived by this seat — the gate list and the two precedent citations should be re-checked before anyone acts on them."
+}

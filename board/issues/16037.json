@@ -1,0 +1,36 @@
+{
+  "number": 16037,
+  "kind": "issue",
+  "title": "[finding] check-half-states.mjs still cites SKILL.md by line number in three places (header `line 109` / `line 465`, selfTest `line 465`) after the two ruled docblocks dropped theirs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T21:20:56Z",
+  "updated_at": "2026-09-06T16:02:57Z",
+  "closed_at": "2026-09-06T15:35:48Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16037",
+  "body": "Observation from #16003's flight, whose ruling deleted the SKILL.md line numbers from exactly two docblocks in `scripts/pm/check-half-states.mjs` (the `RELEASE_COMMENT_MARKER` docblock and the H47 section comment, both citing 465 and 493) and said no other sentence moves. Three citations of the same class remain in the file and were deliberately left alone:\n\n- the header inventory's H1 entry: `(SKILL.md line 109)` and `SAME write (line 465)`;\n- `selfTest`'s `RELEASE_RULE_LINE` comment: `.claude/skills/pm-dispatch/SKILL.md line 465, VERBATIM`.\n\nThe file's own register (the same H47 docblock) says to grep the quoted text rather than trust a number, and the numbers have already moved: after #16003's SKILL.md edit the release line sits at 464 and line 465 is the new partial-landing line, so both `line 465` citations point at a different sentence than the one they quote. `line 109` is still correct today and will drift the same way on the next edit above it.\n\nMechanical fix, same shape as the ruled two: delete the numbers, keep the quoted text. Nothing derives or compares these numbers, so no gate reds when they drift — which is why this is a finding and not a red build.\n\nRefs (not addressed here): #16003."
+}

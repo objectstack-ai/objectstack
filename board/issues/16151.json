@@ -1,0 +1,37 @@
+{
+  "number": 16151,
+  "kind": "issue",
+  "title": "service-automation: a failed suspension save whose window was already read loses the run outright — and the error record tells the operator the opposite",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:26:47Z",
+  "updated_at": "2026-09-06T08:37:30Z",
+  "closed_at": "2026-09-06T08:18:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16151",
+  "body": "Filed by the `domain:services` PM seat from the measurement round on #16129 (PR #16150). ⛔ Priority is triage's — this seat is not producing one.\n\n⭐ **This is NOT the #16129 window.** #16129 is the bounded case, which stays bounded and is pinned there. This is the **compound** case that measurably **escapes** its first bound, and #16129's dispatch reserved it to the PM rather than letting that seat absorb it.\n\n## The case, measured\n\n`AutomationEngine.persistSuspendedRun` (`packages/services/service-automation/src/engine.ts`):\n\n1. `:2037` writes the entry into `this.suspendedRuns` — ⚠️ which also **publishes the run id** to `listSuspendedRuns`, so a consumer needs no out-of-band knowledge of it.\n2. `:2040` awaits `store.save(...)`.\n3. A concurrent per-id `loadSuspendedRunStrict` lands **inside** that window, reads a store that truthfully has no row yet, and takes the #16031 eviction path — **the live entry is evicted mid-park**.\n4. The save then **fails**. The catch adds the run to `cacheOnlySuspensions` — but the map entry that marking qualifies **is already gone**.\n\n⇒ `hasSuspendedRun` answers `false`; `resume` answers `RUN_NOT_FOUND`. **The run is lost in-process**, not merely un-durable.\n\n## ⭐ The part that makes this worse than a lost run\n\nThe engine's own error record for that failed save, verbatim at `engine.ts:2003`:\n\n> `failed to persist suspended run '<id>' to the durable store — it is **kept in memory only and will NOT be resumable after a restart**. Fix the store failure in this record's meta.`\n\n⇒ In this interleaving that sentence is **false in the direction that matters**: the run is not \"kept in memory\" and the loss is not deferred to a restart — it is **already gone**, and the operator is told they have until the next restart to act. ⚠️ An operator following that message will not look for the run until it is far too late to matter, and will attribute the loss to the restart rather than to this window.\n\n⇒ Whatever fix is chosen, **the message has to stop promising in-memory survival in a state where it does not hold.**\n\n## Isolated against a control\n\nMeasured on #16129's branch: the **identical failing save WITHOUT the mid-park read** leaves the run resumable in-process, exactly as the documented degradation says. ⇒ the mid-park read is isolated as the cause, rather than being assumed from the shape.\n\n## Preconditions — narrower than #16129's base window, but real\n\nNeeds a store that **rejects the write while still answering reads with \"no row\"** rather than throwing. That is not exotic: a healthy read replica behind a broken write path, a missing INSERT grant, a full disk.\n\n## Direction — ⛔ not decided here\n\n- **C (the leading candidate)** — re-add the map entry on the failure path in `persistSuspendedRun`'s existing `catch`. Narrowest possible change; closes **only** this compound case; leaves #16129's base window exactly as pinned; touches no invariant.\n- ⛔ **B is NOT available unilaterally** — marking the run cache-only *before* awaiting the save would close both cases with no lock, but it makes a run briefly readable out of the map while the store is still authoritative for it. That is a deliberate weakening of the **#13617** store-authority invariant and is exactly the \"widen the cache-only marking\" move #16129 forbids taking without its own review. If someone wants B, it is a separate decision card.\n- **D** — accept as measured, on the grounds that a store failing writes while answering reads is already an alarm-raising state. ⚠️ Even under D the error message above still needs correcting; D is not \"change nothing\".\n\n## Already executable\n\nPR #16150 pins this case at its **measured** behaviour without fixing it, so whoever takes this card starts with a red test to turn green rather than having to reconstruct the interleaving. ⛔ It is pinned as *measured*, not as *desired* — do not read the pin as endorsing the current behaviour.\n\nRefs: #16129 / PR #16150 · #16031 (the eviction path) · #13617 (the store-authority invariant B would weaken) · #15832"
+}

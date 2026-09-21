@@ -1,0 +1,36 @@
+{
+  "number": 15230,
+  "kind": "issue",
+  "title": "service-automation: the `runRegion` tagger writes `branch` on parallel-branch steps and carries the enclosing loop's `iteration` through nesting — the engine half of #14414 (spec PR #15227)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:42:56Z",
+  "updated_at": "2026-09-06T19:46:19Z",
+  "closed_at": "2026-09-06T16:39:31Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15230",
+  "body": "Filed by the `domain:spec` execution seat (session `session_01H2oQebDDxYKfWZusyd8GXk`, seat post #6017) at the ACCEPT of PR #15227 (#14414, contract review 5536760564, 2026-09-04T06:43Z). Unassigned; `domain:*`, type and priority are triage's — this seat does not produce them (the lane table puts `packages/services/*` under `domain:services`).\n\n**Named reader:** the seat that owns `packages/services/service-automation`.\n\nBlocked-by: #14414\n\n## The ruling this executes (maintainer, 2026-09-03, recorded on #14414 as comment 5519397028)\n\n\"`iteration` is single-valued: the zero-based iteration of the enclosing loop, carried through any nesting … The branch index lives on a new optional `branch` key, present only on steps inside a `parallel` branch. **The engine's `runRegion` tagger stops discarding the outer region's index for steps the inner region already tagged.**\" Execution order: \"the spec half lands first … then the engine tagger in `service-automation` as a follow-on card … ⛔ no engine-only patch in between.\" The spec half is PR #15227 (`ExecutionStepLogSchema.branch`, the `iteration` describe rewritten) — this card unblocks when it lands.\n\n## What to build (`packages/services/service-automation/src/engine.ts`)\n\n- The `runRegion` tagger (the `tag()` closure that fills `parentNodeId` / `iteration` / `regionKind` only on steps that do not already carry a `parentNodeId`) stops letting the innermost region win outright: a step inside a `parallel` branch gets `branch` = the branch index and `regionKind: 'parallel-branch'`; when that parallel node sits inside a `loop` body, the step also carries `iteration` = the enclosing loop's iteration. `try` / `catch` inside a loop keeps today's behaviour (loop iteration on `iteration`, no `branch`).\n- The engine's local `StepLogEntry` interface still documents `iteration` as \"Zero-based loop iteration or parallel branch index\" — it gains `branch?: number` and the single-meaning comment (it is not derived from the spec type; keep the two in step by a pin, not by prose).\n- `docs/qa/platform-checklist/areas/automation.json` item `automation.flow-run-step-nesting` gains its `loop { parallel }` clause (the dev of PR #15227 measured it has none; it is writable only once the engine writes `branch`).\n\nPins (the ruling's own): a `loop { parallel }` fixture where a branch step carries both the loop iteration and its branch index; `try_catch` inside `loop` unchanged; a `parallel` node NOT inside a loop writes `branch` and no `iteration`. The step records must still parse under `ExecutionStepLogSchema` from the spec at the head that carries PR #15227 (`branch` refuses negative / fractional values at the `branch` path).\n\nRe-check (symbols, not lines):\n\n```\ngit grep -n \"branch\" origin/main -- packages/services/service-automation/src/engine.ts | grep -c \"regionKind\\|StepLogEntry\"   # expect 0 today\ngit grep -n \"parallel-branch\" origin/main -- packages/services/service-automation/src/engine.ts                             # the tagger (positive control)\n```\n\n## Not this card\n\n⛔ Not the objectui `FlowRunsPanel` grouping key (`${regionKind}#${iteration}` at its `:156`) — a card in objectui, gated on a spec release that carries `branch`. ⛔ Not a second index key: option B (keep the overload, add `loopIteration`) was not taken.\n\nRefs: #14414 / PR #15227 (the contract half) · #13681 (the `loop { try_catch }` containment sibling; its try/catch rule is unchanged) · ADR-0031 (structured regions)"
+}

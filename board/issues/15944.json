@@ -1,0 +1,37 @@
+{
+  "number": 15944,
+  "kind": "issue",
+  "title": "service-automation: a run whose nodes ALL succeeded is journalled and reported `stranded` when its terminal history write throws — and restoring it RE-RUNS the flow",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:41:31Z",
+  "updated_at": "2026-09-06T10:56:21Z",
+  "closed_at": "2026-09-06T10:36:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15944",
+  "body": "Found while implementing #15555 (branch `claude/issue-15555-strand-repairable-window`). ⛔ Deliberately **not** fixed there: that card is a different window and the opposite failure direction, and its dispatch fences this out. Filed bare — `domain:*`, type and priority are triage's.\n\n⚠️ **Measured on the PRE-FIX tree as well as the fixed one**, so this is not something #15555's guard introduces. See \"Both trees\" below.\n\n## The mechanism\n\n`resumeInternal`'s completion path calls `this.recordLog({ status: 'completed', ... })` from **inside** the same `try` whose `catch` exists for node failures (`packages/services/service-automation/src/engine.ts`; the `try` opens above the map re-entry block and the catch arm is the one that journals). So a throw out of `recordLog` on a run that **finished successfully** is handled as though a node had failed:\n\n1. the arm calls `journalConsumedSuspension(...)` — writing the repair snapshot that makes a run restorable;\n2. it stamps `status: 'stranded'` and answers `success: false`;\n3. `restoreConsumedSuspension(runId)` therefore answers `restored: true` and re-arms the pause;\n4. the next resume **runs the downstream nodes again**.\n\n`recordLog`'s own doc comment states the invariant this breaks, in the file: *\"Best-effort + fire-and-forget: a history write must NEVER block or break the run that produced it.\"* It does break it — it converts a completed run into a reported, repairable strand.\n\nA synchronous throw is what reaches this: the `void write.catch(...)` under `store.recordTerminal(record)` only ever sees a **returned promise's** rejection, so a store that throws before returning a promise escapes `recordLog` entirely. The run-summary line (`logger.info`, on by default) is the second such statement.\n\n## Measured\n\nDriven against the built artifact of `@objectstack/service-automation`, flow `start → hold (pauses) → tail → end`, `tail` **succeeding** on resume. Store double: `class SyncThrowTerminalStore extends InMemorySuspendedRunStore { recordTerminal() { throw ... } }`.\n\n**Both trees** — the mutation legs proved on disk (`git hash-object` delta plus marker counts) and the artifact proved by `scripts/ablation-dist-preflight.mjs`, restored under a `trap` with an empty `git diff HEAD` and the blob back at HEAD's.\n\n| store | tree | `resume` of a run whose nodes ALL succeeded | `restoreConsumedSuspension` |\n|---|---|---|---|\n| refuses only the `completed` row | pre-#15555 (`engine.ts` blob `976d8ec78`, guard absent from `dist/`, preflight `--absent` exit 0) | returns `{ success: false, status: 'stranded', error: 'run-history driver refused the COMPLETED row' }` | `restored: true` |\n| refuses only the `completed` row | with #15555's guard (blob `e6fa6ff8f`) | **the same literal** | `restored: true` |\n| refuses every terminal row | pre-#15555 | **threw** `run-history driver refused the terminal row` | `restored: true` — and resuming again ran the downstream node a **2nd** time (`tail` count 1 then 2) |\n| refuses every terminal row | with #15555's guard | returns `{ success: false, status: 'stranded' }` | `restored: true` — same double run |\n\n⇒ The phantom strand, the phantom repair snapshot and the double run are all present **before** #15555's change. What that change alters is only which store failures **report** the phantom rather than throwing over it: the first two rows are byte-identical across the two trees.\n\n## Why it matters\n\nThe #13937 shape-4 ruling rests on the property *\"a re-armed run must never become double-runnable\"*, and `stranded-run-status.test.ts` pins the defence that normally holds it: `restoreConsumedSuspension` reads the durable terminal row first and refuses a stale hot journal. On this path that defence cannot fire — the durable row is precisely what failed to land — so the hot journal is honoured and the completed run is re-armed.\n\nThe direction is the opposite of #15555's: that card is a false `false` (an operator told not to repair a run that is repairable); this is a false `true` (an operator told to repair a run that already finished, where the repair re-runs it).\n\n## Trigger width\n\nNarrow, and honestly **NOT MEASURED** in the same respect #15555 records: nobody has enumerated the shipped `SuspendedRunStore` implementations to see whether any can throw synchronously out of `recordTerminal`. The two in-repo implementations were not audited for this. That enumeration is the thing that would move a priority.\n\n## Suggested direction (advisory — the disposition is the lane's)\n\nGuard the completion-path `recordLog` so a history-write failure cannot enter the node-failure arm at all, restoring the invariant that call's own doc states. That would also mean no journal is written for a completed run, which closes the double-run path without touching the repair verb. ⛔ Do not fix it by weakening `restoreConsumedSuspension` — the verb is behaving correctly on the evidence it is given; the evidence is what is wrong.\n\n## Adjacent, not the same\n\n#15358 (`[Decision]` — `inspectStrandedRequests` over-reporting) is the same over-reporting direction on the approvals sweep surface. This one is the engine-side producer. ⛔ Nothing here settles that card.\n\nRefs: #15555 (the sibling window, being fixed) · #13937 / PR #15237 (the ruling whose double-run invariant this crosses) · #13909 (`restoreConsumedSuspension`) · #15358 (adjacent, decision pending)."
+}

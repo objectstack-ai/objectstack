@@ -1,0 +1,37 @@
+{
+  "number": 16114,
+  "kind": "issue",
+  "title": "[finding] four `packages/cli` sites cite driver-sql's lookup arm for \"a platform id is 26 characters\" — the platform mints 16, and stores a supplied id at any width",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T01:52:34Z",
+  "updated_at": "2026-09-06T21:55:40Z",
+  "closed_at": "2026-09-06T21:44:25Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16114",
+  "body": "Found while implementing #15522 (`driver-sql`'s lookup arm), **deliberately not fixed there** — a different package, so a different verification surface. Unassigned, bare, for triage.\n\n## The claim, and why it is not this platform's\n\n`packages/drivers/driver-sql/src/sql-driver.ts`'s `case 'lookup': case 'user':` arm carried the sentence *\"a platform id is 26 characters\"*, spelling out a ULID literal `01JQ8XKZ9M4N7P2R5T6V8W0Y3B`. Measured on `origin/main` `64011dd3f` while closing #15522:\n\n- `DEFAULT_ID_LENGTH` is **16**, and `git log -p --follow` over the whole life of that file yields exactly one `+const DEFAULT_ID_LENGTH` line and no `-` line — **it has never been anything but 16**.\n- **No ULID is minted anywhere in this repo.** `git grep -rni ulid` excluding the lockfile returns **0**; the positive control `nanoid` on the same instrument returns 50.\n- Empirically, driving the real `SqlDriver` against SQLite: a write supplying no id gets a **16**-character nanoid; a write that **supplies** an id has it stored **verbatim at whatever width the caller chose** (10-, 17- and 18-character ids all landed unaltered).\n- Three drivers agree independently — `driver-sql`, `driver-mongodb`, `driver-turso` each spell `DEFAULT_ID_LENGTH = 16`; `driver-memory` mints a different shape entirely. Ids are **driver-owned**; nothing above the driver mints one.\n\n⇒ An id's width is not a fixed number at all, and 26 is not among the numbers this platform produces.\n\n## The four sites (locate by TEXT — line numbers drift)\n\nAll four cite the driver arm **by name** as their authority, which is what makes them worth a card rather than a typo:\n\n| file | anchor text |\n|---|---|\n| `packages/cli/src/commands/generate.ts` | `` id is 26 characters (`createColumn`'s lookup arm says so and `` |\n| `packages/cli/src/commands/generate.ts` | `this card's five rows — a platform id is 26 characters` |\n| `packages/cli/src/commands/generate-field-type-vocabulary.pin.test.ts` | `A platform id is 26 characters (driver-sql spells one out in its lookup arm), ` |\n| `packages/cli/src/commands/generate-multiple-json-column.pin.test.ts` | `platform id is 26 characters and Postgres refuses one in a ` + backtick-uuid-backtick + ` column.` |\n\nThe third is a **failure-message string** inside `expect(value, message)`, not an asserted value; the fourth is a plain comment. Neither is load-bearing for pass/fail, and the first two are doc comments — so this is expected to be a **comment/message-text-only** change.\n\n## What is NOT claimed here\n\n⛔ **Nothing landed on a false premise.** Every one of these four passages concludes that a reference column must be `table.string(...)` / `VARCHAR(255)` rather than `table.uuid`, and that conclusion is **unchanged**: Postgres refuses a 16-character nanoid in a `uuid` column with `22P02` exactly as it refuses a ULID. Only the cited number and the ULID literal are wrong.\n\n⛔ **Not a request to change what anything mints.** `DEFAULT_ID_LENGTH` stays 16.\n\n## Also spread, and out of reach\n\nTwo CHANGELOG entries carry the same claim and are historical records, ⛔ **not** to be edited:\n\n- `packages/cli/CHANGELOG.md` — `This was the one hard failure: a platform id is 26 characters, and Postgres`\n- `packages/platform-objects/CHANGELOG.md` — `A minted platform id is 26 characters, so` — note this one says **minted**, which is the strongest form of the false claim.\n\n## Why it earns a card\n\n#15522 filed the origin sentence on the argument that *\"an authority sentence contradicted by its own file's constant is a citation waiting to be relied on again.\"* It already had been — **four times, in a second package, each naming the driver arm as its source.** With the origin now corrected, these four are the surviving copies and the citation chain points at text that no longer exists.\n\nRefs: #15522 · #14828 · #11431."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16351,
+  "kind": "issue",
+  "title": "skills(pm-dispatch, os-dev, AGENTS.md): finding admission threshold — only a reproducible defect, a contract violation, or a metadata-authoring trap becomes a card; everything else rides the PR's acceptance notes (maintainer-directed, both repos)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T15:01:25Z",
+  "updated_at": "2026-09-07T02:11:13Z",
+  "closed_at": "2026-09-07T02:02:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16351",
+  "body": "Maintainer-directed (skills seat, 2026-09-06T15:0xZ). Governing text — the maintainer's instruction in the seat's chat, verbatim: 「这个问题我觉得也需要，两个仓库都需要：finding 准入门槛（源头减流，一张 skills 卡）：只有「可复现缺陷、契约违背、会让 AI 写错元数据」三类才立卡；纯观察、风格、文档 nit 写进 PR 验收评论即可。改 os-dev.md 与 SKILL.md 的立卡规则，受管面走草案 PR。预期入流减半。」\n\n## The measurement behind it (objectui, 2026-09-06T14:15Z, read by the seat)\n\n| reading | value |\n|:--|--:|\n| open issues | 411 |\n| of which `finding` | 189 |\n| `domain:ui` `pm:queue` | 124, of which `finding` 79, `priority:p3` 56 |\n| new cards filed 09-05 / 09-06 (to 14:15Z) | 56 / 83 |\n| open `finding` cards created 09-05 / 09-06 | 46 / 56 |\n| cards closed 09-05 / 09-06 | 78 / 102 |\n\nThroughput is not the problem — inflow is, and the inflow is manufactured by the fleet itself: every dev flight files one to three out-of-scope findings, nearly all graded p3, and the queue only grows. The rule that produces this is written in five places and none of them carries an admission threshold.\n\n## Where the rule lives today (objectstack `main`; objectui carries NO `.claude/agents/` and no finding rule of its own — its seats and devs read these same files, so one landing covers both repos)\n\n- `.claude/agents/os-dev.md` — 范围 rule: 「顺路撞见的无关缺陷立成新的无 assignee issue」 and 「观察类发现(死代码、未演练漂移、外观抛光)打 `finding` 标签,⛔ 不打 `pm:queue`」— every observation becomes a card.\n- `.claude/skills/pm-dispatch/SKILL.md` — the `finding` label row (「观察类记录,恒 = 待首次定级」), the 分类 line (「`finding` = 观察类(死代码、未演练漂移、抛光;真实但今天没有用户撞上),待首次定级」), the 发现分诊轮 block (「每 fire 定完全部未定级 finding」), and the report-reading lines (「`out_of_scope_findings` 应已由 dev 立成无 assignee 的卡」/「范围外发现的标签按种分:观察类打 `finding`」).\n- `references/core-rules.md` — the digest line 「观察类记录打 `finding` 待首次定级」 and 「范围外发现须已立卡」.\n- `AGENTS.md` Prime Directive 10 — 「File issues for out-of-scope findings — don't silently expand scope or leave them buried」.\n\n## The rule to land\n\n1. **Admission: a card is filed for exactly three classes** — (a) a reproducible defect (repro or failing probe named), (b) a violation of a declared contract (the contract text cited), (c) a trap that would lead an AI authoring metadata to write something the runtime refuses or silently drops. Nothing else becomes a card.\n2. **Everything else rides the PR** — observations, dead code, drift not yet exercised, polish, style, doc nits, naming: the dev lists them in a `## 验收备注` (acceptance notes) section of its PR body and in the report's `out_of_scope_findings` as `noted, not filed: …`; the seat reads them at ACCEPT. A noted item that is in fact class (a)–(c) is filed by the seat at ACCEPT, not by the dev.\n3. **The seat's grading of a filed finding outside the three classes is one stroke: close `not_planned`**, the reason on the card; the 发现分诊轮 stops carrying observation-class cards.\n4. `AGENTS.md` Prime Directive 10 keeps its intent (never bury a defect, never expand scope) and states the threshold in one sentence; the corollary (declared ≠ enforced) is untouched.\n5. The `finding` label keeps its meaning for what is filed (待首次定级); the card-body requirement for class (a)–(c) is the evidence named above, so a triage seat can refuse a finding that carries none.\n\n## Acceptance\n\n- The four texts above say the same rule in their own registers; `references/core-rules.md`'s digest line matches SKILL.md in the same PR (the one-rule-two-places rule).\n- Line-neutral on every pinned file (`SKILL.md` 811, `os-dev.md` 403, `core-rules.md` 150, `AGENTS.md` 1058 — folds inside the same sections); rules-only register.\n- `check-skill-line-ratchet`, `check-skill-id-lint`, `check-skill-frame-sync`, `check-governed-prose`, `check-half-states --self-test` (no H-row pins a sentence touched), `check-governed-merges --test` exit 3, whole-repo lint — every exit captured before any pipe.\n- Governed (`.claude/**`, `AGENTS.md`): draft PR, seat review at contract tier, `os-zhuang` + `hotlong`, `needs-user-decision` + 维护者速读, human merge.\n- Expected effect, to be re-measured one week after landing on both boards: new `finding` cards per day at or below half of the 09-05/09-06 rate.\n\n## Serial plan (recorded at filing)\n\n`SKILL.md` + `core-rules.md` are held by flight A (PR #16339, at CI) and by the devx seat's PR #16271; `os-dev.md` is held by flight B (no PR yet). The SKILL.md / core-rules / AGENTS.md parts dispatch as one flight the moment a slot frees, with a merge-tree proof against both open PR heads (the shape #16003 used against PR #15946); the `os-dev.md` part rides the flight that follows flight B on that file, folded with #16262. The selection-order card filed in the same stroke folds into the SKILL.md half (same file, same register, no conflicting ruling).\n\nRefs #16262.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 16118,
+  "kind": "issue",
+  "title": "lint: `visibility-bare-identifier` goes silent for an identifier that also appears inside a `has()` in the same predicate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:09:43Z",
+  "updated_at": "2026-09-06T21:52:39Z",
+  "closed_at": "2026-09-06T21:42:59Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16118",
+  "body": "`@objectstack/lint@17.3.0`. Measured on `objectstack-ai/hotcrm` at `ff43321`, three injections into ONE site in `src/views/lead.view.ts` (`views[9] · formViews.status_update_modal`), same run, same command (`objectstack lint --json`).\n\n## The reachability fact\n\n`visibility-bare-identifier` reports a bare identifier in a view visibility predicate — until the SAME identifier also appears as the argument of a `has()` macro anywhere in that predicate. Then the rule goes silent for it entirely, including for its unwrapped occurrence.\n\n| predicate written at that site | lint | finding |\n|:--|:--:|:--|\n| `status == \"qualified\"` | **exit 1** | `visibility-bare-identifier` at **error** — CONTROL |\n| `has(status) && status == \"qualified\"` | **exit 0** | none |\n| `has(status)` | **exit 0** | none |\n\nBaseline for all three: `passed:true · errors:0 · warnings:17 · suggestions:12` — the two silent injections moved nothing at all.\n\n## The control that makes this negative worth reading\n\nThe site is definitely walked, and the walk definitely reports there. Two OTHER injections into the byte-identical anchor at the same site fired in the same harness:\n\n- `has(record.status) && && record.status == \"qualified\"` gives `visibility-predicate-syntax` at **error, exit 1**, naming `views[9] · formViews.status_update_modal`;\n- `has(record.status) && notARealFn(record.status) == \"qualified\"` gives `visibility-predicate-unknown-function` at **error, exit 1**, same site.\n\nSo this is not \"the rule cannot see that view\".\n\n## Why the middle row matters — it is the shape an author actually writes\n\n`has(x) && x == \"…\"` is the guarded spelling the totality discipline pushes authors toward. An author who correctly adds the `has()` guard and incorrectly forgets the `record.` prefix on both halves lands exactly in the silent row. The predicate then never evaluates for any record (`Unknown variable: status`), and on a form surface an unevaluable `visibleWhen` fails OPEN — the field renders, carrying its `required: true` into the console's submit check. That is the #688 shape, and the rule that exists to catch it is quiet for it.\n\nThe plausible cause is that a `has()` argument is a legitimate select target and is excluded from the bare-identifier walk — but the exclusion appears to be keyed on the identifier NAME across the whole predicate rather than on the occurrence.\n\n⛔ Not necessarily a defect in the exclusion's intent. What it **is**, definitely, is a reachability fact: on this input the rule reports nothing, and the guarded-but-unprefixed spelling is the one an author is most likely to produce.\n\n## How it was found\n\n`objectstack-ai/hotcrm#1625` retires local test assertions proven duplicate of platform rules. hotcrm's `test/view-predicate-dialect.test.ts` carries a sweep, `references only namespaces the evaluator binds`, which reds on all three rows above (it reads roots through `collectCelRootIdentifiers`). Because the platform covers only the first row, that assertion was **kept** rather than retired.\n\nDedupe ran before filing — #13594, #13652, #12665 and #14288 read in full; none covers this. Unassigned."
+}

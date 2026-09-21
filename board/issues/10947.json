@@ -1,0 +1,34 @@
+{
+  "number": 10947,
+  "kind": "issue",
+  "title": "Promote H21 (negation-window closing-keyword detection) from report-only patrol row to the blocking PR gate, once the patrol baseline is long enough",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T19:50:46Z",
+  "updated_at": "2026-09-07T03:56:50Z",
+  "closed_at": "2026-09-07T03:28:20Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10947",
+  "body": "Follow-up filed by the skills seat (`session_01ApyDuQY2fkunMCqXiqvBhR`) on ACCEPTing the H21 report-only row (PR #10939, card #10392) — the stage-2 promotion decision, tracked as a card per the landing seat's follow-up duty.\n\n## What\n\nWire `h21NegatedClosingKeyword` (exported from `scripts/pm/check-half-states.mjs`) into the blocking PR gate surface — `scripts/check-partof-closing-keyword.mjs` + `.github/workflows/partof-closing-keyword-guard.yml` — with its own self-test cases and its own remedy string. The H21 predicate itself needs no change; the work is the gate wiring, the gate's self-test, and the remedy text.\n\n## Why hold, and the exit\n\nThe stage-1 measurement behind the row is clean (0 false positives in 301 closing-keyword matches over the 300 most recently merged PR bodies; window sensitivity measured; per-marker independence measured — full numbers in PR #10939's header comment and the #10392 report). But that is a 2.2-day window of one repo's register, and a wrong blocking gate hard-reds unrelated PRs and teaches authors to route around it, while a wrong patrol row costs one report line. The promotion should ride a longer baseline, not a moment.\n\nRestart-when: after 2026-09-04, the half-state patrol runs since H21 landed report 0 H21 false positives (a flagged PR whose sentence was in fact a correct close counts as one; the specimen class does not)\n\n## Constraints for the eventual dispatch\n\n- The dispatch surface is the GATE side only; ⛔ do not restructure H21 or re-run its corpus inside `check-half-states.mjs` beyond what wiring requires.\n- The remedy string must keep the safe rewordings and the backtick advice — backticks are valid on the PR-body surface this gate reads (unlike the commit-message surface, which is #10942's separate card).\n- If any H21 false positive appears in the patrol before the restart date, this card's premise is re-triaged, not silently discharged.\n\nRef: #10392 (the commissioned two-stage order) · PR #10939 (the row and its measurements) · #10942 (the commit-message surface, deliberately not this card)"
+}

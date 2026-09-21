@@ -1,0 +1,37 @@
+{
+  "number": 15950,
+  "kind": "issue",
+  "title": "The dashboard publish gate resolves `widget.dataset` against the boot-time stack, so a dataset saved through `PUT /meta/dataset` is a phantom `widget-dataset-unknown` until the runtime restarts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:47:25Z",
+  "updated_at": "2026-09-06T07:49:51Z",
+  "closed_at": "2026-09-06T07:36:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15950",
+  "body": "Observed while running cloud's objectui pin-smoke (cloud#2008) against a local\n`run-stack.sh --with-ui --prod-like --seed` runtime at framework `e581457baaaf`.\n\n## What happened\n\n1. `PUT /api/v1/meta/dataset/p2008_users?package=com.pin2008.smoke` → **200**\n   `{\"success\":true,\"seq\":2,\"state\":\"active\",\"message\":\"Saved dataset 'p2008_users' (env-wide, state=active)\"}`\n2. `GET /api/v1/meta/dataset/p2008_users` → **200**, the item comes back with\n   `_packageId: \"com.pin2008.smoke\"` and `_diagnostics: { valid: true }`.\n   `GET /api/v1/meta/dataset` lists it alongside the five code-package datasets.\n3. `PUT /api/v1/meta/dashboard/p2008_dash?package=com.pin2008.smoke` with three widgets, each\n   `dataset: \"p2008_users\"` → **422**, three `widget-dataset-unknown` issues:\n\n   > dataset \"p2008_users\" does not resolve to a declared dataset.\n   > hint: Declared datasets: sys_user_metrics, sys_organization_metrics, sys_session_metrics,\n   > sys_package_installation_metrics, sys_audit_log_metrics\n\n   The hint enumerates ONLY the code-package datasets — the just-saved, readable,\n   `valid: true` runtime one is missing from the gate's resolution universe.\n4. `POST /api/v1/meta/dataset/p2008_users/publish` → 200. Retry step 3 → **same 422**.\n5. Restarted the runtime process (nothing else changed — same workdir, same tenant DB).\n   Replayed step 3 byte for byte → **200**, dashboard saved, and it renders correctly.\n\nSo the dashboard author-time gate resolves `widget.dataset` against a universe built at kernel\nboot, while `GET /meta/dataset` reads through to the store. A dataset and a dashboard authored\nin the same session cannot be saved in that order without a restart, and the 422 names the\nauthor's own dataset as nonexistent while the read API returns it.\n\n## Why this reads as a defect rather than a config\n\n`runtime-gate.ts` documents `datasets` as \"the live dataset declarations (stack key `datasets`)\n… the resolution universe `validateWidgetBindings` links a widget's `dataset` / `dimensions` /\n`values` against\", added by objectui#7529 precisely so a per-write dashboard snapshot does not\nreport phantom `widget-dataset-unknown` on a board bound to a real dataset. The phantom shape\nthat docblock describes is exactly what a *runtime-stored* dataset still produces — the\ncollection appears to be populated from the boot-time stack rather than from the live metadata\nstore, so the fix that landed for declared datasets does not reach authored ones.\n\nThis is the door AI authoring goes through: an agent that creates a dataset and then a\ndashboard in one turn gets a hard 422 blaming its own artifact, with a hint that lists\neverything except the thing it just made.\n\n## Repro\n\nAny runtime with `--prod-like`; a writable package; the two PUTs above in that order.\n\nFiled from cloud#2008 (objectui pin bump). Not fixed there — cloud only pins objectui.\n"
+}

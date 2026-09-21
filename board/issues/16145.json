@@ -1,0 +1,37 @@
+{
+  "number": 16145,
+  "kind": "issue",
+  "title": "finding(metadata-protocol): the unanswerable-target refusal opens its human message with a machine-shaped `[unanswerable_target]` tag that has no reader — and it is now wire-visible",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:09:12Z",
+  "updated_at": "2026-09-06T08:43:33Z",
+  "closed_at": "2026-09-06T08:40:25Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16145",
+  "body": "Found while repairing the `/references` door's two refusal envelopes (#15685, PR #16143); recorded rather than fixed, because it is the PRODUCER's prose and that repair deliberately relays the producer verbatim.\n\n## What is there\n\n`findReferencesToMeta` refuses an unanswerable TARGET type by throwing a message that opens with a bracketed tag:\n\n```\n[unanswerable_target] References to a 'field' item cannot be computed. A 'field' is addressed by the\ncomposite key 'OBJECT.FIELD' (here 'account.owner'), while every metadata property that names a field\nholds the BARE field name — … Ask the owning object instead: GET /api/v1/meta/object/account/references.\n```\n\n(`packages/metadata-protocol/src/protocol.ts`, the `REFERENCE_SITES.unanswerableTargetTypes` branch.)\n\n## The measurement\n\nThe tag has exactly ONE writer and ZERO readers, across every tracked file type:\n\n```\n$ git grep -n 'unanswerable_target' -- '*.ts' '*.mjs' '*.md'\npackages/metadata-protocol/src/protocol.ts:<the throw above>   ← 1 hit, the writer\n```\n\nNothing parses it, nothing switches on it, no test asserts it, no doc mentions it. The fact it encodes — \"this target type is unanswerable\" — already rides the wire on its own axis as `code: 'NOT_IMPLEMENTED'` with `status: 501`.\n\n## Why it is worth a row now\n\nIt used to be invisible: the relay replaced the whole sentence with `Internal server error`, so the tag never reached anyone. After PR #16143 the door relays the producer's prose verbatim, which is the point of that repair — and the tag comes with it, as the first thing an operator reads.\n\nThat sits against the standing ruling behind #12975 (maintainer, 2026-08-29) on the `/data` door shipping `FORBIDDEN:` in front of a localized refusal: ONE envelope semantics — `error` is HUMAN LANGUAGE and `code` is the MACHINE TOKEN, and a prefix is removed *because* the same fact already rides the `code` axis. This is the same shape one bracket-spelling over, and the same audience: the message is prescriptive per ADR-0110 D3, read by an operator deciding whether to delete something.\n\n## Why the repair belongs HERE and not at the transport\n\n`withoutDeclaredCodePrefix` (`packages/rest/src/error-response.ts`) is anchored to the producer's own declared `code`, so it does not match `[unanswerable_target]` and must not be widened to: its docblock argues at length that a blanket SCREAMING-then-separator strip would delete tokens the wire carries nowhere else, and eat ordinary driver prose. Stripping the tag at the door would be a third local opinion at a boundary that already argues against having one. The cheap, sound repair is at the producer: drop the tag, or — if a discriminator is genuinely wanted — declare it on an axis something can read.\n\n## Scope\n\nOne string literal, plus whichever assertions quote it. `protocol.reference-target-unanswerable.test.ts` and `packages/rest/src/rest-server-meta-references-refusal-envelope.test.ts` both anchor on the sentence's CONTENT, not on the prefix, so neither pins the tag.\n\nNot urgent: no status code, no error code, no envelope position moves either way. This is prose in front of an operator."
+}

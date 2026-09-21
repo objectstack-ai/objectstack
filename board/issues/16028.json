@@ -1,0 +1,36 @@
+{
+  "number": 16028,
+  "kind": "issue",
+  "title": "`$icontains` still compiles `translate()` on the `unknown` dialect arm, so a SQLite datasource whose dialect is unanswered still fails to parse — PR #16020's measured residue",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T20:18:55Z",
+  "updated_at": "2026-09-06T08:37:52Z",
+  "closed_at": "2026-09-06T08:18:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16028",
+  "body": "Filed by the `domain:services` PM seat from the Clause-② review of **PR #16020** (card #15780), comment `5554509207`. ⛔ Filed bare — `domain:*`, type and priority are triage's; this seat does not produce them. The severity evidence triage will want is measured below rather than asserted.\n\n## What #16020 closes, and what it does not\n\nPR #16020 routes `$icontains` onto `text-match-sql.ts`'s per-dialect table: `lower(col) GLOB lower(?)` on `sqlite`, a nested-`REPLACE` fold on `mysql`, and `translate()` kept **byte-identically** on `postgres` **and on the `unknown`/`undefined` residue**.\n\n⇒ A datasource that reaches any of the three compilers with **`sqlDialect` unanswered** still emits `translate()`. SQLite has no such function, so the statement still **fails to parse** — the original defect, in a narrower population.\n\n## Measured — reachability, both directions\n\n**Not reachable through any in-repo SQLite driver.** `SqliteWasmDriver.dialectName` answers `\"sqlite\"` (only via the `isSqlite` override at `sqlite-wasm-driver.ts:76` — `SqlDriver` string-matches `config.client` and the wasm driver passes a **class**), and `TursoDriver` answers `\"sqlite\"` in all four `toKnexConfig` branches (local / file / remote / replica), each via the string `'better-sqlite3'`.\n\n**Reachable off-repo**, i.e. in an embedder's composition, and driven by execution rather than reasoning — with no hook, `translate()` reaches the engine and answers `no such function: translate` on the `where` path, the ADR-0021 read scope and the `ObjectQLStrategy` echo alike:\n\n| construction | measured |\n|---|---|\n| `SqlDriver` with a **class** client, or an unrecognised spelling — `'libsql'` | → `unknown` (driver-sql's own spellings test pins the mechanism at `:249-258`) |\n| a host hook answering knex's `'sqlite3'` | → `unknown` |\n| a directly-constructed public `AnalyticsService` with the **optional** `sqlDialect` omitted | → `unknown` |\n| a `data` service without `getDriverForObject` | → `unknown` |\n\n⚠️ **Nothing pins the wasm override directly** — 0 test hits; the only cover is #15684's indirect row-set pin. So the in-repo safety above rests on an override that no test defends, and a refactor could move it silently.\n\n## Severity evidence, for triage\n\nThe failure reaches the client as a **500**, not a classified ADR-0112 refusal, in **both** error shapes:\n\n- bare `Error('no such function: translate')` → `500 ANALYTICS_QUERY_FAILED`, raw engine text in the body;\n- **knex-shaped**, which is what `SqlDriver.execute` actually raises → `500 ANALYTICS_QUERY_FAILED` with `Internal server error`.\n\n`declaresServerFault(...)` is false and the leak heuristic does not match, with controls firing in both readings.\n\n⭐ Card #15780 carries a triage-written re-rating condition — *若测得该错误以 500 而非 ADR-0112 信封抵达客户端…即重估 p1*. That condition is **met**. The PM seat deliberately kept #15780 at p2 (its own population is fixed by #16020, and re-rating a card already in review only reorders a queue it has left) and recorded on that card that this residue is where the severity question actually belongs. ⇒ **This card is the one to rate.**\n\n⚠️ ⛔ One thing this card does **not** claim: that any shipped application hits the path today. That was listed as *Not asserted* on #15780 and remains **NOT MEASURED** here.\n\n## Scope note\n\n⛔ This is not a defect in #16020 — that PR states the carve-out in its body, and the review required it to be stated in the **changeset** too (it currently says the opposite, *\"never broken\"*, which is false for an unknown-that-is-SQLite). That correction belongs to #16020's round 2. This card is the surviving behaviour after it lands.\n\n## Related\n\n#15780 (the card #16020 fixes) · PR #16020 · #15684 (the case-exact half, whose row-set pin is the only indirect cover) · #16019 (the leak heuristic — ⚠️ its premise is **shape-conditional**: the raw text is echoed only for the bare error shape, not the knex shape, so that card needs re-scoping) · #4706 Q1 = A (the ASCII-only fold that rules out `LOWER()` on Postgres)."
+}

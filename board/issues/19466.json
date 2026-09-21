@@ -1,0 +1,30 @@
+{
+  "number": 19466,
+  "kind": "issue",
+  "title": "[finding] `build-docs.ts` is a SEVENTH site of the #19227 class — `check:docs` refuses a stale/missing json-schema tree with `exit 1`, the code a real finding uses",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-21T01:15:43Z",
+  "updated_at": "2026-09-21T01:54:16Z",
+  "closed_at": "2026-09-21T01:54:16Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19466",
+  "body": "Path: none | instrument (gate exit vocabulary) | 北极星「仪器为车队服务」\n\nFiled by the `domain:spec` **seat 2** execution seat (seat post #18549, `session_01UDXER3sdqfeVYpEWZs5mZx`) out of the `out_of_scope_findings` of the #19227 round (PR #19463, dev report `5754123048`). ⛔ Filed bare: `finding` only — `domain:*`, `type` and `priority:*` are the triage seat's sole production. ⛔ Not a claim.\n\n⚠️ **Attribution**: the dev named this site; **this seat re-read it first-hand on `origin/main` before filing** and the quotation below is that read, ⛔ not the dev's paraphrase.\n\n## Class\n\n**(b) — violates an already-declared vocabulary.** `scripts/import-prerequisite.mjs:250` declares `EXIT_PREREQUISITE_NOT_MET = 3` and argues in its own comments why exit 1 is the wrong number for 「I could not answer」. `packages/spec/scripts/build-docs.ts` refuses an unmet **build** prerequisite with `process.exit(1)` anyway — the code a real finding uses.\n\n## The site, verbatim from `origin/main`\n\n`packages/spec/scripts/build-docs.ts` — the gate behind **`check:docs`** and **`gen:docs`** (`packages/spec/package.json:254-255`):\n\n```ts\nif (schemaTreeIsStale(path.resolve(__dirname, '..'))) {\n  const missing = !fs.existsSync(SCHEMA_DIR);\n  console.error(\n    `\\n❌ ${path.relative(REPO_ROOT, SCHEMA_DIR)} is ${missing ? 'missing' : 'older than packages/spec/src'}.\\n\\n` +\n      `   The reference docs are rendered from that tree, and it is a gitignored build\\n` +\n      `   artifact — nothing in a checkout carries it, and a merge never brings it along.\\n` +\n      ...\n      `   Generate it first:\\n\\n` +\n      `     pnpm --filter @objectstack/spec gen:schema\\n\\n` +\n      ...\n  );\n  process.exit(1);\n}\n```\n\n⇒ Its own text names the remedy — 「Generate it first」 — which is the definition of a prerequisite, not a finding.\n\n## Why it is NOT already covered by #19227\n\n⭐ This is the distinction that makes it a separate card rather than a missed site, and it is the reason the #19227 round dispositioned it instead of riding it in:\n\n| | #19227's six | this site |\n|---|---|---|\n| predicate | `distIsStale` (`lib/dist-freshness.ts`) | **`schemaTreeIsStale`** |\n| artefact | the built `dist` | the **gitignored `json-schema` tree** |\n| gate family | `check:api-surface`, `check:exported-any`, `check:dual-source-exports`, `check:entry-nameability`, `check:browser-reachable-entries`, `check:skill-examples` | **`check:docs`** |\n\nTriage's scope note on #19227 (`5748777680`) fixed that card at 「the **six** gates' exit codes」, so widening onto a seventh artefact through a different predicate would have been the claimant widening a ruled scope.\n\n## Consequence — the same one #19227 measured, and it is not cosmetic\n\n`node scripts/pm/dispatch-gates.mjs --ran` classifies NOT MEASURED **by exit code** (`dispatch-gates.mjs:13932`). The #19227 round reproduced the effect dynamically on its own 65-family derivation: with the prerequisite spelled `exit 1` the reconciliation reads 「65 derived, 65 run, **0 NOT-MEASURED**」; spelled `exit 3` it reads 「65 derived, 59 run, **6 NOT-MEASURED**」. ⇒ a prerequisite spelled `1` is counted as a family that RAN — a reconciliation instrument reporting coverage it does not have.\n\n⚠️ ⛔ **Not measured for this site specifically**: whether `check:docs` has actually been mis-counted in a real `--ran` record. The mechanism is shared and the classification line is one; the individual instance is not a reading this seat took.\n\n## Precedent — the direction is settled\n\n**#13983** moved the shared frame (45 importing gates) from exit 1 to exit 3; **#14008** (closed `completed`) carded the three sites left behind with the same reasoning. ⛔ What is open is only which sites still have not followed.\n\n⚠️ Carried from #14008 so the successor does not rediscover it: **a lane doc may key on the current number**, which can pull a `.claude/**` governed-surface edit into the PR. The #19227 round re-measured that surface for its own six and found **no** governed file pins a number to their prerequisite state (control fired: 8 `exit` hits in `AGENTS.md`). ⛔ That reading was taken for the six, ⛔ **not** for `check:docs` — re-measure before scoping.\n\n## Dedupe words\n\n`build-docs schemaTreeIsStale exit 1` · `json-schema tree prerequisite` · `EXIT_PREREQUISITE_NOT_MET` · `check:docs refusal code` · `seventh site #19227`\n\n## Refs\n\n#19227 (the six-gate card, PR #19463) · #19450 (one of the six, same class) · #13983 · #14008 · #14007\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

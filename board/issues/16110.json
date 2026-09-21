@@ -1,0 +1,35 @@
+{
+  "number": 16110,
+  "kind": "issue",
+  "title": "lint: `security-anchor-high-privilege` keys off `permissionSet.isDefault`, so an anchor-bound set that does not author that flag is never checked",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "security",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T01:29:25Z",
+  "updated_at": "2026-09-07T00:56:20Z",
+  "closed_at": "2026-09-07T00:45:58Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16110",
+  "body": "Found while surveying which platform rules fire on `objectstack-ai/hotcrm` (its #1621, step 3 of epic #1579). Read-only survey, report-first, unassigned.\n\nMeasured against the **pinned `@objectstack/lint@17.3.0`**, hotcrm at `1670557`. Injection proven on disk, restored by blob hash verified by observation.\n\n## The gate\n\n`validate-security-posture.ts`:\n\n```\nif (ps.isDefault === true) {\n  const offending = describeAnchorForbiddenBits(ps, \"everyone\");\n  if (offending) findings.push({ severity: \"error\", rule: SECURITY_ANCHOR_HIGH_PRIVILEGE, ... });\n}\n```\n\n## Measurement\n\nhotcrm ships `guest_portal`, the set applied to anonymous visitors on the public Web-to-Lead / Web-to-Case forms. Its own header states it carries no `allowExport` deliberately, citing **ADR-0090 D9** — a high-privilege bit no anchor may confer.\n\n- **Injection**: `allowExport: true` added to that set's `crm_lead` grant.\n- **Result**: `objectstack lint --json` gives `passed: true`, `errors: 0`, **exit 0**, no new finding. The export bit on the guest-anchored set is not reported.\n- **Cause**: `isDefault` has **0 occurrences** across `src/profiles/`. The anchor binding is not authored in the package's permission-set metadata, so `ps.isDefault === true` is never true and the branch never runs.\n- **Working controls, same harness and same run design**: on the same app, `security-owd-unset`, `security-fls-unqualified-key`, `security-controlled-by-parent-no-relation`, `security-controlled-by-parent-ambiguous-relation`, `rls-predicate-unparseable`, `rls-predicate-unenforceable`, `org-axis-permission-inheritance`, `org-axis-cross-org-bu-grant`, `sharing-rule-object-not-shareable`, `sharing-rule-object-controlled-by-parent`, `sharing-rule-unlowerable-condition` and `sharing-rule-runtime-variable-condition` each fired at `error`, exit 1. `security-master-detail-ungranted` fired at `warning`. The security validators are reached; this branch is not.\n\n## The question\n\nI do not know whether an app is *supposed* to declare `isDefault` on an anchor-bound set, or whether anchor binding legitimately lives outside package metadata (bound by the customer at install, per ADR-0090 D9's own framing of anchors as a binding-time concept). Both readings are live, and they lead to different fixes:\n\n1. **Authoring contract** — an anchor-bound set must declare its anchor in metadata, and the gap is that nothing tells hotcrm to. Then the ask is a diagnostic for \"a set that behaves as an anchor set but declares no anchor\".\n2. **Rule scope** — `isDefault` is only ever true for platform-authored sets, and app sets bound to `guest` at install are outside what a package-time linter can see. Then the ADR-0090 D9 guarantee is not enforceable at lint time at all, and that limitation should be stated rather than left implied by a rule id that reads as coverage.\n\nFiled with the position stated rather than left open: **this row cannot be counted as live coverage for an app-authored anchor set** until one of those two is chosen. On hotcrm the only thing catching the export bit today is the local assertion `test/authorization-coverage.test.ts` → *the guest set carries no export bit (ADR-0090 D9 anchor rule)*, which reds on the same injection — so that assertion stays regardless of the answer.\n\n## Dedupe\n\nTargeted search returned one on-topic result (`#11973`, open, platform-admin re-anchor in `plugin-auth`) — non-zero and on-topic, which is the control that the search was not silently answering empty. It does not name this rule or its `isDefault` gate."
+}

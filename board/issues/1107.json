@@ -1,0 +1,35 @@
+{
+  "number": 1107,
+  "kind": "pull_request",
+  "title": "Implement real-time event subscriptions for metadata and data changes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-10T14:40:20Z",
+  "updated_at": "2026-09-07T04:48:59Z",
+  "closed_at": "2026-04-11T04:28:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-11T04:28:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1107",
+  "body": "AI chat creates objects but the Studio sidebar doesn't update until manual refresh. This implements end-to-end event streaming from backend operations to frontend UI.\n\n## Architecture\n\n**Backend Event Publishing**\n- `MetadataManager` emits `metadata.{type}.{action}` events on create/update/delete\n- `ObjectQL Engine` emits `data.record.{action}` events on insert/update/delete\n- Both integrate via `IRealtimeService` dependency injection through plugin system\n- Graceful degradation: wrapped in try-catch, system works without realtime service\n\n**Client SDK**\n- New `RealtimeAPI` class exposes `subscribeMetadata()` and `subscribeData()`\n- Integrated as `client.events` property on `ObjectStackClient`\n- Subscription filters: type, packageId, recordId, eventTypes\n- Returns cleanup function for automatic unsubscribe\n\n**React Bindings**\n- `useMetadataSubscription()` / `useDataSubscription()` - stateful event hooks\n- `useMetadataSubscriptionCallback()` / `useDataSubscriptionCallback()` - callback variants for refetch triggers\n- `useRealtimeConnection()` - connection status indicator\n- `useAutoRefresh()` - automatic query invalidation on data changes\n\n**Studio UI**\n- Sidebar subscribes to 8 metadata types (object, view, app, agent, tool, flow, dashboard, report)\n- Triggers `loadMetadata()` refetch on any metadata event\n- No manual refresh required\n\n## Usage\n\n```typescript\n// React component with auto-refresh\nfunction ObjectList() {\n  const { data, refetch } = useQuery('project_task', {});\n  \n  // Refetch list when tasks are created/updated/deleted\n  useDataSubscriptionCallback('project_task', refetch);\n  \n  return <div>{data.map(...)}</div>;\n}\n\n// Or with event state\nfunction TaskDetail({ taskId }) {\n  const event = useDataSubscription('project_task', { recordId: taskId });\n  \n  useEffect(() => {\n    if (event?.type === 'data.record.updated') {\n      console.log('Fields changed:', event.changes);\n    }\n  }, [event]);\n}\n```\n\n## Event Schema\n\n- Metadata: `metadata.object.created`, `metadata.view.updated`, `metadata.agent.deleted`, etc.\n- Data: `data.record.created`, `data.record.updated`, `data.record.deleted`, `data.field.changed`\n\nAll events defined in `packages/spec/src/api/events.zod.ts` with Zod schemas.\n\n## Files Changed\n\n**New Files:**\n- `packages/spec/src/api/events.zod.ts` - Event type definitions\n- `packages/client/src/realtime-api.ts` - Client subscription API\n- `packages/client-react/src/realtime-hooks.tsx` - React hooks\n\n**Modified:**\n- `packages/spec/src/contracts/realtime-service.ts` - Extended IRealtimeService with subscription filters\n- `packages/metadata/src/metadata-manager.ts` + `plugin.ts` - Event emission + DI wiring\n- `packages/objectql/src/engine.ts` + `plugin.ts` - Event emission + DI wiring\n- `packages/client/src/index.ts` - Integrated RealtimeAPI\n- `packages/client-react/src/index.tsx` - Export hooks\n- `apps/studio/src/components/app-sidebar.tsx` - Subscribe to metadata events\n\n## Future Work\n\n- WebSocket/SSE transport (currently in-memory adapter)\n- Connection retry logic\n- Event batching for high-frequency updates\n- Offline event queue"
+}

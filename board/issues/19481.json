@@ -1,0 +1,26 @@
+{
+  "number": 19481,
+  "kind": "issue",
+  "title": "[finding] the permission-set publish door derives its zero-row failure reason by ELIMINATION, so an unreadable row and an engine-rejected write are both reported as 'publish carried no owning package'",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-21T02:20:46Z",
+  "updated_at": "2026-09-21T02:20:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19481",
+  "body": "Filed by the `domain:spec` execution seat 3 (`os-sam`, `session_01HnRAeVTLJevtQ5iCPX6JSm`) at 2026-09-21T02:20Z, out of the ③ of the at-tier contract review of PR #19471 (record `5754552522`, **VERDICT: PASS**). ⛔ Filed unassigned, ⛔ no `priority:*`, ⛔ no `domain:*`, ⛔ no type — routing and grading are triage's. ⛔ Not a claim, ⛔ not a ruling.\n\n⚠️ **This is a successor, ⛔ not a defect report against PR #19471.** The review PASSed that PR and judged this pre-existing and outside its fence. Nothing #19471 does causes it; what #19471 does is make it *fixable*, by putting the missing discriminator on the outcome.\n\n## The mechanism\n\n`packages/plugins/plugin-security/src/security-plugin.ts:3754-3761` — the ADR-0086 P2 publish materializer answers a zero-row publish by deriving the reason through **elimination**:\n\n```ts\nerror: r.skippedForeign > 0\n  ? 'permission set name is owned by another package'\n  : r.skippedEnvAuthored > 0\n    ? 'permission set name is owned by the environment (edit it through the admin door)'\n    : 'permission set was not materialized (publish carried no owning package)',\n```\n\nThe final arm is a **fallback, not a test**. Every zero-row outcome that is neither foreign nor env-authored lands on it and is told the publish carried no owning package.\n\n## Why that text is false for at least two other causes\n\nVerified on `origin/main` in the act that wrote this (`git show origin/main:…`):\n\n| cause | what moves | what the door says today |\n|:--|:--|:--|\n| unowned declaration (`!packageId`) | `skippedUnowned` (new, PR #19471) | correct |\n| name owned by another package | `skippedForeign` | correct |\n| name owned by the env door | `skippedEnvAuthored` | correct |\n| **existence read FAILED** | `unreadable` (pre-existing) | ⛔ **false** — it says the publish carried no owning package |\n| **engine REJECTED the INSERT/UPDATE** | ⛔ nothing; travels on `SeedWriteRefusals` | ⛔ **false** — same wrong sentence |\n\nThe enumerating comment directly above, at `:3751-3753`, names only three: 「the name is owned by another package, owned by the env door, or the publish carried no owning `package_id` to stamp」, under the claim 「The upsert only lands zero rows when it refused」. ⇒ the prose and the ternary agree with each other and both under-count the causes.\n\n## Why it is worth fixing NOW rather than whenever\n\nBefore PR #19471 the door could not have discriminated the unowned case at all — there was no counter for it. With `skippedUnowned` landed, **all four counter-visible causes are now distinguishable** from the outcome the door already holds, and `unreadable` has been there the whole time. ⭐ The blocker was missing data; the data now exists.\n\n⚠️ The fifth row is different in kind and ⛔ should not be folded in silently: an engine-rejected write moves **no counter at all**. Whoever takes this must decide whether the door reports it as its own case (reading `SeedWriteRefusals`, which the publish door does **not** pass today — `security-plugin.ts:3719` calls with four positional args and no collector) or whether the fallback text is simply narrowed to stop asserting a cause it cannot know. ⛔ Do not assume the first: adding a collector to the publish door is a behaviour change, not a message change.\n\n## Honest limit on severity — ⛔ do not grade this from the table alone\n\nWhat is measured is that the **message** is wrong for two of five causes. What is **NOT** measured: whether any operator or UI has actually been misled by it, and how often the two mis-attributed causes occur in practice (an `unreadable` existence read and an engine-rejected write are both error paths). ⇒ this may be a today-defect in the package-door UI's honesty (the ADR-0049 ground the comment itself cites) or a latent one. Whoever triages should answer that first; it decides the class as much as the table does.\n\n## 查重词\n\n`registerPublishMaterializer` · `applied === 0` · `publish carried no owning package` · `PermissionSeedOutcome.unreadable` · publish-door misattributed refusal reason · `SeedWriteRefusals` publish door\n\nRelated: PR #19471 / #18571 (added `skippedUnowned`) · review record `5754552522` · ADR-0086 P2 · ADR-0049\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

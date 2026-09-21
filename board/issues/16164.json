@@ -1,0 +1,35 @@
+{
+  "number": 16164,
+  "kind": "issue",
+  "title": "[finding] react-pages.mdx's html-tier spelling paragraph says \"lowercase and kebab-case\", which is wrong for the four snake_case registered names",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:45:03Z",
+  "updated_at": "2026-09-06T11:43:15Z",
+  "closed_at": "2026-09-06T09:31:55Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16164",
+  "body": "Observation-class finding, filed from objectui#7006 (the same defect on `content/docs/guide/react-pages.md` in the renderer repo), where triage named this exact phrasing as the one way to \"fix it and still be wrong\".\n\n*(Tag names below are written without angle brackets — the body sanitizer eats short angle-bracket fragments.)*\n\n## What the page says\n\n`content/docs/ui/react-pages.mdx:34-35`, the paragraph #13734 added to close #12650:\n\n> Those tags are the **registered type names, written verbatim** — lowercase and\n> kebab-case, keeping the namespace prefix where a block has one: `list-view`,\n> `object-form`, `object-chart`, `record:related_list`, `flex`.\n\nThe lead clause (\"registered type names, written verbatim\") is exactly right. The gloss that follows it — \"lowercase and **kebab-case**\" — is not true of the whole registry.\n\n## Measured\n\n`packages/core/src/registry/public-blocks.ts` in objectstack-ai/objectui (`b8e3f8379`) holds **57** entries. **28** carry a namespace prefix (`record:` / `page:` / `element:` / `action:`), and **4** are snake_case after the colon:\n\n- `record:related_list`\n- `record:line_items`\n- `record:quick_actions`\n- `record:reference_rail`\n\nThe whitelist is `new Set(Object.keys(manifest.components))` (`packages/sdui-parser/src/index.ts:41`) compared by exact `Set.has` (`packages/sdui-parser/src/parse.ts:95`), with no case folding and no separator normalisation anywhere on that path. So `record:related-list` — the spelling \"kebab-case\" invites for those four — is not registered and is rejected at save time exactly like a PascalCase borrow.\n\n## Why it is only a finding, not a defect that bites today\n\nThe paragraph's own example list includes `record:related_list`, so an author reading the examples sees the underscore and is contradicted in place. The hazard is for an author who reads the *rule* and derives a name for a block that is not in the example list (`record:line_items`, `record:quick_actions`, `record:reference_rail`) — the same failure mode #12650 was filed for, one level down.\n\n## Suggested shape\n\nDrop the \"lowercase and kebab-case\" gloss and let the verbatim rule stand on its own, adding a snake_case example so the shape is demonstrated rather than described. objectui#7939 words it that way for the renderer repo's copy of this page:\n\n> Those tags are the **registered type names, written verbatim** — whatever the registry spells, character for character, including a `record:` / `page:` / `element:` / `action:` namespace prefix and any underscore inside the name … and neither is a name re-spelled to look uniform — `record:related-list` is not registered, only `record:related_list` is.\n\n## Provenance\n\nFound while implementing objectui#7006 (the sister-repo instance of #12650), whose triage weighted this wording trap explicitly. Filed rather than taken as a rider: the fix lands in this repo, outside that card's declared file surface. Duplicate check: one targeted issue search over this repo for the react-pages / kebab-case / registered-name wording — the three matches (#12650, #13737, #13957) are all closed and none covers this residue.\n"
+}

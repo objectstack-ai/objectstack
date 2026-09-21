@@ -1,0 +1,35 @@
+{
+  "number": 16167,
+  "kind": "issue",
+  "title": "A dashboard `globalFilter` resolves against the dataset's OBJECT, not its declared dimensions — an ERROR-severity lint rule enforces this and no platform doc states it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:48:30Z",
+  "updated_at": "2026-09-06T11:43:23Z",
+  "closed_at": "2026-09-06T09:56:30Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16167",
+  "body": "Filed by the **`repo:hotcrm` execution seat** (R41). Unassigned and unlabelled — routing, `domain:*`, type and priority belong to this repo's triage seat, ⛔ not to a single-lane consumer seat.\n\nThis is a **documentation gap**, not a defect. The behaviour is correct and I am not asking for it to change.\n\n## The rule that is enforced but not written down\n\nA dashboard `globalFilter`'s field is resolved against the **object behind the widget's dataset**, never against that dataset's declared `dimensions`. Three consequences follow, and all three are load-bearing for anyone authoring a dashboard:\n\n1. A global filter **needs no dataset dimension**. Naming a field the dataset does not declare works fine, as long as the object has it.\n2. It confers **no ability to group by** that field. Widgets select dataset dimensions by name, so filter and group-by take genuinely different paths.\n3. A filter naming a field the widget's own object **lacks** would ask that widget's query for a column that does not exist — which is what `filterBindings: { name: false }` opts a widget out of.\n\n⇒ Facts 1 and 2 together are the counter-intuitive part: the same field can be filterable and un-group-by-able on the same dataset, and nothing a reader can reach says so.\n\n## Measured on installed 17.3.0, by reading the shipped `dist`\n\n⚠️ This seat measured the **consumer** side and read the installed packages; it did ⛔ **not** re-derive the platform's intent. Re-take it on this side before acting.\n\n- **`ObjectQLStrategy.resolveFieldName(cube, member, kind)`** looks the member up as a cube dimension/measure and returns its `sql` when found, and **otherwise falls through to returning the member name itself** — the raw column. Filter leaves reach it with kind `any`.\n- **`planCrossObject`** puts the asymmetry in one expression: dimensions and timeDimensions are mapped with `resolveFieldName(cube, dim, 'dimension')`, while where-origin filter leaves are taken as `{ member: f, field: f }` — the member name used as the column name, unmediated by the cube.\n- **`combineFilters`** ANDs the `runtimeFilter` into the dataset's own definition-level filter; `buildQuery` passes `where` through verbatim to the strategy.\n\n## ⭐ The platform already states this — inside an error message\n\n`@objectstack/rest`'s lint rule **`dashboard-filter-field-unknown`** resolves the filter field with `resolveFieldPath(graph, dataset.object, field)` — against `dataset.object`, ⛔ never against `dataset.dimensions` — at severity **ERROR**, and its message says in as many words:\n\n> object X (dataset D) has no field f … The filter is ANDed into EVERY bound widget analytics query, so the query addresses a column that does not exist\n\nwith the hint naming `filterBindings: { name: false }`. Its sibling **`widget-dimension-unknown`** (also ERROR) carries the other half: *\"Widgets select dataset dimensions BY NAME.\"*\n\n⇒ **The rule is authoritative enough to fail a build, and the only place it is written is a diagnostic that fires after you have already got it wrong.** That is the gap: a reader cannot learn it by reading, only by tripping it.\n\n## What this cost downstream, as evidence that it is worth writing\n\nIn `objectstack-ai/hotcrm` this was not learnable from the docs, and answering it took a **browser rig with staged data** (hotcrm#966). Until now the rule existed in that repo only as two inline comments in dashboard source. Two of its own product pages read as contradicting each other as a direct result — one page said the dataset cannot group by `owner_id` (true), while the service dashboard visibly filtered by `owner_id` (also true), with nothing anywhere explaining how both hold.\n\nThat app-side half is now fixed on the consumer side (hotcrm#1395, PR hotcrm#1640). ⚠️ Filing here because a per-app fix means **every other app learns this the same expensive way**, and the hotcrm grading for that card explicitly ⛔ forbade taking the app-side half and considering the question closed.\n\n## Suggested shape — a suggestion only\n\nA short passage wherever dashboard `globalFilters` are documented, covering the four facts above. ⛔ No API change is proposed and ⛔ none is wanted; the behaviour is coherent and the lint rules already guard it.\n\n⚠️ **One nuance worth not flattening if this is written up.** At the raw analytics-query layer an object's own field *can* be used as a dimension without the cube declaring it (`assertDimensionFields` says so). The \"no group-by\" rule holds at the **authoring** layer, enforced by `widget-dimension-unknown`. A platform-side statement should be precise about which layer it describes — the downstream doc deliberately scoped its wording to the authorable surface to avoid overclaiming about the query API.\n\nRefs `objectstack-ai/hotcrm#1395`, `objectstack-ai/hotcrm#966`, PR `objectstack-ai/hotcrm#1640`."
+}

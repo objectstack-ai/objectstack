@@ -1,0 +1,36 @@
+{
+  "number": 1141,
+  "kind": "pull_request",
+  "title": "feat(auth): add auth config discovery endpoint for dynamic SSO UI rendering",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T12:04:17Z",
+  "updated_at": "2026-09-07T04:48:52Z",
+  "closed_at": "2026-04-14T12:12:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T12:12:06Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1141",
+  "body": "Frontend applications need to discover server-side auth configuration to dynamically render appropriate login buttons (email/password, Google, GitHub, etc.) without hardcoding provider lists.\n\n## Changes\n\n### Protocol Layer (`packages/spec/src/api/auth-endpoints.zod.ts`)\n- Added `AuthProviderInfoSchema` - public OAuth provider metadata (id, name, enabled)\n- Added `EmailPasswordConfigPublicSchema` - email/password auth settings\n- Added `AuthFeaturesConfigSchema` - feature flags (2FA, passkeys, magic link, organization)\n- Added `GetAuthConfigResponseSchema` - complete config discovery response\n- All sensitive fields (clientSecret, secret) excluded by design\n\n### Backend (`packages/plugins/plugin-auth/`)\n- Added `AuthManager.getPublicConfig()` - extracts safe config from internal state\n  - Filters disabled providers\n  - Maps provider IDs to friendly names (google → Google)\n  - Returns only non-sensitive configuration\n- Registered `GET /api/v1/auth/config` endpoint in `AuthPlugin`\n  - Returns standard JSON envelope format\n  - Includes error handling\n\n### Client SDK (`packages/client/src/index.ts`)\n- Added `client.auth.getConfig()` method\n- Exported config types: `GetAuthConfigResponse`, `AuthProviderInfo`, etc.\n\n### Tests\n- Comprehensive test coverage for `getPublicConfig()`\n- Validates sensitive data exclusion\n- Tests provider filtering and name mapping\n- Verifies default values\n\n## Usage Example\n\n```typescript\n// Frontend discovers available auth methods\nconst client = new ObjectStackClient({ baseUrl: window.location.origin });\nconst config = await client.auth.getConfig();\n\n// Dynamically render social login buttons\nconfig.socialProviders.forEach(provider => {\n  renderButton({\n    label: `Login with ${provider.name}`,\n    onClick: () => window.location.href = `/api/v1/auth/authorize/${provider.id}`\n  });\n});\n```\n\n## Response Format\n\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"emailPassword\": {\n      \"enabled\": true,\n      \"disableSignUp\": false,\n      \"requireEmailVerification\": false\n    },\n    \"socialProviders\": [\n      { \"id\": \"google\", \"name\": \"Google\", \"enabled\": true },\n      { \"id\": \"github\", \"name\": \"GitHub\", \"enabled\": true }\n    ],\n    \"features\": {\n      \"twoFactor\": true,\n      \"passkeys\": false,\n      \"magicLink\": false,\n      \"organization\": true\n    }\n  }\n}\n```"
+}

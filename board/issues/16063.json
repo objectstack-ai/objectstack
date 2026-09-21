@@ -1,0 +1,34 @@
+{
+  "number": 16063,
+  "kind": "issue",
+  "title": "`@objectstack/spec`'s browser dist carries authoring documentation prose (Zod `.describe()` strings): 17.3.0 is +292.2 KB gzip on every browser consumer — should the browser build carry it at all?",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T22:58:19Z",
+  "updated_at": "2026-09-06T15:02:37Z",
+  "closed_at": "2026-09-06T15:02:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16063",
+  "body": "Filed by the `domain:spec` @ objectui execution seat (session `session_01BAZFhALsQsGqxui8sNqM8s`) under the maintainer's ruling on objectui#7122 decision item 1 (live PM chat, 2026-09-05T22:4xZ; the item was tabled as \"B + A — a one-time, cause-recorded ceiling adjustment in objectui, with this upstream card filed alongside\"; verbatim reply 「其他同意」). Reader: the `domain:spec` @ objectstack seat. ⛔ Unlabelled — `domain:*`, type and grading are triage's.\n\n## What was measured (objectui PR #7685, head `f389bec90`, dev report objectui#7122 comment 5552389369, round note 5552408831)\n\nPer-package gzip of the installed ESM, `@objectstack/*` 17.2.0 → 17.3.0:\n\n| package | 17.2.0 | 17.3.0 | delta |\n|---|---|---|---|\n| **spec** | 1850.8 KB | 2143.0 KB | **+292.2 KB** |\n| lint | 281.9 | 337.2 | +55.3 |\n| core | 65.1 | 74.9 | +9.8 |\n| client | 44.3 | 53.7 | +9.4 |\n| sdui-parser | 4.4 | 7.1 | +2.7 |\n| formula | 20.5 | 22.1 | +1.6 |\n| types (new at 17.3.0) | — | 15.1 | +15.1 |\n\nDownstream effect on the objectui console after the duplicate spec copy was eliminated (family bump; markers unique to spec 17.2.0 fell from 92.3% to 1.0% presence in the chunk, 0 of 104 unexplained): `vendor-objectstack` chunk 926.1 → 1206.1 KB (+280.0 KB, which the spec's own +292.2 KB explains within 12 KB); eager closure 3186.1 → 3466.4 KB against a 3191.4 KB budget (**+274.7 KB over**). No chunk entered or left the closure, so lazy loading does not apply; the console's `check:eager-closure` gate self-reports sensitivity and freshness OK, so the number is real.\n\n**Mechanism, measured by the same probe that refuted duplication**: 17.3.0 lengthened the Zod `.describe()` doc strings across the schema surface, and those ship in the browser build. Examples from the diff of quoted literals: `\"Output schema\"` → `\"Output schema (JSON Schema)\"`; `\"Action functionality type\"` → `\"Action functionality type — the dispatch route. …\"`; `\"Max character length\"` → `\"Max character length (positive integer). Only authorable…\"`.\n\n## The question for the spec seat\n\nDoes `@objectstack/spec`'s **browser** build need to carry authoring documentation prose at runtime? The objectui console runs `@object-ui/core`'s structural `validateSchema` on the render path and zod at the designer / publish doors; which browser consumers read `.description` at runtime (error messages, designer help text, docs generation) has not been measured and is the first deliverable. Directions, none asserted:\n\n- **(a)** a browser entry or build condition that keeps the schema and drops the prose (a `describe`-stripping transform, tree-shakeable / `sideEffects`-safe), so every browser consumer gets the ~292 KB back;\n- **(b)** keep `.describe()` short and move long-form authoring text into a docs artifact that only authoring tools load;\n- **(c)** accept the growth as the price of the authoring-first contract and let consumers raise budgets (objectui does so once, cause-recorded, with a restore condition pointing here).\n\nPrecedent in the same class: #9771 (closed) — a Node Postgres DSN parser bundled into the console's eager vendor chunk through the spec's driver schemas. Related: objectstack#15843 (17.3.0 removed four public type exports in a `minor`).\n\n## Downstream state\n\nobjectui#7122's chain lands with a one-time ceiling adjustment of exactly the measured delta (+274.7 KB eager closure), cause-recorded in the PR with what the bytes buy and a restore condition naming this card. The adjustment is the manual-floor exception the maintainer ruled, not a precedent for further raises.\n\n## 四维(供分诊与 spec 席复核)\n\n- **实际业务需求**:客户每次打开控制台多下约 275 KB gzip 的作者文档文案,运行时不读它;而消费方需要 17.3.0 的契约修复,拉力两边都真。\n- **项目长远合理性**:正解在 spec 的构建形态,不在每个消费方各抬一次预算;消费端抬上限是记因过渡。\n- **防 AI 写代码犯错**:与元数据作者中性;但 describe 文案是作者工具的错误提示来源,剥离须先量谁在浏览器里读它,⛔ 不盲剥。\n- **创业阶段不扩散**:先量读者,再选 (a)/(b) 中最小的一条;⛔ 不为此建新的文档分发基建。\n\nRefs: objectui#7122 · objectui PR #7685 · #9771 · #15843."
+}

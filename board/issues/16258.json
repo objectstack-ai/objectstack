@@ -1,0 +1,34 @@
+{
+  "number": 16258,
+  "kind": "pull_request",
+  "title": "docs(ui): react-pages html-tier names are verbatim, not kebab-case (#16164)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T08:14:11Z",
+  "updated_at": "2026-09-06T09:31:55Z",
+  "closed_at": "2026-09-06T09:31:54Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-06T09:31:53Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16258",
+  "body": "Fixes #16164\n\n## What the paragraph said, and what was wrong\n\n`content/docs/ui/react-pages.mdx`'s html-tier spelling paragraph told authors that\nregistered block names are \"lowercase and kebab-case\". Four registered names carry\nan underscore after their namespace prefix, so that gloss was wrong for them and\nwould lead an author who read the *rule* (rather than the worked examples) to derive\na kebab-case respelling that is not registered.\n\n## Registry reading (objectui, read-only, this PR touches nothing there)\n\n`objectui` `origin/main` at read time: `15789d5655753c6cf4f0e01ea9fa63f184ff68c0`.\n\n```\ngit show origin/main:packages/core/src/registry/public-blocks.ts \\\n  | grep -oE \"^\\s*'[a-z][a-z_:-]*',\" | grep -oE \"'[a-z][a-z_:-]*'\" | sort -u\n```\n\n57 entries total, 28 carry a namespace prefix (`record:` / `page:` / `element:` /\n`action:`), 4 are snake_case after the colon:\n\n- `record:line_items`\n- `record:quick_actions`\n- `record:reference_rail`\n- `record:related_list`\n\nThese numbers match the card's own reading (at a slightly earlier objectui sha,\n`b8e3f8379`) exactly — 57 / 28 / 4, same four names, same four prefixes.\n\n## sdui-parser exact-match confirmation (this repo)\n\n- `packages/sdui-parser/src/index.ts:41` — `const allowedTags = new Set(Object.keys(manifest.components))`\n- `packages/sdui-parser/src/parse.ts:95` — `if (this.opts.allowedTags && !this.opts.allowedTags.has(tag))`\n\nNo `toLowerCase`/`replace`/normalisation touches the tag-matching path (the one\n`.replace(...)` in `parse.ts` collapses whitespace in text content, unrelated to tag\nnames). The comparison is an exact `Set.has`, so `<record:related-list>` (kebab-case)\nis rejected at save time exactly like a PascalCase borrow — confirming the doc's\n\"verbatim\" framing and the negative example now added.\n\n## The fix\n\nDropped the \"lowercase and kebab-case\" gloss, kept the verbatim rule standing on its\nown, added a second snake_case example (`record:line_items`) alongside the existing\n`record:related_list`, and added one sentence making the negative concrete: a\nre-spelled name that \"looks uniform\" is not registered — `<record:related-list>` is\nrejected at save time, only `<record:related_list>` exists. No other content changed.\n\n## Gates (pinned to `a955b752`)\n\nGate list derived via `node scripts/pm/dispatch-gates.mjs --commands` (no path\nargument — self-derived from the working-tree diff vs merge-base `0e16fc454` of\n`origin/main` and HEAD), 38 commands matched by path or whole-tree declaration:\n\n**33/38 green:**\n`check-ci-filter-parity`, `check-closing-keyword-parity` (+ `--self-test`),\n`check-comment-mask-corpus`, `check-doc-frontmatter` (+ `--self-test`),\n`check-doc-route-spelling --advisory` (+ `--self-test`), `check-docs-section-name`\n(+ `--self-test`), `check-section-landing-index` (+ `--self-test`),\n`check:empty-state`, `check:liveness`, `check:strictness-ledger`,\n`check:variant-docs`, `check:yaml-examples`, `check:corpus-claim-drift`,\n`check:cross-package-test-inputs`, `check:doc-anchors`, `check:doc-authoring`,\n`check:docs-audit-scope`, `check:docs-redirects`, `check:docs-single-h1`,\n`check:driver-memory-census`, `check:nul-bytes`, `check:published-readme-links`,\n`check:react-page-adapter-contract`, `check:refd-timer-probe`, `check:role-word`,\n`check:skill-identifier-liveness`, `check:vendor-version-stamps`,\n`check:watch-hint-literal` — all exit 0.\n\n**5/38 NOT MEASURED (PREREQUISITE NOT MET, not findings):**\n`check:doc-formula-expressions` and `check:doc-security-posture` (both print\n\"Nothing was measured... Fix: pnpm exec turbo run build --filter=@objectstack/formula\n--filter=@objectstack/lint\", exit 3), `check:docs` (spec docs check needs\n`gen:schema` first, exit 1 with an explicit \"generate it first\" message),\n`check:skill-examples` (needs `@objectstack/spec build` first, exit 1, explicit\nfalse-green warning if skipped), `check:docs-transcript-drift` (needs\n`@objectstack/lint` built — `packages/lint/dist/index.js` missing — explicit\n\"PREREQUISITE NOT MET\", exit 3). All five name the exact build needed rather than\nreporting a real check result. The container's shared heavy-verify lock\n(`scripts/pm/os-verify-lock.sh`) had a holder plus a queued waiter building the\nsame package set (`spec`+`lint`+`client-react`) when this PR was opened; per this\nlane's resource discipline, the scope was collapsed here rather than waited on\nindefinitely, and these five are reported honestly as NOT MEASURED.\n\n`skip-changeset` label applied (docs-only change under `content/docs/**`).\n\n## Open questions\n\nNone — no fork in this fix; the card's triage ruled `pm:queue` with no decision box.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8)_"
+}

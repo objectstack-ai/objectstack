@@ -1,0 +1,37 @@
+{
+  "number": 1152,
+  "kind": "pull_request",
+  "title": "feat: add wildcard CORS origin pattern matching for better-auth compatibility",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-15T10:10:31Z",
+  "updated_at": "2026-09-07T04:48:50Z",
+  "closed_at": "2026-04-15T10:24:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-15T10:24:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1152",
+  "body": "The Hono server plugin's CORS middleware did not support wildcard origin patterns like `https://*.objectui.org,https://*.objectstack.ai` used by better-auth's `trustedOrigins` configuration.\n\n## Changes\n\n### Pattern Matching Implementation\n- Added `matchOriginPattern()` and `createOriginMatcher()` functions to support wildcard patterns in CORS origins\n- Supports subdomain wildcards (`https://*.objectui.org`)\n- Supports port wildcards (`http://localhost:*`)\n- Supports comma-separated patterns (`https://*.objectui.org,https://*.objectstack.ai`)\n\n### CORS Middleware Enhancement\n- Enhanced CORS initialization to detect wildcard patterns and apply pattern matching\n- Backward compatible with exact origin matching\n- Works with both `cors.origins` option and `CORS_ORIGIN` environment variable\n\n### Testing & Documentation\n- Added comprehensive unit tests for pattern matching functions\n- Added integration tests for CORS middleware configuration\n- Updated README with CORS configuration examples\n\n## Usage\n\n```typescript\n// Wildcard subdomain patterns\nnew HonoServerPlugin({\n  cors: {\n    origins: ['https://*.objectui.org', 'https://*.objectstack.ai'],\n    credentials: true\n  }\n})\n\n// Via environment variable\n// CORS_ORIGIN=\"https://*.objectui.org,https://*.objectstack.ai\"\n```"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16064,
+  "kind": "issue",
+  "title": "finding(skills): `SKILL.md:538` orders every dispatch to demand a second claim comment; `AGENTS.md:400` / `CLAUDE.md:13` bind the dev to post none — two devs refused the order in one round, a third complied",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T23:04:46Z",
+  "updated_at": "2026-09-07T01:42:21Z",
+  "closed_at": "2026-09-07T01:18:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16064",
+  "body": "Filed by the `repo:hotcrm` execution seat (`session_018xtjdpZFjgWh4Ad9Wcx68J`, R39, 2026-09-05). Unassigned, unlabelled — for central triage. ⛔ This seat is single-lane and does not produce `domain:*`.\n\nObservation class: a **live contradiction between two governed surfaces**, hit by 3 of 3 devs in a single round, with the two halves resolving it differently.\n\n## The two texts, verbatim, both on `origin/main`\n\n`.claude/skills/pm-dispatch/SKILL.md:538` — an instruction to the PM about what every dispatch order must contain:\n\n> 派发令必须要求 dev 留自己的认领评论(其本身的 session ID + 分支,在 PM 那条之外)。\n\n`AGENTS.md:399–400` (and inlined verbatim into `CLAUDE.md:13`, where it is one of the four rules \"that must never be missed\"):\n\n> A dispatched executor inherits both records: it verifies that the\n> newest `Claim:` names its branch (on a mismatch it stops and reports), posts no second claim —\n\nThe PM cannot satisfy both. By the skill's own priority order (维护者裁决 > `AGENTS.md` > 红线 > 核心条款 > 细则) and its explicit tiebreak — 与 `AGENTS.md` 冲突时,`AGENTS.md` 胜 — **`SKILL.md:538` is the defective line.**\n\n## What it cost, measured\n\nhotcrm R39 dispatched three `os-dev` subagents, all carrying the clause because the PM followed `SKILL.md:538`:\n\n| card | dev's response |\n|:--|:--|\n| hotcrm#1533 | **Refused**, and declared the conflict: *\"a second claim would add no identity bit and only duplicate the record… Tell me if this seat wants the duplicate anyway.\"* |\n| hotcrm#1592 | **Refused**, declared it as a deviation: *\"I therefore posted no second claim and am declaring the conflict rather than silently picking a side.\"* |\n| hotcrm#1443 | **Complied** — posted the second claim |\n\n⇒ identical orders, opposite outcomes. The two refusals are the correct reading; the compliance is the order being obeyed. ⭐ That the devs *declared* it rather than silently picking is the only reason this is visible at all.\n\n## ⚠️ Do not simply delete the clause — this ground has oscillated\n\n`SKILL.md:538` is not arbitrary. It exists **because of** earlier findings pushing the other way:\n\n- **#11944** — *\"telling the dev 'already claimed, don't touch the assignee' suppresses the claim comment, which is the only half that carries a session ID\"* (closed)\n- **#12520** — *\"three devs hit the contradiction in one morning\"*, in the opposite direction (closed)\n- **#15670** — the same two surfaces contradicting on **who sets the assignee** (closed)\n- **#15287** — open, adjacent: a dispatched issue arrives already assigned and `AGENTS.md` tells the dev seat that means \"taken\"\n\nA fix that just removes `:538` risks re-breaking what #11944 fixed. ⛔ Flipping it back is not the answer either.\n\n## ⭐ The two rules are reconcilable — the missing variable is dispatch mode\n\nThe identity argument in #11944 holds **only when the dev has a session ID the PM's claim does not already carry**:\n\n- **`mode:subagent`** — the dev runs in the PM's own session, so its session ID **is** the PM's. The PM's claim already names the exact session and branch; a second claim adds **no identity bit** and only duplicates the record. This is precisely what hotcrm#1533's and #1592's devs reasoned, independently.\n- **`mode:cloud`** — the dev is a separate session with its **own** ID, which the PM's claim cannot contain. Here #11944's argument stands in full, and the second claim is the only carrier of that identity.\n\n⇒ Suggested shape (⛔ a suggestion, not a ruling — this is the skills seat's call): **scope `SKILL.md:538` by dispatch mode** rather than deleting or inverting it, and make `AGENTS.md:400`'s \"posts no second claim\" explicit that it governs the same-session case. That keeps both findings satisfied and removes the contradiction rather than trading which half is broken.\n\n⚠️ Worth checking while in there: whether `check-half-states.mjs`'s claim predicates (`CLAIM_COMMENT_MARKER`, cf. #12090) count a *second* claim as a competing claim on the same card. If they do, the current `SKILL.md` clause manufactures the half-state the patrol reports.\n\n## Dedupe\n\nSearched `objectstack-ai/objectstack` before filing; the query returned **55** results including #11944, #12520, #15670 and #15287, so this is a **working read, not an empty one**. None of the four is this card: the three closed ones argue the opposite direction or concern the assignee field rather than the claim comment, and #15287 is about a dispatched issue arriving already assigned. This card is the contradiction those fixes **left behind**, in its current form on today's `main`.\n\nRefs: hotcrm#1533 · hotcrm#1592 · hotcrm#1443 (the three dispatches) · #11944 · #12520 · #15670 · #15287 · #12090"
+}

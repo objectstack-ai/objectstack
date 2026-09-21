@@ -1,0 +1,34 @@
+{
+  "number": 16330,
+  "kind": "issue",
+  "title": "scaffold: `create-objectstack` creates `.github/` but ships no workflow, so every scaffolded app starts with zero CI — the gates exist as npm scripts nothing ever runs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T14:34:50Z",
+  "updated_at": "2026-09-06T19:46:17Z",
+  "closed_at": "2026-09-06T17:21:02Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16330",
+  "body": "`domain:*` / type / priority are triage's.\n\nFound while building a real app on the published scaffold (`objectstack-ai/ats`, an open-source recruiting marketplace on protocol ^17) — not from a sweep. Two silent-at-authoring defects were caught there **only** because a human remembered to run the gates by hand; nothing in the project would have caught either.\n\n## Measured (`origin/main` `3e270d4e`)\n\n- `find packages/create-objectstack/src/templates -path '*.github*'` → **no match**. The blank template contains no `.github` directory and no workflow of any kind.\n- `packages/create-objectstack/src/index.ts:287` — the scaffolder *does* create `.github/`, at runtime, for exactly one file:\n  ```ts\n  const copilotPath = path.join(targetDir, '.github', 'copilot-instructions.md');\n  fs.mkdirSync(path.dirname(copilotPath), { recursive: true });\n  ```\n  `packages/create-objectstack/src/created-summary.ts:17` records the same count: `.github/  1`.\n- `packages/create-objectstack/src/templates/blank/package.json` declares `validate`, `typecheck` (and `build`, `dev`, `start`). Every one of them is a script a human has to remember.\n- For contrast, this repository runs **19 workflows** on itself (`.github/workflows/`: `ci.yml`, `codeql.yml`, `docs-drift-check.yml`, `governed-surface-guard.yml`, …). The framework holds itself to machine-enforced gates and hands its users none.\n\nSo the directory is there and the workflow is not, which reads as \"CI was considered and dropped\" rather than \"CI was out of scope\".\n\n## Why this one matters more than a usual scaffold nicety\n\nThe product claim is that metadata mistakes **fail silently at runtime** and the gates are the only place they surface early — `templates/AGENTS.md` says so in its own words (\"Metadata mistakes fail **silently at runtime**, not at edit time… **Never report a metadata change as done until `npm run validate` passes**\"). A scaffold that ships the gates as unwired npm scripts makes that instruction advisory.\n\nAnd the documented workflow is **AI authoring**. The agent is precisely the party that most needs an unskippable gate, and the least able to be trusted to remember an optional one.\n\nEvidence from the app built on this scaffold, both caught by `pnpm validate` / `pnpm lint` and invisible in review:\n\n1. `security-owd-*` — an `allowRead` grant on a `private` object with no `readScope` is owner-only. A recruiter would not have seen an application a colleague created; the shared pipeline would silently have been a set of private inboxes.\n2. `hook-body/not-lowerable` — handlers sharing a module-level helper stop lowering to metadata-only bodies, so the app ships a bundled closure instead of pure metadata. A change of **deployment shape**, from a refactor that looks like tidying.\n\nNeither is visible by reading the diff. On that repo `get_check_runs` returned `total_count: 0` for its first PR, and every gate result was a human pasting a terminal tail into the PR body.\n\n## The ask\n\nAdd `packages/create-objectstack/src/templates/blank/.github/workflows/ci.yml`, running on `push` and `pull_request`:\n\n- `actions/checkout`, `pnpm/action-setup`, `actions/setup-node` (Node 22 per the template's engines, pnpm cache)\n- `pnpm install --frozen-lockfile`\n- `pnpm validate`\n- `pnpm lint`\n- `pnpm typecheck`\n\nPin action versions the way this repo pins its own. Keep it one job and one file — a starting point, not a CI framework. If the template gains `pnpm test` from #15952, this workflow is where that step lands; the two cards touch the same template, so whichever lands second rebases.\n\nThe file must survive the template copy: confirm the packaging step does not drop dot-directories (a `.github` inside `src/templates/blank/` is the first one the template has ever had — `_gitignore` is renamed precisely because dotfiles were a problem, so **verify, do not assume**).\n\n## Acceptance\n\n- A freshly scaffolded app contains `.github/workflows/ci.yml`, and that workflow's steps pass against the scaffolded project as generated.\n- `create-objectstack`'s own scaffold test asserts the file exists and parses as YAML.\n- Changeset: `create-objectstack` **minor** (new template file).\n\n## Not in this card\n\nThe three-copy skills install (separate card). Any workflow for release, publish or deploy. Any change to this repository's own `.github/workflows/`."
+}

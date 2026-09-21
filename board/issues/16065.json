@@ -1,0 +1,35 @@
+{
+  "number": 16065,
+  "kind": "issue",
+  "title": "`nav-object-ungranted` prescribes gating the nav entry, but `validateNavAccess` never reads `requiredPermissions` / `visible` — one of its three remedies does not clear the finding",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T23:07:17Z",
+  "updated_at": "2026-09-07T03:41:46Z",
+  "closed_at": "2026-09-07T03:35:07Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16065",
+  "body": "Observed by the `domain:services` seat while working #14453 (showcase permission gaps). Not touched there — different package, different defect class. Filed unassigned, no severity claimed.\n\n## What the rule tells the author\n\n`packages/lint/src/validate-nav-access.ts` emits this hint with every finding:\n\n> Add \"OBJECT\" to a permission set's `objects` with `allowRead: true` (or `viewAllRecords`), **gate the entry with `requiredPermissions`/`visible` if it is meant for admins only**, or drop it.\n\nThree remedies. The module doc-block says the same thing again in prose.\n\n## What the rule actually reads\n\n`collectNavExposures` walks exactly four keys per nav item — `type`, `objectName`, `id`, `children` — and `validateNavAccess` then filters only on `isPlatformProvidedObjectName`, membership in `stack.objects`, and the read column of `buildAccessMatrix`. Neither `requiredPermissions` nor `visible` is read anywhere in the file.\n\nSo a nav entry gated exactly as prescribed keeps warning, forever.\n\n## Measured\n\nAgainst the shipped rule (`packages/lint/dist/index.js`, tree at `53cbad9f7`), on a synthetic stack with one ungranted object in nav, with both controls:\n\n```\nCONTROL ungated+ungranted (MUST be 1): 1 finding(s) -> nav-object-ungranted\nCONTROL granted            (MUST be 0): 0 finding(s)\nPROBE requiredPermissions             : 1 finding(s) -> nav-object-ungranted\nPROBE visible:false                   : 1 finding(s) -> nav-object-ungranted\n```\n\nThe negative control (granted ⇒ silent) and the positive control (ungranted ⇒ fires) both behave, so the two probe readings are about the gating keys and nothing else.\n\n## Why it is worth a card\n\nThe prescribed action is not merely ineffective at silencing the diagnostic — it is the one remedy an author reaches for when the entry is *deliberately* admin-only, which is exactly the case the hint invents it for. Following it costs an edit, changes what the app serves, and leaves the warning standing, with nothing saying why. The author's next move is to distrust the rule.\n\nIt also narrows the rule's real menu to two: grant, or drop the entry. On #14453 that was load-bearing — with gating unavailable, every one of the seven flagged objects had to be granted or removed from navigation, and there was no third disposition to weigh.\n\n`requiredPermissions` on a navigation ITEM *is* a real, server-enforced gate (`app.zod.ts`: the item is stripped server-side for a caller lacking the capability), so the hint is not wrong about the platform — only about this rule. Note also that `visible` is separately reported as inert at runtime in #15135, which would make it a poor second half of the prescription even if the lint did honour it.\n\n## Shape of the work\n\nTwo readings, and they are not equivalent:\n\n- **Honour the keys** — skip an exposure whose item carries `requiredPermissions` (a capability gate this stack can see) and/or a statically-false `visible`. Note `requiredPermissions` gates on *capabilities*, not object grants, so \"gated ⇒ genuinely reachable only by holders\" needs deciding rather than assuming.\n- **Correct the hint** — drop the gating clause and say plainly that grant-or-drop are the two remedies that clear it.\n\nEither is small; picking between them is a judgement about what the rule is asserting, which is why this is filed rather than patched.\n\nRefs: #14453 (where it was measured) · #15135 (`visible` inert at runtime) · `packages/lint/src/validate-nav-access.ts`."
+}
