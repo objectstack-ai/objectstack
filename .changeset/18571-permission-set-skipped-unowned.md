@@ -19,6 +19,8 @@ permission set (after)     skippedUnowned            1                  1
 
 **Both doors onto the branch increment it.** The boot catalog loop aggregates it alongside the five counters it already forwarded; the ADR-0086 P2 publish materializer passes no collector and returns its own outcome, so a fix wired only into the aggregation would have left that caller as silent as before.
 
-**The accounting closes.** `seeded + updated + unchanged + skippedEnvAuthored + skippedForeign + skippedUnowned + unreadable` is now the number of named declarations a pass read — pinned by a conservation test modelled on the capability axis'. Before this counter that sum was short by every unowned declaration.
+**The accounting closes.** `seeded + updated + unchanged + skippedEnvAuthored + skippedForeign + skippedUnowned + unreadable` is now the number of named declarations a pass read — pinned by a conservation test modelled on the capability axis'. Before this counter that sum was short by every unowned declaration. (Pre-existing caveat, unchanged and outside this change: a write the engine rejects increments no counter; it is reported through `SeedWriteRefusals`.)
 
-New published surface on `@objectstack/plugin-security`: the `skippedUnowned` member of the barrel-exported `PermissionSeedOutcome`. Reading an outcome is unaffected; the repo-wide sweep found no construction site for this type outside the package, so no consumer owes the new field.
+New published surface on `@objectstack/plugin-security`: the `skippedUnowned` member of the barrel-exported `PermissionSeedOutcome`. Reading an outcome is unaffected — the member only adds a number to read.
+
+The sweep for construction sites covered this repository, the pinned `objectui` checkout and the downstream app repositories available to it, and found none outside the package. That is what was measured, and it cannot speak for a consumer outside those trees. So: if you construct a `PermissionSeedOutcome` yourself — a test double standing in for the seeder is the shape that does — add `skippedUnowned: 0`. Nothing else changes.

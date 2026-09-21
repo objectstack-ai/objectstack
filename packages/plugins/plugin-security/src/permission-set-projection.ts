@@ -256,9 +256,12 @@ export interface PermissionSeedOutcome {
    * Every door that returns this outcome initializes it, so a caller may add
    * it into the accounting unconditionally — `seeded + updated + unchanged +
    * skippedEnvAuthored + skippedForeign + skippedUnowned + unreadable` is the
-   * number of named declarations this pass read. Before this counter existed
-   * that sum was short by every unowned declaration, and the outcome said
-   * nothing at all about them.
+   * number of named declarations this pass read. (Pre-existing caveat,
+   * unchanged: a write the engine REJECTS increments no counter — `tryInsert`
+   * answers `null` and `tryUpdate` `false`, and the refusal travels on
+   * `SeedWriteRefusals` instead.) Before this counter existed that sum was
+   * short by every unowned declaration, and the outcome said nothing at all
+   * about them.
    *
    * Named for its `CapabilitySeedOutcome.skippedUnowned` sibling on the
    * capability axis, which counts the same refusal at the same ADR-0086 D3
