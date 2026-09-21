@@ -2194,7 +2194,7 @@ function claimRepeatSentences(groups) {
 // cross-login `Release:` REFUSED as a handover (a field missing, the id or the
 // session id not named) is listed in the row's own sentence, so the seat reads
 // what to complete instead of a silent red. The remedy sentence is SKILL.md's
-// handover sentence, verbatim, and the self-test pins the two texts as one.
+// handover sentence, verbatim (`CLAIM_HANDOVER_SENTENCE_LINES`).
 // ---------------------------------------------------------------------------
 
 /**
@@ -2231,8 +2231,10 @@ export const CLAIM_HANDOVER_RULE =
 /**
  * SKILL.md's handover sentence, line for line and byte for byte (the 认领
  * section's five handover bullets, without the bullet). The remedy below PRINTS
- * it and the self-test pins that every line is a line of SKILL.md, so the
- * reader and the protocol text cannot say two different things.
+ * it; the byte identity with SKILL.md is the twin rule's (「一条规则在本文与核心
+ * 条款一处改动,另一处同 PR 同改」), checked at review — a governed read of
+ * SKILL.md from this self-test would make this gate a derived family of that
+ * file, which is a gate-derivation change and not this reader's to make.
  */
 export const CLAIM_HANDOVER_SENTENCE_LINES = Object.freeze([
   '认领人不可达(token 耗尽/会话结束/身份退役)⇒ 接管:一条评论四件齐,⛔ 不判死活。',
@@ -9525,7 +9527,7 @@ export async function selfTest() {
   t('⛔ the ONE red kept: a cross-login `Claim:` with NO `Release:` at all for the earlier claim is still C9', claimHandovers([X62_HOLDER_S, X62(7200000032, X62_AFTER2, 'seat-taker', ['Claim: jump', 'Branch: `claude/issue-4343-first`', 'Clause-②: no'])])?.judged === true);
   t('⛔ a handover that names only ONE of two live claims leaves the other standing — every live claim on the thread is named, or the row stays', claimHandovers([X62_HOLDER_S, X62_THIRD_S, X62_HO])?.judged === true && says(X62_ROW([X62_HOLDER_S, X62_THIRD_S, X62_HO]), '7200000033'));
   t('…the remedy is SKILL.md\'s handover sentence, verbatim — the four items, the 出处三件 source line, 让先到者 for a yield', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), CLAIM_HANDOVER_SENTENCE_LINES.join(' ')) && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), HANDOVER_PROVENANCE_SOURCE) && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), '让先到者'));
-  t('⭐ …and those lines ARE SKILL.md\'s, byte for byte, one bullet each, beside the 出处三件 line — the two texts are ONE sentence', (() => { const skill = readFileSync(new URL('../../.claude/skills/pm-dispatch/SKILL.md', import.meta.url), 'utf8').split('\n'); return CLAIM_HANDOVER_SENTENCE_LINES.every((l) => skill.includes(`- ${l}`)) && skill.includes(`- ${HANDOVER_PROVENANCE_SOURCE}`); })());
+  t('…and each of those lines is one SKILL.md bullet by shape — within the 120-byte line budget, no bullet, no issue id — so the twin can be pasted back byte for byte (the byte identity itself is the twin rule\'s, checked at review: a governed read from this self-test would make this gate a derived family of SKILL.md)', CLAIM_HANDOVER_SENTENCE_LINES.every((l) => Buffer.byteLength(`- ${l}`, 'utf8') <= 120 && !/^[-*] /.test(l) && !/#[0-9]{3,}/.test(l)) && Buffer.byteLength(`- ${HANDOVER_PROVENANCE_SOURCE}`, 'utf8') <= 120);
 
   // (e) same-author and mixed threads — C8 and C9 are disjoint states.
   const X62_A2 = X62_CLAIM(7200000020, X62_AFTER2, 'seat-holder', 'claude/issue-4343-third');
