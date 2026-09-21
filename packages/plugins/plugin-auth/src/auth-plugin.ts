@@ -35,6 +35,7 @@ import {
   AuthManager,
   resolveOidcProviderEnabled,
   readMcpServerEnabledEnv,
+  isOAuthEligibleBaseUrl,
   // [#16384] The one place `'/api/v1/auth'` is written — see its docblock in
   // auth-manager.ts. This file no longer carries an independent copy.
   DEFAULT_AUTH_BASE_PATH,
@@ -3126,26 +3127,41 @@ export class AuthPlugin implements Plugin {
     }
 
     // ── Plain-HTTP OAuth notice (maintainer ruling 2026-09-21) ────────
-    // The transport rule (`isOAuthEligibleBaseUrl`) accepts plain HTTP when
-    // the deployment's own host is loopback or a private / link-local
-    // address, so an unencrypted authorization server is a SUPPORTED posture
-    // here (intranet installs, a dev bind on a LAN address) rather than an
-    // impossible one. It is never a SILENT posture: one loud line, emitted
-    // once at mount, whenever OAuth is served over plain HTTP — and none at
-    // all under TLS. The ruled wording is kept verbatim as the first clause;
-    // ⛔ no configuration key or environment variable gates either the rule
-    // or this notice.
+    //
+    // The ruling's wording for this line, preserved verbatim as the quotation
+    // it is — the line itself is an ordinary English repository artefact:
+    //
+    //     「OAuth 未加密:仅限可信内网」
+    //
+    // `isOAuthEligibleBaseUrl` accepts plain HTTP when the deployment's own
+    // host is loopback or a private / link-local address, so an unencrypted
+    // authorization server is a SUPPORTED posture here (intranet installs, a
+    // dev bind on a LAN address) rather than an impossible one. It is never a
+    // SILENT posture: one loud line, emitted once at mount — and none under
+    // TLS. ⛔ No configuration key or environment variable gates either the
+    // rule or this notice.
+    //
+    // ⚠️ BOTH halves of the condition are load-bearing. Plain HTTP alone is
+    // not enough: on a PUBLIC plain-HTTP deployment the transport rule
+    // REFUSED this origin and the OAuth track is dark, so a line saying the
+    // transport is accepted would be a false statement about that deployment
+    // — an operator reading it would conclude a public plaintext AS is
+    // something this rule permits. That deployment's line is the `OAuth track
+    // is NOT live` warning further down: a different sentence, the opposite
+    // meaning.
+    //
     // Read off the PUBLISHED issuer — the authorization-server identity these
     // documents are about — so the line names the exact URL a client is sent
     // to rather than a value only this method can see.
     const authIssuer = this.authManager!.getAuthIssuer();
-    if (/^http:\/\//i.test(authIssuer)) {
+    if (/^http:\/\//i.test(authIssuer) && isOAuthEligibleBaseUrl(authIssuer)) {
       ctx.logger.warn(
-        'OAuth 未加密:仅限可信内网 — this deployment serves its OAuth authorization server over plain ' +
-          `HTTP (${authIssuer}). Authorization codes, access tokens and bearer headers cross the ` +
-          'network in the clear, so anything that can observe it can replay them. This is accepted only ' +
-          'because the host is loopback or a private / link-local address; put TLS in front of any ' +
-          'deployment reachable from a public network, where the same origin is refused outright.',
+        `OAuth is served UNENCRYPTED — trusted intranet only: this deployment's authorization server ` +
+          `is published over plain HTTP (${authIssuer}). Authorization codes, access tokens and bearer ` +
+          'headers cross the network in the clear, so anything that can observe it can replay them. The ' +
+          'transport rule accepts this origin only because the host is loopback or a private / ' +
+          'link-local address; put TLS in front of any deployment reachable from a public network, ' +
+          'where the same origin is refused outright.',
       );
     }
 

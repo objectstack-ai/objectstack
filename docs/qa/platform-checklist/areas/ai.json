@@ -693,7 +693,7 @@
         "a non-IP intranet hostname (crm.corp, host.docker.internal) — a name, not an address: refused over plain HTTP by the pinned reading"
       ],
       "steps": [
-        "boot (a) on a private address over plain http; capture the boot log and record whether the unencrypted-transport warning appears, how many times, and whether it names the issuer URL",
+        "boot (a) on a private address over plain http; capture the boot log and record whether the unencrypted-transport warning (`OAuth is served UNENCRYPTED`) appears, how many times, and whether it names the issuer URL",
         "on boot (a), GET /.well-known/oauth-protected-resource and its path-inserted variant /.well-known/oauth-protected-resource/api/v1/mcp; record status and body",
         "on boot (a), POST /api/v1/mcp with NO credentials; record the 401 and its WWW-Authenticate header, including whether a resource_metadata pointer is present",
         "if a second machine is available, drive a real MCP client from it against boot (a) over http:// and record whether the client completes the OAuth flow, refuses the scheme up front, or fails elsewhere — RECORD WHICH, because a client-side scheme refusal changes what this compatibility is worth",
@@ -715,10 +715,10 @@
           "evidence": "the two 404s and the boot-log line"
         },
         {
-          "clause": "the unencrypted-transport warning is emitted exactly once, at mount, on every plain-HTTP boot that serves OAuth (a and c), and NOT on the https re-boot; it carries the ruled wording 「OAuth 未加密:仅限可信内网」 and names the issuer URL",
+          "clause": "the unencrypted-transport warning is emitted exactly once, at mount, on every plain-HTTP boot whose origin the transport rule ACCEPTS (a and c); NOT on the https re-boot, and NOT on the public plain-HTTP boot (b), whose OAuth track is dark — there the line would assert a posture that deployment does not have. It names the issuer URL",
           "oracle": "log",
-          "verify": "grep the captured boot logs for the ruled wording: exactly 1 occurrence on (a), exactly 1 on (c), 0 on the https re-boot; the line names <origin>/api/v1/auth",
-          "evidence": "the matching log lines with their counts, and the empty https result"
+          "verify": "grep the captured boot logs for the notice head `OAuth is served UNENCRYPTED` — the log line is English, and the ruling own wording is preserved verbatim in the comment above the emit site in auth-plugin.ts, which a boot log does not carry: exactly 1 occurrence on (a), exactly 1 on (c), 0 on (b), 0 on the https re-boot; the line names the issuer, the origin followed by /api/v1/auth",
+          "evidence": "the matching log lines with their counts, and the two empty results (the public boot and the https re-boot)"
         },
         {
           "clause": "loopback (c) is unchanged — the OAuth track is live exactly as it was before the rule widened, with the same advertised metadata",
@@ -736,7 +736,7 @@
       "negative": [
         "reading a 200 on boot (b) as 'the feature works' is the inverted verdict this item exists to prevent — the public arm answering anything but a refusal is a FAIL, not a pass with a wider surface",
         "scoring boot (a) from a localhost request on the server itself: the request would be loopback, which was already eligible before this rule, so the private-address arm was never exercised — drive it from the private address, or at minimum assert the ADVERTISED origin is the private one",
-        "reading the mount-time 'OAuth track is NOT live' line as the unencrypted-transport warning (or vice versa): they are different sentences with opposite meanings, and a run that conflates them scores boot (b) as if it had served OAuth",
+        "reading the mount-time 'OAuth track is NOT live' line as the unencrypted-transport warning (or vice versa): they are different sentences with opposite meanings, and a run that conflates them scores boot (b) as if it had served OAuth. Boot (b) carries the first and never the second",
         "treating an intranet HOSTNAME boot (http://crm.corp) as the private-address case — it is a name, not an address, and the pinned reading refuses it; a run that uses one has tested the hostname reading, not this clause"
       ],
       "traps": [

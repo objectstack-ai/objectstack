@@ -409,19 +409,6 @@ export function assertScimAdminCoherence(pluginConfig?: Partial<AuthPluginConfig
 }
 
 /**
- * Four dotted decimal octets, nothing else. Deliberately anchored at both
- * ends: `10.0.0.5.evil.com` is a HOSTNAME that merely starts with a private
- * IPv4 string, and a prefix match on it would hand plain-HTTP OAuth to a name
- * its owner points wherever they like.
- */
-function parseIpv4Literal(host: string): number[] | null {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!m) return null;
-  const octets = m.slice(1, 5).map(Number);
-  return octets.every((n) => n <= 255) ? octets : null;
-}
-
-/**
  * Expand an IPv6 literal (already unbracketed) to its eight 16-bit groups, or
  * `null` when it is not one. Handles `::` elision and a trailing embedded
  * IPv4 (`::ffff:10.0.0.5`) so the classifier below reads real bits rather
@@ -440,9 +427,9 @@ function parseIpv6Literal(host: string): number[] | null {
       if (piece.includes('.')) {
         // An embedded IPv4 tail is legal only in the last position.
         if (i !== pieces.length - 1) return null;
-        const v4 = parseIpv4Literal(piece);
-        if (!v4) return null;
-        out.push((v4[0]! << 8) | v4[1]!, (v4[2]! << 8) | v4[3]!);
+        const v4 = ipv4ToInt(piece);
+        if (v4 === null) return null;
+        out.push((v4 >>> 16) & 0xffff, v4 & 0xffff);
         continue;
       }
       if (!/^[0-9a-f]{1,4}$/.test(piece)) return null;
@@ -474,21 +461,28 @@ function parseIpv6Literal(host: string): number[] | null {
  * and is NOT inside `fc00::/7`, so it is refused too; an IPv4-mapped IPv6
  * form (`::ffff:10.0.0.5`, which WHATWG URL canonicalises to `::ffff:a00:5`)
  * is refused rather than unwrapped — the conservative side of a rule whose
- * failure mode is opening plaintext OAuth to the public internet.
+ * failure mode is opening plaintext OAuth to the public internet. The whole
+ * of `127.0.0.0/8` is loopback (RFC 1122 §3.2.1.3), not the single literal
+ * `127.0.0.1`, and `http://127.0.0.2` pins that.
+ *
+ * The IPv4 half is spelled with this file's own ADR-0069 D5 helpers
+ * ({@link ipMatchesRange}, `ipv4ToInt`) rather than a second dotted-quad
+ * regex: one parser for IPv4 literals in this file, and the ranges read as
+ * the CIDR blocks the ruling names.
  */
+const PLAIN_HTTP_ELIGIBLE_IPV4_CIDRS = [
+  '127.0.0.0/8', // loopback (RFC 1122)
+  '10.0.0.0/8', // RFC 1918
+  '172.16.0.0/12', // RFC 1918
+  '192.168.0.0/16', // RFC 1918
+  '169.254.0.0/16', // RFC 3927 link-local
+] as const;
+
 function isPrivateOrLoopbackHostLiteral(host: string): boolean {
   const bare = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
 
-  const v4 = parseIpv4Literal(bare);
-  if (v4) {
-    const a = v4[0]!;
-    const b = v4[1]!;
-    if (a === 127) return true; // loopback
-    if (a === 10) return true; // RFC 1918
-    if (a === 172 && b >= 16 && b <= 31) return true; // RFC 1918
-    if (a === 192 && b === 168) return true; // RFC 1918
-    if (a === 169 && b === 254) return true; // RFC 3927 link-local
-    return false;
+  if (ipv4ToInt(bare) !== null) {
+    return PLAIN_HTTP_ELIGIBLE_IPV4_CIDRS.some((cidr) => ipMatchesRange(bare, cidr));
   }
 
   const v6 = parseIpv6Literal(bare);

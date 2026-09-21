@@ -105,6 +105,15 @@ describe('isOAuthEligibleBaseUrl (OAuth 2.1 transport rule — TLS public, plain
     ['https://203.0.113.5', true],
     ['http://localhost:3000', true],
     ['http://127.0.0.1:8080', true],
+    // Loopback is 127.0.0.0/8 (RFC 1122 §3.2.1.3), not the single literal
+    // `127.0.0.1` the rule used to compare against. Without this leg nothing
+    // in the tree holds the whole block, and refusing 127.0.0.2 beside an
+    // eligible 10.0.0.5 would be incoherent.
+    ['http://127.0.0.2', true],
+    ['http://127.255.255.254:9000', true],
+    // The adjacent blocks on either side are ordinary public space.
+    ['http://126.0.0.1', false],
+    ['http://128.0.0.1', false],
     ['http://[::1]:3000', true],
     ['http://myapp.localhost:3000', true],
     ['ftp://localhost', false],

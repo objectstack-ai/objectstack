@@ -7,8 +7,15 @@
  * `isOAuthEligibleBaseUrl` decides WHETHER an unencrypted deployment gets the
  * OAuth track; this notice is what keeps that posture from being a silent
  * one. The ruling fixes three things about it and all three are pinned here:
- * it fires whenever OAuth is served over plain HTTP, it fires exactly ONCE
- * per mount, and it does not fire under TLS.
+ * it fires whenever OAuth is actually served over plain HTTP, it fires
+ * exactly ONCE per mount, and it does not fire under TLS.
+ *
+ * ⚠️ The PUBLIC plain-HTTP face is the one that costs something to get wrong,
+ * and it is the face a notice keyed on the SCHEME ALONE gets wrong: there the
+ * transport rule REFUSED the origin and the OAuth track is dark, so a line
+ * announcing an accepted unencrypted transport asserts a posture that
+ * deployment does not have. Silence there is the correct reading, and the
+ * `OAuth track is NOT live` warning is that deployment's own line.
  *
  * ⚠️ The subject is `registerOidcDiscoveryRoutes` driven against a STUB
  * manager and a stub Hono app — it can answer "does the mount emit this
@@ -30,8 +37,14 @@ vi.mock('@better-auth/oauth-provider', () => ({
 
 import { AuthPlugin } from './auth-plugin';
 
-/** The ruled wording, verbatim — ⛔ never paraphrase this constant. */
-const RULED_WORDING = 'OAuth 未加密:仅限可信内网';
+/**
+ * The observable head of the notice. The ruling's own wording
+ * (「OAuth 未加密:仅限可信内网」) is preserved verbatim in the code comment
+ * above the emit site, as the quotation it is; the LOG LINE is an ordinary
+ * English repository artefact, and this is the token anything scoring a boot
+ * log greps for — the platform-checklist item included.
+ */
+const NOTICE_MARKER = 'OAuth is served UNENCRYPTED';
 
 const savedMcpEnv = process.env.OS_MCP_SERVER_ENABLED;
 
@@ -86,7 +99,7 @@ async function mountDiscoveryFor(baseUrl: string): Promise<{
   return { warns, infos, routes };
 }
 
-const noticesIn = (warns: string[]) => warns.filter((w) => w.includes(RULED_WORDING));
+const noticesIn = (warns: string[]) => warns.filter((w) => w.includes(NOTICE_MARKER));
 
 describe('plain-HTTP OAuth startup notice', () => {
   it('fires on a private-address deployment — the posture the ruling opened', async () => {
@@ -109,6 +122,20 @@ describe('plain-HTTP OAuth startup notice', () => {
     expect(noticesIn(warns)).toHaveLength(0);
   });
 
+  // ⛔ The security-floor leg of this file. A notice keyed on the SCHEME
+  // ALONE fires here, and the sentence it prints — that the transport rule
+  // accepts this origin — is FALSE of a public deployment, whose OAuth track
+  // the same rule left dark. An operator reading it concludes a public
+  // plaintext authorization server is a posture this rule permits.
+  it.each([
+    'http://example.com',
+    'http://203.0.113.5',
+    'http://intranet.corp:3000',
+  ])('⛔ does NOT fire on a PUBLIC plain-HTTP deployment: %s', async (baseUrl) => {
+    const { warns } = await mountDiscoveryFor(baseUrl);
+    expect(noticesIn(warns)).toHaveLength(0);
+  });
+
   it('fires exactly once per mount, not once per route', async () => {
     const { warns, routes } = await mountDiscoveryFor('http://10.0.0.5:3000');
     // Several routes are mounted in this one call; the notice is not one of
@@ -120,7 +147,7 @@ describe('plain-HTTP OAuth startup notice', () => {
   it('is emitted at warn — a visibly smaller security posture, not a durability loss', async () => {
     const { warns, infos } = await mountDiscoveryFor('http://172.16.0.1:3000');
     expect(noticesIn(warns)).toHaveLength(1);
-    expect(infos.filter((i) => i.includes(RULED_WORDING))).toHaveLength(0);
+    expect(infos.filter((i) => i.includes(NOTICE_MARKER))).toHaveLength(0);
   });
 
   it('no environment variable turns it off', async () => {
