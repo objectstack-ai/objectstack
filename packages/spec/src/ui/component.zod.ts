@@ -692,18 +692,19 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 —
-     * `containers.tsx` is byte-identical to the one at `a472b0716` and, through
-     * it, to `00d3f09c5`, the last hop on which either anchor moved by exactly
-     * one line (the icon block from `729-735`, the registration input from
-     * `788`), so NO anchor moved here;
-     * both were re-READ at the new pin with the cited text unchanged rather
-     * than inferred from that identity): `containers.tsx:730-736`
+     * (`.objectui-sha` = `87af769e9`; re-derived at that pin 2026-09-20 —
+     * `containers.tsx` is NO LONGER byte-identical to the one at `53ded82bf`
+     * (300 insertions, 100 deletions), so both anchors were re-READ rather
+     * than carried: the icon block moved `730-736` -> `853-859` with its seven
+     * lines byte-identical, and the registration input moved `789` -> `912`
+     * with its LINE rewritten — it now declares `of: 'object'` and carries a
+     * longer description — while the member list this record cites is
+     * unchanged): `containers.tsx:853-859`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
-     * the key to the Studio block designer at `:789` (the `items` input,
+     * the key to the Studio block designer at `:912` (the `items` input,
      * documented as `[{ label, value?, icon?, count?, visibleWhen?, children
      * }]`).
      *
@@ -1863,18 +1864,19 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 —
-     * `containers.tsx` is byte-identical to the one at `a472b0716` and, through
-     * it, to `00d3f09c5`, the last hop on which either anchor moved by exactly
-     * one line (the icon block from `918-924`, the registration input from
-     * `965`), so NO anchor moved here;
-     * both were re-READ at the new pin with the cited text unchanged rather
-     * than inferred from that identity): `containers.tsx:919-925`
+     * (`.objectui-sha` = `87af769e9`; re-derived at that pin 2026-09-20 —
+     * `containers.tsx` is NO LONGER byte-identical to the one at `53ded82bf`
+     * (300 insertions, 100 deletions), so both anchors were re-READ rather
+     * than carried: the icon block moved `919-925` -> `1069-1075` with its
+     * seven lines byte-identical, and the registration input moved `966` ->
+     * `1116` with its LINE rewritten — it now declares `of: 'object'` and
+     * carries a longer description — while the member list this record cites
+     * is unchanged): `containers.tsx:1069-1075`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
-     * block designer at `:966` (the `items` input, documented as
+     * block designer at `:1116` (the `items` input, documented as
      * `[{ label, icon?, collapsed?, children }]`).
      *
      * Vocabulary is Lucide, resolved through objectui's `LazyIcon`
@@ -2121,19 +2123,26 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 — both
-   * files, `resolve-icon.ts` and `button.tsx`, are byte-identical to the ones
-   * at `a472b0716` and, through them, to `00d3f09c5`, so no anchor MOVED; an
-   * earlier re-READ corrected two that
-   * had been wrong since they were written — the registration's input list and
-   * its `defaultProps`, see the last paragraph of this block. The hop onto
-   * `00d3f09c5` was the one that moved this record's SUBSTANCE rather than
-   * only its line numbers: `resolve-icon.ts` was restructured (110 insertions)
-   * so the resolution runs through a named `describeIconLookup` seam, and its
-   * tokeniser accepts more spellings than this record used to claim — see the
-   * corrected breakdown below. Every anchor below was re-READ at the new pin,
-   * never carried (#10274); the read point first MOVED rather than died on the
-   * earlier hop onto `9602dc820`, which is why the anchors span a second
+   * (`.objectui-sha` = `87af769e9`; re-derived at that pin 2026-09-20 — this
+   * hop is the one that moved both files: `resolve-icon.ts` +203/-7 and
+   * `button.tsx` +6/-11 against `53ded82bf`, so NO anchor below is carried and
+   * every one was re-READ. Four moved with their cited text byte-identical
+   * (`describeIconLookup`, `toPascalCase`, the rename map, `getLazyIcon`);
+   * `resolveIcon` itself was REWRITTEN — its tail no longer indexes
+   * `lucide-react` directly — and the registration's two ranges both moved and
+   * SHRANK, the input list having lost its per-input `label` and
+   * `defaultValue` members. What each anchor asserts is re-stated below from
+   * the new tree, never inferred from the old one — the re-READ discipline
+   * this block records, and which the later paragraph below still cites by
+   * number. ⚠️ That number does NOT resolve: objectstack issue 10274 was probed
+   * 2026-09-20 with `scripts/check-issue-citations.mjs --probe-cause` and came
+   * back minted, gone from the board and 404 on the web endpoint too — DELETED,
+   * not transferred. ⛔ No replacement number is guessed here: the live record
+   * of the discipline is THIS BLOCK, together with
+   * `check:objectui-pin-citations`, whose header states the same rule and whose
+   * refusal text enforces it. The read point
+   * first MOVED rather than died on the earlier hop onto `9602dc820`, which is
+   * why the anchors span a second
    * file):
    * `components/src/renderers/form/
    * button.tsx:43` resolves `schema.icon` through the shared `resolveIcon`,
@@ -2145,17 +2154,21 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * this surface use — it is the `action:*` resolver, and the two accept
    * different spellings:
    *   - here: `resolveIcon`
-   *     (`components/src/renderers/action/resolve-icon.ts:129-132`) delegates
-   *     to `describeIconLookup` (`:117-120`), which PascalCases through
-   *     `toPascalCase` (`:100-105`) and then applies a one-entry rename map
-   *     (`Home` becomes `House`, `:90-92`) before the `icons[key]` lookup from
-   *     `lucide-react`. ⚠️ The tokeniser splits on hyphen, underscore OR
+   *     (`components/src/renderers/action/resolve-icon.ts:322-328`) delegates
+   *     to `describeIconLookup` (`:302-305`), which PascalCases through
+   *     `toPascalCase` (`:153-158`) and then applies a one-entry rename map
+   *     (`Home` becomes `House`, `:143-145`) before the lookup. ⚠️ That last
+   *     step is what this hop rewrote: the resolver no longer indexes
+   *     `lucide-react`'s `icons` record itself — it asks `recordIconName` for
+   *     the kebab-case name and hands the pair to `lazyIconComponent`, so the
+   *     glyph now arrives lazily. The accept/reject behaviour is unchanged.
+   *     ⚠️ The tokeniser splits on hyphen, underscore OR
    *     whitespace (`/[-_\s]+/`) as of this pin; this record previously said
    *     "splits on `-` only", which was true when written and is not now — a
    *     re-READ caught it, a line-number refresh would not have. An unknown
    *     name still resolves to `null` and the button renders with NO icon and
    *     no diagnostic anywhere.
-   *   - `LazyIcon` / `getLazyIcon` (`components/src/lib/lazy-icon.tsx:66-92`):
+   *   - `LazyIcon` / `getLazyIcon` (`components/src/lib/lazy-icon.tsx:98-124`):
    *     normalises to kebab-case, checks the name against Lucide's own name
    *     list, and degrades an unknown name to the `Database` glyph.
    *   So a spelling that draws an icon in a tab trigger can draw nothing here.
@@ -2170,11 +2183,15 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * behaviour promised above is the same on both sides of that move.
    *
    * Also measured at the same pin: the renderer's registration publishes no
-   * `icon` input (`button.tsx:85-102` lists `label`, `variant`, `size`,
-   * `className`; `:103-107` is `defaultProps`), so the Studio block designer
-   * does not offer the key. Those two anchors read `70-87` / `88-92` until the
+   * `icon` input (`button.tsx:85-97` lists `label`, `variant`, `size`,
+   * `className`; `:98-102` is `defaultProps`), so the Studio block designer
+   * does not offer the key. Both ranges SHRANK on this hop — the inputs went
+   * `85-102` -> `85-97` and `defaultProps` `103-107` -> `98-102`, because each
+   * input dropped its `label` and `defaultValue` members; the four input names
+   * and the absence of an `icon` input are what was re-read, and both hold.
+   * They read `70-87` / `88-92` until the
    * `a472b0716` re-measure: wrong since written rather than shifted —
-   * `button.tsx` is byte-identical at `00d3f09c5` and `a472b0716`, so only a
+   * `button.tsx` was byte-identical at `00d3f09c5` and `a472b0716`, so only a
    * re-READ could find them and a line-number refresh never would (#10274). Unpublished is not unread — the header `icon`
    * above is refused for the second, not the first, and this docblock exists
    * to hold them apart.
@@ -2899,21 +2916,22 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 — all
-   * five files in the chain below, `index.tsx`, `ObjectMetricWidget.tsx`,
-   * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx`, are
-   * byte-identical to the ones at `a472b0716`, at `00d3f09c5` and at
-   * `67dadd602` before it, so
-   * NO anchor moved — the `object-metric` registration still begins at `:194`
-   * and the icon input still lands on `:204`. Every anchor below was re-READ
-   * at the new pin rather than inferred from that identity), and the chain
+   * (`.objectui-sha` = `87af769e9`; re-derived at that pin 2026-09-20 — EVERY
+   * file in the chain below moved on this hop, so no anchor is carried and
+   * each was re-READ: the `object-metric` registration now begins at `:227`
+   * and its icon input lands on `:237`. ⚠️ One thing the numbers do not
+   * carry: that input's `label: 'Icon (Lucide name)'` member is GONE — the
+   * whole registration dropped its per-input labels — so the key is still
+   * PUBLISHED to the designer, now as a bare
+   * `{ name: 'icon', type: 'string' }`. The four render-path anchors moved
+   * with their cited text byte-identical), and the chain
    * runs three files:
-   * `plugin-dashboard/src/index.tsx:204` publishes it as a designer input
-   * (`Icon (Lucide name)`) on the registered `object-metric` block;
-   * `ObjectMetricWidget.tsx:142` destructures it and forwards it at `:474` to
-   * `MetricWidget`; `MetricWidget.tsx:312-321` resolves it via
+   * `plugin-dashboard/src/index.tsx:237` publishes it as a designer input
+   * on the registered `object-metric` block;
+   * `ObjectMetricWidget.tsx:174` destructures it and forwards it at `:483` to
+   * `MetricWidget`; `MetricWidget.tsx:351-360` resolves it via
    * `getLazyIcon(icon)` — guarded on `typeof icon === 'string'`, because the
-   * React prop also accepts a ready-made node — and `:373-382` draws it in the
+   * React prop also accepts a ready-made node — and `:412-421` draws it in the
    * tinted square whose colour comes from `colorVariant`.
    *
    * ⚠️ Do not re-anchor this to `MetricCard.tsx`. That sibling calls
@@ -2923,7 +2941,7 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * reaches.
    *
    * Vocabulary is Lucide via the `LazyIcon` module
-   * (`components/src/lib/lazy-icon.tsx:66-80`): kebab-case or PascalCase,
+   * (`components/src/lib/lazy-icon.tsx:98-112`): kebab-case or PascalCase,
    * normalised to kebab-case, degrading to the `Database` glyph when the name
    * is not a real Lucide icon — the same slot the container icons use, and the
    * opposite failure mode from `element:button`'s `icon`, which takes the older
@@ -2992,15 +3010,22 @@ export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
  * `$filter` handoff), `data` (:217-224), `cardTitle`/`titleField` (:233),
  * `cardFields` (:322), `swimlaneField`/`grouping` (:518-519), and via the
  * forwarded schema `coverImageField`/`conditionalFormatting` (`KanbanRenderer`,
- * index.tsx — `ObjectKanban.tsx:931` spreads the authored bag into it).
+ * index.tsx — `ObjectKanban.tsx:1563` spreads the authored bag into it).
  * `quickAdd` sat on that forwarded list and is RETIRED (#17260, tombstoned
  * below): the sentence was true about the FORWARD and false about the READ,
  * which is how the key kept re-authorizing itself. `groupField` is the
  * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `53ded82bf`; re-READ there 2026-09-08, file
- * byte-identical to `a472b0716`, anchor unmoved): `ObjectKanban.tsx:264`, the `$top` of the
+ * (`.objectui-sha` = `87af769e9`; re-READ there 2026-09-20 — the file moved
+ * hard on this hop, +708/-79 against `53ded82bf`, and this anchor is one the
+ * numbers alone would have mis-carried: the read was a bare
+ * `$top: schema.limit ?? DEFAULT_KANBAN_LIMIT` at `:264` and is now
+ * `$top: resolveRowLimit(schema.limit, DEFAULT_KANBAN_LIMIT)`, objectui#9925
+ * having put a refusal in front of it — a contract-refused row cap is dropped
+ * and reported at `:553` instead of being sent. The pinned fact is unchanged:
+ * `schema.limit` still lowers into the query's top-level `$top`):
+ * `ObjectKanban.tsx:676`, the `$top` of the
  * board's one query — its docblock below carries the four-face record.
  */
 export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
@@ -3041,18 +3066,25 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
    * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `53ded82bf`; all four anchors
-   * re-READ at that pin 2026-09-08, every `plugin-kanban` file byte-identical
-   * to the one at `a472b0716` and none moved), four faces agreed
+   * repo builds against (`.objectui-sha` = `87af769e9`; all four anchors
+   * re-READ at that pin 2026-09-20 — this hop moved every one of them, and one
+   * face was RENAMED rather than shifted, so nothing below is carried), four
+   * faces agree
    * while this map refused the key by name: the board's one query is
-   * `dataSource.find(objectName, { $filter: schema.filter, $top: schema.limit
-   * ?? DEFAULT_KANBAN_LIMIT })` (`plugin-kanban/src/ObjectKanban.tsx:262-266`,
-   * the default `100` at `:71` — a REAL top-level `$top` since objectui#4025;
-   * before that the cap sat under a `options` key no adapter read),
+   * `dataSource.find(objectName, { $filter: schema.filter, $top:
+   * resolveRowLimit(schema.limit, DEFAULT_KANBAN_LIMIT) })`
+   * (`plugin-kanban/src/ObjectKanban.tsx:674-679`,
+   * the default `100` at `:84` — a REAL top-level `$top` since objectui#4025;
+   * before that the cap sat under a `options` key no adapter read, and the
+   * bare `??` became `resolveRowLimit` in objectui#9925, which drops and
+   * reports a cap the contract refuses instead of sending it),
    * `OBJECT_KANBAN_DATA_SOURCE` maps `limit: 'limit'`
-   * (`plugin-kanban/src/index.tsx:395-398`), `KanbanSchema` — the type
-   * `ObjectKanban.tsx:143` reads `schema` through — declares `limit?: number`
-   * (`plugin-kanban/src/types.ts:134`), and `content/docs/plugins/plugin-kanban.mdx`
+   * (`plugin-kanban/src/index.tsx:447-450`), the type the board reads `schema`
+   * through is `ObjectKanbanSchema` — ⚠️ `KanbanSchema` was RETIRED on this hop
+   * (maintainer ruling 2026-09-09) and `plugin-kanban/src/types.ts` no longer
+   * declares the member at all — imported at `ObjectKanban.tsx:10` and
+   * declaring `limit?: number` at `packages/types/src/objectql.ts:3735`,
+   * and `content/docs/plugins/plugin-kanban.mdx`
    * teaches it with a typed snippet (`limit: 250`) plus a Properties row. So
    * an author following the published docs wrote a node the save gate
    * refused, with the same `unrecognized_keys` verdict a typo gets.
@@ -3062,8 +3094,10 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * table, not this key's. The component-level `dataSource.limit` overrides
    * this key, and a bound named view's `pagination.pageSize` is LOWERED INTO
    * it through the `limit: 'limit'` mapping only when the component authored
-   * none (`react/src/element-data-source/ElementDataSourceGate.tsx:236-241`,
-   * `readLimit`/`writeLimit` keyed by `ElementDataSourceLimitKey`). The board
+   * none (`react/src/element-data-source/ElementDataSourceGate.tsx:316-331`,
+   * `readLimit`/`writeLimit` keyed by `ElementDataSourceLimitKey`; the branch
+   * gained objectui#9899's presence-is-not-authorship test and a
+   * `describeDisplacedRowLimit` report on this hop). The board
    * has no `pagination` read point, so declaring that spelling here would name
    * a key the renderer ignores — the accepted-and-dropped defect this section
    * exists to remove. Same shape as the `element:record_picker` and
@@ -3086,12 +3120,14 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * React-host `kanban-ui` block).
    *
    * Measured at the objectui pin this repo builds against
-   * (`.objectui-sha` = `53ded82bf`): the board forwards the key —
-   * `ObjectKanban.tsx:931` spreads the authored bag into `KanbanRenderer`,
+   * (`.objectui-sha` = `87af769e9`; all four anchors re-READ at that pin
+   * 2026-09-20 — each MOVED with its cited text byte-identical): the board
+   * forwards the key —
+   * `ObjectKanban.tsx:1563` spreads the authored bag into `KanbanRenderer`,
    * which passes
    * `quickAdd={schema.quickAdd}` and `onQuickAdd={schema.onQuickAdd}`
-   * (`plugin-kanban/src/index.tsx:196`) — but the affordance is gated on
-   * BOTH (`KanbanImpl.tsx:355` and `:368`), and `onQuickAdd` is a
+   * (`plugin-kanban/src/index.tsx:313`) — but the affordance is gated on
+   * BOTH (`KanbanImpl.tsx:621` and `:634`), and `onQuickAdd` is a
    * host-supplied FUNCTION that JSON cannot carry and no producer puts on an
    * `object-kanban` node. `ObjectKanban.tsx` names neither half of the pair
    * (0 occurrences each, against 6 for the sibling `onCardClick` in the same
