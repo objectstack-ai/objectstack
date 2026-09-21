@@ -24,7 +24,10 @@ import {
   ObjectKanbanPropsSchema,
 } from './component.zod';
 import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
-import { GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema, ListColumnSchema, ListViewSchema } from './view.zod';
+import {
+  GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema, ListColumnSchema, ListViewSchema,
+  TimelineConfigSchema, DEFAULT_VIEW_ROW_LIMIT,
+} from './view.zod';
 import { FieldSchema } from '../data/field.zod';
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { strictObjectDeclarations } from '../shared/strict-object';
@@ -3797,5 +3800,70 @@ describe('the three #18305 object blocks — key sets derived from the renderers
 
   it('object-chart is STILL deliberately absent — the three rows did not sweep it in', () => {
     expect((ComponentPropsMap as Record<string, unknown>)['object-chart']).toBeUndefined();
+  });
+});
+
+// #19228 — two authorable row bounds land on one `object-timeline` node, and
+// the react tier's own precedence sentence was narrower than the guard it
+// names. ⛔ This card picks NO precedence and changes no `.default()`; these
+// pins only hold the two structural facts the repair rests on, measured
+// first-hand at the objectui pin `87af769e9` on 2026-09-21T06:30-06:40Z.
+describe('row caps on the object-bound blocks — what #19228 recorded', () => {
+  const timeline = ComponentPropsMap['object-timeline'];
+  const kanban = ComponentPropsMap['object-kanban'];
+
+  it('leaves the ELEMENT-face `limit` undefaulted — the fact that keeps the gate arm alive', () => {
+    // `ElementDataSourceGate` lowers a bound view's cap into this key only
+    // when it does not already carry a USABLE one
+    // (`ElementDataSourceGate.tsx:316-331`, `!fromView || !isUsableRowLimit`).
+    // An applied default here would make every parsed node carry a usable cap
+    // and kill that arm outright — the failure #19228 feared, on the schema it
+    // would actually happen to. ⛔ Do not "fix" a red here by deleting the pin.
+    for (const [label, schema] of [['object-kanban', kanban], ['object-timeline', timeline]] as const) {
+      const parsed = schema.parse({ objectName: 'task' }) as Record<string, unknown>;
+      expect(Object.prototype.hasOwnProperty.call(parsed, 'limit'), label).toBe(false);
+    }
+
+    // LIT CONTROL, same instrument (a Zod applied default, observed through
+    // `parse`): the VIEW-face sibling DOES materialize one, so the zeros above
+    // are a reading rather than a parse that never ran.
+    const viewSide = TimelineConfigSchema.parse({ startDateField: 'start_date', titleField: 'name' }) as { limit?: number };
+    expect(viewSide.limit).toBe(DEFAULT_VIEW_ROW_LIMIT);
+  });
+
+  it('materializes the NESTED `timeline.limit` on a node whose flat `limit` stays absent', () => {
+    // The shape the record is about: one strictObject, two authorable row
+    // caps. At the pin, `ListView.tsx:3084` forwards this block nested and
+    // does NOT hoist `limit` to a flat prop, and `ObjectTimeline.tsx:407`
+    // queries off the flat key alone — so the 100 below reaches no query.
+    const result = timeline.safeParse({
+      objectName: 'task',
+      timeline: { startDateField: 'start_date', titleField: 'name' },
+    });
+    expect(result.success).toBe(true);
+    const data = (result.success ? result.data : undefined) as
+      { limit?: unknown; timeline?: { limit?: unknown } } | undefined;
+    expect(data?.timeline?.limit).toBe(DEFAULT_VIEW_ROW_LIMIT);
+    expect(Object.prototype.hasOwnProperty.call(data ?? {}, 'limit')).toBe(false);
+
+    // CONTROL — the node is still strict, so the acceptance above is not the
+    // verdict of a map that has stopped refusing anything.
+    const control = timeline.safeParse({ objectName: 'task', zzUnlikelyBogusKey__: 1 });
+    expect(control.success).toBe(false);
+    expect(JSON.stringify(control.error?.issues)).toContain('unrecognized_keys');
+  });
+
+  it('states the gate guard the gate actually implements, not the narrower 「unset」 arm', () => {
+    // ⛔ The one prose assertion here, and it is negative on purpose: this
+    // card's whole repair IS the published sentence, so without a pin the
+    // change has no falsifier. The retired wording claimed the view's cap
+    // lands ONLY on an unset key; measured, it also lands on a key set to a
+    // cap the contract refuses, with `describeDisplacedRowLimit` reporting it.
+    const shape = (ObjectKanbanPropsSchema as unknown as {
+      def: { shape: Record<string, { description?: string }> };
+    }).def.shape;
+    const description = shape.limit?.description ?? '';
+    expect(description).not.toContain('only when unset');
+    expect(description).toContain('usable');
   });
 });

@@ -1216,6 +1216,25 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  * as complete, which is worse than the unbounded-and-silent one this key
  * replaces — the author needs to know the cap is visible, and the renderer
  * author needs to know it is owed.
+ *
+ * ⚠️ NO CONSUMER READS THIS KEY YET — recorded, not repaired (#19228).
+ * Measured 2026-09-21T06:40Z at the pin this repo builds against
+ * (`.objectui-sha` = `87af769e9`), by `git grep` over all 8,228 files tracked
+ * at that commit: `.kanban.limit` / `.gallery.limit` / `.timeline.limit` →
+ * **0** read points, against **8** for the identically-shaped control
+ * `.kanban.groupByField` / `.gallery.coverField` / `.timeline.scale` on the
+ * same instrument. The row caps objectui DOES read are two other keys: a
+ * saved view's `pagination.pageSize`, else that view's FLAT `limit`
+ * (`core/src/data-scope/element-data-source.ts:237-241`, `savedViewLimit`),
+ * and the element block's own flat `limit` (`plugin-timeline/src/
+ * ObjectTimeline.tsx:407`, `plugin-kanban/src/ObjectKanban.tsx:676`).
+ * `ListView`'s `baseProps` (`plugin-list/src/ListView.tsx:2840-2865`) carries
+ * no `limit` on any branch, so a parsed view's per-kind ceiling reaches no
+ * query at all — it is declared-and-dropped, the ADR-0049 class, at birth.
+ *
+ * ⛔ Which of the three row bounds wins is NOT decided here and NOT implied by
+ * this declaration: #19228 opens that question and picks nothing, and neither
+ * does this note. What is recorded is only what each key reaches today.
  */
 const rowLimitKey = (view: RowLimitView) =>
   z.number().int().positive().default(DEFAULT_VIEW_ROW_LIMIT).describe(
