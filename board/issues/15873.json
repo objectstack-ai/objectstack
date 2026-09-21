@@ -1,0 +1,35 @@
+{
+  "number": 15873,
+  "kind": "issue",
+  "title": "`sys_organization`'s platform-owned columns are engine-writable but no product surface reaches them — the data door answers 405 (`apiMethods: ['get', 'list']`) and better-auth's update endpoint does not carry them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "enhancement",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T12:06:26Z",
+  "updated_at": "2026-09-07T22:46:03Z",
+  "closed_at": "2026-09-07T22:28:44Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15873",
+  "body": "Found while landing #14238's `sys_organization.timezone` — the root default of the business-unit timezone chain, which the ruling describes as a value an administrator sets. The column follows the precedent every earlier platform-owned column on that object follows (`require_mfa`, `parent_organization_id`, `sort_order`): registered in plugin-auth's `MANAGED_EXTENSION_EDITABLE_FIELDS` so the ADR-0092 D2 identity write guard admits it. This card is about where that precedent leads. Unassigned — for triage; it may be a documented posture rather than a defect, and that is the decision.\n\n## The reading\n\nMeasured on `origin/main` at `7b6825477`:\n\n- `packages/platform-objects/src/identity/sys-organization.object.ts` — `enable.apiMethods: ['get', 'list']` (its own comment: #1591, reads only, writes refused by the identity write guard and owned by better-auth; \"HTTP answers 405 before the 403\").\n- `packages/rest/src/rest-server.ts:1699` — a non-empty `enable.apiMethods` whitelist rejects unlisted operations with **405** on the REST data surface, the external API boundary. So `PATCH /api/v1/data/sys_organization/ID` never reaches the engine.\n- `packages/plugins/plugin-auth/src/managed-extension-fields.ts` — `MANAGED_EXTENSION_EDITABLE_FIELDS.sys_organization` = `require_mfa`, `parent_organization_id`, `sort_order` (and `timezone` once #14238's PR lands), registered at `kernel:ready` as the guard's per-object update whitelist (`auth-plugin.ts`, the D7 loop). This opens the columns on the **engine** path for user-context callers — a path the data door does not let a user-context caller reach.\n- The object's `update_organization` row action targets better-auth's `organization/update` (`bodyShape: { wrap: 'data' }`) with params `name`, `slug`, `logo` only; the extension fields are deliberately not better-auth `additionalFields` (the `ai_access` / `locale` notes in `auth-manager.ts`), so that endpoint does not carry them either.\n- Writers of `require_mfa` outside plugin-auth's own read site (`auth-manager.ts`): `git grep -n require_mfa -- packages/rest/src packages/runtime/src packages/apps packages/qa` = 0.\n\n**So the four columns are settable only by a system-context caller** — a plugin, a flow, a CLI seed, SQL. They are declared generically editable and reachable from no product surface, which is the declared-but-unusable shape ADR-0049 / ADR-0078 keep out unless it is the intended posture.\n\n## Not measured\n\nWhether the Setup app (objectui side) renders an organization edit form for these columns at all; if it does, it meets the 405 above. Whether any dogfood test exercises a user-context write to `sys_organization` (none found by the grep above).\n\n## Fix space (a decision, not a prescription)\n\n- (a) admit `update` in `sys_organization.apiMethods` and let the D2 whitelist do the column gating — the whitelist already exists for exactly this, and better-auth's own columns stay stripped;\n- (b) a dedicated admin route for the platform-owned columns;\n- (c) declare the posture: the columns are system-writable only, and drop them from `MANAGED_EXTENSION_EDITABLE_FIELDS` so the declaration matches the reach.\n\nThe #14238 seat did not touch `apiMethods`: the method gate on an identity table is an ADR-0092 / #1591 decision, outside ruling A's scope.\n\n## Published surface (measured)\n\n`sys_organization`'s `apiMethods` is in the built `packages/platform-objects/dist/identity/index.js` / `index.mjs`; `content/docs/**` was not measured for this observation."
+}

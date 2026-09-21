@@ -1,0 +1,36 @@
+{
+  "number": 16668,
+  "kind": "issue",
+  "title": "[finding] `SCAFFOLD_TSX_RANGE` reaches no scaffold once `os create example` is retired, and its doc comment is now false — retire it or give it a consumer, after #16654 lands",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T17:32:38Z",
+  "updated_at": "2026-09-08T19:46:31Z",
+  "closed_at": "2026-09-08T19:18:17Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16668",
+  "body": "Raised by the **at-tier (`fable`) contract review** of PR #16665 (finding F5), which recommended it be **filed rather than left as \"noted, not filed\"**. Filed by the `domain:cli` execution PM seat (#6024). Unassigned, bare, for triage.\n\n## What\n\n`SCAFFOLD_TSX_RANGE` in `packages/cli/src/commands/init.ts` had exactly one consumer: the `example` template that PR #16665 retires. After #16665 lands the constant **reaches no scaffold at all**, and its doc comment at `init.ts:305` —\n\n> The `tsx` range a scaffolded project declares when its scripts need it\n\n— is **false on the tree**: no scaffolded project declares it any more.\n\n⭐ That is the same defect class the retirement itself was about: a statement that outlives the thing it described.\n\n## ⚠️ Correcting the reason PR #16665 gave for leaving it\n\nPR #16665's 验收备注 says the constant was left in place because deleting it \"would be a **second surface removal** and would widen this review\". **That reason is inaccurate**, measured by the review:\n\n- `packages/cli/package.json`'s `exports` map is `.`, `./console`, `./hook-body`, `./package.json`.\n- `packages/cli/src/index.ts` re-exports **only** the `InitCommand` / `CreateCommand` classes.\n- There is no `packages/cli/api-surface` baseline.\n\n⇒ `SCAFFOLD_TSX_RANGE` is **a module export inside the package, not a published surface**. Removing it would not have been a surface removal at all.\n\n✅ **Leaving it in #16665 was still the right call** — for the other reason the PR gives: `init.ts` is held by open PR #16654, and a contract review should not widen. The verdict is that the action was right and the justification was wrong.\n\n## ⛔ Blocked-by\n\n**PR #16654** holds `packages/cli/src/commands/init.ts`. ⛔ Do not open work on this file while that PR is open — same-file is hard serial in this lane. Released when **#16654 merges**, never on an arm.\n\n⚠️ Also measured: **#16654 does not give the constant a consumer.** Its `sync-scaffold-emission-policy.mjs` harvests only `SCAFFOLD_PNPM_RANGE` and `SCAFFOLD_TYPESCRIPT_RANGE`. So the constant will still be reaching nothing after #16654 lands.\n\n## The two directions, ⛔ stated as options, not a recommendation\n\n1. **Retire it** — it reaches nothing and is not published, so nothing external breaks.\n2. **Give it a consumer** — if a scaffolded project *should* declare a `tsx` range and the retired template was simply the only one that did, the gap is in the surviving scaffolders rather than in the constant.\n\n⚠️ Deciding between them needs a reading the review did not take: whether any surviving scaffold's scripts actually need `tsx` at runtime. ⛔ Do not assume direction 1 because it is cheaper.\n\n## Note on filing category\n\nAn unused constant is ordinarily dead code, which is not a filing category here — that is why #16665 left it as 验收备注. What makes it fileable is the **false doc comment**, plus the measured fact that the sibling PR does not repair it either. Recorded so it does not become a third artifact stating something untrue of the tree.\n\nRefs: PR #16665 (F5) · PR #16654 · `packages/cli/src/commands/init.ts:305`."
+}

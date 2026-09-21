@@ -1,0 +1,34 @@
+{
+  "number": 16602,
+  "kind": "issue",
+  "title": "[finding] the two plugin-type-closed-set pins still say core \"has no typecheck script\", and the rest pin header keeps the \"refused it at parse\" wording #16049 measured false",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T12:06:11Z",
+  "updated_at": "2026-09-08T04:31:05Z",
+  "closed_at": "2026-09-08T03:56:59Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16602",
+  "body": "Observation from #16334, filed unassigned — comment drift only, no behaviour.\n\n- `packages/core/src/plugin-type-closed-set.test.ts` (header, lines 14-22) and `packages/rest/src/plugin-type-closed-set.pin.test.ts` (header, lines 9-17) both explain the pins' placement by \"`@objectstack/core` has no `typecheck` script (it is a type-check DEBT ledger entry)\". On the current tree `packages/core/package.json` declares `typecheck` (`tsc --noEmit && tsc --noEmit -p tsconfig.examples.json && pnpm check:test-typecheck`), and `pnpm --filter @objectstack/core typecheck` runs green (measured on the #16334 branch, commit 8dc4a33040). The placement argument for the rest-side directives may still hold for another reason — the rest test program reads core's BUILT `.d.ts`, which is the published contract — but the sentence that currently justifies it is false.\n- `packages/rest/src/plugin-type-closed-set.pin.test.ts` line 7 still says the Zod gate \"refused it at parse\". #16049's measurement (from #15638) is that nothing parsed plugin objects until #16363; core's `types.ts` docblock was rewritten to say so, this header was not. Card #16334 attributed that wording to `core/src/types.ts:127`; on the current tree it survives only here.\n\nSuggested fix: one docs-only commit rewriting both headers against the current tree (core has a typecheck script; the refusal is on the boot path since #16363), with no change to the pins themselves. Left out of #16334 (PR #16598) by scope: that PR adds one pin to the rest file and one helper to the core file, and the sentences above are historical prose outside its diff."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16134,
+  "kind": "issue",
+  "title": "Decision: do a flow's top-level `nodes[]` and its region bodies (`loop` / `try_catch` / `parallel`) share ONE node-id space, or two? — uniqueness is now enforced inside each, never across",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:56:18Z",
+  "updated_at": "2026-09-08T14:56:11Z",
+  "closed_at": "2026-09-08T14:55:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16134",
+  "body": "Filed by the `os-dev` seat working #15713 (session `session_01T6HeZvT9wdSJD1ZxJb5Eno`, branch `claude/issue-15713-flow-top-level-node-id-uniqueness`), as the out-of-scope fork that card's dispatch ruled OUT of its PR (Zone 1, ruling 2: \"the shared-namespace question is OUT of scope for this PR — implement the narrow rule only\"). Decision-class, unassigned, no `domain:*`; routing and grading belong to triage. Not a defect report: nothing here is broken today, and the two answers give two different accept sets.\n\n## The fork\n\nAfter #14964 (edge ids) and #15713 (top-level node ids) land, `FlowSchema` refuses a duplicate id **within** each of these arrays:\n\n- the flow's own top-level `nodes[]` — parse-time `superRefine` in `packages/spec/src/automation/flow.zod.ts` (#15713's PR);\n- each region body's `nodes[]` — `analyzeRegion()` in `packages/spec/src/automation/control-flow.zod.ts` (`duplicate node id 'X'`), consulted at `registerFlow()`, one region at a time.\n\nNothing judges the id space **across** the two: a `loop` body node may carry the same `id` as a top-level node (or as a node in a sibling region), and both rules stay green. Whether that is correct is the open question. `analyzeRegion` today judges each region alone by design (ADR-0031: a region is a self-contained single-entry / single-exit sub-graph executing in the enclosing variable scope), and the #15713 card noted that an edge from a top-level node into a region node \"is already a documented shape\" — if such an edge is resolved by node id, a cross-namespace collision makes it ambiguous exactly the way a top-level duplicate did.\n\n## Why it is a decision, not an implementation detail\n\n- **One id space** narrows a published accept set a second time (clause ②): every region node id must differ from every top-level and every sibling-region id. It also changes what a region IS — no longer self-contained. Blast radius measured below.\n- **Two id spaces** keeps regions self-contained and leaves the cross-namespace collision legal — then every reader that flattens a flow (designer canvas, BPMN export, flow diff, `completedNodeIds` on a checkpoint, `collectFlowGraphs`) must key on a scoped path rather than the bare id, which is a contract those readers do not spell today.\n\nEither answer should be recorded once, in the PR that takes it, and pinned; #15713's PR pins today's boundary (a region node reusing a top-level id parses) so that the decision, when taken, moves it deliberately rather than by drift.\n\n## Measurements (tree `origin/main` `1f2a02ba`, AST scan over `packages/**` and `examples/**`, TypeScript/JavaScript literals only)\n\n- Outermost literal `nodes: [ … ]` arrays: **915** including tests (**66** excluding tests); of these, **53** (**6**) hold at least one nested region `nodes: [ … ]`; region arrays **82** (**13**); region nodes with a literal id **66** (**9**).\n- Region node ids that collide with a top-level id of the SAME outer array: **0** (0 excluding tests).\n- Lit control on the same instrument: a planted fixture with a `loop.config.body.nodes[0].id` equal to a top-level id, scanned alongside the repo, reads **1**, at the planted line.\n- Not covered by the scan (declared, not measured): flows assembled as call arguments (`flowWith([ … ])`) or generated in code, YAML/JSON flow files (none found under these roots for `nodes` arrays), and the pinned objectui / hotcrm trees.\n\nSo the \"one id space\" answer would refuse no in-repo flow today; the reading says nothing about downstream apps.\n\n## Where each half lives today\n\n- `packages/spec/src/automation/flow.zod.ts` — `FlowSchema.superRefine`: top-level `nodes[]` and `edges[]` uniqueness (#15713, #14964).\n- `packages/spec/src/automation/control-flow.zod.ts` — `analyzeRegion()`: per-region uniqueness, edge integrity, single entry / exit, acyclicity; `validateControlFlow()` walks every depth via `collectFlowGraphs`.\n- `packages/lint/src/lint-flow-patterns.ts` builds a `nodeIds` set only to check edge endpoints — no cross-namespace judgement there either.\n\nRefs: #15713 (top-level node ids, ruled narrow), #14964 (edge ids, ruled A), ADR-0031 (regions), ADR-0018 (open node-type vocabulary — an invalid node `type` is NOT a control on this schema)."
+}

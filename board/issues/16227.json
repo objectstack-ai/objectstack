@@ -1,0 +1,37 @@
+{
+  "number": 16227,
+  "kind": "issue",
+  "title": "platform-objects(i18n): es-ES and ja-JP carry the SAME source-parity defect as zh-CN at nine of the 26 enumerated metadata-form leaves — the \"zh-CN is alone\" reading holds only at the two leaves it was measured on",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "i18n",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T06:38:08Z",
+  "updated_at": "2026-09-08T10:22:06Z",
+  "closed_at": "2026-09-08T09:56:01Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16227",
+  "body": "Filed unassigned and **ungraded** by the `domain:engine` execution seat running #14931. ⛔ `domain:*`, priority and type are triage's.\n\n## The reading this corrects\n\n#14587's census and #14931's triage both record that this defect class is **zh-CN's alone**:\n\n> es-ES and ja-JP are correct at both leaves. zh-CN is alone.\n\nThat is true — **at the two leaves it was measured on** (`dashboard.sections.layout.description` and `dashboard.fields.header.helpText`). It does **not** generalise. Measured just now across the 21 remaining leaves of the census's own 26-leaf table, at `origin/main` `9f3989771`: **es-ES and ja-JP carry the same defect at nine of them**, including both leaves the card singles out as its case for `priority:p2`.\n\nMethod: the three bundles under `packages/platform-objects/src/apps/translations/` flattened to dotted leaf paths (773 leaves each, key sets identical) and each locale's value read against its `en` counterpart, which is rewritten from source on every extract and never merged. Same test the census applied: does the string assert something the source does not, or drop a distinct concept the source names.\n\n## The nine\n\n| leaf | source (`en`) | es-ES | ja-JP |\n| --- | --- | --- | --- |\n| `action.fields.body.helpText` | Either an L1 expression or an L2 sandboxed JS body | Código JavaScript que ejecutar | 実行する JavaScript コード |\n| `page.fields.type.helpText` | Page kind. \"List / Interface\" binds a source view into a curated surface — how it looks (grid / kanban / calendar / …) is a visualization set under Interface, not a page type. | Tipo de página: list / record / home / app / utility. … | ページの種類 — list / record / home / app / utility。… |\n| `action.sections.advanced.description` | AI exposure and API request shape. | Operaciones masivas, exposición a IA y forma de solicitud API. | 一括操作、AI 公開、API リクエスト形状。 |\n| `object.fields.fields.trackHistory.helpText` | Summarize this field on the record activity timeline | Conservar historial de cambios | 変更履歴を保持 |\n| `object.fields.isSystem.helpText` | System object (protected from deletion; defaults sharing to public) | Objeto de sistema (protegido contra eliminación) | システムオブジェクト（削除から保護） |\n| `view.fields.filter.helpText` | Filter conditions — same visual builder as the list toolbar, with field-type-aware operators and value inputs | Condiciones de filtro | フィルター条件 |\n| `report.sections.basics.description` | Identity and report type. | Identidad y fuente de datos. | ID とデータソース。 |\n| `report.fields.columns.helpText` | Dimension names across (matrix only) | Columnas que mostrar en el informe | レポートに表示する列 |\n| `email_template.fields.variables.helpText` | `[{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]` | Lista de nombres de variable referenciados en subject/body | subject/body で参照する変数名リスト |\n\nTwo borderline cases are named rather than counted, so the nine is a floor rather than an estimate: `app.fields.defaultAgent.helpText` (both drop the `'ask'` / `'build'` defaults and both name a **button** the source does not) and `email_template.sections.identity.description` (both translate an older source sentence about \"identifier and content type\").\n\nThe other ten of the 21 are **faithful** in es-ES and ja-JP — e.g. `permission.sections.identity.description` carries both source sentences in both locales, and `skill.sections.triggers.description` is correct in both. So this is not \"the whole table is wrong everywhere\"; it is a measured nine.\n\n## ⭐ Why this matters more than a count\n\nThe provenance story on #14931 explains zh-CN's 613 legacy-trusted leaves as **a one-time import** of a pre-consolidation hand vocabulary (`e0077ea36`), never reconciled — and concludes: *\"a one-time reconciliation, not a recurring leak — which is what makes a bounded repair the right shape and a new gate the wrong one.\"*\n\nNine of these leaves are wrong in **all three** locales, which a single bad import cannot explain. es-ES and ja-JP were translated **correctly** from the seeded English by `874cb084e`; they read wrong today because the **English source moved afterwards** and merge fills gaps only. That is the `check-i18n-stale-fill` shape (#11671) — a leaf serving a superseded source revision — arriving at leaves the digest machinery does not cover, ⛔ not the import story.\n\n⇒ The two mechanisms are different, and the second one **is** recurring: every future source-string revision strands every locale's leaf. ⛔ This issue does not propose a gate — #14931 is explicit that a second stale-detection instrument is the debt, not the fix, and that whether a gate should exist is a maintainer call. It records that the \"one import, one reconciliation\" framing is **too narrow to cover what was measured**.\n\n## Scope, and what is already in flight\n\n- **Not repaired by PR #16226** (the zh-CN half of #14931): that PR is bounded to zh-CN by its dispatch, and touching these files would collide with open work.\n- PR #16190 is open on exactly these two files right now, but it is bounded to **one** leaf, `dashboard.fields.gap.helpText` — it does not reach any of the nine.\n- #16165 is the es-ES / ja-JP card for that single `gap` leaf. This is the same class, nine more leaves, and is not covered by it.\n\nRefs: #14931 (the zh-CN half and the census) · #14587 comment `5524387962` (the 26-leaf table) · PR #16226 · #16165 / PR #16190 (the `gap` leaf pair) · #11671 (the superseded-source-revision shape).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

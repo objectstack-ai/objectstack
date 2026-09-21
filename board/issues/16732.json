@@ -1,0 +1,36 @@
+{
+  "number": 16732,
+  "kind": "pull_request",
+  "title": "feat(lint): report a flow-filter token neither the template evaluator nor ObjectQL resolves",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "needs:contract-review",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T02:25:43Z",
+  "updated_at": "2026-09-08T03:40:45Z",
+  "closed_at": "2026-09-08T03:40:44Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-08T03:40:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16732",
+  "body": "Fixes #16096\n\n## What\n\nA second gating rule, `flow-filter-token-unknown`, that walks `flows` and reports a `{…}` filter token in a flow node's `config.filter` that **neither** `{…}` dialect can resolve: a call to a name outside the flow template evaluator's closed function table (`{TOMORROW()}`, `{ROUND(x)}`, `{Math.round(x)}`, `{DATEADD(day, -45)}`). `filter-token-unknown`'s root list is untouched.\n\nThe naive fix the card pre-refutes — `{ key: 'flows', kind: 'flow' }` on the existing rule — is measured, not argued, in this PR: on this tree's own example apps it reports **4 findings on app-todo + app-crm (loaded through their configs) and 3 more on app-showcase (grep census)**, every one a legitimate run-time variable (`{recordId}` ×3, `{record.id}` ×3, `{currentTask.id}` ×1). The new rule reports **0** on the same corpus.\n\n## Reference set: the flow token grammar, mirrored and pinned\n\n`packages/lint/src/flow-template-grammar.ts` mirrors `resolveToken`'s whole-token dispatch from `packages/services/service-automation/src/builtin/template.ts` — the five regexes, the reserved-literal step, the `NOW()`/`TODAY()` whole-token form tried **before** the call-position scan (the only reason `{TODAY() - 45}` stays silent), and the six-name value-function table. `@objectstack/lint` may not depend on a runtime, so the mirror is pinned by `flow-template-grammar.test.ts`, which reads `template.ts` from disk (declared cross-package input; spelled per `check:cross-package-test-inputs`) and fails when any mirrored piece stops matching the original.\n\nVerified against the evaluator, not the filename: every mirrored regex source is present verbatim in `template.ts`; `EXPRESSION_FUNCTION_ARITY`'s key set equals the mirrored table; `unknownFunctionError` is still thrown on an unknown call (A4 holds — `TOMORROW()` is a guard refusal at run time, so the node cannot run; it is not resolved to anything).\n\n## Layering\n\nLayer one asks `classifyFilterToken` (the same spec classifier `filter-token-unknown` uses); only its `unknown` verdict goes to layer two, `classifyFlowTemplateToken`; only `unknown-function` is a finding. So every finding is a strict subset of what the naive root addition would report (asserted in the test), and the open arm — bare and dotted identifiers addressing the run's `VariableMap` — is deliberately silent and says why.\n\n## Successor note — the inherited commit, diffed and verified\n\n`4c7d5c522` (7 files) was pushed by a dispatch that died before opening a PR. Each file was read against the evaluator and the registry pins rather than trusted; nothing in it was thrown away or rebuilt. One thing it was missing: registering the 44th author-time rule stales the four `os build` / `os validate` transcripts under `content/docs` that quote the count as a literal, and `check:docs-transcript-drift` went red on this branch. `de9b5514` moves those four literals (43 → 44). The branch was also merged with `origin/main` (`bd62a569`, clean; `packages/lint/src` was uncontested at the time of the check — open PR #16727 now touches two other files in that directory, none of this PR's).\n\n## Evidence (tree `de9b5514`)\n\nReproduction of the card's control design on this tree, through `runAuthoringRules('lint', …)` — the registry line `os lint` runs (`packages/cli/src/commands/lint.ts:514`; exit 1 at `:881` when any error-severity finding exists):\n\n| leg | `{TOMORROW()}` in a view `filter[].value` | `{TOMORROW()}` in a flow node `config.filter` |\n|:--|:--|:--|\n| rule unregistered (base copies of `authoring-rules.ts` + `index.ts`, dist rebuilt, marker absent from all 14 built files) | `filter-token-unknown` error → exit 1 | **0 findings → exit 0** |\n| rule registered (restored, blob hashes equal HEAD's, marker present in 6 built files) | `filter-token-unknown` error → exit 1 | `flow-filter-token-unknown` error → exit 1 |\n\n`{TODAY() - 45}` and `{record.id}` in the flow position: 0 findings in both legs (the negative control triage asked for).\n\n- `pnpm --filter @objectstack/lint test` — 102 files / 3549 tests passed (includes the two new suites plus the wiring, barrel-export and runtime-gate pins).\n- `pnpm --filter @objectstack/lint typecheck` — OK, test layer under `tsconfig.test.json` OK (2 files / 6 pre-existing errors held in the ledger, unchanged).\n- Derived gates (`dispatch-gates --commands`, 83 families on the final file set): see the report comment on the card for the per-family table. Two families read `PREREQUISITE NOT MET` here (whole-repo dists) and are declared to CI: `check:dual-build-cjs-loads`, `check:type-check-debt`.\n- Not run locally: the CLI package's suites (57-package cold closure); the CLI consumes the registry unchanged and its command-parity test is a case list, not an exhaustive pin. Declared to CI.\n\n## 验收备注\n\n- `skills/objectstack-query/rules/filters.md` (governed surface, not touched) describes `filter-token-unknown` as the rule that refuses a whole-string `{…}` token; the flow position now has its own id. Not wrong, only incomplete — noted, not filed; 承接者：无.\n- `scripts/check-plugin-teardown-shape.mjs --self-test` cannot run on a shallow clone (its positive control is pinned to commit `621a4876`); fetching that one commit makes it green (47 cases). Environment, not a defect — noted, not filed.\n- #16727 is the other open PR in `packages/lint/src`; it does not touch `authoring-rules.ts`, so the rule count stays 44 whichever lands first.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_"
+}

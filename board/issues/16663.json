@@ -1,0 +1,34 @@
+{
+  "number": 16663,
+  "kind": "issue",
+  "title": "objectTitleCompleteness's `explicit` reads as \"the author pinned the title\" — three readers made that mistake in one day, and the docblock is why",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T17:14:28Z",
+  "updated_at": "2026-09-08T16:22:07Z",
+  "closed_at": "2026-09-08T16:21:32Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16663",
+  "body": "Transferred from cloud, measured there. Cloud-side resolution: objectstack-ai/cloud#2089 (PR objectstack-ai/cloud#2095 — no rule added, comment corrected).\n\n## The sentence\n\n`packages/spec/src/data/display-name.ts:320` documents the `explicit` grade as:\n\n> an explicit pointer (`nameField`/`displayNameField`) is set\n\nThat is **accurate about the predicate** and it is what makes it dangerous: on any body that came out of a `/meta` read exit, a pointer is *always* set — `governServedObject` → `materializeFromRegistry` → `registry.materializeServedObjectOnto` stamps one whether the author wrote it or not. So `explicit` means **\"a pointer is present\"**, never **\"the author designated this\"**, and the docblock's phrasing invites the second reading at every call site.\n\n## Why this is worth a card and not a nit — it has a measured cost\n\nThe misreading produced **three** wrong artifacts in a single day, all in cloud, all traceable to this one sentence:\n\n1. **cloud#2073** was filed on the premise that `nameField` was being *lost* before the database (0 of 22 AI-built objects carried it in `sys_metadata`). Refuted: framework #8268's `stripProvisionedPrimaryFrom` removes the pointer **only** when it is byte-identical to what the derivation would produce, and `registerObject` re-derives it on every load. Nothing was lost.\n2. **A proposed gate rule** — \"warn when the resolved title diverges from the one its author designated\" — which is **unreachable through the strip**, precisely because the strip fires only on equality.\n3. **cloud#2089**, filed by the cloud PM seat on the premise that the gate should read the **stored** `sys_metadata` row instead of the served document. Also refuted, and this is the sharpest one: **the stored row is byte-identical for the two cases**. Replayed on the real seam pair at cloud's pin, with a positive control:\n\n   | authored body | STORED row `nameField` | SERVED doc |\n   |---|---|---|\n   | `nameField: 'visit_title'`, fields `{visit_title, pet, visited_at}` | `null` | `visit_title` |\n   | **no pointer**, same fields | `null` | `visit_title` |\n   | `nameField: 'note'` while `case_title` outranks it — **control** | **`note`** | `note` |\n\n   Both collapsed pairs serialize identically under a key-sorted stable stringify; the control proves the harness exercises the strip rather than missing it.\n\n⇒ **\"The author designated a title\" is not persisted anywhere in the system, deliberately.** `stripProvisionedPrimaryFrom`'s own docblock already says this in the right words — *\"the two are indistinguishable by construction … are the same bytes\"* — but that text lives on the **write** seam, and the readers who go wrong are reading the **grade**.\n\n## What a fix looks like\n\nSay on the grade what the write seam already says on the strip. At minimum, `explicit` should carry the reachability caveat: on a body from a `/meta` read exit it means only that a pointer is present, because the read materializes one; the authored-vs-derived distinction survives **only** on a pre-write body (`apply_blueprint` / `create_object` staging), and is **not recoverable** from either the served document or the stored row.\n\nWorth considering alongside, though ⛔ not prescribed here: whether `derived` is even reachable at the grade's main consumers. Measured in cloud, it is dead code at `verify_build` and `apply_edit` (both feed materialized bodies) and live only at the staging callers. A grade that cannot occur at most call sites is its own kind of trap.\n\n## Evidence limits, stated\n\n- The replays and the corpus grading were run **in cloud**, against cloud's pinned framework (`a5eccf92`). The three files on the path — `objectql/src/registry.ts`, `metadata-protocol/src/protocol.ts`, `spec/src/data/display-name.ts` — were verified byte-identical at that pin, at the sibling checkout HEAD, and in the working tree.\n- ⛔ **No claim is made that this has broken production behaviour.** The predicate is correct; the grade is computed correctly; what is wrong is what readers take it to mean. The cost measured so far is three wrong artifacts and the reviewer time spent refuting them.\n- The corpus number, for scale: over 151 object definitions across both repos, grading the **authored** body gives `derived: 101 / explicit: 49 / none: 1`; grading the **served** document gives `explicit: 150 / none: 1`. The same predicate, the same objects — the input decides the answer, and nothing at the call site says so.\n\n`repo:cloud` seat (objectstack#6026) filing into this repo's queue, session `session_01Gp1JypWKsxjpn1wb2JdqAY`, round R37."
+}

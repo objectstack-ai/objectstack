@@ -1,0 +1,34 @@
+{
+  "number": 16667,
+  "kind": "issue",
+  "title": "[finding] The \"maintainer 2026-08-27: no alias, no deprecation window\" ruling cited by #16483 and PR #16665 cannot be located, and its date contradicts the \"same week\" prose that cites it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T17:32:18Z",
+  "updated_at": "2026-09-09T05:12:57Z",
+  "closed_at": "2026-09-09T05:12:57Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16667",
+  "body": "Raised by the **at-tier (`fable`) contract review** of PR #16665 (finding F1), dispatched by the `domain:cli` execution PM seat (#6024). Filed by that seat. Unassigned, bare, for triage.\n\n⛔ **This card does not decide the ruling, and nothing here questions the retirement itself.** The contract review's verdict on #16665 was **PASS-WITH-FINDINGS** and F1 was explicitly **not blocking** — the *substance* was verified against the shipped `os g agent` precedent. What cannot be verified is the **citation**.\n\n## The claim\n\n#16483 and PR #16665 both attribute the no-alias / no-deprecation-window decision to a **maintainer ruling of 2026-08-27**. That attribution has propagated into six places:\n\n- the card body (#16483)\n- PR #16665's body\n- `packages/cli/src/commands/create.ts:13-14`\n- the header of `packages/cli/test/create-example-retired.e2e.test.ts`\n- `.changeset/os-create-example-retired.md`\n- the retirement callout in `content/docs/deployment/cli.mdx`\n\n## ⚠️ It could not be found — searched, not assumed\n\nThe reviewer searched:\n\n- **all six comments on #15531** — the batch #66 ruling (director seat, 2026-09-07, option B, comment `5564757555`) says verbatim only *\"Retire `os create example` (a weaker `os init` plus a README) — #16483\"*. No alias or window language.\n- **all 200 comments on ledger #12708** — the batch #66 row matches #15531 and carries no alias/window language. ⭐ **The ledger's earliest comment is 2026-08-30, so it cannot carry an 2026-08-27 ruling at all.**\n- **the head tree** (`AGENTS.md`, `docs/`, `.claude/`, `scripts/pm`, `.changeset/`, `packages/cli/src`, `content/docs`) for \"deprecation window\" and \"2026-08-27\". Every 2026-08-27 ruling found is about something else: #12473, #12509, #12579, #12599, #12667, #12278, #11982, objectui#6262.\n\n## ⭐ Two internal tensions — one statement is wrong whichever way this resolves\n\n1. **2026-08-27 predates the measurement that first identified the duplicate.** The `os create example` / `os init` convergence was measured by PR #15797 on **2026-09-05**. A ruling to retire the command could not precede the measurement that found it was a duplicate.\n2. **`create.ts:13-14` and the e2e header say the maintainer \"ruled the same week\" as #15531**, which is dated **2026-09-07**. 2026-08-27 is not that week.\n\n⇒ The date and the \"same week\" prose cannot both be right.\n\n## What is being asked\n\n**Confirm the ruling and its date.** Then the \"same week\" prose in `create.ts` and `create-example-retired.e2e.test.ts` should be corrected to the real date.\n\n## ⚠️ What has already been done, so this is not re-done\n\nPR #16665's dev has been instructed by the PM seat to make the citation **assert only what is verifiable** — cite the #15531 batch #66 ruling (verified verbatim by the review) and record the alias/no-window provenance as *recorded on card #16483, pending maintainer confirmation*, dropping the unsupported date and the \"same week\" phrasing.\n\n⛔ The **runtime message** was deliberately left alone: *\"There is no alias and no deprecation window\"* describes what the code does and is true regardless of who ruled it. Only the provenance claims were narrowed.\n\n⇒ So the PR does not ship the unverifiable date. This card exists so the underlying question survives #16483 closing on merge, and so the real date can be restored if one exists.\n\n## Why it is worth a card rather than a shrug\n\nThis repo's whole `os create example` retirement is about a statement that outlived its truth. A ruling citation that six artifacts repeat and no one can locate is the same shape, one level up — and it is load-bearing, because \"no alias, no deprecation window\" is the part a consumer is told is not negotiable.\n\nRefs: PR #16665 · #16483 · #15531 (batch #66, comment `5564757555`) · #12708 (ledger) · PR #15797 (the 2026-09-05 measurement)."
+}

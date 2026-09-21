@@ -1,0 +1,35 @@
+{
+  "number": 16482,
+  "kind": "issue",
+  "title": "ci: heavy CI never runs on a PR whose base is a feature branch — `lint.yml` / `ci.yml` `pull_request` triggers are limited to `branches: [main]`, so six required contexts report nothing on such PRs (item 3 of #16149)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T03:47:58Z",
+  "updated_at": "2026-09-08T20:22:50Z",
+  "closed_at": "2026-09-08T20:22:50Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16482",
+  "body": "Split out of #16149 by director ruling (decision batch #66, 2026-09-07, option C): this item stands on its own — it is true of **any** PR based on a feature branch, not only of stacked series, which merely exposed it.\n\n## Measured (#16149, triage re-verified on `origin/main`)\n\n```yaml\n# .github/workflows/lint.yml            # .github/workflows/ci.yml\non:\n  pull_request:\n    branches: [main]                        branches: [main]\n```\n\nA PR whose base is a feature branch triggers neither workflow. Across the six-card #14478 stack every card PR showed 8–11 light checks (Auto Label, Check Changeset, PR Size, docs drift, …) and **zero** of `Lint & Repo Gates`, `TypeScript Type Check`, `Test Core`, `Build Core`, `Dogfood Regression Gate`, `Temporal Conformance`. The first real signal arrived at the trunk PR, after every card was written, reviewed and merged; correctness rested on local runs quoted into PR bodies — a discipline, not a gate.\n\n## Scope\n\n- Make the required contexts report on PRs regardless of base branch (widen the `pull_request` trigger, or add a `pull_request` trigger without a `branches` filter for the heavy workflows), **after** reading and honouring the two comment blocks the current triggers carry: `ci.yml:12-15` (every workflow producing a required check MUST keep the `merge_group` trigger or queue builds wait forever) and `lint.yml:16` onward (the MEASURED 2026-08-25 / #12211 negative result), plus the `concurrency` cancel policy at `ci.yml:17`.\n- ⚠️ Runner cost rises: measure and state the expected increase (PRs per week with a non-`main` base × the heavy matrix) on this card before landing; if it is large, gate the heavy run on a label or on the base branch being an open PR's head rather than running for every feature-branch PR.\n- Pin: a workflow-lint test (or the existing `ci-cd-pipeline-doc.test`) asserting that every workflow producing a branch-protection-required check runs on `pull_request` for any base.\n\n## Out of scope\n\n- Items 1 and 2 of #16149 (ADR-0087 registration double base; squash-only × stacked rebuild) — ruled as \"stacks are not a supported form\", recorded in AGENTS.md by #16149.\n\n## Acceptance\n\n- [ ] a PR based on a feature branch shows all six required contexts\n- [ ] `merge_group` behaviour unchanged (queue builds still report)\n- [ ] runner-cost delta recorded on this card\n- [ ] pin present\n\nRefs #16149, #12211, #12933."
+}

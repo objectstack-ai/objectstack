@@ -1,0 +1,34 @@
+{
+  "number": 16405,
+  "kind": "issue",
+  "title": "lint: `flow-double-brace-interp` / `flow-bare-dollar-ref` never reach an `http` node's request payload — the same `stripRegions` union that blinded the flow-template rules",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T19:15:41Z",
+  "updated_at": "2026-09-08T14:43:27Z",
+  "closed_at": "2026-09-08T14:33:36Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16405",
+  "body": "Found while fixing card 16111 (the flow-template rules' `warning` half). Not fixed there: it changes the reach of two DIFFERENT rule ids, so it earns its own changeset line and its own review rather than riding along.\n\n## The defect\n\n`packages/lint/src/lint-flow-patterns.ts:1562` runs a recursive template-string scan over a region-stripped view of each node's config:\n\n```ts\nconst strings: string[] = [];\ncollectTemplateStrings(stripRegions(node.config), undefined, strings);\n```\n\n`stripRegions` is called with ONE argument, so it strips the flat union of every config key that holds a region on **any** node type — `body`, `try`, `catch`, `branches`. But `body` is `loop`'s region slot **and** the canonical request-payload key on an `http` node (`packages/spec/src/automation/io-node-config.zod.ts` says so in as many words: \"`body` IS canonical on an `http` node\"). So `config.body` is deleted from every node's view before this scan reads it, and the whole of an `http` node's request payload is invisible to:\n\n- `flow-double-brace-interp` — a `{{ ... }}` token in a payload. Flow node values use SINGLE braces; the double-brace form is the formula dialect and is never interpolated, so it ships to the endpoint as the literal text `{{ ... }}`.\n- `flow-bare-dollar-ref` — a bare `$ref.field` written as a literal in a payload, likewise never interpolated.\n\n`http-nodes.ts` interpolates the raw config wholesale (`interpolate(raw, variables, context)`), so a payload is exactly where an uninterpolated token reaches a real outbound request.\n\nThe same union also hides a non-`loop` node's `try` / `catch` / `branches` keys, if any node type ever uses those names as ordinary config.\n\n## Why it is not the card-16111 fix\n\nCard 16111 changed `WalkedFlowNode.localConfig` to strip only the slots the node's own type declares, and deliberately left `stripRegions`' DEFAULT argument as the flat union so this caller's behaviour did not change under it. That was scope control, not a verdict that the union is right here — it is the identical defect, one call site over.\n\n## The fix\n\n`node.type` is already in scope at that call site (the line above builds `nodeWhere` from it):\n\n```ts\ncollectTemplateStrings(stripRegions(node.config, ownRegionKeys(node.type)), undefined, strings);\n```\n\n`ownRegionKeys` is exported from `./flow-walk.js` as of card 16111. Once this call site passes its own slots, the flat-union default has no callers left and should be removed, so the next caller cannot inherit the trap: make `regionKeys` a required parameter.\n\n## Expected blast radius\n\nNew findings only where a `{{ }}` or bare `$ref.field` sits in a previously-hidden key. Both rules' severities are unchanged. Worth measuring against the example apps the way card 16111 did — `examples/app-showcase` has `http` nodes with `body` payloads inside a `parallel` branch and a `try_catch` try.\n\n## Verification this needs\n\n- Pins on an `http` node payload carrying each of the two token shapes, at top level and nested in a region.\n- The double-count negative control: a token in a `loop` body must still be reported ONCE, on the node that carries it, not also against the container. That is what the strip exists for, and it is the direction that breaks if the fix over-corrects to stripping nothing.\n"
+}

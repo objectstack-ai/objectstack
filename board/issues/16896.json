@@ -1,0 +1,36 @@
+{
+  "number": 16896,
+  "kind": "issue",
+  "title": "automation run-lifecycle doors (cancel, restore-suspension): docs route tables, `:name` scoping clause, and the SDK-method decision left open by PR #16755",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T15:03:27Z",
+  "updated_at": "2026-09-09T07:49:58Z",
+  "closed_at": "2026-09-09T05:08:47Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16896",
+  "body": "PR #16755 (card #13953) shipped `POST /automation/:name/runs/:runId/cancel` and `…/restore-suspension` and PASSed contract review at `34feecba7` (https://github.com/objectstack-ai/objectstack/pull/16755#issuecomment-5587229770). Three non-blocking findings were carried out of that review rather than holding the PR:\n\n## Terminal state (one sentence)\n\nThe two doors are documented where the rest of the run family is, their ledger notes say what the `:name` segment does and does not scope, and whether a JS SDK method exists is a recorded decision rather than scope prose.\n\n## Items\n\n1. **Docs route tables (review F7/N2).** `content/docs/automation/flows.mdx` (the run-family table, around the `resume` / `screen` rows) and `packages/services/service-automation/README.md` (same table) list the run family without the two new doors. Add both rows with their gate (`PLATFORM_ADMIN` posture rung, `isSystem` bypass), body `{ reason? }`, and the 501-when-absent shape. ⛔ `content/docs/releases/**` stays untouched.\n2. **`:name` scoping clause (review F5/N5).** Both arms call the verb with `parts[2]` and never check that the run belongs to flow `parts[0]` — the existing convention of `resume` / `screen` / `getRun`. One clause in each `route-ledger.ts` note saying so, so the flow-scoped shape is not read as a scoping the door enforces.\n3. **SDK method decision (review F4/N4).** Both ledger rows are `server-only` with prose \"adding one reclassifies the row to `sdk`\". Record the decision: either file the `client.automation.cancelRun` / `restoreSuspension` card, or state on this card that they stay server-only until an operator asks, and cite that from both ledger notes.\n\n## H-check (one)\n\n`node scripts/docs-audit/affected-docs.mjs` on the head lists neither `flows.mdx` nor the README as naming a route the tree does not document, and `route-ledger.conformance.test.ts` is green with the amended notes.\n\n## Related\n\n#13953 (card) · PR #16755 · #16285 (dogfood not in the derived gate families — separate, already open) · #3877 (Stage-D response-schema ratchet, F8 observation).\n\nFiled by the director seat after the contract review of PR #16755 @ `34feecba7`."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 16541,
+  "kind": "issue",
+  "title": "`os generate` has NO name validation at all — `os generate object foo.bar` emits `const foo.bar: Data.ServiceObject` and a barrel re-export, both un-parseable TypeScript",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T07:59:17Z",
+  "updated_at": "2026-09-08T02:52:57Z",
+  "closed_at": "2026-09-08T02:52:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16541",
+  "body": "Filed **unassigned and bare** by the `domain:cli` execution PM seat (#6024), session `session_01YFY46JydE1gMxQG1TqBcMZ`. ⛔ Not graded here — no `domain:*`, no type, no priority; that is triage's.\n\nMeasured by the `os-dev` seat that delivered #15892 (PR #16536), which was told to **report rather than widen**. It reported; this card is the seat's follow-through on that instruction.\n\n## Measured — driven, not inferred\n\nOn the #15892 branch, driving the built entry:\n\n```\nos generate object foo.bar          exit 0\n\nsrc/objects/foo.bar.object.ts\n  const foo.bar: Data.ServiceObject = {          → 1 syntactic diagnostic\n\nsrc/objects/index.ts\n  export { default as foo.bar } from './foo.bar.object';   → 1 syntactic diagnostic\n```\n\nParsed with TypeScript's own parser (`ts.createSourceFile`, syntactic diagnostics only), the same instrument #15892 used — and that instrument carries a **canary**: over the pre-fix `os create` bytes it reports `1` diagnostic (`\"',' expected.\"`), so a zero from it is a reading and not an inert harness.\n\n## ⭐ Why this is NOT closed by #15892, and is worse than it\n\n#15892 repaired `os create`'s emitted identifier under the maintainer's option-2 ruling (`5564368535`). That repair is scoped to `packages/cli/src/commands/create.ts`. This is a **second door**, and it is wider:\n\n> **`generate.ts` runs NO name validation at all** — no `validateProjectName`, no sanitiser — so its accepted set is **strictly wider** than `create`'s.\n\n⇒ `os create` at least refuses names npm refuses (`validateProjectName`, `init.ts:847`, charset `^[a-z0-9][a-z0-9._-]*$`, gate at `create.ts:512` before any write). **`os generate` refuses nothing.**\n\n⚠️ And the blast radius is larger: **14 emission sites across 7 subcommands** (`os generate object / view / action / flow / dashboard / app / skill`), and the derived identifier is also referenced from a **barrel `index.ts` that the command rewrites** — so one bad name corrupts two files, not one.\n\n## ⛔ The obvious fix is NOT a mechanical lift, and the dispatch's premise on this was wrong\n\nThe dispatching seat assumed the three `toCamelCase` copies were the same function. **Measured, they are not:**\n\n| site | fold |\n|:--|:--|\n| `packages/cli/src/commands/create.ts` (before #15892) | `/-([a-z])/` — hyphen only |\n| `packages/cli/src/commands/generate.ts:455` | `/[-_]([a-z])/` — hyphen **and underscore** |\n| `packages/cli/src/commands/init.ts:720` | `/[-_]([a-z])/` — hyphen **and underscore** |\n\n⇒ Adopting #15892's `sanitizeIdentifier` in `generate`/`init` changes their output for `.`, a leading digit, a digit after a separator and a trailing separator — while the underscore case they already fold **agrees** with it (`a_b` → `aB`). So the helper is not the blocker.\n\n⭐ **The blocker is the acceptance decision.** Sharing the sanitiser would quietly make un-parseable input produce a **legal** identifier for a name the command should arguably have **refused** — i.e. it silently answers an acceptance question by widening tolerance, which is the shape this repo ranks below a loud refusal. That question is the same shape the maintainer just ruled for `os create`, and it needs its own ruling here because `generate`'s starting point (no gate at all) is different from `create`'s (an npm-charset gate).\n\n## What a taker must decide first\n\n**Does `os generate` get an acceptance gate, a sanitiser, or both — and if a gate, is it `create`'s npm charset or something narrower?** ⛔ Do not lift `sanitizeIdentifier` across without answering that; a legal-looking identifier derived from a name that should have been refused is the worse of the two failures.\n\n## Dedup\n\nOne targeted `search_issues` pass, semantic, repo-scoped. **Positive control**: the query returned **#15816** — a known-indexed `os create` emission card — so the index was reached and the near-empty result is a reading, ⛔ not a silent zero. Nothing open covers `os generate`'s identifier derivation. #15816 (closed) is `os create` + npm-illegal names; #14336 (closed) is `os generate` scaffolding kinds `os validate` refuses — a different defect.\n\n## Re-check\n\n```\nnode packages/cli/bin/run.js generate object foo.bar\nsed -n '1,8p' src/objects/foo.bar.object.ts\ngrep -n \"toCamelCase\" packages/cli/src/commands/generate.ts packages/cli/src/commands/init.ts\n```\n\nRefs: #15892 / PR #16536 (the `os create` half, maintainer-ruled option 2) · #15816 · #15530 (emitted scope, with the maintainer)."
+}

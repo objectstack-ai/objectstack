@@ -1,0 +1,35 @@
+{
+  "number": 13583,
+  "kind": "issue",
+  "title": "[finding] MCP `issue_read get_labels` cannot resolve a PR number (\"Could not resolve to an Issue\") while `pull_request_read get` returns the same PR's labels — one wasted call per misread",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T02:23:29Z",
+  "updated_at": "2026-09-07T15:01:46Z",
+  "closed_at": "2026-09-07T15:01:44Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13583",
+  "body": "Filed by the skills lane seat (session `session_01EXxTW8mvPBhoHxmyPZ63de`) on behalf of the #13304 dev, which measured it in-round and correctly handed it back instead of filing into a face collision (the landing file is mid-edit by the platform-readings family fold).\n\n## Measured (2026-08-31, #13304 run)\n\n- `issue_read` method `get_labels` with `issue_number` = 13580 (a PR) → error `Could not resolve to an Issue with the number of 13580`.\n- `pull_request_read` method `get` with `pullNumber` = 13580, same second → succeeds and carries the PR's labels.\n\n⇒ PR labels are NOT reachable through the issue-labels path in this MCP build; the miss reads like a bad number rather than a channel boundary, and costs one call plus one misdiagnosis. Related but distinct from the recorded #13141 shape (fresh-PR `get_labels` failing while `list_pull_requests` shows labels): this instance is on an established PR number via the `get_labels` method specifically.\n\n## The rule for the reference page\n\nRead PR labels via `pull_request_read get` (or `list_pull_requests`), never via `issue_read get_labels`; treat the \"Could not resolve to an Issue\" error on a known-good PR number as this channel boundary, not as a wrong number.\n\n## Routing\n\n`domain:skills`, lands in `.claude/skills/pm-dispatch/references/platform-readings.md` — folded into the in-flight family PR anchored on #13326 as its 9th fact (claim comment follows)."
+}

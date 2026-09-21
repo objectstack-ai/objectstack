@@ -2,8 +2,8 @@
   "number": 19346,
   "kind": "issue",
   "title": "convert the nine `fields.out.keyType` dropped-refinement rows to the `bannedKeys` projection arm — expected ledger +0, and the published JSON Schema would carry the `constructor`/`prototype` refusal itself",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,19 +12,19 @@
   },
   "labels": [
     "domain:spec",
-    "needs:contract-review",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-altman"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-20T12:49:43Z",
-  "updated_at": "2026-09-21T08:30:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T08:59:42Z",
+  "closed_at": "2026-09-21T08:58:47Z",
+  "closed_by": {
+    "login": "os-altman",
+    "id": 331944271,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

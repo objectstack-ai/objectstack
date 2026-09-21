@@ -1,0 +1,35 @@
+{
+  "number": 15921,
+  "kind": "issue",
+  "title": "[finding] `system-context.mdx` re-conflicts faster than one verification lap — the resolve→land window is measurably smaller than the gate union it requires",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:30:17Z",
+  "updated_at": "2026-09-07T14:11:02Z",
+  "closed_at": "2026-09-07T13:52:33Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 18,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15921",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), from a measurement handed back by the #14366 implementer. ⛔ **No severity asserted, no domain routing — that is triage's.**\n\n## The measurement\n\nRepairing PR #15673's conflict took **two full merge rounds**, and the second was forced by the first one's own verification lap:\n\n| | |\n|:--|:--|\n| **Round A** | merged `origin/main` at `4f379125e31`; census re-anchored; CI green |\n| **during round A's 84-family gate harvest** | **#15863 landed** — a *five-line comment change* in `packages/rest/src/rest-server.ts` |\n| **result** | the same **ten anchors** re-rotted; `mergeable_state` dirty again |\n| **Round B** | merged `origin/main` at `abdceef8c68`; census re-anchored again |\n\n⇒ **The window between \"resolve\" and \"land\" is currently smaller than one verification lap.**\n\n⭐ The implementer's own statement of it, which is the finding: *\"Any main PR that moves a line in an anchored source does this.\"*\n\n## Why the existing remedy does not cover this\n\n**#13646** (closed) identified `content/docs/permissions/system-context.mdx` as a generated anchor table that **12 of the last 20 main commits rewrote**, and its remedy was routing the file to the `merge=os-regen` driver. That routing is in place and it works **for merging**.\n\n⚠️ But it does nothing about the *treadmill*, because the cost is not the merge — it is that **every line move in any of the 45 anchored source files invalidates the anchors**, and each repair then owes a full structural census re-derivation plus a gate union that has grown to **84 families** on this diff. The driver resolves; it does not stop the rot, and it cannot shorten the lap.\n\n⚠️ Note also that the driver's behaviour is **input-dependent** — in round A it declined to defer (*\"NOT deferred: the incoming side carries hand-written changes that no regeneration can restore. This file is MIXED\"*) and the merge conflicted; in round B it deferred and auto-committed. So the repair path itself is not stable between rounds.\n\n## Measured cost on this one PR\n\n- **4 commits** added purely to repair (2 merges + 2 re-anchorings), against a branch diff that never changed: still exactly **6 paths**, 363 additions / 39 deletions.\n- The census re-derived **twice**, structurally, each time with the instrument itself proven identical on both sides first — which was not paranoia: **main moved BOTH census scripts inside this window**.\n- The 84-family gate union harvested **twice**, at two heads, byte-identical command lists.\n- Three separate conflict repairs on this one file across the day, on three different PRs (#15673 ×2, #15863, #15849's anchor red).\n\n⭐ And the instance that makes the treadmill self-evident: **the PR whose landing re-rotted #15673 was #15863 — another PR from this same lane.** A comment deletion in one PR invalidated a sibling PR's anchors while that sibling was being verified.\n\n## Not claimed, and the bound is stated\n\n⛔ **No repair is proposed here.** The obvious directions each have a cost this card has not measured — anchoring by symbol rather than line number, generating the table at build time, or narrowing what the census anchors — and choosing among them is a design decision, not a finding.\n\n⛔ Dedup is one semantic search plus the direct predecessor: **#13646** (closed, merge routing), **#15815** (the `merge-tree` probe instrument, now fixed by #15868). The claim here — *the resolve→land window is smaller than a verification lap* — is distinct from both and is newly measured. Not exhaustive.\n\nRefs: #13646, #15815, PR #15673, PR #15863, PR #15849."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 16752,
+  "kind": "issue",
+  "title": "spec: `collectFlowGraphs` dereferences a non-record member of a NESTED region's node list — its own walk, not the caller's",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T03:34:43Z",
+  "updated_at": "2026-09-08T17:48:27Z",
+  "closed_at": "2026-09-08T17:25:38Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16752",
+  "body": "Found while implementing #15793. Filed as a finding only, not claimed. **This is the upstream fork #15793's ruling 2 said to stop and report rather than act on** — it is a `domain:spec` routing question, not the devx seat's call.\n\n## What #15793 settled, and the one shape that reading does not cover\n\n#15793 ruled that both of its casts are consumer-side, on this reading: `collectFlowGraphs` declares its input as `FlowNodeParsed[]` — already-parsed nodes — and is **transparent**, forwarding the caller's array and re-exposing the same object. So a `null` reaching `graph.nodes` is the *caller* handing it raw authored metadata, not the producer admitting one. That reading is correct and #15793 was fixed accordingly (coerce before the call).\n\nIt covers the array the caller passes in. It does **not** cover the arrays `collectFlowGraphs` picks up **by itself**.\n\n## Measured\n\nOn `7c12e475`, with the top-level `flow.nodes` already coerced to records by the caller:\n\n```ts\ncollectFlowGraphs({\n  nodes: [ { id: 'start', type: 'start', config: {} },\n           { id: 'lp', type: 'loop',\n             config: { collection: 'x', body: { nodes: [null, { id: 'inner', type: 'noop', config: {} }], edges: [] } } } ],\n  edges: [],\n});\n```\n\n```\nTHREW  TypeError: Cannot read properties of null (reading 'config')\n    at regionSlotsOf        control-flow.zod.ts:515:20\n    at visit                control-flow.zod.ts:714:26\n    at visit                control-flow.zod.ts:716:9\n    at collectFlowGraphs    control-flow.zod.ts:726:3\n```\n\nThe caller cannot coerce this list: it lives inside `node.config`, and `collectFlowGraphs` is what decides to descend into it. In `visit`:\n\n```\nif (!isRegionDict(slot.raw) || !Array.isArray(slot.raw.nodes)) continue;\nvisit(slot.raw.nodes as FlowNodeParsed[], ...)\n```\n\n`Array.isArray` proves the LIST, never its MEMBERS — the same sentence #15552 / #15636 / #15742 / #15793 removed from four lint readers — and the cast that follows is the producer's own assertion about members it read out of an open `z.record` config, not the caller's.\n\n## Why this is a genuine contract question and not just one more guard\n\nTwo readings, and they route differently:\n\n1. **The recursive-contract reading.** `FlowNodeParsed.config` regions already hold `FlowNodeParsed[]`, so a caller honouring the declared contract could not present a non-record at any depth. Then this is still caller-side, the declared input is simply recursive, and the fix is that no lint reader may hand `collectFlowGraphs` raw metadata at all — a bigger consumer-side change than #15793 made.\n2. **The producer-walk reading.** `collectFlowGraphs` re-derives these inner arrays from an open `z.record` at run time and casts them itself; nothing the caller can do reaches them. Then the guard belongs here.\n\n⭐ Deciding between these is the routing call. #15793 deliberately did not make it.\n\n## A second, independent defect in the same function — the depth ceiling leaks a non-record\n\n`visit` pushes the graph **before** the depth guard returns:\n\n```\ngraphs.push({ scope, nodes, edges });\nif (depth >= MAX_REGION_DEPTH) return;\nfor (const node of nodes) { ... }\n```\n\nSo at exactly `MAX_REGION_DEPTH` (32) the members are never walked, never dereferenced — and a graph whose `nodes` hold a `null` is **returned to the caller successfully**:\n\n```\nnesting 30 : THREW Cannot read properties of null (reading 'config')\nnesting 31 : THREW Cannot read properties of null (reading 'config')\nnesting 32 : OK, 33 graph(s); graphs whose nodes hold a NON-RECORD: 1\nnesting 33 : OK, 33 graph(s); graphs whose nodes hold a NON-RECORD: 0\n```\n\nThis is why the `graph.nodes` guard #15793 landed at its consumer is not dead code: the ceiling is the one route by which a non-record legitimately arrives in a returned `FlowGraph`. Whatever is decided above, a `FlowGraph` handed out with a `null` in `nodes` does not match the declared `readonly FlowNodeParsed[]`.\n\n## Notes\n\n- Both halves are authorable: an empty item in a YAML `nodes:` list under a `loop` body deserialises to `null`, exactly as it did for `fields:` (#15742) and the top-level `nodes:` (#15793).\n- The pin exists and is currently RED-by-ledger: `non-record-object-entry.test.ts` gained a `flows[].nodes[].config.body.nodes` arm in #15793, with the throw recorded in `RESIDUAL_THROWS`. Fixing this card means deleting that row, and the test fails until it goes.\n- ⛔ Widening the declared input to tolerate non-records is the direction #15793 explicitly rejected on the anti-AI-error axis. If the answer is \"guard here\", it should be a filter or a skip in the walk, not a looser signature."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 15418,
+  "kind": "issue",
+  "title": "audit — hotcrm ships 69,419 lines of hand-written test against a 39,734-line metadata app: split them three ways and measure how many lines `os verify` should have derived",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T15:03:13Z",
+  "updated_at": "2026-09-09T01:52:41Z",
+  "closed_at": "2026-09-09T01:52:37Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15418",
+  "body": "Maintainer-requested, 2026-09-04. The deliverable is **a number and its derivation**, not a code change.\n\n## Why this card exists\n\nThis project's central claim is on its own repository description: *\"a complete CRM in under 150k tokens, one context window. Agents read it whole, reason it whole, refactor it whole.\"*\n\nMeasured on `objectstack-ai/hotcrm` at `71a3452` (the 17.3.0 upgrade merge):\n\n| | lines | files |\n|:--|--:|--:|\n| `src/` — the metadata app itself | 39,734 | 172 |\n| **`test/` — hand-written tests** | **69,419** | **169** |\n| `content/` | 26,996 | 243 |\n| `docs/` | 13,476 | 30 |\n| `scripts/` | 3,765 | 13 |\n\n160 `.test.ts` files against 44 object files.\n\nAnd the app's own shrink-only ratchet, whose scope is `src/**/*.ts` minus `src/translations/` and `src/data/`, comment- and blank-stripped:\n\n| layer | scope | reading | ceiling | used |\n|:--|:--|--:|--:|--:|\n| business semantics | `objects` `flows` `actions` `hooks` | 84,060 | 85,000 | **98.9%** |\n| interaction layer | `views` `pages` `dashboards` `apps` | 37,429 | 40,000 | 93.6% |\n| authored total | the above plus the rest of `src/` | 135,830 | 140,000 | **97.0%** |\n\n⚠️ **`test/` is not in that ratchet at all.** Nothing watches it.\n\nSo the honest reading of \"怎么越改越复杂\" is: **the metadata app is disciplined and nearly at its ceiling; the growth is in the half nobody measures — and that half is where the app's actual behaviour is pinned.** An agent that \"holds the app whole\" holds 135,830 tokens of metadata and none of the 69,419 lines that say what it must do.\n\n## What to produce\n\n**A three-way split of all 69,419 lines, by file, with the line count of each bucket.**\n\n**① Should be derived by the platform, is hand-written today.** A test that asserts only that the metadata is self-consistent — it needs no knowledge of the business. Candidates spotted by name and size (⛔ starting set, not the scope, and **not** verified by reading):\n\n```\nmetadata-references.test.ts   1,288    reference integrity\nsharing-coverage.test.ts      1,309    sharing-rule coverage\ndocs-view-rosters.test.ts     1,095    view rosters\ni18n-references.test.ts         866    translation coverage\n                             ─────\n                             4,558    at a glance\n```\n\n**② Genuinely the app's own — business judgement.** The platform cannot know these and should not try:\n\n```\nquote-discount-ceiling.test.ts  898    a discount ceiling is company policy\ncase-assignment.test.ts         897    who a case goes to\nwin-loss-capture.test.ts        857    how won/lost is booked\n```\n\n**③ Grey zone — testing PLATFORM behaviour, but the app carries the cost.**\n\n```\nhooks-runtime-service.test.ts 1,503\naction-sandbox.test.ts          976\n```\nThese assert what a hook does inside the platform's own sandbox. Related: #15325.\n\n## How to do it, and the traps\n\n- ⚠️ **Read the tests. ⛔ Do not classify by filename.** The three names above are a starting hypothesis I formed from names and sizes and explicitly did not verify — treat them as unclassified like everything else, and say so if any of them lands in a different bucket than guessed.\n- **Classify by the question each test asks**, not by what it touches: *\"could this assertion be written by something that has only the metadata, and no knowledge of this company?\"* Yes ⇒ ①. No ⇒ ②. *\"is the subject the platform's behaviour rather than the app's?\"* ⇒ ③.\n- **A file may split.** Report per-file line counts and, where a file straddles buckets, split it at `describe` granularity rather than forcing the whole file into one.\n- **Measure what `os verify` derives TODAY** — `packages/verify/src/derive.ts` and `rls.ts` are its whole surface — and subtract it from ①. The remainder is the actual roadmap: **what bucket ① asks for that the platform does not yet produce.** That subtraction is the point of the card; ① alone is not the answer.\n- ⚠️ `os verify`'s multi-package path has been **deriving zero cases and reporting success** (#15210, fixed by #15229 / PR #15281, landing now). So part of why the app hand-writes is that the derived half could not be trusted. Note where a bucket-① test predates or postdates that, if the history shows it.\n\n## ⛔ What this card must NOT do\n\n- ⛔ **Delete or rewrite a single test.** They are green today and pinning real behaviour; removing one before the platform derives its replacement trades a loud protection for a silent gap. This card produces a **measurement**, full stop.\n- ⛔ Do not build the derivation. The roadmap this produces gets costed and dispatched separately, ordered by the measured demand.\n- ⛔ Do not change hotcrm at all. This is read-only against that repository.\n\n## Deliverable\n\nA record comment on this card (and, if it is long, a file under `docs/` in a docs-only PR) carrying:\n\n1. the per-file three-way table with line counts and a one-line reason per file;\n2. the three bucket totals, and the ① minus already-derived remainder;\n3. a ranked list of the derivation capabilities bucket ① implies, heaviest first — this is `os verify`'s roadmap, ordered by real measured demand rather than by guess;\n4. **the honest reading of the size claim**: `src` + the tests a metadata app cannot avoid writing (② and any of ③ the platform will never absorb) is what a truthful \"how small can a metadata app be\" number looks like. State it.\n\n⚠️ Where the classification is genuinely ambiguous, say so and put the lines in a fourth \"undecided\" bucket rather than forcing a verdict. **An undecided count I can see is worth more than a confident split I cannot check.**"
+}

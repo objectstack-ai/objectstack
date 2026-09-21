@@ -1,0 +1,34 @@
+{
+  "number": 16410,
+  "kind": "issue",
+  "title": "[finding] a fifth live-source site states \"a minted platform id is 26 characters\" — `sys-import-job.object.ts`, outside #16114's four-site population",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T20:10:01Z",
+  "updated_at": "2026-09-08T19:33:51Z",
+  "closed_at": "2026-09-08T19:33:36Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16410",
+  "body": "Found while implementing #16114 (the four `packages/cli` citations), **deliberately not fixed there** — a different package, so a different verification surface. That is #16114's own stated precedent for why #15522 did not fix the `packages/cli` copies. Unassigned, bare, for triage.\n\n## The site\n\nLocate by TEXT — line numbers drift (#16114's own triage anchors had rotted by up to 491 lines within a day).\n\n| file | anchor text |\n|---|---|\n| `packages/platform-objects/src/audit/sys-import-job.object.ts` | `The floor is cleared with room to spare: a minted platform id is 26` |\n\nFull sentence as it stands on `origin/main` `de75e407e53`:\n\n```\n    // The floor is cleared with room to spare: a minted platform id is 26\n    // characters (measured on #11431, where honouring a bound below that made a\n    // column structurally unable to hold any id at all).\n```\n\n## Why this one is the strongest form of the claim\n\n#16114 lists two CHANGELOG copies as out of reach, and notes that the `packages/platform-objects` one says **minted** — \"the strongest form of the false claim\". This is that same sentence in **live source**, in the same package, and it was not in #16114's population of four. The CHANGELOG entry is the historical record OF this comment.\n\n\"Minted\" is the strongest form because it is the one reading that measurement flatly contradicts: the platform mints 16, never 26.\n\n## Measured, this seat, on `origin/main` `de75e407e53`\n\nDriving the real `SqlDriver` against SQLite rather than reading constants:\n\n- **Mint width is 16.** 12 consecutive `create()` calls supplying no id yielded exactly one distinct width, `16`. Samples: `m3rD4WR6sc6XqF-O`, `cevYV0RMKDHMMTbk`, `F6uD2Cz19oQO167i`. The alphabet carries `-` and lowercase, so the shape is a nanoid, not a ULID — a Crockford-base32 check over the samples returns `false`.\n- **A supplied id is stored verbatim at whatever width the caller chose.** Ids of 10, 17, 18, 26, 40 and 200 characters all landed and read back unaltered. With a live non-vacuity control: a query for an id never written returned 0 rows while the table held 6, so the filter really filters.\n- **No ULID is minted anywhere in the repo.** `ulid`, case-insensitive over tracked source, matches exactly 1 file — and that file is `driver-sql`'s own \"do not restore\" guard naming the removed literal. Positive control on the same instrument: `nanoid` matches 26 files, so the instrument fires and the 1 is real.\n- **Width is driver-owned, not a platform constant.** `driver-sql`, `driver-mongodb` and `driver-turso` each spell `DEFAULT_ID_LENGTH = 16`; `driver-memory` mints `objectName-timestamp-counter`, a variable-width shape that is not 16 at all.\n\n## What is NOT claimed here\n\n⛔ **Nothing landed on a false premise, and the surrounding argument survives.** The comment's conclusion is that `created_by` takes `maxLength: 255`, derived immediately above by referenced-column transitivity from the physical `varchar(255)` id column. That derivation is independent of the false number and is **unchanged**. 255 still clears a minted id with room to spare — it clears 16 by more than it clears 26.\n\n⛔ **Not a request to change what anything mints.** `DEFAULT_ID_LENGTH` stays 16.\n\n⛔ **The two CHANGELOG copies stay untouched** — historical records, per #16114.\n\n## Suggested shape of the repair\n\n⛔ Not to swap 26 for 16. An id's width is not a fixed number at all: 16 is what the driver MINTS, while a supplied id is stored at whatever width the caller chose, and the ceiling that actually protects this column is the physical `varchar(255)` the comment already derives. A replacement that names a new fixed number just re-arms the same trap.\n\n⚠️ Note for whoever takes this: the file sits in a package that owns an `i18n-extract.config.ts`, so the edit implicates `check:i18n` and `check:i18n-stale-fill` even though it is comment-only. Measured: adding this file to #16114's diff took the derived gate set from 48 to 49 families. That cost is exactly why it was filed rather than ridden along.\n\nRefs #16114 · #15522 · #11431."
+}

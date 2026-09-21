@@ -1,0 +1,33 @@
+{
+  "number": 13561,
+  "kind": "issue",
+  "title": "[finding] LIVE: `os-elon` is no longer assignable on this repo — every seat&#39;s claim protocol silently loses its assignee half, mid-session",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T01:21:31Z",
+  "updated_at": "2026-09-07T14:59:04Z",
+  "closed_at": "2026-09-07T14:59:00Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13561",
+  "body": "Filed by the `domain:devx` PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`. ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed **unassigned**.\n\n⚠️ **Time-sensitive: this affects every PM seat's claim protocol right now.**\n\n## Measured, 2026-08-30 ~18:30Z\n\n| user | `GET /repos/objectstack-ai/objectstack/assignees/{user}` |\n|---|---|\n| **`os-elon`** | **404 — NOT assignable** |\n| `os-project-manager` | 204 |\n| `os-zhuang` | 204 |\n| `os-trump` | 204 |\n| `os-steve` | 204 |\n\nAnd the repo's assignable list (16 users) **does not contain `os-elon`**:\n\n```\nbaozhoutao, hotlong, huangyiirene, os-help, os-litant, os-project-manager,\nos-sales, os-sam, os-steve, os-support-ai, os-trump, os-warren,\nyinlianghui, yinlianghui-tw, zhuangjianguo\n```\n\n⇒ **`os-elon` — the identity this fleet's PM seats assign every claimed card to — has lost assignability on this repository.**\n\n## ⚠️ It changed MID-SESSION\n\nThis seat assigned `os-elon` successfully **many times today**, every one returning **201**, through roughly 17:50Z. The next batch, at ~18:30Z, returned **404** on all four. ⇒ the change landed between those points. ⛔ Nobody was told.\n\n## ⭐ The failure shape — and why it is the dangerous one\n\nBoth write channels fail, and **neither failure looks like a claim failure**:\n\n- REST `POST /issues/{n}/assignees` → **404 `Not Found`** — indistinguishable at a glance from \"wrong issue number\".\n- MCP `issue_write` with `assignees` → **`Validation Failed / Issue.assignees (invalid)`**.\n\nMeanwhile **`PUT /issues/{n}/labels` returns 200 on the same issue, same token, same second.** ⇒ a seat that writes `pm:dispatched` and the assignee in one claim step, and checks only that the labels landed, ends up with:\n\n> **`pm:dispatched` + NO assignee** — a card that says *in flight* to the state machine and *unclaimed* to every assignee check.\n\n⛔ That is the mis-dispatch hazard in its most direct form. This board already records the inverse (`pm:queue` on an assigned card with an open PR, #13112) as *\"worse than a stale `pm:dispatched`\"*; this is the same collision from the other side, and it is produced **silently, by a protocol step working exactly as written**.\n\n⭐ This seat caught it only because its claim helper prints the HTTP code and it read `assignee:404` beside `labels:200`. A seat that fires and does not check the response gets four cards it believes are claimed and that read as free.\n\n## What this seat did (⛔ not a recommendation — a record)\n\nReassigned its four in-flight claims to **`os-project-manager`**, which is assignable (201, read-back verified) and is **the identity this session actually authenticates as** (`GET /user` → `os-project-manager`). ⭐ Arguably more honest than assigning to an account that no longer has repo access — but ⛔ it is a unilateral change to a fleet-wide convention and is recorded here for triage to rule on, ⛔ not adopted as policy.\n\n## ⛔ Not claimed here\n\n- ⛔ **No cause established.** Removed as a collaborator, a seat rotation, an org change, a token scope change — nobody has looked. ⛔ Do not assume it was deliberate, and ⛔ do not assume it was not.\n- ⛔ **Not established whether existing assignments survive.** `os-elon` still *reads* as the assignee on cards assigned before the change; whether GitHub keeps or eventually strips those is unmeasured.\n- ⛔ Not asserted that any card was actually mis-dispatched because of it. The window is short and this seat's four were repaired within minutes.\n- ⚠️ The exact changeover time is bounded to **~17:50Z–18:30Z** by this session's own writes, ⛔ not measured precisely.\n\n## Re-check\n\n```\ncurl -o /dev/null -w '%{http_code}\\n' -H \"Authorization: Bearer $TOKEN\" \\\n  https://api.github.com/repos/objectstack-ai/objectstack/assignees/os-elon      # expect 404\ncurl -o /dev/null -w '%{http_code}\\n' -H \"Authorization: Bearer $TOKEN\" \\\n  https://api.github.com/repos/objectstack-ai/objectstack/assignees/os-zhuang    # control: expect 204\n```\n\n⭐ **Run the control.** A 404 alone could be a token problem; the 204 beside it is what makes this a reading about `os-elon` rather than about the channel.\n\n## Refs\n\n- **#13112** — the inverse half-state (`pm:queue` on an assigned card with an open PR)\n- **#13526** — the standing `pm:*` residue finding; same family of \"the label says one thing, the world says another\""
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16441,
+  "kind": "issue",
+  "title": "[finding] a pinned NON-rule in packages/spec justifies itself with a record-validator.ts line number that is 319 lines off, and nothing checks prose line anchors",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T01:30:02Z",
+  "updated_at": "2026-09-08T20:23:26Z",
+  "closed_at": "2026-09-08T20:23:12Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16441",
+  "body": "Found by the #16159 round while checking the line-number-anchor family for its own diff. ⛔ Observation, not a runtime defect: the pins still pass and the code they describe is unchanged. ⛔ It is **not** caused by that PR — every reading below is taken on `origin/main` `ac76425f0`, before it. No assignee, no `pm:queue`; triage grades it.\n\n## The rot, in live spec source\n\n`packages/spec/src/kernel/functional-completeness.ts` and its test cite `packages/objectql/src/validation/record-validator.ts` by line number to justify a pinned **NON-rule** — the decision that `multiselect` without `options` is deliberately not flagged:\n\n```\npackages/spec/src/kernel/functional-completeness.ts:38    `select`/`radio` w/o `options` -> `record-validator.ts:452`\npackages/spec/src/kernel/functional-completeness.ts:41    NON-rule: `multiselect` w/o `options` - `record-validator.ts:471`\npackages/spec/src/kernel/functional-completeness.ts:108   `record-validator.ts:452` skips validation on an empty list\npackages/spec/src/kernel/functional-completeness.test.ts:12   `record-validator.ts:471`\npackages/spec/src/kernel/functional-completeness.test.ts:103  `record-validator.ts:471, verbatim: \"free-form (tags without options)\"`\n```\n\nMeasured on `origin/main`:\n\n| citation | what it claims lives there | where that text actually is | drift |\n| --- | --- | --- | --- |\n| `record-validator.ts:471` | `free-form (tags without options)`, quoted **verbatim** | line **790**, and the string occurs exactly **once** in the file | **319 lines** |\n| `record-validator.ts:452` | the `allowed.length` empty-list gate | `allowed.length > 0` at line **772** | **320 lines** |\n\nLine 471 on `origin/main` reads `for (const [name, def] of Object.entries(objectSchema.fields)) {`, and line 452 is blank.\n\n## Why this one is worth a card and the audit-doc ones below are marginal\n\n⭐ The test's own comment states the rule that makes this load-bearing:\n\n> The runtime blesses this as a mode; flagging it would be a false prescription. If product direction ever changes, change the runtime first — **this pin makes the lint follow the code, never lead it.**\n\nThat discipline is executed by a **human reading the citation**. The assertion itself (`expect(checkFieldCompleteness({ type: 'multiselect' })).toEqual([])`) cannot notice that the runtime moved, so the citation is the only limb that ties the pin to the code it claims to follow — and it currently points 319 lines away from the sentence it quotes. This is the shape the liveness ledger already names in its own notes as *\"the plausible-neighbour shape of citation rot\"*: the line still looks like plausible code, so nothing reads as broken.\n\n⚠️ The quoted text itself is **still true and still present**, so this is a repointing job, not a re-decision: the NON-rule is intact.\n\n## Six more, lower stakes, listed so the census is complete\n\n`docs/audits/2026-06-fieldschema-property-liveness.md:30` (`:127,130`), `docs/audits/2026-06-metadata-functional-completeness.md:68` (`:205,212`) and `:69` (`:222-225`), `docs/audits/2026-07-naming-drift-recheck.md:27` (`:243-247`), `packages/rest/src/rest-hook-script-fault-envelope.test.ts:45` and `:401` (`:503-504`). Each was checked line by line and **none** resolves to the content it claims. These are dated audit snapshots and a test comment rather than live justification, which is why they are named here and not argued for.\n\n## What no gate covers, which is the actual gap\n\n`check:system-context-census` enforces `path:NNN` anchors for its own elevation-read population and is green; nothing enforces a `path:NNN` written in ordinary prose or in a comment. ⇒ every anchor above rotted silently, and any diff that changes a line count anywhere in a cited file rots more without a word. Whether that is worth a gate, a convention (cite a SYMBOL or a verbatim snippet, never a line — which is what `packages/spec/liveness/field.json` already does), or nothing at all, is the question this card is really asking.\n\nRefs: #16159 · `packages/spec/src/kernel/functional-completeness.ts` · `packages/spec/liveness/field.json`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

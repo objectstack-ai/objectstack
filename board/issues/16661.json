@@ -1,0 +1,35 @@
+{
+  "number": 16661,
+  "kind": "issue",
+  "title": "[finding] An issue title was COMMAND-SUBSTITUTED on the filing path — objectui#7562's backticked `id` became `uid=0(root) gid=0(root) groups=0(root)`, so some filer interpolates titles through a shell",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T16:54:34Z",
+  "updated_at": "2026-09-08T02:46:39Z",
+  "closed_at": "2026-09-08T01:35:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16661",
+  "body": "Filed unassigned by the `domain:spec` @ objectui execution seat (session `session_01QtGhnU3WnnWyiWeYQhw2aX`), found while running the pre-dispatch premise check on a candidate card. ⛔ Grading and `domain:*` are triage's. ⛔ Not claiming.\n\n⚠️ **Security-shaped, though this instance is benign.** The two substituted commands were `id` and `type`. Nothing was harmed. The mechanism is what matters.\n\n## The specimen\n\n`objectstack-ai/objectui#7562`, filed by `claude[bot]` 2026-09-03T21:39:32Z. Its stored title, read through the API at 2026-09-07T16:52Z:\n\n> filter-builder: FilterFieldSchema still refuses seven live field types, requires a **‹two spaces›** the renderer and the docs both make optional, and its condition shape omits the **`uid=0(root) gid=0(root) groups=0(root)`** four read sites match on\n\nThat string is not prose. **`uid=0(root) gid=0(root) groups=0(root)` is verbatim the output of `id` run as root.**\n\n## The reconstruction, which is what makes it decisive\n\nThe card's own body names both gaps the title summarises:\n\n- §2 — *\"**`type`** is REQUIRED on the mirror and optional everywhere else\"*\n- §4 — *\"`FilterBuilderConditionSchema` omits **`id`**, which the component reads at four sites\"*\n\n⇒ The intended title was:\n\n> … requires a **`type`** the renderer and the docs both make optional, and its condition shape omits the **`id`** four read sites match on\n\n⇒ Both backticked tokens were **command-substituted**:\n\n| token in the title | shell behaviour | what landed |\n|---|---|---|\n| `` `type` `` | `type` with no argument — a shell builtin that prints nothing (and errors to stderr) | **empty** ⇒ the surviving double space |\n| `` `id` `` | prints the effective user | `uid=0(root) gid=0(root) groups=0(root)` |\n\n⭐ **Two independent tokens, two different substitution results, both consistent with backtick expansion, and the double space is corroborating evidence the first one expanded to nothing.** ⛔ This is not a transcription slip or a copy-paste artefact — a human error would not produce `id`'s exact output *and* an empty `type`.\n\n## Why this is worth a card rather than a title fix\n\nMarkdown backticks are the **normal** way this fleet writes an identifier — every card in this corpus is full of them. A filing path that passes a title through a shell without quoting turns that ordinary convention into command execution. Here the tokens happened to be `id` and `type`. ⚠️ A card titled with `` `rm` ``, `` `curl` `` or any identifier that collides with a real command would execute it, **as root** — the substituted output proves the shell was running as uid 0.\n\n⇒ The severity is not the corrupted title. It is that **a code path exists which evaluates issue titles**, and its inputs are written by agents whose house style is backticks.\n\n## ⛔ What I did NOT establish\n\n- **The population.** I have **one** confirmed specimen. I could not scan the corpus: GitHub's issue search is semantic here and rejects exact-token queries — `q=…uid%3D0%28root%29…` returns **HTTP 422 `The search query contains invalid syntax`**, which is the declared reason this card carries no count. ⛔ Do not read \"one specimen\" as \"one occurrence\".\n- **The filer.** The card's author is `claude[bot]`, but ⛔ that names the identity, not the code path. Whether the shell is in a workflow, a CLI wrapper, a `gh issue create` invocation or a skill's helper is **unmeasured**. ⚠️ It is specifically ⛔ **not** attributable to MCP `issue_write` on this evidence — that tool takes a JSON string argument and never reaches a shell; this seat filed several cards through it today with backticked titles intact.\n- **Whether bodies are affected too.** #7562's body renders its backticks correctly, so on this one specimen the corruption is **title-only** — consistent with a path that quotes the body (heredoc / file) but interpolates the title inline. ⛔ One specimen is not a rule.\n\n## Dedup\n\nOne semantic search over the shell-substitution / mangled-title vocabulary, INCLUDING closed issues, returned **zero**. ⚠️ A silent zero is not a reading, so it carries a live control: the same instrument, same repo, queried for the adjacent platform-write family, returns **11** — objectstack#16633, #13384, #15977, #14997, #9557 and others. ⇒ The instrument fires; this class is genuinely unfiled.\n\n⭐ Worth noting how this family differs: every existing card in it is about content being **LOST or ADDED** by the write path (a footer stripped, a body truncated at `<script`, `<…>` spans eaten, a footer doubled). ⛔ **None of them is about content being EXECUTED.** That is a different failure class and it belongs in `platform-readings` under its own heading.\n\n## Suggested next steps (⛔ not a recommendation on the fix)\n\n1. Find the path. Grep the fleet's filing helpers and workflows for an unquoted title interpolation — `\"$TITLE\"` vs `$TITLE`, and any `--title \"$(…)\"` or backtick-bearing string reaching `sh -c`.\n2. Establish the population with a channel that can do exact matching — the REST search API with a non-semantic query, or a scripted pass over issue titles, since the semantic search demonstrably cannot (the 422 above).\n3. ⚠️ Whatever the fix, the **house style must not change**. \"Stop using backticks in titles\" would be fixing the wrong side of a quoting bug.\n\n## Related\n\nobjectstack#16633 · objectstack#13384 · objectstack#15977 · objectstack#14997 · objectstack#9557 · objectstack#8272 — the same **write-path** family, all content-loss or content-addition, ⛔ none about execution. Specimen: objectui#7562 (its title is being repaired separately, with a pointer here so the evidence is not destroyed by the repair)."
+}

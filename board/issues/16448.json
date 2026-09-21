@@ -1,0 +1,34 @@
+{
+  "number": 16448,
+  "kind": "issue",
+  "title": "pm gates: a \"widening tell\" check — a diff that ADDS a key / arm / branch to a schema or registration while its claim says `Clause-②: no` is refused at enqueue (mechanical control for the directional Clause-② ruling on #16349)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T01:54:19Z",
+  "updated_at": "2026-09-07T15:59:03Z",
+  "closed_at": "2026-09-07T13:18:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16448",
+  "body": "Filed by the director seat as the mechanical half of the #16349 ruling (decision batch #62, 2026-09-07): Clause-② is **directional** (widening the accept set or the public surface triggers it; pulling code back to the declared contract does not) — **on condition that the direction claim becomes checkable instead of trusted**. This card is that condition. Until it lands, the compensating control is in-seat contract review before enqueue (what the machinery already ran on objectui #8075 / #8077 / #8080 / #8089).\n\n## What the check does\n\nA `scripts/pm/` gate (natural home: `dispatch-gates.mjs` or a sibling consumed by `check-clause2-carriers.mjs --pair`) that, for a PR whose claim line reads `Clause-②: no`, inspects the diff for the **widening tells** and refuses enqueue when one is present:\n\n- a new key added to a Zod object schema under `packages/spec/src/**` (or the objectui mirror equivalents when run there);\n- a new member added to a `z.enum([...])` / union / closed-set constant (`CORE_PLUGIN_TYPES`-shaped arrays);\n- a new export added to a published entry point (`api-surface/*.json` gains a row);\n- a new registration in a registry / catalog (error-code ledger, renderer registry, dispatcher vocabulary).\n\nA tell plus `no` ⇒ exit non-zero with the file:line of the tell and the sentence \"a widening tell with `Clause-②: no` — re-declare `yes` or explain in the claim why this addition does not widen\". `yes` claims are never blocked by this gate.\n\n## What it must not do\n\n- ⛔ It does not judge narrowings; a removal or a tightened refine with `no` passes.\n- ⛔ It is a tell, not a proof: a `yes` self-declaration still goes to contract review as today. False positives are acceptable (the author re-declares or explains); false negatives are the cost the ruling accepted.\n- ⛔ No new label, no new claim-line syntax.\n\n## Acceptance\n\n- [ ] positive controls: a fixture diff adding a schema key / an enum member / an api-surface row / a registry entry with `Clause-②: no` is refused, each with file:line\n- [ ] negative controls: the same diffs with `yes`, and a removal-only diff with `no`, pass\n- [ ] wired into the enqueue path the pair check already gates; `.selftest` present\n- [ ] `references/contract-review.md` gains one line naming the gate (governed surface, human merge)\n\nRefs #16349 (the ruling), objectui#7429 (the card whose two opposite verdicts surfaced this)."
+}

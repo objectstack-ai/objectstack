@@ -1,0 +1,35 @@
+{
+  "number": 16119,
+  "kind": "issue",
+  "title": "lint: an RLS predicate naming a non-existent field, or an un-pre-resolved `current_user.*` variable, is reported by nothing — both fail CLOSED at runtime",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:09:58Z",
+  "updated_at": "2026-09-09T07:10:38Z",
+  "closed_at": "2026-09-09T05:13:12Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16119",
+  "body": "`@objectstack/lint@17.3.0`. Measured on `objectstack-ai/hotcrm` at `ff43321`, four injections into ONE site — `src/profiles/sales-manager.profile.ts`, policy `opportunity_private_owner_only` on `crm_opportunity`, whose shipped `using` is `is_private == false || owner_id == current_user.id`. Same run, same command (`objectstack lint --json`).\n\n## Measured\n\n| `using` written at that site | lint | finding |\n|:--|:--:|:--|\n| `billing_address.country == \"US\"` (not pushdownable) | **exit 1** | `rls-predicate-unenforceable` at **error** — CONTROL |\n| `is_private == = false` (unparseable) | **exit 1** | `rls-predicate-unparseable` at **error** — CONTROL |\n| `is_private_nope == false \\|\\| owner_id == current_user.id` | **exit 0** | **none** |\n| `is_private == false \\|\\| owner_id == current_user.nope` | **exit 0** | **none** |\n\nBaseline for all four: `passed:true · errors:0 · warnings:17 · suggestions:12`. The two silent rows moved nothing.\n\nSo the RLS rules cover the *shape* of a predicate (does it parse, can it be lowered) and not its *references* — neither the field names nor the `current_user` variables are resolved against anything.\n\n## Why the two silent rows are the expensive ones\n\nBoth fail **closed**, which is the opposite of a cosmetic defect:\n\n- An unknown field is what a column RENAME leaves behind. The policy referencing it stops narrowing the way it was authored to, and the layer denies.\n- `current_user.*` is pre-resolved from a fixed set (hotcrm's own guard names `id`, `organization_id`, `positions`, `org_user_ids`, `email`). An unknown one compiles to nothing and the policy fails closed — **every holder of the permission set loses the object entirely**.\n\nA rename that silently converts an authored narrowing into a deny-all is exactly the class the two shipped rules were written for; it just happens to be the half they do not check. Note this is the same field-existence asymmetry one surface over that #16108 records for `security-fls-unqualified-key` (unqualified key reported, qualified-but-dangling key silent).\n\n## How it was found\n\n`objectstack-ai/hotcrm#1625` retires local test assertions proven duplicate of platform rules. hotcrm's `test/authorization-coverage.test.ts` carries two sweeps — `every predicate is pushdownable and names real fields` and `the first field of a \"using\" predicate exists (the engine drops the policy otherwise)` — which red on **both** silent rows above. Meanwhile `rls-predicate-unparseable` fires on a shape those sweeps accept (their clause regex reads `is_private == = false` as field/op/rhs). ⇒ Neither side subsumes the other, so both assertions were **kept** rather than retired, and the two rule ids were reported as non-retirable.\n\nDedupe ran before filing — #16108, #6778, #3539, #13639 read; none covers this. Unassigned."
+}

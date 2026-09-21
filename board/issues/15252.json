@@ -1,0 +1,32 @@
+{
+  "number": 15252,
+  "kind": "issue",
+  "title": "Action-governance audit cannot reach a SCOPED metadata service at boot: `ctx.getService('metadata')` throws `Service metadata is async - use await` before any read runs (C4 residue of #14423)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T07:14:23Z",
+  "updated_at": "2026-09-07T14:43:18Z",
+  "closed_at": "2026-09-07T14:40:16Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15252",
+  "body": "> ✅ **`Blocked-by: #14423` removed 2026-09-07T11:5xZ** — engine execution seat, session `session_01ADLdAs2pVcH17h9tZKWMBg`, R18. #14423 closed `completed` on 2026-09-04T14:27:19Z (PR #15378, merged), so the line was stale residue: the label already read `pm:queue` while the machine-readable reverse index still named an open blocker. Leaving it would keep #14423 looking like it has an open downstream. ⛔ Nothing else about the card changed.\n\nFiled by the director seat (objectstack #12708, session_01LsEjuNMPitCHwEfYftZ1um) as the separate cut the batch #31 ruling on #14423 requires (2026-09-04, maintainer 「同意」 to `1 D+B`): every mechanism option for #14423's step 2 leaves this cell open, and the ruling says it is not that card's. `domain:engine` set by the director seat per the executing lane; priority and type are triage's.\n\n## The shape\n\nThe `domain:engine` seat's census on #14423 (comment 5536438973, probe scripts under `scripts/audits/`, measured with a real `@objectstack/metadata` + `@objectstack/core` build) found that on an environment-scoped kernel the boot-time action-governance inventory never reaches the SCOPED metadata instance: `ctx.getService('metadata')` throws `Service metadata is async - use await` **before any read method runs**, so neither `loadMany`, `listNames`, `load` nor the keyed read that #14423 adds is ever attempted. The audit then falls back to the same `standalone = []` it falls back to on any thrown source, and reports the scoped declarations as absent.\n\nRecorded facts from the census, not re-measured here:\n- No shipped composition in this repo walks into C4 (the seat measured C6 on the factory `os dev` composition; C4 needs a request-scoped metadata instance read from a boot-time, non-request context).\n- The failure is upstream of #14423's fix: parity on `listNames`, `loadManyKeyed`, and the by-name probe all sit behind the `getService` call that throws.\n\n## What to build (direction only, for triage)\n\nLet the boot-time, non-request-scoped audit obtain the scoped metadata service the way a request would — an awaited resolution rather than the synchronous `getService`, or an injected reader the plugin resolves once — so the audit reads the same instance the router resolves through. Pin with a fixture that composes a scoped metadata service and asserts the audit reports its declarations; ablation: the synchronous read, the fixture goes red.\n\n⛔ Not in scope: the mechanism choice for C2/C3/C6 — that is #14423's ruled D+B.\n\nRe-check: `git grep -n \"getService('metadata')\" origin/main -- packages/objectql/src/plugin.ts packages/objectql/src/action-governance.ts` and the census probes `git ls-tree -r --name-only origin/main -- scripts/audits/ | grep 14423`.\n\nRefs: #14423 (the ruling, batch #31) · #14123 / PR #14421 (the registry rung) · #14205 (identity = store key) · ADR-0110 D5."
+}

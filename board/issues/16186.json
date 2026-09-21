@@ -1,0 +1,35 @@
+{
+  "number": 16186,
+  "kind": "issue",
+  "title": "bug(plugin-auth): published 17.1.0/17.2.0/17.3.0 float `@better-auth/core` to 1.7.3, which dropped `createLocalAccountIssuer` — a fresh `objectstack dev --seed-admin` never creates the system tables and never seeds",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p0"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T05:01:55Z",
+  "updated_at": "2026-09-08T01:57:01Z",
+  "closed_at": "2026-09-07T23:08:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16186",
+  "body": "Deliberately unassigned and unlabelled, for triage. Measured from the objectui side while realigning that repo's live-e2e backend pin (objectui#7689 / objectui PR for that card), which is what surfaced it: the pin had been stale for two minor versions, so nothing had booted a published 17.1.0-or-later backend in that lane until today.\n\n## Symptom\n\nA fresh install of the published showcase app against `@objectstack/*@17.2.0` starts the server and then never seeds. Every system-object read fails:\n\n```\n[sql-driver] DATABASE_ERROR — the backend refused a read on 'sys_user' (SQLITE_ERROR)\n  ... select `id` from `sys_user` where `email` = 'admin@objectos.ai' limit 1 - no such table: sys_user\n[sql-driver] DATABASE_ERROR — the backend refused a read on 'sys_organization' (SQLITE_ERROR)\n  ... - no such table: sys_organization\n```\n\nSame for `sys_permission_set` and `sys_position`. The seeded admin sign-in therefore never answers and any caller polling for readiness times out. The driver's own diagnostic says the quiet part out loud a line earlier: \"this driver did not create the table\".\n\n## Cause\n\nThe CLI logs the real failure at startup, well before the schema step, as an oclif warning that is easy to scroll past:\n\n```\nWarning: SyntaxError\n  plugin: @objectstack/cli\n  message: The requested module '@better-auth/core/db' does not provide an export named 'createLocalAccountIssuer'\n```\n\n`@objectstack/plugin-auth` imports that symbol from `@better-auth/core/db` (present in its shipped `dist/index.js` and `dist/index.mjs`). The installed `@better-auth/core@1.7.3` does not export it — verified by grep over the installed package tree, zero occurrences.\n\nIt reaches 1.7.3 through a floating range, and the version that changed is ours, not theirs:\n\n| published `@objectstack/plugin-auth` | declares `@better-auth/core` | npm resolves | fresh boot seeds |\n|---|---|---|---|\n| `17.0.0-rc.2` | `1.7.0-rc.2` — **exact, no operator** | `1.7.0-rc.2` | **yes** |\n| `17.1.0` | `^1.7.1` | `1.7.3` | no |\n| `17.2.0` | `^1.7.1` | `1.7.3` | no |\n| `17.3.0` | `^1.7.2` | `1.7.3` | expected no — same resolution, not yet booted |\n\nSo the loosening from an exact pin to a caret range is what exposed this, and a `@better-auth/core` minor then removed the export under it. `better-auth` and the sibling `@better-auth/*` adapters float the same way.\n\n## Measurement\n\nBoth legs run in the same container, minutes apart, through objectui's own `e2e/live/ci/start-backend.sh` (sparse-checkout of `examples/app-showcase` at the release tag's commit, rewrite every `@objectstack/*` dep to the pinned version, `npm install`, `objectstack dev --seed-admin --fresh`, poll the seeded sign-in):\n\n| pair | showcase ref | result |\n|---|---|---|\n| `@objectstack/*@17.2.0` | `e7d2cc67fdef7fee9d2c6d65d7363fe1c78ce6a4` (tag `@objectstack/cli@17.2.0`) | install clean (521 packages), server starts, **not ready after 300s**; 4 distinct `no such table` system objects |\n| `@objectstack/*@17.0.0-rc.2` | `89d2a4eb3f3b6b8f8c0fbc4cb3953cbe8218dc66` (tag `@objectstack/cli@17.0.0-rc.2`) | **seeded sign-in answered after 30s**; zero `createLocalAccountIssuer` lines, zero `no such table` lines |\n\nThe control leg is the load-bearing half: it rules out \"this container cannot boot the lane at all\" and attributes the failure to the published version, not the harness.\n\n## Why it went unseen\n\nNothing in the repository that consumes published packages pins them by lockfile — the showcase-app boot path installs at run time with no lockfile at all, so each run re-resolves the floating ranges. A published artifact whose dependency ranges float is only as reproducible as npm's registry state that minute, and a consumer's green from last week says nothing about today.\n\n## Suggested directions, none picked here\n\n1. Pin `@better-auth/core`, `better-auth` and the `@better-auth/*` adapters to exact versions in `@objectstack/plugin-auth`, the way `17.0.0-rc.2` did. Reproducible; costs a release whenever better-auth moves.\n2. Keep the caret range and re-export or re-implement whatever `createLocalAccountIssuer` provided against 1.7.3's actual surface. Fixes today's break, leaves the class open.\n3. Add a smoke test that installs the published tarballs with no lockfile and boots them, so a floating-range break is caught by this repository rather than by a downstream consumer. This is the direction that would have caught it.\n\nWhichever is chosen, `17.3.0` is very likely affected too and worth booting before it is recommended to anyone.\n\n## Downstream\n\nobjectui's `Live E2E (informational)` lane will now go red against the matched pair, by design — a failing matched pair carries strictly more information than a green mismatched one, and objectui#7689's triage forbids repairing it by reverting the pin. That lane is non-blocking, so nothing in objectui is stuck on this; it will simply keep reporting the break until this is addressed.\n\nFiled by an objectui developer seat, via Claude Code.\n"
+}

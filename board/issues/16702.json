@@ -1,0 +1,36 @@
+{
+  "number": 16702,
+  "kind": "issue",
+  "title": "`saveMetaItem` persists the caller's `_packageId`/`_provenance` verbatim, and non-`object` boot hydration reads it back as truth — a Studio GET-then-PUT can brick a tenant's own app with `NOT_OVERRIDABLE` forever",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T23:07:45Z",
+  "updated_at": "2026-09-08T19:46:35Z",
+  "closed_at": "2026-09-08T18:34:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16702",
+  "body": "`saveMetaItem` persists the caller's `_packageId` / `_packageVersion` / `_provenance` verbatim, and for every NON-`object` type boot hydration then reads that body back as the truth — so a Studio GET-then-PUT round trip can make a tenant's own item permanently un-editable.\n\n## The contradiction, in this file's own words\n\n`saveMetaItem`'s docblock already states the rule and the reason (`packages/metadata-protocol/src/protocol.ts`, the `_provenance: 'org' IS STAMPED HERE, SERVER-SIDE` section):\n\n> Client-supplied provenance cannot be trusted here: `metadata-read-decorations.ts` deliberately does NOT strip `_provenance`, so a Studio GET → PUT round-trip echoes whatever the served document carried. Every row this method sees came out of a `sys_metadata` write, which is tenant-authored by definition (ADR-0010 `_provenance: 'org'`) — so the server states that fact rather than reading it back from the caller.\n\nIt then enforces that statement in exactly one place: `applyObjectRegistryMutation` / the boot re-hydration `object` branch, which register `{ ...body, _provenance: 'org' }` on a COPY. **The persisted body is never cleaned, and the non-`object` branch of the same two seams does not restate the fact either** — `hydrateOverlayIntoRegistry` calls `registerItem(type, mergeArtifactProtection(data, artifact), 'name')` with the stored body as-is.\n\nSo for `app`, `view`, `page`, `dataset` and every other non-`object` type, the row's own body decides. `SchemaRegistry.getArtifactItem`'s bare-key fallback accepts that hydrated entry as a code artifact when it carries a truthy `_packageId` that is not the `sys_metadata` sentinel and is not `_provenance: 'org'` (`isCodeArtifactBody` / `isTenantAuthored`), `isArtifactBacked` turns true, and `saveMetaItem`'s overlay gate refuses every later write with `NOT_OVERRIDABLE` — permanently, since the next boot re-derives the same verdict from the same row.\n\n## Reproduction (measured, not argued)\n\nReal `ObjectQL` engine + real `ObjectStackProtocolImplementation(engine, undefined, environmentId)` + real `SchemaRegistry`, `sys_metadata` registered, no code package loaded at all:\n\n```js\nawait protocol.saveMetaItem({\n  type: 'app', name: 'pet_hospital', packageId: 'app.sdbh',\n  item: { name: 'pet_hospital', label: 'Pet Hospital',\n          _packageId: 'app.sdbh', _packageVersion: '1.0.0', _provenance: 'package' },\n});\n// stored row:\n// {\"name\":\"pet_hospital\",\"label\":\"Pet Hospital\",\"_packageId\":\"app.sdbh\",\"_packageVersion\":\"1.0.0\",\"_provenance\":\"package\"}\n\n// fresh engine + protocol over the same driver, then loadMetaFromDb():\n// {\"loaded\":1,\"errors\":0,\"invalid\":0,\"storeUnavailable\":false}\nawait protocol.saveMetaItem({ type: 'app', name: 'pet_hospital', item: { name: 'pet_hospital', label: 'edit' }, packageId: 'app.sdbh' });\n// throws:\n// code=NOT_OVERRIDABLE status=403\n// [not_overridable] Metadata item 'app/pet_hospital' is provided by a code package\n// and the type has not opted into per-org overlay writes (allowOrgOverride=false)\n```\n\nNo code package ships `app/pet_hospital`. The refusal is produced entirely by the tenant's own stored bytes. It is also unconditional once `isArtifactBacked` is true: the writable-base limb above it only re-codes the error when the named base is read-only, so authoring into the org's own writable base does not rescue it.\n\n## Why the cloud fix is not this fix\n\ncloud#2050 / cloud PR #2065 stopped ONE producer — `service-ai-studio`'s `stageDraft` waist — from writing the three keys back. cloud#2069 (PR objectstack-ai/cloud#2111) back-fills the rows already written. Neither closes the door: any other read-modify-write consumer of `GET /meta/TYPE/NAME` → `PUT /meta/TYPE/NAME` re-poisons the row, because the read stamps the envelope (`mergeArtifactProtection`, ADR-0010 §3.3), the read decorations deliberately keep it, and the write persists it. The console's own metadata editors are exactly that shape.\n\nPer the cloud repo's contract-first rule, cloud does not want a tolerant strip in a second consumer; the door belongs here.\n\n## What the fix probably is (a suggestion, not a ruling)\n\nThe three keys are read-side DERIVED — `mergeArtifactProtection` re-computes them from the artifact on every read, so a stored copy is never load-bearing and its removal is observable only where the copy was a lie. Two shapes, both narrow:\n\n1. **Strip at the write door.** `saveMetaItem` drops `_packageId` / `_packageVersion` / `_provenance` from the body it persists, the same three keys and NOT the `_lock*` family (a lock is author-declarable, and dropping one is the fail-open direction — the line cloud PR #2065 drew at its producer).\n2. **Restate the fact at hydration for every type**, not only `object`: make the non-`object` branch of `hydrateOverlayIntoRegistry` say what the `object` branch already says. ⚠️ This one needs care — the artifact's envelope must still win where a real artifact exists, which is what `mergeArtifactProtection` is doing in that same call.\n\n(1) alone converges the stored corpus on what the read already re-derives; (2) alone makes today's rows harmless without rewriting them. Which one — or both — is a maintainer call.\n\nFiled from cloud#2069 (PR objectstack-ai/cloud#2111), which measured the mechanism at framework pin `a5eccf92577490da8a4ee82285fcdcb5b876c0e1` while running against checkout `c383352cb`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

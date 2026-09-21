@@ -1,0 +1,36 @@
+{
+  "number": 16312,
+  "kind": "issue",
+  "title": "The sys_notification migration back-dates created_at through the create-side ?? that #15964 removes, so migrated inbox rows and receipts get the migration instant",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T13:44:13Z",
+  "updated_at": "2026-09-09T00:35:31Z",
+  "closed_at": "2026-09-08T10:51:11Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16312",
+  "body": "Filed from the #15964 round, as the ruling required:\n\n> Any other creator that relied on the create-side `??` is enumerated in the PR body (it is a finding if one exists, not a reason to keep `??`).\n\nOne exists. This is it.\n\n## The creator\n\n`packages/metadata/src/migrations/migrate-sys-notification-to-event.ts` materializes each legacy `sys_notification` row into an inbox row and a receipt, and it deliberately reinstates the ORIGINAL timeline:\n\n```ts\nconst createdAt = row.created_at != null ? canonicalTimestampText(row.created_at) : now();\n...\nawait data.insert(INBOX_OBJECT, {\n    ...\n    created_at: createdAt,\n});\nawait data.insert(RECEIPT_OBJECT, {\n    ...\n    at: isRead && row.read_at != null ? canonicalTimestampText(row.read_at) : createdAt,\n    created_at: createdAt,\n});\n```\n\nBoth calls pass **no options bag at all**, so the write context carries neither `preserveAudit` nor `isSystem`. Before the #15964 fix, `record.created_at = record.created_at ?? now` in the audit binder kept the legacy value and the engine's static-readonly strip spared it (a hook assigned the key). After the fix, the binder stamps the migration instant on the ordinary branch, so **every migrated inbox row and receipt is stamped with the moment the migration ran instead of the moment the notification was created**.\n\n`data` here is a real `IDataEngine` (declared at `:110`), so in production these inserts run the shipped `sys_stamp_audit_insert` hook. The reliance is on the HOOK's `??`, not on the strip, so it does not depend on whether the target object declares `created_at` as readonly.\n\n## Why no test caught it\n\n`migrate-sys-notification-to-event.test.ts` drives the migration through a **fake engine double** whose `insert` records the payload directly. No audit hook runs there, so `expect(inbox.row.created_at).toBe(REPORTED_INSTANT)` passes on both sides of the change. Measured: that suite is `23 passed` at the fixed head. The double is faithful about dispatch (it routes through `assertEngineUpdateDispatch` / `assertEngineDeleteDispatch`) and silent about the before-phase hooks, which is exactly the seam this defect lives in.\n\n## The remedy, and why it is a card\n\nOne context key on each of the two writes — `{ context: { preserveAudit: true } }` — which is the explicit historical-import channel the same ruling preserved (`treatAsHistorical` sets exactly that, `packages/rest/src/import-runner.ts`). It is a card rather than a rider on the ruled PR because:\n\n- it lands in a different package (`@objectstack/metadata`) and needs its own changeset;\n- it needs a test that actually exercises the audit hook, or the fix is unfalsifiable by the same double that hid the defect — that is the substantive half of the work;\n- the ruling asked for enumeration, and named a finding as the outcome.\n\n## Enumeration this came out of\n\nEvery non-generated source under `packages/`, `apps/` and `examples/` carrying `created_at` as an object-literal key was classified by whether the value is the current instant (no reliance on preservation) or an external/back-dated one. Only this file supplies a value that is not \"now\":\n\n| site | value | verdict |\n|---|---|---|\n| `metadata/src/migrations/migrate-sys-notification-to-event.ts:185,197` | the legacy row's `created_at` | **RELIANT — this card** |\n| `metadata/src/loaders/database-loader.ts:1357` | its own `now` | same instant, no reliance |\n| `rest/src/rest-server.ts:8826` | `new Date().toISOString()` | same instant |\n| `services/service-messaging/src/{sql-outbox,sql-http-outbox}.ts` | its own `now` | same instant |\n| `services/service-messaging/src/{inbox-channel,messaging-service}.ts` | the delivery/read instant of the same call | same instant |\n| `services/service-automation/src/{flow-dispatch-store,suspended-run-store}.ts` | its own `now` (one already passes a system context) | same instant |\n| `objectql/src/engine.ts:6741` | `new Date().toISOString()`, and it calls `secretDriver.create` DIRECTLY | not an engine insert at all |\n| `runtime/src/domains/share-links.ts:238` | a response body field | not an insert |\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

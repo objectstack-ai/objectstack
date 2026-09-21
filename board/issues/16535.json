@@ -1,0 +1,37 @@
+{
+  "number": 16535,
+  "kind": "issue",
+  "title": "plugin-auth: `POST /two-factor/verify-totp` on the enrolment lane echoes `user.twoFactorEnabled: false` after the flag has flipped — the vendor's pre-rotation snapshot, which `two-factor-rotated-token-echo` repairs for `token` only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "auth",
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T07:50:08Z",
+  "updated_at": "2026-09-09T07:50:14Z",
+  "closed_at": "2026-09-09T02:00:48Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16535",
+  "body": "Found while binding the `auth.*` return types for #14313 (not fixed there: that card narrows published return types and does not touch wire bytes).\n\n## Reproducible defect\n\nWhen a SIGNED-IN user confirms a new TOTP factor (`POST /api/v1/auth/two-factor/verify-totp`, the enrolment lane), better-auth's handler writes `twoFactorEnabled: true`, rotates the session, and only then calls the `valid(ctx)` closure that `verifyTwoFactor()` built at entry — which still holds the PRE-rotation session and serialises `parseUserOutput(session.user)` from it (`better-auth/dist/plugins/two-factor/verify-two-factor.mjs`, the signed-in branch). So the 200 body reports the user with `twoFactorEnabled: false` although the flag has just flipped server-side.\n\nplugin-auth already knows this closure is stale: `packages/plugins/plugin-auth/src/two-factor-rotated-token-echo.ts` (#10701) repairs the `token` member of that same body from the response's own `Set-Cookie`. It leaves `user` as the vendor echoed it.\n\nMeasured on 2026-09-07, twice — the real `AuthManager` (better-auth 1.7.2) on the in-memory engine, and again on a real `SqlDriver` (better-sqlite3) driven through the real `ObjectStackClient`:\n\n```\nPOST /two-factor/enable {password}         -> 200 { method: \"totp\", totpURI, backupCodes }\nPOST /two-factor/verify-totp {code}        -> 200 { token: \"(live rotated token)\", user: { …, \"twoFactorEnabled\": false, … } }   ← stale\nPOST /two-factor/verify-backup-code {code} -> 200 { token, user: { …, \"twoFactorEnabled\": true, … } }                            ← the next read shows the flip\n```\n\n(`verify-backup-code` on the signed-in lane does not rotate and echoes the live row, which is how the stale value is visible without a second request.)\n\n## Why it matters\n\nThe Account portal's enrolment flow reads this body to render \"2FA is on\"; a client that trusts `user.twoFactorEnabled` here renders the factor as still OFF right after the user enabled it, and a bearer client that caches the echoed user carries the wrong flag until its next `get-session`.\n\n## Expected\n\nOn the rotating 2FA verify routes, when the response staged a session cookie whose token differs from the one echoed (the exact condition `two-factor-rotated-token-echo.ts` already keys on), the echoed `user` should be the post-flip row — re-read from the adapter, or at minimum `twoFactorEnabled` set from the write the handler just made — so the body and the row agree.\n\n## Where\n\n- `packages/plugins/plugin-auth/src/two-factor-rotated-token-echo.ts` — the after-hook that repairs `token` on `ROTATING_TWO_FACTOR_VERIFY_PATHS`.\n- Vendor: `better-auth/dist/plugins/two-factor/verify-two-factor.mjs` (closure over the entry-time session) and `two-factor/totp/index.mjs` (rotation before `valid(ctx)`).\n\nDedup: open `domain:cli`, `domain:services` and `domain:runtime` cards listed via REST and grepped for `twoFactorEnabled`, `verify-totp` / `verifyTotp` and bearer/rotation — zero hits, with the control terms `exported-any-returns` and `better-auth` answering."
+}

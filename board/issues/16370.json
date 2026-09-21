@@ -1,0 +1,38 @@
+{
+  "number": 16370,
+  "kind": "issue",
+  "title": "MCP `run_action` on a flow action answers `ok: true` and starts the run on a row the caller cannot read (or that does not exist) — the flow door still turns a denied load into an implicit grant",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "mcp",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T15:36:36Z",
+  "updated_at": "2026-09-08T11:43:22Z",
+  "closed_at": "2026-09-08T11:41:10Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16370",
+  "body": "## Summary\n\nMCP `run_action` on a **flow-typed** action answers `ok: true` and starts the run for a `recordId` the caller cannot read — and for a `recordId` that names nothing at all. The caller-scope load fails, the door stamps `record = { id: recordId }`, and the flow starts on that stub. Nothing in the MCP response tells the agent the row was not delivered.\n\nThis is the flow-door sibling of the rule #15079 already wrote into the declarative-update door (\"a swallowed load must never become an implicit grant\" — `executeDeclarativeUpdateAction` throws `recordNotFoundError` on `subject.recordLoadDenied` before any work). #14244 / #15168 carried the `recordLoadDenied` signal INTO the flow context, explicitly context-only: \"whether the automation engine acts on it (a flow-level refusal, a step condition) is a separate reading\". This card is that reading, as seen from the MCP caller's side.\n\n## Measured (hotcrm @ `5e08628f`, `@objectstack/{mcp,runtime,service-automation}` 17.2.0, Claude Code desktop via `x-api-key`, principal human)\n\nCaller: `na.rep@objectos.ai` — profile `sales_rep`, `crm_lead` is private OWD + `readScope: 'own'`, she owns no leads.\n\n1. `get_record(crm_lead, I1EsT9vv-FUP6jym)` → `Record I1EsT9vv-FUP6jym not found in crm_lead` (RLS, existence non-disclosure — correct).\n2. `update_record(crm_lead, I1EsT9vv-FUP6jym, {next_followup_date})` → `You do not have access to this record.` (correct).\n3. `run_action(schedule_followup, recordId: I1EsT9vv-FUP6jym, params: {subject, dueDate, activityType, priority})` →\n   ```json\n   { \"ok\": true, \"action\": \"schedule_followup\", \"objectName\": \"crm_lead\", \"recordId\": \"I1EsT9vv-FUP6jym\",\n     \"result\": { \"success\": true, \"status\": \"paused\", \"runId\": \"run_94fcb26b-9fe6-4c4e-b347-3f10ef46ef7e\", \"durationMs\": 1, \"screen\": { \"nodeId\": \"screen_1\", ... } } }\n   ```\n4. Same call with `recordId: \"does-not-exist-0000\"` → identical shape, `ok: true`, `status: \"paused\"`, `runId: run_8827846a-…`.\n\nSo the same agent that is told \"not found\" by `get_record` and \"no access\" by `update_record` is told \"ok\" by `run_action` on the same id, and a persisted paused run now exists for a row the caller has never demonstrated read access to. (Nothing was written on 17.2.0 only because `schedule_followup` is a screen flow and the screen node parks the run before its `get_record` / `create_record` / `update_record` nodes — see #15705.)\n\n## Where it stands on `main` (read at `packages/runtime/src/action-execution.ts`)\n\n- `loadActionSubjectRecord` sets `recordLoadDenied = true` on both a thrown 404 and a resolved-but-empty load; the id is still stamped onto `record` (kept on purpose for record-less actions).\n- Declarative-update door: `if (subject.recordLoadDenied) throw recordNotFoundError(objectName, recordId)` — refused before any write (#15079).\n- Flow door: `dispatchFlowAction(…, { subject, … })` spreads `recordLoadDenied: true` into the `AutomationContext` (#15168) and **starts the run**; the response is `{ ok: true, … }` with no trace of the verdict.\n- Script/body door: same — the handler gets `ctx.recordLoadDenied`, the caller gets `ok: true`.\n\n## Why this matters more after #15787\n\n#15787 (landed 2026-09-05, `Part of` #15705) makes a screen node NOT park when the caller already answered its required fields. With that, the run in step 3 no longer stops at `screen_1`: it proceeds into `get_lead` (caller-scoped, returns nothing), `create_task` (owner `$User.Id`, `related_to_lead` = an id the caller cannot read) and `stamp_lead` (`update_record` on the hidden row). The flow's own data nodes run as the caller (`runAs` user), so the last step should be refused by the data plane — but by then a task referencing a row the caller cannot see may already exist, and the agent was told `ok: true` at the door. A flow declaring `runAs: 'system'` (a documented authoring option) would stamp the hidden row outright; the only guard is an author-written decision node on `ctx.recordLoadDenied`, which #15168's own docs describe as opt-in.\n\n## Expected (either, or both)\n\n1. **Refuse at the door**, mirroring #15079: a row-scoped flow or script action invoked with a `recordId` whose caller-scope load was denied is refused with the shared not-found envelope (`RECORD_NOT_FOUND`, 404) before the run is created — for actions that are NOT record-less (`requiresRecord: true` / a non-object-less key). Record-less and new-record actions keep the stamp behaviour untouched.\n2. At minimum, **surface the verdict to the caller**: `run_action`'s result carries `recordLoadDenied: true` (same `true | undefined` shape the context uses), so an agent can stop instead of reporting success.\n\n## Not claimed\n\n- No exploitation claim; on `runAs: 'user'` flows the data nodes are caller-scoped. This is a door-level \"implicit grant + false success\" defect, not a data-leak report.\n- Not a request for an MCP resume verb (that is #15705's held item).\n- Not asking to disclose existence: the not-found envelope is the right refusal, as #15079 argues.\n\nRelated: #14143, #14244, #15168, #15079, #15705, #15787. Companion observations from the same session are in #15705 (screen-flow dead end) and objectstack-ai/hotcrm#1578.\n"
+}

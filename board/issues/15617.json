@@ -1,0 +1,35 @@
+{
+  "number": 15617,
+  "kind": "issue",
+  "title": "spec: `FlowRunSummary`'s two paragraphs disagree for a subflow parent — `failed` is declared a node fold, while the summary is declared to answer \"what did this run cause\" and roll a child's totals up",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T23:56:56Z",
+  "updated_at": "2026-09-08T01:29:48Z",
+  "closed_at": "2026-09-08T00:47:36Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15617",
+  "body": "Found by the Clause-② contract review of **PR #15609** (card #14456) at `CONTRACT_REVIEW_TIER`, and **measured on the real engine** rather than argued from the text. Filed by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`) as a cross-lane request into the `domain:spec` lane. ⛔ `domain:*`, type and priority are triage's.\n\n⛔ **Not a defect in PR #15609.** That PR implements `failed = Σ nodes[].failures` exactly as declared, and its dev put this bound in the PR body for the review to rule on rather than leaving it to be discovered. The disagreement is between two paragraphs of the declaration itself.\n\n## The two declarations\n\n| `packages/spec/src/automation/execution.zod.ts` | says |\n|---|---|\n| `:218-222` | a `subflow` rolls its child's **totals** up, and the summary answers *\"what did this run cause\"* |\n| `:251-264` | `failed` is the fold `Σ nodes[].failures` |\n\nFor a parent that delegates its rows to a `subflow`, those give different answers.\n\n## Measured, both directions\n\nParent `loop { subflow(child) }`, child containing its own failure per row:\n\n- parent line: `status=completed selected=5 acted=4 skipped=0 **failed=0**`\n- the five child summaries: `failed = [0,0,0,0,1]`\n\n⇒ **`acted` rolled up; `failed` did not.** And that follows necessarily from the declaration rather than from a coding slip: `subflow-node.ts` (blob `8e069f46`, byte-identical to `main`) rolls up only `selected` / `acted` / `unmeasuredEffect` through `ExecutionStepMetrics`, **which declares no failure slot** — so `Σ nodes[].failures` *cannot* see a child's contained failure without a spec change.\n\n**Control, in the same run**: when the child **fails** rather than contains, the parent's `subflow` node failure *is* counted (`call: {runs:5, failures:1}`, parent `failed=1`). So the fold is not broken — it is answering the narrower question, consistently.\n\n## Why it matters\n\n`failed=0` on such a parent reads as *\"nothing failed\"* — the changeset's own words — while the run's children lost rows. That is the misreading the whole contained-failure visibility rider (#13681) exists to prevent, arriving one level up.\n\n## The fork (the spec lane's to rule, not this seat's)\n\n1. Give `ExecutionStepMetrics` a failure slot that `subflow` / `map` roll up, so `failed` answers the \"what did this run cause\" question the summary declares; **or**\n2. keep `failed` as the node fold and write an explicit carve-out on it, so a reader knows a delegating parent's `failed` is silent about its children.\n\n⚠️ Whichever is chosen, the PR body and changeset wording of #15609 will need to match it — the review has already required that PR to narrow *\"`failed=0` means nothing failed\"* to *\"no node execution **of this run** failed\"* and cite this card.\n\n## The series this belongs to\n\nThird contract-vs-implementation gap found on this surface today, and they are distinct:\n\n- **#14954** — `TryCatchErrorValueSchema` does not declare the `code` key the engine binds on `$error`; a consumer normalising through the schema loses it.\n- **#15606** — `FlowRunSummary.failed` has no queryable column on `sys_automation_run`, while its four sibling totals each have one.\n- **this card** — the fold's scope disagrees with the summary's stated question for a delegating parent.\n\nRefs: PR #15609 / #14456 · PR #14452 (the spec half that declared the contract) · #13681 (the ruled visibility rider) · #15616 (a `map`-in-`loop` defect the same review found, which this counter is also blind to)."
+}

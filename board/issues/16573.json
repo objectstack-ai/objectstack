@@ -1,0 +1,34 @@
+{
+  "number": 16573,
+  "kind": "pull_request",
+  "title": "docs(ci, AGENTS.md): the merge queue runs the affected set, not the full package list — two stale sentences corrected",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T10:07:47Z",
+  "updated_at": "2026-09-08T02:13:03Z",
+  "closed_at": "2026-09-08T02:13:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-08T02:13:02Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16573",
+  "body": "Fixes #16479\n\nTwo sentences still described CI's merge-queue scoping as it was before #16453 (PR #16471, merged 2026-09-07T03:37:21Z). Both are corrected here; nothing else changes. Text only — no CI behaviour is touched.\n\n## What is true on `main` today\n\n`scripts/ci/select-shard-packages.sh` decides `Test Core`'s package set per event:\n\n| event | package set |\n| --- | --- |\n| `pull_request` | affected set against `merge-base(origin/BASE_REF, HEAD)`, unioned with the cross-package scans |\n| `merge_group` | affected set against the group's own `base_sha`, with the same union |\n| `push` | **the FULL list, unchanged** |\n\nSo `push` on `main` is the one build that still partitions the full package list — and it stays that way until #16467 lands, which then owns that sentence again. Both corrections say only what is true today.\n\n## Correction 1 — `AGENTS.md` §7 (Multi-agent working discipline, \"Re-arm awareness\")\n\nBefore:\n\n> auto-merge, often on a package your PR never touched (the queue runs the full suite; the\n> PR ran affected-only) — diagnose against `merge-queue-triage.yml`'s comment, recognise a\n\nAfter:\n\n> auto-merge, often on a package your PR never touched (it runs the merge group's affected\n> set, not just yours) — diagnose against `merge-queue-triage.yml`'s comment, recognise a\n\nThe sentence's job is to explain why a queue red lands on a package the PR never touched. The old answer (the queue ran everything) is gone; the current answer is that the queue's affected set is computed against the GROUP's base, so it covers every entry in the group, not just this PR's diff. Same register, same length, same advice.\n\n## Correction 2 — `scripts/check-cross-package-test-inputs.mjs` header, Layer B\n\nBefore:\n\n```\n//     the same before and after any change outside `packages/spec`, so even the\n//     merge-queue and push builds -- which deliberately partition the FULL\n//     package list, not the affected subset -- replay a cached green.\n```\n\nAfter:\n\n```\n//     the same before and after any change outside `packages/spec`, so even a\n//     build that partitions the FULL package list -- `push` on `main` today,\n//     the merge queue too until #16453 -- replays a cached green.\n```\n\nLayer B's argument is unchanged: a full-list build still replays a cached green, which is why full-list coverage was never the protection. The full-list build is now `push` alone; the queue is named as a former one so the next paragraph — `Layer B is why the merge queue did not catch it`, past tense about #7802 — keeps its antecedent.\n\n## The line pin — measured, not recalled\n\nThe card cited `AGENTS.md` at **1058/1058 — fold-paid**. That number is stale (it is the count this repo's `AGENTS.md` had before PR #15885 landed). The real mechanism and the real reading:\n\n- Gate: `pnpm check:pm-skill-ratchet` → `scripts/pm/check-skill-line-ratchet.mjs`, `CEILINGS`.\n- Entry: `['AGENTS.md', 1068]` — raised 1058 → 1068 by PR #15885 (the merge-tree corollary), re-pinned at the landed count, **headroom 0**.\n- `origin/main` measures `wc -l AGENTS.md` = **1068**. The pin is AT its ceiling.\n\nSo the correction had to be **line-neutral**, and it is: the replacement text is rewrapped inside the existing two lines (57 → 56 characters of parenthetical), `wc -l` after the edit is still **1068**, and the widest line in the touched paragraph is unchanged at 93 bytes (budget 120, `MAX_LINE_BYTES`). ⛔ No ceiling was raised. The second ratchet in that file, `MAX_TABLE_ROW_BYTES` (`['AGENTS.md', 768]`), is untouched — no table row is in the diff.\n\nThe script header is not ratcheted; its correction is line-neutral anyway (3 lines → 3 lines).\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 38 commands from this diff (2 paths). Every one was run and reconciled with `--ran`. Results are in the report on #16479; the families that actually read these two files:\n\n- `pnpm check:pm-skill-ratchet` — the `AGENTS.md` line pin (1068/1068).\n- `pnpm check:pm-governed-prose`, `pnpm check:pm-governed-merges`, `pnpm check:pm-skill-id-lint` — the `AGENTS.md` reading gates.\n- `pnpm check:cross-package-test-inputs` — the edited script's own gate, plus `check:self-test-wired`, `check:scripts-symbol-anchors`, `check:comment-mask-corpus`, `check:published-list-mirrors`, `check:declaration-mirrors`.\n- `pnpm check:nul-bytes`, plus a manual control-character sweep over both files.\n\n⛔ The heavy test fleet was deliberately not run: no executable line is in this diff.\n\n## Changeset\n\n`skip-changeset`. Per `AGENTS.md` §Prime Directives item 3, that label is for a diff that publishes nothing from any released package — a repo-root instruction file and a repo script's comment header publish nothing. ⛔ The label is NOT applied here: the dispatch reserved repository labels to the PM for this card, which conflicts with the standing dev clause that the author applies it on PR open. Flagged in the report; the PM applies it.\n\n## Landing\n\nThis PR is **governed** (`AGENTS.md` is a governed surface — one hit governs the whole PR). It stays **DRAFT**: no ready flip, no auto-merge, no queue. It waits for a maintainer's hand merge.\n\n## 维护者速读(草稿)\n\n**改了什么** — 两句关于 CI 合并队列跑多少测试的描述句,一句在 `AGENTS.md` §7,一句在 `scripts/check-cross-package-test-inputs.mjs` 的文件头注释。只改文字,不改任何 CI 行为、不改任何可执行代码。\n\n**为什么改** — PR #16471(卡 #16453)已经把合并队列从「跑全量包」改成「跑该合并组的受影响包集」。这两句仍按旧事实写,一句还是 agent 每次排队失败时照着诊断的那句,读错会把一次正常的连带红判成自己的问题。现在只有 `main` 上的 `push` 还跑全量;#16467 落地后这句归它再改一次。\n\n**风险与代价(含回滚)** — 风险接近零:纯文本,无行为面。`AGENTS.md` 的行数上限 1068 已经顶格,本次改动做成了行数中性(改后仍是 1068 行),⛔ 没有抬任何棘轮上限。回滚就是 revert 这一个 commit,无迁移、无发布物、无 changeset。\n\n**席位意见** — (留空,待复核席填)\n\n**你要做的** — 读一遍两处 before/after,认可后手工合并这个 PR(受管面,⛔ 不走队列)。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8)_"
+}

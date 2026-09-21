@@ -1,0 +1,37 @@
+{
+  "number": 15297,
+  "kind": "issue",
+  "title": "[finding] Two more source comments name out-of-repo app paths as live — `objectql/src/plugin.ts:142` and `cloud-connection/.../marketplace-install-local-seed-replayer.test.ts:16`, both missed by #14806's census",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T09:00:04Z",
+  "updated_at": "2026-09-08T23:45:54Z",
+  "closed_at": "2026-09-08T22:58:06Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15297",
+  "body": "Found while implementing #14806 (dev seat, session `session_01D47qPfEWVPmhguWgBZCi5N`, branch `claude/issue-14806-out-of-repo-app-path-comments`). Filed unassigned for triage. Deliberately NOT swept by that branch — both sites are outside the file surface that branch declared before editing, and one is in another package family, so editing them would have made a declared claim untrue while another lane was reading it.\n\n## The class, already established\n\nA source comment naming a repository path is a checkable claim. `apps/objectos` and `apps/cloud` were deleted from this repo and now live in `objectstack-ai/cloud`. #14634 fixed three such sites, #14806 fixed six more. These two are the same defect and were in neither census.\n\nPositive control, because the claim is a negative — `apps/` is not empty and the query is not broken:\n\n```\n$ git ls-tree origin/main -- apps/\n040000 tree f281e0156f1e4569560b79b9899d3ea56cfb7f1d\tapps/docs\n```\n\n## Site 1 — `packages/objectql/src/plugin.ts:142`\n\nTSDoc on the `skipSchemaSync` option. Present tense, unmarked:\n\n```ts\n  /**\n   * Skip both `syncRegisteredSchemas()` calls inside `start()` and\n   * assume DDL is managed out-of-band (e.g. an `apps/cloud/scripts/migrate.ts`\n   * run before deploy that connects directly to the database and creates\n   * all `sys_*` + custom tables once).\n```\n\n⭐ This is the **same sentence, about the same script**, as `packages/cli/src/commands/serve.ts`'s migrate-and-exit note — which #14806's branch has just fixed. They were written as a pair and drifted apart because only one of them was ever in a census. The referent is genuine, so the disposition is to mark it out-of-repo, not to rename or delete it.\n\n## Site 2 — `packages/cloud-connection/src/marketplace-install-local-seed-replayer.test.ts:16`\n\n```ts\n// A runtime that declares no data of its own — `objects: []`, no `data`, which is\n// exactly what a marketplace-install target looks like and exactly what\n// `apps/objectos-ee` is — therefore ended up with `seed-datasets` POPULATED and\n// `seed-replayer` ABSENT.\n```\n\nWeaker than site 1 — it is a test's rationale, not an instruction — but it is the only `apps/objectos-ee` mention in the tree that does **not** mark the app as living elsewhere. Its three siblings all do: `service-cluster/src/multi-node-gate-mount.ts:9` (\"cloud repo\"), `service-cluster/src/multi-node-gate.test.ts:227` (\"cloud: …\"), `packages/types/src/node.ts:72` (\"Measured on cloud's …\"). Consistency is the whole value here.\n\n## The spelling to copy — do not invent a fourth one\n\nTake it from the branch above, so the sweep ends with one house style rather than four. `serve.ts`'s migrate-and-exit note now reads:\n\n```ts\n      // Out-of-band migration mode: the caller (e.g.\n      // `apps/cloud/scripts/migrate.ts`, which lives in the separate\n      // `objectstack-ai/cloud` repo and is NOT a path in this one) just\n      // wants the kernel bootstrap (ObjectQLPlugin → schema sync →\n```\n\nThe oldest in-repo precedent is `multi-node-gate-mount.ts:9`'s terse \"(`apps/objectos-ee/objectstack.config.ts`, cloud repo)\". Either is fine; a third is not.\n\n## The trap, unchanged and still the whole risk\n\n⛔ Grep for the **paths** `apps/objectos` and `apps/cloud`. ⛔ **Never** for the bare tokens `objectos` or `cloud` — `objectos.ai`, `cloud.objectos.ai`, `DEFAULT_CLOUD_URL`, the root-domain guard, `admin@objectos.ai` as the dev seed address and the plugin ids `objectos-ee` / `objectos-runtime` / `objectos-environment` / `objectos-stack` are all correct, several matched as literal plugin ids inside `serve.ts`. A token sweep breaks working code.\n\n⛔ Do not add an `apps/objectos` or `apps/cloud` directory to this repo to satisfy any comment.\n\n## Explicitly NOT in this card\n\n- **`packages/cli/src/commands/package/publish.ts:168`** stays on #14806 — it is a CLI help example string, not a comment, and that card's dispatch was ruled to comment text only. It is the remainder there, which is why that branch's PR says `Part of` rather than a closing keyword.\n- **`packages/cli/src/commands/serve.ts:133`** is #15295 — a live cross-repo sync obligation, a decision rather than a rename.\n- **`packages/observability/README.md:39`** is listed for completeness and is **not** asserted as a defect: it already reads \"handled in apps/cloud — see that repo's exporter\", which does mark the referent as out-of-repo, just without naming the repo. A seat may tighten it while here; nothing is wrong if it does not.\n- **`packages/spec/prompts/architecture.md:26`** is a product-strategy inventory listing `apps/www` / `apps/marketplace` / `apps/studio` beside `apps/cloud` — none of those is in this repo either, so it is not making a claim about this tree.\n- The `_console/apps/cloud_control/...` matches in `cloud-connection/README.md`, `cloud-connection/src/runtime-config-upgrade-url.test.ts` and `spec/src/ui/inline-action.test.ts` are a different path (a Console route), and every `CHANGELOG.md`, `ROADMAP.md` and `docs/adr/**` hit is a historical record. ⛔ Never rewrite those.\n\nRefs: #14806, #14634, #15295."
+}

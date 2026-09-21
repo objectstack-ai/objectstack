@@ -1,0 +1,33 @@
+{
+  "number": 16986,
+  "kind": "pull_request",
+  "title": "ci(lint): add a `.sh` arm to select-gate-families's pm_dispatch_gates read-set",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T23:32:04Z",
+  "updated_at": "2026-09-09T00:15:00Z",
+  "closed_at": "2026-09-09T00:14:59Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-09T00:14:59Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16986",
+  "body": "Part of #16769.\n\n## Half 1 only — half 2 stays open, the card stays queued\n\nThis PR lands only the first of the card's two halves: the one-line `*.sh` arm\nin `pm_dispatch_gates`'s read-set, plus a self-test case that drives the real\nwindow. It closes nothing. Half 2 — pinning the selector's key sets to the\ngates' *live* read-sets so this class of drift cannot recur — is a design\nquestion the card explicitly declines to prescribe a shape for, and stays\nunaddressed here. `objectstack-ai/objectstack#16769` remains open and queued\nafter this merges.\n\n## What changed\n\n`family_reads`'s `pm_dispatch_gates` branch classified a modified (`M`) shell\nscript that is not masked source, not a `.gitignore`, and sits directly under\n`packages/**` / `apps/**` / `examples/**` (not inside a `*/scripts/*`\nsubdirectory) into the `workspace` class, whose arm returns 1 (skip) for\nanything but `*/package.json` or `*/scripts/*`. But `scripts/pm/dispatch-gates.mjs`'s\nself-test reads the CONTENT of every tracked `.sh` file (a live census\nasserting the shell-comment mask never adds a watch hint), so such a path\nshould always run `pm_dispatch_gates`.\n\nAdded `case \"$path\" in *.sh) return 0 ;; esac` beside the existing\n`*/.gitignore` arm, before the class switch — so any `.sh` file runs the\nfamily whatever class it sits in, matching how masked source and\n`.gitignore` are already handled. Updated both comments describing this\nfamily's read-set in the same voice.\n\nThis is superset-only by construction: it can only make `pm_dispatch_gates`\nrun *more* often on a path that previously skipped, never less.\n\n## Self-test case, and the before/after ablation the card requires\n\nAdded `packages/a/foo.sh` (workspace class, not under `*/scripts/*`) to the\nself-test's fixture tree, and a case modifying it at status `M`:\n\n```\nS=$(scenario M:packages/a/foo.sh)\nrun_case 'merge_group: a workspace shell script outside scripts/ is still gate source, not a skipped non-source workspace file (#16769)' \"$REPO\" merge_group '' \"$C0\"\nexpect_rc 0\nexpect_warnings '' ''\nexpect_verdicts pm_dispatch_gates\nexpect_reason pm_dispatch_gates packages/a/foo.sh\n```\n\nRun against the **unmodified** script (the `.sh` arm reverted, self-test\notherwise identical) — the new case fails, demonstrating the real hole:\n\n```\nFAIL  pm_dispatch_gates reason mentions: packages/a/foo.sh\n      got: pm_dispatch_gates skip no changed path is in its read-set\n      -- output --\n      | Gate families: 0 run, 5 skipped  (event: merge_group; changed paths: 1)\n      |   skip  pm_dispatch_gates      no changed path is in its read-set\n      |   skip  query_options_erasure  no changed path is in its read-set\n      ...\nSELFTEST FAILED (40 cases, 192 checks)\n```\n\nRun against the **fixed** script — the case passes and the full battery is\ngreen:\n\n```\nall 40 cases passed (192 checks)\n```\n\n**Negative control (mandatory)**: the pre-existing case at\n`M:packages/a/src/data.json` (\"a non-source, non-manifest workspace file\nskips every family\") still asserts `expect_verdicts` (empty — all skip) and\npasses post-fix, confirming the new arm did not escape its intended scope\ninto an early, over-broad `return 0`. The pre-existing merge_group docs-only\ncase (`docs/guide.md`, status `M`) likewise still asserts `expect_verdicts`\nempty (all skip) post-fix.\n\n## Re-check commands, re-derived before and after (on `origin/main` `3030369e94`)\n\n```bash\ngrep -n 'gitignore' scripts/ci/select-gate-families.sh\ngrep -c 'shellGrew' scripts/pm/dispatch-gates.mjs\ngit ls-files '*.sh' | wc -l\n```\n\n| command | before (this branch's base) | after (this PR) |\n|---|---|---|\n| `.gitignore` arm line | `:320  case \"$path\" in */.gitignore) return 0 ;; esac` | `:323  case \"$path\" in */.gitignore) return 0 ;; esac` (the new `*.sh` arm now sits at `:322`, immediately above it) |\n| `shellGrew` in `dispatch-gates.mjs` | 4 | 4 (unchanged — out of scope, read-only) |\n| tracked `.sh` files | **31** | 31 (unchanged by this PR) |\n\nThe card said 27 at filing, triage said 29 sixteen hours later; this run\nre-derives **31**. That drift is the card's own argument for half 2 — three\ndata points now, not two. **Control**: all 31 tracked `.sh` files still live\nunder `scripts/**` or `.claude/hooks/**` (classes where `pm_dispatch_gates`\nalready ran before this fix); files matching\n`^(packages|apps|examples|docs|content)/` and not under `*/scripts/*` → **0**\n— the hole was real but its firing window was, and remains, shut by where\npeople happen to put shell scripts, not by any rule. This PR closes that\nrule-level gap for the one class this half addresses.\n\n## Local checks run (this file surface has no `package.json`; not a package)\n\n- `pnpm check:select-gate-families` (= this file's own self-test): 40/40\n  cases, 192/192 checks — before-fix red demonstrated above, after-fix green.\n- `pnpm check:nul-bytes`: OK (8403 tracked text files, 0 raw control bytes).\n- `pnpm check:scripts-symbol-anchors`: OK (3041 anchors, 234 scripts).\n- `node scripts/check-self-test-wired.mjs`: OK.\n- `node scripts/check-self-test-workflow-commands.mjs`: OK.\n- `node scripts/check-comment-mask-corpus.mjs`: OK (6389 files, 0 disagree).\n- `pnpm check:pm-dispatch-gates` (`scripts/pm/dispatch-gates.mjs`'s own\n  self-test, run detached per that gate's own header instruction since it\n  exceeds a practical foreground budget): PASS — `dispatch-gates self-test:\n  1561 cases pass` (~530s wall time, this run).\n\nNo changeset: nothing in `packages/**`'s published `files[]` references\n`scripts/ci/**`; this is unpublished, repo-root CI tooling under a private\npackage, so no user-visible surface moved.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_"
+}

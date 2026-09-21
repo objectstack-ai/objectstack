@@ -1,0 +1,36 @@
+{
+  "number": 16841,
+  "kind": "pull_request",
+  "title": "feat(spec): a blueprint nav entry can name the VIEW it opens (cloud#2150)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ai",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T10:06:19Z",
+  "updated_at": "2026-09-08T11:52:43Z",
+  "closed_at": "2026-09-08T11:52:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-09-08T11:52:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16841",
+  "body": "## What\n\n`BlueprintNavItemSchema` gets an optional `viewName`, and the OpenAI-strict mirror's `StrictNavItem` gets it in lockstep (required-but-nullable, per the strict convention).\n\n## Why\n\nUntil now the blueprint nav shape could only say which **object** an entry opens. A model that had just designed a kanban and wanted it in the app menu therefore had exactly one move left: emit a **second** entry at the same `target`, with the intent carried by `label`/`icon` alone.\n\nMeasured downstream (objectstack-ai/cloud#2150, a real tenant DB):\n\n```json\n[0] {\"id\": \"nav_frez_ticket\", \"label\": \"工单列表\", \"icon\": \"list\",   \"type\": \"object\", \"objectName\": \"frez_ticket\"}\n[1] {\"id\": \"nav_frez_ticket\", \"label\": \"工单看板\", \"icon\": \"kanban\", \"type\": \"object\", \"objectName\": \"frez_ticket\"}\n```\n\nTwo identical ids, both opening the object's default view. The kanban view (`frez_ticket.ticket_status_board`) really was built — the menu just could not reach it. And nothing complained: the target object exists, so the dangling-target lint had nothing to say.\n\nThe **runtime** could always express this — `ObjectNavItemSchema.viewName` is `'Default list view to open. Defaults to \"all\". …'` — so the gap was the blueprint's alone, and the duplicate entry was the reasonable move under the expressiveness the model was given.\n\n## Both halves, deliberately\n\nA key on the lenient side only is a fix on no path the product runs: `propose_blueprint` validates its structured output against the **mirror**, so the design step could never author a board entry while `apply_blueprint` accepted a key nothing emits. That is the `seedData` divergence (cloud#2118) with a different key name.\n\n**Ablation** — reverting only the `StrictNavItem` half and re-running `packages/spec/src/ai/solution-blueprint.test.ts`:\n\n```\n⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯\n FAIL  src/ai/solution-blueprint.test.ts > SolutionBlueprintStrictSchema (OpenAI strict mirror) > carries viewName on a strict nav item — nullable, and REQUIRED to be present (OpenAI strict)\n FAIL  src/ai/solution-blueprint.test.ts > SolutionBlueprintStrictSchema (OpenAI strict mirror) > accepts the QUALIFIED <object>.<view> spelling too — the applier normalizes, the mirror must not refuse\n FAIL  src/ai/solution-blueprint.test.ts > strict mirror ↔ lenient schema — key parity > the NAV ITEM schemas carry exactly the same keys\n FAIL  src/ai/solution-blueprint.test.ts > strict mirror ↔ lenient schema — key parity > carries `viewName`, so a menu entry can say WHICH view it opens\n      Tests  4 failed | 39 passed (43)\n```\n\nRestored: `43 passed (43)`.\n\n## Why no `SNAKE_CASE` regex\n\n`viewName` is deliberately un-regexed on **both** sides, unlike `target`. A view answers to two interchangeable spellings — the bare key a blueprint's `views[].name` carries, and the qualified `<object>.<key>` a staged view record's `name` carries — and the applier normalizes between them. Constraining the leaf would make one spelling legal to GENERATE and illegal to APPLY: the cloud#1967 shape, where an already-approved blueprint was refused wholesale at apply time. VALUE parity holds because neither side constrains it.\n\n## Parity pin widened\n\nThird time the same gap was found one level further out: fields → objects → **nav items**. The nav-level key-parity test now fails on the next divergence in either direction.\n\n## Verification\n\n- `packages/spec` full suite: **13328 passed | 23 skipped (13351)**\n- `tsc --noEmit -p packages/spec`: clean\n- `check:authorable-surface`, `check:docs`: in sync (both regenerated in this commit — `authorable-surface/ai.json` gains one key, the blueprint reference gains one row)\n\n## Companion\n\nThe cloud half — passing `viewName` through to the runtime nav entry, and the nav-id derivation change that lets one object legitimately carry two entries — is objectstack-ai/cloud#2156 (draft, and it pins this branch head until this one merges). Part of objectstack-ai/cloud#2150.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

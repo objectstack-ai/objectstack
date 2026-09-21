@@ -1,0 +1,36 @@
+{
+  "number": 16483,
+  "kind": "issue",
+  "title": "cli: retire `os create example` — it is a weaker `os init` plus a README; docs point at `os init` (item 2 of #15531)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T03:48:06Z",
+  "updated_at": "2026-09-07T20:02:51Z",
+  "closed_at": "2026-09-07T20:02:32Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16483",
+  "body": "Filed by the director seat under the #15531 ruling (decision batch #66, 2026-09-07, option B — do not merge the command families; fix the measured problems).\n\n## Why\n\n#15531 rendered the real emission of `os init` and `os create` and hashed it: the only template-level duplication between the two families is `os create example`, which emits a subset of `os init`'s project (plus one README). The two families' emission policy is already unified through four shared exports (PR #15974), so the remaining duplicate is this one template.\n\n## Scope\n\n- Remove the `example` template from `os create`; `os create` keeps `plugin` (kernel code plugin) and its other non-`init` shapes.\n- Docs: every page that mentions `os create example` points at `os init` instead; the \"Which scaffolder?\" hint is corrected in the sibling card (plugin wording), so coordinate wording with it.\n- Published CLI surface removed ⇒ Clause-② yes: landing PR carries `needs:contract-review`; changeset (minor/major per the CLI's versioning policy) states the removal; no alias, no deprecation window (maintainer 2026-08-27).\n- Pin: `os create example` exits non-zero with a message naming `os init`; docs-parity pin updated.\n\n## Acceptance\n\n- [ ] template gone, refusal message tested\n- [ ] docs updated with the docs-parity pin green\n- [ ] changeset present\n\nRefs #15531, PR #15974."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 16556,
+  "kind": "issue",
+  "title": "[finding] `build-export-origins.ts` and `check-dual-source-exports.ts` still carry the first-match `kindOf` that #15919 repaired in `build-api-surface.ts` — the two published artifacts now disagree on kind semantics for 132 names",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T09:14:08Z",
+  "updated_at": "2026-09-09T01:00:09Z",
+  "closed_at": "2026-09-09T01:00:09Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16556",
+  "body": "Filed by the `domain:spec` PM seat (`session_01T6HeZvT9wdSJD1ZxJb5Eno`, seat post #6017), out of the **at-tier contract review** of PR #16554 (card #15919) — advisory A1, reviewed at `claude-fable-5-1`. ⛔ Unlabelled and unassigned on purpose; routing is triage's.\n\n⛔ **Not a defect claim yet — a divergence with no measured consumer.** It may well close as \"acceptable, and now written down.\"\n\n## What #15919 fixed, and where the same code still lives\n\n`packages/spec/scripts/build-api-surface.ts`'s `kindOf` tested `TypeAlias` before `Variable`. TypeScript merges `export const X` and `export type X` into **one** symbol carrying both flags, so a dual-declared name always printed `(type)` and the value half was never enumerated — measured across a **closed population of 132 names**, all of shape `type SHADOWS const`. PR #16554 replaces it with `kindsOf`, emitting one row per kind.\n\n**The same first-match lookup is still in two sibling generators** (*read*, from the review):\n\n| file | line |\n|---|---|\n| `packages/spec/scripts/build-export-origins.ts` | `:117` |\n| `packages/spec/scripts/check-dual-source-exports.ts` | `:87` |\n\n## The consequence\n\nAfter #16554 lands:\n\n- `api-surface/` records those 132 names as **`const` + `type`** (two rows);\n- `export-origins/` still records them as **`(type)` alone**.\n\n⇒ **Two published artifacts describing the same export surface now disagree about what kind each of 132 names is.**\n\nThere is a second, sharper half. `packages/spec/scripts/lib/export-origins-testkit.ts:213-246` (`runtimeParityOf`) **explicitly under-claims on exactly this shape**: its `RUNTIME_KINDS` filter skips those 132 value exports in the `missingAtRuntime` check, and its own comment acknowledges the gap and defers to `check:export-origins`. So the parity testkit is knowingly blind to the same 132 value halves that #15919 showed `check:api-surface` was blind to.\n\n## Why it is NOT blocking, measured\n\nThe reviewer grepped **every script that reads both artifacts**: nothing joins them by kind — the cross-references are prose and registry mentions only. ⇒ **No gate conflict exists today**, which is why PR #16554 was passed rather than held. This card is the follow-up that PR deliberately did not become.\n\n## What a fixer should establish first\n\n1. **Does `export-origins/` mean the same thing by \"kind\" as `api-surface/` does?** If its kind field answers a different question (where an export *originates*, not what it *is*), then \"disagreement\" is the wrong frame and this closes as a naming clarification.\n2. **Is `runtimeParityOf`'s under-claim load-bearing?** #15919's whole lesson was that a gate blind to a value half lets a `export const` deletion pass green. Whether the same hole exists here is a **measurement, not an inference** — and the honest test is the one #15919 used: delete the `const` half of a dual-declared name, regenerate, and see whether either gate goes red.\n3. **If it is a real hole, the repair is likely the same shape** — `kindOf` → `kindsOf`, one row per kind — but the regeneration cost and the artifact's consumers must be priced separately. #16554 measured its own as +134 rows across 10 of 17 shards, a pure insertion; ⛔ do not assume `export-origins/` behaves the same.\n\n⚠️ Whoever takes this should read PR #16554 first — its ablation shape, its pure-insertion proof, and the pin it added that reads the **committed** shards are all directly reusable, and the reviewer found the real justification for that pin: `.gitattributes:146` routes `packages/spec/api-surface/**` through `merge=os-regen` and `scripts/regen-artifacts.mjs:151` lists it, so a regression riding a driver regen would be green with no human reading the deletions. If `export-origins/` is routed the same way, the same argument applies to it.\n\nRefs: #15919 · PR #16554 · #16045 (the sibling finding: 5309 exports pinned by name-and-kind, only 27 by signature)."
+}

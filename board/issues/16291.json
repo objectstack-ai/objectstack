@@ -1,0 +1,36 @@
+{
+  "number": 16291,
+  "kind": "issue",
+  "title": "plugin-reports: a non-member `timezone` silently discards a report schedule's cron and fires it on the interval cadence forever — and the create-time guard cannot see it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T12:31:21Z",
+  "updated_at": "2026-09-08T19:46:46Z",
+  "closed_at": "2026-09-08T14:30:36Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16291",
+  "body": "Found while implementing #15872 (adding `valueDomain: 'iana_time_zone'` to `sys_report_schedule.timezone`). That card's first step was to measure what the reader does with a non-member zone; this is what the measurement turned up in the reader itself, and it is a defect in `plugin-reports` rather than in the column declaration, so it is carded here rather than widened into that PR.\n\n## The reading\n\nMeasured on `origin/main` at `dacb73f4f`, with croner `10.0.1` on Node `v22.22.2` (the repo's baseline in this container).\n\n**croner does not reject an invalid IANA zone at construction — it throws from `nextRun()`, and only when there is no callback.** Both halves matter and they are why this is easy to miss:\n\n```\nnew Cron('0 9 * * *', { timezone: 'Mars/Olympus' })                    -> constructs FINE\n  .nextRun(...)                                                        -> TypeError: CronDate: Failed to convert\n                                                                          date to timezone 'Mars/Olympus' ...\nnew Cron('0 9 * * *', { timezone: 'Mars/Olympus' }, async () => {})    -> THROWS at construction\n```\n\nThe callback form schedules internally, so it computes a next run and throws there.\n\n### 1. The create-time guard is blind to the timezone half of its own input\n\n`packages/plugins/plugin-reports/src/report-service.ts`, in `scheduleReport`:\n\n```\n// Validate eagerly so an author gets a clear error at schedule time\n// instead of a schedule that silently falls back to interval on sweep.\ntry {\n  new Cron(cron, { timezone: input.timezone || 'UTC' });\n} catch (err) {\n  throw new Error(`VALIDATION_FAILED: invalid cron_expression '${cron}': ...`);\n}\n```\n\nThat is the callback-less form, so it validates the EXPRESSION and nothing else. A bad `timezone` sails straight through the guard whose stated purpose is to prevent exactly the outcome it then produces.\n\n### 2. `nextRunAt` swallows the throw and falls back to interval, blaming the wrong input\n\nSame file, `nextRunAt`:\n\n```\ntry {\n  const next = new Cron(cron, { timezone: schedule.timezone || 'UTC' }).nextRun(from);\n  ...\n} catch (err) {\n  this.logger?.warn?.(`ReportService: invalid cron '${cron}'; falling back to interval`, err);\n}\nconst interval = schedule.interval_minutes ?? DEFAULT_INTERVAL_MIN;   // 1440\nreturn new Date(from.getTime() + interval * 60_000);\n```\n\n`nextRunAt` is reached on every sweep through `advanceSchedule`, with `schedule.timezone` lifted off the stored row by `rowFromSchedule`. So a schedule carrying a non-member zone permanently drops its cron expression and fires on the interval cadence instead — a report authored as \"every weekday 09:00 in Asia/Shanghai\" becomes \"every 1440 minutes, forever\". The only trace is a `warn` that names the cron expression, which is fine, rather than the timezone, which is not.\n\n## Consequence\n\nNeither of the two outcomes a reader would expect: it does not throw, and it does not fall back to UTC. It schedules at the wrong instants indefinitely, and the one log line it emits points an investigator at the wrong input.\n\n## What #15872 does and does not close\n\n#15872 declares `valueDomain: 'iana_time_zone'` on `sys_report_schedule.timezone`, so a non-member is now refused on the WRITE path with the ADR-0114 field code `value_domain`. That closes the door for new rows. It does NOT fix either defect above:\n\n- rows that already hold a non-member zone are never re-read by the transition-gate class, so they keep falling back to interval, still with the misattributed warning;\n- the guard in `scheduleReport` is still blind — after #15872 the refusal comes from the engine insert with a generic field error, not from the guard's own deliberately clearer `VALIDATION_FAILED` message;\n- the warning text is wrong regardless of the timezone, for any input croner rejects at `nextRun()` rather than at construction.\n\n## Suggested shape (for the implementing seat to verify, not a ruling)\n\n- Validate the zone explicitly in `scheduleReport`, with its own message, rather than hoping the `Cron` constructor does it: the repo already exports the one membership predicate, `isValueDomainMember('iana_time_zone', tz)` from `@objectstack/spec/shared`, which is the same probe the column now uses. One answer in both places.\n- Make `nextRunAt`'s warning name what actually failed, or at least include the timezone in the message. A warning that names the wrong input is worse than none.\n- Consider whether an unusable schedule should be marked (`last_status` / `last_error`) rather than silently re-scheduled at a cadence nobody asked for.\n\n## Re-check\n\n```\nsed -n '600,620p' packages/plugins/plugin-reports/src/report-service.ts\nsed -n '812,830p' packages/plugins/plugin-reports/src/report-service.ts\nnode -e \"const {Cron}=require('croner'); const c=new Cron('0 9 * * *',{timezone:'Mars/Olympus'}); console.log('constructed'); c.nextRun()\"\n```\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

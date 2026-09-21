@@ -1,0 +1,34 @@
+{
+  "number": 16507,
+  "kind": "issue",
+  "title": "docs(source): two source comments about a mis-aimed `navigationContributions[].group` are incomplete against what #14920 shipped",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T05:50:33Z",
+  "updated_at": "2026-09-08T20:30:46Z",
+  "closed_at": "2026-09-08T20:30:32Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16507",
+  "body": "Found while implementing #14925 (the `describe()` half). Filing rather than fixing there: #14925's scope is the one `describe()` string and the spec regeneration family it pulls, and one of these two spots is in another package entirely.\n\nBoth are **source comments** — neither reaches a generated artifact. Verified: `git grep` for the JSDoc sentence below matches `packages/spec/src/ui/app.zod.ts` only, while the sibling `describe()` string matched the two generated reference pages as well, so the two strings do have different reaches and the negative is a real reading rather than a silent miss.\n\n## 1. `packages/spec/src/ui/app.zod.ts`, the `NavigationContributionSchema` JSDoc (around `:739`)\n\n```\n * tree by **target group id + priority** (lower priority applied first,\n * mirroring object extender ordering). When `group` is omitted the items are\n * appended at the app's top level. Contributed items keep the normal nav\n```\n\nThis is the same incompleteness #14925 fixed one screen down on the `describe()`: it documents the **omitted** case and says nothing about `group` being **present and naming no group the target app declares** — the case an author cannot detect from their own source, because the target app belongs to another package. As of #14925 the `describe()` immediately below now names that case; the JSDoc above it still does not, so the two halves of the same key's authoring-time documentation disagree.\n\n## 2. `examples/app-multi-package/src/packages/orders/index.ts:47`\n\n```\n * (`nav_contribution_group_missing`, at `warn`), and `os build` reports the\n * same finding at compile time. This fixture is where that is measured\n```\n\nNames **only** `os build`. What shipped in #14920 computes the finding in **both** commands: `findNavGroupDiagnostics` is imported by `packages/cli/src/commands/compile.ts:49` and `packages/cli/src/commands/validate.ts:43`, and both fold it into the same `warnings` key (`compile.ts:202`, `validate.ts:148`). `content/docs/ui/setup-app.mdx` already carries the corrected form (\"`os build` **and `os validate`**\"), so this comment is the odd one out.\n\n## Suggested fix\n\nProse only, both spots, no behaviour: add the mis-aimed case to the JSDoc in the spelling `content/docs/ui/setup-app.mdx` and the `describe()` now use, and add `os validate` to the example's comment. Neither string feeds a generated artifact, so this pulls no regeneration family.\n\n## Not in #14925 because\n\nThe bounded-in-place-fix test fails on the no-new-verification-surface condition: `examples/app-multi-package` is a separate package with its own build and test lane, so folding it in would widen that PR's affected set beyond the spec regeneration family it was sized for. The JSDoc half is in the same file but is a judgement about wording rather than a mechanical repair, and #14925's dispatch scoped it to the `describe()` explicitly.\n\nFiled unassigned. Confirmed not already filed: a targeted search over this repo returned only #14925 itself (the positive control that proved the search could return a hit) and four unrelated docs-generation cards.\n"
+}

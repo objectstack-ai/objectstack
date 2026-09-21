@@ -1,0 +1,35 @@
+{
+  "number": 11188,
+  "kind": "issue",
+  "title": "[finding] ADR-0055 records `controlled_by_parent` as single-level-only — two statements (lines 75 and 86) go false when #11183 lands. Governed surface: maintainer-authored.",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T01:43:22Z",
+  "updated_at": "2026-09-07T13:48:19Z",
+  "closed_at": "2026-09-07T13:22:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11188",
+  "body": "Filed unassigned — recording, not claiming. **Deliberately NOT enqueued** (`pm:queue` absent, by intent): `docs/adr/**` is a governed surface, so per AGENTS.md #13/#14 the PM does not flip it ready, does not enqueue it, and does not dispatch a seat at it. The amendment is authored and landed by a maintainer; the human merge **is** the audit record. This card exists so the fact is written down, not so it gets scheduled.\n\n## The two statements\n\nVerified on `origin/main` at filing time (not copied from a report — re-read from the file):\n\n`docs/adr/0055-master-detail-controlled-by-parent.md`\n\n```\n75:  - **Single-level only in v1.** Nested master-detail chains (a detail whose master is itself a detail) are **not** traversed transitively in v1.\n```\n\n```\n83: ## Non-goals\n86: - **Transitive nested master-detail chains** (v1 is single-level).\n```\n\nBoth are accurate descriptions of `main` **today**. Both become false when PR #11183 lands, which makes the derivation compose across a chain, with a cycle guard and a depth bound that both fail closed.\n\n## Why this is worth a card rather than a mental note\n\nThis is not a cosmetic drift. Line 75 sits under a heading that reads as a **statement of the enforced boundary**, and line 86 lists the same thing as a deliberate **non-goal** — i.e. as a limit someone chose. An ADR that records a narrower enforcement than the runtime actually performs is the same class of hazard this repo has repeatedly measured from the other direction (#9997 for ADR-0091 D1; ADR-0120 D3): a future reader takes the ADR as the contract and reasons about blast radius from it. Here the error is in the safe direction for users and the **unsafe direction for reviewers** — someone reviewing a later change to this surface would derive the wrong invariant from the ADR and could \"restore\" the single-level behaviour believing they were fixing a drift.\n\nThe honest shape of the amendment is not a deletion. Line 75's \"single-level only in v1\" was **true and correctly recorded** for v1; what changed is the version it describes. A maintainer amending it should say when and by what the limit was lifted, not erase that it existed — the Non-goals entry in particular is a record of a decision, and decisions that get reversed are worth reading as reversals.\n\n## What the runtime will actually say, for whoever writes the amendment\n\nStated so the amendment does not have to re-derive it, and flagged where it is **conditional**:\n\n- The derivation composes the master's own `controlled_by_parent` filter as an additional layer, resolved through the same method, so the recursive answer cannot drift from the top-level one.\n- The write gate walks the same chain, hop by hop, until it reaches a master that governs its own rows.\n- Cycle protection carries the set of objects already being resolved on the branch. Termination does not depend on the depth bound — the visited set grows strictly over a finite schema registry.\n- The depth bound is `CBP_MAX_CHAIN_DEPTH = 8` (`packages/plugins/plugin-security/src/security-plugin.ts:360`) and is a **cost ceiling, not a supported-chain-length statement**. At the bound the walk denies and logs the chain it refused. An ADR sentence that reads it as \"chains up to 8 levels are supported\" would be recording something the code does not claim.\n- ADR-0055 already books a per-request cost for this surface; the bound caps the walk at the same order.\n\n## Premise, stated so it can be checked\n\nPR #11183 is **draft and not merged** at filing time (`needs:contract-review` unresolved on #11082). Until it lands, lines 75 and 86 are **correct** and must not be amended. If the PR lands narrowed, the amendment narrows with it. Whoever picks this up should re-read the merged diff rather than this card's summary of it.\n\n## Refs\n\n#11082 (the card) · PR #11183 (draft; the change that falsifies lines 75 and 86) · #11187 (the companion finding, on direction 3's publish-time lint) · #9997 (same class: an ADR still declaring a shape after the ruling that removed it) · #5386 / #7685 (the single-level evidence ADR-0055's limit was written against)"
+}

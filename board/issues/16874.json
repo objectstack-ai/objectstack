@@ -1,0 +1,35 @@
+{
+  "number": 16874,
+  "kind": "pull_request",
+  "title": "docs(changeset): @objectstack/runtime carries NO boot-refusal row for the STACK_* codes now — correct the closing sentence of the stack-refusal-envelopes changeset",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T12:49:25Z",
+  "updated_at": "2026-09-08T13:27:27Z",
+  "closed_at": "2026-09-08T13:27:25Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-09-08T13:27:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16874",
+  "body": "Fixes #16857\n\n`.changeset/stack-refusal-envelopes.md` (#16342's changeset, still unconsumed) closed by claiming that `@objectstack/runtime` *\"carries one classification row per new code in the dispatcher error-code vocabulary\"*. That was true when it was written and is **false** against `main` today — the runtime vocabulary carries **zero** such rows. This corrects that one sentence, before a release compiles it into a published `packages/*/CHANGELOG.md` that this repo does not amend per-PR.\n\n## The reading\n\nEvery number below is a grep over `packages/runtime/src/dispatcher-error-vocabulary.ts` at blob `ff83d6506d53cee86c87f1d124e56e1978e65dc5`, which `git rev-parse` shows is byte-identical at this branch's base `12babac13` and at `origin/main` `c930f8597`. **A reading is a count plus the tree it was taken against**, so both are named. Exit codes were captured before any pipe.\n\n| reading | pattern | exit | count |\n|---|---|---|---|\n| **subject** — the false claim | `code: 'STACK_` | 1 | **0** |\n| **control** — line 20's claim, still true | `verdict: 'boot-refusal'` | 0 | **14** |\n| **control** — population sanity | `code: '` | 0 | **84** |\n| **positive control** for the zero | `STACK_` | 0 | **1** — the removal comment at line 302 |\n\nThe positive control is the same tool over the same file, so the zero is a reading and not a broken grep.\n\n**Where the rows went**, measured rather than recalled: `abae16adf` deleted exactly seven of them — `grep -c \"^-        code: 'STACK_\"` over its patch for that file returns **7** — in the same landing that registered those seven codes in `ERROR_CODE_LEDGER`, where they now sit at `packages/spec/src/api/error-code-ledger.zod.ts` lines 1045-1051 under the `@objectstack/spec` key. The gate's own header states the consequence: a registered code drops out of its scan, and a stamp site under `packages/spec/src/` may be classified `foreign-vocabulary` or `runtime-pinned` *\"and NOTHING ELSE\"*.\n\n## Two things in the same file that did NOT change — proven by hash, not by inspection\n\n| invariant | sha1 before | sha1 after | `cmp` |\n|---|---|---|---|\n| **line 20** — *\"...one-row-per-refusal granularity (14 rows)...\"* | `71192bf158de167ac2774c576a462350600d7fa8` | `71192bf158de167ac2774c576a462350600d7fa8` | exit 0 |\n| **front matter, lines 1-4** — including `\"@objectstack/runtime\": minor` | `c3e97c77ad1e4948e11906c233e2d326ffcf4003` | `c3e97c77ad1e4948e11906c233e2d326ffcf4003` | exit 0 |\n\nLine 20 is the neighbouring sentence about the same fact family, and it is **true** — 14 is exactly what control 2 returns. Two sentences describe that family; only one went false.\n\nThe front-matter key stays on the seat's ruling in issue comment `5585216825`: eight other unconsumed changesets already declare `@objectstack/runtime: minor`, so the released version is inert either way, but the key also decides whether this paragraph compiles into `packages/runtime/CHANGELOG.md`, which ships in the tarball via `files[]` — and that history belongs where a runtime consumer greps for it.\n\nAnchor counts across the edit, each with its exit code:\n\n| anchor | before | after |\n|---|---|---|\n| `carries one classification row per new code` (the old sentence) | 1 (exit 0) | **0 (exit 1)** |\n| `carried one classification row per new code` (the new one) | 0 (exit 1) | **1 (exit 0)** |\n| `one-row-per-refusal granularity (14 rows)` | 1 (exit 0) | **1 (exit 0)** |\n| `\"@objectstack/runtime\": minor` | 1 (exit 0) | **1 (exit 0)** |\n\n`git diff --stat`: 1 file changed, 1 insertion(+), 1 deletion(-).\n\n## Register\n\nThis matches PR #16856, which corrected line 24 of the same file in the same landing shift: the true half of the sentence is kept, the false half is replaced by what actually happened, and the card that moved the fact is named (#16449, PR #16652).\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran` reconciles the run against this tree's own derivation:\n\n> ✓ dispatch-gates --ran: 17 derived famil(ies) accounted for — 17 run, 0 NOT-MEASURED.\n\nAll 17 exit 0, at `1be4e378c`. Three of them (`check-closing-keyword-parity` twice, `check-comment-mask-corpus`) first returned **exit 3 — PREREQUISITE NOT MET**, which is not a red gate; they were re-run green after `pnpm install`. `check-changeset-fixed.mjs` is included deliberately: the derivation flags its roster as living under `.changeset`, so its silence would not have been evidence in either direction — it was run, and it passes.\n\nNot owed here, and named rather than skipped silently: no package source is touched, so there is no dependency-closure build and no package `test`/`typecheck` to run. Repo-wide `pnpm lint` is CI's run, not this PR's.\n\n## `skip-changeset`\n\nMeasured, not assumed: of the 82 workspace `package.json` files, **70 declare a `files[]` whitelist** (matching `check:published-files`'s own count of 70 publishable packages), and **0 of their `files[]` entries mention `.changeset`** — positive control on the same scan: **70** entries mention `dist`. `.changeset/**` is repo-root release-notes input and ships in no tarball, so nothing published moves.\n\n## Landing\n\n⛔ Draft on purpose. Not flipped ready, not enqueued, no auto-merge armed — the dispatching seat does that.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016N6xmWt5hYm94ffVEwGH8x)_"
+}

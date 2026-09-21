@@ -1,0 +1,33 @@
+{
+  "number": 16398,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates' reconciliation line enumerates what sits OUTSIDE the runnable total and omits two blocks it printed itself — the WIDE-population block and the artifact rosters",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T18:35:59Z",
+  "updated_at": "2026-09-08T09:03:37Z",
+  "closed_at": "2026-09-08T09:02:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16398",
+  "body": "## Measured\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, run twice today from a worktree on `claude/issue-16025-hono-auth-mount-basepath`.\n\nThe Reconciliation block ends with the sentence that tells a harvester what its total does **not** cover:\n\n```\n⛔ 87 is what THIS CARD owes by path and kind — NOT a complete account of what CI runs on\nthe PR. The pending-changeset families, the unreachable listing and the always-runs tail\nbelow are each OUTSIDE it, each with its own count.\n```\n\nIt names **three** outside blocks. The same run prints **five**. The two it does not name are:\n\n- `Artifact rosters — 37 famil(ies)`\n- `Declared WIDE population — 9 famil(ies)` (10 on a diff that does not touch a gate script)\n\nBoth print their own count and their own heading, exactly like the three that are named.\n\n## Why this is not cosmetic — it cost a CI round trip, measured\n\nThe WIDE block's own text already says the right thing:\n\n```\n… so no path of yours can narrow them and their absence from the matched block above is\nNOT a clearance.\n```\n\nBut a harvester who follows the **reconciliation line's** enumeration never reaches that text, because the reconciliation line is the thing that says \"here is what else you owe\".\n\nThat is what happened on PR #16380 (round 1). The implementer reported the union derived twice, `Reconciliation — 68 famil(ies)`, **all 68 green**, plus the 37 artifact rosters, plus a whole-repo `pnpm lint` at exit 0. CI then failed on `Lint & Repo Gates` → `check:wildcard-fallthrough`, on a defect that diff introduced (it renamed a wildcard mount and left the `MOUNTS` ledger declaring the old spelling).\n\nRe-derived on that diff's paths: `check:wildcard-fallthrough` was **not** in the 68. It was printed, in the `Declared WIDE population` block — one of the two the reconciliation line omits. The derivation was not blind to the gate; the line that tells you where else to look did not point at the block that named it.\n\nThe rosters block is in the same position and is only saved today by seats hand-carrying the instruction (\"the Artifact rosters block sits outside that total and must be run, not read as silence\") in their dispatch briefs — i.e. by prose outside the tool.\n\n## Shape of the class\n\n`#13642` fixed the *inside*-the-total version of this: a harvest that stopped at one of the two sections that make up the total. The reconciliation line now enumerates those explicitly and it works. This is the same failure one level out — the enumeration of what sits **outside** the total is itself incomplete.\n\n## Not measured here\n\n- Whether the omission is deliberate. Both blocks are described elsewhere in the output as things CI runs regardless, so the intent looks like \"named under their own heading is enough\"; the observed cost says it is not.\n- Whether any other seat has lost a CI cycle to the rosters block specifically. Only the WIDE case is measured, once, on #16380.\n\n## Suggested remedy (not prescriptive)\n\nAdd both blocks to that sentence's enumeration, with their counts, in the same shape as the three already there. The blocks themselves need no change."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 15439,
+  "kind": "issue",
+  "title": "spec: `ApprovalDecisionResult`'s docblock does not record that a stranded decision's four facts ride the ERROR body — execution item 2 of #13807's batch #37 ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T15:46:28Z",
+  "updated_at": "2026-09-08T23:24:27Z",
+  "closed_at": "2026-09-08T23:24:03Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15439",
+  "body": "Blocked-by: #13807\n\nFiled by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`, seat post #6021) as the **spec half** left unowned by the maintainer's 2026-09-04 ruling on #13807 (director batch #37, verbatim 「同意」 on `1B · 2及`, issuecomment-5541861039). Cross-lane request into the `domain:spec` lane. ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\n## What the ruling owes here\n\nThe ruling's **execution list, item 2**, verbatim:\n\n> The `ApprovalDecisionResult` contract docblock records the declared posture: a finalised decision whose resume fails **throws with the decision and run identified**, never a half-state; the fields are the published way to read it.\n\nThe services half is implemented in **PR #15436** (draft, head `13b58ed7d`, under Clause-② contract review): `serviceResume` carries `status`, and a stranded decision's 500-class `RESUME_FAILED` error body gains `finalized`, `decision`, `runId` and a repairable flag.\n\n## Why it is not in that PR\n\n`packages/spec/src/contracts/approval-service.ts` is a single-owner lane the implementing seat is **read-only** in — declared in its claim comment (issuecomment-5541965534) before it started, and honoured. It reported the item rather than editing across the boundary. ⇒ Filed here so the ruling's item 2 has an owner instead of evaporating between two lanes.\n\n## What is and is not owed\n\n⚠️ **The contract TYPE needs no new fields.** Measured on `origin/main`: `ApprovalDecisionResult` (`packages/spec/src/contracts/approval-service.ts`, ~`:622`) already declares `request`, `finalized`, `decision`, `runId?`, `resumed?` and `resumeError?`, and its `resumed` docblock already states the #4420 posture — *\"A decision that finalises a flow-bound request and CANNOT resume its run throws rather than returning `resumed: false` — a recorded decision whose flow never advances is the zombie half-state of #4420.\"*\n\nThe four facts ride the **error** body, not the success shape. So what is owed is prose, not a field: the docblock should record that when that throw happens, the failure is now *readable* — `finalized` / `decision` / `runId` / the repairable flag are the published way to read the already-declared posture, rather than the caller being left with a bare 500.\n\n⛔ Do not add the four fields to `ApprovalDecisionResult`. That would declare a success shape that never carries them.\n\n## Sequencing\n\n`Blocked-by: #13807` is deliberate: the sentence describes fields that do not exist on `main` until PR #15436 lands. Writing it earlier would put a false statement in the contract — the same defect class this repo keeps finding, where a surface documents itself as covered by something that has not shipped (see PR #15365's own account of a p0 seam that did exactly that).\n\n⚠️ Whoever takes this: re-read the docblock on the then-current `origin/main` rather than inheriting the `:622` anchor — PR #15436 adds ~52 lines of docblocks to `approval-service.ts` in `plugin-approvals`, and this repo's line refs rot fast enough that the #13807 dev found a card ref that had drifted ~223 lines *and* named the wrong mechanism.\n\nRefs: #13807 (the ruled card) · PR #15436 (the services half) · #4420 (the posture this records) · #13937 / PR #15237 (the shape-4 ruling that excluded compensation) · #15221 (the generic resume door, measured NOT the same seam)."
+}

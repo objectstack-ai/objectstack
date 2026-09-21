@@ -1,0 +1,37 @@
+{
+  "number": 16801,
+  "kind": "issue",
+  "title": "[finding] `rest-server.ts#enforceBatchSize` calls the batch cap \"deployment policy\", but no shipped boot path can set it — the same defect #15543 just closed in `packages/spec`, one package over",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T06:12:06Z",
+  "updated_at": "2026-09-08T19:46:37Z",
+  "closed_at": "2026-09-08T18:30:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16801",
+  "body": "Filed by the `domain:spec` execution seat (session `session_016N6xmWt5hYm94ffVEwGH8x`) out of PR #16775 / card #15543. ⛔ Unassigned and without a `domain:*` label — routing and grading are the triage seat's, not this one's.\n\n## The sentence\n\n`packages/rest/src/rest-server.ts#enforceBatchSize`, verbatim:\n\n> The cap is deployment policy — `RestServerConfig.batch.maxBatchSize` (1..1000, default 200)\n\n**\"Deployment policy\" is false of every shipped boot path.** `RestServerConfig` is the argument a host passes when it constructs the server, and there is exactly one door: `createRestApiPlugin({ api })` (`packages/rest/src/rest-api-plugin.ts#createRestApiPlugin`), whose `start()` is the only non-test site reaching `new RestServer(...)`. Neither shipped boot path opens it with a `batch` config:\n\n- `packages/cli/src/commands/serve.ts#apiConfig` reads the stack config's own top-level `api:` block and forwards exactly **two** keys out of it (`api.enableProjectScoping`, `api.projectResolution`), through an `as any` cast;\n- `packages/plugins/plugin-dev/src/dev-plugin.ts` calls `createRestApiPlugin()` with no config at all.\n\n⇒ A CLI-started deployment always gets `maxBatchSize: 200` and cannot move it. The key is **embedder-only**, and the docblock tells an operator the opposite.\n\n## Why this is a card and not a rider on #16775\n\nThis is the second carrier of the identical claim. #15543 closed the `packages/spec` half — the `crud` / `metadata` / `batch` docblocks now state `Reachability: EMBEDDER-ONLY`, and `packages/spec/liveness/{crud,metadata,batch}_endpoints.json` carry a per-key `REACHABILITY` row. PR #16775 does **not** touch `packages/rest`, and the 2026-09-07 ruling's scope was `packages/spec`, so fixing it there would have widened the PR past its ruling. Recorded as owed in `docs/qa/platform-checklist/FOLLOW-UPS.md` §10b E2.\n\n⚠️ **A correction to the record, worth reading before anyone re-measures.** The #15543 card and its ruling both cite this \"deployment policy\" sentence and attribute it to `packages/spec/src/api/rest-server.zod.ts`. The phrase **does not occur in that file** — control: `maxBatchSize` occurs there 3 times, so the zero is a real zero. It exists, verbatim, in `packages/rest`. ⇒ **The ruling misattributed the sentence to the wrong file; it did not invent it.** The carrier is real and is what this card is about.\n\n## What is wanted\n\n⛔ No shape proposed — this seat measured the sentence, it did not decide the fix. The two obvious routes are not equivalent and the choice is not mine:\n\n1. **Correct the prose** so it says what #15543's spec-side docblocks now say: the cap is embedder policy, set through `createRestApiPlugin({ api })`, and a CLI-started deployment always gets the default. Cheapest, and consistent with the landed ruling.\n2. **Make it true** by threading a `batch` config through a boot path. ⚠️ That is a new authorable surface — the 2026-09-07 ruling (director seat, summon #17, decision batch #2) explicitly **declined** this for the spec-side keys, for no measured demand. Taking it here would need its own decision, and would contradict that ruling unless the maintainer distinguishes the cases.\n\nRoute 1 is what the landed ruling implies. ⛔ Recorded as an observation, not a recommendation with authority.\n\n## Lane\n\n`packages/rest` belongs to **`domain:cli`** by the lane table (`packages/cli`, `runtime`, `verify`, `qa`, `types`, `packages/rest`, `packages/mcp`, …). ⚠️ The originating dev report named `domain:rest`, which is **not a lane in this repo** — noted so triage does not inherit the wrong name. ⛔ No `domain:*` label applied here; the triage seat produces those.\n\n## Duplicate check — method stated, because a zero is only as good as how it was taken\n\n⛔ `search_issues` was **not** usable for this. Measured this session: it returns `total_count: 0` for camelCase identifiers and for quoted phrases against this repo's index — `RestServerConfig` returns 0 even though it is in the **title** of open card #15543, and `maxBatchSize` and `\"deployment policy\"` likewise return 0. Live control: the hyphenated slug `check-react-blocks-declaration-parity` returns a full result set on the same call sequence, so search itself is up. ⇒ Those zeros are an indexing artifact, never evidence of absence.\n\nDone deterministically instead: the whole `domain:cli` lane enumerated (**97 of 97**, `totalCount` matched, so the enumeration is complete, not a page), every title and body scanned for `batch` / `maxBatchSize` / `enforceBatchSize` / `deployment policy` / `rest-server` / `RestServer`. **19 candidates, none is this defect** — the nearest, #16674, is `crud.dataPrefix` discovery self-contradiction, a different key and a different failure. Positive control: 52 of the 97 mention \"rest\", so the scan reached the text.\n\n## Refs\n\n#15543 · PR #16775 · `docs/qa/platform-checklist/FOLLOW-UPS.md` §10b E2 · the 2026-09-07 ruling (director seat, summon #17, decision batch #2, maintainer verbatim 「同意」)\n\nhttps://claude.ai/code/session_016N6xmWt5hYm94ffVEwGH8x"
+}

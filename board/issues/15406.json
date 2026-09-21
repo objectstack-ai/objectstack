@@ -1,0 +1,33 @@
+{
+  "number": 15406,
+  "kind": "issue",
+  "title": "[governed audit] PR #15284 landed a `skills/**` file through the merge queue with `merged_by os-justin` — an account outside `GOVERNED_APPROVERS`; the mixed-diff diversion did not fire",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T14:36:19Z",
+  "updated_at": "2026-09-09T05:12:49Z",
+  "closed_at": "2026-09-09T05:12:49Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15406",
+  "body": "**Named reader: the project director seat (#12708)** — the governed-merge audit is one of its four duties, and the authoritative merge window plus any finding/rollback disposition belong to it. Filed as a card rather than left as a seat-post comment because a cross-seat request is work, and prose is invisible to every sweep.\n\n⛔ **This card does not assert a violation.** It reports one audit row that does not match the register, and hands the recognition question to the seat that owns it.\n\n## The row\n\nTriage seat R+145 governed-merge sweep, run at **2026-09-04T14:52Z**, topological window from `objectstack=c4d1354e3253` / `objectui=0b24d7f85cae`:\n\n> objectstack-ai/objectstack **PR #15284** — feat(spec): list-view grouping is server-side — compile the group header query and the per-group row page from the view\n> commit `f502898a4` @ 2026-09-04T12:42:17Z; **merged_by `os-justin`** @ 2026-09-04T13:08:11Z\n> surfaces: `skills/**` ×1 — `skills/objectstack-ui/references/react-blocks.md`\n\n`GOVERNED_APPROVERS` is `Object.freeze(['os-zhuang', 'hotlong'])` at `scripts/pm/check-governed-queue-guard.mjs:349`, read on `origin/main` at 14:52Z. **`os-justin` is not a member** — it is the `domain:spec` execution seat (#6017).\n\nThe other four rows in the same window all read `merged_by os-zhuang`, which **is** in the set.\n\n## What the shape suggests, and what it does ⛔ not establish\n\nThis looks like the **mixed-diff diversion failing to fire** rather than anything deliberate. #15284 is a spec feature PR that happens to carry one `skills/**` reference doc. The rule is that a mixed diff diverts on **one** hit and is ⛔ not judged by proportion — so this PR should have gone to the governed endgame (stay draft, review recorded on the issue, review requested from both approver accounts, never enqueued) instead of through the queue.\n\n⚠️ **Two things this card explicitly does not do**, both because they are the director seat's and because the evidence does not carry them:\n\n1. ⛔ It does not read `merged_by` as a principal. The audit script says so in its own output, and the measured precedent is on the record: objectui PR #5188 read `merged_by os-steve`, and asked directly the maintainer answered 「5188 是我合并的」. **The column prompts recognition; it never settles it.**\n2. ⛔ It does not check whether an authorized **approval** exists on #15284. Under the 2026-09-04 ruling an authorized approval record releases the queue — 「只需要有人工批准记录就行，不需要卡最新的提交」 — so a row merged under a non-approver account may still be fully compliant if an approver approved it. **Triage has not looked.** That is the first thing the director seat should read, and it may end this card.\n\n## Also corrected in this sweep, because it changes the audit's own denominator\n\n`GOVERNED_REPOS` (`scripts/pm/check-governed-merges.mjs:986`) now holds **five** members, not four: `objectstack`, `objectui`, `cloud`, `objectos`, **`hotcrm`** — the last added by the 2026-09-03 ruling recorded in #14867. Recent triage close briefs describe the register as holding four. ⇒ Any brief reasoning from \"4 governed repos\" is now one repo short.\n\nThis sweep audited **4 of 5**; `objectos` is `no-checkout` and outside this session's repository scope, so it reads **NOT MEASURED** and the sweep is **INCOMPLETE** by the script's own verdict. ⛔ Not clean — nothing was found there because nothing was looked at.\n\n⭐ Two of the five repos were also found **stale-mirror** at the first run (`objectstack` and `hotcrm` both behind their remotes). The script refused to enumerate over them rather than under-reporting, which is the right refusal: a short governed-merge list reads as compliance. Both were fetched and the sweep re-run; **the four rows above `objectstack` contributes were invisible on the first pass.** ⇒ A governed sweep run without fetching first is not a weaker reading, it is a wrong one.\n\nNext window, exactly: `--since-ref objectstack=a56baa2bdfe7 --since-ref objectui=1ec291c0d7c4 --since-ref cloud=51a49d9f0db9 --since-ref hotcrm=71a34523130f`."
+}

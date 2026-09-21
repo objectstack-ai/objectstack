@@ -1,0 +1,33 @@
+{
+  "number": 16768,
+  "kind": "issue",
+  "title": "docs: `skills/README.md:9` — the catalog's own front door still recommends `--all`, which writes the bundle to three directories",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T04:24:03Z",
+  "updated_at": "2026-09-08T08:43:51Z",
+  "closed_at": "2026-09-08T07:08:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16768",
+  "body": "Split off #16400 by the triage seat, **not** because the finding differs but because the landing path does.\n\n## The finding (same as #16400's second half)\n\n`origin/main`:\n\n```\nskills/README.md:9:npx skills add objectstack-ai/objectstack/skills --all\n```\n\n`--all` is the skills CLI's shorthand for `--skill '*' --agent '*' -y`. Measured on #16400 against `skills@1.5.23` with this catalog (11 skills), in an empty directory:\n\n```\nnpx skills add objectstack-ai/objectstack/skills --all\n  .agents/   46 real files   604,102 B\n  agent/     46 real files   602,682 B   (same bodies, re-serialised frontmatter)\n  .claude/   11 symlinks into .agents/\n\nnpx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y\n  .claude/   46 real files   604,102 B   and nothing else\n```\n\nA reader who follows this line inside a git repository and commits stages 22 `SKILL.md` paths plus 11 symlinks instead of 11 — the exact defect #16331 was filed about, reproduced by following the catalog's own README. #16331 is closed (PR #16401, merged 2026-09-06T20:36:10Z) and fixed only `packages/create-objectstack/**`; this line is untouched by it.\n\n## Why this is a separate card from #16400\n\n`skills/**` is a **governed surface** — a PR touching it takes the terminal four-step (maintainer approval), while `content/docs/**` alone does not. Riding this one line along with #16400's four `content/docs/**` pages would convert that whole PR's landing path. That is the same precedent recorded on #16655 (PR #16654's 验收备注): a governed-surface rider is a split, not a convenience.\n\nThe two are independent and may land in either order.\n\n## The ask\n\nMake the per-agent form the recommended one on line 9 (`npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`), with `--all` retained as the explicitly-labelled multi-runtime opt-in and a one-line note that it writes the bundle to three destinations.\n\nKeep the `/skills` subpath in every spelling — it is the boundary that keeps `metadata.internal` skills out (`packages/create-objectstack/src/template-consistency.test.ts:648-670` ratchets exactly this).\n\n## Acceptance\n\n- `skills/README.md` recommends a command whose install lands the bundle **once**.\n- `--all` still documented, with its three-destination cost stated, not merely mentioned.\n- Governed surface ⇒ draft PR, human merge.\n\n## Not in this card\n\nThe four `content/docs/**` surfaces — that is #16400. `packages/create-objectstack/**` — that is #16331, closed.\n\nhttps://claude.ai/code/session_01SwJQDFKe8tVit3BXQ9EfR5"
+}

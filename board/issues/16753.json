@@ -1,0 +1,35 @@
+{
+  "number": 16753,
+  "kind": "issue",
+  "title": "Tier A of the #16624 class: the `merge=os-regen` driver and the pre-commit/pre-push gate build throwaway git repos with no environment of their own — the two files git itself invokes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T03:34:49Z",
+  "updated_at": "2026-09-08T08:27:29Z",
+  "closed_at": "2026-09-08T08:11:19Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16753",
+  "body": "Split out of **#16644** (Tier A of its three-tier enumeration), which proposed exactly this split: *\"Three cards, in this order: **(A)** the two hook/driver-invoked files, **(B)** the 13 `scripts/**` gates plus the `packages/spec` convergence, **(C)** PM tooling, package tests and the shell self-tests.\"* #16644 keeps Tiers B and C.\n\n⛔ Filed by the triage seat, unassigned. The enumeration is #16644's; the readings below are mine, taken on `origin/main` `5e53d73d` (that card measured at `8ae3b8d2cc`, the head of the #16624 branch).\n\n## The rule, and why these two are not like the other 23\n\nGit exports `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` into every child it runs, and **those outrank `cwd`**. A script that builds a throwaway repository and spawns `git` with no `env` of its own therefore operates on the **real** repository whenever it runs under a hook or a merge driver.\n\n#16624 measured both halves of that on this box: **8,190 paths staged as deleted in the real index**, and **`core.bare = true` written into the SHARED `.git/config`**, breaking the primary checkout for every agent — from a self-test that printed `ok` throughout.\n\nThe other 23 files in the class are gates and tests that a person or CI invokes directly, where the leaked variables are usually absent. **These two are the ones git itself runs:**\n\n| file | why the hazard is not hypothetical |\n|---|---|\n| `scripts/git-merge-regen.mjs` | it **IS** the `merge=os-regen` driver. Git runs it, so `GIT_DIR` is exported **by construction** — not by coincidence. |\n| `scripts/check-regen-pending.mjs` | run by `.githooks/pre-commit` and `.githooks/pre-push` — **the exact path #16624 travelled**. |\n\n⇒ For these two, the mechanism is proven and the invocation path is proven. What has not been observed is only the coincidence of a `git init` firing during one of those invocations.\n\n## Measured on `origin/main` `5e53d73d` — still live, with controls\n\n```\nscripts/git-merge-regen.mjs      exists ✓   'git' spawn sites: 12   'init' mentions: 4\nscripts/check-regen-pending.mjs  exists ✓   'git' spawn sites:  4   'init' mentions: 2\n```\n\nNeither file imports or calls `gitFreeEnv()`. Every `GIT_`-shaped hit in both files is a **comment or an unrelated identifier**, read one by one rather than counted:\n\n- `git-merge-regen.mjs` — `:41` `$GIT_DIR/os-regen-pending` (prose), `:66` `GIT_SETTINGS` (a local config table), `:184` / `:196` / `:204` / `:205` prose about `GITHEAD_*`, `GIT_REFLOG_ACTION`, `GIT_INDEX_FILE`, `:1195` `GIT_SETTINGS.find(…)`.\n- `check-regen-pending.mjs` — `:9` `$GIT_DIR/os-regen-pending` (prose).\n\n⚠️ **A first pass of this measurement produced a false negative and is recorded so the next reader does not repeat it.** Grepping these files for `git init` returned nothing **and so did its control**, because they spawn git through an argv array (`'git'`, `['init', …]`) rather than as a command string. A zero whose control does not fire has measured nothing. The counts above use `'git'` and `init` as separate probes, both of which answer.\n\n## What the fix already looks like\n\n`scripts/git-env.mjs` (landed by #16624) carries `gitFreeEnv()` **and its boundary** in the same header:\n\n> `gitFreeEnv()` is for a git child that must operate on the repository named by its `cwd` and arguments … a network child keeps the ambient environment.\n\n## ⛔ The boundary any migration must respect\n\nA blanket `GIT_*` strip is correct **only** for a child that operates on the repository its `cwd` and arguments name. It is **wrong** for a child that talks to a remote: the agent containers this repo runs in carry `GIT_CONFIG_COUNT` with `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*` pairs that rewrite GitHub remotes and disable interactive credentials, plus `GIT_SSL_CAINFO` naming the proxy CA bundle. Strip those and `fetch` / `clone` / `push` in the child loses its transport configuration.\n\nBoth files in this card do local-only work, so `gitFreeEnv()` applies cleanly to both — but the reviewer must confirm that per spawn site rather than assume it, because #16644 measured at least two files elsewhere in the class that do **both** kinds of work in one file.\n\n## Acceptance\n\n1. Every throwaway-repo `git` spawn in these two files goes through `gitFreeEnv()`. ⛔ Not a hand-rolled strip — the repo already states this rule three ways (#16644's second finding) and a fourth spelling makes that worse.\n2. **The test must fail before it passes.** Set `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` to the real repository in the test environment, run the throwaway-repo path, and assert the real repository is **untouched** (index unchanged, `.git/config` unchanged). Run that assertion against the **unfixed** file first and record it going red — a green that was never red cannot distinguish \"isolated\" from \"the variables were absent\".\n3. **Negative control**: with those variables absent (the ordinary CI and hand-run case), both files behave exactly as they do today. A fix that changes the ordinary path has done more than isolate.\n4. Per spawn site, state whether it is local-only or network-touching, and apply `gitFreeEnv()` only to the former (see the boundary above). ⛔ Do not blanket-strip a network child.\n5. ⛔ **Do not add a repo-wide gate in this PR.** #16644 rules it out until the population is zero, and the reason is right: it would land red and get weakened. That gate belongs after Tier C.\n\nRelated: **#16644** (the enumeration; Tiers B and C stay there) · **#16624** (the measured incident and `gitFreeEnv()`) · **#9068** / **#9109** (closed; the earlier `LEAKED_GIT_ENV` allowlist spelling that #16644 recommends retiring)"
+}

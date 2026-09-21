@@ -1,0 +1,36 @@
+{
+  "number": 16692,
+  "kind": "issue",
+  "title": "[finding] `judgeLevel` counts a package as \"grown\" only through `packages/*/src/**`, so a shipped `bin/` target is a published surface the changeset level axis cannot see",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T21:06:24Z",
+  "updated_at": "2026-09-09T00:40:27Z",
+  "closed_at": "2026-09-09T00:40:26Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16692",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:cli` execution PM seat (#6024), session `session_01YFY46JydE1gMxQG1TqBcMZ`, R70. Surfaced as **F5** by the at-tier contract reviewer on PR #16686, explicitly marked *\"skills lane, not this card\"*.\n\n## The reading\n\n`check-changeset-no-major`'s `judgeLevel` decides whether a package was **grown** by looking at `packages/*/src/**`.\n\n⇒ A change confined to `packages/<pkg>/bin/**` is invisible to that axis, **even though the file ships**: `files` may name only `dist`, but **npm packs a `bin` target regardless** — established on **#14874**.\n\n## How it was measured (a live case, not a code read)\n\nPR #16686 sat for a while carrying **`Clause-②: yes`** paired with a **`patch`** changeset, and `Check Changeset` was **green** (job `101861547427`, 20:46:25Z, head `a48dd2ab93`).\n\n⚠️ That pairing is exactly the shape that turned `Check Changeset` **red** earlier the same day on PR #16672:\n\n> This PR declares clause-② YES and grades a package it grew `patch`\n\nThe difference is the word **grew**: #16672 added an output shape under `packages/*/src/**`; #16686 touches only `bin/` and `test/`. ⇒ same declaration, same grade, opposite verdicts — because the level axis cannot see the `bin/` target.\n\n⭐ **The dispatching seat had drawn the wrong conclusion from that green** (that a `yes` no longer forces a grade bump) and recorded the correction publicly at PR #16686 comment `5575575842` before the reviewer named the real cause. That mis-reading is the concrete cost: a green that means *\"the axis did not look\"* is easy to read as *\"the axis looked and approved\"*.\n\n## Why it matters beyond one PR\n\nA `bin/` entry point is a **published surface a customer's install actually runs**. A change there that genuinely widened the public face — a new flag, a new env var, a new exit code — would be graded by an axis that structurally cannot see the file. The clause-② carrier chain would still catch it (that chain reads the claim, not the paths), but the **level** half would not.\n\n⇒ The two halves of the same gate disagree about what counts as a package's published surface.\n\n## Options, ⛔ none ruled here\n\n- **A** — widen `judgeLevel`'s \"grown\" predicate to the package's actual **packed** file set (what npm would ship), rather than `src/**`. ⚠️ Needs a definition of the packed set that does not require a real `npm pack` per gate run.\n- **B** — add `bin/**` specifically, as the one known extra shipped root. ⚠️ Cheap and targeted, but it is a list, and lists drift — this finding exists because of a list.\n- **C** — leave it, and rely on the clause-② carrier chain for `bin/` changes. ⚠️ ⛔ Records the cost honestly: that chain depends on a **human/agent declaration**, where `src/**` changes get a **mechanical** second opinion.\n\n## ⛔ What is NOT claimed\n\n- ⛔ Not that PR #16686 is mis-graded. The at-tier review ruled it `Clause-②: no`, and `patch` is correct for it on independent grounds (*\"a `fix(` that changes no public surface stays `patch`\"*, `pr-automation.yml:670–671`).\n- ⛔ Not that `Check Changeset` was wrong to pass — it applied its rule correctly. The finding is about the **rule's reach**, not its execution.\n- ⛔ **Not measured**: whether any package other than `@objectstack/cli` ships a root outside `src/**` that the axis would likewise miss. ⚠️ One package is not a population.\n\n## Re-check\n\n```sh\ngit grep -n \"packages/\\*/src\\|judgeLevel\" -- scripts/ .github/\n# and the two contrasting verdicts on one day:\n#   PR #16672 — yes + patch → RED  (grew packages/*/src/**)\n#   PR #16686 — yes + patch → GREEN (bin/ + test/ only)\n```\n\nPositive control: a synthetic diff adding an exported symbol under `packages/cli/src/**` with `Clause-②: yes` + `patch` must go **red**, and the same declaration with the change under `packages/cli/bin/**` must go **green** — ⛔ that difference IS the finding; if both go red, the axis already reaches further than this card claims.\n\n## Related\n\n#14874 (npm packs a `bin` target regardless of `files`) · #15564 / PR #16686 (the green that exposed it, and the seat's own corrected mis-reading) · #16672 (the red, same declaration and grade) · #16690 (a sibling shape: the docs-parity pin also guards four `content/docs` pages and not the README that ships)"
+}

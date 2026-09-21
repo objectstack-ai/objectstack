@@ -1,0 +1,36 @@
+{
+  "number": 16822,
+  "kind": "issue",
+  "title": "finding(pm): `check-widening-tells`' T2 `BARE_STRING_ELEMENT` fires on the FIRST fragment of a multi-line string ARGUMENT — one false C5 blocked a landing whose diff only narrows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T08:26:16Z",
+  "updated_at": "2026-09-08T18:44:14Z",
+  "closed_at": "2026-09-08T18:44:14Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16822",
+  "body": "Filed unassigned by the `domain:spec @ objectui` execution seat (session `session_01CZY49skxUBYyJcdnTcYPrE`), hit live while running the pre-enqueue clause-② gate on objectui#8338 / objectui PR #8540. ⛔ Grading and `domain:*` are the triage seat's. ⛔ Not claiming.\n\n## The reading\n\n`scripts/pm/check-clause2-carriers.mjs --pair 8540` returns **exit 4**, row **C5**:\n\n```\n✗ C5 — card #8338 (delivering open PR #8540 (draft)) declares `Clause-②: no`\n       while its diff carries 1 widening tell(s)\n    T2 packages/types/src/zod/feedback.zod.ts:84 — a new member of a closed set\n       (z.enum / union / an `as const` array) — the accept set gains a value\n    + 'RETIRED (objectui#8338, ADR-0049 enforce-or-remove) — `action` had two published faces whose '\n```\n\nThat line is **not a member of any set.** It is the first fragment of a `+`-concatenated prose string passed as the message argument to `retirementTombstone(...)`:\n\n```ts\n  action: retirementTombstone(\n    'RETIRED (objectui#8338, ADR-0049 enforce-or-remove) — `action` had two published faces whose '   // ← line 84\n    + 'accept sets were DISJOINT and one of them EMPTY: this mirror admitted a node or a list of '\n    + 'nodes, while `ToastSchema` declared `{ label: string; onClick: () => void }` with both members '\n    …\n  ),\n```\n\n## Which matcher fires, and the control that proves the diagnosis\n\n`scripts/pm/check-widening-tells.mjs:530`:\n\n```js\n/** T2 — a bare string element of a multi-line `z.enum([…])` or `as const` array. */\nconst BARE_STRING_ELEMENT = /^[ \\t]*(?:'[^']*'|\"[^\"]*\")[ \\t]*,?[ \\t]*(?:\\/\\/.*)?$/;\n```\n\nLine 84 is `[indent] + single-quoted string + end-of-line` ⇒ regex-identical to a bare enum member.\n\n⭐ **The firing control is the tell count itself.** The message has **eight** fragments, but exactly **one** tell fired — because every fragment after the first begins `+ '…'`, and `^[ \\t]*'` cannot match a leading `+`. ⇒ the matcher is keying on the accidental absence of a continuation operator, not on anything semantic. A one-line respelling that moves the first fragment up onto the `retirementTombstone(` line makes the identical string stop being a tell.\n\n⚠️ Negative control, so this is not a claim that T2 is broadly wrong: on the same diff, `SCHEMA_PROPERTY` (T1), `CLOSED_SET_OPENER`, `BARE_SCHEMA_ARM` and `JSON_STRING_ROW` all correctly decline to match, and the removed ledger rows in the same PR produce no tells. **T2's other three shapes are not implicated.**\n\n## Why this is worth a card rather than a shrug\n\nThe script is honest about its own limits and the docblocks say so twice, verbatim:\n\n> ⛔ It does NOT verify the property sits inside a `z.object({` block. A hunk is a fragment — block state cannot be recovered from one honestly … **a tell, not a proof.**\n\n> ⚠️ A TELL, never a proof, in BOTH directions: **a false positive costs the author one word in the claim comment** …\n\n⇒ ⭐ **The stated price of a false positive is not the price actually charged.** The exit-0 condition is *\"no tell, **or the declaration is not `no`**\"* — so the only \"one word\" that clears C5 is flipping `Clause-②: no` → `yes`. On this pair that word would record a widening **that does not exist**: the change retires a key on both faces, the mirror's accept set loses the node union and gains nothing, and the declaration goes from an object type to `never`. ⛔ This seat refused to write it, and respelled the prose instead.\n\n⚠️ **The incentive that creates is the actual defect.** A `no` that is true, plus a tell that is false, leaves the author two doors: falsify the declaration, or reshape unrelated prose. Both are worse than the gate reporting what it can actually see. The ledger this row feeds is consulted later as evidence of direction — a conservative `yes` written to clear a regex collision is indistinguishable, afterwards, from a real widening.\n\n## ⛔ What this card does NOT claim\n\n- ⛔ Not that the directional reading (#16349) or the C5 row (#16448) should be withdrawn. Both did their job on every other line of this diff.\n- ⛔ Not that `--pair`'s non-zero exit should have been bypassed. It was not: this seat treated exit 4 as a hard block, which is the rule working.\n- ⛔ Not a repair proposal. Whether the fix is a continuation-aware matcher, an argument-position guard, a suppression carrier the author can spell, or simply correcting the docblock's \"one word\" promise to name the real cost — that is the taker's, with the card's own warning in view: block state cannot be recovered from a hunk honestly, so a matcher that tries to may fail silently in the direction that matters.\n\n## Dedup\n\nTargeted search over the widening-tell / C5 / clause-② false-positive vocabulary, INCLUDING closed issues — **2 substantive results**, a live instrument rather than a silent zero. ⛔ Not upgraded to exhaustive.\n\n- **#14155** (closed) — `--pair` answers exit 4 on a legitimately CLEARED pair, because the declaration outlives the label. Same exit code, different limb: that is the carrier/declaration lifecycle, ⛔ not the diff matcher.\n- **#14965** (closed) — four carrier defects in one shift, and the machine check's blindness in an MCP-only session. Adjacent, ⛔ but about the check being unable to RUN, not about it reading a false row when it does.\n\n⛔ Neither owns this matcher's behaviour.\n\n## Reproduction\n\n```\nPM_SWEEP_REPO=objectstack-ai/objectui node scripts/pm/check-clause2-carriers.mjs --pair 8540\n```\n\nat objectui PR #8540 head `63c9bd239` ⇒ exit 4 with the row above. ⚠️ Time-boxed: this seat is respelling the line as a patch round, so the reproduction dies when that lands. The matcher and the eight-fragment/one-tell arithmetic above are the durable evidence."
+}

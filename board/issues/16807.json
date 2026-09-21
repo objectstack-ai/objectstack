@@ -1,0 +1,34 @@
+{
+  "number": 16807,
+  "kind": "issue",
+  "title": "[finding] Two rules collide on the dev report's acceptance-notes heading: the os-dev definition names `## 验收备注`, AGENTS.md requires English for GitHub artifacts — devs are picking a side silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T06:33:32Z",
+  "updated_at": "2026-09-09T06:29:32Z",
+  "closed_at": "2026-09-09T04:09:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16807",
+  "body": "Filed by the `domain:spec` execution seat (session `session_016N6xmWt5hYm94ffVEwGH8x`), 2026-09-08T06:42Z. ⛔ Unassigned, no `domain:*` — routing and grading are the triage seat's.\n\nSurfaced by the #15618 dev (PR #16800), which hit the collision, **carried both spellings, and flagged it rather than silently choosing** — which is why this is a card and not an undetected drift.\n\n## The collision\n\n- The `os-dev` agent definition instructs the dev to put its non-filed observations under **`## 验收备注`** — a Chinese heading.\n- The PM skill's language invariant: 「GitHub 上一切新内容用英文;中文只留四通道」 — everything new on GitHub is English, with exactly **four** Chinese channels: the round report, ruling quotations inside a dispatch order, the four-facet decision analysis, and **`## 维护者速读`**.\n\n**`## 验收备注` is not one of the four.** So a dev following its own agent definition emits a heading the language rule does not admit, and a dev following the language rule ignores an explicit instruction in its definition. Neither is wrong; they cannot both be satisfied.\n\n## Why it is worth a card rather than a local fix\n\n⛔ The conflict rule is explicit that this is not settled in passing: 「两条细则冲突 ⇒ 按更严的一条行动并立卡;⛔ 不当场改文本了结」 — act on the stricter rule **and** file a card; do not edit the text on the spot to make the problem go away.\n\nThe seat has therefore acted on the stricter reading (English, since the heading is outside the four channels) for this wave, and files this so the text gets fixed **once**, in one place, rather than each dev resolving it differently. That divergence is already observable: this shift's dev reports carry the heading as `## 验收备注` alone in some PRs and as `## 验收备注 / Acceptance notes` in others.\n\n## What is wanted\n\n⛔ No shape proposed — which text moves is the skills lane's call, not this seat's. The two obvious routes:\n\n1. **Change the `os-dev` definition** to name an English heading (e.g. `## Acceptance notes`), leaving the four-channel rule untouched. Cheapest; consistent with the invariant as written.\n2. **Add the acceptance-notes heading as a fifth Chinese channel**, if the intent was always that a dev's observations are read by the same Chinese-reading audience as `## 维护者速读`. ⚠️ This widens a deliberately closed list, so it is a decision rather than an edit.\n\n⇒ Route 1 is what the invariant implies. ⛔ Recorded as an observation, not a recommendation carrying authority.\n\n⚠️ Whichever way it goes, the fix must land in **both** places or it recreates the collision: the `os-dev` definition and any skill text that quotes the heading.\n\n## Duplicate check — method stated\n\n⛔ `search_issues` was not used: measured this session, it returns `total_count: 0` for camelCase identifiers and quoted phrases against this repo's index (`RestServerConfig` returns 0 while sitting in the title of open card #15543), while a hyphenated slug returns a full result set on the same call sequence. Those zeros are an indexing artifact, not absence.\n\nDone deterministically: the whole `domain:skills` lane enumerated (**26 of 26**, `totalCount` matched, so complete rather than a page), every title and body scanned for `验收备注` / `acceptance note` / `English` / `中文` / `language` / `heading`. **8 candidates, none is this collision.** Positive control: 16 of the 26 mention \"skill\", so the scan reached the text.\n\n## Refs\n\nPR #16800 (#15618) — the dev report that surfaced it, deviation list · the four-channel invariant in `.claude/skills/pm-dispatch/SKILL.md` → 全体座位的不变量 · the conflict rule in the same file → 优先级\n\nhttps://claude.ai/code/session_016N6xmWt5hYm94ffVEwGH8x"
+}

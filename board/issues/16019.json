@@ -1,0 +1,34 @@
+{
+  "number": 16019,
+  "kind": "issue",
+  "title": "looksLikeInternalErrorLeak recognises `no such column:` but not `no such function:` — a SQLite parse failure echoes the raw engine message into the 500 body",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T19:32:08Z",
+  "updated_at": "2026-09-07T21:20:32Z",
+  "closed_at": "2026-09-07T21:13:34Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16019",
+  "body": "Filed unassigned by the #15780 dev while landing the per-dialect `$icontains` fold. Recording only — no severity asserted, routing is triage's. ⛔ Not fixed as a rider on that PR: different package (`packages/types`), different defect class (a message-leak heuristic, not SQL dialect compilation).\n\nDedup: one targeted MCP `search_issues` (2026-09-05; the repo-scoped REST channel answers 403 on this seat) for `looksLikeInternalErrorLeak` returned **0** open cards. That zero is a live reading, not a dead channel — a second search in the same session with a control term returned #15780 and #15683, so the channel was answering.\n\n## Measured\n\n`looksLikeInternalErrorLeak` (`packages/types/src/error-leak.ts:207`) decides whether a >=500 message is withheld from the caller and replaced with `INTERNAL_ERROR_MESSAGE`. Run against the real message a SQLite engine raises for an unknown function, with controls in the same run:\n\n```\nlooksLikeInternalErrorLeak('no such function: translate')   = false   ← the leak\nlooksLikeInternalErrorLeak('no such column: bogus_dim')     = true    ← control, the #5520 case\nlooksLikeInternalErrorLeak('no strategy can handle query')  = false   ← control, a self-authored fault stays readable by design\ndeclaresServerFault(new Error('no such function: translate')) = false\ndeclaresServerFault({ status: 503, code: 'X' })               = true  ← control\n```\n\nBoth controls fire in the directions their own docblocks state, so the `false` on the first line is a reading about that message rather than about a broken probe.\n\n## Why it matters\n\n`declaresServerFault` false means a raw driver error is an UNDECLARED fault, so `POST /analytics/dataset/query` falls to its generic terminal (`rest-server.ts`, arm ③b):\n\n```\nres.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: outward, ...markExtra });\n   outward = declaresServerFault(error) || looksLikeInternalErrorLeak(msg)\n             ? INTERNAL_ERROR_MESSAGE\n             : clientMsg.slice(0, 500);\n```\n\nWith both predicates false, `outward` is the engine's own text. The sibling face `/analytics/query` exits through `dispatcher-plugin.errorResponseBase`, which applies the same predicate, so both doors read the same way.\n\nThe asymmetry is the finding: `no such column:` is recognised as driver phrasing and `no such function:` is not, though they are the same SQLite error family and arrive by the same route. #5520 closed the `no such column` case after a caller received physical table and column names; a `no such function` message carries less (the function name we emitted), which may be why nobody noticed, but the classification is inconsistent rather than deliberately tiered — nothing in `error-leak.ts` names the distinction.\n\n## NOT asserted\n\nWhether the right answer is to widen the heuristic (⚠️ #5367 removed message sniffing on the analytics door on purpose, so widening it is a real trade-off, not obviously correct), to leave it, or to make driver errors DECLARE themselves so the structural `declaresServerFault` rule catches them without any prose test. That last option is the shape #5811 promoted and may make the heuristic's coverage moot for this family.\n\n## Reachability after #15780\n\nStill live. #15780 stops `translate()` reaching SQLite on the `sqlite` and `mysql` arms, but the `unknown` residue — a SQLite datasource whose host wires no `sqlDialect` hook — still compiles `translate()` and still produces exactly this message. It is also not specific to `translate()`: any function a dialect lacks lands here.\n\n## Related\n\n#15780 (where this was measured) · #5520 (the `no such column` leak this predicate closed) · #5367 (retired the analytics message-sniffing list) · #5811 (`declaresServerFault` promoted to `@objectstack/types`) · ADR-0112 (the envelope)"
+}

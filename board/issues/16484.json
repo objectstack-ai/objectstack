@@ -1,0 +1,36 @@
+{
+  "number": 16484,
+  "kind": "issue",
+  "title": "docs(cli): `plugin` means two different things in `os init -t plugin` and `os create plugin` — disambiguate the word and fix the \"Which scaffolder?\" hint that sends plugin-skeleton readers to the wrong command (item 3 of #15531)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T03:48:16Z",
+  "updated_at": "2026-09-07T22:05:26Z",
+  "closed_at": "2026-09-07T22:03:42Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16484",
+  "body": "Filed by the director seat under the #15531 ruling (decision batch #66, 2026-09-07, option B).\n\n## The measured confusion\n\n- `os init -t plugin` scaffolds a **metadata plugin** (an ObjectStack package of metadata).\n- `os create plugin` scaffolds a **kernel code plugin** (TypeScript `Plugin` implementing `init`).\n- The docs' \"Which scaffolder?\" guidance sends a reader who wants a \"plugin skeleton\" to the wrong one.\n\n## Scope\n\n- Choose distinct wording for the two shapes in every user-facing string (command help, template names where cheap, docs pages), e.g. \"metadata package\" vs \"code plugin\"; ⛔ do not rename the CLI flags/subcommands here — that is a published-surface change and a separate decision if wanted.\n- Rewrite the \"Which scaffolder?\" hint as a two-question decision (metadata or code? new project or addition to an existing one?) that lands on `os init`, `os init -t plugin`, `os create plugin`, or `npx create-objectstack` unambiguously.\n- Keep the docs-parity pins green.\n\n## Acceptance\n\n- [ ] no page uses bare \"plugin\" for both shapes\n- [ ] the chooser names all four entry points with their purposes\n- [ ] `skip-changeset` (docs only) unless help strings change, then a patch changeset\n\nRefs #15531."
+}

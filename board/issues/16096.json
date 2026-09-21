@@ -1,0 +1,35 @@
+{
+  "number": 16096,
+  "kind": "issue",
+  "title": "lint: `filter-token-unknown` never walks `flows` — an unresolvable `{TOKEN()}` in a flow node's `config.filter` is silent, while the identical string in a view filter exits 1",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T00:34:00Z",
+  "updated_at": "2026-09-08T03:54:37Z",
+  "closed_at": "2026-09-08T03:40:45Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16096",
+  "body": "Measured on the **pinned `@objectstack/lint@17.3.0`** artifact as installed by `objectstack-ai/hotcrm`, ⛔ not on the platform source tree. Filed unassigned by the hotcrm step-3 rule survey (hotcrm#1613); the local assertion covering the flow surface stays in place there.\n\n## The gap\n\n`validateFilterTokens` walks a fixed root list:\n\n```js\n[ { key: \"objects\", kind: \"object\" },\n  { key: \"views\",   kind: \"view\" },\n  { key: \"reports\", kind: \"report\" },\n  { key: \"datasets\",kind: \"dataset\" },\n  { key: \"pages\",   kind: \"page\" },\n  { key: \"apps\",    kind: \"app\" } ]\n```\n\n`flows` is not in it. A flow node's `config.filter` is a filter in every sense that matters — it is handed to the data engine and it decides which rows a sweep touches — but no root reaches it, so `classifyFilterToken` is never called on those strings.\n\nThe rule's own message says what the cost is: *\"It is sent to the data engine as a literal string, matches no record, and the surface renders empty.\"* On a scheduled sweep there is no surface to render empty. The sweep simply acts on nothing, nightly, at exit 0.\n\n## Measurement, with a working control\n\nOne committed tree (hotcrm at `a0362a37`), one injection at a time, restored by blob hash. Clean-tree baseline: `0 error(s), 17 warning(s), 12 suggestion(s)`, exit 0. **The same token string** in both rows.\n\n| where `'{TOMORROW()}'` was injected | `pnpm lint` |\n|:--|:--|\n| **control** — `src/views/account.view.ts`, a list view's `filter[].value` | `filter-token-unknown` **error**, **exit 1** |\n| `src/flows/opportunity-stagnation.flow.ts`, the `query_stalled` node's `config.filter` | **nothing fires** — 17 warnings, exit 0, byte-identical to baseline |\n\nSame command, same run design, same string. The control fires, so the second row is a reading about the walk's roots.\n\n`{TOMORROW()}` is genuinely unresolvable on this pin: it is not a context token and not a date macro, and the view-side finding names it as such.\n\n## Why this one is sharper than it looks on hotcrm\n\nThat repo already carries `test/flow-filter-today-token.test.ts`, which exists because `{TODAY()}` in a flow filter changed meaning under it at the rc.5 to rc.6 bump (hotcrm#1107). The answer there was that the flow template engine resolves `TODAY()` **before** ObjectQL sees it — so flow filters have their own token vocabulary, resolved by a different layer than the one `classifyFilterToken` knows. That is a good reason for the flow surface to need its own treatment; it is not a reason for it to have none.\n\nA token the flow template pre-pass does not consume reaches ObjectQL verbatim, and one neither layer knows fails the run rather than querying. Both of those are run-time outcomes with no author-time signal.\n\n## Suggested direction, not a prescription\n\nAdding `{ key: \"flows\", kind: \"flow\" }` to the root list is the obvious shape, but ⚠️ it is very likely wrong as-is: it would immediately red every legitimate `{TODAY() - 45}` in every sweep, because those are resolved by the automation template evaluator and not by the filter-token vocabulary. Whatever lands needs the flow token grammar as its reference set, not the ObjectQL one — which is why this is filed as a finding for the owner to scope rather than as a one-line fix.\n\n## Related, and why this is not a duplicate\n\n- #3810 (closed) — flow node filters silently blanking date macros: the template engine consuming `{…}` before the query engine sees it. Same seam, run-time half, and the reason a naive root addition would misfire.\n- #3582 (closed) — template tokens in filter values not evaluated at run time.\n- #14275 (closed) — `dashboard-filter-field-unknown` skipping dotted filter fields; a different rule with the same \"the walk does not reach this position\" shape.\n\nRefs: hotcrm#1613 · hotcrm#1582 (F1) · hotcrm#1583 (F2) · hotcrm#1584 (F3) — `filter-token-unknown` is claimed by three of the six family cards, and the flow-surface half is unreachable for all of them."
+}

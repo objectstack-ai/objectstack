@@ -1,0 +1,37 @@
+{
+  "number": 15405,
+  "kind": "issue",
+  "title": "[finding] the #13904 engine-slot repair is re-collapsed at `objectQLProvider`'s SECOND consumer — `GET /meta/object/:name/state/:field` answers 404 for a wired-and-failing engine",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T14:34:36Z",
+  "updated_at": "2026-09-09T07:49:39Z",
+  "closed_at": "2026-09-09T07:47:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15405",
+  "body": "Found while running the #14251 phase-1 consumer census (read-only). Recorded for triage; no severity asserted.\n\nMeasured by reading `origin/main` at `a56baa2bdf`. Located by symbol, not by line — the line numbers below are that commit's.\n\n## The shape\n\n`objectQLProvider` has **two** consumers in `packages/rest/src/rest-server.ts`, and #13904 (PR #14250) repaired the slot for one of them:\n\n| consumer | line | how it reaches the provider |\n|:--|:--|:--|\n| `computeExecCtx`, the authorization-input seam | 2361 | `wiredEngineOrLoud(Boolean(this.objectQLProvider), ...)` — **keeps the two facts apart** (#13476) |\n| `GET {basePath}/meta/object/:name/state/:field` | 7453 | `await this.objectQLProvider(environmentId).catch(() => undefined)` — **re-collapses them** |\n\nThe second one converts every rejection back into the same `undefined` a never-registered engine produces, three lines before the answer is chosen:\n\n```\nconst ql = this.objectQLProvider\n    ? await this.objectQLProvider(environmentId).catch(() => undefined)\n    : undefined;\nconst schema = (ql as any)?.registry?.getObject?.(name);\nif (!schema) {\n    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Object not found' } });\n```\n\n⇒ on this route, an engine that was **wired and failed to build** and an engine that was **never registered** both answer `404 NOT_FOUND · \"Object not found\"` — the same disguise #13476 measured at the package door (there it wore a 403), and the same one its sibling seam now answers `503` for.\n\n## Why this line is NEWLY load-bearing, and was not before\n\nBefore #13904 the shipped provider was `try { ... } catch { return undefined; }`, so it **could not reject**: the `.catch` at 7453 was dead code and the collapse happened one layer earlier. #13904 made the provider re-raise every unbranded rejection precisely so a consumer could see it. This consumer catches it back. So the repair reaches one of the slot's two consumers, and the other is unchanged by it.\n\n⛔ Not a defect in #13904 — its card and its pins are scoped to the `computeExecCtx` seam, and they hold. This is the second consumer nobody enumerated.\n\n## A second, narrower observation at the same line\n\n`provider(environmentId).catch(...)` attaches to the promise the call RETURNS, so it can only ever see a *rejection*. A host that wires a non-`async` provider — which the seam's declared type cannot prevent, and `RestServer`'s constructor is the public wiring point — throws while the expression is still being evaluated, and the `.catch` is never reached. That is exactly the asymmetry `seamOrUndefined` was introduced to end (its docblock measures it at `settingsServiceProvider`: 200 when the provider was `async`, 401 when it was not).\n\nTwo provider call sites in `rest-server.ts` still carry the retired spelling:\n\n- `rest-server.ts:7453` — `objectQLProvider` (above)\n- `rest-server.ts:9286` — `emailServiceProvider`, in `POST {basePath}/email/send`\n\nEvery other provider call site in the file either goes through `seamOrUndefined` / `wiredEngineOrLoud` or wraps the call in a real `try`/`catch`, which sees both fault shapes.\n\n⚠️ Neither is reachable from the **shipped** wiring today: both providers in `rest-api-plugin.ts` are declared `async`. This is residue of the #13280 class at an embedder-reachable seam, not a live wire defect.\n\n## Scope\n\nNot folded into anything. #14251 phase 1 is read-only, and its file surface is the provider closures in `rest-api-plugin.ts`; both observations here are **consumer-side**, in `rest-server.ts`. The repair for the first is a one-line change of spelling at 7453 plus the ruling that goes with it — is \"the engine is wired and broken\" a 503 on a metadata read, as it already is on the package door — which is a per-consumer judgement and the reason this is a card and not a rider.\n"
+}

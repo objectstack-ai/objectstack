@@ -1,0 +1,35 @@
+{
+  "number": 16994,
+  "kind": "pull_request",
+  "title": "test(spec): pin the solution-blueprint pointer row to its subject",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T00:36:42Z",
+  "updated_at": "2026-09-09T02:02:15Z",
+  "closed_at": "2026-09-09T02:02:13Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-09-09T02:02:13Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16994",
+  "body": "Refs #15263\n\nBlocked-by: #16992 — must land AFTER it. Measured, not assumed: see \"Landing order\" below.\n\nClause-②: no\n  A test-only change. It adds no schema, no export, no accept set and no runtime path;\n  it asserts an existing published artifact's content. Nothing an author can write moves.\n\n> **Split from #16992.** The fix and its regeneration stay there. This pin was separated\n> because a change under `packages/spec/scripts/` is a change to the generator that the\n> #11705 generated-artifact exception has to trust: carried alongside the regenerated\n> `skills/**` index, the recompute that certifies that index would be running the same\n> PR's own generator and could not certify it, so the whole PR would have needed a human\n> merge. Split, #16992 measures NOT governed and this PR measures NOT governed.\n\n## What this pins, and why a generator-only check cannot\n\nThe published skill-index row for `ai/solution-blueprint.zod.ts` is generated from the\nmodule's own doc block, with `Exports: …` as the fallback when no block qualifies.\n`check:skill-refs` and `check:docs` each compare an artifact against the generator that\nwrote it, and the generator reproduces the header selector faithfully — so both stayed\ngreen for the entire life of the defect #16992 fixes. Triage said it plainly:\n\n> ⛔ 验收必须断言发布出来的那一行**内容**,而不是「生成器跑通了」。…**生成器自己看不见这一类** —— 它们忠实地复现了选择器。\n\nSo this asserts the fact the artifact must state. Modelled on\n`packages/spec/scripts/query-pointer-row.test.ts`, which #14441's fix used for the same\nreason one file over.\n\n## Two legs that fail differently\n\n| leg | what makes it red |\n|:--|:--|\n| SOURCE | the separator between the module header and `SNAKE_CASE` goes away — reds immediately, no regeneration needed |\n| CORPUS | an index is regenerated from a file whose header no longer qualifies — reads checked-in bytes, so it is blind to a source-only regression and catches the published state instead |\n\nAblation from the committed fix, deleting the one-line doc:\n\n| stage | source legs | corpus leg |\n|:--|:--|:--|\n| source mutated, index not regenerated | **RED** (2) | green — reads checked-in bytes |\n| index regenerated from the mutated source | RED | **RED**, row reverts byte-for-byte to the `Exports:` fallback |\n\nThe mutation was proven on disk by blob hash before each run and the restore proven by an\nempty `git diff HEAD`. A fourth leg (\"finds the rows at all\") is an anti-vacuity guard and\nstayed green throughout — without it, \"no bad row\" would read as green when nothing parsed.\n\n## Landing order — this PR is red until #16992 lands\n\nMeasured on this branch, which is based on `main` where the fix has NOT landed:\n\n```\n× opens on the plan-first authoring sentence, not on `SNAKE_CASE`\n× still documents `SNAKE_CASE` — the fix ADDS a symbol doc, it does not delete the header\n✓ finds the rows at all\n× reads the blueprint sentence on every one of them, never the `Exports:` fallback\n  Tests  3 failed | 1 passed (4)\n```\n\nThat is the pin correctly detecting the defect that is still on `main` — it is evidence the\npin is not vacuous, not a fault in this PR. It goes green the moment #16992 lands and this\nbranch takes that commit. ⛔ Do not land this first.\n\n## Cross-package declaration\n\nThe pin reads `skills/*/references/_index.md`, outside its own package, so it is declared in\n`packages/spec/vitest.repo-tests.json` and runs under the `repo` project, whose hash moves\nwith what it actually reads. Left undeclared it would run under `@objectstack/spec#test`,\ninvisible to both the affected-subset filter and the turbo cache — green on every PR while\nred on main, which is the one failure a pin like this exists to refuse.\n`pnpm check:cross-package-test-inputs` caught exactly that and is now green.\n\n## Governed-surface verdict\n\n```\nnode scripts/pm/check-governed-merges.mjs --test \\\n  packages/spec/scripts/solution-blueprint-header-row.test.ts \\\n  packages/spec/vitest.repo-tests.json\n\ngoverned-surface predicate: 0 of 2 path(s) hit the register (5 surfaces, repo-agnostic).\n  ✅  NOT governed — ordinary queue landing applies to a PR with exactly this file list.\n```\n\nexit 0.\n\n## Changeset — both halves, measured\n\nHalf 1: `packages/spec`'s `files[]` is `dist`, `json-schema`, `liveness`, `prompts`,\n`llms.txt`, `README.md`, `src/**/*.zod.ts`, `CHANGELOG.md`, `api-surface`,\n`spec-changes.json`. Neither `packages/spec/scripts/**` nor a root `vitest.repo-tests.json`\nis on it, so half 1 says no.\n\nHalf 2, measured on the deciding tree — `npm pack --dry-run --json` on the\n`@objectstack/spec` tarball:\n\n| path | shipped entries |\n|:--|--:|\n| `scripts/solution-blueprint-header-row.test.ts` | **0** |\n| `vitest.repo-tests.json` | **0** |\n| any `scripts/` entry at all | **0** |\n| positive control — `src/**/*.zod.ts` | 206 |\n| discriminating control — root `*.json` that DO ship | `package.json`, `spec-changes.json` |\n\nThe last row is what makes this a measurement rather than an absence: a sibling root-level\n`.json` **is** shipped by the same `files[]` mechanism, and this one is not. ⇒ nothing\npublished moves ⇒ `skip-changeset`, applied as a label rather than an empty changeset\n(an empty-frontmatter changeset is a real input to `changesets/action` and an all-empty set\nstalls the release silently and greenly).\n\n## Verification\n\n- `pnpm check:cross-package-test-inputs` ✓ · `pnpm check:test-source-alias` ✓ · `pnpm check:nul-bytes` ✓ · `pnpm --filter @objectstack/spec check:scripts-typecheck` ✓ · `pnpm check:agent-test-spelling` ✓ · `pnpm check:type-check-coverage` ✓\n- The pin ran green on the branch that carries the fix: `test:repo` 28 files / 407 passed.\n- On this main-based branch it is 3 red / 1 green, exactly as the landing-order section shows.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016N6xmWt5hYm94ffVEwGH8x)_"
+}

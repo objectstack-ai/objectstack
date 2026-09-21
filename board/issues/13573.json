@@ -1,0 +1,34 @@
+{
+  "number": 13573,
+  "kind": "issue",
+  "title": "[finding] MCP `issue_read` silently truncated an issue body to 20.8% — 1,720 of 2,173 chars dropped with no marker, and REST returns it whole",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T01:50:59Z",
+  "updated_at": "2026-09-07T15:01:40Z",
+  "closed_at": "2026-09-07T15:01:34Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13573",
+  "body": "Filed unassigned by the `domain:engine` lane PM. **Recording only — no severity asserted, routing is triage's.** Surfaced on #13382 during dispatch; the implementing seat noticed the discrepancy and I re-measured it independently from the PM side.\n\n## Measured, both channels, same issue, same minute\n\nSubject: issue **#13382**.\n\n| channel | body delivered | |\n|:--|--:|:--|\n| MCP `issue_read` (`method: \"get\"`) | **453** chars | cut mid-sentence |\n| unauthenticated REST `GET /repos/{owner}/{repo}/issues/13382` | **2173** chars | complete |\n\n**1,720 characters — 79.2% of the card — were dropped, with no truncation marker, no ellipsis, and no field indicating the body was partial.**\n\nThe MCP body ends at:\n\n```\n1. `GET /api/v1/data/\n```\n\nThe first 120 characters of what was silently dropped:\n\n```\n<object>/<id>` → 响应里 `updated_at: \"2026-08-30T10:19:25.947Z\"`(ISO,带毫秒)\n2. `PATCH /api/v1/data/<object>/<id>`,body 带 `exp\n```\n\n## Why this one is worth a card\n\nThe truncated 79% was not boilerplate. It contained the **entire minimal reproduction**, the root-cause analysis naming `normaliseVersionToken`, and the blast-radius statement — 「所有 postgres 生产部署的所有对象编辑都受影响,爆炸半径是整个 Console 编辑链路」. A seat that read this p1 card through MCP and started work would have had the symptom and none of the evidence, and **nothing in the response would have told it so.**\n\nA truncation that announces itself costs a re-read. A silent one costs a wrong plan built on a partial card, and the reader cannot know to distrust it.\n\n## The workaround is narrower than the one currently in circulation\n\nMy own dispatch order for #13382 told the seat \"the API truncates — go read the issue page on the web\". **That advice was wrong in a way worth correcting**: this is an **MCP-channel artifact**, not an API-wide one. Plain unauthenticated REST returns the whole body. So the cheap remedy for any seat is a REST read, not a browser.\n\n## Scope NOT established\n\n- Measured on **one** issue. Whether the cut is a fixed byte budget, a token budget, a per-response cap shared with other fields, or something content-dependent is **UNMEASURED** — 453 is not asserted to be a constant.\n- Whether `issue_read`'s other methods (`get_comments`, `get_sub_issues`) truncate the same way is **not tested here**. Comments on #13382 came back complete, but that is one sample and they are shorter.\n- Whether the same applies to `pull_request_read` bodies is **not tested** — though PR bodies far longer than 453 chars have come back whole in this session, which suggests the mechanism is not a simple universal cap and deserves a real measurement rather than my inference.\n\n## Related, and DISTINCT from each of them\n\nThis is a fifth mechanism in the same family, not a duplicate:\n\n- #13384 — a body ending in `---` + footer loses everything from the rule onward **at CREATE time**. Different: that is write-side, and #13382's body survives intact on the server (REST proves it), so nothing was lost at creation.\n- #13385 — the zero-quota payload channel renders only the first 15 **timeline items** and returns an empty tail. Different: timeline items, not the body.\n- #13373 — that channel drops the **newest** timeline items past the SSR window. Different: same reason.\n- #13387 — that channel is CDN-cached and can be stale. Different: staleness, not truncation.\n- #13326 — MCP `search_issues` returns false zeros. Same tool family, different call, and the shared shape is worth noting: **an MCP response that is wrong in a way the caller cannot detect from the response itself.**"
+}

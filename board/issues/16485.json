@@ -1,0 +1,36 @@
+{
+  "number": 16485,
+  "kind": "issue",
+  "title": "cli: `create-objectstack` emits TypeScript `^6.0.0` while `os init` / `os create` emit `^5.3.0` — generate the on-ramp's version policy from the same constants at build time (item 4 of #15531)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T03:48:24Z",
+  "updated_at": "2026-09-07T16:28:59Z",
+  "closed_at": "2026-09-07T16:28:48Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16485",
+  "body": "Filed by the director seat under the #15531 ruling (decision batch #66, 2026-09-07, option B).\n\n## Why\n\n`npx create-objectstack` is the documented on-ramp (13 doc pages). It declares `typescript: ^6.0.0` for a new project while `os init` and `os create` declare `^5.3.0` from the shared emission policy (PR #15974). Two projects created the same day get different TypeScript majors depending on which entry point the reader followed. The structural cause: `create-objectstack` cannot import from `@objectstack/cli`, so the shared constants never reach it.\n\n## Scope\n\n- Generate `create-objectstack`'s version pins from the same policy source at **build time** (a small generation step that inlines the shared constants into the package, with a check that fails when the inlined values drift from the source — the repo's usual generated-file pattern).\n- Decide the actual TypeScript range once (the shared policy's value wins unless the cli seat records a reason the on-ramp needs a different one — record it here).\n- Pin: a test that the three scaffolders emit identical `typescript` (and pnpm / engines) ranges.\n\n## Acceptance\n\n- [ ] identical ranges across `create-objectstack`, `os init`, `os create`\n- [ ] drift check present and green\n- [ ] changeset for `create-objectstack`\n\nRefs #15531, PR #15974."
+}

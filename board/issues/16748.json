@@ -1,0 +1,34 @@
+{
+  "number": 16748,
+  "kind": "issue",
+  "title": "`approval-approvers-may-resolve-empty` covers `position` and not `manager` — the rung whose column no product surface can write is the one the rule stays silent on",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T03:19:43Z",
+  "updated_at": "2026-09-09T05:12:34Z",
+  "closed_at": "2026-09-09T05:12:33Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16748",
+  "body": "Split out of **#16678** (\"Expected capability\", option 2), which offers three ways to close it and says *\"Any one of these closes it\"*. Option 2 is a coverage gap in a rule that already exists, is measurable in-tree, and is independent of the decision option 1 needs — so it gets its own card rather than sitting behind that decision. #16678 keeps the write-surface half.\n\n⛔ Filed by the triage seat, unassigned. The app-side measurement is the original reporter's (`objectstack-ai/hotclm`, `@objectstack/*` 17.3.0); the in-tree readings below are mine.\n\n## The gap\n\n`packages/lint/src/validate-approval-approvers.ts` declares, in its own rule table (`:23`):\n\n```\n| approval-approvers-may-resolve-empty       | info     | empty-position dead-end (#3424) |\n```\n\nMeasured on `origin/main` `5e53d73d`:\n\n```\ntarget : git grep -c \"'manager'\"  validate-approval-approvers.ts   ->  0\ncontrol: git grep -c \"'position'\" validate-approval-approvers.ts   ->  4     (the instrument fires)\nrule id : :60  export const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY = 'approval-approvers-may-resolve-empty';\n```\n\n⇒ the rule reasons about `position` rungs and says nothing about `{ type: 'manager' }`.\n\n## Why the omission is the wrong way round\n\nThe rule exists for the **empty-position dead-end** (#3424): an approver slate that resolves to nobody, with `lockRecord: true` turning that into a stranded record. `{ type: 'manager' }` has the **same failure shape and a worse cause**:\n\n| rung | why it can resolve empty | can the operator fix it in-product? |\n|---|---|---|\n| `{ type: 'position', … }` | the position is unstaffed | **yes** — staff it |\n| `{ type: 'manager' }` | `sys_user.manager_id` is unset | ⛔ **no** — see #16678: the data API refuses the column (`Editable fields: name, image, locale`), the auth admin endpoints do not accept it, and the Console renders no field |\n\nConfirmed in-tree: `packages/plugins/plugin-auth/src/identity-write-guard.test.ts:186` pins `getManagedUpdateWhitelist('sys_user')` as exactly `{name, image, locale}`, and `packages/platform-objects/src/identity/sys-user.object.ts:55` states the same narrowing.\n\n⇒ the rule warns about the rung an operator **can** rescue and stays silent on the rung they **cannot**. And `{ type: 'manager' }` is, as #16678 puts it, *\"the canonical first rung of every tiered approval ladder, and what the docs reach for first\"* — so the silent case is also the common one.\n\n## What is NOT claimed\n\n- ⛔ Not that `manager_id` should be writable. That is #16678's question and it is deliberately left there — this card is satisfied either way, because a rule that warns is correct whether or not the column later gains a write surface (the warning would simply stop firing once one is populated).\n- ⛔ Not measured: how often `{ type: 'manager' }` is authored across real stacks. One app is not a population; the grade below does not rest on a rate.\n- ⛔ Not a claim that the existing `position` arm is wrong. It is correct and stays.\n\n## Acceptance\n\n1. The rule fires on a stack that authors `{ type: 'manager' }` — at the same `info` tier as its `position` sibling, with a message naming the real remedy (populate `sys_user.manager_id` via SCIM / import / directory sync; see #16678 for why no product surface writes it today).\n2. **Negative control**: a stack authoring `{ type: 'manager' }` where the relevant users **do** carry `manager_id` must **not** fire, if the rule can see that; if it cannot see row data at lint time, the message must say the check is static and say so plainly rather than asserting the slate is empty. ⛔ A lint rule must not claim a runtime fact it did not read.\n3. **Regression control**: the existing `position` arm keeps firing on exactly what it fires on today. ⛔ A refactor that generalises both arms must not change the `position` verdicts.\n4. If #16678 later gives `manager_id` a product write surface, this rule's message needs the remedy line updated — note that dependency in the code so it is not missed.\n\nRelated: **#16678** (the write-surface half, and the source measurement) · **#3424** (closed; the empty-position dead-end this rule was written for) · **ADR-0092** (the platform-object write narrowing that refuses the column) · **#16679** (the operational escape hatch for a stranded record, and why it is API-only today)"
+}

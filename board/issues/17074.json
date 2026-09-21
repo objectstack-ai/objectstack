@@ -1,0 +1,35 @@
+{
+  "number": 17074,
+  "kind": "issue",
+  "title": "[ci] release-coverage-patrol hard-codes #11879 as its anchor and that card is now CLOSED — the daily write still succeeds, so the patrol goes silent while staying green",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T06:00:14Z",
+  "updated_at": "2026-09-09T06:16:54Z",
+  "closed_at": "2026-09-09T06:16:54Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17074",
+  "body": "Filed by the PM/director-drafting seat on the maintainer's 2026-09-09 instruction, verbatim: 「11879 直接关闭」. That closure is done; this card takes its mechanical consequence, which the closure does not resolve by itself.\n\n## Measured mechanism (read on `origin/main`)\n\n`.github/workflows/release-coverage-patrol.yml`:\n\n```\n:105   - cron: '19 4 * * *'\n:153   ANCHOR_ISSUE: >-\n:154     ${{ vars.RELEASE_COVERAGE_ANCHOR_ISSUE\n:155     || (github.repository == 'objectstack-ai/objectstack' && '11879')\n:279     await github.rest.issues.update({ …anchor body… })\n```\n\n⇒ **#11879 is a hard-coded literal fallback for this repository**, and the anchor leg's only write is `issues.update()` on that number.\n\n## Why closing the card is not enough — and why this is worse than a red job\n\nGitHub **permits editing the body of a CLOSED issue**. So after the closure, on every daily run:\n\n- the sweep runs,\n- `issues.update()` on #11879 **succeeds**,\n- the job exits **0 and stays green**,\n- and the rendered findings land on a **closed** card that no board view surfaces.\n\n⇒ The patrol keeps reporting into a place nobody reads, **with no red signal anywhere**. Compare objectui#7852, where a missing anchor made the job fail loudly for 50 consecutive runs — that was noisy but *visible*. This shape is silent.\n\n⚠️ And the anchor's whole purpose was the heartbeat. Its own body states the reading discipline: *\"a timestamp that stops advancing means the standing caller died, which is the failure this anchor exists to make visible.\"* With the card closed, the timestamp keeps advancing into a closed page — so the one signal the anchor existed to carry is now both **live and unreadable**.\n\n## What this card asks for\n\nPick one and land it; the first is the default given the maintainer declined the pin:\n\n1. **Drop the anchor leg for this repository.** Remove the `'11879'` literal from `:155`, and make an empty `ANCHOR_ISSUE` a *supported* configuration rather than an error: publish the rendered body to the **run summary**, emit a `::notice::` naming `RELEASE_COVERAGE_ANCHOR_ISSUE`, and **exit 0**. Keep the hard failure for every other anchor failure (issue not found, write rejected, non-numeric variable — `:231-232` already handles that last one).\n2. **Re-point it.** If the coverage sweep should keep a durable anchor, open a fresh `tracking` issue and set the repo variable `RELEASE_COVERAGE_ANCHOR_ISSUE` to its number — ⚠️ that is a maintainer action (repository variables are not writable by any seat), so ⛔ do not choose this route inside this card without a ruling.\n3. **Retire the patrol.** If published-minor section coverage is not worth a standing check, delete the workflow. ⚠️ Note what is lost: the gate ships with **no baseline and no exception list** precisely because its v16+ floor is inherited from `scripts/check-release-page-status.mjs` (maintainer ruling 2026-08-15: 「只负责 v16 以后的，需要的话之前的版本删除也可以的」); below that floor there are **24 uncovered minors** (v9, v12, v13, v14).\n\n⛔ Whichever route: do **not** leave `issues.update()` pointed at a closed issue. That is the one outcome this card exists to prevent.\n\n## Acceptance criterion\n\nA scheduled run of `release-coverage-patrol.yml` on this repository writes to **no closed issue**, and either (a) succeeds with the rendered body in the run summary and a notice naming the variable, or (b) writes to an anchor that is open. A run with a *bad* anchor number still fails.\n\n## Same family, cross-linked\n\nobjectui#8740 asks for the identical graceful-degrade treatment for `half-state-patrol.yml` and `merge-queue-head-patrol.yml`, which share the `HALF_STATE_ANCHOR_ISSUE` variable in that repo. ⇒ **Three patrols, one anchor pattern, two repos.** Whoever takes either card should read the other first; a single shared shape for \"no anchor configured\" is cheaper than two.\n\nRefs: #11879 (the closed anchor, carries the sweep's last reading and the reading discipline) · objectui#8740 (same pattern, sibling repo) · objectui#7852 / objectui#5986 (both closed 2026-09-09 — the loud-but-invisible variant of this failure)"
+}

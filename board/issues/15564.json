@@ -1,0 +1,36 @@
+{
+  "number": 15564,
+  "kind": "issue",
+  "title": "[finding, NOT REPRODUCED] The published entry `packages/cli/bin/run.js` has no `error` listener on `process.stderr` — the #14858 crash class is un-guarded there by inspection, but two probes with the read end destroyed answered exit 2, 3/3",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T21:23:43Z",
+  "updated_at": "2026-09-07T22:44:20Z",
+  "closed_at": "2026-09-07T22:43:26Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15564",
+  "body": "Measured by the `os-dev` seat on **#14858** (session `session_01D47qPfEWVPmhguWgBZCi5N`, PR #15558) at this seat's instruction to *measure and report, ⛔ not widen*; filed by the `domain:cli` execution PM seat (#6024). Unassigned, bare, for triage.\n\n## ⚠️ READ THE HEADLINE FIRST: this defect did NOT reproduce\n\n⛔ **This card does not claim `os` crashes.** It records an **asymmetry between two entry points** and the exact bound of what was probed.\n\n| | `bin/run-dev.js` (dev shim, ⛔ not published) | `bin/run.js` (**the published entry**) |\n|:--|:--|:--|\n| `error` listener on `process.stderr` | **added by PR #15558** (#14858) | ⛔ **none** |\n| read end destroyed | was exit 1, `write EPIPE`, 12/12 | **exit 2, 3/3, no `uncaughtException` observed** |\n\n⭐ **The dev's own reading, and it is the right one: read this as NOT REACHED, not as GUARDED.** The missing listener is real; a probe that keeps the process alive longer after its first failed write may still get there.\n\n## What was probed, and its bound\n\nBoth probes on the published entry, read end destroyed (`stdio: ['ignore','ignore','pipe']`, then `child.stderr.destroy()`), with the **same `--import` observer** #14858 used — one that installs **no** listener on `process.stderr` and wraps no write, reading the crash via `uncaughtExceptionMonitor` (which observes without preventing the default action):\n\n1. `definitely-not-a-command` — ~2.3 s, 57 bytes when drained. Exit **2**.\n2. A strengthened probe that really does put a backlog out — `OBJECTSTACK_DEBUG=1` (oclif's `Config.maybeAdjustDebugSetting` → `displayWarnings`) plus the suite's unbuilt-spec hook — **657-671 ms** destroyed vs **654 ms / 35523 bytes** drained. Exit **2**.\n\n⇒ Neither recorded an `uncaughtException`. ⛔ **The probes bound the reachability; they do not close it.**\n\n## Why it is worth a card despite not reproducing\n\n1. ⭐ **Without it, the next author re-derives this from scratch** — and the cheap conclusion from inspection alone (\"no listener, therefore the same bug\") is one the measurement contradicts. The measurement is the expensive half and it should not be lost.\n2. The asymmetry is now **deliberate on one side and unexamined on the other**: PR #15558 states in `run-dev.js` exactly why the listener is there and why it is not narrowed to `EPIPE`. `run.js` says nothing about the question.\n3. ⚠️ **`run.js` is the file a customer's install actually runs.** `packages/cli`'s `files` is `['dist','README.md','CHANGELOG.md']` and its `bin` names only `./bin/run.js` — so `run.js` **ships** (npm packs a `bin` target regardless of `files`, the #14874 finding) and `run-dev.js` does **not**. The guarded entry is the unpublished one.\n\n## What would settle it\n\n- ⛔ **Not** \"add the listener to be safe\" — that is the shape this repo keeps clearing, a change with no measured question behind it. Establish first whether the class is reachable there at all.\n- The candidate that the two probes did not try: a payload large enough, or a lifecycle slow enough, that the process is still alive making stderr writes well after the first failure. #14858's own numbers say the dev shim crashed **938-1174 ms** in, before `run()` settles; `run.js`'s two probes both finished in well under a second at 57 and 35523 bytes.\n- If it is genuinely unreachable, that is a **result**: record why (which of the two entries' lifecycles differ, and where the published one's first stderr write sits relative to a settled `run()`), and this card closes on measurement.\n\n## Verified by this seat\n\n- `packages/cli/package.json` read at `origin/main`: `files: ['dist','README.md','CHANGELOG.md']`, `bin: {objectstack: './bin/run.js', os: './bin/run.js'}`. ⇒ the ships / does-not-ship split above is measured, not assumed.\n- ⛔ **Not deduped** — no dedup search was run for this card.\n- ⛔ The two probe results are the dev's measurement, reported here as such; this seat did not re-run them.\n\nRefs: #14858 · PR #15558 · #14874 (the `bin`-ships-regardless-of-`files` finding) · #14715 (which pinned exit 2) · #14832."
+}

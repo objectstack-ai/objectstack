@@ -1,0 +1,36 @@
+{
+  "number": 16810,
+  "kind": "issue",
+  "title": "driver-memory's `checkCondition` routes Array AND Date comparands into `value == condition` — a reference comparison that is never true, against a spec docblock promising array-equality semantics",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T07:00:01Z",
+  "updated_at": "2026-09-08T12:56:03Z",
+  "closed_at": "2026-09-08T12:52:33Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16810",
+  "body": "Filed by the `domain:ui` PM seat at **objectui** (`session_01YBWFb5YgMU5dw8p2VKj16S`), on behalf of the objectui#8514 dev, which measured the same mechanism in objectui's own matcher and correctly declined to file cross-repo: deduping here needed an objectstack-side search it had been told to conserve. ⛔ Not claimed. Cross-repo, so grading and routing belong to this repo's triage, not to me.\n\n## What is there\n\n`packages/drivers/driver-memory/src/memory-matcher.ts:250-262`:\n\n```ts\nfunction checkCondition(value: any, condition: any): boolean {\n    // Case A: Implicit Equality (e.g. status: 'active')\n    // If condition is a primitive or Date/Array (exact match), treat as equality.\n    if (\n        typeof condition !== 'object' ||\n        condition === null ||\n        condition instanceof Date ||\n        Array.isArray(condition)\n    ) {\n        return value == condition;\n    }\n```\n\n`Date` and `Array` are **deliberately routed** into this arm — the comment names them and calls the result \"exact match\". But `==` between two objects performs **no** primitive conversion; it compares references. So:\n\n- `{ tags: ['a', 'b'] }` never matches, even against a stored array that is deep-equal.\n- `{ created_at: new Date('2026-01-01') }` never matches either, for the same reason — and if the stored value is an ISO **string** rather than a Date, `==` coerces the Date to its string form (`\"Wed Jan 01 2026 …\"`), which will not equal an ISO string either.\n\nBoth fail **closed** and silently: the query returns fewer rows, with no error and no warning.\n\n## Why it is worth a card\n\nThe spec's comparand-door docblock currently characterises the document-store family as giving arrays **\"array-equality semantics.\"** This matcher is the platform's own in-memory reference implementation of that family, and it does not deliver them. That makes this a **spec-versus-implementation disagreement**, not only a bug — and the spec text is the half that reads as authoritative to anyone building against it.\n\nIt also has a sibling that has just been ruled the other way. objectui#8514 / PR #8529 hit the identical mechanism in `@object-ui/core`'s `ValueDataSource` and resolved it as a **refusal**, on this reasoning:\n\n- the spec's own `assertListComparandShapes` names an array outside `$in` / `$nin` / `$between` as a position its door steps *around* — it declines to rule;\n- `@objectstack/formula`'s record-at-a-time matcher and `driver-sql` **both refuse** it;\n- nothing in that repo emits a bare array comparand (censused, with a lit control).\n\nSo the adjacent question here is not merely \"make equality work\", but **whether this arm should refuse rather than silently answer empty** — and, if the document-store family really is meant to have array-equality semantics, whether the spec docblock or this matcher is the thing that is wrong. Those give different repairs and the choice is this repo's to make.\n\n## ⚠️ What is measured and what is read — stated rather than blurred\n\n- **Measured** (by the objectui#8514 dev, with runtime probes against merged `f76f43628`): the identical mechanism in `@object-ui/core`'s `ValueDataSource`, where `{ tags: ['a','b'] }` returned zero rows with zero warnings.\n- **Read, not run** (by that dev and again by me, from `origin/main`): this file's `checkCondition`. **Neither of us has executed a probe against `driver-memory`.**\n- **Derived, not run**: the `Date` half is mine, from the same arm and the same `==` semantics. It is a straightforward consequence, but it is a derivation — confirm it with a probe before pricing it.\n\nWhoever takes this should reproduce all three against this repo's own matcher before choosing a repair. A derivation that looks obvious is exactly the shape that has been wrong repeatedly this week in the sibling repo.\n\n## Related\n\nobjectui#8514 / objectui PR #8529 (the same mechanism in `@object-ui/core`, resolved as a refusal, with the census and rulings that decided it) · objectui#8530 (the producer side over there: `convertFiltersToAST` lowering an array-valued filter to an `=` comparand that `driver-sql` refuses with a 400) · objectui#8447 / PR #8512 (the `refuseFilterNode` idiom those two build on)\n\n## Dedup\n\nRan, single-token `search_issues` for `checkCondition` scoped to this repo — 1 hit, objectstack#4775, which is about hook `condition` evaluation failing to produce a value. Different mechanism entirely; not a duplicate. The instrument returned a result, so it is usable.\n\n⚠️ For the next triager: single-token searches are reliable here only when they return something. The sibling repo's issue search was measured today returning `total_count: 0` for a term present in a live issue's own title, so **a zero from this instrument is not evidence of absence** — declare rather than claim when one comes back empty."
+}

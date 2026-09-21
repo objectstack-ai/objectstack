@@ -1,0 +1,35 @@
+{
+  "number": 16510,
+  "kind": "issue",
+  "title": "Seed datasets have no locale axis — an app shipping demo data for two language markets has to select seeds at config-assembly time, which bakes the choice into `dist` and leaves the other locale's rows behind",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "domain:spec"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T06:10:15Z",
+  "updated_at": "2026-09-09T06:22:57Z",
+  "closed_at": "2026-09-08T14:11:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16510",
+  "body": "## Symptom\n\n`SeedSchema` can gate a dataset on **environment** but not on **locale**. An app that wants to ship\na Chinese demo dataset and an English one — the same records, different display strings — has no\ndeclarative way to say which applies, so the selection has to happen in application code before the\nplatform ever sees the seed.\n\nThe schema is `strictObject`, so an app cannot add the key itself:\n\n- `packages/spec/src/data/seed.zod.ts:33` — `SeedSchema = lazySchema(() => strictObject({…}))`;\n  fields are `object` / `externalId` / `mode` / `env` / `records` plus the package-provenance keys.\n  The alias table maps `environment` and `environments` onto `env`; there is no locale spelling.\n- `packages/spec/src/data/seed-loader.zod.ts` — `SeedLoaderConfigSchema` carries `env`,\n  `organizationId` and `identity`, but no locale.\n- `packages/metadata-protocol/src/seed-loader.ts:2486` — `filterByEnv(datasets, env)` is the only\n  dataset-level filter; `:490` is its single call site.\n\nVerified against the source tree at `c383352`, and against the published `@objectstack/spec@17.2.0`\nd.ts as installed in a consuming app. A repo-wide grep for `locale` across the seed sources returns\none unrelated hit (a pinyin-search comment in `examples/app-showcase/src/data/seed/index.ts:111`).\n\n## Why this lands on the platform\n\nPer `references/app-platform-boundary.md`, third row of the deciding table: **the subject is\nplatform behaviour and the cost lands on the app** — the missing filter axis is the loader's, and\nthe workaround is paid for in every app that needs it.\n\nThe second question — *if a second app needed this, would it copy the implementation?* — is\nanswered structurally rather than by a second consumer already in hand: any marketplace app\ninstalled into an org whose locale differs from the author's has the same problem, and the person\ninstalling it cannot be expected to know an app-private environment variable exists. **One real\nconsumer today** (see below); the generalisation argument is the marketplace install path, not a\nsecond app already written.\n\n## What the app-side workaround costs\n\n`objectstack-ai/kpi` currently selects between two seed profiles with an app-invented environment\nvariable read at module-evaluation time:\n\n```ts\n// src/data/index.ts\nexport const SEED_PROFILE = (process.env.OS_SEED_PROFILE ?? 'default').trim().toLowerCase();\nexport const KpiSeedData = SEED_PROFILE === 'software' ? SoftwareSeedData : DefaultSeedData;\n```\n\nBecause the choice is made while the config is assembled rather than while seeds are loaded, two\ndefects follow that the app cannot fix from where it sits:\n\n1. **The selection is cached in the build output.** Switching profiles requires deleting `dist`,\n   otherwise the previous profile is still in effect. The app's README has to document this.\n2. **The other profile's rows stay in the database.** Every profile is `upsert` and the loader only\n   writes, so switching on a non-empty database leaves both datasets resident — two org trees and\n   two plans in one database. The app's README has to tell operators to use a fresh database file.\n\nBoth are consequences of filtering in the wrong layer. A loader-side filter is evaluated at load\ntime, so the `dist` caching problem does not arise; and the loader already holds `externalId` and\nthe `_packageId` / `_provenance` keys, so it is the only layer that could reconcile rows belonging\nto a locale that is no longer active.\n\n## Expected capability\n\nAdd `locale` to `SeedSchema` as a filter axis exactly parallel to `env`, honoured by the loader:\n\n- `SeedSchema.locale?: string[]` — omitted means \"applies to every locale\", matching how `env`\n  defaults to all environments.\n- `SeedLoaderConfig.locale?: string` — resolved from the runtime's configured locale, overridable\n  the way `env` is.\n- `filterByEnv` becomes the composition of both axes; a dataset applies when it passes `env` **and**\n  `locale`.\n\nDeliberately out of scope: the platform does not translate anything. The app still authors both\nrecord sets. The platform gains only the axis to select between them.\n\n## Scope note\n\nThe spec field and the loader filter have to land together. A `locale` key accepted by the schema\nbut ignored by the loader is a declared-not-enforced surface — the shape this repo routes to the\nenforce-or-remove channel — and it would be worse than the current state, because an app would\nwrite the key and silently get both datasets.\n\n## Environment\n\n- `@objectstack/spec` / `@objectstack/runtime` / `@objectstack/cli` **17.2.0**\n- Source tree `c383352`\n- Consuming app: `objectstack-ai/kpi` (Apache-2.0, public)\n\n## Duplicate check\n\nSearched `seed data locale language variant demo data per locale i18n seed selection` and\n`seed loader env filter records upsert` in this repo. The two locale hits are unrelated — #9135\n(auth email locale) and #5419 (console UI language). The control search surfaces real seed-loader\ncards (#16488, #14403, #3434), so the negative result on locale is a real absence rather than a\nsearch that matched nothing.\n"
+}

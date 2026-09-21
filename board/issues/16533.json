@@ -1,0 +1,36 @@
+{
+  "number": 16533,
+  "kind": "issue",
+  "title": "Five source comments in `packages/cli` and `packages/core` still call unpack-time `manifest.integrity` re-verification the cloud control plane's obligation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T07:48:15Z",
+  "updated_at": "2026-09-08T09:19:53Z",
+  "closed_at": "2026-09-08T09:19:20Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16533",
+  "body": "Filed unassigned from the #16333 dispatch. Out of that card's scope, so recorded rather than ridden along.\n\n## What\n\n#16333 corrected `packages/spec/src/kernel/manifest.zod.ts` (both `integrity` docblocks) and the liveness ledger to say what is true: the digest map is computed by `os plugin build` and self-checked by the `os plugin publish` preflight, while unpack-time re-verification is **not implemented** and is owned by the **future runtime loader** (ADR-0025 §3.5 steps 4-7), **not** by the cloud control plane.\n\nFive sites outside `packages/spec` still carry the pre-correction attribution, so the repo now states both things at once. Measured at `3335bd35eaf47a5b2aed9120e217dafd242ff7e1`:\n\n| site | text |\n|---|---|\n| `packages/cli/src/utils/osplugin.ts:18` (module docblock) | \"re-verification at install/load-time unpack (ADR §3.5 step 5) is the cloud control plane's obligation\" |\n| `packages/cli/src/utils/osplugin.ts:47` (`sriDigest` TSDoc) | \"unpack-time re-verification is the cloud control plane's obligation, #11331\" |\n| `packages/cli/src/commands/plugin/publish.ts:116` (inline comment) | \"Unpack-time re-verification remains the cloud control plane's obligation (#11331)\" |\n| `packages/core/src/security/index.ts:38` (export comment) | \"Unpack-time re-verification stays the cloud control plane's obligation (#11331)\" |\n| `packages/core/src/security/plugin-artifact-integrity.ts:11` (module docblock) | \"portable to the cloud control plane, which owes the unpack-time re-verification leg\" |\n\nThe last one is the sharpest: it is the module docblock of the verifier itself, and it explains the module's portability *by* the wrong owner.\n\n## Why it matters\n\nSame failure shape #16333 was filed for, one layer out. `plugin-artifact-integrity.ts`'s docblock is a TSDoc on an exported symbol, so it can reach consumers through `@objectstack/core`'s `.d.ts` the way the spec one did. And the ruling that produced #16333 (decision batch #58, option C) broke the documentary cross-reference precisely so that a reader of either repo stops learning that a verification exists — these five keep teaching it.\n\n## Why it was not fixed in the #16333 PR\n\nThe card scopes to `manifest.zod.ts` plus the ADR/ledger, and its acceptance list is met without these. Editing them pulls `packages/cli` and `packages/core` into the verification surface of a prose-only PR — a new set of package test/typecheck runs for a comment change — which the bounded in-place-fix exemption does not cover.\n\n## Suggested fix\n\nMechanical, and the shape is already pinned by the corrected spec text: keep \"computed at build, self-checked at the `os plugin publish` preflight\", and replace the owner clause with the future runtime loader (ADR-0025 §3.5 steps 4-7), keeping the #11331 pointer. One PR across `packages/cli` and `packages/core`; both packages' tests and typecheck are then genuinely owed.\n\nRelated: #16333, #11331, #13563."
+}

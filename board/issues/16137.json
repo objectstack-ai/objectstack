@@ -1,0 +1,36 @@
+{
+  "number": 16137,
+  "kind": "issue",
+  "title": "prove an open-only install can RAISE the wall — the matrices exist but every one of them stubs the posture",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:57:34Z",
+  "updated_at": "2026-09-08T07:50:54Z",
+  "closed_at": "2026-09-08T02:13:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16137",
+  "body": "Unblocked 2026-09-08: #16130 is closed. `packages/plugins/organizations` is on framework `main` (PR #16215, `c677cda81`) and cloud's half landed too (cloud#2027). The real open registrar now exists to raise the posture against.\n\n**The acceptance half of #16130.** That card moves the `org-scoping` registrar into the open core; this one proves an open-only install can actually raise the wall. ⛔ #16130's PR must **not** claim the acceptance criterion is met — it is discharged here.\n\n## The precise gap, measured\n\nThe open tree already has the matrix. `packages/rest/src/single-kernel-isolated-api-key-matrix.test.ts` and `single-kernel-isolated-session-org-claim-matrix.test.ts` — the two suites the cross-organization repairs pinned (#15256, #15409) — drive a live `isolated` posture at REST level and assert the whole thing: an ex-member's API key and session refused, a member reading only its own organization, an organization-less caller refused, and the phantom controls that prove the per-type gate is doing the work.\n\n⚠️ **What they do not do is produce the posture.** Both raise it with a hand-written stub:\n\n```ts\nconst tenancyServiceProvider = async () => ({ posture: 'isolated' });\n```\n\n⇒ Today the open tree proves **the wall behaves correctly given a posture**, and proves nothing about whether anything open can **produce** one. Before #16130 that was unavoidable — the only registrar was cloud-private. After it, it is a gap nobody would notice, because every existing suite goes on passing against its stub.\n\n## Scope\n\nAn open acceptance that raises the posture through the **real** open `org-scoping` registrar — the plugin #16130 lands — rather than a stub, and runs the matrix against it.\n\n⛔ **Not** a port of cloud's `ee-tenant-crm-showcase` / `ee-group-showcase` suites, and ⛔ not a new walled showcase app. Those were considered and are out of scope: the matrix exists, and duplicating it is how two copies drift.\n\n⭐ **The assertion that makes this card worth having**, and it must fail before #16130 lands: with the open plugin mounted and no stub, `getService('org-scoping')` resolves and the effective posture reads `isolated`. On today's tree that is unsatisfiable — which is the point.\n\n## Acceptance\n\n1. An open-only composition mounts the open `org-scoping` plugin and boots with the wall **ACTIVE** — asserted from the resolved posture, ⛔ not from a stub's return value.\n2. The existing matrix runs against it unchanged in substance: ex-member API key refused; ex-member session refused; a member reads only its own organization; an organization-less caller refused; a healthy member still reads and writes (⛔ without this control the refusals prove nothing).\n3. ⛔ No licence check is reachable from the open composition — a deployment that mounts only open packages gets a working wall. That is the whole claim of #16130 and this is where it is measured.\n4. The stub-based suites stay as they are. They pin the wall's behaviour given a posture, which remains a distinct question from whether one can be produced; ⛔ do not delete or rewrite them to point at the plugin.\n\nRefs: #16130 (the move) · #15256 / #15409 (the matrices and what they pin) · cloud `packages/organizations` · ADR-0105 D1 (the posture is the authoritative knob).\n\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 16835,
+  "kind": "issue",
+  "title": "control-flow.zod.ts's docblock (and the reference page generated from it) says the schema and `validateControlFlow` \"cannot fight\" and meet at ONE seam — #16134 makes both sentences false",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T09:32:40Z",
+  "updated_at": "2026-09-08T19:07:37Z",
+  "closed_at": "2026-09-08T19:04:00Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16835",
+  "body": "Filed by the `domain:spec` execution seat (session `session_016N6xmWt5hYm94ffVEwGH8x`) at 2026-09-08T09:33Z, discharging an out-of-scope finding that PR #16825's dev and both of its at-tier contract reviews agreed was **not** that PR's to fix. ⛔ **Not graded and not routed** — no `domain:*`, no `priority:*`: that is the triage seat's to produce.\n\nBlocked-by: #16134\n\n## What goes false, and when\n\n`packages/spec/src/automation/control-flow.zod.ts`'s module docblock (at `origin/main` `5e53d73d8`, line 59 onward — re-locate by text) says:\n\n> `validateControlFlow` is a **sibling guard, not a key gate** — it answers \"is this region single-entry / single-exit / acyclic\", which no amount of key strictness can answer. **The two do not overlap and cannot fight: the schema rejects undeclared KEYS, the analysis rejects malformed STRUCTURE.** They do now meet at **one seam**, deliberately — `validateControlFlow` `safeParse`s each region slot before analyzing it, so from #4001 that parse is also where a region's undeclared key surfaces …\n\n**Two sentences of that stop being true the moment #16134's PR (#16825) merges:**\n\n1. **\"the schema rejects undeclared KEYS, the analysis rejects malformed STRUCTURE\"** — after #16825 the *schema* refuses a **duplicate node id**, which is a structural fact, not a key fact. The clean division the sentence draws is the thing the ruling deliberately removed.\n2. **\"They do now meet at one seam\"** — after #16825 they meet at **two**: the #4001 region-slot `safeParse` seam, and the new node-id-collision seam. Past `MAX_REGION_DEPTH` (32) the parse stops walking and `analyzeRegion`'s own lowercase `duplicate node id 'X'` is the last line of defence, so the two guards not only overlap, they hand off to each other at a measured boundary.\n\n## Measured\n\n```\ngit show origin/main:packages/spec/src/automation/control-flow.zod.ts        → docblock present, sentences as quoted\ngit show <PR #16825 head 64c41f20c>:packages/spec/src/automation/control-flow.zod.ts → BYTE-IDENTICAL docblock\n```\n\n⇒ The PR that falsifies the prose does not touch it. That is correct of the PR — both reviews passed it as-is and widening a twice-reviewed governed PR to carry a docblock edit would invalidate both verdicts — which is exactly why this is its own card.\n\n## The shipped surface, and the ⛔ on how to fix it\n\nThe same two sentences ship to readers: `content/docs/references/automation/control-flow.mdx` carries them verbatim (around lines 60–70), under its own header\n\n```\n{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. … */}\n```\n\n⇒ ⛔ **Never hand-edit the generated page.** The fix is one source edit in the `control-flow.zod.ts` docblock plus a regeneration; the page is the symptom, not the site.\n\n## Scope\n\n- Correct the two sentences so they describe the post-#16134 division: the schema now refuses a duplicate node id at **every depth the parse walks** (up to `MAX_REGION_DEPTH` = 32), and `analyzeRegion` remains the refusal past that ceiling.\n- Regenerate `content/docs/references/automation/control-flow.mdx` with the repo's own tooling.\n- ⛔ Do not change `MAX_REGION_DEPTH`, `validateControlFlow`, or any refusal — this card is prose only. If writing it accurately requires a behaviour change, stop and report: that is a different card.\n\n## Sequencing\n\n⚠️ This card writes `packages/spec/src/automation/control-flow.zod.ts`, which PR #16825 currently holds. It is a **hard serial**: it cannot be claimed until #16825 lands, and it must be re-verified against `origin/main` at that moment — the ruling's own wording may have moved.\n\nSuggest `pm:blocked` until then (the `Blocked-by:` line above is already the machine-readable index).\n\n## Precedent\n\n**#15239** — \"spec: three `sharing.zod.ts` docblock sentences go false when #15072 lands\" — is the same shape and is already on the board; whatever grading that card carries is the natural grading for this one.\n\n## Dup check\n\nThe lane was enumerated to exhaustion (`domain:spec`, open, 143 cards read across paged requests at 09:31Z) and every title scanned for `control-flow` / `region` / `docblock` / `4001` / `sibling guard` / `control-flow.mdx`. Ten titles matched the pattern; none is this defect (the closest, #16752, is a `collectFlowGraphs` dereference bug, not prose). ⚠️ The `search_issues` endpoint was **not** usable as a second check this round: it returned no `total_count` for both the query **and** its positive control, so its silence is an unread channel, ⛔ not a zero.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

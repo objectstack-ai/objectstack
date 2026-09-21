@@ -1,0 +1,35 @@
+{
+  "number": 15243,
+  "kind": "issue",
+  "title": "`websocket.zod.ts`'s retirement note claims the transports carry `SubscriptionEventSchema`; measured, they carry `RealtimeSubscriptionOptions`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T06:56:57Z",
+  "updated_at": "2026-09-08T22:43:38Z",
+  "closed_at": "2026-09-08T22:43:19Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15243",
+  "body": "Observation found out of scope while seeding the realtime liveness ledger for #14446 (PR #15242). Comment-only defect in shipped source; nothing executes differently either way. Filed rather than fixed because #14446's PR is ledger-rows-only by triage ruling.\n\n## What the comment says\n\n`packages/spec/src/api/websocket.zod.ts:54-77` is the retirement note for the deleted `FilterOperator` / `EventFilterCondition` / `EventFilterSchema` vocabulary. Two sentences in, it says (lines 61-63):\n\n> `matchesSubscription` matches on object name and event type only (see `contracts/realtime-service.ts`), and the subscription shape the transports actually carry is the separate, deliberately unvalidated `filters: z.unknown()` on `SubscriptionEventSchema` (`api/realtime.zod.ts`).\n\nThe first half is exact. The second half names the wrong shape.\n\n## What is measured\n\nAt `5f5511f0`, nothing outside `packages/spec` imports `SubscriptionEventSchema`, `SubscriptionSchema` or `RealtimeConfigSchema` at all. `git grep -nE 'SubscriptionEventSchema|SubscriptionSchema|RealtimeConfigSchema'` over the repo excluding CHANGELOGs hits eleven files, every one of them spec's own tree, a generated artifact (`api-surface/`, `declaration-map/`, `export-origins/`) or published prose (`content/docs/references/api/realtime.mdx`, `skills/objectstack-api`). No transport parses a `SubscriptionEvent`.\n\nThe shape the shipped subscription path actually carries is a plain TypeScript interface one directory over: `packages/spec/src/contracts/realtime-service.ts#RealtimeSubscriptionOptions`, with `object` and `eventTypes: string[]`. That is what `packages/services/service-realtime/src/in-memory-realtime-adapter.ts#matchesSubscription` reads — it takes `sub.options` typed as those options and compares `opts.object` and `opts.eventTypes` against the event. The same file's `Subscription` is a file-local interface, unrelated to the spec symbol of that name.\n\nSo there are three spellings of a realtime subscription and only the third is executed: `SubscriptionSchema` / `SubscriptionEventSchema` (`api/realtime.zod.ts`), `EventSubscriptionSchema` (`api/websocket.zod.ts`), and `RealtimeSubscriptionOptions` (`contracts/realtime-service.ts`).\n\n## Why it is worth a card rather than nothing\n\nThe sentence is the kind a census believes. It reads as a positive statement that `SubscriptionEventSchema` has a consumer — the transports — and it is the first thing a reader hits when asking who reads that schema, because it is the only prose in the repo that connects the two. The liveness ledger seeded in PR #15242 classifies all six `SubscriptionSchema` properties `dead` on the opposite measurement, so the tree currently carries a ledger row and a source comment that disagree; the row records the contradiction as a warning, which is a patch over the wrong half.\n\n## Suggested disposition\n\nCorrect the clause to name `contracts/realtime-service.ts#RealtimeSubscriptionOptions` as the carried shape and keep `SubscriptionEventSchema.filters` where it belongs — as the sibling declaration that shares the `z.unknown()` treatment, not as the shape anything transports. A symbol anchor rather than a bare name, since the point of the sentence is which of three same-named things is meant. No behaviour changes; `packages/spec/src/api/websocket.zod.ts` is the only file involved.\n\n⚠️ Not urgent and not a blocker for anything: #14446's ledger rows already carry the correction as a `⚠️ do not read this as a consumer` note, so the next census is protected whether or not this lands."
+}

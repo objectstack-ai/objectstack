@@ -1,0 +1,37 @@
+{
+  "number": 16734,
+  "kind": "issue",
+  "title": "`os dev`'s MCP connect hint builds all three URLs from the listen origin, so under `OS_AUTH_URL=https://…` it prints a `claude mcp add … http://localhost:<port>/…` line the reader is meant to paste",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "mcp",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T02:36:00Z",
+  "updated_at": "2026-09-08T08:05:30Z",
+  "closed_at": "2026-09-08T08:04:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16734",
+  "body": "Split out of #16530 (Side observations, first bullet). That card is a `domain:services` p1 about `plugin-auth` passing an option `@better-auth/oauth-provider` 1.7.2 no longer reads; this is an unrelated `packages/cli` printing face, and making the p1 carry it would pull a whole CLI package verification run into an auth-plugin PR.\n\n## Reproducible defect\n\n`os dev` prints two MCP blocks from two different origin resolvers, and only one of them knows about the canonical origin. Measured on `origin/main` `5e53d73d`:\n\n| printer | origin it uses |\n|---|---|\n| `packages/cli/src/utils/format.ts:816` — the `➜  MCP:` row of the ready banner | resolved base (`link()`), which honours `OS_AUTH_URL` |\n| `packages/cli/src/commands/dev.ts:503-508` — the `🤖 MCP server — connect a coding agent` block | the child's **listen** URL |\n\n`dev.ts:504-505`:\n\n```ts\nconst base =\n  typeof msg.url === 'string' && msg.url ? msg.url.replace(/\\/+$/, '') : `http://localhost:${actual}`;\n```\n\n`msg.url` is the `objectstack:listening` message the serve child emits once its HTTP server is up — the bound socket, by construction. `OS_AUTH_URL` never enters this expression, and the whole block (`Endpoint`, `Skill`, `Connect`) is built from that one `base`.\n\nReported observation from #16530, on hotcrm `789a7324` with `objectstack dev -p 4001` and `OS_AUTH_URL=https://localhost:4443` behind a TLS reverse proxy: the `➜ MCP:` line says `https://localhost:4443/…` and the block below it says `http://localhost:4001/…`, in the same boot output.\n\n## Why it matters\n\nThe `Connect` line is not documentation, it is a **command the reader is meant to paste**. Pasting it registers an MCP entry against an origin that (a) is not the origin the discovery documents advertise and (b) on a TLS-fronted deployment is not reachable from the agent at all. The two blocks disagreeing in the same output also makes the correct line look like the typo.\n\nScoped deliberately narrow: this is about which origin the hint is built from. The `Endpoint`/`Skill`/`Connect` text itself is right.\n\n## Where\n\n- `packages/cli/src/commands/dev.ts:503-508` — the block, and the `base` expression above it.\n- `packages/cli/src/utils/format.ts:816` and its `link()` base — the resolver that already gets this right; the reference implementation, not a second thing to change.\n- `packages/cli/src/commands/serve-auth-base-url-diagnostic.test.ts` — the existing pins on the `OS_AUTH_URL` → `BETTER_AUTH_URL` → `OS_BASE_URL` precedence chain, including the set-but-empty case. Whatever this fix reuses must not re-derive that chain by hand.\n\n## Acceptance\n\n1. With `OS_AUTH_URL` set, all three lines of the connect block print the canonical origin, and the `➜ MCP:` row and the block agree — assert on **both** rows of one captured boot output, not on the block alone. Two printers that disagree cannot be pinned by reading one of them.\n2. With `OS_AUTH_URL` unset, the block still prints the listen origin (including the auto-shifted-port case `3000 busy → 3001` the surrounding code exists to handle). This is the control: a fix that just hardcodes the canonical origin breaks the common local case.\n3. The precedence chain is reused from the existing resolver, not reimplemented — in particular the set-but-empty `OS_AUTH_URL` behaviour already pinned in `serve-auth-base-url-diagnostic.test.ts` must not change.\n\nFiled by the triage seat, unassigned. Related: #16530 (the p1 this came out of), #16399 (URL normalisation in `getAuthIssuer` / `getMcpResourceUrl` — a different layer, and the values in #16530 were well-formed)."
+}

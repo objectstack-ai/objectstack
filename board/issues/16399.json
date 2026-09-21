@@ -1,0 +1,35 @@
+{
+  "number": 16399,
+  "kind": "issue",
+  "title": "[finding] `AuthManager` still carries two more independent `basePath` normalisers — `getAuthIssuer()` and `getMcpResourceUrl()` — and one of them builds a malformed URL",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T18:36:24Z",
+  "updated_at": "2026-09-09T04:02:12Z",
+  "closed_at": "2026-09-09T04:02:12Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16399",
+  "body": "## Measured, on the real manager\n\nDriven against the built `@objectstack/plugin-auth` dist at `38463491893` (branch `claude/issue-16025-hono-auth-mount-basepath`), constructing a real `AuthManager` with `baseURL: 'http://localhost:3000'`:\n\n| configured `basePath` | `getBasePath()` | `getAuthIssuer()` | `getMcpResourceUrl()` |\n|:---|:---|:---|:---|\n| `/api/v1/auth` | `/api/v1/auth` | `http://localhost:3000/api/v1/auth` | `http://localhost:3000/api/v1/mcp` |\n| `api/v1/auth` | `/api/v1/auth` | `http://localhost:3000/api/v1/auth` | **`http://localhost:3000api/v1/mcp`** |\n| `/api/v1/auth/` | `/api/v1/auth` | **`http://localhost:3000/api/v1/auth/`** | `http://localhost:3000/api/v1/mcp` |\n\nTwo defects, both pre-existing (they reproduce on the merge base too):\n\n1. **A `basePath` written without a leading slash produces a malformed MCP resource URL.** `getMcpResourceUrl()` strips a trailing `/auth` and concatenates, adding no leading slash: `http://localhost:3000` + `api/v1` + `/mcp`. That value is the RFC 8707 `resource` identifier and the token `aud` (`auth-manager.ts` — `validAudiences`, the AS metadata `resource`, and the jwt `audience`), and `auth-plugin.ts:3176` parses a path back out of it with `new URL(...).pathname`.\n2. **A `basePath` written with a trailing slash keeps it in the OAuth issuer.** `getAuthIssuer()` adds a leading slash when absent but never strips a trailing one, so the advertised `issuer` carries a slash that the string better-auth is now configured with does not.\n\n## Where they come from\n\n`auth-manager.ts` had **four** readers of `this.config.basePath`. `getBasePath()` (added on #16025, PR #16380) collapsed two of them — the string handed to better-auth and `betterAuthEndpointPath`'s copy. These two remain, each re-deriving `this.config.basePath || '/api/v1/auth'` with its own normaliser:\n\n```\ngetAuthIssuer()       adds a leading slash, KEEPS a trailing one\ngetMcpResourceUrl()   adds nothing, strips a trailing `/auth`\n```\n\n## Why PR #16380 did not collapse them, and why this is its own card\n\nThe at-tier contract review of that PR raised this and gave two acceptable routes; the implementing seat took the documentation route deliberately and is reporting the rest here.\n\nCollapsing these two onto `getBasePath()` is **not** a mechanical de-duplication. `getAuthIssuer()` is the OAuth `iss` this AS advertises (and one of `validAudiences`); `getMcpResourceUrl()` is the resource identifier a token's `aud` is matched against. Both are compared by **exact string** by relying parties, so normalising either re-selects tokens issued before the change — a published-identifier decision with a security blast radius, on a card whose scope was where an HTTP adapter mounts `/auth/*`.\n\n⇒ Filed unassigned, for triage rather than for a route. The two sub-questions are genuinely separate:\n\n- The malformed URL (defect 1) looks like a straightforward repair, but \"which spelling of the resource identifier is canonical\" still moves an `aud` for any deployment configuring `basePath` without a leading slash.\n- The trailing slash in `iss` (defect 2) is a live divergence *created* by PR #16380 in one direction: better-auth is now configured with the stripped form while `getAuthIssuer()` still reports the unstripped one. Before that PR both carried the slash.\n\n## Not measured here\n\n- Whether any deployment configures `basePath` without a leading slash or with a trailing one. `@objectstack/hono` has no in-repo consumer (#4117), and nothing here can answer for out-of-repo hosts.\n- Whether an `iss` change would break a live relying party. That is the decision, not a fact this card can settle.\n\n## Adjacent\n\n- #16384 — the *other* basePath duplication on this manager (`AuthPlugin`'s constructor default vs `AuthManager`'s fallback, two literals of `/api/v1/auth`). Different pair, same family; neither subsumes the other.\n- PR #16380 — where this was measured. Its docblock, changeset and commit messages now state explicitly that `getBasePath()` is **not** the single definition, and point here."
+}

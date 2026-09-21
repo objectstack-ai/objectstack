@@ -1,0 +1,33 @@
+{
+  "number": 16731,
+  "kind": "pull_request",
+  "title": "fix(scripts): drop both transcribed counts from check-regen-pending's battery-roster comment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T02:23:13Z",
+  "updated_at": "2026-09-08T03:08:36Z",
+  "closed_at": "2026-09-08T03:08:35Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-08T03:08:35Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16731",
+  "body": "Fixes #16007\n\n## What changed\n\nOne comment paragraph in `scripts/check-regen-pending.mjs`, inside the `SELF_TEST_BATTERIES` governance block. Both transcribed counts leave the same sentence:\n\n| before | after |\n|---|---|\n| ``` `fixtureSelfTest`'s `check()` helper (14 calls) ``` | ``` `fixtureSelfTest`'s `check()` helper ``` |\n| ``` `decisionTableSelfTest`'s literal 8-row table ``` | ``` `decisionTableSelfTest`'s literal table ``` |\n\nRoute: **option 1** — delete BOTH counts, not only the wrong one, per the ratified triage on the card. Deliberately **not** the derived shape that landed on sibling #15231 (PR #16669): the two cards are the same defect class with opposite ratified remedies — derive there, delete here.\n\n9 comment lines replaced by 9 comment lines (the paragraph is re-wrapped at the file's existing 80-column comment width). File length unchanged: 1408 lines before and after.\n\n## Why the sentence still says what it meant\n\nThe paragraph's own stated job is the contrast between three different **shapes** — \"they are worth naming because all three are different shapes\". A helper, a literal table with its driving loop, a bare boolean: those are the three shapes, and each is named by kind. Neither count was carrying that argument, and nothing downstream in the paragraph reads either number — the later clauses say \"the table\", \"those rows\", \"one callee's internals\", all of which resolve without a size.\n\nRemoving them also makes the three list items parallel for the first time. Before this change one item was sized in calls, one in rows, and one not at all, in the one block whose subject is which numbers in this file are load-bearing and which are not.\n\nThe floor is untouched and is not what drifted: `SELF_TEST_BATTERIES` floors each callee at **1 registration**, deliberately not at an assertion count, and `SELF_TEST_BATTERY_FLOOR` is 3. Nothing here pins a total.\n\n## Measurements re-taken on `origin/main` at `be92d468`\n\nThe card cites `:720`; a later reading cited `:840`. Both were re-measured rather than trusted, and the block was found by its text, not by a line number.\n\n| reading | card | re-measured here at `be92d468` |\n|---|---|---|\n| line of the sentence carrying both counts | `:720` | **`:840`** (the `STOP --` line that opens the paragraph is `:838`) |\n| `check(` call sites in `fixtureSelfTest` | 27 | **28** — the card's own recipe, unmodified |\n| rows in `decisionTableSelfTest`'s literal table | 8 | **8 — the 8 has NOT drifted** |\n\n**The row count was the unsettled one, and it is settled here with a validated instrument.** A crude `grep -c \"^\\s*\\[\"` over an `awk` range returns **11** on this file, and 11 is an artifact, not a reading: the `awk` range runs past the callee and swallows the three rows of the `callees` literal in the dispatch block below it, 8 + 3 = 11. All eleven counted lines were listed and classified.\n\nThe instrument used instead parses the file and counts the **elements of the `cases` array literal** inside the `decisionTableSelfTest` function declaration. It was validated before it was trusted: on a purpose-built input whose correct answer is **6 by construction** (containing a comment line inside the literal, one row spanning three lines, and two rows sharing a line), it returns 6 while the crude grep returns 5. Negative control: asked for a function name that does not exist, it exits 2 with `FAIL`, rather than returning a number.\n\n## Verification\n\n- **Gates**: derived from the actual changed set with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, run individually with exit codes recorded to disk, then reconciled: `34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN`. Every one exits 0. The list was re-derived after the final commit and is byte-identical to the pre-commit derivation.\n  - Three of them (`check:browser-reachable-entries`, `check:docs`, `check:generated`, all `@objectstack/spec`) first exited 1 with their own PREREQUISITE-NOT-MET text — `packages/spec/dist holds no .mjs/.js bundles` and `packages/spec/json-schema is missing`. That is an unbuilt checkout, not a verdict on this diff. After `pnpm --filter @objectstack/spec build` all three exit 0.\n- **Repo-wide lint**, not a narrowing: `eslint . --no-inline-config --format json` completed over a population of **6338 files** that eslint itself resolved under its config — 0 errors, 0 warnings, and the changed file is present in that population.\n- **No executable line moved**, measured two ways. Stripping every full-line `//` comment from the file before and after this change yields byte-identical text (`diff` exit 0). And `node scripts/check-regen-pending.mjs --self-test` exits 0 with a transcript byte-identical to the same self-test run from the pre-change bytes (`diff` exit 0).\n- **Control bytes**: `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` over the changed file exits 1 — none. Exit code captured before any pipe.\n- **No pin depends on the deleted text**: a repo-wide search for `8-row`, `14 calls` and the sentence's own phrases finds no other reference to either count and nothing that pins this comment's wording.\n\n## No changeset — measured, not assumed\n\nNothing published moves. The only changed path lives under the repo-root package, which is `private: true` and declares no `files[]`; of the 70 non-private packages that declare a `files[]`, **zero** are rooted at the repo root, so no published artifact can contain `scripts/check-regen-pending.mjs`. `skip-changeset` applies.\n\n## 验收备注\n\nNo out-of-scope findings. The card's stale `:720` and the earlier `:840` are recorded above as re-measurements rather than filed: they are drift in the card's own citations, not defects in the tree.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_"
+}

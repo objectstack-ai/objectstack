@@ -1,0 +1,34 @@
+{
+  "number": 16934,
+  "kind": "issue",
+  "title": "[Decision] Under `single` posture, which tenant wall is the platform's? driver-sql's posture-independent `tenantId` auto-scope answers a platform admin 0/0/0/0 on `/data` while the engine path, analytics and the memory driver answer 12/30/40/14",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T17:15:08Z",
+  "updated_at": "2026-09-09T04:19:36Z",
+  "closed_at": "2026-09-09T04:19:36Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16934",
+  "body": "Split out of #16645 (condition 5 of its triage rubric), which closes when PR #16860 merges and would otherwise take this open question with it. The dev seat on #16860 escalated it as `needs_decision`; the PM seat concurred; no ruling exists. Filed by the director seat at 17:1xZ, 2026-09-08.\n\n`Governing text:` ADR-0105 (tenancy postures) · ADR-0021 D-C (`getReadScope` threading) · `plugin-security` `computeTenantLayer0Verdict` (`postureEnforcesWall('single') === false`, boot log 「tenancy posture 'single' — Layer 0 is inert」) · `Engine.buildDriverOptions` (`DriverOptions.tenantId` set whenever `execCtx.tenantId !== undefined && !isTenancyDisabled(schema) && !isFederated` — reads no posture) · maintainer ruling 2026-09-08 on #16589, verbatim 「16589 内存驱动不需要支持多租户，业务上没有任何意义啊」.\n\n## 一句话问题\n\n同一个 `single` 姿态的部署里，平台管理员在 sqlite 上走 `/data` 读到的是 **0 条**，走 analytics 或换成内存驱动读到的是 **12 / 30 / 40 / 14 条**——两道「租户墙」各说各话，客户看到的是「同一个人、同一份数据，换个接口或换个驱动，数就变了」。\n\n## 前提（带 re-check 命令）\n\n- P1 `single` 姿态下 plugin-security 的 Layer 0 不生效：`git grep -n \"postureEnforcesWall\" packages/plugins/plugin-security/src | head`（阳性对照：`git grep -c \"computeTenantLayer0Verdict\" packages/plugins/plugin-security/src` ≥ 1）。\n- P2 driver-sql 的自动限定不读姿态：`git grep -n \"tenantId\" packages/objectql/src/engine.ts | grep -i \"buildDriverOptions\\|isTenancyDisabled\"`；`git grep -n \"organization_id IS NULL\" packages/drivers/driver-sql/src | head`。\n- P3 内存驱动忽略 `tenantId`（#16589，维护者已裁不需支持）：`git grep -n \"tenantId\" packages/drivers/driver-memory/src | head`（零命中 + 阳性对照 `git grep -c \"find(\" packages/drivers/driver-memory/src` ≥ 1）。\n- P4 实测表：#16645 正文（ats 应用，demo seed，两驱动）。\n\n## 具体问题\n\n`single` 姿态是「一个部署一个组织」。今天 driver-sql 仍按 `execCtx.tenantId` 追加 `(organization_id = :tenant OR organization_id IS NULL)`，而 Layer 0 按姿态判定「无墙」。平台管理员（`viewAllRecords`）的 `tenantId` 与种子数据的 `organization_id` 不一致时，sqlite 读 0 行；内存驱动与 analytics 原生 SQL 路径不加这条谓词，读全量。\n\n## 选项 × 真实代价\n\n| 选项 | 做什么 | 客户可感知后果（实测/推断） |\n| --- | --- | --- |\n| **A（推荐）** 姿态是唯一权威：`single` ⇒ 引擎不给驱动下发 `tenantId`（`buildDriverOptions` 读姿态；或 Layer 0 `none` 时清空 `tenantId`） | sqlite `/data` 从 0 变回 12/30/40/14，与内存驱动、analytics 一致；`group` / `isolated` 姿态不变（墙照旧）。推断：单租户部署里「管理员看不到自己数据」（ats#39）消失。代价：`single` 部署里带脏 `organization_id` 的行全部可见——本就该可见 |\n| B driver-sql 的自动限定是平台墙：其他路径（内存驱动、analytics 原生 SQL）补上同一谓词 | 与 #16589 裁决相悖（内存驱动不做多租户）；analytics 补墙会把求职者的 RLS 限定 9 也归零（#16860 验收备注第 5 条实测）；`single` 部署里管理员继续读 0 |\n| C 各走各的，只记档 | 同一部署两种答案成为长期状态；每个新读路径都要再选一次 |\n\n业务含义直译：A = 一个店铺的老板能看见自己店里所有货；B = 老板要先证明每件货是他的，证不出来就当没有；C = 不同柜台各自发挥。\n\n## 四轴\n\n- ① **实际业务需求**：有实测拉动——ats 演示应用在默认驱动上管理员读 0 行（#16645 表、ats#39）。这是「今天谁撞上」的直接答案。\n- ② **项目长远合理性**：A 让「姿态」成为租户墙的唯一开关（ADR-0105 的本意），少一处平行判定；B 把驱动层的一个实现细节抬成协议，并要求其他驱动复制它，与 #16589 裁决冲突。\n- ③ **防 AI 犯错**：A 后错误形态是「多看见」但只在声明为单租户的部署里，且响亮（同一部署所有路径一致）；今天的形态是静默——两个路径悄悄给不同数字，AI 写的仪表盘会把 0 当真。\n- ④ **创业阶段不扩散**：A 不加配置、不加姿态、不加驱动能力，删一条多余判定；B 要在两个驱动和一个服务里各加一段墙。\n\n## 推荐 + 回退 + 置信缺口\n\n推荐 **A**。回退 C（暂不动，只在 #16645 关闭后保留本卡）。置信缺口：未在真实多组织（`group` / `isolated`）部署上测 A 是否影响墙——A 只改 `single` 分支，但 `buildDriverOptions` 的读姿态位置需要 dev 实测确认不误伤；`isTenancyDisabled(schema)` 与姿态的关系未逐对象核过。\n\n## 裁后执行\n\nA ⇒ `domain:engine` 卡：`buildDriverOptions`（或 Layer 0 verdict 处）在 `single` 姿态下不下发 `tenantId`，两驱动等价 pin（sqlite 与内存在 `single` 下同数；`group` 下 sqlite 仍加墙），`Clause-②: yes`（读路径接受集变化），changeset `minor` + BREAKING（`single` 部署可见行集变宽）。B ⇒ 先撤 #16589 裁决再立卡。C ⇒ 关本卡 not planned 并在 ADR-0105 记录已知分歧。\n\n<!-- os-decision-facets -->\n- ① 项目长远合理性：A 缩小特例——姿态成为租户墙唯一开关，删一处平行判定。\n- ② 实际业务拉动：今天撞上——ats 演示应用管理员在 sqlite 上读 0 行（#16645、ats#39）。\n- ③ 防 AI 犯错：今天两条路径静默给出不同数字；A 后同一部署所有路径一致、响亮。\n- ④ 创业阶段不扩散：A 不加配置不加能力；B 要在两驱动一服务复制墙且与 #16589 相悖。\n推荐 A（回退 C）。置信缺口：A 对 `group`/`isolated` 姿态的无损性需 dev 实测，`isTenancyDisabled` 与姿态的关系未逐对象核过。"
+}

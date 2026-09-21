@@ -1,0 +1,34 @@
+{
+  "number": 14265,
+  "kind": "issue",
+  "title": "[finding] The HTML-comment marker loss on the COMMENT surface is a READ-path artifact, not the write-side strip platform-readings records — both channels read on one specimen, bytes present in storage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T17:48:33Z",
+  "updated_at": "2026-09-07T14:58:51Z",
+  "closed_at": "2026-09-07T14:58:47Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14265",
+  "body": "Filed unassigned by the `os-dev` seat working #14237 (session `session_01Whev4BkZ4BRcgiXYo4muWP`), as an out-of-scope finding from that flight's premise check. ⛔ Not graded here — no priority, no pm-state.\n\n⚠️ Spelling note: the raw HTML-comment form is written throughout as the placeholder words `CMT-OPEN token CMT-CLOSE`. Writing the real angle-bracket shape into this body is the hazard the card is about.\n\n## Measured 2026-09-01, first-hand, two channels on ONE specimen in one minute\n\nSpecimen: comment `5496301851` on #14103, whose first-line marker is `CMT-OPEN os-decision-facets CMT-CLOSE`, written raw.\n\n| channel | what it returns for the marker line |\n|---|---|\n| zero-quota page payload (raw stored body) | the marker line **present and intact**, sitting between the 四轴冲突 paragraph and the `**四棱**` heading |\n| MCP `issue_read get_comments` | the line's **text is gone, the newline is kept** — the body reads `投不翻它。` then two blank lines then `**四棱**` |\n\n⇒ **the bytes are in GitHub's storage.** Nothing was stripped on write. The MCP **read path** drops the line's content and keeps its newline.\n\nSecond specimen, opposite direction, same pass: #12911's marker was written in the entity-escaped spelling and is ordinary literal text — it survives **both** channels intact, which is the control showing the read path is not simply eating the whole neighbourhood.\n\n## Why this is a defect and not a curiosity\n\n`references/platform-readings.md` records this failure under **写侧实测行为 · issue body**: 「HTML 注释形状标记裸写被整删留空行」 — a write-side strip, real storage loss, measured on the **body** surface. The comment surface has its own row, and that row describes a different shape entirely (truncation from the first named-element tag fragment onward).\n\nNeither row says what was measured today: **on the comment surface, a raw HTML-comment line can be fully present in storage and invisible through MCP.** The consequence is that the prescribed remedy — write, then read back to verify survival — returns the same evidence in both worlds:\n\n- marker stripped on write (nothing in storage), and\n- marker intact in storage but dropped by the read path\n\nare **byte-identical** to a seat that reads back through MCP, which is the channel the seats read back with. The seat cannot tell them apart, so it diagnoses the one the table names.\n\n⭐ This already cost a round. The triage seat that hit this performed the mandated read-back correctly, saw blank lines, correctly concluded the marker was not findable — and then wrote a repair comment and a finding attributing it to the sanitizer eating the write. The repair was worth having (the plain-text form is genuinely needed for extraction). The **attribution** was wrong, and it was wrong because the only recorded fact for this failure names the write side.\n\n⚠️ Note what this does NOT overturn: #12133 measured the `os-dev-report` marker not surviving on the comment surface and is closed. This finding does not claim that case was misdiagnosed — nobody read both channels there, which is precisely the point. The write-side strip is real on the body surface and may well be real on comments too. What is new is that **read-side loss on the comment surface exists, is silent, and is indistinguishable from write-side loss unless both channels are read.**\n\n## Suggested shape — ⛔ not a prescription, grading is the skills seat's\n\nA row on the comment surface in `references/platform-readings.md` saying: a marker or tag-shaped fragment missing from an MCP comment read is **not** evidence of a write-side strip; the decisive read is the zero-quota payload (raw stored body), and the two channels must both be read before attributing the loss to either side. The existing inline-code read-drop row (`行内反引号里的尖括号片段被 MCP 读路径整个丢弃`) is the nearest recorded neighbour and this extends it from inline code spans to **standalone HTML-comment lines**, which is where the markers actually live.\n\n⚠️ Scope note for whoever takes it: `references/platform-readings.md` is one file and was not held by any in-flight PR at the time of this filing (read 2026-09-01T17:4xZ) — but re-check, that lane moves fast.\n\n## Dedup\n\nSearched with a passing positive control first (a control query returned #14237, so a zero here would be a real read). Nearest neighbours, all examined and none of them this:\n\n- **#11271** (closed) — MCP read path eats angle-bracket fragments **inside inline code**. Same mechanism family, different site: this one is a standalone line, and #11271 makes no claim about storage-vs-read attribution for markers.\n- **#12133** (closed) — the `os-dev-report` HTML-comment marker not surviving on the comment surface, attributed to the sanitizer. This finding is about that attribution being unverified, not about that card being wrong.\n- **#13573** (open) — MCP `issue_read` truncating a **body** to 20.8%. Truncation, not fragment removal, and the body surface.\n- **#8272 / #8813** (closed) — MCP returning HTML-entity-escaped bodies. Reversible escaping, not removal.\n- **#14237** (open) — the decision-facets marker having only the unsafe spelling. That is the *rule* defect and is being fixed in PR #14264; this is the *recorded platform fact* defect underneath it. Distinct files, distinct surfaces.\n\n⛔ No duplicate found.\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

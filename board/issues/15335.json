@@ -1,0 +1,37 @@
+{
+  "number": 15335,
+  "kind": "issue",
+  "title": "[finding] sys_metadata_commit and sys_http_delivery still declare maxLength on `id`, so every clean boot logs 5 sql-driver \"undelivered attribute\" warnings about the platform's own tables",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T12:15:24Z",
+  "updated_at": "2026-09-08T21:39:03Z",
+  "closed_at": "2026-09-08T21:07:37Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15335",
+  "body": "Observation-class finding, filed unassigned while re-transcribing the ObjectOS quickstart boot samples against `@objectstack/cli` 17.3.0 (objectstack-ai/objectos#141, PR objectstack-ai/objectos#264). No action requested — routing and grading are the triage seat's.\n\n## What a clean boot prints\n\nBooting `@objectstack/cli@17.3.0` — both `os start` on an empty kernel and `pnpm dev` on a fresh `os init -t app` scaffold — emits **5 `[sql-driver]` warning blocks**, naming only the platform's own system tables:\n\n```\n[sql-driver] while creating table \"sys_metadata_commit\": declared field 'id' asks for storage\nthe platform's own 'id' column does not provide — maxLength: 64 (the column is 255). The\nplatform emits id/created_at/updated_at itself, so THOSE attributes are not applied; ...\n{\n  table: 'sys_metadata_commit',\n  field: 'id',\n  phase: 'create',\n  undelivered: [ 'maxLength' ]\n}\n```\n\nTwo distinct tables are involved — **`sys_metadata_commit`** and **`sys_http_delivery`** — across `phase: 'create'` and `phase: 'alter'`.\n\n## Why this looks like residue rather than the intended steady state\n\nThe warning itself is working as designed: it is the diagnostic that #12015 was filed for, since a declared `id` used to be discarded silently. The finding is not the warning — it is that **the platform's own shipped declarations are what trip it**, on a first boot, with nothing user-authored involved.\n\nThat is the same class #12131 cleared for 45 system objects declaring `id` as `text`. These two are a narrower sibling residue: the attribute is `maxLength: 64` rather than a type, so they survived that sweep. The remedy the warning itself recommends — \"Drop the storage attribute(s) named above\" — appears to be exactly right here, since nothing can honour a `maxLength` on a column the platform emits itself.\n\n## Measured, not recalled\n\nCaptured on a pty from a pristine home, with a **17.2.0 control** booted from an exact-pinned scaffold:\n\n| | 17.2.0 | 17.3.0 |\n|---|---|---|\n| `[sql-driver]` warning lines, `os start` | 338 | **5** |\n| `[sql-driver]` warning lines, `pnpm dev` | 356 | **5** |\n\nSo this is being actively worked down and is nearly finished — 338 to 5 in one minor release. This card is about the remainder, and is filed precisely because a count that small is the one most likely to be left as permanent background noise.\n\n## Why it is worth a card at all\n\nA first-run quickstart is the highest-leverage first impression the platform has, and the reader cannot tell a warning about the platform's internals from one about their own code. It also has a documentation cost that is already being paid: the quickstart's two declaration sentences now have to name these warnings among the output they omit (objectstack-ai/objectos#264), and declaring noise is not the same as the noise being correct.\n\nRelated: #12015 (added this diagnostic), #12131 (cleared the 45-object `text` residue), objectstack-ai/objectos#141, objectstack-ai/objectos#264."
+}

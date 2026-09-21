@@ -1,0 +1,32 @@
+{
+  "number": 11977,
+  "kind": "issue",
+  "title": "platform-admin re-anchor L8 (cloud seam): control-plane env injection + invite-only interaction — cloud seat leg, designed blind",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:31:59Z",
+  "updated_at": "2026-09-09T05:51:20Z",
+  "closed_at": "2026-09-09T05:51:20Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11977",
+  "body": "Leg **L8** of the accepted #11663 platform-admin re-anchor design — a **seam card**: the fix lands in the `cloud` repo, which is not reachable from the filing session, so per the cross-repo rule it lives here with `repo:cloud`. **Named reader: the cloud execution seat**, at its queue-scan step — this card is its instruction to open the cloud-side issue and link it back here. Provenance: design document = #11663 comment 5394453215 (§6 row L8, §9 NOT MEASURED disclosure); maintainer acceptance = #11663 comment 5404675670 (2026-08-25, verbatim 「接受你的建议，继续」). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #11970\nBlocked-by: #11974\n\n**Content (cloud side)**: control-plane injection of `OS_PLATFORM_OWNER_EMAIL` per deployment (list form, Choice 2B); the invite-only interaction — self-registration must never confer platform admin, only configured verified emails do (this is the structural fix for cloud#1509's class); coordinate with the cloud seat's #1614→#1509 train, ⛔ do not collide with its in-flight acceptance.\n\n⚠️ **This leg was designed blind** — the designer could not measure the cloud repo. The cloud seat's review of the design's cloud assumptions is a required first step, and contradictions come back as a fork on #11663, not as silent adaptation.\n\n**Acceptance criterion**: a cloud-repo issue exists carrying this leg with a back-link here and `Blocked-by:` on its own repo's spellings; this card then flips to track it and closes when the cloud leg lands."
+}

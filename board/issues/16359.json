@@ -1,0 +1,37 @@
+{
+  "number": 16359,
+  "kind": "issue",
+  "title": "[finding] The empty-generator refusal reads `Failed to load generator \"\":  is not a valid JS file` — a double space, because bundle-require concatenates an empty filepath",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T15:11:31Z",
+  "updated_at": "2026-09-08T13:37:43Z",
+  "closed_at": "2026-09-08T13:37:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16359",
+  "body": "## The defect\n\nOnce `os lint --eval --generator \"\"` refuses (PR #16341 / card #16161), the message it prints reads:\n\n```\nFailed to load generator \"\":  is not a valid JS file\n```\n\n— with **two spaces** between the colon and `is`.\n\n## Why\n\n`bundle-require` composes its own message as `FILEPATH + ' is not a valid JS file'`. When the filepath is the empty string the concatenation contributes nothing, so the leading space of the upstream fragment lands directly against the space that follows our own `: ` separator. Neither side is wrong on its own; the seam only shows for an empty filepath, which was **unreachable before #16341** — the truthiness guard skipped the whole load block, so no message was printed at all.\n\n⇒ This is a defect **newly made reachable** by a correct fix, not a regression it introduced.\n\n## Why it was not fixed at the site\n\n⛔ Deliberately not special-cased in PR #16341, and that reasoning is right and worth preserving: a bespoke message for the empty value is exactly the **separate refusal shape** that PR documents itself as *not* inventing. #16161's whole argument is that the empty string should answer through the door an unresolvable path already answers through — inventing a hand-written message for it would have quietly created the second shape the card exists to avoid.\n\n⇒ A message-quality card, not a rider on that diff.\n\n## Shape of a fix, for whoever takes it\n\nNot prescribed — but note the choice is real and should be argued, not assumed: trimming our own separator would fix the empty case and leave every non-empty case unchanged, whereas special-casing the empty value re-introduces the branch #16161 refused. Whoever takes this should say which they picked and why.\n\n## Provenance and what a taker must re-run\n\n⚠️ Measured by the implementer at head `26bc91fc8e7` during #16161's round. **Not independently re-driven by the filing seat.** Re-run the refusal and read the bytes rather than inheriting the transcription — a double space is exactly the kind of detail that survives a copy badly.\n\n## Dedupe\n\nRun with a known-hit control in the same session.\n\n- Query *\"double space in refusal message is not a valid JS file bundle-require\"* → **`total_count: 0`**.\n- ⭐ That zero alone is worthless, so a control sharing its vocabulary was run: *\"CLI refusal message has a formatting defect extra whitespace in interpolated text\"* → 6 hits, nearest neighbour **#12891** (closed) — *\"8 residual #12081-class soft breaks ... each renders as a stray mid-sentence space\"*. Same defect **class**, different population entirely: that card is about soft breaks in `.claude/agents/os-dev.md`, an authored markdown file, not about a runtime-composed CLI message.\n\n⇒ The area is reachable, and no duplicate is in it.\n\n⭐ **A channel property worth recording:** a third control, *\"Failed to load generator message text quality wording\"*, also returned **0** — even though that exact phrase appears in the body of cards the same search surfaces under other phrasings. A zero from one phrasing of this semantic search is **not** a zero from the area; only a control sharing the failing query's vocabulary settles it. That is why the #12891-reaching control above, and not the bare zero, is what this dedupe rests on.\n\n## Grading\n\n⛔ Filed unlabelled. `domain:*` and type grading are triage's, not this seat's. The implementer's suggestion, relayed as a suggestion only: `finding` (cosmetic).\n\nHeld on #16161 (comment [5559999365](https://github.com/objectstack-ai/objectstack/issues/16161#issuecomment-5559999365)) while the dedupe channel was down; filed now that a positive control fires in the same session."
+}

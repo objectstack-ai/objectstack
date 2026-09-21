@@ -1,0 +1,36 @@
+{
+  "number": 15238,
+  "kind": "issue",
+  "title": "[finding] three runtime domains still reach the `protocol` service through an untyped handle — the shape that fixes them is now written and proven next door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T06:52:55Z",
+  "updated_at": "2026-09-09T01:57:18Z",
+  "closed_at": "2026-09-08T23:39:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15238",
+  "body": "Found while implementing #13598 (PR #15215), which narrowed `packages/runtime/src/domains/packages.ts` from **twelve** untyped `deps.resolveService(context, 'protocol')` handles to **one**. Filed rather than folded in: #13598's dispatch scoped its file surface to `packages.ts` and named `domains/meta.ts` explicitly as \"same family, a different file, and NOT in scope by default\".\n\n## Measured on `34a1740a` (PR #15215's head), after that change lands\n\nInstrument, per non-test file under `packages/runtime/src`:\n\n```\ngrep -c \"resolveService([^,]*, 'protocol'\"   and   grep -c \"protocol as any\\|protocol: any\"\n```\n\n| file | `resolveService(…, 'protocol')` sites | `any` casts on the handle |\n|:--|--:|--:|\n| `domains/meta.ts` | 9 | 4 |\n| `domains/mcp.ts` | 1 | 1 |\n| `domains/ui.ts` | 1 | 0 |\n| `domains/packages.ts` (after #13598) | 1 | 0 |\n\nThe `packages.ts` row is the control: it is the same instrument on the file that was just fixed, and its single remaining site is the one inside the narrowing helper. Without that row the other three counts say nothing about whether the pattern is repairable.\n\n`ui.ts` is the cheapest of the three and shows the shape plainly: the handle is untyped, so `protocol.getUiView({ object: objectName, type })` compiles against nothing even though `getUiView` and `GetUiViewRequest` are both declared on the spec's `MetadataProtocol`. `mcp.ts` already declares `type McpMergedMetadataRead = Pick(MetadataProtocol, 'getMetaItems')` for its merged-read seam but resolves its second handle (`domains/mcp.ts:609`) as a bare `any`.\n\n## Why it may be worth a card\n\n- Same seam, same reason: `'protocol'` is deliberately unmapped in `ServiceSlotContracts`, so `resolveService` answers `any` for that name and nothing downstream compiles against a contract.\n- The consumer-side fix now EXISTS in-tree and is proven: `PackagesDomainProtocol` plus a one-line `resolveProtocol` helper in `domains/packages.ts`, with a pin (`packages-protocol-handle-typing.test.ts`) whose `@ts-expect-error` directives go unused — TS2578 — if the seam regresses. A follow-up is a template application, not a design question.\n- ⛔ The runtime feature-detection probes must survive any such change, for the documented reason: a host may occupy the slot with a partial object. Every member of the handle type is optional precisely so the type agrees with the probes instead of replacing them.\n- ⛔ Not a `packages/spec` change. Mapping `'protocol'` in `ServiceSlotContracts` would assert that a filled slot IS a `MetadataProtocol`, whose members are mostly required — which is what the probes exist to deny — and it would have to answer for the verbs no contract declares.\n\nObservation-grade: no behavioural defect measured, declared-vs-served unaffected. `meta.ts` in particular builds its literals field by field and has its own pins, so the win there is narrower than it was in `packages.ts`; sizing and priority are triage's call."
+}

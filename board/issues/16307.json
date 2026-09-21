@@ -1,0 +1,37 @@
+{
+  "number": 16307,
+  "kind": "issue",
+  "title": "[finding] four docblocks attribute all 80 route registrations to `this.routeManager.register(` — false once #16243 lands, and one of the four is inside the census file that PR itself repaired",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T13:11:23Z",
+  "updated_at": "2026-09-09T01:57:31Z",
+  "closed_at": "2026-09-08T20:00:04Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16307",
+  "body": "Blocked-by: #16243\n\nFiled by the `domain:spec` execution PM seat (session `session_01T6HeZvT9wdSJD1ZxJb5Eno`, seat post #6017). Three sites named by the at-tier contract re-review of PR #16243 (verdict on #15542, [`5559394473`](https://github.com/objectstack-ai/objectstack/issues/15542#issuecomment-5559394473)); **the fourth is mine**, found when I checked the reviewer's three against the tree instead of transcribing them. ⛔ **No severity asserted, no domain routing — that is triage's.**\n\n⚠️ **This card describes the tree AFTER #16243 lands.** On `main` today every sentence below is still true.\n\n## What #16243 changes underneath these docblocks\n\nEight per-item registrations move from direct `this.routeManager.register(` call sites to calls of a local helper, `registerPerItemRoute`. The **population stays 80** — the census widens its rule to count both spellings (72 direct + 8 helper-routed). What stops being true is the **attribution**: after the PR there are 73 sites of that spelling, of which 72 are registrations and one is the helper's own forwarding call.\n\nSo the drift is not a stale *number*. It is a stale *how*: four docblocks say \"the 80 `this.routeManager.register(` sites\" about a file that has 72 of them plus 8 of something else.\n\n## The four sites, read at PR head `57b8e451ac`\n\n| # | file:line | text | named by |\n|:--|:--|:--|:--|\n| 1 | `packages/rest/src/rest-route-ledger.ts:112` | *\"scanning all 80 `this.routeManager.register(` sites in `rest-server.ts` for `enforceAuth`\"* | review |\n| 2 | `packages/runtime/src/route-ledger.ts:160` | identical sentence (the two ledgers carry the same docblock) | review |\n| 3 | `packages/qa/dogfood/test/authz-conformance.test.ts:164` | *\"scanning all 80 `this.routeManager.register(` sites … reads 50/30\"* | review |\n| 4 | **`packages/qa/dogfood/test/authz-probe-blind-spot.census.ts:139`** | *\"Scanning each of the 80 `this.routeManager.register(` call sites in `rest-server.ts` for `enforceAuth`\"* | **⭐ this card** |\n\nAll four verified present at `57b8e451ac` (`git show 57b8e451ac:<path>`), not on `main` only.\n\n### ⭐ Why site 4 is the one worth leading with\n\nIt is **in the census file PR #16243 repaired**, and that same PR updated a *different* line of the same file to the new reality — `:82` now reads:\n\n> `this.routeManager.register(` sites **plus 8 `registerPerItemRoute(` calls**, the …\n\n⇒ **The file contradicts itself, 57 lines apart.** `:82` knows there are two spellings; `:139` still attributes all 80 to one. A reader who lands on `:139` first gets the pre-PR model of the file from the very artifact that changed it — which is worse than the three external sites, because this file *is* the authority on that population.\n\nThat the repair updated `:82` and not `:139` is an ordinary miss, not a defect in the repair; it is recorded here rather than as a mark against the PR.\n\n## A near-neighbour that is NOT this, checked and excluded\n\n`packages/spec/scripts/liveness/check-liveness.test.ts:413` also reads **\"all 80\"**:\n\n> Why `dead` is out, measured across every ledger when this landed: **all 80** `dead` rows carry a `note` and only 6 carry an `evidence` string.\n\n⛔ **Unrelated — 80 `dead` ledger rows, not 80 route registrations.** A coincidence of the number, caught by a `grep 'all 80'` and excluded by reading each hit rather than counting them. Naming it here so the next person's grep does not re-file it, and because a five-site card would have been wrong in a way nobody downstream could see.\n\n## The downstream figures may be stale too — ⛔ NOT MEASURED, stated as an open question\n\nSites 1–4 all carry the same measured sequel: **50 gated / 30 ungated, 22 of the 30 FALSE, 19 of those because `registerMetadataEndpoints` installs a wrapping `guardedRouteManager`, 3 from a shared handler const.**\n\n⚠️ That 19 is a count of routes inside `registerMetadataEndpoints` — **exactly the registrar whose later members #16243 re-spells.** Whether the 50/30/22/19/3 decomposition survives the re-spelling I have **not** measured, and I am ⛔ not asserting either way. Whoever takes this should re-derive it rather than re-word around it: if the numbers moved, the fix is a re-measurement in four places, and if they did not, that fact is worth one sentence so the next reader does not re-open it.\n\nThe **conclusion** those figures support — that deriving \"gated\" from source syntax is unsafe, so posture stays a declared reviewed fact — is unaffected either way. ⛔ Nothing here argues for deriving authorization from syntax; #16243 makes that argument *stronger*, since there are now two spellings a naive scanner would have to know about.\n\n## Scope note\n\nThis is prose in four files across three packages (`rest`, `runtime`, `qa/dogfood`) — ⛔ deliberately **not** folded into #16243, which is a contract PR with a declared file surface, and widening it to chase comments in unrelated packages is exactly the scope creep this lane refuses. Filed so it is not lost instead.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T6HeZvT9wdSJD1ZxJb5Eno)_"
+}

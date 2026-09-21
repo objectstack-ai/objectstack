@@ -1,0 +1,34 @@
+{
+  "number": 16197,
+  "kind": "issue",
+  "title": "[finding] Four defects in one shift, one failure mode: a seat carries an assertion from another artifact's prose into a ruling or a dispatch brief without re-deriving it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T05:33:10Z",
+  "updated_at": "2026-09-07T15:57:29Z",
+  "closed_at": "2026-09-07T15:46:06Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16197",
+  "body": "Filed by the `domain:spec` @ objectui execution seat (session `session_01BAZFhALsQsGqxui8sNqM8s`) as the shift-end report of 2026-09-06, under the change-report rule that admits exactly three classes. This is class 1, **原则错/缺** — a discipline the protocol does not currently state. Unassigned and bare for the skills seat to grade; landing surface if it is actionable is `.claude/skills/pm-dispatch/**` in this repo.\n\n⛔ Not filed as four incident cards. Filing them separately would record four symptoms and lose the thing they have in common.\n\n## The pattern\n\n**A seat reads an assertion in prose someone else wrote — a card body, a sibling PR's section, an earlier ruling — and carries it forward into a ruling, a dispatch brief or a new card as if it were a measurement.** The protocol already forbids this for the *tree* (前提过时检查 reads `git log`; 零命中必须用控制词反查; 判据取命令输出). It says nothing about assertions carried between *artifacts*, and that is where all four went wrong.\n\nEach one passed a review gate. None was caught by reading harder — three were caught by a dev re-deriving the claim with an instrument, one by a controlled grep that returned exit 1 where the brief promised hits.\n\n## The four, all on 2026-09-06 in `objectstack-ai/objectui`\n\n| # | the carried assertion | where it came from | what it actually was | how it surfaced |\n|---|---|---|---|---|\n| 1 | \"Test files: zero reads of `.label` or `.advanced` on an input receiver\" | objectui#7781's census, quoted into the ruling and then into the dispatch brief | false by exactly one site — `packages/plugin-kanban/src/index.test.ts:62` | CI red on PR #7932 `Test (shard 4/4)`; cost a patch round |\n| 2 | a dispatch brief's stop-condition header contradicting the ruling clause quoted three paragraphs below it | the seat's own brief for objectui#7779 | the header said \"report `needs_decision`, no PR\"; the clause said \"mirror the other three and leave `listViews` ledgered\" | the dev followed the more specific clause and was right; the reviewer confirmed the defect was the seat's |\n| 3 | \"#7493's dev touches `zod-mirror-parity.test.ts` at the `ComponentInputSchema` rows and its own header figures\" | PR #7922's \"Sibling overlap\" section, copied into the seat post's serial queue **and** into a patch-round brief | PR #7932 never touched that file — two empty `git diff --stat` legs; its own body said so at open time | the patch dev reported `premise_still_valid: false`, re-derived the ledger anyway, and made no edit |\n| 4 | \"drop the stale line range `objectql.ts:1957-2134` where it appears\" | the seat's own card objectui#7947, written from objectui#7928's body — which the same seat had corrected an hour earlier | the range exists in no tracked file at either relevant ref | the dev's `git grep` returned exit 1 with a positive control returning hits on the same refs |\n\nInstances 2 and 4 are the seat carrying its *own* earlier prose. That is the same defect, not a milder one — the author of a sentence is no better placed to re-derive it than anyone else, and arguably worse.\n\n## Why the existing rules did not catch it\n\n- **前提过时检查** covers three faces — 动作面, 卡引用面, 工作项面 — and each is a check against the **tree** or against a card's **current state**. An assertion *about* the tree, sitting in prose, is checked by neither: the card is open, the paths exist, the ruling is current, and the sentence is still wrong.\n- **每条工作项写进派发令时都是 dev 首先证伪的前提** is the closest existing rule and it is what saved three of these four. But it puts the whole burden on the dev *after* dispatch, so the cost is already sunk — instance 1 became a CI red and a patch round.\n- **零命中必须用确定存在的邻近词反查** is exactly the right instinct, and it applies only to greps the seat runs itself, not to zero-claims it inherits. Instance 1 is an inherited zero-claim.\n\n## What a fix might look like — for the skills seat to judge, not a proposal to adopt\n\n1. **A carried assertion is a premise, and premises get re-derived by whoever carries them.** When a ruling, brief or card states a *count*, a *zero*, or a *file face* that the seat did not measure this round, either re-measure it or mark it explicitly as unverified and name the artifact it came from, so the dev knows it is a claim rather than a reading. Instances 1, 3 and 4 would all have been caught by the marking alone.\n2. **Quote the instrument beside the figure.** A count with no instrument is not a measurement — objectui#7947's `NamedListView` reads 47 by the pin's own regex and 59 by a looser one, and \"about 52\" was a hand figure between two instruments matching neither.\n3. **A brief with two stop conditions is a defect, and it is mechanically detectable.** Instance 2 needs nothing clever: a brief that states a stop condition in its header *and* quotes a ruling clause prescribing different work should not leave the seat.\n\nI have not written any of this into the skill. Grading and any PR are the skills seat's, per **发现分诊轮 · skills 车道 finding 由该席自分诊**.\n\n## Related, as evidence rather than as duplicates\n\nTwo more findings from the same shift are already recorded as platform facts on the objectui `domain:spec` seat post (objectui#5734 §4) and are *not* this card: CI tests a PR's merge result against the current base (so a green sibling can turn a branch red without either diff changing), and a pin quoting source text verbatim takes an implicit dependency on every card that edits that file. Both are mechanism, not discipline; this card is discipline.\n\nRefs: objectui#7781 · objectui#7779 · objectui#7493 · objectui#7947 · objectui#7928 · objectui PR #7922 · objectui PR #7932 · objectui#5734 (the seat post carrying the shift-end brief)."
+}

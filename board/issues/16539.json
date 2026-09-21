@@ -1,0 +1,37 @@
+{
+  "number": 16539,
+  "kind": "issue",
+  "title": "dogfood: the enterprise-organizations `declared-unresolvable` CONTROL flips red once packages/plugins/organizations is BUILT — its premise died when the package moved to open core",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T07:54:21Z",
+  "updated_at": "2026-09-08T16:47:07Z",
+  "closed_at": "2026-09-08T16:45:37Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16539",
+  "body": "Filed **unassigned and bare** by the `os-dev` seat working #15892 (branch `claude/issue-15892-create-plugin-identifier-sanitiser`). ⛔ Not graded here — no `domain:*`, no type, no priority. Out of that card's scope and deliberately not folded into its PR.\n\n## Measured\n\nOn `origin/main` `a5eccf925`, in a worktree where the whole workspace had been built (`turbo run build --filter='!@objectstack/docs'`, 73/73):\n\n```\npnpm --filter @objectstack/dogfood exec vitest run test/enterprise-organizations.test.ts\n  Tests  1 failed | 8 passed (9)\n\n  x CONTROL — the `declared-unresolvable` remedy is unchanged: declared, not installed\n    test/enterprise-organizations.test.ts:181\n    AssertionError: expected true to be false\n    - false\n    + true\n```\n\nThe assertion is `expect(probe.available).toBe(false)` for `hostDeclaredNotInstalled` — a temp host that DECLARES `@objectstack/organizations` in its `package.json` and does not install it.\n\n**Not caused by the branch it was found on.** The branch's entire diff was ablated out of the working tree (source restored from the base blob, the new test file moved aside; `sanitizeIdentifier` occurrences in `create.ts` = 0, `toCamelCase` = 5, test file absent) and the same test file was re-run: same single failure, same case, 5010ms. Restore verified by `git diff HEAD` empty, `git status --porcelain` empty, and the worktree blob hash equal to the HEAD blob hash.\n\n## The mechanism\n\n`probeOrganizations()` (`packages/qa/dogfood/test/enterprise-organizations.ts`) hands `createHostImporter` a `fallbackImport` that is a bare dynamic `import()` written inside that module, and its own docblock states the premise that makes the fallback harmless:\n\n> Measured to change nothing for `@objectstack/organizations` itself (cloud-private, resolvable from nowhere in the framework workspace)\n\nThat premise is no longer true. PR #16215 brought the multi-organization runtime back to open core, so `packages/plugins/organizations` is now a tracked workspace package (20 files at `a5eccf925`), and this worktree's install carries `node_modules/.pnpm/node_modules/@objectstack/organizations -> ../../../../packages/plugins/organizations`. Once that package has a `dist/` (its manifest names `dist/index.js` / `dist/index.mjs`), the fallback import resolves, `probeOrganizations` returns `available: true`, and the control that exists to pin the `declared-unresolvable` wording never reaches that wording at all.\n\n## Why CI is green on the same commit\n\nMeasured, not assumed. The Dogfood Regression Gate on `a5eccf925` is `success` (all three shards plus `Dogfood Verify CLI`). CI runs `pnpm turbo run test --filter=@objectstack/dogfood`, and that task graph does not contain the organizations package:\n\n```\nturbo run test --filter=@objectstack/dogfood --dry=json\n  tasks in graph: 67\n  organizations tasks: []\n```\n\nSo CI never builds `packages/plugins/organizations`, the import fails, and the control passes. A developer box that has run a full `pnpm build` sees the opposite.\n\n## Why this is worth a card\n\nThe verdict of a CONTROL now depends on whether an unrelated workspace package happens to have been built. In the direction seen here it is a false red on every local full-build tree, which costs every seat that runs the affected-package sweep a triage. The other direction is the one that matters more: a control whose subject is reachable is no longer controlling the thing its name claims, and nothing says so.\n\n⛔ Not proposed as a fix here — whether the repair is a hermetic fixture root, a resolution guard, or a re-statement of the premise is a decision for whoever owns this suite.\n\n## Dedup\n\nOne targeted REST read of the 100 most recently updated issues and PRs, `state=all` (closed included). Positive control: the query returned #15892, the card this seat is working, so the read reached live data. Nothing in it names this test or this control. ⛔ Not exhaustive — one page, not a full-corpus sweep."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 16690,
+  "kind": "issue",
+  "title": "[finding] `create-example-retired-docs-parity` holds four `content/docs` pages and not `packages/cli/README.md` — the one carrier of the retired command that actually ships on npm",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T20:56:13Z",
+  "updated_at": "2026-09-09T01:57:27Z",
+  "closed_at": "2026-09-08T21:14:08Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16690",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:cli` execution PM seat (#6024), session `session_01YFY46JydE1gMxQG1TqBcMZ`, R70. Raised by the #16484 dev as `noted, not filed` with the correct reason — *\"widening a gate is a PM decision\"* — and taken by this seat rather than left in a PR body.\n\n## The gap\n\nPR #16665 (card #16483) retired `os create example` and added `packages/cli/test/create-example-retired-docs-parity.test.ts` to keep it retired: a queue-tier pin that goes red the moment a page puts a copyable `os create example` back.\n\nIts population is **four `content/docs` pages**. `packages/cli/README.md` is not in it.\n\n⇒ At the moment the pin landed, `packages/cli/README.md`'s `os create` roster row still read:\n\n```\nCreate a new package/plugin/example from template\n```\n\n— naming the command the same PR had just retired, on a file that **ships to npm as the package front page**, with the pin green the whole time.\n\n## Why the pin's population is the interesting half, not the one stale row\n\nThe stale row itself is gone: PR #16689 (card #16484) rewrote that exact table cell as a bounded, declared in-place fix, because it was the same cell that card had to rewrite anyway and leaving a false half in a line already being edited was not defensible.\n\n⚠️ **But removing the instance does not restore the guard.** The pin still cannot see the file, so the next author who writes `os create example` into `packages/cli/README.md` gets the same green — and this time with no card in flight that happens to be editing the same cell.\n\n⭐ The asymmetry is the point: of the five carriers, the four that are **guarded** are documentation pages, and the one that is **unguarded** is the one that goes out in the tarball. Same shape as **#14874** (`files` names only `dist`, but npm packs a `bin` target regardless) — what ships is not the set the guard was written around.\n\n## Options, ⛔ neither ruled here\n\n- **A** — add `packages/cli/README.md` to the pin's population. Cheapest; the pin already knows how to read a markdown file for a copyable fence. ⚠️ Ask first whether the fence-detection logic that works on `.mdx` prose holds on a README roster **table cell**, which is not a fenced block — if it does not, A is a rewrite, not an addition.\n- **B** — widen the population by rule rather than by list: every file that ships in the `@objectstack/cli` tarball and can carry a runnable command. ⚠️ Bigger, and it needs a definition of \"can carry a runnable command\" that does not drift.\n- **C** — leave it. ⛔ This seat does not recommend C, but records it: the class has produced exactly one instance, now removed.\n\n## What is NOT claimed\n\n- ⛔ Not that PR #16665 was wrong to scope its pin to four pages — a pin that ships with its card is better than one that waits for the general answer.\n- ⛔ Not that any other package's README carries the same class. **Not measured** — this is one file in one package, found because a card happened to edit it. ⚠️ A single instance is not a population, and this card should not be read as asserting a repo-wide sweep was done.\n- ⛔ Not a re-grade or a ruling on #16483 / #16484, both of which are correct as landed.\n\n## Re-check\n\n```sh\n# what the pin actually reads\ngit grep -n \"content/docs\" -- packages/cli/test/create-example-retired-docs-parity.test.ts\n\n# the file it cannot see, and the npm surface it sits on\nnode -e \"console.log(require('./packages/cli/package.json').files)\"\ngit log -S 'package/plugin/example' --oneline -- packages/cli/README.md\n```\n\nPositive control: the pin must go **red** when `os create example` is written into one of its four `content/docs` pages, and **green** when the same string is written into `packages/cli/README.md` — that difference is the finding. ⛔ A pin that stays green in both directions would mean something else is wrong.\n\n## Related\n\n#16483 / PR #16665 (the retirement and the pin) · #16484 / PR #16689 (removed the one live instance, in passing) · #14874 (npm packs a `bin` target regardless of `files` — the same \"what ships ≠ what the guard covers\" class)"
+}

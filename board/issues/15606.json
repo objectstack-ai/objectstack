@@ -1,0 +1,36 @@
+{
+  "number": 15606,
+  "kind": "issue",
+  "title": "[finding] service-automation: `FlowRunSummary.failed` has no queryable column on `sys_automation_run`, so \"which runs lost rows?\" is a `summary_json` scan",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T23:23:32Z",
+  "updated_at": "2026-09-08T13:49:46Z",
+  "closed_at": "2026-09-08T11:55:29Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15606",
+  "body": "Found while implementing #14456 (the contained-failure visibility contract). Out of scope there and deliberately not widened into — filing it instead.\n\n## What is there now\n\n#14456 populates `FlowRunSummary.failed` (the fold `failed = Sigma nodes[].failures`) and persists it. It rides inside the `summary_json` blob on `sys_automation_run`, including on a summary compacted past the 16 KiB cap, where the totals are kept and the per-node detail is dropped.\n\nThe four sibling totals each have a **column** of their own — `selected_count`, `acted_count`, `skipped_count`, `unmeasured_count` — and `packages/services/service-automation/src/sys-automation-run.object.ts` states why, in a comment right above them:\n\n    // COLUMNS, not just a blob: `selected_count > 0 AND acted_count = 0` is the\n    // first FILTER of the broken-sweep detector, and an operator can only alert\n    // on what is filterable. Buried inside `summary_json` these would be\n    // readable but not queryable — the difference between a dashboard and an\n    // alarm.\n\n`failed` has no such column.\n\n## Why that may matter\n\nThe premise of the containment work is that a run which caught a per-iteration failure completes GREEN: `status = 'completed'`, and no other stored column moves. So \"show me the runs that lost rows this week\" is not answerable from the columns at all — it is a `LIKE` scan over `summary_json`, or nothing. That is the same \"readable but not queryable\" gap the comment above was written against, one field over.\n\nIt is not obviously the same shape as the broken-sweep filter, which is why this is a finding and not a defect:\n\n- `unmeasured_count` exists to QUALIFY `acted_count` — it is read as part of one filter expression, so it has to be in the same row as its operands.\n- `failed` would be its own predicate (`failed_count > 0`), which a caller could equally get by parsing the blob it already fetches.\n\nSo the question is a real one and this card does not presume the answer.\n\n## Options\n\n1. **Add `failed_count`**, mirroring `unmeasured_count`: null on rows written before the count existed (never `0` — absent means \"not tracked\", the convention the spec docblock spells out for both `unmeasured` and `failed`), written from `record.summary?.failed ?? null` beside its four siblings in `ObjectStoreSuspendedRunStore`.\n2. **Leave it in the blob** and say so in `summary_json`'s own description, so the next reader does not re-derive the question.\n\nOption 1 is a stored-surface change on an ADR-0103 engine-owned object, which is why it was not taken as a rider on #14456.\n\n## Not in scope of this card\n\n- The `failed` fold, the summary line token and the `$error` row binding — that IS #14456.\n- `#13803` (a summary reporting `acted: 0` after a mid-loop death) — independent.\n- `#15223` (the run-history row folding `cancelled` and `timed_out` into `failed` as a STATUS) — a different `failed`, on `status`, not this counter. Named here only so the two are not confused; that issue is not addressed by anything proposed above and remains open.\n\nFiled from `claude/issue-14456-contained-failure-visibility`."
+}

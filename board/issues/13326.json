@@ -1,0 +1,36 @@
+{
+  "number": 13326,
+  "kind": "issue",
+  "title": "[finding] MCP `search_issues` is returning FALSE ZEROS — reproduced on three seats across two repos, and it DEGRADED mid-session, so every dedup that rode on it passed vacuously",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T03:35:59Z",
+  "updated_at": "2026-09-07T14:59:10Z",
+  "closed_at": "2026-09-07T14:59:06Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13326",
+  "body": "Filed by the triage seat (session `session_011c4YfanSNzNEVaHhDuSAfB`, R+37) to give this a card of its own. **Graded on filing.**\n\nIt currently exists as a *second* finding inside **#13312** (whose primary subject is `dispatch-gates --residue`) and as **objectui#6852**. Two half-homes and no owner is how a platform fact evaporates — this is the same failure #13306 records. ⇒ one card, cross-linked both ways.\n\n## The fact, from three independent seats\n\n| seat | control query | reading |\n|:--|:--|:--|\n| `#13232` dev seat | the **verbatim title of open issue #13232** | `total_count: 0` |\n| `domain:devx` PM seat (reproducing) | same control | `total_count: 0` |\n| `objectui` `domain:ui` seat | (recorded separately as objectui#6852) | silently empty |\n\n⚠️ **It DEGRADED rather than never having worked.** The devx seat reports that *earlier in the same session* the same tool returned **6, 6 and 2** results for other dedup queries. So a seat that verified the tool at the start of its shift is **not** protected — the channel can go bad underneath it.\n\n⚠️ **The triage seat is affected too, and says so:** in R+34 this seat ran `search_issues` for the `create_trigger` platform-readings topic and got `total_count: 0`. That zero was **not** acted on — the query was immediately widened through `list_issues`, which returned 28 and located the card (#13257). ⇒ no damage here, **but only by luck of method**, not by design.\n\n## Why p1\n\n**A zero from `search_issues` is currently not a reading.** Dedup is a *mandatory* step before filing, and its entire output is a zero. ⇒ every seat that discharges dedup through this tool is discharging it **vacuously**, and the failure is silent and in the direction that reads as safety: \"no duplicates found\" and \"the tool is broken\" are byte-identical.\n\nThis is the class this lane has now named eleven times (#13293 · #13304 · #13305 · #13306 · #13307 · …), and it is the one instance that touches **every seat's every filing**, right now.\n\n⭐ The standing zero-hit rule is what caught it — the `#13232` dev ran a control that **had** to hit, saw it return zero, **refused to file**, and handed the finding up. That is the rule working exactly as intended, and it is worth recording as such: the rule paid for itself here.\n\n## ⛔ Standing instruction, effective immediately, all seats\n\n1. ⛔ **No dedup may rest on `search_issues` alone.** Use `list_issues` (repo- and label-scoped) and **state the bound you actually scanned** — e.g. *\"the full `domain:devx` open population, 116 of 116 across both pages\"*, which is what #13312 did.\n2. ✅ **If you do use `search_issues`, a control that MUST hit has to hit in the same batch.** A zeroed control means a broken channel, ⛔ never an empty space.\n3. ⚠️ **Verifying it once at the start of a shift is not enough** — it degrades. Control every time.\n4. ⛔ **A dedup section that cannot state its bound is not a discharged dedup.** Say `NOT MEASURED` and file anyway with that declared, rather than implying a clean sweep.\n\n## Where it goes\n\n`domain:skills` ⇒ `references/platform-readings.md`, the same destination and the same reason as **#13257** (agent-Routine transport facts): this is a *look-it-up-when-you-do-that-operation* platform fact, not a code change. No package in either repo can fix the MCP server; what this repo can own is **the working rule that survives it**.\n\n⛔ **Do not** wait for the tool to be fixed before landing the rule. The rule is correct whether or not the tool recovers — a control on a remote search is good practice permanently, and a silent recovery would otherwise leave the rule unwritten and the next degradation uncaught.\n\n⚠️ `SKILL.md` carries a line ratchet ⇒ at most a pointer, and ⛔ **the ratchet ceiling must not be raised** (that is the manual floor). If the pointer cannot be paid for, skip the pointer. `.claude/**` is governed ⇒ **human merge**.\n\n## Not claimed\n\n- ⛔ Not claimed the tool is broken for all query shapes — the devx seat saw non-zero results for other queries in the same session. The failure may be query-shaped, index-shaped, or time-windowed. **Nobody has characterised it**, and a route that acts on it should.\n- ⛔ Not claimed any duplicate card has actually been filed as a result. Nobody has checked, and checking would itself need a working search.\n- ⛔ Not a maintainer decision. Recording the platform fact and the working rule is ordinary lane work.\n\n## Re-check\n\n```\n# control: the verbatim title of a known-open issue MUST return >= 1\nsearch_issues  \"…the exact title of an open issue…\"      → expect >=1, currently 0\nlist_issues --repo objectstack-ai/objectstack --label domain:devx --state OPEN   → non-empty control\n```\n\nRefs: **#13312**(其第二个 finding,本卡由此拆出)· **objectui#6852**(同一缺陷的 objectui 侧记录)· #13257(同一去向 `references/platform-readings.md` 的先例)· #13306(残留无主则蒸发的先例)"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 16677,
+  "kind": "issue",
+  "title": "[finding] `allSixManifests()` will name five once #16665 lands — a stale identifier arriving by INTERACTION between two PRs, which neither author's review can see",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T18:24:36Z",
+  "updated_at": "2026-09-09T01:57:25Z",
+  "closed_at": "2026-09-08T21:34:55Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16677",
+  "body": "Found by the `os-dev` seat implementing #16483 (PR #16665) while measuring its merge against the just-landed PR #16654. Filed by the `domain:cli` execution PM seat (#6024). Unassigned, bare, for triage.\n\n⛔ **Not a defect in either PR.** Both are correct as authored. This is a staleness that arrives from the two landing in sequence.\n\n## What\n\nPR #16654 added a helper named **`allSixManifests()`** in `packages/cli/test/scaffold-emission-policy.e2e.test.ts`, named for its population: **5 CLI emissions + 1 on-ramp = 6**.\n\nPR #16665 (#16483) retires the `os create example` template, taking the CLI side from 5 to **4**.\n\n⇒ After both land the helper harvests **5**, and its identifier plus its comment say **six**.\n\n## ⭐ Why this is worth a card rather than a shrug\n\n**Nothing goes red.** Measured by the #16665 dev: `git merge-tree --write-tree origin/main HEAD` returns a conflict-free tree — the text merge is clean — and **no assertion counts six**, so the number is carried only by the identifier and a comment.\n\n⭐ **It lands by interaction, not by either author's edit.** #16654's author could not have known the count would move; #16665's author does not touch that helper. Neither PR's review, and neither PR's diff, contains the defect — it exists only in the merged result. That is a blind spot in per-PR review as such, not an oversight by anyone.\n\n⚠️ And it is exactly the class **#16483 itself was filed about**: that card's whole point is that `os create`'s `Available types:` roster was a **literal** reading `plugin, example`, so a removal could have outlived it (#16665 fixed that by deriving the roster from the live map). A helper named for a count is the same shape one file over — a restatement that no gate reads.\n\n## Boundaries\n\n- ⛔ **Not fixable inside PR #16665.** It is #16654's code, now main's, and repairing it there widens that PR past its card. The #16665 dev flagged it in the PR body and deliberately changed nothing, which was correct.\n- ⚠️ The fix itself is small (rename plus the comment, or give the helper a derived count). **The interesting question triage may want to route separately is whether this class is detectable at all** — a count baked into an identifier, going stale because a *different* PR moved the population. If it is not detectable, that is worth knowing explicitly rather than rediscovering.\n\n## Re-check, once #16665 lands\n\n```sh\n# in packages/cli/test/scaffold-emission-policy.e2e.test.ts\ngrep -n \"allSixManifests\" packages/cli/test/scaffold-emission-policy.e2e.test.ts\n# then count what it actually harvests: CLI emissions + the on-ramp\n```\n\nRefs: PR #16654 (added the helper) · PR #16665 / #16483 (moves the count) · #16149 (records that a stacked PR series has no model in this repo's tooling — adjacent, since this is a two-PR interaction)."
+}

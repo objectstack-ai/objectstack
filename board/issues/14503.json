@@ -1,0 +1,36 @@
+{
+  "number": 14503,
+  "kind": "issue",
+  "title": "packages/rest package read routes claim to SHADOW their dispatcher twins, but the dispatcher answers /packages and /packages/:id on a stock showcase boot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:35:47Z",
+  "updated_at": "2026-09-08T07:50:33Z",
+  "closed_at": "2026-09-08T06:56:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14503",
+  "body": "## What was measured\n\n`packages/rest/src/package-routes.ts` documents its service-gated block as:\n\n> The service-gated half — mounted only when a `package` service is reachable, because each of these three SHADOWS a live dispatcher twin at the same pattern and a degraded shadow is worse than no shadow.\n\nOn a stock showcase boot (`objectstack dev --seed-admin`, which mounts `PackageServicePlugin`, so the service IS reachable), the dispatcher twin answers instead. Two independent probes, same boot:\n\n- **404 wording.** `GET /api/v1/packages/no.such.package` returns `Package 'no.such.package' not found` — the spelling in `packages/runtime/src/domains/packages.ts`. The REST route's own spelling is `Package \"no.such.package\" was not found.`\n- **Response shape.** `GET /api/v1/packages/com.objectstack.setup` returns the installed-package record directly under `data` (`deps.success(pkg)` in the runtime domain). The REST route wraps it as `data.package` and stamps `source: 'registry'`, neither of which appeared.\n\n## Why it matters\n\nThe comment states an intended precedence that the composition does not deliver, so a reader reasoning about which body serves `/packages` gets the wrong answer — which is exactly what happened on #14309, whose root-cause section attributed the 500 to the REST body. Two consequences worth separating:\n\n1. If the shadowing is intended, the mount order is wrong and the REST routes are dead in every composition that also mounts the dispatcher domain — including the reference app. The `source` field and the `version` query-multiplicity refusal are then unreachable there.\n2. If the dispatcher twin is meant to win, the comment is stale and should say so, because it is currently the only written statement of the precedence.\n\nEither way, the two doors have diverged behaviour (`source` stamp, 404 wording, `data.package` vs `data` envelope) while claiming to be one door with a shadow, so a client cannot depend on which it gets.\n\n## Not addressed by #14309\n\nThat card's fix is at the producer (`SchemaRegistry.installPackage`) and applies the read-door projection to both twins, so it is unaffected by which one answers. The precedence question is untouched and deliberately out of its scope.\n\nFound while verifying #14309 on a live showcase boot.\n\n---\n\n## Triage — graded\n\nBoth spellings confirmed at `origin/main` `4a37870`, which is what makes the probe conclusive rather than suggestive:\n\n- `packages/rest/src/package-routes.ts:652-654` — the SHADOWS sentence, verbatim as quoted.\n- `packages/rest/src/package-routes.ts:890` — `` sendError(res, 404, 'RESOURCE_NOT_FOUND', `Package \"${packageId}\" was not found.`) `` — double quotes, \"was not found.\"\n- `packages/runtime/src/domains/packages.ts:359, :378, :822, :885` — `` deps.error(`Package '${id}' not found`, 404) `` — single quotes, \"not found\".\n\nThe two doors are lexically distinguishable in their 404 text, so \"which door answered\" is directly observable rather than inferred. The reported observation is the dispatcher's spelling. The finding stands.\n\nGraded as a decision rather than a queued fix: whichever way it goes, the response body on a published endpoint (`GET /api/v1/packages/:id`) changes shape for somebody — `data.package` + `source: 'registry'` versus a bare `data` — and that is a published-contract call, not a mount-order tidy-up.\n\n&lt;!-- os-decision-facets --&gt;\n\n- **① 项目长远合理性(权重 ≥50%,领起推荐)** —— 同一个网址有两套实现,而且它们的行为**已经**不一样了:404 的措辞、响应外面包不包一层、有没有那个 `source` 戳。注释写着「这一套遮蔽那一套」,实际是另一套在答话。**一个门两套实现、而且没人说得准哪套在服务,是最坏的一种增生** —— 它不增加任何能力,只制造分歧。长远终态只有一种:一个网址一套实现。①指向**删掉其中一套**,而不是修好优先级让两套继续并存。\n- **② 实际业务拉动** —— 已经付过代价了:#14309 的根因分析把一个 500 归给了 REST 那一套,而实际答话的是 dispatcher。这条错误的注释已经误导过一次真实排障,不是假想的风险。\n- **③ 防 AI 犯错** —— 出错时谁看到什么:一个 agent 读到注释说「这里遮蔽那里」,于是去改 REST 那一套,改完**没有任何反应**,测试也不会红,因为答话的根本不是它。改了没反应是最难自我纠正的一种失败 —— 它不给任何反馈信号,agent 只会以为自己改得不够多,继续往错的地方加码。\n- **④ 创业阶段不扩散** —— 两套实现是双份永久义务:每次改包相关的行为都要记得改两处,每次排障都要先查是谁在答话。remove 优于 declare-and-maintain。\n\n**推荐:A —— 删掉 REST 的那三条重复路由,让 dispatcher 成为唯一实现。** 执行顺序写死:先量 REST 独有的两项行为(`source` 戳、`version` 查询多值拒绝)有没有真实消费者,该保的挪进 dispatcher,不该保的在 changeset 里记为**有意去掉**而不是顺手丢掉。①领起(删一套而不是修优先级),③④同向。\n**回退:B —— 若 `source` 与 version 多值拒绝确实是对外承诺过的**,则反过来修挂载顺序让 REST 真的遮蔽,并把 dispatcher 那三条摘掉。同样是「一个网址一套实现」,只是留下的那一套换成 REST。\n⛔ **不接受「只改注释」。** 那是把两套实现的问题降级成一个文字问题:两套代码继续并存、继续各自演化、下一个人继续踩。③④都反对,而且它恰好是最省事因而最容易被选中的那条路。\n**置信缺口(本分析看不见什么):** 没有量 `source` 字段和 `version` 多值拒绝有没有真实消费者(Console、CLI、外部客户端)。这决定 A 里「该保的挪进去」的范围,也正是 A 与 B 之间唯一的实质分歧点 —— **先量这个,再选方向**,否则两条路看起来会一样便宜。\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

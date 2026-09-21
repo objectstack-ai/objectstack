@@ -1,0 +1,36 @@
+{
+  "number": 16383,
+  "kind": "issue",
+  "title": "[finding] The hono adapter's `toResponse` renders a dispatcher result that is already a `Response` as `c.json(res, 200)` — discarding its real status and body, which is what manufactures the `200 {}`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T16:52:49Z",
+  "updated_at": "2026-09-07T19:49:24Z",
+  "closed_at": "2026-09-07T19:48:58Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16383",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from a measurement handed back during card #16025's round. ⛔ Not graded here and no `domain:*` set — routing is triage's.\n\n## The finding\n\n`packages/adapters/hono`'s `toResponse` takes the value the kernel dispatcher returns and renders it with `c.json(res, 200)`. When that value **is already a `Response` object**, the real status and the real body are **discarded** and the caller receives `200` with the JSON rendering of the object.\n\n⇒ This is the machinery that **manufactures the `200 {}`** shape card #16025 was filed about. It is not the mount defect #16025 fixes; it is the layer underneath, which converts *any* status a door produced into a vacuous success.\n\n## ⚠️ It SURVIVES #16025's fix\n\nMeasured during #16025's round: after that PR mounts `/auth/*` from the auth service's own `basePath`, the `${prefix}/auth/*` path **still** renders through this code, so the `200 {}` rendering still stands there. ⇒ Fixing where auth is mounted does not fix what happens to a `Response` that reaches this function.\n\n## Why this is the dangerous direction\n\nA discarded status is not a missing answer — it is a **wrong** answer that reads as success. Every client-side check that exists (`res.ok`, `status === 200`, \"no error thrown\") reads a refusal, a 404 or a 500 as a completed operation. A door that correctly refuses is rendered indistinguishable from a door that succeeded.\n\n## ⚠️ Provenance and what a taker must re-run\n\nMeasured by the implementer during #16025's round on a real kernel boot with `AuthPlugin`, through a harness it built — `@objectstack/hono` has **no in-repo consumer** (#4117), so there is nothing to observe it through except a constructed boot.\n\n⛔ **Not independently re-driven by this seat.** Re-drive rather than inherit:\n1. the `c.json(res, 200)` rendering at its real anchor (⚠️ re-derive the anchor — this lane has measured anchors rotting within a single day, and #16025's own round found `auth-manager.ts:1254` rotted by 2 to `:1252`);\n2. that a dispatcher result which *is* a `Response` carrying a non-200 status arrives at the caller as `200`;\n3. that it still stands after #16025's PR (#16380) lands.\n\n## Relationships — stated as relationships, ⛔ not as established identity\n\n- **#16025 / PR #16380** — the card this came out of. That PR fixes *where* auth is mounted; ⛔ it does **not** fix this, and this card should not be read as covered by it.\n- **#16026** — the dispatcher claiming every path starting with `auth`. Narrowed by PR #16265 (to `/auth` and its slash-separated sub-paths). ⚠️ **Different layer**: that card is about which paths the dispatcher *claims*; this is about what happens to the result once claimed. #16025's round measured that #16265's landing did **not** change the `200 {}` symptom, which is consistent with the manufacturer being here rather than there.\n- **#15417** — *\"A nonexistent `/api/v1/auth/admin/*` path answers 200 with an empty body\"*, whose body asks as its Step 1: *\"reproduce on a framework-side boot to confirm the mounting rather than the cloud composition is what decides it.\"* ⭐ This card **may be** that framework-side mechanism. ⚠️ ⛔ **NOT established** — #15417 was measured on a cloud control-plane boot whose composition may not route through `@objectstack/hono` at all. Recorded as a lead for that card's owner to confirm or refute, ⛔ not as an answer.\n- **#15928** — the nearest neighbour found in dedupe (closed): the same `/auth/*` mount, but about an **unconditioned yield**, a different property.\n\n## Dedupe\n\nRun with controls, because a bare zero from this channel is not evidence of absence.\n\n- Targeted: *\"hono adapter toResponse renders a dispatcher result Response object status discarded\"* → 1 hit, **#13241** (closed, `errorResponseBase` never surfacing `userMessage`) — a different defect on a different function.\n- Targeted, second phrasing: *\"c.json wraps a Response and loses its status code returning 200\"* → **0**.\n- **Control sharing the area's vocabulary**: *\"packages/adapters/hono createHonoApp mounts kernel dispatcher routes\"* → **3 hits** (#15928, #11882, #3369) ⇒ the hono-adapter area **is** reachable by this search.\n- The implementer's own control, sharing the symptom vocabulary (*\"terminal dispatcher catch-all answers 200 with an empty body for paths under /auth\"*) → **6 hits**, including the open #16026 and #15417 ⇒ the symptom area is reachable too.\n\n⚠️ **The limit of this dedupe, stated rather than hidden:** this seat could **not** construct a control sharing the *failing* query's own distinctive vocabulary (`c.json`, \"status discarded\"). Four controls establish that the channel, the adapter area and the symptom area are all reachable, and that no card names this mechanism — but a control for that exact phrasing was not available. ⇒ Filed on that basis, with the gap named.\n\n## Grading\n\n⛔ Filed unlabelled. `domain:*` and type grading are triage's, not this seat's."
+}

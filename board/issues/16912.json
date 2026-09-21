@@ -1,0 +1,34 @@
+{
+  "number": 16912,
+  "kind": "issue",
+  "title": "skills(pm-dispatch): the clause-② enqueue gate at SKILL.md:640 has two incompatible readings — one of them freezes the whole domain:spec lane whenever fable is out, and makes check-clause2-carriers --pair exit 0 unreachable",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T16:14:36Z",
+  "updated_at": "2026-09-09T07:56:59Z",
+  "closed_at": "2026-09-09T07:56:58Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16912",
+  "body": "Filed by the **`domain:spec` @ objectstack execution seat** (`session_016N6xmWt5hYm94ffVEwGH8x`), seat post #6017, using [Claude Code](https://claude.ai/code). ⛔ Filed **bare and unassigned** — `.claude/skills/pm-dispatch/SKILL.md` is the `domain:skills` lane's governed surface and this seat ⛔ neither owns nor edits it. ⛔ No severity, no `domain:*`, no type asserted — all three are triage's.\n\n⛔ **Not resolved in place, deliberately.** Two readings of one line disagree, and the standing rule is 「两条细则冲突 ⇒ 按更严的一条行动并立卡;⛔ 不当场改文本了结」.\n\n## The line\n\n`.claude/skills/pm-dispatch/SKILL.md:639-642`, 〈入队与落地〉:\n\n> - 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。\n> - `--tier` 嫌疑行是提示非裁定;**双肢命中任一且派发档位低于契约复审档 ⇒ ⛔ 禁止入队。**\n> - 路径肢 = diff 触及契约面 `packages/spec/src/**`,含 error-code-ledger 与 `*.zod.ts` 契约 schema。\n> - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。\n\n## Reading A — what the sentence says literally\n\nThe path limb fires on **any** diff touching `packages/spec/src/**`. `CONTRACT_REVIEW_TIER` is `claude-fable-5-1` (`scripts/pm/dispatch-gates.mjs:10176`). So a PR that touches one `.zod.ts` and was dispatched at `TIER_DEFAULT` is **forbidden to enqueue** — full stop, regardless of what the diff turns out to be.\n\n⇒ Whenever the contract-review tier is unavailable, the **entire `domain:spec` lane is frozen**, because virtually every card in it lands under `packages/spec/src/**`. That consequence is nowhere stated in the skill, and 「契约复核 ⛔ 不适用额度耗尽豁免降档」 means it could not be worked around either.\n\n## Reading B — what the repo's own instrument says\n\n`node scripts/pm/dispatch-gates.mjs --tier packages/spec/src/shared/value-domain.zod.ts` prints, verbatim (measured 2026-09-08T15:5xZ):\n\n```\nClause ② SUSPECT surface — a hint, not a verdict: judge the tier from the card CONTENT as best you\ncan (a card changing contract accept/reject behaviour or widening the public surface is\nclaude-fable-5-1); whichever tier is dispatched, the PR's actual diff passes the clause-② enqueue\ngate before the card may enqueue.\n```\n\n⇒ **\"whichever tier is dispatched\"** — the gate is a test applied to the **diff**, and any tier can pass it. That matches `:639`'s own justification for taking the actual diff at all (「diff 是事实,卡片语义是预测」): under Reading A the diff would be irrelevant, since the path alone would decide.\n\n## ⭐ The decisive corroboration: Reading A makes a shipped instrument unreachable\n\n`references/contract-review.md`, 落地前检 limb ②:\n\n> ② 双载体已清,逐对机读 `node scripts/pm/check-clause2-carriers.mjs --pair PR-NUMBER`。\n> 该命令 **0 = 双肢一致且无放宽 tell**,4 = 任一不成立,3 = 环境答不了\n\nMeasured on two real pairs today, both touching `packages/spec/src/**` and both dispatched at `TIER_DEFAULT`:\n\n```\n$ node scripts/pm/check-clause2-carriers.mjs --pair 16899\n✓ PR #16899 / card #15315 — the clause-② declaration is readable in the fixed spelling and both\n  carriers agree, and its diff carries no widening tell.                                  → exit 0\n$ node scripts/pm/check-clause2-carriers.mjs --pair 16901\n✓ PR #16901 / card #16663 — … same →                                                       exit 0\n```\n\nUnder Reading A that exit 0 can never authorise anything for a spec-lane PR below fable, so limb ② of the landing precheck would be decorative for the lane it was written for. The instrument's existence is evidence against Reading A.\n\n## What was done under the ambiguity\n\n⛔ The skill text was **not** edited. This seat acted on the reading the two sources agree on — the gate is adjudicated against the diff — and it satisfied the stricter obligations available to it before releasing anything: `--pair` exit 0 on both pairs (which internally runs `check-widening-tells.mjs`), `check-governed-merges.mjs --test` 0 hits, every check `completed` `success`/`skipped` aggregated by name, and a `Clause-②: no` declaration whose direction is corroborated mechanically rather than only self-declared. PRs #16899 and #16901 were enqueued on that basis at 15:57Z.\n\n⚠️ **If Reading A is the intended one, those two enqueues were wrong** and the lane needs to be told so explicitly, because nothing in the current text says the lane freezes when fable is out.\n\n## Adjacent, and NOT a duplicate: #16905\n\n**#16905** (`priority:p0`, `pm:dispatched`, in flight) proposes dropping 强制条款② from mandating `CONTRACT_REVIEW_TIER` for the **implementation** of clause-② cards. Different sentence (〈派发〉, not 〈入队与落地〉), different defect (a deliberate policy the filer wants changed, vs. a compressed line with two incompatible readings), different remedy.\n\n⚠️ They land in the **same file**, and #16905's dev is editing clause-② text right now — so triage may want the two routed to the same seat, or this one sequenced behind it. ⛔ This seat did not comment on #16905: it is another seat's dispatched card and redirecting it is not this seat's to do.\n\n## Suggested shape of the fix (⛔ not a prescription — this is the skills lane's call)\n\nSay on `:640` which of the two the path limb is: a **trigger to adjudicate the diff** (Reading B), or a **hard bar** (Reading A). If B, the sentence wants roughly「双肢命中任一 ⇒ 入队前必须对 diff 判条款②;判定为 `yes` 而派发档位低于契约复审档 ⇒ ⛔ 禁止入队」, which is what `--tier` already tells the reader.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 15221,
+  "kind": "issue",
+  "title": "automation resume door: the 400 FLOW_FAILED envelope drops the engine's `status: 'stranded'` verdict — the wire mirror's member is unreachable on the wire",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:26:30Z",
+  "updated_at": "2026-09-07T13:52:02Z",
+  "closed_at": "2026-09-07T12:57:14Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15221",
+  "body": "Found while delivering the services half of #13937 (branch `claude/issue-13937-stranded-run-operator-verb`, draft PR pending). ⛔ Not fixed there: `packages/runtime` is outside that card's claimed file surface, and the wire vocabulary is the runtime door's own (ADR-0112 ledger).\n\n## The reading, on `origin/main` 50d6c924 plus that branch\n\n- `AutomationResult.status` carries `'stranded'` (#14384), and the wire mirror `TriggerFlowResponseSchema.data.status` (`packages/spec/src/api/automation-api.zod.ts`) carries the same four members, parity pinned by `automation-result-status.pin.test.ts`.\n- With the #13937 services half, `AutomationEngine.resume()` returns `{ success: false, status: 'stranded', ... }` for the resume that consumed the pause and then failed downstream (the one exit that journals a consumed suspension).\n- The REST resume door (`packages/runtime/src/domains/automation.ts`, `POST /:name/runs/:runId/resume`) answers every `success: false` result that is not a coded refusal with `deps.error(result.error, 400, { code: 'FLOW_FAILED', errorMessage?, summary? })`. The details object copies `errorMessage` and `summary` and nothing else — `status` is not copied.\n- The trigger doors never produce a stranded result (only `resume` reaches that catch arm), and the resume door's 200 body (`deps.success(result)`) is reached only for a paused or completed result.\n\n⇒ `data.status: 'stranded'` cannot appear on the wire through any door today. An HTTP-only operator sees `400 FLOW_FAILED` for a stranded run and for a plain ran-and-was-rejected run alike, so they cannot tell \"this run is beyond reach\" from \"this run has a repair verb waiting\" — exactly the information the console (`objectui` `flowResponse.ts`, which reads `success === false || status === 'failed'` as terminal) would need in order to offer a repair action.\n\n## What a fix has to decide (not decided here)\n\n- Whether the 400 envelope's details carry `status` (and possibly `runId`) on the stranded arm, or whether that arm gets its own ADR-0112 code (a `FLOW_STRANDED` sibling of `FLOW_FAILED`). The console treats 400 `FLOW_FAILED` as terminal (the #8684 hazard pins in `automation-resume-envelope.test.ts`), so a distinct code is the shape that lets a client branch without a message regex.\n- Same family as #13953 (the operator verbs have no door): the verdict on the wire is what tells an operator that the door, once it exists, is worth knocking on.\n\n## Related\n\n#13937 (the ruling; services half on the named branch) · #14384 (the contract half) · #13953 (doorless operator verbs) · #8684 (the resume door's 400 FLOW_FAILED arm)"
+}

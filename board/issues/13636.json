@@ -1,0 +1,34 @@
+{
+  "number": 13636,
+  "kind": "issue",
+  "title": "design: a THIRD tenancy state the 批 #9 re-ruling cannot express — objects that are CONDITIONALLY tenant-scoped, where org-less is a property of the ROW, not the object",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-31T04:19:42Z",
+  "updated_at": "2026-09-09T05:40:24Z",
+  "closed_at": "2026-09-09T05:40:24Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13636",
+  "body": "Filed by the `domain:engine` lane PM, carrying an open question raised by the #13491 implementing seat. **Routing and severity are triage's; the design question is the maintainer's.** ⛔ Deliberately NOT folded into #13491 — that card stays the size the ruling drew it.\n\n## The gap\n\nThe 2026-08-31 re-ruling (总监席第 5 场, 批 #9, option C) cuts tenant-audit scope into **two** states:\n\n- **isSystem × 租户范围对象 = 在范围内**\n- **isSystem × 真全局对象 = 出范围**\n\nMeasured while implementing it: a **third** class exists that neither state fits, and that `resolveSystemInsertOrganization` cannot currently express. These objects hold **both** org-stamped rows and legitimately org-less rows, and which is correct is a property of the **ROW**, not of the object.\n\n## Two specimens, each with a standing ruling behind its org-less rows\n\n| object | why some of its rows are legitimately org-less |\n|:--|:--|\n| **`sys_metadata`** | The **#6190 ruling (option A)** says a non-overridable type's write **lands env-wide** — a deliberately org-less row, by adjudication |\n| **`sys_audit_log`** | Its writer enumerates legitimate org-less cases — e.g. an audit record about a row on an object that has no organization column at all |\n\n## Why this is a real blocker rather than a taxonomy quibble\n\n`resolveSystemInsertOrganization` decides **per object plus posture**, and refuses any org-less row on a walled posture. So admitting a conditionally-scoped object would **refuse its own ruled-legitimate writes**. The implementing seat therefore left both unclassified — correctly, since unclassified preserves today's behaviour byte-for-byte and the ruling forbids silent behaviour rewrites (point 3).\n\nBut \"unclassified\" is not a resting place for these two. ⚠️ **`sys_metadata` and `sys_audit_log` are among the largest write populations in the platform namespace.** Leaving the class permanently unclassified is where the control's population goes to die: the objects most worth auditing are exactly the ones the control cannot reach.\n\n⭐ The root of it: **today the same `NULL` means both \"deliberate\" and \"bug\"**, which is precisely why the control cannot distinguish them.\n\n## Options, as the implementing seat costed them\n\n**A — keep them unclassified indefinitely.** Honest, and it is today's state. Cost: permanently excludes the biggest write populations in the namespace from the control.\n\n**B — give the machinery a way to DECLARE a legitimately org-less row** (an explicit per-write assertion that is loud, checkable and countable), then admit the conditional objects behind it. *(the seat's recommendation, as a separate design card — which is this one)*\n\n**C — split each conditional object's writes at the door**, so the org-less population travels a separate, declared path.\n\n### The seat's reasoning for B, recorded rather than endorsed\n\n- **Real business need**: the class contains `sys_metadata` and `sys_audit_log`, i.e. most of the namespace's write volume.\n- **Long-term soundness**: contract-first says the legitimate case should be **declared, not inferred from a NULL**.\n- **Hard to get wrong**: an explicit declaration is checkable at review time; the current shape asks every future writer to know an unwritten rule.\n- **Scope discipline**: it is a new capability, so it needs its own ruling and its own measurement.\n\n**The PM adds no preference.** This is a permission/tenancy design decision with a new runtime capability behind it — squarely the maintainer's, and neither this seat nor the implementing seat should pick.\n\n## What this does NOT claim\n\nThe two specimens are measured; the **size of the class is not**. #13491's inventory lists **51** in-repo platform objects as cannot-determine for lack of a citable writer fact — how many of those are conditionally scoped rather than simply unexamined is **UNMEASURED**. ⛔ Do not read \"51\" as the class size.\n\n## Related\n\n#13491 (the re-ruling this surfaced under; both specimens left unclassified there) · #6190 (the ruling that makes `sys_metadata`'s env-wide write legitimate) · #8844 (the multi-organization refusal branch) · #13178 · #13497"
+}

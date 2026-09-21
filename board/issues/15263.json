@@ -1,0 +1,35 @@
+{
+  "number": 15263,
+  "kind": "issue",
+  "title": "[finding] `ai/solution-blueprint.zod.ts` publishes an `Exports:` list instead of its own ADR-0033 sentence — its module header is disqualified by the `const` that follows it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T07:43:24Z",
+  "updated_at": "2026-09-09T01:18:06Z",
+  "closed_at": "2026-09-09T01:17:38Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15263",
+  "body": "Out-of-scope by-product of the `SKILL_MAP` family PR anchored on #14462, found while adding `ai/solution-blueprint.zod.ts` to `SKILL_MAP['objectstack-ai']` (the addition #14462's triage ruled unambiguous). **No edit was made** — the repair is in a `.zod.ts` source, which that card's ruling puts off limits. Filed unassigned.\n\n## Measured at `origin/main` `9c1bcda3`\n\nThe file opens, after its imports, with a real module header:\n\n```\n/**\n * Solution Blueprint Schema (ADR-0033 §4 — plan-first authoring)\n *\n * The structured-output target an AI agent emits for a *high-level* goal\n * (\"build me a project-management system\") instead of transcribing a field\n * list. It is a **simplified proposal shape** ...\n */\n\nconst SNAKE_CASE = /^[a-z_][a-z0-9_]*$/;\n```\n\n`findModuleDocBlock()` (`packages/spec/scripts/lib/file-description.ts`) requires, as its third condition, that the block **document nothing** — and \"immediately followed by a declaration\" counts blank lines only. One blank line separates that header from `const SNAKE_CASE`, so the block reads as `SNAKE_CASE`'s documentation and is rejected as the module header.\n\nThe generators therefore fall through to the export-list fallback. The row now published in `skills/objectstack-ai/references/_index.md` is:\n\n```\n- `node_modules/@objectstack/spec/src/ai/solution-blueprint.zod.ts` — Exports: BlueprintConditionSchema, BlueprintSummaryOperationsSchema, BlueprintFieldSchema, BlueprintObjectSchema, BlueprintViewSchema\n```\n\n## Why it matters\n\nSame class as #14441 (landed as PR #14737) one file over: the fallback line states a true fact about the file and says nothing about its subject, while the sentence that WOULD say it — plan-first authoring, the `apply_blueprint` expansion — is sitting in the file unused. The skill tells an agent to read the source for exact field shapes, and this is the row routing it there.\n\nNote the shape differs from #14441's: there the wrong block was published, here the right block is suppressed and a machine-generated list takes its place. Both are the header-zone selector deciding against a header a human wrote.\n\n## Suggested repair (not a ruling)\n\nSeparate the header from `SNAKE_CASE` by something the selector reads as the end of a preamble — the existing rule already treats a banner comment or a second doc block that way — or give `SNAKE_CASE` its own one-line doc. Then `gen:skill-refs` and `gen:docs`. Adding a pin like `packages/spec/scripts/query-pointer-row.test.ts` (the #14441 fix's) is the cheap half; the generators cannot see this class themselves, since they reproduce the selector faithfully.\n\nDedupe: one targeted `search_issues` over this repo (repo-scoped REST is 403 for this seat), validated in-session by a control query that returned its four known hits. The seven results are all closed and none covers this file."
+}

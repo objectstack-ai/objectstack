@@ -1,0 +1,37 @@
+{
+  "number": 15546,
+  "kind": "issue",
+  "title": "`sum` over a column that is NULL in every row of a group: driver-sql answers `null`, the engine's in-memory aggregate tier answers `0` — same query, same rows, fork chosen by a driver capability bit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T20:24:14Z",
+  "updated_at": "2026-09-08T05:53:00Z",
+  "closed_at": "2026-09-08T05:36:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15546",
+  "body": "Found while building the platform pin for #15330 (the compiled list-view group queries through `POST /data/:object/query`). Reported first on #14556 per that card's deliverable 3; filed here as its own card because #15330 is a `tests` card that changes no behaviour, and its two candidate repair sites were held by open PRs at the time.\n\n## The measurement\n\nOne `ObjectQL` engine, one better-sqlite3 `SqlDriver`, one seeded table, one compiled header query. The only thing that moves between the two runs is whether the driver exposes `aggregate` — which is exactly what `ObjectQL.aggregate` forks on (`packages/objectql/src/engine.ts`, the line reading `if (typeof drv.aggregate === 'function' and allStructuredSupported and ...)`).\n\nRows:\n\n| id | business_unit | amount | notes |\n|:--|:--|:--|:--|\n| v1 | void_unit | NULL | NULL |\n| v2 | void_unit | NULL | NULL |\n| v3 | void_unit | NULL | NULL |\n| f1 | full_unit | 10 | 'x' |\n| f2 | full_unit | 20 | NULL |\n\nQuery (the output of `compileListViewGroupQuery` for a view grouping on `business_unit` with a `sum` summary on `amount`), posted through `POST /api/v1/data/:object/query`:\n\n```json\n{ \"groupBy\": [\"business_unit\"],\n  \"aggregations\": [ { \"function\": \"count\", \"alias\": \"count\" },\n                    { \"function\": \"sum\", \"field\": \"amount\", \"alias\": \"sum_amount\" } ] }\n```\n\nAnswers for the `void_unit` group — a group with THREE rows, every one of them holding NULL in the summed column:\n\n| face | `sum_amount` | type |\n|:--|:--|:--|\n| driver-sql pushdown (SQL `SUM(amount)`) | `null` | null |\n| engine in-memory tier (`applyInMemoryAggregation`) | `0` | number |\n| the spec's own reducer, `packages/spec/src/ui/view-grouping-query.test.ts` | `0` | number |\n\n`avg`, `min` and `max` agree (`null` on both faces), and `count_distinct` agrees (`0` on both). `sum` is the only divergence. A group with SOME nulls also agrees, because `applyInMemoryAggregation`'s `toNumber(null)` is `0` and SQL `SUM` skips NULLs — so the divergence needs a group in which the column is null in EVERY row, which is why nothing has caught it.\n\n## Which face is wrong\n\n`0`, on the reading the platform has already written down. `emptyGroupValueFor` in `packages/spec/src/data/aggregation-policy.ts` rules that counting and summing no rows is `0` — \"those are measured facts, not missing data\" — while averaging, minimising or maximising nothing stays null. Summing three rows that each contribute nothing is the same act as summing no rows: the addend set is empty either way. So the in-memory tier and the spec reducer agree with the declared policy, and **driver-sql is the face that disagrees**.\n\nStated as an assumption to be confirmed rather than as a settled reading: `emptyGroupValueFor` is written for a group the runtime evaluates with an EMPTY row set, and this group is not empty — it is three rows whose aggregand is absent. If the maintainer reads those as different cases, then the ruling to record is which one this is, and the repair may land on the spec reducer instead. Either way the two platform faces must stop disagreeing.\n\n## Why it is unmeasured today\n\n`packages/spec/src/data/aggregation-conformance.ts` is the vocabulary's conformance table and it does not reach this cell. Its `stage` column is nullable and every `count_distinct` case turns on it, but its two numeric aggregands are non-null by declaration — `score` is documented as \"a non-null numeric column for the arithmetic aggregates\" and `flag` is 3 true / 3 false. So no case in the table ever asks any face what `sum` over an all-null column is.\n\nNearest neighbours, same defect CLASS and different cells, all closed: #11065 (`avg` over a boolean: driver-memory `null` vs sqlite a number), #11151 (driver-mongodb, `avg`/`sum` over a boolean), #11455 / #11635 (driver-sql boolean aggregands on PG). The shape those cards settled — a face answering `null` where the ruled answer is a number — is this one, one column type over.\n\n## Blast radius\n\nThis is on the live compiled-query path, not a corner: a grouped list view with a `sum` summary on a nullable currency or number column is the ordinary case. The face that answers is picked by `ObjectQL.aggregate` per query — driver capability, advertised date granularity, reference timezone, per-aggregation filter — so the SAME view renders a blank group total on one deployment and `0` on another, with nothing in the response saying which happened. The measures reconcile everywhere else, which is the property that keeps this class alive.\n\n## What would close it\n\n1. A ruling on which value is correct for a non-empty group with an all-null aggregand (the reading above is a recommendation, not a decision).\n2. The losing face repaired — most likely driver-sql lowering `SUM` through a `COALESCE`, matching the identity `emptyGroupValueFor` already declares, and the sibling SQL drivers checked for the same cell.\n3. A case added to `aggregation-conformance.ts` so every enrolled face is held to it, since that table is what the enrolled faces are graded against.\n\n## Reproduction\n\nThe pin for #15330 (`packages/rest/src/list-view-grouping-query-door.test.ts`) boots the harness this was measured on: `ObjectQL` + sqlite `SqlDriver` + `ObjectStackProtocolImplementation` + `RestServer`, with the aggregate fork driven by shadowing `driver.aggregate` with an own property and restored with `delete`. That file deliberately does NOT pin this cell in either direction — pinning today's divergence would cement it, and the fixture it does pin has no all-null measure column.\n\nFound by #15330. Reported on #14556.\n"
+}

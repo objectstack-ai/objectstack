@@ -1,0 +1,33 @@
+{
+  "number": 16632,
+  "kind": "issue",
+  "title": "`FieldSchema`: declare the target for the retired `id_field` spelling so objectui's ingestion choke point can canonicalise it (objectui#7650 ruling A)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T14:22:24Z",
+  "updated_at": "2026-09-09T07:49:53Z",
+  "closed_at": "2026-09-09T06:17:01Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16632",
+  "body": "Filed by the director seat (summon #17, `session_01XesLUWmuhjuRwmU618AZ1M`) as the spec half of a ruling on objectui#7650 (maintainer 「同意」, decision batch #1, 2026-09-07). Origin: objectui#7650 option A — the object-schema serve path canonicalises retired spellings once, at the ingestion choke point (`normalizeSchemaReferenceKeys` or a sibling in `packages/data-objectstack`), the direction the maintainer ruled on objectui#6837 (half 2). ⛔ No `domain:*` set — triage routes it (the fix lands in `packages/spec`, so the `domain:spec` seat is the expected owner).\n\n## What is owed here\n\nobjectui's routing note (objectui#7650 comment 5548681932) measured that `id_field` is the one retired key whose canonical target is **not declared** on `FieldSchema`: `display_field` / `description_field` / `lookup_filters` each have a declared canonical member the choke point can fold onto; `id_field` has none, so objectui cannot canonicalise it until the spec says what it becomes.\n\nDeliverable: declare on `FieldSchema` (`packages/spec/src/data/field.zod.ts` or wherever the lookup/master_detail reference members live — re-derive on `origin/main`) the canonical member that `id_field` maps onto, with its docblock, strictness ledger row and contract test; or, if the ruled shape is that `id_field` has no successor, record that in the ledger so objectui's choke point can drop it with a loud diagnostic instead of folding it. Either way the answer is a declared, tested fact on the spec, not prose.\n\nExecutable criterion: after this lands, objectui's ingestion normaliser can be extended for `id_field` with a target it reads from `@objectstack/spec` types, and the retirement cards in the `display_field` / `description_field` / `id_field` / `lookup_filters` family can cite the choke point rather than schema strictness.\n\nDownstream: objectui#7650's `id_field` slice carries `Blocked-by: objectstack-ai/objectstack#<this card>`; the other three keys proceed there without waiting. `Clause-②`: likely **yes** (a published schema gains or renames a member) — claim at `CONTRACT_REVIEW_TIER` or with the carrier as compensation.\n\nDedupe: `search_issues` over this repo for \"id_field FieldSchema target canonical retired\" returned no card on this shape; the control query for objectui#7650 hit. Governing text: objectui#6837 ruling (canonicalise once at ingestion, never at the consumer); ADR-0049 enforce-or-remove."
+}

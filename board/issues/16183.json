@@ -1,0 +1,37 @@
+{
+  "number": 16183,
+  "kind": "issue",
+  "title": "docs(adr-0104): step 3 promises an abort the prescribed Postgres USING clause does not perform — measured, it flattens the cell instead",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T04:55:51Z",
+  "updated_at": "2026-09-09T07:50:04Z",
+  "closed_at": "2026-09-09T04:00:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16183",
+  "body": "## What is wrong\n\nADR-0104's `--apply` R4 block promises that step 3 moves a media column while\n\n> aborting on the first cell that is not a JSON string\n\nand the paragraph immediately below prescribes the realisation:\n\n> Postgres retypes the column to a varchar with a `USING` clause that unquotes the JSON string\n\n**Measured on live PostgreSQL 16.13, those two sentences contradict each other.** The\n`USING` clause does not abort — it converts. With one un-backfilled inline-object row\npresent, `ALTER TABLE … ALTER COLUMN … TYPE varchar(2048) USING (col #>> '{}')` was\n**ACCEPTED**, and the object was flattened to the literal text\n`{\"url\":\"https://x/y.png\"}` in a varchar column. `#>> '{}'` extracts **any** json type\nas text; \"unquotes the JSON string\" is only what it does when the cell happens to be a\nstring.\n\n⇒ An implementer who reads the prescribed statement as delivering the stated abort\n**silently destroys exactly the rows the backfill has not converted** — the rows the\nreconciliation exists to find.\n\nThe ADR's own confidence gap 2 already says the sketch is unrehearsed. This card is not\nthat gap; it is the **result of the rehearsal it asked for**, and the result is that one\nhalf of the prescription does not implement the other half.\n\n## What was measured, and what was not\n\n- **Measured (live PostgreSQL 16.13, first step-3 rehearsal on that dialect):** the\n  retype above accepts a non-string cell and flattens it. The pre-check that *does*\n  implement the ADR's requirement:\n  `select count(*) from t where json_typeof(col) IS DISTINCT FROM 'string'` — returned\n  **1** on the same fixture, i.e. it sees the row the DDL did not refuse.\n- **Measured (SQLite, the same rehearsal):** `json_extract(col,'$')` gated on\n  `json_valid` + `json_type = 'text'` converts a quoted cell, **leaves an already-bare\n  cell untouched**, and is idempotent on re-run. `json_type` of an un-backfilled\n  inline-object cell is `'object'`, so that is the correct abort discriminator there.\n- ⚠️ **NOT measured:** MySQL. Its ordering question (gap 2's own \"the retype must precede\n  the unquote or the two must be one statement\") is untouched by this card.\n- ⚠️ **NOT measured:** whether some *other* Postgres realisation would abort on its own.\n  `#>> '{}'` is the idiom the ADR's words describe, and it does not; whether a different\n  `USING` expression could is an open question, not a finding.\n\n## What this card changes\n\n`docs/adr/0104-field-runtime-value-shape-contract.md` only — the **Confidence gaps**\nsection (and, if the author judges it clearer, the sketch paragraph itself), so that the\ngoverned document no longer reads as though the `USING` clause performs the abort.\nThe **requirement** (\"aborting on the first cell that is not a JSON string\") is correct\nand stays exactly as written; it is the statement list under it that was optimistic.\n\nTwo things the wording must end up saying, however it is phrased:\n\n1. The abort is a **pre-check step 3 runs before any DDL**, not a property of the retype.\n2. The Postgres rehearsal **has now happened** and this is what it returned — gap 2 is\n   partly closed by a measurement whose result was negative, and gap 1's Postgres half\n   moved from \"reasoned\" to \"measured\" for this one statement.\n\n## Boundaries\n\n- ⛔ **`docs/adr/**` is a governed surface: docs-only PR, draft, human merge.** No code\n  rides along.\n- ⛔ **Do not fold this into a code PR.** The reason this is a separate card at all is\n  that a code PR may not edit `docs/adr/**`.\n- ⛔ Do not re-open the ADR's decision. D1/D3, the window, and the end-state column are\n  ruled; this card corrects a statement about *how a step is performed*, nothing else.\n- ⛔ Do not edit `content/docs/releases/**`.\n\n## Provenance\n\nMeasured by the `#15989` execution round, which deliberately landed no code and stood up\na live PostgreSQL 16.13 to rehearse the sketch. Ruling and the full measurement:\nhttps://github.com/objectstack-ai/objectstack/issues/15989#issuecomment-5556979386\n\nPart-of #15989.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

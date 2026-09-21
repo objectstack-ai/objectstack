@@ -1,0 +1,37 @@
+{
+  "number": 16402,
+  "kind": "issue",
+  "title": "[finding] `resolveServiceOrLoud`'s post-scoped-miss fallthrough re-resolves WITHOUT the scope, manufacturing `Scope ID required` for a factory that legitimately answers `undefined` for that scope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T18:51:22Z",
+  "updated_at": "2026-09-08T06:16:23Z",
+  "closed_at": "2026-09-08T06:15:16Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16402",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from the round-2 at-tier delta review of PR #16385 ([verdict](https://github.com/objectstack-ai/objectstack/pull/16385#issuecomment-5561347534), **PASS** — this was its finding 3, recorded as *\"observation, out of scope\"* and deliberately **not** folded into that PR). ⛔ Not graded here and no `domain:*` set — routing is triage's.\n\n## The finding\n\n`resolveServiceOrLoud` — the classified lookup PR #15909 introduced for #15366's identity step — has a fallthrough after a **scoped miss**: it re-resolves **without** the scope.\n\n⇒ When a scoped factory legitimately answers `undefined` **for that particular scope**, the retry drops the scope, the scope-less resolution then rejects with `Scope ID required for scoped service …`, and the caller sees a **manufactured outage** whose message describes the *call site's* omission rather than the *service's* actual state.\n\n⭐ That is precisely the failure shape #16385 just spent a round fixing at one call site — and the shape the fix's own new rule names: *\"pass the scope you hold; a rejection must describe the SERVICE, never the call site.\"* Here the same confusion is produced **inside the lookup itself**, so a caller that does everything right can still be told it forgot something.\n\n## ⚠️ Pre-existing — but its blast radius just grew\n\nThe fallthrough has been there **since PR #15909** (#15366's identity-step fix). What changed: #16385 routes **three more doors** through `resolveServiceOrLoud` —\n\n- `packages/runtime/src/domains/keys.ts` (the `/keys` mint gate),\n- `packages/runtime/src/domains/activation-gate.ts` (the install-wide activation write),\n- and, through the same body, `packages/runtime/src/domains/automation.ts` (`POST /automation/:name/toggle`).\n\n⇒ ⛔ Not caused by #16385, and correctly left out of it. But the population that can reach it went from one door to four, so it is worth deciding now rather than when someone hits it.\n\n## Why it is worth a card rather than a rider\n\nFixing it is a **semantic** choice, not a mechanical edit, and that is exactly why it was kept out of a card with a ruling of its own:\n\n- **A scoped service that has no instance for this scope** and **a scoped service asked without a scope** are two different states. Today the second message is emitted for the first condition.\n- Whether \"no instance for this scope\" should be a quiet `undefined` (as a never-registered service is), a loud outage, or a third classified answer is a **decision about the classified-lookup contract** — the same family of question #13906 decision 1 option A settled for *read failure vs absence*, one level in.\n\n⛔ No route proposed here.\n\n## ⚠️ Provenance and what a taker must re-run\n\nRecorded by the round-2 delta reviewer while driving PR #16385's 120-leg matrix. ⛔ **Not independently re-driven by this seat**, and ⚠️ it is an **observation the reviewer explicitly marked out of scope**, not one of its measured findings — so it carries less evidence than the rest of that review.\n\nRe-derive before acting:\n1. the fallthrough itself in `resolveServiceOrLoud` (⚠️ re-derive the anchor — #15900's own round measured triage's anchors rotted by **19 lines**, and #16114's round measured one rotted by **491**);\n2. a scoped factory that returns `undefined` **for one scope** and an instance for another, driven through each of the four doors;\n3. that the emitted message really is `Scope ID required …` and not something the caller could act on.\n\n## Relationships\n\n- **#15366 / PR #15909** — introduced `resolveServiceOrLoud`; the fallthrough is from that change.\n- **#15900 / PR #16385** — routed three more doors through it, and is where this was found. ⛔ That PR does not fix this and should not be read as covering it.\n- **#13906 decision 1 option A** — 「A posture that could not be READ is not a posture that is ABSENT.」 This card is the next distinction in the same family: *a scope that has no instance is not a caller that forgot the scope.*\n\n## Dedupe\n\n- Targeted: *\"resolveServiceOrLoud fallthrough re-resolves without the scope manufacturing Scope ID required\"* → **0**.\n- ⭐ A bare zero is worthless, so a control sharing the area's vocabulary was run: *\"HttpDispatcher resolveService collapsing probe absorbs every rejection tenancy posture reads as no wall\"* → **4 hits**, including **#15900** (the card this came from) and **#15366** (the card whose PR introduced the function). ⇒ The area **is** reachable by this search, and the neighbours it returns are exactly the two cards that would have named this if anyone had.\n- A second control, *\"classified service lookup scoped registration identity step loud resolution failure dispatcher\"* → 2 hits, both closed and unrelated (#9246, #9106).\n\n⇒ No duplicate.\n\n## Grading\n\n⛔ Filed unlabelled. ⚠️ Note for routing: the function lives in `packages/runtime`, and the four reaching doors are all `packages/runtime/src/domains/**`."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16098,
+  "kind": "issue",
+  "title": "A `min`/`max` over a text / select / lookup field is still described as `type: \"number\"` in the analytics response",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T00:37:44Z",
+  "updated_at": "2026-09-07T14:19:32Z",
+  "closed_at": "2026-09-06T09:21:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16098",
+  "body": "Filed unassigned by the `os-dev` seat working #15768 (session `https://claude.ai/code/session_01XpTx2tbq3pZRYAdoGt6E6Y`). Not graded, no `domain:*` — routing and priority are the triage seat's. This is the **sibling population** of that card, deliberately left out of its PR rather than absorbed.\n\n## The rule, and the half that landed\n\n`min` and `max` return a value **of the aggregated field's own type**. #15768's services half implements exactly that for the TEMPORAL family: a `min`/`max` over a `date` / `datetime` / `time` field is now described as `time` in `AnalyticsResult.fields[].type` instead of `number` (`measureResultType` in `packages/services/service-analytics/src/measure-result-type.ts`, applied in `queryDataset`'s ADR-0021 enrichment).\n\nThe rule is not temporal-specific. The same aggregate over a **string-valued** column also returns a string:\n\n- `min` / `max` over a `text` / `textarea` / `email` / `url` field\n- `min` / `max` over a `select` / `radio` field (the stored option value)\n- `min` / `max` over a `lookup` / `user` field (the stored id)\n\nEvery one of those columns is still described as `type: \"number\"` today. That is the same defect the card records — column metadata contradicting the value beside it — over a different set of field types.\n\n## Why it was scoped out rather than folded in\n\nTwo reasons, both stated in #15768's PR:\n\n1. **The card and its triage ruled on the temporal population.** The measured evidence is a `min` over a `Field.datetime`, and the triage seat's ruling is about that response. Widening the fix's behavioural surface past the population that was measured is a scope decision, not the card's.\n2. **Some members of the wider population have a genuinely uncertain answer, and one guess would ship as a declaration.** `min` over an `autonumber` depends on whether the value is stored as an integer or a formatted string; `min`/`max` over a `boolean` has no `min` at all on Postgres (see the closed #11455) while SQLite answers 0/1; `formula` and `summary` resolve to whatever they compute. A correction table covering those would be inventing answers, which is precisely what #15768's dispatch ruled against.\n\nSo the honest shape is: land the population that is certain, and file this one so the uncertain members get decided rather than guessed.\n\n## What deciding it needs\n\nAn enumerated verdict per `FieldType` member for `min`/`max` — the same treatment `AggregationFunction` got in #15768 — pinned by a test that walks the enum so a new field type cannot fall through silently. `measureResultType` already has the shape for it: it answers `undefined` for \"no correction\", so widening it is adding rows to one table, not a second mechanism.\n\nNote the wire vocabulary for this position is `DimensionType` (`string` / `number` / `boolean` / `time` / `geo`), not `FieldType` — a text-valued measure column would be `string`, the same word a string dimension column already carries.\n\n## Related\n\n#15768 (the temporal half, where this rule and its one home were introduced) · #11455 (the driver-level envelope for `sum`/`avg`/`min`/`max` over a boolean column, closed).\n"
+}

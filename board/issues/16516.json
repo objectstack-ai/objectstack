@@ -1,0 +1,34 @@
+{
+  "number": 16516,
+  "kind": "issue",
+  "title": "skills(pm-dispatch): the queue-entry rule needs a third case — a non-required gate that is red BY DESIGN — and `check-partof-closing-keyword` must stop telling agents to force-push",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T06:19:28Z",
+  "updated_at": "2026-09-09T06:30:46Z",
+  "closed_at": "2026-09-09T04:09:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16516",
+  "body": "Filed by the director seat on the maintainer's ruling on #16502 (decision batch #73, 2026-09-07 — options **C + D**). Governance text (`.claude/skills/**`, `scripts/check-partof-closing-keyword.mjs`) ⇒ the landing PR is on a governed surface and is merged by the maintainer.\n\n## What the ruling established\n\n- **C**: a PR may enter the queue carrying a red on a **non-required** gate when that gate's own text says the red is expected on a pushed branch and is remedied at merge time (the `Part-of PR must not also close its card` gate, RULE 2, header `:108-112`). The existing rule's premise — \"a red on a non-required gate is either a real defect or a broken gate\" — has a third case, *red by design*, and the rule must name it rather than leave every future instance to a decision box.\n- **D**: the repository setting `squash_merge_commit_message` moves from `COMMIT_MESSAGES` to `PR_BODY` (the maintainer's own change), so the gate's prescribed remedy — the PR body becomes the landing text — happens automatically on every squash instead of depending on someone remembering at the merge button.\n\n## The two edits this card makes\n\n1. **`.claude/skills/pm-dispatch/SKILL.md` — queue entry.** Add the third case next to 「入队资格 = PR 上每一个 check 全绿，⛔ 不是 required 子集」: a red on a non-required check is admissible **only** when (a) the check's own source names the red as by-design on a pushed branch, (b) the check does not run on `merge_group`, and (c) the PR comment records which check and why. Anything else stays a defect or a broken gate. ⛔ Keep 「队列是唯一被认可的落地路径」 untouched — option A (manual merge) was refused.\n2. **`scripts/check-partof-closing-keyword.mjs` — failure output.** Today the output says \"pushing rewritten commits re-runs this check\" beside \"⛔ no amend / rebase / force-push\"; the resolution lives only in the file header. Put the header's resolution into the output: *the red stays on the branch; it is discharged at merge because the squash message is the PR body (`squash_merge_commit_message = PR_BODY`); do not rewrite history.* Once D is in effect, the output states a fact; before D it must say the merge needs the PR body.\n\n## Verification the dispatch will expect\n\nThe gate's own test file gains a pin on the new output text; the skill text change is reviewed against the ruling comment on #16502; ⛔ no change to what the gate detects (RULE 2's four counterfactuals stay as they are).\n\nRefs: #16502 (ruling) · PR #16470 (the PR the ruling lets through) · `AGENTS.md:464` / `:474` / `.claude/agents/os-dev.md:63` (the history-rewrite ban that must not be contradicted by a gate's output)."
+}

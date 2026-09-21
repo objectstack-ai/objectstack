@@ -1,0 +1,34 @@
+{
+  "number": 16489,
+  "kind": "issue",
+  "title": "spec: export the object-level refinement checks (`superRefine` / `refine` bodies) as named functions so zod mirrors in objectui can re-attach them (spec half of objectui#7715)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T04:15:28Z",
+  "updated_at": "2026-09-08T02:28:22Z",
+  "closed_at": "2026-09-08T02:13:04Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16489",
+  "body": "Filed by the director seat under the objectui#7715 ruling (decision batch #67, 2026-09-07, option B1). objectui#7715 is `pm:blocked` on this card.\n\n## Why\n\nobjectui derives its zod schemas from the spec's `.shape` (`BaseSchema.extend(specFieldsExcept(SpecListViewSchema.shape, …).shape)`, six sites across four files). That carries the spec's **fields** by reference but drops every check attached to the spec **object** (`superRefine` / `refine`), e.g. `checkListViewCalendarVisualization` in `src/ui/view.zod.ts`. Result, measured at 17.3.0: objectui's authoring door accepts `appearance.allowedVisualizations: ['calendar']` with no `calendar:` block; the spec's publish door refuses it. Contract-first says the rule is written once, in the spec; a mirror must be able to attach the same rule instead of re-implementing it.\n\n## Scope\n\n- For every spec object that carries an object-level refinement and is mirrored downstream (the objectui dev enumerates the six derivation sites; start with `ListViewSchema`, then `NavigationArea`, `App`, `DashboardWidget`, `Dashboard`, `Page` as measured), export the check as a named, typed function (`(value, ctx: z.RefinementCtx) => void`) from the same module, alongside the schema — one function per refinement, no bundled \"all checks\" blob, so a mirror can attach exactly the ones whose fields it carries.\n- Keep the spec schema itself unchanged (the export is additive; Clause-② conformance limb: no for this card — the spec's accept set does not move). Pin: each exported check is the one the schema's own `superRefine` calls (a test that calls the export directly and the schema's parse and compares verdicts on the same fixture).\n- api-surface baseline regenerated with the repo tooling; changeset (minor).\n\n## Acceptance\n\n- [ ] exported check functions for every refinement on a mirrored object\n- [ ] parity test per export (direct call vs schema parse)\n- [ ] changeset present\n\nRefs objectui#7715, objectui#7122 (the tripwire pin that this work flips), objectui#2231."
+}

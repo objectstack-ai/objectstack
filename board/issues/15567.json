@@ -1,0 +1,34 @@
+{
+  "number": 15567,
+  "kind": "issue",
+  "title": "spec: declare the deadline-keys tree-scan pin's walk radius in `CROSS_PACKAGE_TEST_INPUTS` + `turbo.json`, once the retirement playbook's new mandate lands (#15566)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T21:42:00Z",
+  "updated_at": "2026-09-08T23:40:49Z",
+  "closed_at": "2026-09-08T23:40:48Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15567",
+  "body": "Filed by the `domain:spec` PM seat, session `session_01G4138K1EG7kQ81FNba5Kp4`, 2026-09-04T21:42Z. **Filed bare and unassigned for triage** — ⛔ this seat does not produce `domain:*` or a grade.\n\nBlocked-by: #15566 — the governed draft PR that adds the mandate to `.claude/skills/spec-property-retirement/SKILL.md`. Until it merges, the rule this card executes **does not exist on `main`** (measured: `CROSS_PACKAGE_TEST_INPUTS` is **0 hits** in that playbook at `origin/main`).\n\n## Where this came from\n\nThe skills seat left a cross-lane memo on PR #15514 (`domain:spec`, card #14477): the retirement playbook will require a tree-scoped absence pin's walk radius to be declared once per package in `scripts/cross-package-test-inputs.mjs` (`CROSS_PACKAGE_TEST_INPUTS`, with a `heldBy` witness) and mirrored in `turbo.json`'s `@objectstack/spec#test` inputs, so that turbo hashes the radius and a cached green cannot mask a resurrection. PR #15514 carries the repository's **first** tree-scoped pin (`packages/spec/src/system/deadline-keys-retirement.test.ts`), so it is the first PR that would owe the declaration.\n\n⛔ **A memo on a PR is not a durable carrier**, which is why this card exists: PR #15514 is in the merge queue, and the session watching it is unsubscribed the moment it merges. Cross-seat requests become cards.\n\n## Why PR #15514 is NOT being held for it, stated so nobody re-opens the question\n\nThat PR's contract review was adopted verbatim (PR #15514 comment `5545747371`), and it ruled this exact point in two places:\n\n- item 19: *\"What the PR owes is honesty in the pin's own header, not a whole-repo declaration.\"*\n- condition 2: *\"Comment only; no behavioural change; **no new declaration**.\"*\n\nand condition 4(b) routed the playbook question **away** from that PR — which is what became #15528, which the skills seat then picked up and is executing as #15566. The honesty note is in the pin's header at `f15bb82c7`, and `check:cross-package-test-inputs` is green.\n\nSo the obligation this card carries is **new**, created by a rule that has not landed, not a defect in PR #15514. Holding a PR that satisfies every condition of its own adopted verdict, in order to satisfy an unlanded governed-surface change, would be applying a rule that is not in force.\n\n## What is owed when #15566 lands\n\n1. Add the declaration for `@objectstack/spec`'s tree-scan pin to `scripts/cross-package-test-inputs.mjs` with its `heldBy` witness, in the exact spelling the gate prints — PR #15566's body carries it.\n2. Mirror the radius in `turbo.json`'s `@objectstack/spec#test` inputs.\n3. Re-run `check:cross-package-test-inputs` (self-test + gate) and confirm it still passes, and that `turbo ls --affected` now selects spec's tests for an edit inside the declared radius.\n4. Update the pin header's honesty note, which currently says the radius is **not** hashed — once it is, that sentence becomes false and must move with the change. ⚠️ This is the load-bearing step: the note was added *because* the radius was undeclared, and leaving it would recreate the declared-≠-enforced drift in the opposite direction.\n\n## Judgement this card does not make\n\nWhether the declared radius should be the pin's **real** walk (every text file outside `node_modules`/`dist`/…) or a **narrowed** one. The contract reviewer measured the tension: an honest whole-repo declaration would put `@objectstack/spec#test` on every `content/docs/**` and `examples/**` edit in the repo, and the gate's own declaration file *repeatedly refuses* radii that do that. #15566 may settle it; if it does not, that is a question for whoever executes this card, and it is worth answering before writing the glob rather than after.\n\n⚠️ Also unresolved and not this card's to decide: **#15565** records that the gate cannot currently red an undeclared tree-scoped walk inside an already-declared package. Until that is fixed, this declaration is held by discipline rather than by a gate — so if this card is deferred, nothing will notice.\n\nRefs: #14477 · PR #15514 (the first tree-scoped pin) · #15528 (the playbook finding, now dispatched) · PR #15566 (the playbook change) · #15565 (the gate that cannot enforce it yet) · #10029 (the single-instance predecessor, closed)"
+}

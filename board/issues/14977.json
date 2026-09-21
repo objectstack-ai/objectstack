@@ -1,0 +1,35 @@
+{
+  "number": 14977,
+  "kind": "issue",
+  "title": "[finding] The strictness ledger's `state-machine.zod.ts` row still says `formatZodError` flattens a union branch away — it has not since #4971/#8318, and that stale sentence seeded a false-premise card",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T16:12:37Z",
+  "updated_at": "2026-09-08T06:08:49Z",
+  "closed_at": "2026-09-08T06:07:17Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14977",
+  "body": "Filed unassigned from the #14722 run (PR #14975), which measured the ledger sentence against `origin/main` and found it stale. Not fixed there — out of that card's scope, and it needs the ledger owner's convention rather than a drive-by prose edit.\n\n## The stale sentence\n\n`docs/audits/2026-07-unknown-key-strictness-ledger.md`, the `state-machine.zod.ts` row, present tense:\n\n> `ActionRef` / `GuardRef` are UNIONS: a strict branch's message does not reach the top (zod raises one `invalid_union` whose message is the literal `\"Invalid input\"`, with the real prescription nested in `issue.errors[]`), which **`formatZodError` then flattens away** — filed, not fixed here.\n\nThe parenthesis is still true: zod does raise a keyless `invalid_union` and the prescription does sit in `issue.errors[]`. **The clause after it is not.** `formatZodError` no longer flattens anything — `formatZodIssue` descends `invalid_union` and ranks the branches through `selectUnionBranches` (`packages/spec/src/shared/union-branch-policy.ts`), dropping arms that only complain about the wrong kind and rendering the informative branch verbatim.\n\nThe card that sentence points at, #4971, is **closed**. So are its two siblings on the other doors: #5014 (the wire mapper, `zodIssuesToFields`) and #5341 (the CLI's own formatter). #8318 then consolidated the policy into the one module both spec-side consumers share. The ledger row was never updated.\n\n## Measured\n\nOn `origin/main` `3386493f`, through the real `defineStack` door, an unknown key inside a union arm:\n\n```text\ndefineStack validation failed (1 issue):\n\n  x devPlugins.0: Invalid input\n    x devPlugins.0: Unrecognized key(s) on this package manifest: `namesapce`.\n      Did you mean `namesapce` -> `namespace`? ...\n```\n\nThe key, the surface and the rename all arrive. The cost of the union is one wrapper line, not a lost message. `zodIssuesToFields` behaves the same way, emitting a second entry with `code: unknown_field`.\n\n## Why it is worth a card rather than a silent edit\n\nThis is not a cosmetic docs nit — the stale sentence has already produced work on a false premise. #14722 was filed reporting that `devPlugins[]` leaves an author with a keyless message, reproducing this row's reasoning for a third site; triage graded it `p3` and dispatched a schema reshape. The measurement above is what the implementer found instead, and the reshape was not performed because every available shape moves either the accept set or the published JSON Schema. The card cost a full dispatch cycle, and the ledger row will keep producing more of them: it explicitly generalises the claim as *\"a general constraint on every remaining union site in this campaign\"*.\n\nTwo other places carry the same present-tense claim and should be read in the same pass (both in the same file, the `chart.zod.ts` and `view.zod.ts` rows):\n\n- *\"the named rejection reaches an author only through `packages/lint/src/zod-issue-format.ts`'s arm unpacking\"* — spec's own renderer now unpacks too;\n- *\"the overlay path's rejection surfaces as `invalid_union` / \"Invalid input\" — the #5014 flattening, so the key that caused it is not in the message the author sees\"* — #5014 is closed.\n\n## What is wanted\n\nA decision by the ledger's owner on how a row records a limitation that was later lifted elsewhere — the rows are deliberately written in the past tense of their own batch, so a blanket rewrite may be wrong. The narrow ask is that the three sentences above stop asserting, in the present tense, a flattening that no longer happens, and that they name `union-branch-policy.ts` as what lifted it.\n\n`pnpm --filter @objectstack/spec check:strictness-ledger` is green and stays green either way — it grades row structure and the generated `.counts.md`, not prose accuracy. The companion `.counts.md` is os-regen generated and must not be hand-edited.\n\nNot labelled `pm:queue`: this is an observation for triage to grade, and the fix is a judgement call about ledger convention rather than a mechanical edit."
+}

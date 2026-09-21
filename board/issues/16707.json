@@ -1,0 +1,34 @@
+{
+  "number": 16707,
+  "kind": "issue",
+  "title": "Dashboard widgets: a zero-dimension widget silently becomes a KPI card and drops every measure but one, and `chart-config-missing` warns about a rendering failure that does not occur",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T23:58:37Z",
+  "updated_at": "2026-09-08T02:52:42Z",
+  "closed_at": "2026-09-08T02:52:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16707",
+  "body": "Filed from an app repo (`objectstack-ai/hotclm`, `@objectstack/*` 17.3.0, `@objectstack/console` as shipped, objectui at `8f9d87a`) while building its three §09 dashboards — `objectstack-ai/hotclm#29`, PR `objectstack-ai/hotclm#30`. ⛔ Unassigned, ungraded; routing is triage's.\n\n**Two findings, filed together because they are the same contract seam** — what a dataset-bound widget's authored keys actually do — and because they pull in opposite directions: one drops authored metadata without a word, the other warns about a failure that never happens. Split them if triage prefers a card per defect.\n\n**Provenance.** Both were measured in a browser by the card-10 implementation run. I reviewed the evidence and the reasoning; I did not re-drive the browser myself, and I say so rather than implying otherwise.\n\n**Dedup:** searched `DatasetWidget` / `chart-config-missing` / zero-dimension widget. Nothing open or closed covers either. Related but not this: `objectstack-ai/hotclm` PR #25's `record:details` findings, filed separately as #16695.\n\n---\n\n## Finding 1 — a zero-dimension widget is a KPI card whatever its declared `type`, and the extra measures vanish\n\n`DatasetWidget.tsx:423`:\n\n```ts\nMETRIC_TYPES.has(widgetType) || dimensions.length === 0\n```\n\nSo a widget declaring `type: 'bar'` (or `'table'`) that selects **four measures and no dimension** renders as a single KPI card showing **one** number. The other three are dropped — no error, no warning, no placeholder.\n\nObserved: an approval-routing tile selecting four route counts rendered\n\n```\n11 · Routes: Head of Legal\n```\n\nand nothing else. Three of four rungs silently absent from a card that looked finished and deliberate. `objectstack validate` and `objectstack lint` both pass. It was caught only by reading the rendered DOM and asking why one number was there instead of four.\n\n**Why this is worth a card and not a docs note.** The failure mode is a dashboard that looks complete and is wrong — the reviewer's eye has nothing to catch, because a KPI card showing a real number is exactly what a finished tile looks like. It is the metadata-the-runtime-silently-drops class: the author declared `type: 'bar'`, the runtime decided otherwise, and nothing in between said so.\n\nA spec-side refusal (a `bar`/`table` with zero dimensions is not authorable) or a lint rule would both close it. The app worked around it by splitting the tile into four, which is correct for the app and does nothing for the next author.\n\n## Finding 2 — `chart-config-missing` asserts a rendering failure that does not occur on dataset-bound widgets\n\nThe rule's message reads:\n\n> the renderer cannot determine which measure to plot, so **the series renders empty**.\n\nOn a dataset-bound widget that is not what happens. objectui's `buildChartSeries(rows, dimensions, values, fields)` **derives** the bindings from the widget's own dimension/measure selection, and an authored `chartConfig` is merged onto that derivation as presentation only (`mergeAuthoredPresentation`).\n\nMeasured in Chromium with **no `chartConfig` anywhere** in the app: 7 funnel trapezoids · 3 bars · 2 lines · 2 more bars · 2 more lines · 10 table rows. Every series rendered.\n\nThe rule's own hint concedes it — it prescribes `suppressWarnings: ['chart-config-missing']` *\"if the default rendering is intentional\"*, which only makes sense if the default rendering exists.\n\n**The harm is not the noise.** A warning that says a widget renders empty trains an author to add `chartConfig` blocks that do nothing — decoration that reads as effect, which is a shape `hotcrm` has already had to remove once. Six of these warnings appeared during the card and were retired with the measurement above rather than tolerated, but the next author will meet them fresh.\n\nEither the message should describe what actually happens (presentation defaults are derived; `chartConfig` overrides them), or the rule should not fire on widgets whose bindings are derivable.\n\n---\n\n## One more, adjacent, and load-bearing\n\n`@objectstack/service-analytics` 17.3.0 carries a comment stating that a SQLite `Field.datetime` **is an INTEGER epoch (#2034)**. Measured on 17.3.0 with `better-sqlite3` 13.0.3, it is **TEXT**:\n\n```\nsqlite> select typeof(submitted_at), submitted_at from clm_contract limit 1;\ntext|2026-05-19T00:00:00.000Z\nsqlite> select avg(submitted_at) from clm_contract;\n2025.9166666666667        ← SQLite's text→numeric coercion: the average YEAR\n```\n\nThat annotation is the assumption under which an author would expect `AVG()` over a datetime to mean anything. Downstream of it, `derived: { op: 'difference', of: [avg_a, avg_b] }` **does not error** — it parses, runs, and returns `-0.849999999999909`, the difference of two average years, which is a clean plausible number that renders happily on a dashboard. That is the form that would have shipped had the app not asked what the number meant.\n\nFiled here as context rather than as a third finding, because the remedy could be the comment, the storage, or a duration primitive, and that is a bigger question than this card. Say the word and I will split it out.\n\n## Boundaries\n\n- One app, one console build, `better-sqlite3`. Re-confirm against a current `@objectstack/console` and on a second dialect before acting — the `record:details` card (#16695) shows how much the render path can differ from what the schema implies.\n- ⛔ Nothing was patched in the platform; the app worked around finding 1 and suppressed finding 2's rule with the measurement recorded at the suppression site."
+}

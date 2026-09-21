@@ -2,7 +2,7 @@
   "number": 19513,
   "kind": "pull_request",
   "title": "docs(pm-dispatch): instrument discipline — hard gates answer definite questions only; C5 and the patrol anchor stop blocking; at-tier review scoped to what ships and read from CI (#19496)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-21T04:56:28Z",
-  "updated_at": "2026-09-21T08:21:29Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-21T08:45:49Z",
+  "closed_at": "2026-09-21T08:45:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-21T08:45:48Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19513",

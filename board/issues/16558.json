@@ -1,0 +1,35 @@
+{
+  "number": 16558,
+  "kind": "issue",
+  "title": "check:i18n-walk-parity exits 1 for PREREQUISITE NOT MET — the code a real finding uses",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T09:24:28Z",
+  "updated_at": "2026-09-08T22:19:15Z",
+  "closed_at": "2026-09-08T22:19:15Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16558",
+  "body": "Filed out-of-scope from work on #16147 (the resolver's region-level `page:header` route). Not touched there; filed unassigned.\n\n## The defect\n\n`scripts/check-i18n-walk-parity.mjs` refuses correctly when its inputs are not built, prints the right words, and then returns the wrong number:\n\n```js\n/** A hard prerequisite failure: says what it did NOT measure, and exits. */\nfunction reportPrerequisiteNotMet(headline, lines) {\n  console.error(`  check:i18n-walk-parity — PREREQUISITE NOT MET: ${headline}\\n`);\n  ...\n  process.exit(1);\n}\n```\n\nExit **1** is the finding code. This repo already has one answer to that, with a name and a self-test: `EXIT_PREREQUISITE_NOT_MET === 3` in `scripts/import-prerequisite.mjs`, whose own header states the reason in as many words:\n\n> Exit 1 from an unmet prerequisite and exit 1 from a real finding are the same reading — which is why the guarded refusal below does NOT keep that number.\n\nIts siblings import it. Two of them are in this very family: `check-i18n-bundles.mjs` and `check-i18n-coverage.mjs`, plus `check-dts-closure.mjs` and `check-doc-frontmatter.mjs`. `check-i18n-walk-parity.mjs` is the one that spells the same headline by hand and keeps exit 1.\n\n## Measured, on a fresh per-task worktree\n\nA gate sweep over the derived family list on a worktree where the dependency closure was built but `packages/cli` itself was not, exit codes captured before any pipe:\n\n```\n50 exit=3   pnpm check:dual-build-cjs-loads      <- PREREQUISITE NOT MET, reads as NOT MEASURED\n52 exit=1   pnpm check:i18n-walk-parity          <- PREREQUISITE NOT MET, reads as a FINDING\n67 exit=3   pnpm check:type-check-debt           <- PREREQUISITE NOT MET, reads as NOT MEASURED\n```\n\nAll three refused for the same reason. Two are legible as NOT MEASURED from the number alone; the middle one is not. Its stderr does say so — but the number is what a sweep, a runner script, or a CI step condition reads, and it is the reading a seat writes into a report. The failure direction is a **false RED reported against whatever landed most recently**, which is exactly the near-miss `import-prerequisite.mjs` records as its reason for existing.\n\n## Repro\n\n```bash\ngit worktree add --no-track ../objectstack-probe -b probe origin/main\ncd ../objectstack-probe && pnpm install          # closure NOT built\npnpm check:i18n-walk-parity > /tmp/out.log 2>&1; echo \"EXIT=$?\"\n# EXIT=1, with \"PREREQUISITE NOT MET: the workspace CLI is not built\" in the log\n```\n\n## Suggested direction, for whoever takes it\n\nRoute the refusal through the shared helper rather than re-spelling it: import `EXIT_PREREQUISITE_NOT_MET` (and `EXIT_FINDINGS`) from `scripts/import-prerequisite.mjs` and return that code, the way `check-dts-closure.mjs` does — which also gets the shared \"capture the code BEFORE any pipe\" frame in the output for free. A self-test case asserting the refusal's code is 3 and is not the findings code would pin it; `check-doc-frontmatter.mjs` already carries a case in that exact shape.\n\nWorth a sweep of the other `PREREQUISITE NOT MET` sites in the same pass — `check-doc-frontmatter.mjs` also has a hand-written `exit(1)` near its refusal text, unverified here as to whether it is on the refusal path or a different branch. That is a reading this card does not make.\n"
+}

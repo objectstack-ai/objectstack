@@ -1,0 +1,37 @@
+{
+  "number": 15174,
+  "kind": "issue",
+  "title": "[finding] `os explain dashboard`'s widgets still teach the pre-ADR-0021 inline analytics shape (`object` + `groupBy` + `aggregate`), removed from the spec",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T04:48:33Z",
+  "updated_at": "2026-09-08T17:37:04Z",
+  "closed_at": "2026-09-08T17:36:01Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15174",
+  "body": "Found by the catalog sweep landed for #14811, which parses every `SCHEMAS` entry's `example` in `packages/cli/src/commands/explain.ts` against its real schema. Rewriting catalog entries was ruled out of scope on that card (triage comment `5520209463`, step 3), so this is filed unassigned for triage. Suggested domain: `domain:cli`.\n\n## Measured\n\n`DashboardSchema` (`@objectstack/spec/ui`) rejects the `dashboard` entry's example with nine issues — the worst of the eleven entries:\n\n```\n[widgets.0.id]      invalid_type  :: expected string, received undefined\n[widgets.0.type]    invalid_value :: Invalid option: expected one of \"bar\"|\"horizontal-bar\"|\n    \"column\"|\"line\"|\"area\"|\"pie\"|\"donut\"|\"funnel\"|\"scatter\"|\"treemap\"|\"sankey\"|\"combo\"|\n    \"gauge\"|\"solid-gauge\"|\"metric\"|\"kpi\"|\"bullet\"|\"radar\"|\"table\"|\"pivot\"\n[widgets.0.dataset] invalid_type  :: expected string, received undefined\n[widgets.0.values]  invalid_type  :: expected array, received undefined\n[widgets.0]         unrecognized_keys :: Unrecognized key(s) on this dashboard widget:\n    `object`, `groupBy`.\n    - The pre-ADR-0021 inline analytics shape (`object` + `categoryField` + `valueField`\n      + `aggregate`, pivot `rowField`/`columnField`) was removed — bind a `dataset` and\n      select `dimensions` + `values` by name. Renderer-only settings belong under\n      `options`. Undeclared top-level keys were dropped silently before strict\n      validation, shipping inert metadata; a stale or mis-layered key is now a loud\n      parse error.\n[widgets.1.id]      invalid_type  :: expected string, received undefined\n[widgets.1.dataset] invalid_type  :: expected string, received undefined\n[widgets.1.values]  invalid_type  :: expected array, received undefined\n[widgets.1]         unrecognized_keys :: Unrecognized key(s) on this dashboard widget:\n    `object`, `aggregate`. [same guidance]\n```\n\nThe sample writes `{ type: 'chart', object: 'project_task', groupBy: 'status' }` and `{ type: 'metric', object: 'project_task', aggregate: 'count' }`.\n\n## Note for whoever takes it\n\n`'chart'` is not a widget type at all — the enum names the concrete mark (`bar`, `line`, `pie`, …). Rewriting this example means binding a real `dataset` and choosing `dimensions` / `values`, i.e. it needs an ADR-0021-shaped dashboard to point at, not a key rename. That makes it the entry least suited to a mechanical fix and the one most likely to need an author's judgement about what a good sample dashboard is.\n\nThe entry's `optional` table (`widgets`, `layout`, `refreshInterval`) is only type-name deep, so the wrong shape lives entirely in the example.\n\n## Reproduce\n\n```\npnpm --filter @objectstack/cli exec vitest run test/commands.test.ts\n```\n\nThe sweep names this entry as a known-broken xfail; the day the entry is corrected, that xfail turns red and is meant to be promoted to a plain assertion."
+}

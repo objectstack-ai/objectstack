@@ -1,0 +1,36 @@
+{
+  "number": 16130,
+  "kind": "issue",
+  "title": "Bring single-database multi-organization isolation back to the open core — the wall is already open, only the `org-scoping` switch is closed (~1350 of 1660 lines move; the licence gate stays)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:45:59Z",
+  "updated_at": "2026-09-08T00:07:01Z",
+  "closed_at": "2026-09-08T00:07:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16130",
+  "body": "**Chartered by the maintainer, 2026-09-06, live chat**, verbatim: 「感觉 单库多组织隔离是开源基本需求，如果迁移回开源项目成本有多大」 then 「直接立专题卡派发处理吧」. ⇒ The cost question is answered below by measurement; this card is the work.\n\n## The finding that makes this cheap\n\n**The wall is already open. What is closed is the switch.**\n\nLayer 0 (`plugin-security/src/tenant-layer.ts`, `computeTenantLayer0Filter`), the three postures in `packages/spec`, the API-key and session membership guards, ADR-0105's group posture — all open source. Three cross-organization defects were found and fixed in the open tree this week (#15256, #15409, cloud#1987's framework half). What an open-source deployment cannot do is **turn the wall on**, because the `org-scoping` service has exactly one registrar anywhere: the cloud-private `@objectstack/organizations`.\n\n⭐ And it went the other way once, deliberately: `organizations-plugin.ts`'s own docblock says it was *\"migrated verbatim from the open `plugin-org-scoping`\"* (ADR-0081 D2). The open core still consumes it unchanged — `getService('org-scoping')` and `requiresService: 'org-scoping'` nav gates — and the service name was kept **on purpose** so those anchors would not break. ⇒ **No consumer-side change is needed.**\n\n## Measured on cloud `origin/main`, 2026-09-06\n\n8 non-test source files, **1660 lines**, 8 test files. The licence headers already draw the boundary:\n\n| file | lines | header |\n|---|---|---|\n| `organizations-plugin.ts` | 508 | proprietary |\n| `membership-policy-gate.ts` | 416 | proprietary |\n| **`multi-org-license-gate.ts`** | **306** | **proprietary** |\n| `index.ts` | 107 | proprietary |\n| `manifest.ts` | 28 | proprietary |\n| `claim-orphan-org-rows.ts` | 135 | **Apache-2.0** |\n| `claim-org-seed-ownership.ts` | 116 | **Apache-2.0** |\n| `ensure-default-organization.ts` | 44 | **Apache-2.0** |\n\n**Coupling to cloud is exactly two points, both entitlement**: `multi-org-license-gate.ts` imports `security-enterprise`'s `license/entitlement.ts`; `index.ts:41` carries a bare `import '@objectstack/security-enterprise'` to mount the multi-node authorization gate as a side effect (cloud#1827). Everything else imports framework packages only — 4 of the package's 5 dependencies are `link:` into this repo.\n\n⇒ **~1350 lines move; 306 stay.**\n\nADR-0081 already split this once: **D1**'s open member-management basics landed here (`plugin-auth`'s 415-line `ensureDefaultOrganization`), leaving cloud a 44-line multi-org wrapper.\n\n## ⛔ Hard boundaries — these do NOT move\n\n1. **`multi-org-license-gate.ts` stays in cloud.** It is the entitlement, and it exists because the gate must be answered *by the package that implements multi-org, at construction* — cloud#1020 records the previous shape (an env rewrite in a host config) failing exactly when ADR-0105 D1 made the posture authoritative. ⛔ Do not move it, do not reimplement it here, and ⛔ do not leave a hook that a host could use to re-add one.\n2. **The multi-node gate carrier stays.** `MULTI_NODE_GATE_CARRIER_PACKAGES` (#14114) names both packages precisely so a deployment declares whichever it needs. Whatever remains in cloud must keep carrying it; the open package must **not** acquire it.\n3. ⛔ **The open package must not gain a licence check of any kind.** If enforcement is wanted, it is cloud's, on cloud's side of the split.\n\n## ⚠️ This reverses a recorded decision — the record moves with the code\n\nADR-0081 **D2** put the multi-org machinery in enterprise on purpose. Landing this without amending it leaves the tree contradicting a live ADR. The open mirror of that record is **#14508** (`pm:queue`, unstarted). ⇒ The ADR amendment is part of this work, not a follow-up: `docs/adr/**` is a **governed surface** — draft PR, human merge.\n\n## Phase 1 — classify before moving. ⛔ Do not open a code PR first.\n\nRead all 1660 lines and produce, on this card, a **line-level disposition** for every one: *move as-is* / *move with changes (say which)* / *stays in cloud* / *deleted*. Two files decide whether the estimate above survives:\n\n- **`organizations-plugin.ts` (508)** — what it registers beyond the service, and what of that is cloud-shaped.\n- **`membership-policy-gate.ts` (416)** — a boot-time membership-policy assertion, and the one file whose depth this seat did **not** measure. ⚠️ If it encodes enterprise-only assumptions, the estimate is wrong and this card's shape changes.\n\n⛔ **Stop and report** rather than proceeding if: the classification finds a third coupling point; `membership-policy-gate.ts` cannot be separated from entitlement; or the open package would need any part of `security-enterprise`.\n\n## Phase 2 — the move, once phase 1 is accepted\n\nNew open package (name it after the classification — `plugin-org-scoping` is the historical one and the anchors expect the *service* name `org-scoping`, not a package name). Cloud keeps the gate and imports the open package. Both sides' tests move with their code. ⛔ The service name `org-scoping` does not change — the open core's nav gates and `getService` calls are anchored on it.\n\n**Acceptance**: an open-source-only install with `OS_TENANCY_POSTURE=isolated` boots with the wall ACTIVE and enforces it — the same matrix the three cross-organization repairs pinned (an ex-member's API key and session are refused; a member reads only its own organization). ⚠️ That matrix is the point of the whole card: today an open install cannot run it at all.\n\nRefs: cloud `packages/organizations` · cloud ADR-0081 D1/D2 · #14508 (the open mirror) · cloud#1020 (why the gate lives where it lives) · #14114 / cloud#1827 (multi-node carrier) · ADR-0105 D1 · #15256 / #15409 (the wall's open-source repairs).\n"
+}

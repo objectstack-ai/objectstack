@@ -1,0 +1,36 @@
+{
+  "number": 16599,
+  "kind": "issue",
+  "title": "[finding] hono UI auto-discovery: the slug-from-name fallback and the staticPath guard are unreachable through kernel.use() once PluginSchema requires both keys (#16334)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T12:05:58Z",
+  "updated_at": "2026-09-08T04:24:13Z",
+  "closed_at": "2026-09-08T04:15:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16599",
+  "body": "Observation from #16334 (spec half of #16049), filed unassigned. Sub-issue of #15638 because it is the same block and the same class — an arm of the auto-discovery block in `packages/plugins/plugin-hono-server/src/hono-plugin.ts` (around line 508) that no object can reach any more.\n\n**What is dead, and since when**\n- `const slug = plugin.slug || plugin.name.split('/').pop();` — the `||` fallback. With #16334, `PluginSchema` refuses a `type: 'ui'` plugin without `slug`, and `kernel.use()` runs the schema (#16049, landed as #16363), so a `ui` object with no `slug` never reaches `kernel.plugins`, the only population the block iterates.\n- `if ((plugin.type === 'ui' || plugin.type === 'ui-plugin') && plugin.staticPath)` — the `&& plugin.staticPath` conjunct, for the same reason (`staticPath` is required for `ui` too). The `ui-plugin` disjunct is #15638's own subject and was already unreachable after #16363.\n\n**Evidence.** The two pins that exercised those branches through the real kernel — \"derives the slug from the last path segment of the plugin name when none is declared\" and \"a `ui` type with no staticPath mounts nothing\" in `src/ui-plugin-auto-discovery.pin.test.ts` — had to be inverted into refusal pins on the #16334 PR (#16598): with the schema tightened, `kernel.use()` throws `PLUGIN_CONTRACT_VIOLATION … at 'slug'` / `at 'staticPath'` before `start()` ever runs. The `it.todo` for case C in that file still narrates a boot path that \"never calls `PluginSchema`\", which stopped being true at #16363.\n\n**Left out of #16334 by scope.** Retiring the two arms is a `plugin-hono-server` change with its own verification surface, and #15638 already owns the third arm of the same guard. Suggested shape, for whoever lands it: read `plugin.slug` and `plugin.staticPath` as the contract now guarantees them, drop the fallback and the guard, and rewrite the case-C todo against the post-#16363 boot path. The same block also reads an `isDefault` alias beside `default` (`plugin.default || plugin.isDefault`); `isDefault` is not a `PluginSchema` key and is worth a look in the same pass."
+}

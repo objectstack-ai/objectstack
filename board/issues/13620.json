@@ -1,0 +1,30 @@
+{
+  "number": 13620,
+  "kind": "issue",
+  "title": "[Design] 运行时发布的页面能否注册进代码定义 app 的导航?—— #13216 方向 2 的授权设计(反转 app.allowOrgOverride=false 与否)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T03:28:38Z",
+  "updated_at": "2026-09-09T05:30:58Z",
+  "closed_at": "2026-08-31T06:22:33Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13620",
+  "body": "## 出处\n\n#13216 的维护者裁决(2026-08-29 live director session,verbatim「同意」)采方向 1 + 方向 3,并把**方向 2(发布时注册 app 导航)推给独立设计卡**:它必须反转 `app.allowOrgOverride=false` 这个**做过的授权决定**,「运行时内容能否修改代码定义的 app」是平台级授权设计问题。派发席承诺另立此卡后收班未立;本席(domain:spec,`session_01PBjwYLS6BciTQW3c9xQiD2`)按裁决补立。查重:全仓无同题 open 卡(#13100 为证据卡已关,#13216 母卡不承载本设计)。\n\n## 现状(裁决后的格局)\n\n- **方向 1 已落地**(PR #13372):对象视图可挂载已发布页面(`view.type: 'page'` + `pageName`),零新增授权面,页面自带 `assignedProfiles` 受众门随行。\n- **方向 3 在 #13216 排队**(命令面板索引已发布页面;硬串行于停靠 PR #13599 之后)。\n- **裁决有意接受的残余局限**:入口挂在对象下 —— **不隶属任何对象的全局页面仍只有「搜到」没有「逛到」**。这是本卡的全部动机。\n\n## 待裁问题\n\n一个运行时发布的全局页面,要不要有进入 app 导航的路?若要,授权形状是什么?\n\n| 选项 | 做法 | 代价 |\n|---|---|---|\n| **A** 直接反转 | 放开 `app.allowOrgOverride`(或发布流写 app 导航) | 运行时内容获得修改代码定义 app 的门 —— 正是原授权决定要挡的;波及所有 app 消费方 |\n| **B ⭐ 暂不做** | 维持关闭;全局页面靠方向 3 的搜索可达;观察方向 1+3 落地后的真实拉动再议 | 「逛到」缺口暂存;零工程投入,零授权面移动 |\n| **C** 独立导航 overlay 面 | 新授权面:org 级「导航补充」一等元数据类型(如 `nav-extension`,严格 schema、自己的授权门、⛔ 不触 app 定义本体) | 新契约面 + 新门禁;但 app 定义保持不可变,权限边界显式 |\n\n## 四棱(⛔ 决策分析恒中文)\n\n- **① 实际业务需求** —— 拉动真实但已被部分满足:demo 实测「agent 建页无人可达」(#13100 带 API 回执),方向 1 已覆盖对象绑定页、方向 3 落地后全局页可搜。剩余缺口 =「全局页进导航栏」,**当前零实测用户撞上**(demo 场景本身已被方向 1 解)。⇒ 需求侧支持 B:等实测拉动。\n- **② 项目长远合理性** —— `app.allowOrgOverride=false` 是刻意的授权决定(app 导航属代码 artifact,「edit the source and redeploy」是其 sanctioned path)。A 是 workaround 形状;若做,C 的「独立 overlay 面、app 本体不可变」才符合 contract-first 与 no-workarounds。\n- **③ 防 AI 写元数据犯错** —— A 让运行时内容静默改写代码定义的 app,是 AI 批量犯错的放大器(agent 一次发布即可污染全组织导航)。C 的结构性优势:独立类型 + 严格 schema + 显式授权门,AI 写错在 publish 时响亮被拒。⇒ ⛔ 无论如何不选裸 A。\n- **④ 创业阶段不扩散** —— 能力扩张默认从紧:方向 1+3 未验证消化前不开新授权面。C 是一整条新契约面(schema + 门禁 + 渲染消费),投机性成分高。⇒ 支持 B,C 留作被拉动时的既定形状。\n\n## 建议(输入,非放行)\n\n**B**:暂不做,关闭本缺口的工程投入;待方向 3 落地且出现真实「全局页要进导航」的用户拉动时,以 **C 的形状**(独立 `nav-extension` 类 overlay 面)重启,⛔ 永不裸反转 `app.allowOrgOverride`。若裁 B,建议本卡 `pm:on-hold` 挂机器可读重启判据(`Restart-when: direction-3 landed AND a user-reported ask for global-page nav exists`)或径直关 not planned(重开免费)。\n\nRefs:#13216(母卡)· #13100(证据,closed)· PR #13372(方向 1 落地)。"
+}

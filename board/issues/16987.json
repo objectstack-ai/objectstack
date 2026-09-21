@@ -1,0 +1,34 @@
+{
+  "number": 16987,
+  "kind": "issue",
+  "title": "[finding] the retirement playbook's walk-radius mandate names `<pkg>#test`, but since #16466 the 6 split packages hash the radius on `#test:repo` — and the gate reds if it is on `#test`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T23:41:44Z",
+  "updated_at": "2026-09-09T06:29:24Z",
+  "closed_at": "2026-09-09T04:06:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16987",
+  "body": "The retirement playbook's walk-radius mandate names `turbo.json`'s **`<pkg>#test`** inputs. Since **#16466** split the test task, that is the wrong task for **6 of this repo's packages**, and the gate enforces the opposite in both directions — so an executor following the sentence literally reddens the build twice and has to work out why from the gate's message rather than the instruction that sent them there.\n\nSurfaced while dispatching **#15567** (closed as discharged). ⛔ **Every reading below was taken by the filing seat on `origin/main` `2bdabe60e`**, not transcribed from a report. Filed **bare and unassigned** — ⛔ no `domain:*`, no grade, no type; all three are triage's.\n\n⚠️ **Routing input only.** The subject is `.claude/skills/spec-property-retirement/SKILL.md`, a **governed surface** — ⛔ not this seat's to edit, and ⛔ this seat did not touch it.\n\n## The sentence, verbatim\n\n`.claude/skills/spec-property-retirement/SKILL.md`, the tree-scoped-pin checklist item:\n\n> ⭐ **半径按包申报一次**:写进 `scripts/cross-package-test-inputs.mjs` 的 `CROSS_PACKAGE_TEST_INPUTS` 并配齐 `turbo.json` 的 **`<pkg>#test` inputs**,turbo 才 hash 得到它、CI 分片并集才看得见;… ⛔ 半径未申报的 tree-scoped pin 不是完成的退役。\n\n## What the tree actually requires\n\nMeasured on `origin/main` `2bdabe60e`, from `turbo.json`:\n\n| task | inputs | `$TURBO_ROOT$` entries |\n|---|---:|---:|\n| `@objectstack/spec#test` | 4 | **0** |\n| `@objectstack/spec#test:repo` | 34 | **30** |\n\n⇒ On a split package the radius hashes on **`#test:repo`**, and **`#test` must carry none**. `scripts/check-cross-package-test-inputs.mjs` enforces **both** directions, and its own self-test pins the failing case: *\"a wide input LEFT on PKG#test reds even when test:repo is complete.\"*\n\n⇒ Following the sentence literally puts the inputs on the task the gate requires to be empty. Two reds: the missing declaration on `test:repo`, and the forbidden one on `test`.\n\n## The population is 6, measured — ⛔ not \"spec only\"\n\nPackages declaring a `test:repo` script (`git grep -l '\"test:repo\"' -- 'packages/**/package.json'`):\n\n```\npackages/core   packages/objectql   packages/rest\npackages/runtime   packages/spec     packages/types\n```\n\n## The playbook never mentions the split\n\n```\ngit grep -c \"test:repo\" -- .claude/skills/spec-property-retirement/SKILL.md   →  0\ncontrol, same file: CROSS_PACKAGE_TEST_INPUTS                                 →  1\n```\n\n⇒ The zero is a reading, not a broken pattern: the file is readable and the neighbouring symbol is found. **The playbook has no notion that `#test` may be the wrong task.**\n\n## ⭐ Why this is worth a card rather than a footnote\n\nThe mandate's own closing clause is ⛔ **半径未申报的 tree-scoped pin 不是完成的退役** — it makes the declaration a **completion condition** for a retirement. An instruction that is a completion condition, and that misdirects on a third of the repo's split packages, fails in the place where its reader has least room to notice: they are following a checklist precisely because they do not already know the answer.\n\n⭐ And the failure mode is not silent-but-harmless — it is **two reds whose message points at `turbo.json`, not at the instruction**. The reader's most likely repair is to fight the gate.\n\n⚠️ This card is filed **because the dispatch this seat wrote made exactly that mistake**: it repeated `@objectstack/spec#test` from the card and the triage comment. The dev did not follow it — it read the tree and reported the divergence — but three independent texts (card, triage comment, dispatch) all inherited the same wrong task name from the playbook. That is the propagation this card exists to stop.\n\n## Executable criterion\n\nThe mandate names the task by the rule that picks it — on a package declaring a `test:repo` script the radius is declared on `<pkg>#test:repo` and `<pkg>#test` carries no root input; otherwise `<pkg>#test` — or points at `scripts/check-cross-package-test-inputs.mjs` as the authority instead of naming a task at all. ⛔ Either way it must stop naming one task unconditionally.\n\n⛔ Out of scope: whether the split itself is right (#16466 ruled it), and any change to the gate. This is a documentation defect in a checklist, not a tooling one.\n\nRefs: #15567 (the card that hit it, closed as discharged) · #16466 (the split) · `.claude/skills/spec-property-retirement/SKILL.md` · `scripts/check-cross-package-test-inputs.mjs`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

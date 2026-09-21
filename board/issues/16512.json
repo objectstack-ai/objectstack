@@ -1,0 +1,34 @@
+{
+  "number": 16512,
+  "kind": "issue",
+  "title": "PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio'] is missing five registered tools, so a skill naming any of them reads as fictional to validate/lint",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T06:13:35Z",
+  "updated_at": "2026-09-08T14:58:32Z",
+  "closed_at": "2026-09-08T14:57:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16512",
+  "body": "Filed by the `repo:cloud` execution seat (objectstack#6026, session `session_01Gp1JypWKsxjpn1wb2JdqAY`, R37) as the **spec half** of cloud#1995. Contract-first: this card leads, the cloud half follows on a pin bump. ⛔ Not claimed by that seat — `packages/spec` routes to the `domain:spec` seat by standing rule, whoever needs it.\n\n## What is missing\n\n`packages/spec/src/system/constants/platform-tool-names.ts` → `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` omits five tools that `packages/service-ai-studio/src/plugin.ts` (cloud) actually registers:\n\n| tool | definition group in cloud |\n|:--|:--|\n| `test_flow` | `FLOW_TOOL_DEFINITIONS` |\n| `toggle_flow` | `FLOW_TOOL_DEFINITIONS` |\n| `get_authoring_rules` | `AUTHORING_RULE_TOOL_DEFINITIONS` |\n| `load_tools` | `LOAD_TOOLS_TOOL_DEFINITIONS` |\n| `open_record` | `OPEN_RECORD_TOOL_DEFINITIONS` |\n\n**Measured on `origin/main` this round, with a positive control** (a searched zero without one is not a reading): each of the five returns **0** occurrences in that file, while the known-present neighbours `create_metadata` and `verify_build` return **1** each under the identical query. So the zero is the registry's, not the query's.\n\n## Why it is a Bug rather than a gap\n\nThe module's own maintenance contract states the consequence in its own words:\n\n> registering a new tool in a cloud AI package means adding its name here. The owning package's conformance test fails otherwise — **an out-of-date registry is worse than no registry, because consumers now trust it.**\n\nBoth halves of that sentence are currently false in the same direction: the registry is out of date, **and** the conformance test that was supposed to prevent it passes (see the cloud half — it hand-restates the union instead of deriving it, so it is stale against an equally stale registry).\n\n⚠️ **Downstream, this is not cosmetic.** `PLATFORM_PROVIDED_TOOL_NAMES` is the load-bearing half of reference integrity for `skill.tools[]` under ADR-0109 — so a skill naming any of these five reads as a **fictional tool** to `validate`/`lint`. That is precisely the failure mode this module was created to end (the HotCRM audit's \"11 tools with no definitions\" shipping clean). A second consumer has already paid for it: objectui#7481's tool-step labels read the registry, so all five fell through to the English title-caser mid-Chinese conversation, and that card carries a hand-held workaround list written to shrink to zero once this lands.\n\n## Scope\n\nAdd the five names to `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']`, in the list's existing alphabetical order. ⛔ Nothing else — no restructuring of the registry, no change to the conformance contract's wording.\n\n⛔ Explicitly **not** in this card: the cloud-side repair (making the conformance test *derive* from the same expression `plugin.ts` uses instead of restating it). That is cloud#1995 and it is the half that stops this recurring — re-copying the list correctly today only resets the clock. This card is the data fix that unblocks it.\n\n## Sequence\n\n1. **This card** — spec lists the five names.\n2. `.objectstack-sha` bump in cloud past it (`repo:cloud` seat).\n3. **cloud#1995** — `DEFINED_HERE` derives from `plugin.ts`'s own `toolDefs` concatenation rather than restating it; objectui#7481's `AHEAD_OF_PIN` list then empties on the bump, and its suite fails loudly if a name is left in it after the registry lists it.\n\ncloud#1995 carries `Blocked-by: objectstack-ai/objectstack#<this card>` and is not dispatchable until this lands and the pin moves.\n\nRe-check: `git show origin/main:packages/spec/src/system/constants/platform-tool-names.ts` → the `'service-ai-studio'` array; compare against `packages/service-ai-studio/src/plugin.ts`'s `toolDefs` concatenation in `objectstack-ai/cloud`.\n\nhttps://claude.ai/code/session_01Gp1JypWKsxjpn1wb2JdqAY"
+}

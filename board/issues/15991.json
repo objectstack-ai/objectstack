@@ -1,0 +1,37 @@
+{
+  "number": 15991,
+  "kind": "issue",
+  "title": "No gate reads `repository.directory`, so a package move silently 404s its own npm source link — the rule never existed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T17:45:37Z",
+  "updated_at": "2026-09-08T01:52:01Z",
+  "closed_at": "2026-09-08T01:37:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15991",
+  "body": "Split out of #15478 on that card's own instruction: its triage comment recommends fixing the two stale strings **and** adding the check in one PR, but adds the escape hatch —\n\n> ⛔ If the gate turns out to want a decision (the \"no declaration at all\" question), **land the two string fixes first and split the gate out** — a p3 link fix should not wait on a policy question about the other 55.\n\nThe decision question is real and is measured below, so this is that split. #15478 lands the string corrections; this card carries the gate.\n\n## Why nothing caught it\n\nMeasured on `origin/main` at `aa6ba0623`, in a clean worktree:\n\n- Grepping all of `scripts/` for a read of the manifest `repository` field returns **zero** hits against `repository.directory`. Every textual match on `repository` is CI's `github.repository` context (`owner/repo`) in `release-github-releases.mjs` and `scripts/pm/check-half-states.mjs`, or prose in comments.\n\nSo the answer is not \"wrong population\" and not \"missing rule inside an existing rule set\" — **the rule never existed**. No gate has ever read this field.\n\n### The near-miss worth naming\n\n`scripts/check-published-files.mjs` has **exactly the right population** — every non-private workspace package — and already parses each manifest and validates several of its fields (`files`, `types`, `module`, `exports` subpaths). Its six invariants (DECLARED / COMPLETE / SUFFICIENT / MINIMAL / …) are all about the `files` whitelist: *what the tarball contains*. Nothing in it asks *where the tarball says its source lives*. The un-enforced notch is a category, not an off-by-one: this repo gates published package **contents** and does not gate published package **provenance metadata**.\n\nTwo adjacent gates confirm the notch rather than closing it:\n\n- `check-published-readme-links.mjs` resolves outbound links in published markdown — READMEs, not manifests.\n- `check-adr-links.mjs` resolves relative markdown links in `docs/adr/`. The stale ADR-0041 pointer that #15478 also corrects is written as an **inline code span**, not a markdown link, so that gate cannot see it by construction — wrong *form*, not wrong population.\n\n## The measurement a gate would start from\n\nCensus over `git ls-files` for every tracked `package.json` (81 files, `node_modules` excluded), comparing `repository.directory` against the manifest's own directory and against the filesystem. Control: a directory known to exist must report EXISTS and a deliberately impossible one must report MISSING; the census refuses to print numbers unless both fire.\n\n| | before #15478 | after #15478 |\n|---|---|---|\n| tracked `package.json` | 81 | 81 |\n| declare `repository.directory` | 57 | 57 |\n| declared value resolves **and** equals own directory | 55 | 57 |\n| mismatched | 2 | 0 |\n| declare nothing | 24 | 24 |\n\n## ⚠️ The decision this gate needs before it can be written\n\nThe 24 manifests that declare no `repository.directory` at all are **not** a homogeneous population. Counted mechanically off the same census, not by eye: **10 are `private`** (the docs app, five `examples/*`, the repo root `@objectstack/spec-monorepo`, a `create-objectstack` template, and two `packages/qa/*`), and **14 are publishable** and simply declare nothing:\n\n```\n@objectstack/connector-mcp        @objectstack/connector-openapi\n@objectstack/connector-rest       @objectstack/connector-slack\n@objectstack/embedder-openai      @objectstack/knowledge-memory\n@objectstack/knowledge-ragflow    @objectstack/plugin-approvals\n@objectstack/plugin-email         @objectstack/plugin-pinyin-search\n@objectstack/plugin-reports       @objectstack/plugin-sharing\n@objectstack/service-sms          @objectstack/trigger-api\n```\n\n⭐ Note the last one: `@objectstack/trigger-api` sits in the same `packages/triggers/` family as the two packages #15478 corrects, and declares nothing at all. The family that produced the broken links is also the family with an undeclared sibling.\n\n⇒ **Is declaring `repository.directory` mandatory for a publishable package, or is silence allowed?**\n\n- **Mandatory** turns this into a 14-manifest backfill, and every one of those 14 npm pages currently has *no* source deep link rather than a broken one.\n- **Silence allowed** makes the gate a pure consistency check over whoever opts in — cheap and uncontroversial, but it leaves the 14 permanently unlinked and gives the next new package no signal, which is the `#3786` \"hand-copied line with no gate\" shape this repo has already been bitten by.\n\nThat is a policy call, not a correction, which is why it is not being guessed here.\n\n## ⭐ Anti-vacuity requirement, quoted from the #15478 triage\n\n> give it a `--self-test`, and ⭐ give that self-test an **anti-vacuity anchor** — a case count or a pinned roster that goes red if it runs zero cases. #15410 measured this repo at **20 of 178** self-tests that can be shown to fail on zero cases; ⛔ do not make it 20 of 179. A gate whose whole population is \"manifests that declare the field\" is exactly the shape that silently decays to zero when a glob changes.\n\nThis applies with full force: the population here is defined by `git ls-files` plus a `repository.directory` predicate, so both a glob change and a field rename would silently empty it. The floor should pin the measured counts above (81 / 57) the way `check:dual-build-cjs-loads` pins entries/packages/cjsFiles/probes.\n\n## Recurrence, for the record\n\nThe #15478 residue came from **two** same-day renames, not the one the card names: `plugin-trigger-*` to `trigger-*` inside `packages/plugins/` (`f15d6f6f6`) broke the first segment, then promotion to a first-class `packages/triggers/` (`ea4941ad8`) broke the second. Both were pure directory renames — `ea4941ad8` is 16 files, 0 insertions, 0 deletions — so no content-touching diff existed for a reviewer to notice. That is precisely the defect shape a mechanical check exists for, and it will recur at the next package move.\n\nUnassigned and untriaged."
+}

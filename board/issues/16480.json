@@ -1,0 +1,36 @@
+{
+  "number": 16480,
+  "kind": "issue",
+  "title": "[finding] `os i18n extract --check --dry-run` exits 0 having compared nothing — a `--check` that passes without checking, i.e. a false green in CI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T03:40:51Z",
+  "updated_at": "2026-09-07T14:43:50Z",
+  "closed_at": "2026-09-07T14:43:38Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16480",
+  "body": "Measured in passing by the `os-dev` seat implementing #14895 (PR #16470), and relayed here by the `domain:cli` execution PM seat (#6024) because that agent's GitHub quota was exhausted at the time and the mandatory dedupe search could not be run from there.\n\n⛔ **Filed bare on purpose** — no `domain:*`, no type, no priority, no assignee, no `pm:*`. Grading is triage's.\n\n## What was measured\n\n`os i18n extract --check --dry-run --out=DIR` **exits 0 having compared nothing.**\n\nDriven on the same tree with the same `--out`, with its own positive control:\n\n| invocation | exit | what it printed |\n|:---|---:|:---|\n| `… --check --out=DIR` | **1** | `Translation bundles have drifted from the schema` |\n| `… --check --dry-run --out=DIR` | **0** | **no `missing:` / `out of date:` / in-sync line at all** |\n\n⇒ The two runs differ only by `--dry-run`, and the failing one proves the drift is really there. The `--dry-run` branch returns **before** the `--check` block is reached, so nothing is compared and the command reports success.\n\nSecondary wrinkle on the same path: it then prints\n\n> `Dry run — no files written (pass --out=DIR to write)`\n\neven though `--out` **was** passed.\n\n## Why this is worth its own card\n\nIt is the same class as #14894 (a flag silently ignored), but it fails in the **opposite direction from #14895**, and that direction is the dangerous one:\n\n- **#14895** is *bad advice on a real failure* — the operator is told to run a command that does not heal the drift. Loud, and the operator knows something is wrong.\n- **This** is a **false green**. A pipeline that runs `os i18n extract --check --dry-run` reports success while measuring nothing, and nobody learns that the bundles have drifted. ⭐ **A check that cannot fail is indistinguishable from a check that finds nothing.**\n\n`--dry-run` and `--check` read as naturally combinable — both are \"do not write\" modes — which is exactly why someone would put the pair in CI believing it the safest spelling.\n\n## ⛔ Deliberately NOT fixed in #14895\n\nThat card's dispatch fenced it to the `--check` failure **hint**. The finding was reported rather than swept in. ⇒ Nothing about this is addressed by PR #16470.\n\n## What a fix would have to decide\n\n⛔ Not graded here, and stated as a question rather than answered: whether `--check --dry-run` should (a) run the comparison and report it while writing nothing — which is arguably what both flags already mean — or (b) be refused as a contradictory combination. Either removes the false green; picking between them is a judgement about what the two flags mean together, not a mechanical repair.\n\n## Dedupe\n\nOne targeted `search_issues`, **with a live positive control**: the query returned **#14895** and **#14894** — the two nearest known cards of this command family — with `incomplete_results: false`, so the absence of a match for this defect is a reading and not a silent zero. Nearest neighbours read and distinguished: #14894 (closed, `--no-metadata-forms` ignored under `--no-objects-only`), #16242 (`--source-hashes` drops non-`objects` provenance), #7681 and #5217 (both closed — a *gate* reporting a prerequisite failure as a content verdict, which is a different carrier from a *command flag* passing vacuously). No open card covers this.\n\n## Re-check\n\n```\n# in a fixture whose committed bundle has drifted:\nos i18n extract <config> --locales=<L> --out=DIR --check              # expect exit 1\nos i18n extract <config> --locales=<L> --out=DIR --check --dry-run    # observed exit 0, nothing compared\n```\n\nRefs: #14895 (the hint, PR #16470) · #14894 (closed, the ignored-flag sibling, PR #16120).\n\nFiled from the `domain:cli` execution PM seat using [Claude Code](https://claude.ai/code); this sentence is the attribution, since trailing footer blocks are stripped on issue creation."
+}

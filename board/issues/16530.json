@@ -1,0 +1,38 @@
+{
+  "number": 16530,
+  "kind": "issue",
+  "title": "MCP OAuth cannot complete on 17.3.0: plugin-auth passes `validAudiences`, which @better-auth/oauth-provider 1.7.2 no longer reads — every `resource=` request fails with `invalid_target … is not configured`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "auth",
+    "bug",
+    "domain:services",
+    "mcp",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T07:29:50Z",
+  "updated_at": "2026-09-08T19:46:49Z",
+  "closed_at": "2026-09-08T14:26:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16530",
+  "body": "## Summary\n\nMCP OAuth cannot complete on 17.3.0: the authorization server rejects every MCP client with `invalid_target: requested resource <mcp url> is not configured`. `@objectstack/plugin-auth` configures `@better-auth/oauth-provider` with `validAudiences: [authIssuer, mcpResourceUrl]`, but oauth-provider **1.7.2** (the version plugin-auth declares via `^1.7.2`) no longer has that option — the string `validAudiences` does not occur anywhere in its dist. In 1.7.2 an RFC 8707 `resource` is resolved from the `oauthResource` table (`sys_oauth_resource`), and `enforcePerClientResources` defaults to `true`, so each OAuth client must also be linked in `oauthClientResource`. Neither row is ever written, so any client that sends `resource=` (Claude Code does) is refused at `/oauth2/authorize`.\n\nThis is independent of http/https and of the desktop-app `must be https` refusal — it is the next wall behind it.\n\n## Environment\n\n- hotcrm `789a7324` (main), `@objectstack/*` **17.3.0**, `better-auth` 1.7.2, `@better-auth/oauth-provider` 1.7.2 (hoisted; plugin-auth declares `^1.7.2` for both)\n- dev server `objectstack dev -p 4001` with `OS_AUTH_URL=https://localhost:4443`, behind a local TLS reverse proxy (self-signed CA trusted in the system keychain)\n- Client: Claude Code desktop (Claude for Mac 1.46388.x, Claude Code 2.1.260), MCP entry `{type: http, url: https://localhost:4443/api/v1/mcp}`, no headers\n\n## Reproduction\n\n1. Discovery is correct after `OS_AUTH_URL`:\n   - `/.well-known/oauth-protected-resource` → `{\"resource\":\"https://localhost:4443/api/v1/mcp\",\"authorization_servers\":[\"https://localhost:4443/api/v1/auth\"], …}`\n   - `/.well-known/oauth-authorization-server` → issuer / authorization / token / registration endpoints all `https://localhost:4443/api/v1/auth/…`\n   - `GET /api/v1/mcp` → `401`, `www-authenticate: Bearer realm=\"ObjectStack MCP\", resource_metadata=\"https://localhost:4443/.well-known/oauth-protected-resource\"`\n2. In Claude Code: `/mcp` → **Connect**. Dynamic client registration succeeds (a new `sys_oauth_application` row `Claude Code (hotcrm)` with scopes `[\"openid\",\"profile\",\"email\",\"offline_access\",\"data:read\",\"data:write\",\"actions:execute\"]`), the system browser opens, and the flow ends on the error page:\n\n   > **Authentication failed** — Close this tab and try again from Claude Code.\n   > `invalid_target: requested resource https://localhost:4443/api/v1/mcp is not configured`\n\n3. Database after the attempt: `sys_oauth_resource` **0 rows**, `sys_oauth_client_resource` **0 rows**, `sys_oauth_application` 6 rows (one per Connect attempt over three days — a fresh client each time), `sys_oauth_consent` / `sys_oauth_access_token` / `sys_oauth_refresh_token` all 0. No token has ever been minted.\n\n## Where it happens\n\n- `@objectstack/plugin-auth` (dist, `oauthProvider({...})` options): `validAudiences: [this.getAuthIssuer(), this.getMcpResourceUrl()]` with the comment \"the AS only mints audiences it knows\". No `resources`, `clientRegistrationDefaultResources`, `enforcePerClientResources` or `resourcePrivileges` are passed.\n- `@better-auth/oauth-provider` 1.7.2, token/authorize path: for every requested resource `getResource(ctx, opts, identifier)` reads the `oauthResource` model; a miss throws `invalid_target … is not configured`. Then `resolveEnforcePerClientResources(opts)` → `{ value: true, source: \"default\" }` and `assertClientLinkedToResources` requires an `oauthClientResource` row per client.\n- `grep -c validAudiences node_modules/@better-auth/oauth-provider/dist/*.mjs` → 0 in every file.\n\n## Expected\n\nAn MCP client following the advertised discovery documents (RFC 9728 → RFC 8414 → DCR → PKCE authorize with `resource=<mcp url>`) should reach the consent screen and receive a token audienced to the MCP resource. Concretely, plugin-auth should:\n\n- register the MCP resource (`getMcpResourceUrl()`) as an `oauthResource` row at boot (or via the plugin's `resources` option, whichever 1.7.2 honours), and\n- either set `clientRegistrationDefaultResources: [mcpResourceUrl]` so DCR-registered clients are linked automatically, or set `enforcePerClientResources: false` for the MCP resource — a client that registers anonymously one second before the login cannot be linked by an admin in between.\n\n## Side observations\n\n- The CLI's boot-time \"🤖 MCP server — connect a coding agent\" block still prints `http://localhost:4001/api/v1/mcp` and a `claude mcp add … http://localhost:4001/…` line even when `OS_AUTH_URL=https://localhost:4443` is set and the `➜ MCP:` line above it correctly says https. The hint is built from the listen port, not the canonical origin.\n- Related but distinct: #16399 (URL normalisation in `getAuthIssuer` / `getMcpResourceUrl`). The values here were well-formed; the problem is that they are handed to an option the provider no longer reads.\n- Same demo track as #15705 / #16370 (MCP `run_action` on screen flows).\n"
+}

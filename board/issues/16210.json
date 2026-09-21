@@ -1,0 +1,37 @@
+{
+  "number": 16210,
+  "kind": "issue",
+  "title": "docs: `packages/client/README.md` calls `approvals.approve(requestId, 'LGTM')` — the second parameter is a decision object, so the npm front page fails with TS2559",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T05:59:55Z",
+  "updated_at": "2026-09-08T19:46:40Z",
+  "closed_at": "2026-09-08T17:35:59Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16210",
+  "body": "Found while working #16142 in the same code fence; a different defect class (wrong argument shape for a method that exists, vs. methods that no longer exist), so deliberately left untouched by that PR. Recorded only — not claimed, no assignee.\n\n## Where\n\n`packages/client/README.md`, in the \"Available Namespaces / Complete API Coverage\" tour, on `origin/main` @ `a7cce55038c`:\n\n```ts\n// Approvals (approval is a flow node — decisions are keyed by request id)\nawait client.approvals.approve(requestId, 'LGTM');\nawait client.approvals.reject(requestId, 'Incomplete');\n```\n\n## Why it is wrong\n\n`packages/client/src/index.ts:4686` and `:4699`:\n\n```ts\napprove: async (requestId: string, decision?: { actorId?: string; comment?: string; attachments?: string[] }): Promise<ApprovalDecisionResult> => {\nreject:  async (requestId: string, decision?: { actorId?: string; comment?: string; attachments?: string[] }): Promise<ApprovalDecisionResult> => {\n```\n\nThe second parameter is a decision object, not a comment string. Type-checked against the package's own published declarations (`packages/client/dist/index.d.ts`, built from `a7cce55038c`), both README lines fail:\n\n```\nerror TS2559: Type '\"LGTM\"' has no properties in common with type '{ actorId?: string | undefined; comment?: string | undefined; attachments?: string[] | undefined; }'.\nerror TS2559: Type '\"Incomplete\"' has no properties in common with type '{ actorId?: string | undefined; comment?: string | undefined; attachments?: string[] | undefined; }'.\n```\n\nThe docs site already has the correct spelling — `content/docs/api/client-sdk.mdx` writes `client.approvals.approve(requestId, { comment: 'Looks good' })`. As with #16142, the asymmetry is that the README shipping inside the package is the copy left behind.\n\nA JavaScript reader gets no type error and a silently dropped comment: the string is sent as the request body where the route expects the decision object's fields.\n\n## Why it is worth a card\n\nSame reason as #16142 and not a duplicate of it: `packages/client/package.json` declares `files: [\"dist\", \"README.md\", \"CHANGELOG.md\"]`, so this is the npm front page of `@objectstack/client`. It is also ungraded — every call in this fence sits in `check:published-readme-exports`'s `NOT read` bucket, measured and filed as #16209.\n\n## Executable criterion\n\nType-check the two lines against `packages/client/dist/index.d.ts` after `pnpm --filter '@objectstack/client...' build`: they fail TS2559 today and must compile after the fix. The correct spelling is `{ comment: 'LGTM' }` / `{ comment: 'Incomplete' }`, matching `content/docs/api/client-sdk.mdx`.\n\n## Not in scope for #16142\n\n#16142 is the three `client.ai.*` methods removed in v17. This is a live method documented with the wrong argument type; triage on #16142 drew that class line explicitly, and this PR keeps it."
+}

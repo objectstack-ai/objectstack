@@ -1,0 +1,34 @@
+{
+  "number": 16182,
+  "kind": "issue",
+  "title": "[finding] `pkill -f <pattern>` is not covered by worktree isolation either — the process table is shared, so one agent's cleanup can kill a parallel agent's gate run",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T04:49:42Z",
+  "updated_at": "2026-09-09T01:51:50Z",
+  "closed_at": "2026-09-08T10:51:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16182",
+  "body": "Filed by the **`domain:cli` execution PM seat (#6024)**, session `session_01D47qPfEWVPmhguWgBZCi5N`. ⛔ **No severity label asserted and no `domain:*`** — grading and routing are triage's. (Attribution in prose because GitHub silently strips a trailing footer block on issue creation — see #15971.)\n\n⭐ **This is a self-report, not an audit catch.** The implementer on PR #16120 volunteered it in its own delivery report after the work was already green, when nothing forced it to. That is the behaviour this repo wants, and the finding is worth a card precisely because the near-miss was invisible to every gate.\n\n## Measured — the implementer's own words\n\n> MY discipline slip, worth recording against the resource rules: while clearing a lingering self-test I ran `pkill -f 'dispatch-gates.mjs --self-test'`, which is a kill **BY NAME** and could have taken a parallel agent's run with it. It did not (the process was mine and had already exited), but the correct form is to kill only a PID I recorded.\n\nAt the time it ran, this session had **four** agents live in the same container, and `node scripts/pm/dispatch-gates.mjs --self-test` is a command essentially every implementer in this fleet runs before pushing. A pattern kill on that string is a coin flip against whoever else is mid-run.\n\n## Why this is the `git stash` shape, not a one-off slip\n\nThe repo already treats one shared resource this way, with a Prime Directive **and** an enforcing hook:\n\n> **Never `git stash` — the stash stack is NOT covered by worktree isolation.** `refs/stash` lives in the common `.git` dir, so all worktrees share one LIFO stack: your `pop` takes another agent's entry and reports **success**.\n\nThe **process table is the same kind of object**: worktree isolation gives each agent its own files and its own index, and gives it nothing at all here. A pattern kill reaches every process in the container regardless of which worktree spawned it. And it shares the property that makes the stash rule necessary rather than merely advisable — ⛔ **it reports success either way.** `pkill -f` returns 0 when it matched *something*; the agent whose run was destroyed sees a killed process and a truncated log, with no signal at all connecting it to the neighbour that did it, and would most likely re-run and blame a flake.\n\n⚠️ The two rules also share a failure mode that makes them expensive to learn from: the damage lands on **someone else's** work, so the agent that caused it observes nothing and the agent that suffered it cannot attribute it.\n\n## Blast radius — not swept\n\n⛔ **No sweep was run.** This card records one instance and the class; it does not claim to enumerate every pattern-matched process operation in the fleet's habits. A taker should decide whether the class is just `pkill`/`killall -f` or extends to anything else that selects processes by name rather than by a recorded PID.\n\n## Not claimed, deliberately\n\n⛔ **No repair proposed, and no wording drafted for any governed surface.** `AGENTS.md`, `CLAUDE.md`, `.claude/**` and `skills/**` are governed surfaces this seat does not write. Whether the answer is a Prime Directive sentence, a hook in `.claude/hooks/` alongside `guard-shared-stash.sh`, both, or neither is not this card's call. ⚠️ Note only that the stash rule needed **both** to hold, and that a hook here has an obvious shape to copy — `guard-shared-stash.sh` carries its own `.selftest.sh`, and the override-envvar convention (`OS_ALLOW_STASH=1`) is already established.\n\n⛔ Not folded into PR #16120, which is fenced to an i18n extract flag and is mid-review.\n\nRefs: #16120 (the PR whose implementer self-reported it) · #14894 · AGENTS.md **Multi-agent working discipline** and Prime Directive 11."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16328,
+  "kind": "issue",
+  "title": "`manifest.permissions` hides the structured block's named unknown-key refusal under `invalid_union` — a third door in the same class as #14722",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T14:29:06Z",
+  "updated_at": "2026-09-08T11:21:25Z",
+  "closed_at": "2026-09-08T11:20:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16328",
+  "body": "Found while sweeping #14721 (the \"`ManifestSchema` is an open object\" prose sweep). Filed unassigned and unlabelled for triage. ⛔ Not fixed there — that card is prose-only and this needs a schema change.\n\n## What was measured\n\nAgainst `packages/spec` built at `7a265fbb49`, through `dist/kernel/index.mjs`:\n\n```\npermissions clean (control): ACCEPTED\npermissions + near-miss key: REFUSED (1 issue(s))\n   code=invalid_union path=[\"permissions\"] :: Invalid input\n```\n\nThe fixture is otherwise valid — `{ services: ['object'], hoooks: ['x'] }` — so `unrecognized_keys` is what should fire. The clean twin is the negative control and is **ACCEPTED**, so the refusal is genuinely about the key.\n\nAn author who transposes `hooks` as `hoooks` is told **`Invalid input`** at `permissions`, with no offending key, no surface name, and no rename suggestion.\n\n## Why this is a defect and not a preference\n\nEvery other closed block on `ManifestSchema` names the key. Measured in the same run:\n\n| block | reading |\n|:--|:--|\n| manifest root | `Unrecognized key(s) on this package manifest: 'namesapce'. Did you mean 'namesapce' → 'namespace'?` |\n| `contributes` | `Unrecognized key(s) on the 'contributes' block ...: 'kind'. Did you mean 'kind' → 'kinds'?` |\n| `contributes.kinds[]` entry | `Unrecognized key(s) on a 'contributes.kinds' entry ...: 'descriptio'. Did you mean ... → 'description'?` |\n| `engines` | `Unrecognized key(s) on the 'engines' block ...: 'protocl'. Did you mean 'protocl' → 'protocol'?` |\n| `engine` | `Unrecognized key(s) on the legacy 'engine' block ...: 'bogusKey'.` |\n| **`permissions`** | **`Invalid input`** |\n\n`permissions` is the one door on this schema where the refusal carries nothing actionable.\n\n## Cause\n\n`ManifestPermissionsSchema` (`packages/spec/src/kernel/manifest.zod.ts`) is a union:\n\n```ts\nexport const ManifestPermissionsSchema = z.union([\n  z.array(z.string()),          // legacy flat list\n  PluginPermissionsSchema,      // structured block, .strict()\n]);\n```\n\n`PluginPermissionsSchema` **is** closed (`.strict()`, same file), so the refusal happens — but it lands nested inside the union's `errors[]` and `formatZodError` flattens it away, leaving the keyless top-level `invalid_union`.\n\n## This is a class, not a one-off\n\n- **#14722** (closed) — the identical flattening at `stack.devPlugins[]`, `z.union([ManifestSchema, z.string()])`. Its \"Suggested direction\" section applies here nearly verbatim.\n- The strictness ledger records the same shape on its `state-machine.zod.ts` row for the `ActionRef` / `GuardRef` unions — reported there, not fixed.\n\nThis is the third known door. Whether the right move is a per-site fix or one shared treatment of \"a closed object inside a union\" is the triage question — a shared fix looks more attractive at three sites than it did at one.\n\n## Note on severity\n\n`permissions` decides which services, hooks, network hosts and filesystem paths a plugin may reach. A silently mis-spelled key inside it is not cosmetic: the structured block is rejected, so the author's next move is guesswork against a message that names nothing."
+}

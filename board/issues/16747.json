@@ -1,0 +1,34 @@
+{
+  "number": 16747,
+  "kind": "issue",
+  "title": "[finding] `check-partof-closing-keyword`'s RELATION_CONTRACT presents as a verbatim citation of the os-dev agent rules but carries a second sentence that file does not have",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T03:19:28Z",
+  "updated_at": "2026-09-08T05:39:52Z",
+  "closed_at": "2026-09-08T05:39:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16747",
+  "body": "Filed unassigned by the dev seat working #16653 (session `session_01P58euzUXCVJNwmhuPC9DXY`), 2026-09-08. ⛔ Not routed and not graded — that is triage's. Not repaired in #16653's PR on purpose: see \"Why it was not fixed in passing\" below.\n\n## The contradiction\n\n`scripts/check-partof-closing-keyword.mjs` builds its printed finding around a constant it presents as a **verbatim quotation** of this repo's agent rules:\n\n```\nconst RELATION_CONTRACT =\n  'The contract is written down in the agent rules at .claude/agents/os-dev.md — '\n  + '「PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。'\n  + 'squash 会把全部 commit message 连成一条落地,逐条诚实拼成的一条自相矛盾。」 '\n```\n\nThe corner-bracket quotation marks, the surrounding docblock and the self-test all assert this is a citation and not a paraphrase:\n\n- the constant's own docblock: *\"Quoted verbatim, in its own language, because a translation of a ruling is a rewrite of it.\"*\n- the header, on the same text: *\"cited rather than restated\"*\n- the self-test case name: `the finding CITES the contract rather than restating it in its own words`\n\n## Measured\n\n`.claude/agents/os-dev.md` carries the **first** sentence only, at line 281:\n\n> PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。\n\nThe second sentence inside the quotation marks — 「squash 会把全部 commit message 连成一条落地,逐条诚实拼成的一条自相矛盾。」 — appears **nowhere else in the tree**. Measured at `1ea349f0`:\n\n```\n$ git grep -n \"连成一条落地\"\nscripts/check-partof-closing-keyword.mjs:433: ... (this file, and only this file)\n```\n\nSo the sentence inside the quotation marks was written here, not quoted from there. Every red RULE 2 run prints it to an agent as the ruling's own words.\n\n## Why this is worth a card rather than a note\n\nAGENTS.md's Communication section binds this directly: **\"引用中文裁决时保持原文、不翻译——改写引文就是改写裁决\"**. A citation that adds a sentence is the same failure in the other direction: it attributes to the ruling a claim the ruling does not make, and the agents that read this output are the same population that reads the rules file, so the two texts are expected to agree.\n\n⚠️ The added sentence is not wrong on the facts — the squash really is assembled from the commit messages, and #16653's PR measures that on `0a61db1f5`. The defect is the attribution, not the content. That is what makes it cheap to get wrong and easy to leave standing.\n\n⭐ Worth stating plainly: the gate is *right* to cite rather than restate, and the mechanism it chose is the correct one. Only the payload drifted from its source.\n\n## Candidate remedies (⛔ not a prescription — routing and grading are triage's)\n\n1. Trim the constant to what the rules file actually says, leaving the second sentence as the gate's own prose **outside** the quotation marks.\n2. Or add the sentence to `.claude/agents/os-dev.md` so the citation becomes true — a governed-surface edit, maintainer-merged, and a decision about the ruling rather than about this script.\n3. Consider whether this pair belongs in `check:declaration-mirrors`, which exists for exactly this class of two-copies-must-agree drift and does not cover this quote today. That is the only remedy that would stop the next one.\n\n⚠️ Remedies 1 and 2 point at different files and answer different questions, which is precisely why the dev seat did not pick one in passing.\n\n## Why it was not fixed in passing\n\n#16653's dispatch scopes its PR to the gate's guidance text and its pins. This is a different defect with an unsettled fix shape — one candidate edits a **governed** surface (`.claude/**`), and choosing between \"trim the quote\" and \"amend the ruling\" is a decision about what the ruling says, not a mechanical correction. Filing it keeps a text correction from carrying an unmeasured ruling change.\n\n## Provenance\n\nFound while reading `RELATION_CONTRACT` to confirm #16653's guidance rewrite did not disturb the cited contract. Dedup: one targeted semantic search, `total_count: 1`, the single hit unrelated (#12800, a closed card about the verify lock's guarantees in the same rules file). REST was unavailable to this session (repo-scoped reads answer 403 `GitHub access is not enabled for this session`), so the search channel is declared rather than assumed.\n\nGenerated by Claude Code, session `session_01P58euzUXCVJNwmhuPC9DXY`."
+}

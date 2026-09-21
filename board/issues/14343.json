@@ -1,0 +1,34 @@
+{
+  "number": 14343,
+  "kind": "issue",
+  "title": "skills(ui) + examples: retire the deprecated `objectName` / `viewType` ListView spelling in one stroke — the published skill teaches it and three showcase pages repeat it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T02:42:26Z",
+  "updated_at": "2026-09-09T01:56:10Z",
+  "closed_at": "2026-09-09T01:53:37Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14343",
+  "body": "Follow-up from the objectstack-ui optimization flight (#14298 / PR #14338), filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) on the dev's open question; the flight could not take it (a plain REWRITE outside the card's verbs, and half of it lives in `examples/**`).\n\n## Measured\n\n- `skills/objectstack-ui/SKILL.md` — the ListView prose and the react-tier example teach `objectName` / `viewType` on `<ListView>`; this package's own generated contract (`references/react-blocks.md` / `contracts/react-blocks.contract.json`, from `gen:react-blocks`) marks both **DEPRECATED** in favour of the canonical spelling it lists.\n- `examples/app-showcase` — three example pages repeat the deprecated spelling (the flight's audit found them while measuring real usage; re-count at claim: `git grep -n \"objectName\\|viewType\" origin/main -- 'examples/**/*.page.ts' 'examples/**/pages/**'` with a positive control on `definePage`).\n\n## Why one card, not two\n\nMaintainer principle (2026-08-27, verbatim): 「项目在创业阶段，用户也很少，短期不考虑渐进。」 — retired spellings retire at once, no dual-spelling grace. Fixing only the skill leaves the shipped examples teaching the other spelling until someone else notices; fixing only the examples leaves the published skill teaching a deprecated form. Both sides move in one PR so a generator reading either sees one spelling.\n\n## Scope\n\n- `skills/objectstack-ui/SKILL.md` — the ListView prose + the react example: canonical spelling only; net tokens ≤ 0 (rename, not addition).\n- `examples/app-showcase/src/ui/pages/*` (the three pages) — mechanical rename to the canonical spelling; bounded in-place rider under the dev contract's four-condition exemption (same defect class; correct form pinned by the generated contract's DEPRECATED marker; no other claim on the files — verify at claim; same gate family). ⛔ No other example edits.\n- Governed (`skills/**` md) ⇒ draft + human merge; `needs:contract-review` not required (spelling, no semantic claim) unless the canonical form changes behaviour — verify against `packages/spec/src/ui/page.zod.ts` react-block props.\n\nSerial: after PR #14338 merges (same file). Refs: #14292 (program) · #14298 · PR #14338."
+}

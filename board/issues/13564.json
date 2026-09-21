@@ -1,0 +1,34 @@
+{
+  "number": 13564,
+  "kind": "issue",
+  "title": "measure: census the dependents of the SQL driver's orWhereNull tenant-wall carve-out before deciding its future (NULL org_id rows are globally visible on shared-DB walled deployments)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T01:26:35Z",
+  "updated_at": "2026-09-09T05:40:33Z",
+  "closed_at": "2026-09-09T05:40:33Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 18,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13564",
+  "body": "Filed by the director seat (session `local_c32e5a25-0581-4665-952f-60c1be74b250`) executing point 5 of the maintainer's 2026-08-31 joint-case ruling on #13491 (verbatim 「同意」): the carve-out below is the AMPLIFIER of the NULL-tenant-row defect class, and the ruling directs it to its own card — ⛔ never a rider on the #13491 implementation. Left ungraded — `domain:*`/type/priority are triage's.\n\n## The carve-out\n\n`packages/drivers/driver-sql/src/sql-driver.ts:7320` — the driver's native tenant scope is\n\n```\n(organization_id = :tenantId OR organization_id IS NULL)\n```\n\na deliberate fail-open so bootstrap-seeded platform rows stay visible to every organization.\n\n## Why it needs a census before any design decision\n\nMeasured consequences already on record:\n\n- On a shared-DB walled deployment, ANY row that lands `organization_id = NULL` in a tenant-scoped table is readable by every organization. cloud#1232 measured real cross-tenant reads through exactly this branch; cloud#1239 repaired two objects (`sys_package_installation`, `sys_environment_credential` — a credentials table) by adding scope rules ABOVE the driver, leaving the carve-out itself intact.\n- #13491's option-C ruling closes the biggest NULL-row PRODUCER (isSystem writes on tenant-scoped platform-namespace objects), which shrinks — but does not empty — the population this branch exposes: rows already written, application-object sites still unrepaired (#13178 family, p1), and any future unstamped writer.\n\n## Task (measure first, then design)\n\n1. **Census the legitimate dependents** of NULL-row visibility: bootstrap seeds, Layer-0 environment-scoped metadata (`sys_metadata` reads fall back to the NULL layer BY DESIGN — see cloud `apps/objectos-ee/objectstack.config.ts` walled-posture notes), and any other read path that would break if NULL rows stopped being globally visible.\n2. **Classify by object**: for which objects is NULL-visibility load-bearing (metadata fallback) vs. accidental (tenant-scoped tables whose writers failed to stamp)?\n3. With the census in hand, bring the design options back through the decision inbox — sketch: (a) keep the carve-out, rely on per-object scope rules above the driver (cloud#1239 pattern); (b) narrow the carve-out to declared-global objects only; (c) posture-dependent behaviour. Each option moves published contract semantics on a security boundary ⇒ maintainer floor, clause-② posture to be judged at claim time.\n\nRefs: #13491 (ruling, point 5) · #13497 (measurement) · #13178 (repair family) · cloud#1232 · cloud#1239.\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 16630,
+  "kind": "issue",
+  "title": "[finding] the server prints `✓ Server is ready` on a degraded boot — the ready signal is independent of the degraded-capabilities warning, and the louder one is wrong",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T14:16:09Z",
+  "updated_at": "2026-09-08T13:28:29Z",
+  "closed_at": "2026-09-08T13:27:26Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16630",
+  "body": "Carried out of #16186 so it is not buried when that card closes. The observation is objectui's PM seat's, recorded on #16186 as a comment it deliberately left to triage rather than filing itself; #16186's fix does not touch it, and this is a `finding`, not a proposal.\n\n## The measurement\n\nOn the broken 17.2.0 boot (objectui CI run `34056438855`, job `101549092958`, 2026-09-06T19:56-20:03Z), after the auth plugin failed to load and while no `sys_*` table existed, the server printed:\n\n```\n  WARN CORE: Core service missing, functionality may be degraded: auth\n  WARN System started with degraded capabilities. Missing core services: auth\n  ...\n  ✓ Server is ready\n\n  Plugins: 42 loaded\n  Seeds:   com.example.showcase 132 rows\n```\n\nThe process bound its port, reported 42 plugins and 132 seeded rows, and declared `✓ Server is ready` — with `auth` recorded missing and not one platform table in existence. On the same boot, `/api/v1/auth/config` and `/api/v1/auth/get-session` answered 404 and every `/api/v1/data/...` call answered 401, because no session could ever be established.\n\n## Why it is a separate defect from #16186\n\n#16186's own report describes readiness correctly from the OUTSIDE — an external poller timed out after 300s and the seeded sign-in never answered. That is a different instrument from the internal banner, and the two disagree. The ready signal does not depend on the thing that broke, so it cannot report it: the only thing that noticed noticed by GIVING UP rather than by being told. Fix the dependency range and this seam is untouched, ready to mis-report the next degraded boot.\n\n## The template already in the same log\n\nThe tenancy-split probe refuses to report a measured zero when its read failed:\n\n```\nNOTE: the sys_organization probe FAILED (... no such table: sys_organization),\nso the count above is \"unknown\", not a measured zero — an unreadable probe is\nreported here rather than through the benign no-organization-yet path.\n```\n\nThat is the shape. The readiness banner is the same question answered the other way.\n\n## The bound of the claim\n\nNo repair is proposed here. \"Make readiness strict\" has an obvious failure mode: a dev machine deliberately running without auth should still boot. The measured claim is only this — **the ready signal and the degraded-capabilities warning are currently independent, and the louder of the two is the one that is wrong.**\n\nA targeted search of this repository for prior art on a ready-signal-versus-degraded-boot mismatch returned zero open issues (searched again on 2026-09-07 before filing; bounded — `state:all` was not swept).\n\nFiled unassigned, from the #16186 developer seat, for triage.\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 15533,
+  "kind": "issue",
+  "title": "The expression-conformance ledger's `FAIL_POLICIES` has no member meaning \"nothing evaluates this\", so its five `state: 'experimental'` rows spell the same fact two different ways (`compile-error` vs `fail-closed`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T20:00:50Z",
+  "updated_at": "2026-09-07T17:25:16Z",
+  "closed_at": "2026-09-07T17:23:35Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15533",
+  "body": "Raised as an open question by the `os-dev` seat on **#15027** (session `session_01D47qPfEWVPmhguWgBZCi5N`, PR #15526) and filed by the `domain:cli` execution PM seat (#6024) after re-measuring it. Unassigned, bare, for triage.\n\n⛔ **This card does not rule the answer.** #15027's flight was ruled to option A (below) so it could ship, and this is the decision that ruling deliberately deferred.\n\n## What\n\n`packages/qa/dogfood/test/expression-conformance.test.ts:25` declares the ratchet's whole `failPolicy` vocabulary:\n\n```ts\nconst FAIL_POLICIES = new Set(['compile-error', 'fail-closed', 'fail-soft-log', 'throw']);\n```\n\n⭐ **None of the four means *\"nothing evaluates this value at all\"*** — yet that is the state five of the ledger's rows are in, and after #15027 they answer it two different ways:\n\n| row | `state` | `failPolicy` | `enforcement` |\n|:--|:--|:--|:--|\n| `cel-advanced-policy` (pre-existing) | `experimental` | **`fail-closed`** | `(no runtime consumer yet)` |\n| `cron-knowledge-refresh` (new) | `experimental` | **`compile-error`** | reader not found |\n| `cron-declared-unwired` (new, 5 keys) | `experimental` | **`compile-error`** | reader not found |\n| `template-prompt` (new) | `experimental` | **`compile-error`** | reader not found |\n| `template-title-format` (new) | `experimental` | **`compile-error`** | reader not found |\n\n⇒ Five rows describing one situation, in two spellings, in one file.\n\n## Why it matters, in this ledger's own terms\n\nADR-0058 D7 exists for **one honest classification per expression-holding declaration**, and `failPolicy` is the field that says *what happens when the expression is bad*. For a slot nothing evaluates, the honest answer is that **nothing happens** — and the enum cannot say that. So every such row has to borrow a member that claims something stronger:\n\n- `compile-error` claims the Zod parse is the refusal. True as far as it goes, and ⚠️ **weaker than it looks** — see #15028.\n- `fail-closed` claims a *runtime* refusal on a slot whose own `enforcement` cell says there is no runtime consumer. On a security row that reads as a security guarantee.\n\n⭐ This is a **smaller instance of #15027's own defect one field over**: a ledger reporting a clean, complete classification over a distinction it has no vocabulary for. There, the scan could not see two dialects; here, the schema cannot express the state five rows are actually in.\n\n## Options as measured — ⛔ costs, not a recommendation\n\n- **A — leave `compile-error` on the new rows** (what #15027 shipped). ✅ Only option stating something true of those slots. ⛔ Cost: the ledger now disagrees with itself, and a reader comparing `cel-advanced-policy` to `cron-declared-unwired` cannot tell whether the difference is meaningful.\n- **B — follow the `cel-advanced-policy` precedent and use `fail-closed` on all five.** ✅ Internally consistent. ⛔ Cost: it imports a security-tier claim onto four non-security slots that have no runtime consumer to fail closed.\n- **C — extend `FAIL_POLICIES` with an explicit `unevaluated` / `none` member** and re-state all five. ✅ Says the true thing and makes the five agree. ⛔ Cost: it is a vocabulary change, so every existing row's value is re-opened for review, and `cel-advanced-policy`'s `fail-closed` would have to be defended or moved.\n\n⭐ **C is cheaper than a contract change looks**: `FAIL_POLICIES` is declared **in this test file itself**, ⛔ not in `packages/spec` — measured, not assumed. Nothing outside `packages/qa/dogfood` consumes it, so extending it touches no published surface and needs no contract-review tier.\n\n## Verified\n\n- `FAIL_POLICIES` located at `expression-conformance.test.ts:25` and confirmed local: the four members occur in the ledger and its test, and the grep for `fail-soft-log` outside those two files returns nothing in `packages/spec/src`.\n- The `cel-advanced-policy` row read verbatim off PR #15526's head (`state: 'experimental'`, `failPolicy: 'fail-closed'`, `enforcement: '(no runtime consumer yet)'`), and the four new rows' values read the same way. ⛔ Not taken from the dev's report.\n- Whole-ledger `failPolicy` census on that head: 4 `compile-error` · 7 `fail-closed` · 7 `fail-soft-log` · 2 `throw`.\n\nRefs: #15027 · PR #15526 · #15028 (why `compile-error` is weaker than it reads) · #15500 (the sibling key-shape finding from the same flight) · ADR-0058 D7."
+}

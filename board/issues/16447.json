@@ -1,0 +1,35 @@
+{
+  "number": 16447,
+  "kind": "issue",
+  "title": "[finding] extractWatchHints drops any watch-hint literal that OPENS with a glob, so a gate declaring `**/package.json` declares a population of ZERO — correct to hintCovers, invisible to the derivation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T01:47:39Z",
+  "updated_at": "2026-09-08T08:43:37Z",
+  "closed_at": "2026-09-08T06:52:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16447",
+  "body": "Found while writing the `repository.directory` gate (PR #16446). Filed rather than fixed there: the repair is a change to `scripts/pm/dispatch-gates.mjs`'s admission rule and belongs to a card that owns that file.\n\n## The measurement\n\nA gate whose population is a FILE KIND rather than a subtree wants to declare it in one line. That line is judged CORRECTLY by the consumer and is never SEEN by the producer:\n\n- `hintCovers('**/package.json', p)` answers `true` for `package.json`, `packages/triggers/trigger-schedule/package.json`, `apps/docs/package.json` and `examples/crm/package.json`, and `false` for `packages/spec/src/index.ts`. It is judged as a pattern (`globInNonFinalSegment` is true), so it goes through `triggerCovers` and is exactly right.\n- `extractWatchHints` on a module body containing `const ROOT_DIR_WATCH_HINTS = ['**/package.json'];` returns `[]`.\n\nThe reason is one character position in the admission regex, which requires the literal to START with a word character, a dot or an `@`:\n\n```\nif (!/^[\\w.@][\\w.@\\/*-]*$/.test(raw)) continue;\n```\n\nA leading `*` fails that test, so the literal never reaches the resolve step, never becomes a hint, and the gate is placed on NO card.\n\n## Why this is the silent-drop class rather than a spelling preference\n\nThe symptom is the one `check:watch-hint-literal` exists to prevent, arrived at through the VALUE instead of through the spelling. That gate asks whether the declaration is a literal array inside the declaration statement — which this one is, so it passes. Nothing anywhere asks whether the literals inside it are ADMISSIBLE. The gate then reads as declared, its self-test passes, `check:declared-population-live` is satisfied by nothing (a family that declares zero literals \"declares nothing\", which is a legitimate state), and the family scores `undetermined` or `silent` for every card in the tree.\n\nMeasured end to end on the branch of PR #16446: with the one-line declaration, `check:pm-dispatch-gates` reddened on the ROOT_WALK_RESIDUE case (\"unlisted: check:manifest-repository-directory\") — which is the correct outcome and is the only reason the drop was noticed at all. A gate whose source carries no repo-root walk would have gone unnoticed entirely: no gate reds, and the family simply appears on no card.\n\n## The workaround that shipped, and why it is not the fix\n\nPR #16446 declares four literals instead, all admissible:\n\n```\nconst ROOT_DIR_WATCH_HINTS = ['packages/**/package.json', 'apps/**/package.json', 'examples/**/package.json'];\nconst ROOT_FILE_WATCH_HINTS = ['package.json/**'];\n```\n\nThose extract all four and place the gate exactly (MATCHED on a manifest card, silent on `packages/spec/src/index.ts`). But the enumeration has to name every root that holds a manifest, so it goes stale the day a new top-level root appears — that gate pins a set-equality against its own scan to catch it, which is per-gate work every future file-kind gate would have to repeat.\n\n## The decision this needs, not guessed here\n\nTwo shapes, and they are not equivalent:\n\n1. Widen admission to accept a leading glob. Cheap, but admission is a load-bearing refusal with measurements behind it (the docblock records +139084 fabricated pairs for bare top-level words and a re-measured refusal of the resolved-form widening), so widening it is a change to a rule that was narrowed deliberately.\n2. Leave admission alone and make the DROP loud: a literal that fails admission inside a recognised `*_WATCH_HINTS` declaration is a finding in `check:watch-hint-literal`, which already owns \"the declaration must be visible to the extractor\" and already reads exactly those declarations.\n\nOption 2 looks like the smaller change and the one that matches the existing division of labour, but the choice is a maintainer's — the first is a change to the derivation's own admission semantics for every gate in the farm.\n\nUnassigned and untriaged."
+}

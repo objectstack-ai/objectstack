@@ -1,0 +1,34 @@
+{
+  "number": 15223,
+  "kind": "issue",
+  "title": "[finding] service-automation: the durable run-history row folds `cancelled` (and `timed_out`) into `failed` — after a restart the Runs surface cannot tell a cancelled run from a failed one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T06:26:49Z",
+  "updated_at": "2026-09-09T03:23:08Z",
+  "closed_at": "2026-09-09T03:04:37Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15223",
+  "body": "Observed while delivering the services half of #13937 (branch `claude/issue-13937-stranded-run-operator-verb`); recorded, not fixed.\n\n## The reading, on `origin/main` 50d6c924\n\n- `RunRecord.status` (`packages/services/service-automation/src/engine.ts`) is declared `'completed' | 'failed'`.\n- `AutomationEngine.recordLog` writes the durable row for every terminal entry (`completed`, `failed`, `cancelled`, `timed_out`) with `status: entry.status === 'completed' ? 'completed' : 'failed'`.\n- `ObjectStoreSuspendedRunStore.deserializeTerminal` reads it back as `row.status === 'failed' ? 'failed' : 'completed'`; the in-memory store round-trips what it was given (`failed`).\n- `getRun` prefers the in-memory ring entry, which still says `cancelled`; after a restart (or ring-buffer eviction) the durable row answers, and it says `failed`.\n\n⇒ In-process a cancelled run reads `cancelled`; after a restart the same run reads `failed` on `getRun`, `listRuns` and the Runs surface. `restoreConsumedSuspension`'s refusal ladder can name `RUN_CANCELLED` only for a run this process saw cancelled — the durable row gives another replica nothing to distinguish (measured in `stranded-run-status.test.ts` on the named branch: the stale-copy refusal after a cancellation elsewhere is `NO_CONSUMED_SUSPENSION`, honestly, because that is all the row says). The narrowing is not explained in either file; `ExecutionStatus` in `@objectstack/spec` declares all four terminal members.\n\nNot measured: whether any consumer branches on a durable `cancelled` today (plugin-approvals' dead-run sweep treats every terminal status alike, so it is unaffected).\n\n## Related\n\n#13937 · #13909 · #2585 (run-history retention, the row's origin) · #7533 (the trigger columns on the same row)"
+}

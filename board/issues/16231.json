@@ -1,0 +1,34 @@
+{
+  "number": 16231,
+  "kind": "issue",
+  "title": "[finding] `ObjectQL.findOne` / `update` / `delete` return `hookContext.result` under a `Promise[any]` declaration — nothing to guard, because nothing is declared",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "needs:contract-review",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T06:51:42Z",
+  "updated_at": "2026-09-09T07:49:45Z",
+  "closed_at": "2026-09-09T06:36:37Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 21,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16231",
+  "body": "## What was measured\n\nAngle brackets do not survive this body's sanitizer, so declared types are spelled with square brackets: `Promise[any]` is the real `Promise` of `any`.\n\n`packages/objectql/src/engine.ts` has **four** `return hookContext.result` sites — one per hook-bearing verb. Measured on `origin/main` at `bdc02182b`:\n\n| return site | host method | declared return type | enforceable declaration to violate? |\n|:---|:---|:---|:---|\n| `:9565` | `find` (`:9425`) | **`Promise[any[]]`** | yes — a concrete shape |\n| `:9784` | `findOne` (`:9671`) | `Promise[any]` | no |\n| `:12103` | `update` (`:10837`) | `Promise[any]` | no |\n| `:13537` | `delete` (`:13054`) | `Promise[any]` | no |\n\nEach of the four returns whatever the corresponding `after*` hook dispatch left in `hookContext.result`, with no re-check. On `find` that was a real contract violation, and the 2026-09-06 ruling on #15823 shut that seam (`FIND_HOOK_RESULT_NOT_ARRAY`). On the other three there is nothing to violate, because `any` promises nothing.\n\n## Why this is a card rather than a shrug\n\nThe director ruling on #15823 recorded it explicitly, and fenced it out of that card's scope:\n\n> Not ruled, recorded for the engine seat to file as its own `finding`: `findOne` (`:9671`) and `update` declare `Promise[any]` and so carry no enforceable declaration — a declaration question, not this card's.\n\nTriage on #15823 had raised the same point a day earlier, from the other side:\n\n> 若裁定「`find()` 必须保证数组」，那么 `findOne` / `update` 声明 `Promise[any]` 这件事本身就值得问一句——它们**没有可执行的声明**。\n\nSo the question this card carries is not \"should these three be guarded\" — it is **what should they declare at all**. A guard cannot exist before a declaration worth guarding does. `find()` was guardable precisely because someone had written down what it answers.\n\nConcretely, each of the three has a knowable answer that `any` hides:\n\n- `findOne` answers one record **or `null`** — its own docblock says so (\"Read the ONE record the query selects, or `null`\"), and callers already branch on `if (!row)`. `Promise[any]` documents none of that.\n- `update` and `delete` answer a driver-shaped result whose shape varies by dispatch path (by-id vs predicate vs multi), which is exactly the sort of thing a declared union would make legible — and exactly the sort of thing an `any` lets drift per driver.\n\nThe cost is the same one #15823 recorded and priced: every consumer that has to decide whether a normalizer limb over one of these is dead pays a reachability argument instead of reading a type. The #15094 census counted 104 array-or-envelope normalizer blocks. #15823's ruling made the ones downstream of `find()` dead by type; the ones downstream of these three are not, and cannot be, while the declaration is `any`.\n\n## Not ruled here, and deliberately not proposed\n\nThis card records the measurement and the question. It does **not** propose the answer, because there are at least three and they differ in cost:\n\n1. narrow each declaration to what the method actually answers (`findOne` to a record-or-`null` type, the write verbs to a declared result shape), then guard the hook seam the way `find()` now is;\n2. narrow the declarations only, and leave the seams unguarded — a documentation win with no enforcement;\n3. leave all three as `any` and record that decision, so the next reader does not re-derive this.\n\nOption 1 is a published-surface change on three engine methods with roughly the same consumer blast radius `find()` had, so it wants its own ruling rather than a dev's judgement.\n\n## Neighbours, checked\n\nDedup ran on the repo-scoped REST list of open `domain:engine` issues (74 open, control satisfied in the same read: #15823 itself is present, so the empty result is a reading rather than a false zero). GitHub's `/search/issues` is 403 for this seat (sessions are bound to repository-scoped endpoints) and the MCP search was rate-limited, so the list-plus-grep channel is what produced this.\n\nThe nearest neighbour is **#15267**, and it is a different layer: that card is about `driver-sql` / `driver-turso` publishing `Promise[any]` on five **`IDataDriver`** doors. This card is about the **engine's own** `ObjectQL` method declarations. The two would likely be argued together, but neither contains the other.\n\nRefs: #15823 (the ruling that fenced this out, and the precedent for what a guardable declaration buys) · #15094 (the normalizer census whose sweep policy this affects) · #15267 (the driver-layer sibling).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

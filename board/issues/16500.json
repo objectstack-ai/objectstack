@@ -1,0 +1,36 @@
+{
+  "number": 16500,
+  "kind": "issue",
+  "title": "Registry canary failed: fresh npx create-objectstack install is broken",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T04:51:15Z",
+  "updated_at": "2026-09-09T04:18:10Z",
+  "closed_at": "2026-09-09T04:18:10Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16500",
+  "body": "The weekly publish-smoke registry canary failed: a fresh `npx create-objectstack@latest` project no longer completes the first-run path against the npm registry — scaffold, npm install, npm run build, then auth + REST CRUD.\n\nRead the run log to see WHICH step failed, because the two have different owners:\n\n- **npm run build failed** — the published scaffold is broken on its own second command. This is the #4902/#7644/#8677 class; the fix is in create-objectstack or the template it ships.\n- **an auth or CRUD probe failed** — this is the #3091 class hitting ALREADY-published versions (e.g. a transitive dependency released into a ^ range).\n\nRun log: https://github.com/objectstack-ai/objectstack/actions/runs/34084559243"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 16669,
+  "kind": "pull_request",
+  "title": "fix(tooling): derive check-wildcard-fallthrough's self-test case count from its own ledger",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T17:37:48Z",
+  "updated_at": "2026-09-07T18:29:06Z",
+  "closed_at": "2026-09-07T18:29:05Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-07T18:29:05Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16669",
+  "body": "Fixes #15231\n\nThe self-test verdict of `scripts/check-wildcard-fallthrough.mjs` printed a\ntranscribed `17 cases` while the body ran 18 assertions and the battery roster\npinned 18. Nothing derived that number and nothing compared it — the fourth\ninstance of a class already filed twice (#13963, #13536) and once more in\n#16007. Per triage, the route is option 2: derive the count, not correct the\nliteral.\n\n## Before / after\n\n```\n$ node scripts/check-wildcard-fallthrough.mjs --self-test     # origin/main 0a61db1f5d\n✓ self-test: 17 cases                                          exit 0\n\n$ node scripts/check-wildcard-fallthrough.mjs --self-test     # this branch\n✓ self-test: 18 cases                                          exit 0\n\n$ pnpm check:wildcard-fallthrough                             # this branch\n✓ self-test: 18 cases\n✓ wildcard fall-through: 8 yielding / 0 ratcheted / 5 exempt (13 namespace-claiming mounts)\n                                                               exit 0\n```\n\nRe-derived on this branch's base, not taken from the card: the literal was at\n`scripts/check-wildcard-fallthrough.mjs:634`, and `grep -c \"^\\s*assert(\"` over\nthat file returns 18.\n\n## Which number is printed, and why that one\n\nThe line now prints **assertions that actually RAN this run** — the sum of\n`batterySeen`, the same ledger the battery floor immediately above already\nevaluates. It does **not** print `assert(` call sites in the source.\n\nToday both facts are 18, so a reader would otherwise assume whichever one was\nnot meant. The runtime ledger is the honest choice for a line whose words are\n\"cases\": a call site that never executes is not a case that held, and the whole\nreason this class exists is that a printed number must be produced by the run\nit describes. It also makes the printed number and the floor structurally\nincapable of disagreeing, since they read one ledger.\n\nSumming the whole ledger is exact rather than approximate: reaching the verdict\nmeans the set-difference check above found every battery that registered to be\na declared one, so the sum has no unattributed remainder.\n\nNo new floor is introduced. `SELF_TEST_BATTERIES` keeps its existing pinned\nvalue of 18 and is untouched — this change does not convert a printed number\ninto a gate.\n\n## Two comments rewritten, deliberately\n\nBoth would have become false on landing, standing next to a derived line:\n\n- the in-place comment above the literal explained that `17` was knowingly\n  wrong and \"left as-is here so this change stays a pure no-op on output\" —\n  that sentence was about the PR that added the floor, not this one;\n- the roster's rationale block described the verdict, in the present tense, as\n  spelling a transcribed count.\n\nBoth now describe what the file does.\n\n## Nothing outside the file pinned this stdout\n\n`git grep -n \"17 cases\"` at the base returns 10 hits: CHANGELOG prose and test\nfixtures about unrelated 17-case corpora, plus this file's own two lines. None\nis an expectation of this file's output. The instrument was controlled — the\nsame pattern scoped to the file finds line 634 — so the zero is a real zero.\n`docs/audits/2026-09-self-test-shape-census.md` names this script but records\nits *failure* line, not the success line. This change deliberately moves output,\nso it could not have ridden the byte-identical batch that left the literal wrong.\n\n## Verification\n\nPositive and negative controls, each mutated on disk (blob hash shown to differ\nfrom the HEAD blob), run, then restored under a trap and proven restored by\nhash equality plus an empty `git diff HEAD`:\n\n| leg | mutation | printed |\n|---|---|---|\n| baseline | none | `✓ self-test: 18 cases` (exit 0) |\n| positive control | one deliberately added 19th assertion | `✓ self-test: 19 cases` (exit 0) |\n| negative control | an assertion's message text edited, case count untouched | `✓ self-test: 18 cases` (exit 0) |\n| deletion | one assertion removed | floor reds: `registered 17 case(s), below its pinned floor of 18` (exit 1) |\n\nAnd the same positive control against the **pre-change** code, to show what the\nliteral could not do: `origin/main`'s version of the file plus a deliberately\nadded 19th case still prints `✓ self-test: 17 cases`, exit 0.\n\nRestore proof for every leg: `git checkout HEAD -- path`, then\n`git hash-object path` equal to `git rev-parse HEAD:path`\n(`bf00750b2d11cb8b0af7c4c0216d9c355fca5e4a`) and `git diff HEAD` empty.\n\nGates — `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`\nderived 31 commands; all 31 were run and all exited 0 (exit code captured before\nany pipe), reconciled with `--ran`:\n`✓ dispatch-gates --ran: 31 derived famil(ies) accounted for — 31 run, 0 NOT-MEASURED.`\n\nRepo-wide lint at final HEAD `3185352ffc`: `pnpm exec eslint . --no-inline-config\n--format json` — 6309 files, 0 errors, 0 warnings, exit 0. No narrowing claimed.\nControl-character self-scan over the changed file is clean, and\n`pnpm check:nul-bytes` is green.\n\n## Changeset\n\n`skip-changeset` applies and is set on this PR: the diff is one repo-internal\ngate script under `scripts/`, which publishes from no package.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8)_"
+}

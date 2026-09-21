@@ -1,0 +1,34 @@
+{
+  "number": 16595,
+  "kind": "issue",
+  "title": "Wire `config.locale` at the runtime's seed-load call sites — the locale axis added by #16510 is inert on the default boot path until a producer supplies it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T11:55:27Z",
+  "updated_at": "2026-09-09T04:21:30Z",
+  "closed_at": "2026-09-09T03:34:13Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16595",
+  "body": "Blocked-by: #16510\n\n## Why this exists\n\n#16510 / PR #16592 adds a `locale` filter axis to seed datasets and the loader that enforces it. The\nconsumer half is complete; **no first-party call site supplies `config.locale` yet**, so on the\ndefault boot path the axis is inert — a `locale`-scoped dataset loads everywhere, exactly as if it\ncarried no scope.\n\nThe dev that landed the consumer half named this gap in its own PR body and asked the PM to file it\nrather than widening its card past the declared file surface. That is the right call: `packages/spec`\nand `packages/metadata-protocol` are one lane's surface, `packages/runtime` is another's.\n\n## Call sites\n\nConfirmed by grep at tree `c383352`:\n\n- `packages/runtime/src/app-plugin.ts:1249`\n- `packages/runtime/src/app-plugin.ts:1326`\n- `packages/runtime/src/app-plugin.ts:1642`\n\nall three `await seedLoader.load(request)`.\n\nPR #16592's body additionally names a draft-publish path in `protocol.ts`. I could not confirm that\none in my checkout — the grep over `packages/metadata-protocol/src/protocol.ts` returned nothing at\n`c383352`. Whoever picks this up should re-derive the full call-site list against current `main`\nrather than trusting either reading; the three above are the ones that stand up today.\n\n## What to do\n\n1. Resolve the locale from the stack's configured locale (`i18n.defaultLocale` is the obvious source;\n   confirm against how `env` is resolved in `resolveEnvConfig`, which is the shape this mirrors) and\n   pass it as `SeedLoaderConfig.locale` at each call site.\n2. Flip the liveness ledger row `seed.locale` in `packages/spec/liveness/seed.json` from\n   `experimental` to `live`, with a `producer` pointer to the wiring. **That flip is the point of the\n   card** — the row is `experimental` today specifically because publishing `live` on a\n   correct-but-insufficient consumer pointer is the falsehood the `producer` field exists to prevent.\n3. `warnOnUnresolvedLocaleScope` in the loader exists to signpost the unwired state. Check whether it\n   should stay as a guard for embedding hosts that still pass no locale, or go once the default path\n   supplies one — that is a judgement call for the implementer, not a decided answer here.\n\n## Not in scope\n\nReconciling rows already written under a different locale. Switching an app's active locale on a\nnon-empty database leaves the other locale's rows resident, because every seed is `upsert` and the\nloader only writes. That is a real gap, it is named in #16510's body as a cost the consuming app\ncurrently documents in its README, and it is **not filed yet** — it needs a decision on whether the\nloader should own that reconciliation at all before it becomes a card.\n\n## Origin\n\nFollow-up requested by the dev on #16510 (PR #16592). Filed by the PM seat that dispatched it."
+}

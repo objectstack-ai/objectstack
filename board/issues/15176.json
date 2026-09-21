@@ -1,0 +1,37 @@
+{
+  "number": 15176,
+  "kind": "issue",
+  "title": "[finding] `os explain trigger` documents a metadata type the spec does not have — no `TriggerSchema` exists, and the entry's sample is not a Hook either",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T04:49:02Z",
+  "updated_at": "2026-09-08T17:37:07Z",
+  "closed_at": "2026-09-08T17:36:02Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15176",
+  "body": "Found by the catalog sweep landed for #14811, which parses every `SCHEMAS` entry's `example` in `packages/cli/src/commands/explain.ts` against its real schema. Rewriting catalog entries was ruled out of scope on that card (triage comment `5520209463`, step 3), so this is filed unassigned for triage. Suggested domain: `domain:cli`.\n\nThis one is **not** a broken example. It is an entry with nothing to parse against, which is a different and arguably worse condition — and it is the reason the sweep classifies it as unbound rather than green.\n\n## Measured\n\n`grep` over `packages/spec/src` finds no `export const TriggerSchema` anywhere, and no `TriggerSchema` binding exists on any of the four metadata-authoring subpaths the catalog's other entries resolve from (`@objectstack/spec/data`, `/ui`, `/ai`, `/automation`). The only near names on that surface are `SkillTriggerConditionSchema`, `TimeRelativeTriggerSchema`, `WebhookTriggerType` and `resolveFlowTriggerKind` — none of them an authorable `trigger` metadata type.\n\nThe obvious candidate is `HookSchema` (`packages/spec/src/data/hook.zod.ts`), which is the live \"fires on data events for an object\" surface. The entry's example does not parse as one either:\n\n```\n[events] invalid_type :: Invalid input: expected array, received undefined\n[] unrecognized_keys :: Unrecognized key(s) on this hook: `event`, `flow`.\n   Did you mean `event` -> `events`? Until this shape was closed, these were dropped\n   silently — the hook still registered and ran.\n```\n\nSo the entry is doubly adrift: `event` (singular) is a strict-object **alias** of `events` — the same alias-as-a-documented-key failure class measured on the `flow` entry at #14782 — and `flow` is not a hook key at all, because a hook's code slot is `handler`.\n\n## The decision this needs\n\nThe `workflow` entry in the same catalog already models the honest answer for a topic with no type behind it: it was rewritten as an explicit \"ObjectStack has no standalone Workflow authoring type\" redirect. `trigger` may need the same treatment, pointing at `Flow` with `type: 'record_change'` and at `HookSchema`, or it may need to become a real Hook entry under the name operators look for. That is an operator-facing documentation judgement, not a mechanical fix.\n\n## Guard state\n\nThe sweep landed for #14811 does not silently skip this entry. It asserts the reason: that `TriggerSchema` is absent from the searched surface, and that the example is not a `Hook` either — so the classification is defended rather than assumed, and the day either fact changes the test turns red.\n\n## Reproduce\n\n```\npnpm --filter @objectstack/cli exec vitest run test/commands.test.ts\n```"
+}

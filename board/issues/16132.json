@@ -1,0 +1,34 @@
+{
+  "number": 16132,
+  "kind": "issue",
+  "title": "[finding] extractWatchHints masks // but not # comments, so a shell target's inherited population is prose — latent until the first family follows a .sh",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T02:50:11Z",
+  "updated_at": "2026-09-08T03:54:38Z",
+  "closed_at": "2026-09-08T03:40:45Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16132",
+  "body": "Found while re-pricing #14290 (STAGE-THEN-RUN edge) on `1f2a02b`. Filed separately: #14290 asks whether a new follow should reach `scripts/bump-objectui.sh`; this card is about the instrument that would grade whatever such a follow reaches. Fixing this is a precondition for #14290, not part of it.\n\n## The defect\n\n`extractWatchHints` masks its source with `maskedModuleBody`, which understands `//` and block comments. It does not understand `#`. But `PROGRAM_TEXT_TARGET` in the same file already admits `.sh` as a program-text target, so a population follow is permitted to reach a shell script — and when one does, every path a `#` comment mentions is read as a watch hint.\n\nMinimal fixtures, all against `scripts/fixture.sh`:\n\n```\nhints  source\n    1  # see `scripts/bump-objectui.selftest.sh` for the self-test     (comment, backtick prose)\n    1  # see \"scripts/bump-objectui.selftest.sh\" for the self-test     (comment, quoted prose)\n    1  bash 'scripts/bump-objectui.selftest.sh'                        (real invocation)\n    0  // see `scripts/bump-objectui.selftest.sh`                      (JS comment — masked)\n```\n\nThe first three are indistinguishable. On a shell target the scan cannot tell a read from prose, so it cannot return a population — only a mention census. Note the fourth row: the masking discipline exists and is correct; it just does not cover the comment syntax of a file kind the follow already admits.\n\nTwo spellings feed it. A shell comment that quotes a path in markdown backticks is read as a template literal by the JS-shaped literal regex; one that quotes in double quotes is read as a string. Both land in the hint set.\n\n## Measured blast radius, tree-wide\n\n25 tracked `.sh` files; 14 spell at least one hint.\n\n```\ntotal hints as spelled                          35\nsame, after blanking `#` comment lines           7\n.sh files whose hint population is 100% prose  7/14\n```\n\n`scripts/bump-objectui.sh` is the sharpest: **7 hints as-is, 0 after blanking `#` lines**. Every one of its seven — `.changeset/*.md`, `scripts/bump-objectui.selftest.sh`, `.github/workflows/cut-rc.yml`, `docs/releases-maintenance.md`, `.changeset/console-82a94170c405.md`, `.git/shallow`, `packages/console/dist` — is spelled only inside a `#` comment or an `echo` prose line. One of them, `.changeset/*.md`, also has a genuine code site (line 596, `CS_FILE=...`), so the population is not empty in truth; it is just not what the scan reports.\n\n## Why it is latent today, and why that is the danger\n\nMeasured on this tree: **0 family-to-`.sh` population edges exist.** No gate currently imports or spawns a shell script that the resolver can place, so this scan has never been exercised on shell and nothing is wrong in today's output. The first follow that reaches a `.sh` inherits prose silently, on its first run.\n\nThat is the direction this tool errs against everywhere. `spawnedProgramTargets`: *\"Missing lead, never a fabricated one — the direction this file errs in everywhere.\"* `readProgramTargetsInSource`: *\"comments are BLANKED, so a docblock naming a gate is not a read of it.\"* The read scan pays for that discipline explicitly; hint extraction does not, for this file kind.\n\nThe declaration escape hatch does not cover it either. `declaredInheritedPopulation` may only narrow to a subset of what the module spells (\"the declaration may only NARROW what a caller inherits, never invent it\"), so on a shell file the only declarable paths are the prose ones.\n\n## Remedy shape (not prescribing)\n\nMask `#` comments when the scanned source is shell-kind, so the three fixtures above read 0 / 0 / 1. The file-kind test already exists next door in `PROGRAM_TEXT_TARGET`. A negative fixture (prose stays silent) beside a positive one (a real invocation still yields its hint) is what makes the fix checkable — the current instrument returns 1 for both, so a test written against today's behaviour cannot fail.\n\n## Re-check\n\n```\nnode -e \"import('./scripts/pm/dispatch-gates.mjs').then(m=>{const t=m.watchHintTree();const p=m.extractWatchHints('# see \\`docs/releases-maintenance.md\\`\\n','scripts/x.sh',{tree:t}).length;const c=m.extractWatchHints('cat \\\"docs/releases-maintenance.md\\\"\\n','scripts/x.sh',{tree:t}).length;console.log(p===0&&c===1?'CALIBRATED':'NOT CALIBRATED')})\"\n```\n\nPrints `NOT CALIBRATED` today.\n\nNo assignee, per the finding convention. Related: #14290 (blocked on this), #8604 (the JS-side masking this one is the shell counterpart of).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

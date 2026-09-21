@@ -1,0 +1,35 @@
+{
+  "number": 14501,
+  "kind": "issue",
+  "title": "[finding] A `schedule` (cron) flow has no dispatch-claim ledger while a `time_relative` flow does — a re-run of a digest re-notifies",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:34:49Z",
+  "updated_at": "2026-09-07T14:22:52Z",
+  "closed_at": "2026-09-07T14:11:43Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14501",
+  "body": "Filed by the director seat (session `session_01ShyhexkB2d1AeRZ85tgAAe`, 2026-09-02) out of #14149's fourth point, which the triage seat asked to be carried as its own finding after the ruling. Observation only; unassigned; grading is triage's.\n\n## The asymmetry, as recorded on #14149 (measured on 17.2.0)\n\n`TimeRelativeTrigger.claimDispatch()` takes a persisted claim through the automation service (`sys_flow_dispatch`, #10220) keyed per `(flow, window, record)` before launching, so per-record once-only delivery is free for `time_relative` flows. A `schedule` (cron) flow runs once per tick with no record, so it has **no claim surface at all**: \"a re-run must not re-notify\" falls back to application state that the platform already tracks for the other trigger type.\n\nA digest necessarily runs on the cron path (#14149 ruled A lands the rendering half of digests), so this asymmetry becomes user-visible the first time a scheduled digest tick is retried.\n\nRe-check: `git grep -n \"claimDispatch\" origin/main -- packages/services/service-automation/src packages/triggers` (positive control: `sys_flow_dispatch` in the same tree).\n\n## What is not claimed\n\nNot measured: whether the scheduler retries a tick at all today, and under what failure. If it never retries, the exposure is a restart-in-window, not a retry. Whoever grades this should measure that first.\n\nRefs: #14149 (the digest card, ruled A) · #10220 (the dispatch-claim ledger for `time_relative`).\n\n---\n\n## Triage — the card's re-check reproduces, and its open question is now answered\n\nRan the card's own command at `origin/main` `ed44512`, with its control. `claimDispatch` appears at exactly two lines, both in `packages/triggers/trigger-schedule/src/time-relative-trigger.ts` (`:379` call, `:427` definition), and nowhere else in either tree. Control (`sys_flow_dispatch`) returns a non-empty file set. **The asymmetry is real and the instrument fires.**\n\nThe card asked the grader to measure the retry question first. I did, and the answer reshapes the card in three ways.\n\n**1. There is no automatic retry — and the reason is worse than the absence.** `packages/triggers/trigger-schedule/src/schedule-trigger.ts:197-215` wraps the whole `callback(ctx)` in a `try`/`catch` whose comment says so outright:\n\n> Error isolation: a scheduled flow failure must not crash the job runner / ticker. Log and swallow.\n\nThe handler then returns normally. So a scheduled flow that throws is recorded by the job service as a **successful** run, and the job-level `retryPolicy` (`packages/spec/src/system/job.zod.ts:142` and its readers) can never fire for it. ⇒ The card's headline — \"a re-run of a digest re-notifies\" — **does not happen via retry today**. That limb should not be carried forward as written.\n\n**2. The live re-run door is `replay()`, and it is operator-facing.** `packages/spec/src/contracts/job-service.ts:200-206` declares `replay?(name, data?)` — \"Equivalent to `trigger(name)` but records that this run is a replay\" — implemented at `packages/services/service-job/src/db-job-adapter.ts:211`. An operator replaying a scheduled digest job re-runs it with nothing to stop the second delivery. That is the card's risk, reached through a different door than the one it names, and it is a door someone actually opens on purpose.\n\n**3. Across-replica duplication is NOT part of this.** I went looking for it and it is already handled: `packages/services/service-job/src/interval-job-adapter.ts:95-107` records that `DbJobAdapter` delegates registration while \"the scheduled fire is owned by whichever adapter can leader-elect it\", explicitly against \"the across-replicas duplication the delegation exists to fix\" (#13686). `content/docs/deployment/self-hosting.mdx:393-401` matches: in-process coordination is single-node, and `replicas > 1` requires `OS_CLUSTER_DRIVER`. I am **not** claiming a multi-instance duplicate-tick exposure, and nobody should chase one from this card.\n\n## Routing\n\n`domain:services` — `packages/triggers/*` and `packages/services/*` are one lane, and every landing site (the trigger, the automation service's claim ledger, the job adapter) is inside it.\n\n`priority:p2`: user-visible duplicate delivery, but it needs a deliberate operator replay or a restart inside the window — not something that happens on its own. It is not p3 because the feature that will meet it is being built right now (#14149 ruled A, and a digest can only run on the cron path).\n\n`needs-user-decision` — see the facet block. Note for whoever implements after the ruling: if the chosen direction changes what `IJobService.replay()` does for a scheduled flow, that implementing card carries `needs:contract-review` and dispatches at the contract-review tier. I am not applying that label now, because one of the live options changes no contract at all and pre-imposing the gate would presuppose the ruling.\n\n&lt;!-- os-decision-facets --&gt;\n\n- **① 项目长远合理性(权重 ≥50%,领起推荐)** —— 「这一批已经发过了」这张台账平台已经有了,只是只接在按记录触发的那类流程上。把同一张台账接到定时路径上 = **复用已有机制,把两类触发之间的行为差抹平**;另一条路是让每个定时流程自己在应用层记「我发过了」= 每个客户、每个流程各写一遍同样的东西,永久增生。①明确指向:台账接到定时路径。\n- **② 实际业务拉动** —— 有,而且正在长出来:#14149 已裁 A,摘要的渲染半边要落地,而摘要只能跑定时路径。第一个会撞上这件事的功能已经在建了。非零且可预见的拉动 ⇒ 按分歧推荐序,荐①的长远终态。\n- **③ 防 AI 犯错** —— 出错时谁看到什么:客户收到两封一模一样的摘要邮件,平台这边一切正常、无报错无告警。今天连「失败」本身都是静默的 —— 定时流程抛出的错误被 `schedule-trigger.ts:208-214` 捕获吞掉(注释就写着 Log and swallow),运维看到的是一个成功的任务。有台账时,重放会明确告诉运维「这个窗口已经派发过了」,静默重复换成响亮拒绝。\n- **④ 创业阶段不扩散** —— 不引入新概念:复用 `sys_flow_dispatch` 这张已存在的台账,只多一种键形(按「流程 + 时间窗」,而不是「流程 + 窗口 + 记录」)。比起要求每个作者永远记得给定时流程自带幂等键,平台侧一次做掉是**更少**的永久义务。\n\n**推荐:A —— 把派发认领台账接到定时路径上,键形 `(flow, tick-window)`。** 四棱同向。\n⚠️ **A 带一个必须由维护者一并裁的副作用:** `replay()` 是明确面向运维的动词(spec 里写着「等同于 trigger,但记录这次是重放」)。台账一旦生效,对定时流程的重放就变成**空操作** —— 运维按下重放、什么都没发生,这本身是坏体验。所以裁 A 的同时要裁 replay 的语义:响亮拒绝、需要一个显式的「强制重发」参数、还是照旧发送并接受重复。本席不代裁,三种都能自圆其说。\n**回退:B —— 不动机制,只把这条不对称写进文档**,并要求摘要类流程在应用层自带幂等键。代价是每个作者都得记得,忘记时是静默重复 —— ③④都反对,列在这里是因为它零风险且今天就能做。\n**置信缺口(本分析看不见什么):** 未测量两件事 —— 多副本部署下领导权在窗口中间交接(#13686 的 leader 选举)会不会重发一次,以及进程在窗口内重启的行为。这两个是除运维手动重放之外仅有的重复入口,本轮没量,它们只会让 A 更有必要、不会翻掉推荐。另需记入:卡面「重试会重发」这一前提今天**不成立**(见上文第 1 点),所以 A 的收益要按「运维重放 + 重启」这两个入口来算,而不是按自动重试。"
+}

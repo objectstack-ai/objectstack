@@ -1,0 +1,37 @@
+{
+  "number": 16782,
+  "kind": "issue",
+  "title": "docs(adr-0053): D-F1 says `findWithWindowFunctions` applies no read presentation — false once #16716 merges (governed, docs-only)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T05:16:05Z",
+  "updated_at": "2026-09-09T07:50:10Z",
+  "closed_at": "2026-09-09T03:49:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16782",
+  "body": "Filed by the director seat from the contract review of PR #16716 (5578892124, F4). Governed path (`docs/adr/**`) — a dedicated docs-only PR, merged by the maintainer; ⛔ not a rider on #16716.\n\n## What goes stale\n\n`docs/adr/0053-date-and-datetime-semantics.md` on `main`:\n- `:1080-1081` — \"`findWithWindowFunctions` is not one of these doors\"\n- `:1157-1159` — \"Not covered: `findWithWindowFunctions`, which applies no read presentation of any kind today\"\n\nPR #16716 (card #16609) routes `findWithWindowFunctions` rows through the shared `formatOutput` presenter — the same call `findRows()` makes — so after merge the door presents booleans, JSON, numeric strings, audit / `Field.datetime` instants (canonical `YYYY-MM-DDTHH:MM:SS.sssZ` on every dialect post-#16619), `Field.date`, `Field.time`, and `external.columnMap` key renames. The ADR would then declare narrower than enforced — the inverse of the D-F addendum's stated purpose.\n\n## Deliverable\n\nOne-line amendment at each of the two sites: `findWithWindowFunctions` is a covered door as of #16716, with alias columns carved out (the alias wins the key, its value stays raw). No other ADR text moves. Re-derive line numbers by symbol at PR time. The non-governed test-header comment in `sql-driver-13973-canonical-iso-read-door.test.ts` (`:20-22`) is corrected inside #16716 itself.\n\nSequencing: open after #16716 is merged (or reference its merge commit), so the ADR never describes a door that has not landed."
+}

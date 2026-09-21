@@ -1,0 +1,34 @@
+{
+  "number": 16795,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates' other two output lanes disclaim an incomplete OUTSIDE list too — --ran names three of five blocks, and --commands never discloses the WIDE population at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T05:39:14Z",
+  "updated_at": "2026-09-09T06:29:21Z",
+  "closed_at": "2026-09-09T03:49:29Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16795",
+  "body": "## Measured\n\nRead on `claude/issue-16398-reconciliation-outside-blocks` at `65c55f936` (`objectstack-ai/objectstack`) — that is, with #16398's correction to the human reconciliation line already in place.\n\n#16398 corrected the enumeration on the human default lane. The same claim is spelled twice more, on the other two output lanes, and both are still short.\n\n### Lane 1 — `--ran`, in `runReconciliationLines`\n\n```\n  ⛔ This answers ONE link: what this card DERIVES against what you RAN. It is not a complete\n  account of what CI runs on the PR — the always-runs tail, the unreachable listing and the\n  pending-changeset families are each outside the derived total, each printed under its own\n  heading by a run without --ran.\n```\n\nThree of the five blocks a plain run prints. The artifact rosters and the declared WIDE population are absent, exactly as they were on the human line.\n\n### Lane 2 — `--commands` / `--json`, in `machineReadableOutput` (the stderr accounting)\n\nRepro, from a worktree on this repo:\n\n```\nnode scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack 2> commands.err\ngrep -c 'WIDE' commands.err               # 0\ngrep -c 'Artifact rosters' commands.err   # 1\n```\n\nThe stderr accounting prints the artifact-roster block, but the declared WIDE population is never mentioned at all — not as a block, not as a count, and not in the closing disclaimer, which names exactly one block:\n\n```\n  ⛔ Not a complete account of what CI runs on this PR: the always-runs tail (workflows with no\n  path filter) is NOT here. Run without --commands/--json for it.\n```\n\n`machineReadableOutput` already receives `widePopulationRows` and forwards it to `derivationJson`, so the `--json` document carries the rows. The `--commands` reader gets nothing.\n\n## Why this is the same defect, not a cosmetic sibling\n\n#16398 measured the cost on the human lane: PR #16380 round 1 spent a CI round trip on `check:wildcard-fallthrough`, a family printed in the `Declared WIDE population` block that the reconciliation line did not point at.\n\n`--commands` is the lane this file's own header tells consumers to use *instead of* harvesting the prose — so a whole block of families being absent from it is the same failure on the channel that was supposed to be the safe one.\n\n## Suggested remedy (not prescriptive)\n\n#16398's change built the list once, as `outsideBlockNames` in `familyReconciliationLines`, from the block counts carried on `recon` — the lengths of the very arrays that render the two blocks, so the enumeration cannot name a set the output does not contain. Both lanes above can read that one expression rather than growing a third and a fourth prose copy of the list.\n\nThat reuse is why this is filed as blocked on it rather than folded into it: each lane needs those counts threaded through a different structure (`runReconciliation` for lane 1, `machineReadableOutput` for lane 2), which is a different verification surface from the one #16398's claim declared.\n\nBlocked-by: #16398\n\n## Not measured here\n\n- Whether any seat has spent a CI cycle on either lane specifically. Only the human lane's cost is measured, on #16380.\n- Whether `--json` consumers are affected. `widePopulationRows` does reach `derivationJson`, so the rows are in the document; it is the stderr disclaimer beside it that is short."
+}

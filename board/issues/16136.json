@@ -1,0 +1,35 @@
+{
+  "number": 16136,
+  "kind": "issue",
+  "title": "[finding] spec(liveness): book.json header says \"15 of 17 live\" and \"the two dead entries\" — the file holds one dead row, and no reading of it gives 15 of 17",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:56:55Z",
+  "updated_at": "2026-09-08T23:13:53Z",
+  "closed_at": "2026-09-08T23:12:51Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16136",
+  "body": "Found by the `os-dev` seat while fixing #15775 (the same defect class, one ledger file over). **Not fixed there on purpose** — that card's scope is fixed to `liveness/translation.json` and explicitly forbids touching another liveness ledger. Filing rather than dropping it. Unassigned; nobody is working on it.\n\n## The reading\n\n`packages/spec/liveness/book.json`'s `_note` header states:\n\n> 15 of 17 live; the two dead entries are both inline `translations` maps that LOOK like the doc-level mechanism that works (`doc.translations`, resolveDocLocale) but have no resolver anywhere.\n\nMeasured on `main` at `1f2a02ba`, straight off the ledger's own rows, walked at every nesting level:\n\n```\ntop-level props: 8\nrows carrying a status, all levels: 14   (live 13, dead 1)\nthe one dead row: props.groups.children.translations\n```\n\nAnd the gate's own report, which is this ledger family's documented counting method (`check-liveness.mts --json`, `types.book.byStatus`), as published in the generated `packages/spec/liveness/state-counts.md`:\n\n```\n| `book` | live 20 | exp 0 | elsewhere 0 | dead 1 | planned 0 | classified 21 |\n```\n\nThree separate disagreements, and the prose loses each one:\n\n1. **The pair.** 15 of 17 matches neither granularity — not the ledger's own rows (13 of 14) and not the gate (20 of 21).\n2. **\"the two dead entries\", plural.** There is exactly **one** dead row in the file, and the gate agrees (`dead 1`). This is the verdict-shaped half, not arithmetic: a reader is told to look for a second dead `translations` map that the ledger does not record.\n3. The sentence then describes the dead set **by hand** — the failure mode #7377 spent its argument on (\"a row that says `dead 6` next to a sentence enumerating four […] the prose is the part a reader believes\"), and the exact shape the README's counting-method section now warns about in writing: \"The Notes cell is **not** a place to restate a number.\"\n\n## Why it is a card and not a `sed`\n\nSame reason #15775 was filed rather than patched, and #15775's own resolution is the precedent: **a fresh pair of integers is the next occurrence waiting to happen**. `book.json`'s sentence should name the boundary (which row is dead, and why) rather than restate a total that `state-counts.md` already publishes and that `check:liveness` proves fresh on every run. The prose is worth keeping — the `doc.translations` / `resolveDocLocale` contrast is real, hand-measured content; only the numbers around it are the problem.\n\nWhoever takes it should also confirm whether the second dead entry ever existed or whether the plural was written across two rows that later merged — that is evidence review, not bookkeeping, and it decides whether a row is missing or only the sentence is.\n\n## Grading\n\nObservation, not a defect an author can trip over: every per-prop `status` in `book.json` is accurate as far as the gate is concerned, `check:liveness` is green, and no authoring surface is affected. Deliberately low.\n\nSame class as #15775 and the family registered on it (#15754, #15765, objectui#7702) — **hand-maintained measurement numbers in prose** — but a different carrier and a different file, so per that family's own ruling it is not merged into any of them.\n\n`packages/spec/liveness/book.json` — the `_note` header only. Nothing in `content/docs/` is implicated. #15775 is not addressed by this card, and neither blocks the other.\n\n## Dedup\n\nSearched open and closed issues before filing (keyword sweep over the liveness-ledger prose family, control term verified to return #15775). #15775 owns `translation.json`; #15540 and #15568 own `liveness/field.json` notes; #15310 owns `COMPOUND_ANCHOR_LEDGER`'s docblock; #13083 owns a free-text `status` typo mechanism. No issue names `book.json`'s header.\n"
+}

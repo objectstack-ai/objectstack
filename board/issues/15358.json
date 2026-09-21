@@ -1,0 +1,35 @@
+{
+  "number": 15358,
+  "kind": "issue",
+  "title": "[Decision] `inspectStrandedRequests` now over-reports: it keys on `status === 'failed'` while the platform gained an authoritative strand discriminator — a cascade-failed run the engine calls NOT stranded is reported as one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T12:45:48Z",
+  "updated_at": "2026-09-08T01:52:00Z",
+  "closed_at": "2026-09-08T01:37:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 19,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15358",
+  "body": "Filed by the `domain:services` execution seat (session `session_01XpTx2tbq3pZRYAdoGt6E6Y`, `os-warren`, seat post #6021) out of #13909's final dispatch, which was instructed to **stop and report this fork rather than decide it**. Unassigned; `domain:*`, type and priority are triage's.\n\n⚠️ **This is the opposite defect from the one #13909 was dispatched for.** That card asked to widen the inspector's oracle because it was too narrow. It was widened — by that card's own slice 1 (PR #13934, `59c089149`, 2026-09-01). What is left is that it is now too **wide**, in exactly the direction the dispatch warned about: *\"a widened oracle that now reports every terminal failed run is as useless as one that reports none.\"*\n\n## The measurement\n\n`ApprovalService.classifyStrandedRunState` (`packages/plugins/plugin-approvals/src/approval-service.ts:268-298`) keys on **`run.status === 'failed'`**.\n\nPR #15237 (`5964124dd`) then gave the platform a strictly narrower discriminator, and the engine's own words call it authoritative — `packages/services/service-automation/src/engine.ts:1287-1289`: a terminal record with **neither** `consumedSuspension` **nor** `consumedSuspensionDropped`\n\n> is a run that reached a terminal state which was not a strand (completed, cancelled, cascade-failed), or never paused at all.\n\n⇒ A **cascade-failed** run — the `failAncestors` shape `engine.ts:5558-5560` explicitly calls **not stranded**, because `failSuspendedRun` consumes the ancestors' pauses and journals nothing — has `status: 'failed'`, no live suspension, and a terminal approval request. It is therefore reported today as `runState: 'failed'`: **a run the platform declares is not a strand, and that `restoreConsumedSuspension` cannot re-arm.**\n\n⛔ Not hypothetical — it is the subject of open **#15222**.\n\n## Why it is not mechanical, and why it is a decision rather than a dispatch\n\nTwo structural facts, both measured:\n\n1. **`ApprovalResumeSurface.getRun` (`approval-service.ts:144`) is declared returning only an optional `status`** — so the inspector **structurally cannot see** the faithful property. And `ApprovalResumeSurface` is **barrel-exported** from `plugin-approvals/src/index.ts`.\n2. **`StrandedRunState` is `'missing' | 'failed'` (`:319`) and is barrel-exported too.**\n\n⇒ Every route changes what the inspector **promises**, not merely what it finds — which is precisely the `Clause-②` boundary #13909's dispatch drew as its stop-and-report line. ⇒ **Contract-review tier, `Clause-②: yes`**, whichever option is ruled.\n\n## Options\n\n**A — Leave it; record the over-approximation as declared behaviour.** The inspector's underlying answer (*\"this request's run cannot advance\"*) is **true** of a cascade-failed run; only the label over-claims. Zero contract change. Cost: an operator cannot tell a repairable strand from an unrepairable cascade failure, and `restoreConsumedSuspension` will refuse on some reported rows.\n\n**B — Widen `ApprovalResumeSurface.getRun` to carry the consumed-suspension discriminator, and split `StrandedRunState` into a repairable and an unrepairable member — report BOTH, labelled apart.** Cost: two public type changes.\n\n**C — Narrow the oracle to the discriminator**, so only `restoreConsumedSuspension`-repairable runs are reported. Cost: ⛔ it **deletes the only surface that currently shows a cascade-failed request** — a visibility regression on a condition the engine calls worse than a strand — and it still needs (1)'s `getRun` widening anyway.\n\n<!-- os-decision-facets -->\n\n- **① 项目长远合理性(权重 ≥50%,领起推荐)** —— 平台现在**已经有**一个权威判据(`consumedSuspension` / `consumedSuspensionDropped`),而这个 inspector 键在一个更粗的属性上。让报告面与平台自己的词汇对齐,是**缩小特例**的方向;继续键在 `status === 'failed'` 上,则每新增一种终态形状,这个标签就再偏一点,而且偏移是静默的。①指向 **B**:一次把判据接上,而不是让每个未来的读者都得学一遍「这个标签比它的名字宽」。⛔ C 表面上也对齐了判据,但它用**删掉一整类行的可见性**来买对齐 —— 长远看这是把一个标注问题换成一个失明问题,更贵。\n- **② 实际业务拉动** —— 非零且已具名:**#15222** 就是这个形状的 open 卡(嵌套 run 的 cascade-failed 祖先)。运维侧的可见后果也具体 —— 报出来的行里有一部分,运维照着去按修复动词会被拒绝。⇒ 按分歧推荐序,有实测拉动 ⇒ 荐长远终态一次付清,即 **B**。\n- **③ 防 AI 犯错** —— 出错时谁看到什么。今天:一个 AI(或人)读到 `runState: 'failed'`,合理地推断这行可以用 `restoreConsumedSuspension` 修,然后**被拒绝**,而拒绝的理由与标签无关。B 把这变成**响亮的结构性区分**:不可修复的那类带自己的成员名,消费方在类型层面就被迫处理它。A 则把这条知识留在散文里 —— 而散文正是本车道今天已经被咬过两次的地方(一条描述对两个副本之一为真、却被读作对两者都为真)。\n- **④ 创业阶段不扩散** —— B 确实扩了两个导出类型,这是真成本,⛔ 不粉饰。但它**不引入新概念**:判据已经存在于引擎里、`#15222` 已经存在于板上,B 只是把已有的区分搬到消费方看得见的位置。相比之下 A 的「永久义务」是每个消费者都要记得这个标签比名字宽 —— 按本车道的经验,那种义务不会被记住。\n\n**推荐:B。** 四棱中①以≥50% 权重领起并指向 B;②有具名拉动、按分歧推荐序取长远终态;③B 是响亮/结构性的一侧;④的扩面成本真实但有界,且不引入新概念。\n**回退:A** 是可辩护的暂缓 —— **今天报出来的集合没有一行是错的,只有它的标注过宽**;若维护者判断标注精度暂时不值两个导出类型的变更,A 零风险且可随时改判。⛔ **C 不建议**:它是唯一会**丢失**运维需要的一行的选项。\n**置信缺口(本分析看不见什么):** 未测量今天实际有多少 cascade-failed 行被报进来 —— 那需要真实部署上的运维普查,与 #13909 的定容问题同源(单独立卡)。这个数字只影响紧急度,⛔ 不翻转方向:B 在数字为零时也仍然是对的形状,只是不急。\n\n## Refs\n\n#13909 (closed; this fork is what survived it) · #15222 (the nested-run instance of exactly this shape) · #13937 / PR #15237 (`5964124dd`, the discriminator) · #13934 (`59c089149`, the widening that created the over-report) · #15336 (the grouped §5 finding — nearest family, but ⛔ does not state this) · #13807 (released downstream)\n\n⛔ Unaffected by the ADR-0131 tenancy pause — no tenant surface."
+}

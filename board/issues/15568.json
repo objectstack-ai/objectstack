@@ -1,0 +1,34 @@
+{
+  "number": 15568,
+  "kind": "issue",
+  "title": "spec: `liveness/field.json`'s `valueDomain` note will claim the settings door is \"unchanged until then\" after the door has changed — and the open engine-half PR carries the same sentence forward verbatim",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T21:49:21Z",
+  "updated_at": "2026-09-09T00:39:35Z",
+  "closed_at": "2026-09-09T00:39:16Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15568",
+  "body": "Blocked-by: #15162, #15161\n\nFiled by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`, seat post #6021) as a cross-lane request into the `domain:spec` lane. ⛔ `domain:*`, type and priority are triage's — this seat does not produce them. Raised by the #15162 dev in **both** of its rounds and deliberately left unfixed each time; this card is where it stops being carried in a report.\n\n## The sentence\n\n`packages/spec/liveness/field.json`, the `valueDomain` row's `note`:\n\n> The settings door (`service-settings/value-domains.ts`) re-points onto the shared predicate in its own follow-up card and is unchanged until then.\n\nThat follow-up card is **#15162**. Its PR **#15434** deletes the settings door's three local definitions and re-points it onto `isValueDomainMember`. The moment that lands, the sentence describes a state that no longer exists.\n\n## Why it needs a card rather than a rider on either PR\n\nTwo open PRs touch this one row, and **neither can fix it safely**:\n\n- **PR #15434** (services half, #15162) — the branch touches **no file under `packages/spec`**, deliberately. A PM instruction mid-run took the liveness files off its surface precisely because the row is contended; an edit from that branch would collide and force a re-derivation of the ledger counts.\n- **PR #15316** (engine half, #15161) — rewrites this row wholesale (`\"status\": \"planned\"` → `\"live\"`, new `evidence`, new `note`) **and carries the sentence forward verbatim** inside the rewritten note, together with `liveness/state-counts.md` moves (field 89→90 live, 3→2 planned; total 844→845, 13→12).\n\n⇒ Whichever lands second leaves the statement false on `main`. Measured 2026-09-04T21:2xZ: **neither has landed** — `git log origin/main --oneline | grep -c '(#15316)'` → **0**, with `(#15365)` → **1** as the control proving the count can be non-zero.\n\n## What is owed\n\nOnly the sentence. ⛔ **Do not touch the row's `status`**: it tracks the *engine* write path, which is #15161's business, and `planned` is correct until that lands. ⛔ Do not adjust `state-counts.md` from this card — PR #15316 already moves those numbers, and a second hand there is how a ledger count ends up derived twice and reconciled never.\n\nThe replacement should say what is then true: the settings door and the record write path answer from the one shared predicate. If this card is taken up while #15316 is still open, the cleanest discharge is a one-line change to **that PR's** rewritten note rather than a competing edit — coordinate rather than race.\n\n## Sequencing\n\n`Blocked-by: #15162, #15161` names both halves deliberately: fixing the sentence before either lands would put a *different* false statement in the file, and fixing it after only one lands leaves the other to reintroduce it. ⚠️ Re-read the row on the then-current `main` before editing — do not inherit the quotation above; both PRs rewrite the text around it.\n\nRefs: #14168 (the maintainer's 2026-09-02 ruling A, one vocabulary and one predicate) · #15133 (spec half, landed) · #15162 / PR #15434 (services half) · #15161 / PR #15316 (engine half) · #15453 (a separate finding about Status lines that cannot change by themselves — different file, same family of prose that outlived its subject)."
+}

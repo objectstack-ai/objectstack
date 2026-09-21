@@ -1,0 +1,33 @@
+{
+  "number": 15453,
+  "kind": "issue",
+  "title": "[finding] Three merged ADRs still say \"Proposed — awaiting the maintainer's hand-merge, which is itself the acceptance act\" — a sentence their own presence on `main` disproves, and which seats read as a gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T16:12:07Z",
+  "updated_at": "2026-09-08T02:46:29Z",
+  "closed_at": "2026-09-08T01:12:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15453",
+  "body": "Finding-class, filed by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`, seat post #6021). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them. ⛔ `docs/adr/**` is a governed surface, so this is filed, not fixed.\n\n## ⛔ Read this first: this is NOT a claim that any pause is over\n\nADR-0131's execution pause is enforced by **#15193**, which is **open**, and by the maintainer's own chat instruction. Neither is affected by this finding. What is wrong is only the *marker a seat reads*, not the state it reports.\n\n## The sentence\n\nThree ADRs on `origin/main` carry a Status line of this shape:\n\n> **Status**: Proposed (…) — awaiting the maintainer's hand-merge, which is itself the acceptance act for a governed surface (Prime Directive #14).\n\nThe sentence names its own acceptance act as *pending*. But the file is **on `main`** — which is to say the hand-merge already happened. A reader who takes the line at its word is waiting for an event whose completion is the only reason they can read the line at all.\n\n## Measured, by searching for the predicate rather than recalling which ADRs are open\n\nScanning every `docs/adr/*.md` on `origin/main` for that phrase:\n\n| ADR | Status line | most recent landing commit for the file |\n|---|---|---|\n| `0128-producer-discriminated-aad-for-cryptocontext.md` | Proposed (2026-08-28) | `bbf88be85` |\n| `0130-release-artifact-as-co-ownership-boundary.md` | Proposed (2026-09-01) | `09cc6be43` (an anchor migration — its original landing is earlier; not chased here) |\n| `0131-total-organization-ownership-no-null-organization-id.md` | Proposed (2026-09-04) | `0ed271574` — *\"docs(adr): ADR-0131 … (#14976)\"* |\n\n**Controls, so this reads as an outlier rather than a house style:** 135 ADRs on `main`; **86** carry `Accepted`. ADR-0125 shows the resolved spelling — *\"**Status**: Accepted (2026-08-20) — accepted by the merge that landed it on `main`\"* — which is exactly the act these three describe as still owed. And a negative control on the landing check: `git log origin/main --oneline | grep -c '(#14976)'` → **1**, while the same command for a fabricated PR number → **0**, so the merge reading is a reading.\n\n## Why ADR-0131's copy is load-bearing right now\n\nThree records already treat ADR-0131 as in force while its own header says it is not:\n\n- **ADR-0126**'s Status reads *\"**Amended** (2026-09-04) by ADR-0131\"* — a record cannot be amended by one that has not been accepted.\n- **#15193**'s body states ADR-0131 was *\"merged to `main` via #14976, approved by the maintainer 2026-09-04\"*.\n- The execution tree #15194 / #15196 / #15204 / #15205 / #15207 / #15211 is cut from its §8.\n\nMeanwhile **this seat reads that exact Status line on every check-in as its pause condition** — it is written into the seat's standing check-in text as *\"re-read the Status line, never assume\"*. That instruction is right; the line it reads is not. A pause keyed to a marker that can never change by itself is a pause with no end condition, which is a different thing from the pause the maintainer actually declared (and which #15193 correctly encodes as a card that closes).\n\n⇒ The risk runs in **both** directions, which is why it is worth a card rather than a shrug: a seat could wait forever on a line that will never flip, or a seat could notice the contradiction and \"correct\" it themselves — and `docs/adr/**` is precisely where a seat must not do that.\n\n## What is actually owed (advisory — the disposition is the maintainer's)\n\nFor each of the three, one of:\n\n- **Accepted**, in ADR-0125's spelling, dated to the landing commit — if the merge was the acceptance act, which is what the sentence itself says it is; or\n- a Status that says what is *really* still owed and names an event that can occur (ADR-0131's would presumably point at **#15193**, whose closing is the act that opens the v18 line); or\n- an explicit **Proposed** with the hand-merge clause removed, if a record can sit on `main` un-accepted — in which case the corpus needs one sentence saying so, because 86 Accepted records currently imply the opposite.\n\n⚠️ Whoever takes this should re-run the scan rather than trusting this table — three is the count at 2026-09-04T16:1xZ and the corpus moves.\n\nRefs: #15193 (the gate that actually holds the ADR-0131 line, open) · #14976 / `0ed271574` (ADR-0131's landing) · ADR-0125 (the resolved spelling) · ADR-0126 (already amended by ADR-0131) · Prime Directive #14."
+}

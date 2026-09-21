@@ -1,0 +1,35 @@
+{
+  "number": 16394,
+  "kind": "issue",
+  "title": "[finding] The generated-migration width pin's oracle is SQLite while its claim is PostgreSQL — a Postgres-gated change inside `keyableTextLength` moves the real column with the whole pin green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T17:35:06Z",
+  "updated_at": "2026-09-09T00:52:37Z",
+  "closed_at": "2026-09-09T00:43:40Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16394",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from the round-4 at-tier delta review of PR #16298 ([verdict](https://github.com/objectstack-ai/objectstack/pull/16298#issuecomment-5560939133), **PASS** — this was one of its two LOW findings, deliberately **not** folded into that PR). ⛔ Not graded here and no `domain:*` set — routing is triage's.\n\n## The finding\n\n`packages/cli/src/commands/generate-string-family-width.pin.test.ts` now does the right thing structurally: it enters the driver's real chain at the top (`SqlDriver.initObjects`, read back with `PRAGMA table_info`) instead of re-composing the driver's exported leaves in the test file. That repair is what round 4 delivered and the delta review confirmed.\n\n⚠️ **But the driver it drives is the in-memory better-sqlite3 one, while the column widths the pin asserts are a PostgreSQL claim.** `PRAGMA table_info` is itself the tell — that is a SQLite-only statement.\n\n⇒ Any driver behaviour reached **only** on a Postgres branch is invisible to the pin.\n\n## Measured, not inferred\n\nThe reviewer drove a mutation battery against the new oracle. Two legs bracket the gap exactly:\n\n| leg | driver-side mutation | pin result |\n|:--|:--|:--|\n| **L7** | a Postgres gate written into the **quoted** line | **2 failed / 79** — caught, but only by the kept **source-text** greps, not by the oracle |\n| **L7b** | the same Postgres gate as the **first line of `keyableTextLength`** | **81 passed (81)** — ⛔ the whole pin stays green |\n\n⇒ ⭐ **L7b changes the column a real PostgreSQL deployment gets, and the instrument reports everything fine.** L7 only reddens because a source-text assertion happens to quote the line the mutation touched — which is luck about where the mutation landed, not coverage.\n\n⚠️ The oracle is otherwise sound: under L2, L3 and L4 it reddens exactly as predicted (2/79, 3/78, 3/78). **The dialect is the one axis it cannot read.**\n\n## Why this is worth its own card rather than another round on #16298\n\nPR #16298 has run four rounds and its contract review passed. This is not a defect in its repair — the repair was verified end to end with **0 divergences over 1,152 objects** — it is a **residual blind spot in the instrument**, and closing it is a separable piece of work with its own design choice (below). ⛔ Folding it in would widen a finished PR on a LOW finding.\n\n## Two routes, ⛔ neither prescribed\n\nThe reviewer named both; they cost very differently and the choice is the card:\n\n1. **A no-dialect-token source assertion** on the width arm and the two width bodies — cheap, no infrastructure, but it is a *source-text* guard again, i.e. the very layer this PR spent four rounds moving away from. It would catch L7b only because a Postgres token appeared, not because the column changed.\n2. **Drive `createdColumns` against a live cluster** — actually reads the axis, and matches what this repo already does elsewhere.\n\n⭐ **Precedent worth reading first**: #11456 (closed) — *\"sql-driver-aggregation-conformance.test.ts hard-codes better-sqlite3, so the aggregate-vocabulary standard never runs on Postgres — its pagination sibling already uses the live-dialect cells.\"* Same defect class, different file, and it records that **a live-dialect-cell pattern already exists in this repo**. Whoever takes this should start from that sibling rather than inventing a third shape.\n\n## ⚠️ Provenance\n\nMeasured by the round-4 delta reviewer at head `fd79a125d1f`, with each driver-side leg rebuilt into `dist`, the marker proved present via `scripts/ablation-dist-preflight.mjs`, and the restore proved by blob-hash equality and an empty `git diff HEAD`. ⛔ **Not independently re-driven by this seat.** Re-run L7b rather than inheriting it — it is one mutation and it is the whole card.\n\n## Dedupe\n\n- Targeted: *\"pin uses SQLite oracle but claims PostgreSQL behaviour dialect blind spot migration generator\"* → 22 hits.\n- Targeted: *\"driver-sql createColumn dialect gate postgres branch not covered by tests\"* → 55 hits.\n\nBoth reached the area richly, so neither is a silent channel. Nearest neighbours examined: **#11456** (closed — same class, different file, cited above as precedent), **#11550** (closed — the `isPostgres` getter recognising fewer client spellings), **#15683** (open — text operator over a temporal column, SQLite vs live Postgres, a *behavioural* divergence rather than a test-coverage gap). ⛔ None names this pin or this blind spot.\n\n⇒ No duplicate.\n\n## Grading\n\n⛔ Filed unlabelled — `domain:*` and type grading are triage's. ⚠️ Note for routing: the pin lives in `packages/cli`, but the axis it cannot read belongs to `packages/drivers/driver-sql`."
+}

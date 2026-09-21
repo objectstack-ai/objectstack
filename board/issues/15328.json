@@ -1,0 +1,35 @@
+{
+  "number": 15328,
+  "kind": "issue",
+  "title": "check:docs-audit-scope (affected-docs --self-test) answers a finding's exit 1 on an unbuilt workspace — the contract-declaration case flips with the build state, where its siblings exit 3 PREREQUISITE NOT MET",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T11:56:56Z",
+  "updated_at": "2026-09-09T06:50:45Z",
+  "closed_at": "2026-09-09T06:48:19Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15328",
+  "body": "Found while running the derived gate list for PR #15284 on a fresh worktree (head `49f19218b`, merged past `e77635b8f`); filed unassigned, out of that PR's scope. Same class as #15285 (a gate reporting an unbuilt workspace as findings, exit 1, where its sibling exits 3) — a different gate, so a separate card.\n\n## What was observed\n\n`pnpm check:docs-audit-scope` = `node scripts/docs-audit/affected-docs.mjs --self-test && …`. On a worktree where `@objectstack/spec` was built but the rest of the workspace closure was not (no `packages/lint/dist`, no `packages/client-react/dist`, …), the self-test failed with exit **1**:\n\n```\n  ✗ self-test \"every contract declaration admitted is a packages/spec API declaration\": kind=contract → expected scanRouteSurface=true, got false\n✗ affected-docs self-test failed (1 case(s)).\n```\n\nAfter `pnpm exec turbo run build --filter=@objectstack/client-react --filter=@objectstack/lint` (34 tasks) the SAME command, on the SAME tree (no file changed, `git status` clean), passed: `node scripts/docs-audit/affected-docs.mjs --self-test` exit 0, `pnpm check:docs-audit-scope` exit 0 (\"✓ scope injection is live …\").\n\nThe case is the one `e77635b8f` (#15274, \"a route SOURCE of two kinds — admit spec contract declarations behind a runtime-registration guard\") added at `scripts/docs-audit/affected-docs.mjs:5568`: `liveKind('contract').every((f) => f.startsWith('packages/spec/src/api/'))`. Its answer depends on what the runtime-registration guard can see, and on an unbuilt closure the guard admits at least one contract declaration outside `packages/spec/src/api/`. The branch under test touches 0 lines under `scripts/` (`git diff --stat origin/main HEAD -- scripts/` empty), so this is the gate's own behaviour, not the PR's.\n\n## Why it matters\n\nThe repo's convention for \"this gate reads built output and it is not there\" is exit **3, PREREQUISITE NOT MET** (`check:type-check-debt`, `check:dual-build-cjs-loads`, `check:doc-security-posture`, `check:doc-formula-expressions` all answer that way on the same unbuilt tree). Exit 1 here reads as a red finding: a dev re-deriving gates on a fresh worktree gets a false red they cannot distinguish from a real self-test regression, and a CI job that happened to run it before the closure build would be red for the same non-reason. The two readings (unbuilt → 1, built → 0) are the false-green/false-red pair the exit-3 convention exists to separate.\n\n## Repro\n\n```\ngit worktree add ../objectstack-probe origin/main && cd ../objectstack-probe && pnpm install\npnpm --filter @objectstack/spec build                      # spec only\nnode scripts/docs-audit/affected-docs.mjs --self-test > /tmp/a.log 2>&1; echo \"EXIT=$?\"   # 1, the kind=contract case\npnpm exec turbo run build --filter=@objectstack/client-react --filter=@objectstack/lint --concurrency=2\nnode scripts/docs-audit/affected-docs.mjs --self-test > /tmp/b.log 2>&1; echo \"EXIT=$?\"   # 0\n```\n\n## Suggested direction (not decided here)\n\nEither the runtime-registration guard detects the unbuilt prerequisite and the self-test exits 3 with the PREREQUISITE NOT MET wording its siblings print (naming the missing `dist`), or the `kind=contract` case is made independent of built output (read the declarations from source). Which of the two is the #15274 author's call."
+}

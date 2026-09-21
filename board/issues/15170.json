@@ -1,0 +1,37 @@
+{
+  "number": 15170,
+  "kind": "issue",
+  "title": "[finding] `os explain object`'s example does not parse as an Object — `field.options` is documented and sampled as `string[]`, the spec wants objects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T04:47:44Z",
+  "updated_at": "2026-09-08T17:37:33Z",
+  "closed_at": "2026-09-08T17:35:59Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15170",
+  "body": "Found by the catalog sweep landed for #14811, which parses every `SCHEMAS` entry's `example` in `packages/cli/src/commands/explain.ts` against its real schema. Rewriting catalog entries was ruled out of scope on that card (triage comment `5520209463`, step 3), so this is filed unassigned for triage. Suggested domain: `domain:cli`.\n\n## Measured\n\n`ObjectSchema` (`@objectstack/spec/data`) rejects the `object` entry's example:\n\n```\n[fields.status.options.0] invalid_type :: Invalid input: expected object, received string\n[fields.status.options.1] invalid_type :: Invalid input: expected object, received string\n```\n\nThe sample writes `status: { type: 'select', label: 'Status', options: ['open', 'closed'] }`.\n\n## Second surface, same root cause\n\nThe `field` entry's own optional-property table documents the same key with the same wrong type:\n\n- `{ name: 'options', type: 'string[]', description: 'Available choices (select fields)' }`\n\nThat row is prose, not a parsed literal, so the sweep does not turn it red — but it teaches operators the shape that the `object` example then demonstrates and the spec then rejects. Whoever fixes the example should fix the row in the same pass, and the `field` entry's example (which parses today) is a candidate place to demonstrate the real option shape.\n\n## Reproduce\n\n```\npnpm --filter @objectstack/cli exec vitest run test/commands.test.ts\n```\n\nThe sweep names this entry as a known-broken xfail; the day the entry is corrected, that xfail turns red and is meant to be promoted to a plain assertion."
+}

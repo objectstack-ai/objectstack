@@ -1,0 +1,33 @@
+{
+  "number": 15287,
+  "kind": "issue",
+  "title": "finding(agents): a PM-dispatched issue arrives already assigned, and AGENTS.md tells the dev seat that means \"taken\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T08:39:37Z",
+  "updated_at": "2026-09-09T01:52:50Z",
+  "closed_at": "2026-09-09T01:52:48Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15287",
+  "body": "Found while running the #14122 reader program. **Three separate dev seats reported the same contract conflict in their delivery reports**, each resolving it differently and each flagging the disagreement rather than resolving it silently — which is the right behaviour and is why it is filed rather than patched over.\n\n## The conflict\n\nTwo rules, both currently true, that cannot both be followed:\n\n| Source | Says |\n|:--|:--|\n| `AGENTS.md:450-456` (Prime Directive; `CLAUDE.md` inlines it verbatim) | \"Assign it to yourself … as the *first* action of the task — before the worktree, before the first read.\" and \"**Already assigned to someone else? It is taken** — pick another or ask; never reassign it to yourself.\" |\n| `.claude/skills/pm-dispatch/SKILL.md:516` | \"**assignee 字段归 PM**:原子对 step 1 设,dev 席恒不写它(os-dev 规则 2 同句)\" |\n\nA dev seat dispatched onto a card therefore reads: *assign yourself first* (AGENTS.md) and *never write the assignee field* (its own seat contract). Both are binding on it. The seats that hit this took the seat contract and recorded the disagreement; that is the correct precedence, but nothing in `AGENTS.md` says so.\n\n## Why it just got sharper\n\nUntil today the conflict was mostly latent, because the dispatched cards were arriving **unassigned** — the PM had not executed step 1 of the atomic pair, so the dev seat saw an open invitation and only the \"assign yourself\" half was live. That was a PM-side half-state (five cards of one batch: #15005, #15006, #15007, #15229, #15232 — all `pm:queue`, all unassigned, all with an in-flight dispatch), and it has now been corrected: assigned, and the label swapped to `pm:dispatched`.\n\nCorrecting it activates the **other** half of the conflict, and this one is worse. A dev seat dispatched onto one of those cards now reads `AGENTS.md:454` — \"already assigned to someone else? It is taken — pick another\" — and **yields a card it was just dispatched to**. Yielding a dispatched card is more expensive than double-claiming one: the PM waits on a seat that has already walked away, and nothing on the card records why.\n\n## The shape of the fix\n\nNot a weakening of \"claim before you write code\" — that rule is load-bearing and its failure story (one issue implemented twice in one morning) is real. The missing sentence is that **the assignee field can arrive pre-set by the dispatching PM on the seat's behalf**, and how to tell that case from a genuine prior claim:\n\n- a claim is still two acts, and the dev seat still performs the second one (the claim comment carrying its session ID and branch);\n- when a dispatch order names the seat and the card is already assigned to the dispatching account, that assignment **is** step 1, already done — the seat does not re-write it and does not yield;\n- the discriminator stays exactly where `AGENTS.md:457-460` already puts it: **re-read the comments.** An earlier *claim comment* with a different session ID or branch means taken. A bare assignee with no such comment does not.\n\nThat keeps one rule (\"the comments are what tell you whether a claim is yours\") and removes the contradiction rather than adding an exception to it.\n\n## Surfaces to touch\n\n- `AGENTS.md` — the Prime Directive paragraph at `:450`.\n- `CLAUDE.md` — it inlines the same paragraph and must not drift from it.\n- possibly `.claude/skills/pm-dispatch/SKILL.md:516` and the `os-dev` seat definition, so the two sides cite each other rather than each asserting alone.\n\n⛔ Governed surfaces (`AGENTS.md`, `CLAUDE.md`, `.claude/**`) — no auto-merge; a human reviewer decides."
+}

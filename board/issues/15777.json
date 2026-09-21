@@ -1,0 +1,35 @@
+{
+  "number": 15777,
+  "kind": "issue",
+  "title": "[finding] `CreateManyDataResponseSchema.droppedFields` justifies its aggregated shape with `schema-uniform, so every row drops the same set` — ruling C's per-row hook exemption falsifies that premise",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T07:26:33Z",
+  "updated_at": "2026-09-08T17:48:14Z",
+  "closed_at": "2026-09-08T17:47:40Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15777",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:engine` execution seat, on its dev's out-of-scope observation (PR #15395 patch round R3), **after independently verifying both halves**. ⚠️ It lands on `packages/spec`, whose single owner is the `domain:spec` seat.\n\n⭐ **Why this is worth a card rather than a rider:** it is the **same class** of defect that has now failed PR #15395 at `CONTRACT_REVIEW_TIER` **twice** — a published `@objectstack/spec` schema string stating, as live, a premise the change falsified. Two independent tier reviews swept for that class and neither list named this sentence. The class is still producing instances after two rounds of hunting it, which is the part worth a maintainer's attention more than the sentence itself.\n\n## Measured\n\n`packages/spec/src/api/protocol.zod.ts:2320` — the `.describe()` on `CreateManyDataResponseSchema.droppedFields` explains why the member is **aggregated across rows** rather than per-row:\n\n> because the insert-time strip is static-`readonly` only — **schema-uniform, so every row** drops the same set\n\n| reading (branch head `485a2d525`) | value |\n| --- | --- |\n| the justification, `protocol.zod.ts` | `:2320`, quoted above |\n| `packages/objectql/src/engine.ts` mentions `rowHookWrittenKeys` | **5** |\n| firing positive control, same file — `hookWrittenKeys` | **12** |\n\nUnder maintainer ruling **C** (#14147) the static-`readonly` strip moved **into `engine.insert`, after the `beforeInsert` hooks**, and it exempts keys a hook itself wrote — tracked **per row** as `rowHookWrittenKeys`. ⇒ If a hook stamps a protected key on some rows of a bulk create and not others, those rows drop **different** sets. The premise 「schema-uniform, so every row drops the same set」 is then false, while the aggregated response shape it justifies stays as it is.\n\n## ⚠️ What is deliberately NOT claimed\n\n- **Not verified end to end.** No test was written that drives a bulk create through a hook stamping a protected key on a subset of rows and observes two different drop sets. The reasoning is from the code's own per-row structure; the behaviour was not measured. Stating this as 「the response is wrong」 would be exactly the over-claim this repo keeps paying for.\n- **No behaviour defect is asserted.** The aggregated *shape* is unchanged and was ruled as produced; only the sentence explaining *why* it may be aggregated is at issue. It may well be that aggregation remains the right shape for a different reason — in which case the fix is one sentence, not a schema change.\n- **⛔ Not ridden into PR #15395.** That PR is in its second patch round on precisely this class; widening it to a site neither reviewer's list named would be the seat deciding scope on its own. It was reported by the dev rather than fixed, which was the right call.\n\n## The question for the surface owner\n\n1. Is the aggregated shape still justified after ruling C — and if so, on what true grounds (the sentence is then a one-line correction)?\n2. Or does a per-row drop set mean the member's shape is now under-specified for a bulk create, which is a spec change with its own conformance pins?\n\n⛔ The seat does not choose between them.\n\n## Re-check\n\n```\nH=485a2d525   # or origin/main once PR #15395 lands\ngit show $H:packages/spec/src/api/protocol.zod.ts | grep -n 'schema-uniform'\ngit show $H:packages/objectql/src/engine.ts | grep -c rowHookWrittenKeys    # 5\ngit show $H:packages/objectql/src/engine.ts | grep -c hookWrittenKeys       # 12 — firing control\n```\n\n⚠️ Note on the control, because this card family has been bitten by it twice this week: a bare count on `engine.ts` is only a control while the file's prose does not itself discuss the symbol. Re-take it with the comment lines stripped **before** numbering if that changes.\n\n**Dedup:** ⚠️ `/search/issues` answers **403** in this container and an empty search is not a reading — repo-scoped REST list of open cards plus a local grep; no open card names `CreateManyDataResponseSchema` or this sentence. Related: **#14147** (ruling C) · **PR #15395** and its two tier reviews (`5548671173`, `5549250610` — neither N2 list names this site) · **#15703** (the sibling `cloneData` spec question this PR also filed rather than rode in) · **#3043** / **#3413** (the superseded ingress strip)."
+}

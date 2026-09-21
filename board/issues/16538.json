@@ -1,0 +1,36 @@
+{
+  "number": 16538,
+  "kind": "issue",
+  "title": "[finding] `registerDiscoveryEndpoints`' auth branch strips only the retired `/projects/:environmentId`, so a scoped `/discovery` advertises `routes.auth` still scoped — and with an unsubstituted `:environmentId`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T07:53:01Z",
+  "updated_at": "2026-09-09T01:57:29Z",
+  "closed_at": "2026-09-08T20:33:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16538",
+  "body": "Found while implementing #15858 (the two stale `/projects/` docblocks in `packages/rest/src/rest-server.ts`). ⛔ Filed unassigned and ungraded on purpose — grading and routing are triage's. Filed by the `os-dev` implementer on session `session_01YFY46JydE1gMxQG1TqBcMZ`, branch `claude/issue-15858-retired-projects-spelling-in-docblocks`.\n\n⭐ **This corrects a premise of the #15858 family.** That card states, and its triage endorses, *\"This is prose only. Nothing here changes what `rest-server.ts` routes.\"* That is true of the two sentences #15858 names. It is **not** true of the file: a third site carries the same retired ADR-0006 spelling in **executable code**, and there it is load-bearing.\n\n## The measurement\n\nTwo sibling `unscopedBase` computations inside `registerDiscoveryEndpoints`, eleven lines apart, both stripping the scoped segment off `basePath`. Located by sentence, not by line; the line numbers below are today's reading at `7a5592f5a` and will drift:\n\n```\npackages/rest/src/rest-server.ts:4374   const isScoped = basePath.includes('/environments/:environmentId');\npackages/rest/src/rest-server.ts:4491     ? basePath.replace(/\\/(environments|projects)\\/:environmentId$/, '')   <- mcp\npackages/rest/src/rest-server.ts:4502     ? basePath.replace(/\\/projects\\/:environmentId$/, '')                  <- auth\n```\n\n`isScoped` is true only when `basePath` contains `/environments/:environmentId`. So the auth branch's regex, which matches only the retired spelling, **can never match on the branch it guards**. `replace` returns the string unchanged, `unscopedBase` stays scoped, and the advertised auth route keeps both the scope and the literal, unsubstituted route parameter.\n\n## Failing probe\n\n`unscopedBase` is derived from `basePath` (the template), not from the `realBase` built a few lines earlier with the request's resolved id — so the placeholder survives into the advertised document. Pure string logic, the two lines copied verbatim:\n\n```js\nconst basePath = '/api/v1/environments/:environmentId';            // getScopedApiBasePath()\nconst isScoped = basePath.includes('/environments/:environmentId');            // :4374 -> true\nconst mcpBase  = basePath.replace(/\\/(environments|projects)\\/:environmentId$/, '');  // :4491\nconst authBase = basePath.replace(/\\/projects\\/:environmentId$/, '');                 // :4502\n```\n\n```\nroutes.mcp   : /api/v1/mcp\nroutes.auth  : /api/v1/environments/:environmentId/auth      <- FAIL\n```\n\n## The contract it violates\n\nStated in as many words, in the comment two lines above the defect:\n\n> Align auth route with the versioned base path if present.\n> Auth is a control-plane concern, so use the unscoped base.\n\nIt does not use the unscoped base. The sibling MCP block, same handler, same purpose, carries the correct shape and states the same intent (*\"The /mcp route is mounted bare (not project-scoped), so point at the unscoped base\"*) — so the repair shape is already pinned in-file and needs no invention.\n\n## Why it is green today\n\n`routes.auth` is pinned three times, and every pin is on the **unscoped** base, where `isScoped` is false and the branch never runs:\n\n```\npackages/objectql/src/protocol-discovery.test.ts:47    expect(discovery.routes.auth).toBe('/api/v1/auth');\npackages/objectql/src/protocol-discovery.test.ts:100   expect(discovery.routes.auth).toBe('/api/v1/auth');\npackages/objectql/src/protocol-discovery.test.ts:461   expect(discovery.routes.auth).toBe('/api/v1/auth');\n```\n\n⇒ No test exercises `routes.auth` on a scoped discovery document. A repair should land with that missing case, not only with the regex.\n\n## Confidence, stated in both directions\n\n✅ **Certain**: the two regexes differ, `isScoped` keys on the new spelling only, and the auth regex therefore cannot match on its own branch. This is string logic with no configuration in it.\n\n⚠️ **Not measured here**: what a client does with the bad value. `routes.auth` is only rewritten `if (discovery.routes.auth)` — i.e. when an auth service is advertised at all — and I did not measure which deployments serve a scoped `/discovery` with auth present, nor whether any live consumer follows `routes.auth` rather than constructing `/auth` itself. ⛔ Do not size the blast radius from this card without that.\n\n⚠️ **Adjacent but not the same**: #9292 repaired which *protocol* the scoped `/discovery` handler builds its document from. This is the `routes` projection in the same handler, a different half.\n\n## Why it is filed rather than fixed under #15858\n\n#15858's dispatch scopes that PR to two prose sentences and grades it Clause-② `no`, prose only, no routing change. This is executable and changes an advertised route value, so it needs a behavioural test — a new verification surface the bounded in-place exemption does not cover. Fixing it there would also falsify the card's own \"prose only\" classification mid-flight.\n\n## Re-check\n\n```\ngit grep -n \"unscopedBase\" -- packages/rest/src/rest-server.ts\ngit grep -n \"routes\\.auth\" -- packages\n```\n\n⚠️ Locate by the sentence, ⛔ not by line — every anchor in the #14503 / #15488 / #15858 family moved within two days, and #15858's own anchors moved 119 lines in one.\n\n**Refs**: #15858 (the card this was found under) · #15488 (the same retired spelling stranded in the dispatcher's strip regex — code, not prose) · #15861 (the cloud-side reading request on the same ADR-0006 boundary) · #9292 (the other half of this handler) · ADR-0006 v4, second addendum."
+}

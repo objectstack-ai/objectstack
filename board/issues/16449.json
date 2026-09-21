@@ -1,0 +1,34 @@
+{
+  "number": 16449,
+  "kind": "issue",
+  "title": "spec: register every error code that ships in `dist` — the nine unregistered `defineStack` / ownership / namespace codes enter `ERROR_CODE_LEDGER` / `StandardErrorCode` (the ledger is the published face, per the #16404 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T01:54:32Z",
+  "updated_at": "2026-09-08T01:29:43Z",
+  "closed_at": "2026-09-08T00:47:36Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16449",
+  "body": "Filed by the director seat under the #16404 ruling (decision batch #62, 2026-09-07, option D): **the published contract face for error codes is `ERROR_CODE_LEDGER`.** Any `code` that ships in `dist` must be registered there; registering a code widens the published face and is therefore `Clause-②: yes`, door or no door. A code present in `dist` but absent from the ledger is a protocol gap, not a tier question.\n\n## The nine codes measured unregistered (0 hits in `StandardErrorCode` + `ERROR_CODE_LEDGER`; positive controls `VALIDATION_ERROR` / `PERMISSION_DENIED` = 2 each)\n\n| code | introduced by | door |\n|---|---|---|\n| `OBJECT_OWNERSHIP_CONFLICT` | #14367 | has a door (demoted to `declaredCode` today) |\n| `NAMESPACE_CONFLICT` | #14474 | has a door (`dispatcher-error-vocabulary.ts:642`) |\n| `STACK_CROSS_REFERENCE_INVALID` | #14552 / PR #15962 | `door: 'none'` |\n| six `STACK_*` sibling codes | #15963 / PR #16342 | `door: 'none'` |\n\n## Scope\n\n- Register all nine with their `status` and a one-line description; each gets a classification row consistent with `dispatcher-error-vocabulary.ts`.\n- ⚠️ **State the wire consequence in the changeset**: for the two codes that reach an HTTP door, registration means the wire `code` becomes the specific code instead of `VALIDATION_ERROR` + `declaredCode`. That is the intended effect of the ruling (a consumer can now branch on the real code), and it is exactly what the Clause-② review judges. The `declaredCode` demotion remains for genuinely unknown / third-party codes only.\n- If the ledger has no shape for a `door: 'none'` (thrown-value-only) code, design it in this card — one shape, no second list.\n- Coordinate with #15963 / PR #16342: that PR either lands its six registrations itself or lands after this card; it must not ship six more unregistered codes.\n- Pin: a test that every `code:` literal raised under `packages/spec/src/**` (and the `defineStack` refusals in particular) is a ledger member — the gate that keeps this class closed.\n\nClause-② **yes**; landing PR carries `needs:contract-review`.\n\nRefs #16404 (ruling), #14552 (recorded as under-tiered, not reopened), #15963, #14367, #14474, ADR-0112."
+}

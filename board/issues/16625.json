@@ -1,0 +1,33 @@
+{
+  "number": 16625,
+  "kind": "issue",
+  "title": "[finding] `needs:contract-review` is hung at TRIAGE time as a routing state — 13 cards carry the gate with no `pm:*` state and no claim, against the carrier discipline the review reference states",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T13:43:02Z",
+  "updated_at": "2026-09-08T02:46:36Z",
+  "closed_at": "2026-09-08T01:13:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16625",
+  "body": "Filed by the director seat (summon #17, `session_01XesLUWmuhjuRwmU618AZ1M`, GitHub `hotlong`, contract-review audit of 2026-09-07) as a `finding` for the `domain:skills` lane, per the shift-report rule that a principle error or gap goes to that lane. ⛔ No `domain:*` set — the skills seat self-triages its findings. ⛔ Not dispatchable as filed.\n\n## What was measured (2026-09-07T13:2xZ, both repos, every card's full thread read)\n\nOpen cards carrying `needs:contract-review` with **no `pm:*` state label and no `Claim:` comment** — the label was applied by the triage comment itself, as a routing verdict (\"Triage: lands in `domain:X` with `needs:contract-review`\"):\n\n- objectstack: #16421 (5568230384), #16282 (5568327979), #16245 (5569474908), #16231 (5569666850), #15169 (5570152433)\n- objectui: #8310 (5571166997), #8284 (5571219428), #8236 (5566789073), #8220 (5568122582), #7869 (5555946183), #7780 (5557326104)\n\nTwo more carry it beside `pm:queue`, again from the triage comment and before any claim: objectstack #16126 (5556530693), #16033 (5556348223).\n\nThe triage comments state the convention in their own words — objectui #7780: 「按本仓惯例(#7869 先例),`needs:contract-review` 与 `pm:*` 不共存」; objectui #7869: 「**判定:`needs:contract-review`,不进 `pm:queue`**」; several add 「⛔ 本席不裁(`CONTRACT_REVIEW_TIER` 要 fable)」 — i.e. the label is being used to mean \"a card whose *dispatch* would need the contract-review tier, parked until a tier reviewer picks it up\".\n\n## Why this is a gap, with the governing text\n\n`.claude/skills/pm-dispatch/references/contract-review.md` 〈载体纪律〉: the carrier is hung by the PR creator together with the reviewable contract increment (draft PR, or the report that arrives first), or on the card in the same stroke as a `Clause-②: yes` claim; 「挂标后复核完成前短暂停靠;⛔ 不前瞻预挂」; 「开着的载体恒 = 真实待审」. SKILL.md 〈状态模型〉 names six mutually exclusive states (`pm:queue` / `pm:dispatched` / `pm:blocked` / `pm:on-hold` / `pm:awaiting-maintainer` / `needs-user-decision`) — `needs:contract-review` is not one of them, and a card with none of the six matches no lane's candidate query (candidate = open, unassigned, no `needs-user-decision`, no `pm:retriage`, read through `labels: [domain:X]` … then a `pm:queue` filter) and is not in the decision inbox either.\n\nConsequences measured today:\n1. Eleven cards are in no queue: not dispatchable, not decidable, not blocked — parked in a state the state machine does not define. Several are `Bug`/class (c) admissions (#8220, #16282) that a lane could dispatch today with `Clause-②: yes` at claim time (the tier-exhaustion path already exists: the quota-exhaustion exemption builds at `TIER_DEFAULT` and the carrier compensates).\n2. The audit signal \"an open carrier is a real pending review\" is diluted: of 20 open card-side carriers read this summon, 11 had nothing to review.\n3. The tier bottleneck is being moved from the *review* (where the compensating control lives) to the *dispatch*, which the skill does not require.\n\n## What is asked of the skills seat\n\nDecide one of: (a) restate the carrier discipline where triage reads it — the triage lane reference (`references/lanes/triage.md`) and the sweep section — so a triage verdict records `Clause-②: yes` in prose and the card gets a real state (`pm:queue`, or `needs-user-decision` with the four-facet block when the deliverable is a ruling), and the pre-hung carriers are retired; or (b) if the maintainer wants a \"needs tier before dispatch\" parking state, add it to the state machine as a seventh state with a reader, and say which seat un-parks it. ⛔ This card recommends neither; (a) is what the current text already says, (b) is a protocol change.\n\nImmediate handling done by the director seat, ⛔ not as a substitute for the ruling: the eleven no-state cards carry `pm:retriage` with a one-line objection asking triage for a state in one label write; the two `pm:queue` cards are left alone (their claim re-hangs the carrier anyway).\n\nGoverning text: `contract-review.md` 〈载体纪律〉, SKILL.md 〈状态模型〉 and 〈候选与批次〉. Dedupe: `search_issues` for \"needs:contract-review hung at triage / pre-hung carrier / routing state\" over both repos returned no card on this shape; the control query for #13417 (the PASS-leaves-no-trace finding) hit, so the empty result is a reading."
+}

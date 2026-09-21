@@ -1,0 +1,36 @@
+{
+  "number": 16108,
+  "kind": "issue",
+  "title": "lint: an object-qualified field-permission key naming a field the object does not declare is reported by nothing — `security-fls-unqualified-key` only catches the unqualified shape",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "priority:p2",
+    "security",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T01:28:45Z",
+  "updated_at": "2026-09-09T02:28:39Z",
+  "closed_at": "2026-09-09T02:28:39Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16108",
+  "body": "Found while surveying which platform rules fire on `objectstack-ai/hotcrm` (its #1621, step 3 of epic #1579). Read-only survey, report-first, unassigned.\n\nMeasured against the **pinned `@objectstack/lint@17.3.0`**, hotcrm at `1670557`. Both injections proven on disk; both restored by blob hash verified by observation.\n\n## The pair, same key, same file, same run\n\n`src/profiles/sales-rep.profile.ts` authors `fields: { 'crm_account.description': { readable: true, editable: true }, … }`.\n\n| injection | `objectstack lint` | exit |\n|:--|:--|--:|\n| key to `'description'` (unqualified) | **`security-fls-unqualified-key` at `error`** | **1** |\n| key to `'crm_account.description_nope'` (qualified, field does not exist) | `passed: true`, no new finding | **0** |\n\nThe second row is the finding; the first is its working control — same file, same harness, same command, one run apart.\n\n## Why the silent half is the worse one\n\nThe rule's own message explains that FLS is matched at runtime by the `object.field` prefix, so an unqualified key is silently ignored and the declared masking never enforces. A **qualified key naming a field that does not exist** has the identical runtime consequence — nothing ever matches it — but it looks correct in review, survives rename refactors invisibly, and is exactly what a field rename leaves behind. It is the shape that accumulates.\n\nOn hotcrm the local assertion `test/authorization-coverage.test.ts` → *every FLS key is object-qualified and names a real field* goes **red on both** injections, which is how the asymmetry surfaced: that assertion cannot be retired against `security-fls-unqualified-key`, because the rule covers only half of what it asserts.\n\n## Adjacent precedent\n\n**#15495** (closed) — *\"The object write door still runs no field-existence rule for searchableFields or listViews — the same asymmetry #15254 closed one key over\"*. Same shape of gap (a declared key whose field is never resolved), one surface over. Cited as precedent, not as a duplicate: it does not reach permission-set `fields`.\n\n## Dedupe\n\nTargeted search over this repo returned 10 on-topic results (`#14747`, `#15495`, `#12935`, `#11000`, `#9538`, `#9327`, …), none naming permission-set field-permission keys. That non-zero, on-topic return is the control that the search was not silently answering empty."
+}

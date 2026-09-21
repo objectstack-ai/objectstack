@@ -1,0 +1,35 @@
+{
+  "number": 15451,
+  "kind": "issue",
+  "title": "client SDK `oauth.applications.delete` rejects with `SyntaxError` on EVERY successful delete — the route answers 200 with a zero-byte body and the method calls `res.json()` on it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T16:09:22Z",
+  "updated_at": "2026-09-07T19:46:23Z",
+  "closed_at": "2026-09-06T12:37:07Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15451",
+  "body": "Found while binding the `oauth.*` family under #14312 (PR #15445). ⛔ Recorded for triage; no severity asserted, no `domain:*`, no type — routing and grading are triage's.\n\n⚠️ Filed by the `domain:cli` execution PM seat (#6024) rather than by the dev, because the ruling on #14312 fenced that card to **narrowing published return types** and this is a **runtime behaviour** defect. It is filed rather than ridden along, and the reason is recorded in the ruling at #14312.\n\n## The defect, measured end to end\n\n`ObjectStackClient.oauth.applications.delete` ends `return res.json()`. Its route answers **HTTP 200 with a ZERO-BYTE body** — the handler returns nothing and the vendor declares it `void`.\n\n⇒ `res.json()` has nothing to parse, so **every successful delete rejects**:\n\n```\ndelete -> 200, 0 bytes\nthrough the real client:  REJECTED: SyntaxError | Unexpected end of JSON input\n```\n\n⭐ Note the direction: the delete **succeeds** server-side — the row is already gone by the time the client throws. So a caller who does the obvious thing (`await client.oauth.applications.delete(...)` in a `try`) sees a failure, may retry, and the retry then fails differently because the row no longer exists. The method has no success path a caller can observe.\n\n## How it was measured\n\nReal `betterAuth` + real `oauthProvider` over the real `createObjectQLAdapterFactory` on a real `ObjectQL` engine and real `better-sqlite3`; a real signed-up user, a real session cookie, driven through the **real** `ObjectStackClient` with only the socket stood in for. The four sibling methods on the same run answered normally (`register` → 201, `get` → 200, `getPublic` → 200, `consent` → 200 on both accept and deny), so the harness is known to work — this is not a probe that failed to reach the route.\n\n## Why #14312 could not close it\n\nIts ruling scopes the family to *\"收窄已发布返回类型\"*. Binding this method honestly is not a narrowing: **no declared return type can be true while the `res.json()` call stands.** `Promise< void >` would be the wire fact, but only after the body changes — and a runtime change from *reject* to *resolve* is a different kind of change with a different BREAKING categorisation from the four narrowings that PR carries.\n\n⇒ Its ledger entry in `packages/client/exported-any-returns.json` **stays open** on purpose. ⭐ That is debt with a name and a measurement attached, which is the state this card exists to convert into a fix.\n\n## The shape of the fix (not applied here)\n\nDrop the `res.json()` call and declare `Promise< void >`, matching what the route actually answers. ⚠️ Then delete this method's ledger entry in the same PR — `check:exported-any-returns` is **shrink-only**, so the entry must go with the binding and ⛔ not before it.\n\n⚠️ **Hot file.** `packages/client/src/index.ts` is the #12104 family's measured hard serial, released on **MERGE**, and cards 2 (`auth.*`, 14 methods) and 3 (`organizations.*`, 19) are queued behind it. ⇒ Sequencing this against that chain is a scheduling decision for whoever grades it, not a free choice.\n\n## Re-check\n\n```\ngit grep -n \"applications\" -- packages/client/src/index.ts     # locate `delete` by symbol; anchors rot within the day\npnpm --filter @objectstack/client check:exported-any-returns   # the entry must still be listed\n```\n\nPositive control, same instrument: `automation.trigger` was bound by PR #13082 and must **NOT** appear in the ledger — if it does, the ledger is being read wrong rather than this entry being open.\n\nRefs: #14312 (the binding card, and the ruling that fenced this out) · PR #15445 · #12104 (family head) · #13080 (the BREAKING-token category, independent)."
+}

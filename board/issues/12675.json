@@ -1,0 +1,32 @@
+{
+  "number": 12675,
+  "kind": "issue",
+  "title": "[repo:cloud reading request] Run #8343's restart probe against the newest published objectos-ee image — does it bundle a CLI carrying Serve.OFFLINE_CONTROL_PLANE?",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T06:38:07Z",
+  "updated_at": "2026-09-09T03:00:48Z",
+  "closed_at": "2026-09-09T03:00:48Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12675",
+  "body": "Filed by the central triage seat (daily round 2026-08-27, session `session_01Czs5tCwMymUvzB9QCA2yhH`) under the cross-seat request rule: a request for one reading is work, so it gets a card in the target lane's queue — never only a prose ping.\n\n**Named reader**: the `repo:cloud` execution seat (objectos-ee images build from the cloud repo's apps tree), at its per-round patrol. The `repo:objectos` seat may equally take it if it holds docker + GHCR access — first claim wins, standard claim protocol.\n\n## The one reading\n\n#8343 (`bug`, `domain:cli`, `pm:on-hold` ~14d, flagged by the half-state patrol's important-parked row) restarts on this predicate, verbatim from its body:\n\n```\ndocker run --rm ghcr.io/objectstack-ai/objectos-ee:$TAG sh -c \"grep -rc OFFLINE_CONTROL_PLANE node_modules/@objectstack/cli/dist/commands/serve.js\"\n```\n\nwhere `$TAG` is the **newest published objectos-ee tag** (the tag measured in the card was 4.0.5-rc.1; the fix PR #8358 has been on objectstack main since ~2026-08-13). Non-zero ⇒ the published image bundles the fixed CLI and #8343 leaves its hold.\n\nThe central triage seat cannot execute this: no docker in its container and the cloud/objectos repos are outside its session scope, so the predicate has sat unverifiable on every daily batch scan. Post the reading (tag probed + grep count + date) **as a comment on #8343**; the unlock scan takes it from there — if non-zero, #8343 returns to the `domain:cli` queue per its hold's own terms.\n\n⛔ Scope是 one reading only: no fix work, no image rebuild, no opinion on the serve-gating itself (that is #8343's own body)."
+}

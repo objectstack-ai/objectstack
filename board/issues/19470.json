@@ -2,8 +2,8 @@
   "number": 19470,
   "kind": "issue",
   "title": "A fork PR is inside no line of defence: #9495 makes the pre-merge defence SEAT DISCIPLINE, which does not bind an outside contributor, and the governed predicate is path-only — measured live on #19342",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-litant",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-21T01:28:01Z",
-  "updated_at": "2026-09-21T06:31:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T08:35:48Z",
+  "closed_at": "2026-09-21T08:35:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

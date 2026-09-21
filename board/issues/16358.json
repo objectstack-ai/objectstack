@@ -1,0 +1,37 @@
+{
+  "number": 16358,
+  "kind": "issue",
+  "title": "[finding] `os lint --json --eval --generator UNRESOLVABLE_PATH` leaks esbuild's diagnostic to stderr — the sibling pin one file over asserts the opposite property holds",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T15:11:10Z",
+  "updated_at": "2026-09-08T11:43:23Z",
+  "closed_at": "2026-09-08T11:42:01Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16358",
+  "body": "## The defect\n\n`os lint --json --eval --generator UNRESOLVABLE_PATH` writes **54 bytes to stderr** — esbuild's own diagnostic, `[ERROR] Could not resolve ...` — while the run's `--json` face is otherwise well-formed on stdout.\n\nA `--json` invocation is a machine face. Anything on stderr is a human-channel emission the caller did not ask for, and here it is an internal bundler's diagnostic, not an ObjectStack refusal.\n\n## ⭐ Why this is a contradiction and not just a leak\n\nOne file over, `packages/cli/test/lint-eval-generator-load-envelope.e2e.test.ts` **pins the opposite property**:\n\n```\nexpect(run.stderr).toBe('')\n```\n\nwith the comment *\"A --json run leaks nothing to the human channel\"*.\n\nThat pin is green, and it is honest about what it measures: it drives a module that **exists and throws at import**. The **unresolvable-path** branch is a different door into the same failure, it is uncovered, and it leaks.\n\n⇒ **Same command, same face, two answers — with a pin asserting the one that holds.** The pin's comment states a property of the `--json` face as a whole; the code only delivers it on one of the two branches that reach the same catch.\n\n## Where it comes from\n\nThe leak is esbuild's logger writing directly, inside the `bundleRequire` call that loads the generator. The `[ERROR] Could not resolve` text is emitted during bundling, before any ObjectStack code sees a throw — so the surrounding try/catch, which does produce a correct one-key `{error}` JSON document on stdout, never gets the chance to suppress it.\n\n## Scope note — why it was not repaired where it was found\n\nMeasured during #16161's round, and deliberately **not** fixed in PR #16341. The repair is silencing esbuild's logger inside the `bundleRequire` call, and the correct form of that (a `logLevel`, a custom logger, or a captured stderr) is **not settled by existing evidence in this repo** — so it fails the bounded-in-place exemption and would have been an unargued rider on an unrelated diff.\n\n## Provenance and what a taker must re-run\n\n⚠️ Measured by the implementer at branch point `4a1a3b0c254` / head `26bc91fc8e7`. **Not independently re-driven by the filing seat** — recorded as the implementer's reading. Whoever takes this should re-run rather than inherit:\n\n1. the 54-byte stderr on the unresolvable-path branch, under `--json`;\n2. that `lint-eval-generator-load-envelope.e2e.test.ts` is green at the same head while (1) holds — the two together are the finding.\n\n## Dedupe\n\nRun with a known-hit control in the same session, because a bare zero from this channel is not evidence of absence.\n\n- Query *\"esbuild diagnostic leaks to stderr during --json run bundleRequire generator load\"* → 6 hits, nearest neighbour **#15549** (closed): same command, same face, but about the **payload's shape** (a bare `{error}` with no `code`/`httpStatus`), not about a stderr emission. Distinct populations — #15549 is about what stdout carries, this is about stderr carrying anything at all.\n- Control query *\"os lint eval generator load failure error envelope\"* → 5 hits (#16161, #15549, #15550, #14974, #10653), proving the query shape reaches this area.\n\n⇒ No duplicate.\n\n⭐ **A channel property worth recording:** the control *\"Failed to load generator message text quality wording\"* returned **`total_count: 0`** even though that exact phrase appears in the body of cards this same search returns under other phrasings. A zero from one phrasing of this semantic search is **not** a zero from the area — only a control sharing the failing query's vocabulary can settle that.\n\n## Grading\n\n⛔ Filed unlabelled. `domain:*` and type grading are triage's, not this seat's. The implementer's suggestion, relayed as a suggestion only: `domain:cli`, `bug`.\n\nHeld on #16161 (comment [5559999365](https://github.com/objectstack-ai/objectstack/issues/16161#issuecomment-5559999365)) while the dedupe channel was down; filed now that a positive control fires in the same session."
+}

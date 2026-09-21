@@ -1,0 +1,35 @@
+{
+  "number": 16209,
+  "kind": "issue",
+  "title": "[finding] `check:published-readme-exports` cannot see any call in `packages/client/README.md`'s namespace tour — the receiver is built by `new`, so ~30 documented calls on the npm front page are ungraded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T05:59:38Z",
+  "updated_at": "2026-09-08T10:55:53Z",
+  "closed_at": "2026-09-08T10:45:11Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16209",
+  "body": "Found while working #16142 (which fixes three retired `client.ai.*` methods in that README). Out of scope there — that card is a content defect, this is why no gate caught it. Recorded only; not claimed, no assignee.\n\n## What was measured\n\n`packages/client/README.md`'s \"Available Namespaces / Complete API Coverage\" fence opens with\n\n```ts\nconst client = new ObjectStackClient({ baseUrl: 'http://localhost:3000' });\nawait client.connect();\n```\n\nand then makes roughly thirty `client.<ns>.<method>(…)` calls. `check:published-readme-exports` grades documented call sites, and its own summary line says what it did **not** reach:\n\n```\nCall-site half: 78 documented `X.y(…)` call(s) checked, on 242 import-bound name(s) and 48 name(s) built from one.\nNOT read: 120 documented `X.y(…)` call(s) on 72 receiver(s) with no type this gate can reach\n(free variables, parameters, globals, non-workspace imports). Visibility, not a verdict — see #9870.\n```\n\nEvery call in that tour is in the `NOT read` bucket.\n\n**Ablation 1 — the gate cannot fail on this file's content.** With `origin/main`'s own defect restored (the three `client.ai.nlq` / `.suggest` / `.insights` lines #16142 removes) put back into the tour, on an otherwise fully built tree:\n\n```\ninjected nlq lines: 1 (expect 1)\nGATE EXIT ON MUTATED TREE = 0\n```\n\nExit **0** — green, with three calls to methods that are not on `client.ai` at all. Restore proven: restored blob `891c27e3c07c…` equals `HEAD:packages/client/README.md`, `git diff HEAD` empty, injected line count back to 0.\n\n**Ablation 2 — the obvious fix does not close it.** Adding `import { ObjectStackClient } from '@objectstack/client';` inside that fence, so the receiver is import-bound:\n\n```\nimport lines BEFORE: 1   →   AFTER: 2\nGATE EXIT WITH IMPORT-BOUND RECEIVER = 0\nImport half: 325 documented symbol(s)      (was 324 — the new import IS counted)\nCall-site half: 78 … NOT read: 120         (both UNCHANGED)\n```\n\nThe import half moves by exactly one; the call-site half does not move at all. So the blindness is not \"this fence forgot an import\" — a receiver produced by `new X(…)` is not resolved to a type by the call-site half even when `X` is import-bound. Same restore proof: blob matches `HEAD`, `git diff HEAD` empty.\n\n## Why it is worth a card\n\n`packages/client/package.json` ships `files: [\"dist\", \"README.md\", \"CHANGELOG.md\"]`, so this tour is the npm front page of `@objectstack/client`, and it is the single densest block of documented call sites in the repo. It is currently graded by nothing: #16142's defect survived from v17 to today inside the one gate that exists to catch it, and #16142 also turned up a second, independent defect in the same fence (`approvals.approve(requestId, 'LGTM')` — TS2559 against the published `.d.ts`; filed separately). Two defects, both in the ungraded block, is the population estimate.\n\nThis is adjacent to but not the same as the closed #10815 (the `NOT read` count is published only as a whole-repo scalar), #9610 (the call-site half misses `Kernel.use(Plugin.configure(…))`) and #10893 (blind to install instructions by construction). Those are about *reporting* and about *other* shapes; this one names the most valuable single document the receiver rule excludes, and shows the import fix does not reach it.\n\n## Executable criterion\n\nRestore the #16142 lines into `packages/client/README.md`, build the workspace, run `node scripts/check-published-readme-exports.mjs > /tmp/o.log 2>&1; echo \"EXIT=$?\"`. It prints `EXIT=0`. When this is fixed, that same procedure prints a non-zero finding naming `ai.nlq`.\n\n## Shape of a fix (a hint, not a dispatch)\n\nTeach the call-site half to bind a receiver from a `new <ImportedClass>(…)` initializer inside the same fence, then re-run against the two ablations above — ablation 1 must go red, and the tour's remaining ~30 calls must be audited in the same PR, because turning this on will surface whatever else the block has been hiding."
+}

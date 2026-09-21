@@ -1,0 +1,35 @@
+{
+  "number": 16751,
+  "kind": "issue",
+  "title": "lint: two more flow-node-list readers throw on a non-record member — `lintFlowPatterns` and `collectFlowVariableNames`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T03:34:15Z",
+  "updated_at": "2026-09-08T19:23:32Z",
+  "closed_at": "2026-09-08T19:23:32Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16751",
+  "body": "Found while implementing #15793 (which repaired the two `validate-expressions.ts` casts). Filed as a finding only, not claimed.\n\n#15793's ruling was to extend `non-record-object-entry.test.ts` with a **graph-shaped arm** rather than ship a local test, precisely because no sweep could express \"a flow's inner node list\". The arm was added — and on its first run it caught a reader in a **different file** that the card never named.\n\n## Measured\n\nOn `7c12e475`, driving the whole `AUTHORING_RULES` table over `flows[].nodes` with a junk member beside a valid node:\n\n```\nflows[].nodes  null       threw=[lintFlowPatterns]  invented=0\nflows[].nodes  undefined  threw=[lintFlowPatterns]  invented=0\nflows[].nodes  a string   threw=[]                  invented=0\nflows[].nodes  a number   threw=[]                  invented=0\nflows[].nodes  an array   threw=[]                  invented=0\n```\n\n```\nTypeError: Cannot read properties of null (reading 'type')\n    at lint-flow-patterns.ts:1430:39   (Array.find)\n```\n\nReproduce:\n\n```ts\nlintFlowPatterns({\n  objects: [{ name: 'crm_account', fields: [{ name: 'name', type: 'text' }] }],\n  flows: [{ name: 'crm_flow', nodes: [null, { id: 'start', type: 'start', config: {} }], edges: [] }],\n});\n```\n\n## The lines\n\n`packages/lint/src/lint-flow-patterns.ts` holds the **same two spellings** #15793 removed from `validate-expressions.ts`, three times over:\n\n```\n:1426  const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];   <- throws at :1430\n:456   for (const node of graph.nodes as unknown as AnyRec[]) {\n:1522  const graphNodes = graph.nodes as unknown as AnyRec[];\n```\n\nA fourth site is in `packages/lint/src/flow-variable-scope.ts`:\n\n```\n:225   for (const item of graph.nodes) { const flowNode = item as AnyRec;\n         if (typeof flowNode.id === 'string' ...)      <- throws on a null member\n```\n\nNote `collectFlowVariableNames` guards `flow.variables` members three lines above with `if (!item || typeof item !== 'object') continue;` and does not guard `graph.nodes` — the guard exists in the same function, one loop over.\n\n## Reachability differs between the two, and that matters for the pin\n\n- **`lintFlowPatterns` is reachable shallowly** — the repro above, an ordinary flow. This is the live half.\n- **`collectFlowVariableNames` is currently MASKED**: every nested route into `graph.nodes` with a non-record member throws earlier inside `packages/spec` (see the sibling card on `collectFlowGraphs`). The one input that reaches it is a region nest exactly `MAX_REGION_DEPTH` (32) deep, where `visit` pushes the graph and returns *before* walking its members:\n\n```\nnesting 32 : OK, 33 graph(s); graphs whose nodes hold a NON-RECORD: 1\nnesting 33 : OK, 33 graph(s); graphs whose nodes hold a NON-RECORD: 0\n```\n\n  So it is real but only observable at the ceiling today. Fixing the spec-side card will UNMASK it at every depth.\n\n## Notes for whoever takes it\n\n- `recordsOf` (`object-graph.ts`) is the one home of this coercion, as it was for #15793; re-pointing adds no copy for `collection-coercion-single-copy.test.ts` to count.\n- `:1426` needs the same treatment #15793 gave its twin: the coerced array must also be what is handed to `collectFlowGraphs`, or the crash merely relocates into `packages/spec` rather than going away. That was measured on #15793 and is the non-obvious half.\n- The pin already exists: `non-record-object-entry.test.ts` has a `flows[].nodes` arm as of #15793, with `lintFlowPatterns` recorded in `RESIDUAL_THROWS`. Fixing this card means **deleting that row**, and the test goes red until it does."
+}

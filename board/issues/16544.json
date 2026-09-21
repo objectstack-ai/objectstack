@@ -1,0 +1,36 @@
+{
+  "number": 16544,
+  "kind": "issue",
+  "title": "`os validate` parses the normalized stack WITHOUT lowering inline handlers, so the hook write-set family (`hook-api-update-readonly-field` and siblings) cannot see a handler-authored hook there — `os validate` passes a stack `os build` refuses",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T08:15:33Z",
+  "updated_at": "2026-09-08T04:08:28Z",
+  "closed_at": "2026-09-08T04:08:03Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16544",
+  "body": "Filed unassigned from the #16095 door enumeration (branch `claude/issue-16095-hook-rules-reach-handler-authored-hooks`). Measured on `origin/main` @ `5d55afec4d` through the real CLI (`packages/cli/test/lint-hook-rules-reach-handler-hooks.e2e.test.ts` on that branch pins the reading).\n\n## The reading\n\nEvery rule in the `hook-body-*` / `hook-api-update-readonly-*` family opens on `body.language === 'js'`. Whether a hook authored as `handler: async (ctx) => { … }` reaches it is a property of what each command hands the rule registry:\n\n| door | lowers inline handlers before the rules run? | handler-authored readonly write via `ctx.api` |\n|:--|:--|:--|\n| `os build` | yes — `lowerCallables` runs before `ObjectStackDefinitionSchema.safeParse` (`compile.ts`) | **refused**, `hook-api-update-readonly-field`, exit 1 |\n| `os lint` | since #16095 — `lintConfig` hands the `parsed` tier the lowered view | **refused**, exit 1 |\n| `os validate` | **no** — `validate.ts` parses `normalized` directly | **passes**, exit 0, no finding |\n\nControl on the same fixture: the identical statement authored as an explicit `body: { language: 'js', source }` is refused by `os validate` (exit 1, same rule). So the silence is the door, not the rule.\n\nThis is the #4409 / #3782 class (\"one command returns clean for a stack another refuses\"), on the hook surface: the reference-integrity suite is `gating` and registered for all three commands, but `os validate` gives it an input on which the hook members cannot fire.\n\n## Why it was not folded into #16095\n\n#16095's ask and ruling were scoped to `os lint`; making `os validate` lower would change what `os validate` refuses (a stack that validates green today would exit 1), which is its own accept/reject decision. Also note `os validate` runs `lintUnknownStackKeys` / `lintUnknownAuthoringKeys` pre-parse on the same normalized stack; a lowering pass would have to sit between those and the parse, mirroring `compile.ts` step 2b.\n\n## Suggested shape\n\nRun `lowerCallables(normalized)` in `validate.ts` before the parse and parse `lowering.lowered`, exactly as `compile.ts` does — the same call, not a copy — and hand the registry `parsed: result.data`. The card's control fixture is the red-first test.\n\nBlast radius on this tree: zero on the ten `objectstack.config.ts` corpus files (none of the repo's handler-authored hooks writes through `ctx.api`; the two that exist stamp `ctx.input`). Outside this tree the affected population is the one #16095 measured: 39 of 39 hooks in the reference CRM are handler-authored.\n\nRelated: #16095 (lint half, in flight) · #3782 (closed — the same class on flows) · #13838 (open — `os build` acceptance, deliberately untouched)."
+}

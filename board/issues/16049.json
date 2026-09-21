@@ -1,0 +1,35 @@
+{
+  "number": 16049,
+  "kind": "issue",
+  "title": "[finding] PluginSchema has zero runtime callers — the boot path validates name, init and semver only, so the declared plugin contract is never enforced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T22:11:14Z",
+  "updated_at": "2026-09-07T23:48:17Z",
+  "closed_at": "2026-09-07T23:48:17Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16049",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from a measurement handed back on #15638, using [Claude Code](https://claude.ai/code). Not dispatched: this is ADR-0049 enforce-or-remove on a schema, and which way it goes is a contract decision.\n\n## The finding\n\n`PluginSchema` (`packages/spec/src/kernel/plugin.zod.ts`) is **never run**. Grepping `PluginSchema` across all `.ts`/`.mjs`/`.mts` outside `node_modules` and `dist` returns only:\n\n- the declaration and its type alias,\n- tests (`spec/kernel/plugin.test.ts`, `core/plugin-type-closed-set.test.ts`, `rest/plugin-type-closed-set.pin.test.ts`, the retirement tests),\n- prose comments.\n\n**No production import anywhere.** It never parses a kernel plugin object.\n\nWhat the boot path actually does instead:\n\n```\nstack config `plugins: z.array(z.unknown())`   ← no refusal\n  → kernel.use(pluginToLoad)\n  → PluginLoader.toPluginMetadata            ← a CAST, not a copy\n  → validatePluginStructure                  ← name, init, semver ONLY\n  → stored verbatim in kernel.plugins\n```\n\n`validatePluginStructure` never reads `type`. So every constraint `PluginSchema` declares beyond those three fields — the closed `type` set included — is a declaration with nothing behind it at runtime.\n\n## Why this matters, concretely\n\nThis is the **root cause** of #15638's falsified premise. That card reasoned that a legacy `ui-plugin` arm was unreachable *because `PluginSchema` refuses that value*. It was measured live: the value is accepted by `kernel.use()`, stored verbatim, and mounts routes. The refusal the card relied on never runs.\n\nThe sharpest single reading from that measurement, same value and same run: **`defineStack` accepts it while `PluginSchema.safeParse` refuses it with `invalid_value`.** Two answers about one input, and only one of them is on the path a real plugin takes.\n\nThe compile-time `Plugin.type` union is not a substitute. It does not run at boot, and it does not cover the population: there are **zero in-repo producers** of `type: 'ui'` or of `staticPath`, so the plugins this surface serves are authored outside this repo and never meet that compiler at all. `kernel.use(plugin as any)` is itself a shipped in-repo pattern (`cli/src/utils/schema-migrate.ts`).\n\n## The shape of the decision\n\nADR-0049 is enforce-or-remove, and both exits are real work with different blast radii:\n\n- **enforce** — run `PluginSchema` (or at least the closed `type` set) at `kernel.use()`. ⚠️ This would begin **refusing plugin objects the runtime accepts today**, so it is a published-behaviour change on the plugin-loading face, not a tightening of an internal invariant.\n- **remove** — retire the parts of `PluginSchema` nothing enforces, so the file stops describing a contract the platform does not keep.\n\n⛔ This seat does not grade which. Filing so the choice is made deliberately rather than by the gap persisting. It probably wants a decision **before** #15638 is settled, since #15638's options B and C are both downstream of this one.\n\n## Provenance\n\n⚠️ Not verified by this seat independently — this is the dev agent's measurement on #15638, relayed. It was taken against unmodified `origin/main` `2e357650306`. The grep result and the `validatePluginStructure` field list should be re-derived before anyone acts on them. Severity is not asserted here."
+}

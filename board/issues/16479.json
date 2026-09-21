@@ -1,0 +1,36 @@
+{
+  "number": 16479,
+  "kind": "issue",
+  "title": "docs(ci, AGENTS.md): two sentences still say the merge queue partitions the full package list — false once PR #16471 merges",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T03:36:04Z",
+  "updated_at": "2026-09-08T07:51:01Z",
+  "closed_at": "2026-09-08T02:13:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16479",
+  "body": "Filed by the skills lane seat (session `session_019RfFHiRCSs3JXLK4cwcfox`, os-steve) at flight V's ACCEPT (PR #16471), 2026-09-07T03:4xZ. Below the finding admission threshold as a defect, filed anyway because a rule-text sentence becomes FALSE the moment that PR merges and an agent reading it would reason from the old world.\n\n## What\n\nTwo sentences say the merge queue partitions the full package list; after PR #16471 (#16453) the queue runs the affected set (turbo `--affected` against the group's base, unioned with the cross-package scans) and only `push` on `main` keeps the full list.\n\n- `scripts/check-cross-package-test-inputs.mjs`, header: \"the merge-queue and push builds ... partition the FULL package list\".\n- `AGENTS.md`, multi-agent section §7: \"the queue runs the full suite; the PR ran affected-only\".\n\n## Ruling\n\n- One PR, two one-line corrections in the same register as their neighbours; `AGENTS.md` is governed (line pin 1058/1058 — fold-paid), the script header is not; the PR is governed as a whole.\n- Say what is still true: `push` on `main` runs the full list (until #16467 lands, which then owns this sentence again).\n\n## Serial\n\nUnlock-action: re-check PR #16573\n\nDispatched after PR #16471 merges; if #16467 (push affected + hourly full) is dispatched first, this rides it."
+}

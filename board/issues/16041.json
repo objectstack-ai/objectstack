@@ -1,0 +1,34 @@
+{
+  "number": 16041,
+  "kind": "issue",
+  "title": "`driver-memory` analytics silently accepts an unparseable `dateRange` and matches EVERY row — and the platform's own documented spelling `'Last 7 days'` is one of them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T21:38:41Z",
+  "updated_at": "2026-09-07T15:58:41Z",
+  "closed_at": "2026-09-07T15:56:25Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16041",
+  "body": "Found while working on #15825 (the calendar repair in the same function). ⛔ Deliberately NOT fixed there — triage on that card ruled 「先做拼写修复（UTC 化两个缺陷），⛔ 不要顺手换掉整个 parser」 and asked that anyone proposing to replace the parser first **measure which `range` forms actually reach it**. This card is that measurement. Refs #15825.\n\n## The shape\n\n`packages/drivers/driver-memory/src/memory-analytics.ts` `parseDateRangeString()` recognises exactly two forms — the literal `'today'`, and `range.startsWith('last ')` — and its final line is:\n\n    return [range, range]; // Fallback\n\nThat fallback is **not a refusal**. The caller (the analytics query path, same file) does not distinguish it from a real window: it sees `range.length === 2` and pushes the pair straight into the `$match` as bounds.\n\n## Two things measured, 2026-09-05\n\n**1. The fallback matches every row rather than none.** With `range` unparseable, the emitted predicate is `{$gte: '<garbage>', $lte: '<garbage>'}` (plus the `Date`-typed twin, which is `Invalid Date`). Driven through mingo directly over four rows:\n\n    rows: 2020-01-01 (Date), 2026-09-05 (Date), 2099-01-01 (Date), 2026-09-05 (ISO string)\n    matched: [ 'a', 'b', 'c' ]      <- every Date-typed row, including 2099\n\nUnder BSON cross-type ordering a `Date` compares above a `String`, so both bounds are satisfied by every `Date`. ⇒ **The time filter is silently dropped, not refused.** A dashboard asking for one week gets all of history, with no error anywhere.\n\n**2. The spelling the repo's own sources use is one of the unrecognised ones.** `range.startsWith('last ')` is case-SENSITIVE. Every authored `dateRange` string literal in the tree, counted:\n\n| count | literal | reaches a window? |\n|---:|:---|:---|\n| 3 | `'Last 7 days'` | ⛔ no — capital `L` |\n| 1 | `'2026-01-20'` | ⛔ no |\n| 12 | field names (`'signed_at'`, `'closed_date'`, …) | ⛔ no — a different, probably separate authoring error |\n\n`'Last 7 days'` is not an incidental fixture typo: it is the spelling written into the schema's own documentation of the field, `packages/spec/src/data/analytics.zod.ts`:\n\n    dateRange: z.union([\n      z.string(), // \"Last 7 days\"\n      z.array(z.string()) // [\"2023-01-01\", \"2023-01-31\"]\n    ]).optional(),\n\nand `packages/spec/src/contracts/analytics-service.ts` discusses a `dateRange: last_30_days` (snake_case), which is also unrecognised. So the documented vocabulary and the implemented vocabulary do not intersect on the one example the schema gives.\n\nRecognised vs not, evaluated against the implementation:\n\n    RECOGNISED       \"today\", \"last 7 days\", \"last 3 months\", \"last 1 year\"\n    FALLS THROUGH    \"Last 7 days\", \"Last 30 days\", \"last_30_days\", \"This week\", \"yesterday\"\n\n## Why this is filed rather than repaired in #15825\n\n#15825's fence was the calendar (local-vs-UTC), and its acceptance is two precise pins. This is a different defect class — vocabulary and refusal, not arithmetic — and repairing it means deciding a contract, which is exactly what that card's triage declined to fold in.\n\n## The decision this needs (not obvious, hence no patch attached)\n\n1. **What is the vocabulary?** Case-insensitive `last N <unit>`? Also `yesterday` / `this week` / `last_30_days`? `@objectstack/core`'s filter-token macros (`{today}`, `{7_days_ago}`, period tokens) already define a rich, tested vocabulary for exactly this job — reusing it would make the driver agree with the rest of the platform instead of carrying a second dialect. Note the Prime Directive #12 direction: one strict contract, not N dialects.\n2. **What happens to an unrecognised string?** Under ADR-0112 the honest answer is a refusal envelope with a `code` and `status`, not a window that quietly matches everything. Silently widening is the worst of the three options (refuse / widen / narrow) because nothing downstream can tell.\n3. **Where does it get enforced?** `AnalyticsQuerySchema` types `dateRange` as a bare `z.string()`, so a bad value is accepted at the door. If the vocabulary is closed, the schema is the place to reject it (contract-first), with the driver then unable to receive one.\n\nUnlabelled on purpose: routing, `domain:*`, type and priority belong to triage."
+}

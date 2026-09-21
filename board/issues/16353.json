@@ -1,0 +1,34 @@
+{
+  "number": 16353,
+  "kind": "issue",
+  "title": "spec: declare the aggregate × field-type compatibility matrix (`AggregationFunction` × `FieldType`) that dataset measures are refused against (spec half of #16099)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T15:01:50Z",
+  "updated_at": "2026-09-08T01:29:44Z",
+  "closed_at": "2026-09-08T00:48:46Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16353",
+  "body": "Spec half of #16099, split by director ruling (decision batch #59, 2026-09-06, \"both legs, table in spec\"). The two consumer legs — compile-time refusal in `dataset-compiler` (#16099 itself, services) and an authoring-time lint rule (devx sub-card) — are `pm:blocked` on this card and consume this one table.\n\n## Why\n\nA dataset measure pairing `avg` with a `Field.datetime` compiles to `AVG(col)` and reaches the backend: SQLite renders a mean of epoch milliseconds, Postgres fails with `42883`. Nothing between author and driver correlates `aggregate` with the field's type. Which pairs are accepted is a narrowing of a published acceptance set, so it is a contract, declared once in `@objectstack/spec` and executed by both legs.\n\n## Scope\n\n- Export a compatibility table from the spec (next to `AggregationFunction` / `DatasetMeasureSchema`), e.g. `AGGREGATE_FIELD_TYPE_COMPATIBILITY: Record<AggregationFunction, readonly FieldType[]>` plus a predicate `isAggregateCompatibleWithFieldType(aggregate, fieldType)`.\n- **Starting rows (director's ruling; the spec seat finalises against the full `FieldType` membership):**\n  - `count`, `countDistinct`: any type\n  - `sum`: numeric types only (`number`, `currency`, `integer`-class) — **excludes `percent`** (`analytics-service.ts` already calls that pair incoherent)\n  - `avg`: numeric types including `percent`\n  - `min`, `max`: numeric types plus temporal (`date`, `datetime`)\n  - every other pair: refused\n- TSDoc states the rule and the reason (backend-divergent results, Prime Directive #12).\n- Clause-② conformance limb: **yes** (a previously accepted authoring shape becomes refused once the consumers land) — carry `needs:contract-review` on the landing PR; changeset states the narrowing.\n\n## Out of scope\n\n- The refusals themselves (compile leg: #16099; lint leg: devx sub-card).\n\n## Acceptance\n\n- [ ] table and predicate exported and pinned in the api-surface baselines\n- [ ] every `AggregationFunction` member has a row; every `FieldType` member is classified\n- [ ] changeset present"
+}

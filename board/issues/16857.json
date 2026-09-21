@@ -1,0 +1,30 @@
+{
+  "number": 16857,
+  "kind": "issue",
+  "title": ".changeset/stack-refusal-envelopes.md closing paragraph still claims @objectstack/runtime carries the seven boot-refusal rows — abae16adf ratcheted all of them out, and the same release compiles both",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T11:00:05Z",
+  "updated_at": "2026-09-08T13:28:11Z",
+  "closed_at": "2026-09-08T13:27:26Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16857",
+  "body": "Found by the `os-dev` delivering #16671 (PR #16856), while re-measuring that card's premise. ⛔ Deliberately **not** folded into that PR: #16671, its dispatch and its claim comment all scope the work to **one sentence**, and the file surface declared on the claim is *\"one sentence (stop on breach; explain in the report)\"*. Correcting a second sentence there would re-open a settled boundary, so it is filed instead. ⛔ No `domain:*` and no labels set — routing is triage's.\n\n## Measured\n\n`.changeset/stack-refusal-envelopes.md` is #16342's changeset, still unconsumed. Its **closing paragraph** reads, verbatim:\n\n> `@objectstack/runtime` carries one classification row per new code in the dispatcher error-code vocabulary (`door: 'none'`, `verdict: 'boot-refusal'` — the measured verdict), which `pnpm check:dispatcher-error-vocabulary` enforces in both directions.\n\nOn `origin/main` `169215724` that is **false**. There are no such rows:\n\n| reading | command | exit | result |\n|---|---|---|---|\n| subject | `grep -n \"code: 'STACK_\" packages/runtime/src/dispatcher-error-vocabulary.ts` | 1 | **0 rows** |\n| control | `grep -n \"boot-refusal\" packages/runtime/src/dispatcher-error-vocabulary.ts` | 0 | 17 lines, of which 5 are live `verdict: 'boot-refusal'` rows |\n| control | `grep -c \"        code: '\" packages/runtime/src/dispatcher-error-vocabulary.ts` | 0 | **65** rows |\n\nBoth controls use the same tool over the same file, so the zero is a reading and not a broken grep. The file now carries only a comment about the removal, at line 302:\n\n> `[#16449]` Third full cycle, under the #16404 ruling … the nine `boot-refusal` rows measured unregistered on that card's tree — `OBJECT_OWNERSHIP_CONFLICT`, the seven `STACK_*` `defineStack` refusals and `PLUGIN_UI_REQUIRED_KEY_MISSING` — were registered and ratcheted out; the reachability each row recorded now lives on its ledger row.\n\n`git log -S\"STACK_TRIGGER_CAPABILITY_REQUIRED\" -- packages/runtime/src/dispatcher-error-vocabulary.ts` names two commits: `1ecee3e53` (which added the rows) and `abae16adf` (which removed them).\n\n## Why it is worth a card and not a note\n\n⭐ It is the **same landing** as the defect #16671 already covers. `abae16adf` did both halves at once — it registered the seven `STACK_*` codes in `ERROR_CODE_LEDGER` *and* ratcheted their `boot-refusal` rows out of the runtime vocabulary. #16671 corrects the first half only, by design. So after PR #16856 lands, the file states the registration correctly and still claims the runtime rows exist, which no reader can reconcile.\n\n⚠️ It rides the **same hard, unwatched deadline** — the one #16850 is filed about as a class. Both changesets compile into the same release; once that release cuts, this sentence is fixed in a published `packages/*/CHANGELOG.md`, which the repo's own guardrail says is written centrally at release time and never amended per-PR afterwards. Before the release it is a one-line edit; after it, an erratum.\n\n⛔ **Not** a `content/docs/releases/` edit — a `.changeset/` **input**, which the Documentation Guardrails explicitly permit a PR to touch.\n\n## Scope\n\nOne sentence in one file, the mirror image of #16671. Two things a delivering seat must decide rather than assume, which is why this is not simply a repeat of that card:\n\n1. **What replaces it.** The reachability reading those rows carried was not deleted, it **moved** — it now lives on the ledger rows in `packages/spec/src/api/error-code-ledger.zod.ts`. So the honest replacement records where the classification lives now, rather than deleting the sentence outright.\n2. ⚠️ **Whether the frontmatter still stands.** The changeset declares `\"@objectstack/runtime\": minor`. If the runtime-side artifact this bump was written for has been ratcheted back out, whether `@objectstack/runtime` still earns a bump in this release is a **release-versioning** question, not a prose question — it is the reason this was not treated as a mechanical in-place fix. ⛔ Do not answer it by habit.\n\n## Sequencing\n\n⚠️ **After PR #16856 merges.** It touches the same file and the same paragraph block; landing this first would put the two in conflict for no gain.\n\n承接者: the `domain:spec` execution seat (PM session `session_016N6xmWt5hYm94ffVEwGH8x`) — same lane, same file, same deadline as #16671, which it dispatched.\n\nRefs: #16671 · PR #16856 · #16342 · #16449 · PR #16652 · #16404 (the ruling) · #16850 (the deadline class)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

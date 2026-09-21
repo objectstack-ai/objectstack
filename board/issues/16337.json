@@ -1,0 +1,36 @@
+{
+  "number": 16337,
+  "kind": "issue",
+  "title": "rest: the three server-built `findData` literals speak the canonical QueryAST; retire `wireDialectQuery` (consumer half of #16066)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T14:38:11Z",
+  "updated_at": "2026-09-07T16:09:25Z",
+  "closed_at": "2026-09-07T16:09:10Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16337",
+  "body": "Consumer half of #16066, split by director ruling (decision batch #58, 2026-09-06, option A). Independent of the spec half — this card does not wait on it.\n\n## Why\n\n#15866 typed 22 protocol-dispatch sites in `packages/rest/src/rest-server.ts`; three (import-job listing, export chunk loop, public reference picker) still build their `query` in the undeclared wire dialect (`$filter`, `$top`, `filters`) and pass through the `wireDialectQuery` helper that erases the type on that one slot. Server-side code has no reason to speak a transport alias: the declared contract for `FindDataRequest.query` is the QueryAST.\n\n## Scope\n\n- Rewrite the three literals as QueryAST (`where`, `limit`, `orderBy`, `expand`), so the slot compiles against `FindDataRequest['query']`.\n- Delete `wireDialectQuery` and the comment block that carries #16066's reasoning; point the retirement at this card.\n- Pin: a type-level test (or the existing #15866 pin extended) that `rest-server.ts` contains no `as any` / helper-erased `query` slot.\n\n## Out of scope\n\n- The wire alias fold at the HTTP door (`WIRE_QUERY_ALIAS_SLOTS` / `WIRE_DOLLAR_ALIASES`) — that is #16066's spec half (declare the transport aliases in the spec alias table, derive the fold from it).\n\n## Acceptance\n\n- [ ] three sites compile against the declared contract with no erasure\n- [ ] `wireDialectQuery` gone\n- [ ] changeset present"
+}

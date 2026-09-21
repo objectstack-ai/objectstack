@@ -1,0 +1,35 @@
+{
+  "number": 16095,
+  "kind": "issue",
+  "title": "lint: every `hook-body-*` / `hook-api-update-readonly-*` rule is unreachable for a hook authored as a `handler` function — the whole family is gated on `body.language === 'js'`, and the reference CRM has 39 hooks and 0 bodies",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T00:33:36Z",
+  "updated_at": "2026-09-07T15:28:01Z",
+  "closed_at": "2026-09-07T14:40:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16095",
+  "body": "Measured on the **pinned `@objectstack/lint@17.3.0`** artifact as installed by `objectstack-ai/hotcrm`, ⛔ not on the platform source tree. Filed unassigned by the hotcrm step-3 rule survey (hotcrm#1613); the local assertions currently standing in for these stay in place there.\n\n## The gap\n\n`validateReadonlyHookWrites` — and the sibling hook-body write validator — open with:\n\n```js\nconst body = hook.body;\nif (!isRec5(body) || body.language !== \"js\") return;\nconst source = body.source;\nif (typeof source !== \"string\" || source.trim() === \"\") return;\n```\n\nA hook authored as a TypeScript `handler` function never reaches that door. It carries no `body`, so every rule behind it returns before looking at anything:\n\n- `hook-api-update-readonly-field`\n- `hook-api-update-readonly-when-field`\n- `hook-body-write-unknown-field`\n- `hook-body-write-unprovisioned-anchor`\n- `hook-body-source-unparseable`\n\nThis is not hypothetical authoring style. Normalizing `objectstack-ai/hotcrm`'s stack through `normalizeStackInput` and counting:\n\n```\nhooks: 39\n{ withBody: 0, withHandler: 39, withSource: 0 }\nsample hook keys: name, object, events, handler, priority, async, description, onError, runAs\n```\n\nThirty-nine of thirty-nine. Actions in the same stack are the other way round — 24 of 31 carry `body.source` — so the action-side rules DO reach that app, and the hook-side rules reach none of it.\n\n## Measurement: the same defect, twice, one shape apart\n\nOne committed tree (hotcrm at `a0362a37`), one injection at a time, restored by blob hash. Clean-tree baseline: `0 error(s), 17 warning(s), 12 suggestion(s)`, exit 0. Both injections write the same readonly field (`crm_case.is_escalated`, `readonly: true`) through the same call, into the same file, in the same run design.\n\n| hook shape | body of the injected hook | `pnpm lint` |\n|:--|:--|:--|\n| `handler: async (ctx) => { … }` (the repo's own shape, all 39) | `await ctx.api.object('crm_case').update({ id: ctx.input.id, is_escalated: true })` | **nothing fires** — 17 warnings, exit 0, byte-identical to baseline |\n| `body: { language: 'js', source: \"…\" }` | the same statement, verbatim | `hook-api-update-readonly-field` **error**, **exit 1** |\n\nThe second row is the control: the rule is live, correct and gating on this exact stack. The first row is therefore a reading about the door, not about the rule.\n\nFor contrast, the flow-side and action-side counterparts of the same family both fire on this repo as authored:\n\n| rule | injected where | result |\n|:--|:--|:--|\n| `flow-update-readonly-field` | `case_actions.escalate` writes `is_escalated` | **error**, exit 1 |\n| `flow-update-readonly-when-field` | `readonlyWhen` added to `crm_case.escalation_reason` | **warning** x4, exit 0 |\n| `action-api-update-readonly-when-field` | `readonlyWhen` added to `crm_contact.is_primary` (written by `mark_primary`) | **warning**, exit 0 |\n\nSo the hook surface is the only one of the three with no author-time signal at all, and it is the surface the reference app uses exclusively.\n\n## Why it matters more than a missing warning\n\nThe strip these rules describe is real at run time: on a non-system context the engine removes `readonly` keys from the UPDATE payload and the call still returns success. An author writing that from a `handler` gets no signal at any layer — not from lint, and not from the call, which succeeds. The rule exists precisely because that failure is silent, and the shape it is attached to is not the shape people write.\n\n## Suggested direction, not a prescription\n\nThe lowering path already exists and `os lint` already reasons about it: `checkHookBodyLowering(config)` reads FUNCTION values before any Zod parse, and #13651 made lowering's refusal loud rather than fail-open. If the write-set extraction can be run over a lowered body — or over the same extraction `os build` performs — the family reaches handler-authored hooks without changing what `os build` accepts. Failing that, the honest alternative is to say so on each rule: a rule that structurally cannot see the dominant authoring shape should not read as coverage.\n\n⚠️ ⛔ This card asks for nothing about `os build`'s acceptance. It is entirely about which hooks the author-time rules can see.\n\n## Related, and why this is not a duplicate\n\n- #13838 (open) — whether `os build` should fail by default on the accidental hook-body-lowering class, deferred until a real population number exists. Adjacent, and this card supplies a population number (39/39 unlowered in the reference CRM), but the ask is different.\n- #13718 (open) — a declared constant surface for a lowered body.\n- #13651 (closed) — lowering failing open; fixed, and a precondition for anything here.\n- #13770 (closed) — the action-side counterpart of the readonly gate, which is why the action row above fires.\n- #4271 / #4383 — the write-set rules' original scope.\n\nRefs: hotcrm#1613 · hotcrm#1582 (F1) · hotcrm#1587 (F6, whose `test/hook-write-shape.test.ts` row is credited entirely to the three unreachable `hook-body-*` ids)"
+}

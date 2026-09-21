@@ -1,0 +1,36 @@
+{
+  "number": 16803,
+  "kind": "pull_request",
+  "title": "docs(skills): name flow-filter-token-unknown for the flow-node filter position",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T06:19:10Z",
+  "updated_at": "2026-09-08T07:04:18Z",
+  "closed_at": "2026-09-08T07:04:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-08T07:04:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16803",
+  "body": "Fixes #16736\n\n`skills/objectstack-query/rules/filters.md` had exactly one `filter-token-unknown`\nhit, and it sat in the paragraph immediately after \"A **flow node's**\n`config.filter` takes these tokens too\" — with nothing re-scoping it, so it read\nas the rule that fails an unknown token in a flow node. Since PR #16732 that\nposition is owned by a second rule.\n\n## The two ids stay distinct\n\nVerified on the branch base by grep, both live:\n\n| position | rule id | declared in | consequence |\n|:--|:--|:--|:--|\n| `flows` | `flow-filter-token-unknown` | `packages/lint/src/validate-flow-filter-tokens.ts:65` | template evaluator raises a guard refusal — \"this node **cannot run at all**\" |\n| `dashboards` `objects` `views` `reports` `datasets` `pages` `apps` | `filter-token-unknown` | `packages/lint/src/validate-filter-tokens.ts:65` | literal reaches the engine, matches nothing, surface renders the silent zero |\n\nThey are two ids because the two positions share neither a token vocabulary nor a\nconsequence. `validate-filter-tokens.ts` walks seven roots and **deliberately not\n`flows`**; `validate-flow-filter-tokens.ts` walks `flows` only and fires solely on\nthe call-position arm. Its module header states why widening the old id was\nrefused: \"Widening the published id would make its meaning depend on the position\nit fired in, which a machine consumer keyed on the id cannot see.\"\n\nSo the flow sentence names its own rule and the general paragraph is scoped with\n\"Outside a flow\". The prose does not merge them into a single statement.\n\nWording — not the id distinction — was tightened to pay the token ratchet.\n\n## Readings (re-derived; the card's `238` was not inherited)\n\nBranch base is `b72226f48`, newer than the `b38821d1c` the card was written\nagainst; every number below was re-measured on it.\n\n- before: 250 lines, **exactly one** hit, at line **238**\n- after: 251 lines, `flow-filter-token-unknown` at line 234, `filter-token-unknown` at line 239 (one hit each)\n\nPublished-bundle readings, both required for a `skills/**` diff:\n\n| reading | before | after | delta |\n|:--|--:|--:|--:|\n| this file (`rules/filters.md`) | 2136 tokens | **2146** | +10 |\n| whole shipped bundle | 150584 tokens | **150594** | +10 |\n| ratcheted authored subtotal | 139938 / 157098 | 139948 / 157098 | +10 |\n\nCeiling for this file is **2149**, so headroom went 13 to **3** — it fits without\ndeleting content, and the id distinction never became the currency:\n\n```\n✓ check-skills-token-ratchet: skills/objectstack-query/rules/filters.md is 2146 tokens (ceiling 2149; headroom 3).\n✓ check-skills-token-ratchet: 36 authored bundle file(s) within their ceilings; 10 generator-owned file(s) measured, not ratcheted.\n```\n\nThis is a one-line correctness fix, not an expansion: net +10 tokens on a 150k\nbundle.\n\n## Gates — 20/20 green at `6cfd58efa`\n\nDerived in the worktree with `node scripts/pm/dispatch-gates.mjs --commands --repo\nobjectstack-ai/objectstack` (no paths); the derivation reproduced the dispatch's\nlist exactly — 20 commands, no additions. All run after the final commit, each\nexit code captured by redirect before any pipe.\n\n`check:doc-formula-expressions` first exited **3 — PREREQUISITE NOT MET**, which is\nnot a reading. Built the two packages it names under `scripts/pm/os-verify-lock.sh`\n(`VERDICT command-exit 0 · held the lock 1s · waited 98s`) and re-ran it to a real\nexit 0.\n\nGoverned-surface predicate, quoted:\n\n```\ngoverned-surface predicate: 1 of 1 path(s) hit the register (5 surfaces, repo-agnostic).\n  ⛔  GOVERNED — a human merge is the review record for this PR (#9495 regime).\n```\n\nOutside the runnable total and deliberately not read as clearance: 10 WIDE families,\n42 artifact rosters, 2 families taking a value from the workflow.\n\n## No changeset — measured, not assumed\n\n`skills/**` is not on the fast track, so it was measured rather than asserted:\n\n- zero `files[]` entries across `packages/**`, `apps/**`, `services/**` match `/skill/i`\n- symbol unique to this edit (`Outside a flow, a whole-`): **0** hits in any built `dist/`\n- positive control `flow-filter-token-unknown` (genuinely published via `@objectstack/lint`): **6** hits\n\nSymbol zero, control non-zero, so the grep works and nothing published moves.\nLabelled `skip-changeset`.\n\n## 验收备注\n\n- The card's premise held, but its line number was re-derived rather than\n  inherited: base moved `b38821d1c` to `b72226f48` between dispatch and pickup.\n  The file was still 250 lines with the single hit still at 238.\n- `noted, not filed:` the same passage's \"renders a widget showing 0\" clause and\n  its `isDateMacroToken` / `isContextToken` advice are the ObjectQL-vocabulary\n  story, so before this change a flow author who searched the skill for their\n  build error would have landed on the wrong dialect's fix. The scoping added\n  here removes that path; no separate card. 承接者: this PR.\n- The seven roots `filter-token-unknown` walks include `dashboards` and `objects`,\n  two more than the five the card enumerates. The prose does not enumerate them,\n  so nothing here depends on the difference; recorded only so the next reader of\n  this passage is not surprised. 承接者: 无.\n\n## 维护者速读(草稿)\n\n**改了什么** — 一个已发布技能文件里的一段话,一处规则 id。原文把「flow 节点的\n`config.filter` 里写错 token,构建会以哪条规则失败」指向了 `filter-token-unknown`;\n自 #16732 起,那个位置归 `flow-filter-token-unknown` 管。现在 flow 那句点名自己的规则,\n原来那段用「Outside a flow」限定回它本来的位置。\n\n**为什么改** — 这段话是给 AI 作者看的。它构建失败、拿着 `flow-filter-token-unknown`\n回来查技能包,原文会把它领到另一条规则的后果(「widget 显示 0」)和另一套词汇的修法\n(`isDateMacroToken` / `isContextToken`)。两个位置的 token 词汇本就不同 —— 这正是当初\n拆成两个 id 的原因 —— 所以散文里合并两者,等于把这次拆分要防的混淆重新教一遍。\n\n**风险与代价(含回滚)** — 风险很低:改动只有一个文件、一段话,不含任何代码,不发布\n任何 npm 包内容(已实测,非推断)。代价是 token 棘轮余量从 13 降到 3,这个文件以后再\n加字需要先删字。回滚就是 revert 这一个 commit,没有任何下游依赖。\n\n**席位意见** — (留空,待席位填)\n\n**你要做的** — 只需确认一件事:为了让两个 id 的区分放得进 token 棘轮,我压缩了同一段\n落的措辞(删掉「while authoring」「passing the」这类冗余,把「a value that is entirely\n`{...}`」改成「a whole-`{...}` value」),没有删任何一条信息、也没有抬 ceiling。请确认\n这个取舍可以接受 —— 裁决说「容不下时缩短的是措辞,不是那两个 id 的区分」,我照此执行。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01P58euzUXCVJNwmhuPC9DXY)_"
+}

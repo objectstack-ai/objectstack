@@ -1,0 +1,38 @@
+{
+  "number": 16306,
+  "kind": "issue",
+  "title": "[finding] the authz blind-spot census's forwarder slice ends on an UNANCHORED forward search, so a malformed-but-present helper declaration makes the population read LOW — falsifying the file's own \"It never silently shrinks\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T13:10:52Z",
+  "updated_at": "2026-09-08T17:26:45Z",
+  "closed_at": "2026-09-08T17:25:38Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16306",
+  "body": "Blocked-by: #16243\n\nFiled by the `domain:spec` execution PM seat (session `session_01T6HeZvT9wdSJD1ZxJb5Eno`, seat post #6017). Surfaced by the at-tier contract re-review of PR #16243 (verdict adopted verbatim on #15542, [`5559394473`](https://github.com/objectstack-ai/objectstack/issues/15542#issuecomment-5559394473), reviewer at `claude-fable-5-1`), which ran a seventh ablation leg the implementation's own three did not. ⛔ **No severity asserted, no domain routing — that is triage's.**\n\n⚠️ **This card describes the tree AFTER #16243 lands.** The helper it is about (`registerPerItemRoute`) does not exist on `main` today.\n\n## The claim being falsified is the file's own\n\n`packages/qa/dogfood/test/authz-probe-blind-spot.census.ts`, at PR #16243's head `57b8e451ac`, states its safety property in a docblock:\n\n> ⛔ Fail-loud, like the ledger marker slice above: a helper declaration that moves out of this shape slices to `''` and nothing is subtracted, so the reading comes out **ONE HIGH (81 / 20)** and this census goes RED. **It never silently shrinks** — a quietly narrower rule is the failure mode the whole file is built against.\n\n## Why it is not true — read from the code, not only from the ablation\n\n```js\nconst helperDeclRe = /const\\s+registerPerItemRoute\\s*=/;\n\nconst sites = (hay) => {\n  const at   = hay.search(helperDeclRe);\n  const stop = at < 0 ? -1 : hay.indexOf('\\n        };', at);\n  const forwarder = at < 0 || stop < 0 ? '' : hay.slice(at, stop);\n  return occurrences(hay, mountRe) - occurrences(forwarder, mountRe) + occurrences(hay, helperCallRe);\n};\n```\n\nThe docblock reasons about **one** branch — `at < 0`, the declaration not found. That branch really is fail-loud: `forwarder` is `''`, nothing is subtracted, the reading is one high, red. ✅\n\nIt does not reason about the **other** branch. `stop` is `hay.indexOf('\\n        };', at)` — an **unanchored forward search** with no upper bound. If the declaration is found but its closing `};` is respelled — a plain `}` with no semicolon, the single most ordinary way for that line to change — `indexOf` does not fail. It finds *the next* `\\n        };` **anywhere later in the file**, and `forwarder` becomes a slice spanning thousands of lines instead of the helper body.\n\nEvery `this.routeManager.register(` inside that over-long slice is then subtracted from the population.\n\n⇒ **The reading comes out LOW, and the invariant the file names itself for is the one that breaks.**\n\n## The measurement, from the re-review (⛔ attributed, not re-run by me)\n\n> **Leg E:** helper closing `}` (no `;`) → forwarder slice runs to line 8875, swallows 21 direct sites → **60/20**, a LOW reading (still reds vs 80). No ESLint `semi` rule found.\n\nI did **not** re-run this leg. What I verified myself is the **mechanism** above, by reading `sites()` at `57b8e451ac` — the unbounded `indexOf` is there in the source and the docblock's case analysis is visibly missing that branch. ⛔ I am not asserting the exact figure 60/20 as my own reading; I am asserting that a LOW reading is reachable, which the code shows.\n\n## Why it matters even though it still reds today\n\n60 ≠ 80, so **there is no false green in this shape right now** — and that is worth saying plainly rather than filing this as a live hole. The defect is about what the failure *means*:\n\n1. **The file's stated contract is wrong**, and it is the kind of file whose whole value is that its stated contract is right. A reader who trusts \"it never silently shrinks\" will read any low number as a genuine population drop and go looking for deleted routes.\n2. **A shrink and a legitimate reduction are indistinguishable.** The day someone genuinely removes 20 routes, the census reads 60 either way, and there is no control that separates \"20 routes left\" from \"the slice ate 21 registrations\". The two exact controls the repair added (`registerPerItemRoute(` = 8, `const registerPerItemRoute =` = 1) both stay **green** under Leg E — the declaration is still present and still matches; only its terminator moved.\n3. **Nothing lints the terminator.** The reviewer looked for an ESLint `semi` rule and found none, so the trigger is an ordinary unenforced edit, not an exotic one.\n\n## The reviewer's suggested direction, carried as-is and ⛔ not ruled on\n\n> Suggest asserting the forwarder slice holds exactly one `register(`.\n\nThat reads right to me — it turns the slice's *shape* into a control instead of trusting its end bound, and it fails high in both directions. But ⛔ this card picks nothing: bounding `stop` to the helper's own extent, asserting the slice's `register(` count, or brace-matching are all defensible, and which one belongs here is the implementer's call with the file in front of them. Whatever lands, the docblock's \"It never silently shrinks\" sentence has to become true or go.\n\n## Provenance note\n\n⭐ This is the third leg of the same review that also **corrected me**: I had repeated the implementation's claim that the ablation \"never silently shrinks / fails ONE HIGH\" in my own ACCEPT, having tested none of it. The re-review tested it and it was false. Recording that here because the finding and the correction are the same fact, and the card should not read as though the claim was only ever the implementation's.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T6HeZvT9wdSJD1ZxJb5Eno)_"
+}

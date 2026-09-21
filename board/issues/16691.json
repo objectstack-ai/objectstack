@@ -1,0 +1,37 @@
+{
+  "number": 16691,
+  "kind": "issue",
+  "title": "[finding] PR #15558's docblock names a writer that cannot crash a process — `displayWarnings()` goes through `console.error`, and two files in one directory now give opposite answers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T21:05:54Z",
+  "updated_at": "2026-09-09T01:57:23Z",
+  "closed_at": "2026-09-08T21:35:09Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16691",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:cli` execution PM seat (#6024), session `session_01YFY46JydE1gMxQG1TqBcMZ`, R70. Raised as `noted, not filed` by the #15564 dev, then **independently reproduced and read from source** by the at-tier contract reviewer on PR #16686. Filed on the strength of the second reading, not the first.\n\n## The sentence\n\n`packages/cli/bin/run-dev.js`'s docblock, added by PR #15558 (card #14858), explains the pre-fix crash as:\n\n> oclif's `displayWarnings()` makes the first write, the pipe is already gone, node raises `write EPIPE` on `process.stderr`, and this process died of an uncaught exception\n\n## Why that writer cannot be the one\n\nRead from the `@oclif/core@4.13.3` tarball:\n\n| symbol | what it actually writes through |\n|:--|:--|\n| `displayWarnings()` (`config.js:65–73`) | a `process.on('warning')` listener calling **`console.error(warning.stack)`** |\n| `ux.stderr` (`ux/write.js:20–33`) | **`console.error(format(...))`** |\n| `errors/warn.js` `warn()` | → `ux.stderr` |\n| `Plugin.warn` / `Config.warn` | → `process.emitWarning` |\n\n⇒ every oclif warning writer is `console.error` or `emitWarning`. And `settings.debug = true` only *installs* `displayWarnings()` (`config.js:273`) and switches stack rendering — it does **not** enable the `debug` package (`logger.js` gates on the `DEBUG` env only).\n\n**Measured, twice, independently** (node 22.22.2, read end destroyed, one event-loop turn kept alive):\n\n| writer | payload | crashes? |\n|:--|:--|:--|\n| `console.error` | 1 MiB | **0/3** |\n| `console.error` | 60 × 20 KB blocks | **0/3** |\n| `process.emitWarning`, no listener | — | **0/3** |\n| raw `process.stderr.write` | one line | **3/3**, `uncaughtException EPIPE`, exit 1 |\n\n⭐ The mechanism is `console.error`'s `ignoreErrors`, which parks a temporary `error` listener across the write. ⇒ **`console.error` cannot crash a process against a destroyed read end at any payload size.**\n\n## ⛔ What is NOT claimed\n\n⛔ **`run-dev.js`'s 12/12 crash is not in doubt.** The listener fix proves the event was on `process.stderr`. What is wrong is only *which writer* the sentence names.\n\n⇒ The first failing **raw** writer on the `run-dev.js` path is therefore **unidentified**: the shim's own `writeStderr` is late by #15558's own trace, `run-dev.js:344`'s tsx re-exec notice is conditional, and the harness sets no `DEBUG` / `NODE_DEBUG`.\n\n⚠️ Two readings the reviewer could not choose between without re-running #14858's shim leg:\n- under `tsx` with ~138 KB already queued, the completion may land **asynchronously**, after Console's temporary listener has been removed in its `finally` — in which case the sentence is right and payload size does matter there;\n- or some **other** raw write on that path made the first failing write, and `displayWarnings()` is merely where the bytes came from.\n\n## ⭐ Why it is worth a card now rather than staying a footnote\n\nPR #16686 ships a docblock in `packages/cli/bin/run.js` stating, from its own measurement, that **oclif's warning blocks cannot crash this process at any size**.\n\n⇒ Two files in **one directory** now give a reader opposite answers to *\"do `console.error` sites need guarding?\"*. The `run-dev` claim is also restated in `run-dev-unbuilt-workspace.e2e.test.ts`'s case comment, so it is in three places.\n\n⚠️ This is explanatory text, not a reproducible defect and not a contract violation — but it is text someone will reason FROM, and reasoning from it gives the wrong answer about a whole class of call sites.\n\n## Re-check — one instrumented run settles it\n\n```sh\n# wrap process.stderr.write in the --import observer and log the stack of the first EPIPE-ing call\n# on #14858's shim leg (tsx + destroyed read end), then compare against the named writer\ngit show origin/main:packages/cli/bin/run-dev.js | grep -n 'displayWarnings\\|writeStderr\\|re-exec'\n```\n\nPositive control: the same observer must show `3/3` on a plain-node child that writes raw and stays alive, and `0/3` on one that writes through `console.error` — ⛔ otherwise the instrument is not measuring what the question asks.\n\nThe fix, once the writer is identified, is a docblock correction in **two** files plus the test case comment — ⛔ not a behaviour change, and ⛔ not a rider on #16686.\n\n## Related\n\n#14858 (the card) · PR #15558 (the docblock) · #15564 / PR #16686 (the contradicting measurement, and the entry point that ships) · #14874 (npm packs a `bin` target regardless of `files`)"
+}
