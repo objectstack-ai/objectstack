@@ -371,10 +371,9 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 **`os dev` keeps booting on a stack the platform would reject; build and publish
 refuse it, and `os validate` reports it — as a failure for anything the stack schema
 refuses, and as an advisory that `--strict` promotes to one for the rest.** The dev
-server skips only the part it could not read, boots
-the rest, and prints an `error` line naming what was malformed and what was skipped —
-the shape every mainstream dev server takes, where the error overlay stays on screen
-while the server keeps serving.
+server skips only the part it could not read, boots the rest, and prints an `error`
+line naming what was malformed and what was skipped — the shape every mainstream dev
+server takes, where the error overlay stays on screen while the server keeps serving.
 
 This is deliberate, and it is one posture rather than two. Metadata that is incomplete
 halfway through an edit is the **normal** state of a project you are actively working
