@@ -1370,8 +1370,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "标识与报表类型"
       },
       dataset_binding: {
-        label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        label: "数据集绑定",
+        description: "本报表渲染的语义层数据集。度量与行分别来自该数据集的度量与维度"
       },
       joined_blocks: {
         label: "关联对象",
@@ -1424,8 +1424,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "排序方向"
       },
       drilldown: {
-        label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        label: "下钻",
+        helpText: "点击聚合后的行/单元格，打开其底层记录"
       },
       blocks: {
         label: "分块",
@@ -1465,8 +1465,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "排序"
       },
       runtimeFilter: {
-        label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        label: "运行时筛选",
+        helpText: "渲染时的范围筛选，在查询时以 AND 方式并入"
       },
       chart: {
         label: "图表",
