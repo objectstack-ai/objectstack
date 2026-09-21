@@ -24,16 +24,17 @@ ADR-0049's 「声明即强制」 admits two resolutions — honour the declarati
 
 **`skill` — the fourth type of group A — is NOT wired, and for it that IS the deliverable.** Its bridge, `validateAiToolReferences`, resolves into `stack.tools` and `stack.actions`; a per-write snapshot carries `objects` (so an object-level `action_NAME` resolves) but neither of those, so at that door the rule has no truthful `unresolved` verdict at all — only its clean answers are reliable. Measured on the shipped corpus rather than synthetically: `app-showcase`'s single AI-exposed action exists at STACK level only, and a skill naming it is advised `ai-skill-tool-unresolved` at the door while the same rule over the whole stack answers `[]`. That advisory reaches `SaveMetaItemResponseSchema.advisories` and renders in Studio, with a hint prescribing exactly what the author had already done — so the card's own acceptance («a good write passes») does not hold for `skill`. The type therefore takes the ruling's own group B treatment of `tool`, the same universe obstacle read from the other side: **a reading first, not a wiring**. Crossing it needs `actions` / `tools` carried in `RuntimeStackContext` plus a `CLOSURE_CONTEXT_KEY_BY_TYPE` row and two more door gathers in `@objectstack/metadata-protocol` — a second package, a snapshot widening paid on every gated write, and its own card. Both halves of the wiring are held ABSENT by pins, with the measurement kept executable beside them.
 
-## Migration
+## The refusal set grows — and there is no FROM → TO, because nothing changed spelling
 
-**A publish of an `action`, `hook` or `report` that used to succeed can now be refused (HTTP 422, `INVALID_METADATA`).** The receipt names the rule id and the offending path plus the string that was written. To clear a refusal:
+A runtime metadata write — Studio's designer, REST `/meta`, an MCP/AI author — of an `action`, `hook` or `report` that carries one of the defects below is now refused with the 422 lint envelope instead of stored. Concretely, these used to succeed at that door and no longer do:
 
-| Refusal | Fix |
-| --- | --- |
-| `expression-invalid` on an action's `visible` / `disabled`, or a hook's `condition` | Correct the CEL. A syntax fault is named with its position; an `unknown field` names the object it was resolved against — point the ref at a column that object declares, or bind the action with `objectName`. |
-| `chart-dataset-unknown` / `chart-dimension-unknown` on a report | Point `dataset` at a declared dataset, and `rows` / `columns` / `values` at dimension and measure NAMES that dataset declares (post-ADR-0021 result rows are keyed by dimension name, not by the base field). |
-| `filter-empty-combinator` on a report filter | Delete the empty `$and: []` / `$or: []` / `$not: {}` key — it constrains nothing. |
-| `filter-preset-comparand` on a report filter | A dashboard date-range PRESET name (`last_30_days`, …) is not a filter value; write a real comparand. |
+- an action whose `visible` / `disabled` CEL does not parse, or names a field its bound object does not declare;
+- a hook whose `condition` does the same;
+- a report binding a dataset nothing declares, or grouping by a dimension or measure its dataset does not declare;
+- a report whose filter carries a literal empty combinator (`$and: []`, `$or: []`, `$not: {}`);
+- a report filtering by a dashboard date-range PRESET name (`last_30_days`, …) as if it were a value.
+
+⚠️ **No metadata needs rewriting to a new spelling, and none is being retired.** Every one of those was ALREADY refused by `os build`, `os validate` and `os lint` — the rules, their ids, their severities and their fix-it text are unchanged since they landed. What widens is the set of doors each runs at. A tenant whose stored metadata carries one of these defects has metadata that was never valid; the refusal envelope names the rule id, the path and the offending string, and the rule's own `hint` carries the correction at the moment it is needed. There is nothing for `objectstack migrate meta` to reach and no ledger entry to make.
 
 `skill` writes are unchanged — the type is not gated by this change. `email_template` and `mapping` writes are unchanged in behaviour today: their rule is dispatched and judges nothing until a ledger row lands.
 
