@@ -737,7 +737,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userFilters: {
         label: "用户筛选器",
-        helpText: "快速筛选栏：控件样式（下拉 / 标签页 / 开关）+ 暴露的字段或标签页预设"
+        helpText: "快速筛选栏：控件样式（dropdown / tabs / toggle）+ 暴露的字段或标签页预设"
       },
       tabs: {
         label: "标签页",
