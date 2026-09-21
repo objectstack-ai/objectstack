@@ -562,6 +562,37 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
   namespace: '`namespace` is not part of the translation contract — omit it (ADR-0129 D3 retired the separate namespace declaration platform-wide)',
 };
 
+/**
+ * The per-app door's answer for `settings`, the one group that is
+ * platform-only.
+ *
+ * Written as `guidance` rather than an alias because there is no key on THIS
+ * surface to send the author to: settings copy is not app-authorable at all,
+ * and a rename suggestion would be a signpost into a second rejection — the
+ * exact failure {@link TRANSLATION_KEY_GUIDANCE} was extracted to stop. The
+ * singular `setting` rides the same entry: it was an alias for `settings`
+ * while this door declared it, and an alias whose target the shape no longer
+ * accepts is a suggestion the author cannot take.
+ */
+const PER_APP_SETTINGS_PLATFORM_ONLY =
+  '`settings` is a PLATFORM group, not an application one: it is keyed by '
+  + '`SettingsManifest.namespace`, and a manifest is platform code — an application cannot '
+  + 'declare one, so the only namespaces this key could address are the platform\'s own. '
+  + 'Authored here it deep-merged into the one served translation tree and silently rewrote '
+  + 'the platform\'s own settings copy for the deployment. Delete the group; platform settings '
+  + 'copy is translated in the platform bundle '
+  + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
+  + '`PlatformTranslationData`). For an application\'s own copy use the groups this bundle '
+  + "does declare — 'objects', 'apps', 'pages', 'dashboards', 'datasets', 'flows', "
+  + "'globalActions', 'metadataForms', 'messages'.";
+
+/** The per-app door's guidance: the shared table plus the platform-only `settings`. */
+const APP_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
+  ...TRANSLATION_KEY_GUIDANCE,
+  settings: PER_APP_SETTINGS_PLATFORM_ONLY,
+  setting: PER_APP_SETTINGS_PLATFORM_ONLY,
+};
+
 // ────────────────────────────────────────────────────────────────────────────
 // Locale-level Translation Data (per-locale aggregate)
 // ────────────────────────────────────────────────────────────────────────────
@@ -586,18 +617,21 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
  * `content/docs/protocol/kernel/i18n-standard.mdx`.
  */
 /**
- * The translation groups, as a shape rather than a schema.
+ * The translation groups an APPLICATION may author, as a shape rather than a
+ * schema. Ten groups — the eleventh, `settings`, is platform-only and lives in
+ * {@link platformSettingsShape}.
  *
- * Two schemas need exactly these keys: {@link TranslationDataSchema} (one entry
- * of a file-authored bundle) and {@link TranslationItemSchema} (the registered
- * `translation` metadata type — the same groups plus `locale` and the ADR-0010
- * envelope). The item used to reach them with `.extend()`, which is correct for
- * the *validation* but wrong for the *error*: `.extend()` inherits the strict
- * error map that closed over the keys the BASE was built with, so a typo of
- * `locale` on an item would be rejected with `locale` missing from the
- * candidate list. A shape spread into two `strictObject` calls gives each
- * surface its own full key set — the pattern the six `validation` variants
- * settled on in the same campaign.
+ * Three schemas need exactly these keys: {@link TranslationDataSchema} (one
+ * entry of a per-app file-authored bundle — these ten and no more),
+ * {@link PlatformTranslationDataSchema} (these ten plus `settings`) and
+ * {@link TranslationItemSchema} (the registered `translation` metadata type —
+ * the platform face plus `locale` and the ADR-0010 envelope). The item used to
+ * reach them with `.extend()`, which is correct for the *validation* but wrong
+ * for the *error*: `.extend()` inherits the strict error map that closed over
+ * the keys the BASE was built with, so a typo of `locale` on an item would be
+ * rejected with `locale` missing from the candidate list. A shape spread into
+ * separate `strictObject` calls gives each surface its own full key set — the
+ * pattern the six `validation` variants settled on in the same campaign.
  *
  * A function, not a `const`: the values reference `lazySchema` proxies, and
  * building the shape eagerly at module load would defeat the laziness those
@@ -652,7 +686,7 @@ const FLOW_SCREEN_FIELD_NO_OPTIONS =
   + '`objects.<object>.fields.<field>.options` uses — cannot address them unambiguously. Author the '
   + "option labels on the node's `config`.";
 
-const translationDataShape = () => ({
+const appTranslationDataShape = () => ({
   /** Object translations */
   objects: z.record(z.string(), ObjectTranslationDataSchema).optional().describe('Object translations keyed by object name'),
 
@@ -1154,67 +1188,6 @@ const translationDataShape = () => ({
   })).optional().describe('Screen-flow translations keyed by flow name'),
 
   /**
-   * Settings manifest translations keyed by settings namespace
-   * (matches `SettingsManifest.namespace`, e.g. "mail", "branding").
-   *
-   * Convention (auto-resolved by `resolveSettings*` helpers):
-   *   settings.<namespace>.title
-   *   settings.<namespace>.description
-   *   settings.<namespace>.groups.<group_key>.title
-   *   settings.<namespace>.groups.<group_key>.description
-   *   settings.<namespace>.keys.<setting_key>.label
-   *   settings.<namespace>.keys.<setting_key>.help
-   *   settings.<namespace>.keys.<setting_key>.placeholder
-   *   settings.<namespace>.keys.<setting_key>.options.<option_value>
-   *   settings.<namespace>.actions.<action_id>.label
-   *   settings.<namespace>.actions.<action_id>.confirmText
-   *   settings.<namespace>.actions.<action_id>.successMessage
-   */
-  settings: z.record(z.string(), strictObject({
-    surface: 'this settings manifest translation',
-    history: TRANSLATION_HISTORY,
-    aliases: { label: 'title', name: 'title', sections: 'groups', fields: 'keys', settings: 'keys' },
-  }, {
-    title: z.string().optional().describe('Translated settings manifest title'),
-    description: z.string().optional().describe('Translated settings manifest description'),
-    groups: z.record(z.string(), strictObject({
-      surface: 'this settings group translation',
-      history: TRANSLATION_HISTORY,
-      aliases: { label: 'title', name: 'title', heading: 'title' },
-    }, {
-      title: z.string().optional().describe('Translated group title'),
-      description: z.string().optional().describe('Translated group description'),
-    })).optional().describe('Group translations keyed by group key'),
-    keys: z.record(z.string(), strictObject({
-      surface: 'this setting translation',
-      history: TRANSLATION_HISTORY,
-      aliases: { title: 'label', name: 'label', helpText: 'help', hint: 'help', description: 'help', choices: 'options', values: 'options' },
-    }, {
-      label: z.string().optional().describe('Translated setting label'),
-      help: z.string().optional().describe('Translated setting help text'),
-      placeholder: z.string().optional().describe('Translated input placeholder'),
-      options: z.record(z.string(), z.string()).optional()
-        .describe('Enum option value → translated label'),
-    })).optional().describe('Per-setting field translations keyed by setting key'),
-    actions: z.record(z.string(), strictObject({
-      surface: 'this settings action translation',
-      history: TRANSLATION_HISTORY,
-      // Settings actions have no `params`/`resultDialog` — a settings button is
-      // not an action-metadata action. Say so, rather than suggesting the
-      // nearest key and sending the author round again.
-      aliases: { name: 'label', title: 'label', confirm: 'confirmText', success: 'successMessage' },
-      guidance: {
-        params: 'settings actions take no parameters — there is no `params` group to translate',
-        resultDialog: 'settings actions have no result dialog — `resultDialog` translations belong under `objects.<object>._actions` or `globalActions`',
-      },
-    }, {
-      label: z.string().optional().describe('Translated action label'),
-      confirmText: z.string().optional().describe('Translated confirmation prompt'),
-      successMessage: z.string().optional().describe('Translated success toast/message'),
-    })).optional().describe('Action button translations keyed by action id'),
-  })).optional().describe('Settings manifest translations keyed by namespace'),
-
-  /**
    * Translations for **metadata-type configuration forms** — the forms
    * used by admins to author objects, fields, agents, flows, etc. in the
    * Studio metadata editor.
@@ -1312,26 +1285,172 @@ const translationDataShape = () => ({
   }).optional().describe('Cross-namespace Settings UI strings'),
 });
 
+/**
+ * The one group that is PLATFORM-ONLY, as a shape rather than a schema.
+ *
+ * `settings` is keyed by `SettingsManifest.namespace`, and a manifest is
+ * platform code (`packages/services/service-settings/src/manifests/*.manifest.ts`)
+ * — an application cannot declare one. So the only namespaces a per-app bundle
+ * could ever address are the PLATFORM's own, and what an app authored there
+ * deep-merged into the single served tree
+ * (`AppPlugin.loadTranslations` → `II18nService.loadTranslations`) that
+ * {@link resolveSettingsTitle} and the console's `useSettingsLabel` read —
+ * i.e. it silently rewrote the platform's settings copy for that deployment.
+ * Platform labels and application labels are separate namespaces (ruling batch
+ * #132 item 2 letter ②), so this shape is spread into
+ * {@link PlatformTranslationDataSchema} and {@link TranslationItemSchema} and
+ * NOT into {@link TranslationDataSchema}, whose door refuses it by name.
+ *
+ * A function, not a `const`, for the same reason
+ * {@link appTranslationDataShape} is one.
+ */
+const platformSettingsShape = () => ({
+  /**
+   * Settings manifest translations keyed by settings namespace
+   * (matches `SettingsManifest.namespace`, e.g. "mail", "branding").
+   *
+   * Convention (auto-resolved by `resolveSettings*` helpers):
+   *   settings.<namespace>.title
+   *   settings.<namespace>.description
+   *   settings.<namespace>.groups.<group_key>.title
+   *   settings.<namespace>.groups.<group_key>.description
+   *   settings.<namespace>.keys.<setting_key>.label
+   *   settings.<namespace>.keys.<setting_key>.help
+   *   settings.<namespace>.keys.<setting_key>.placeholder
+   *   settings.<namespace>.keys.<setting_key>.options.<option_value>
+   *   settings.<namespace>.actions.<action_id>.label
+   *   settings.<namespace>.actions.<action_id>.confirmText
+   *   settings.<namespace>.actions.<action_id>.successMessage
+   */
+  settings: z.record(z.string(), strictObject({
+    surface: 'this settings manifest translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { label: 'title', name: 'title', sections: 'groups', fields: 'keys', settings: 'keys' },
+  }, {
+    title: z.string().optional().describe('Translated settings manifest title'),
+    description: z.string().optional().describe('Translated settings manifest description'),
+    groups: z.record(z.string(), strictObject({
+      surface: 'this settings group translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { label: 'title', name: 'title', heading: 'title' },
+    }, {
+      title: z.string().optional().describe('Translated group title'),
+      description: z.string().optional().describe('Translated group description'),
+    })).optional().describe('Group translations keyed by group key'),
+    keys: z.record(z.string(), strictObject({
+      surface: 'this setting translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { title: 'label', name: 'label', helpText: 'help', hint: 'help', description: 'help', choices: 'options', values: 'options' },
+    }, {
+      label: z.string().optional().describe('Translated setting label'),
+      help: z.string().optional().describe('Translated setting help text'),
+      placeholder: z.string().optional().describe('Translated input placeholder'),
+      options: z.record(z.string(), z.string()).optional()
+        .describe('Enum option value → translated label'),
+    })).optional().describe('Per-setting field translations keyed by setting key'),
+    actions: z.record(z.string(), strictObject({
+      surface: 'this settings action translation',
+      history: TRANSLATION_HISTORY,
+      // Settings actions have no `params`/`resultDialog` — a settings button is
+      // not an action-metadata action. Say so, rather than suggesting the
+      // nearest key and sending the author round again.
+      aliases: { name: 'label', title: 'label', confirm: 'confirmText', success: 'successMessage' },
+      guidance: {
+        params: 'settings actions take no parameters — there is no `params` group to translate',
+        resultDialog: 'settings actions have no result dialog — `resultDialog` translations belong under `objects.<object>._actions` or `globalActions`',
+      },
+    }, {
+      label: z.string().optional().describe('Translated action label'),
+      confirmText: z.string().optional().describe('Translated confirmation prompt'),
+      successMessage: z.string().optional().describe('Translated success toast/message'),
+    })).optional().describe('Action button translations keyed by action id'),
+  })).optional().describe('Settings manifest translations keyed by namespace'),
+});
+
+/**
+ * One locale of a PER-APP translation bundle — `stack.translations`, and
+ * everything {@link defineTranslationBundle} builds.
+ *
+ * Ten groups: every group the platform bundle declares EXCEPT `settings`,
+ * which is platform-only and is refused here by name with
+ * {@link PER_APP_SETTINGS_PLATFORM_ONLY} as the remedy. See
+ * {@link PlatformTranslationDataSchema} for the eleven-group face and for why
+ * the two are separate namespaces.
+ */
 export const TranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this locale of the translation bundle',
   history: TRANSLATION_HISTORY,
-  guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  guidance: APP_TRANSLATION_KEY_GUIDANCE,
+  // ⛔ No `setting: 'settings'` alias any more: this door no longer declares
+  // `settings`, and an alias prescribing a key the shape rejects is a
+  // suggestion the author cannot take (the `alias-integrity` audit judges
+  // exactly that). Both spellings are answered by `guidance` above instead.
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', flow: 'flows', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   // `locale` lives on the ITEM, not on a bundle entry (the bundle keys ARE the
   // locales). Naming it keeps the suggestion useful for an author who moved a
   // `translation` item into a bundle and left the field behind.
   extraKeys: ['locale'],
-}, translationDataShape()).describe('Translation data for objects, apps, and UI messages'));
+}, appTranslationDataShape()).describe('Per-app translation data for objects, apps, and UI messages'));
 
 export type TranslationData = z.input<typeof TranslationDataSchema>;
+
+/**
+ * One locale of a PLATFORM translation bundle — the eleven groups, `settings`
+ * included.
+ *
+ * The platform's own bundles are code, not authored metadata
+ * (`@objectstack/service-settings`, `@objectstack/platform-objects`, the
+ * plugins), and `settings` is theirs alone: it is keyed by
+ * `SettingsManifest.namespace` and only platform code declares a manifest.
+ *
+ * ## Why this is a second export rather than one type serving both
+ *
+ * It was one type, and one type serving two bundles is what made every
+ * reading of this key wrong. A per-app census asked "does any application
+ * carry `settings` data?", got zero, and read that as "dead key" — while the
+ * platform read it on every Settings screen. The two bundles are separate
+ * namespaces on the platforms this one resembles, and they are separate here
+ * (ruling batch #132 item 2 letter ②, 2026-09-13).
+ *
+ * What made the merged type actively harmful rather than merely imprecise:
+ * both bundles are loaded into ONE served tree
+ * (`AppPlugin.loadTranslations` and each platform plugin's `kernel:ready`
+ * contribution both call `II18nService.loadTranslations`, which deep-merges),
+ * and {@link resolveSettingsTitle} and the console's `useSettingsLabel` read
+ * that merged tree. So a per-app `settings` branch did not sit inert — it
+ * overwrote the platform's own settings copy for the deployment, addressed by
+ * a namespace the application does not own.
+ */
+export const PlatformTranslationDataSchema = lazySchema(() => strictObject({
+  surface: 'this locale of the platform translation bundle',
+  history: TRANSLATION_HISTORY,
+  guidance: TRANSLATION_KEY_GUIDANCE,
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  extraKeys: ['locale'],
+}, {
+  ...appTranslationDataShape(),
+  ...platformSettingsShape(),
+}).describe('Platform translation data — the per-app groups plus the platform-only `settings`'));
+
+export type PlatformTranslationData = z.input<typeof PlatformTranslationDataSchema>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Translation Bundle (all locales)
 // ────────────────────────────────────────────────────────────────────────────
 
-export const TranslationBundleSchema = lazySchema(() => z.record(LocaleSchema, TranslationDataSchema).describe('Map of locale codes to translation data'));
+export const TranslationBundleSchema = lazySchema(() => z.record(LocaleSchema, TranslationDataSchema).describe('Map of locale codes to per-app translation data'));
 
 export type TranslationBundle = z.input<typeof TranslationBundleSchema>;
+
+/**
+ * The platform's own locale map — {@link PlatformTranslationDataSchema} per
+ * locale. `@objectstack/service-settings`'s `settingsBuiltinTranslations` is
+ * the bundle that needs it; a platform package authoring only groups the
+ * per-app face also declares can keep the narrower {@link TranslationBundle}.
+ */
+export const PlatformTranslationBundleSchema = lazySchema(() => z.record(LocaleSchema, PlatformTranslationDataSchema).describe('Map of locale codes to platform translation data'));
+
+export type PlatformTranslationBundle = z.input<typeof PlatformTranslationBundleSchema>;
 
 /**
  * Type-safe factory for an i18n translation bundle (locale code → translations map). Validates at authoring time via
@@ -1448,7 +1567,8 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   guidance: TRANSLATION_KEY_GUIDANCE,
   aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
 }, {
-  ...translationDataShape(),
+  ...appTranslationDataShape(),
+  ...platformSettingsShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),
 
   // Item identity. Every other registered metadata type declares these;

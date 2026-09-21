@@ -27,7 +27,7 @@ import {
 import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
-import { TranslationDataSchema } from '../system/translation.zod';
+import { PlatformTranslationDataSchema } from '../system/translation.zod';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
 // value this spec cannot name is a value the resolver would have dropped.
@@ -3167,9 +3167,16 @@ export const GetTranslationsRequestSchema = lazySchema(() => z.object({
   locale: z.string().describe('BCP-47 locale code'),
 }));
 
+/**
+ * The served document is the MERGE of every loaded bundle — each platform
+ * package's own contribution at `kernel:ready` plus the app's
+ * `stack.translations` — so it carries the platform-only `settings` group and
+ * is typed against the platform face, not the per-app one
+ * (`system/translation.zod.ts`).
+ */
 export const GetTranslationsResponseSchema = lazySchema(() => z.object({
   locale: z.string().describe('Locale code'),
-  translations: TranslationDataSchema.describe('Translation data'),
+  translations: PlatformTranslationDataSchema.describe('Translation data'),
 }));
 
 export const GetFieldLabelsRequestSchema = lazySchema(() => z.object({
