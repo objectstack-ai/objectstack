@@ -1305,7 +1305,8 @@
  *     commits: 452 per-file-only, **0 per-commit-only**, and 0 of the 452
  *     outside that file or outside T2. ⇒ A census that does not state its unit
  *     lands the next reader 452 rows away in one direction or the other, which
- *     is the same defect as a census that does not state its population. All 28 are T2 and all 28 were re-read
+ *     is the same defect as a census that does not state its population.
+ *     All 28 declines are T2 and all 28 were re-read
  *     THROUGH THIS READER rather than by eye: callee `Set` on 28 of 28, 0
  *     exceptions, across eleven bindings — the three `field-value.zod.ts` value
  *     classes, `VALUE_DOMAIN_FIELD_TYPES`, `TEXT_OPERATOR_DOOR_PASSING_TYPES`,
