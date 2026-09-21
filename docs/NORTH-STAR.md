@@ -29,6 +29,7 @@
 - devpath · 种子数据原样落库,重放不多不少 · platform-core · seed-integrity, seed-mode-matrix
 - devpath · 登得进去,外壳记得住:导航、自带应用、收藏与最近、主题、快捷键、返回键 · platform-core · console-login, nav-surfaces-render, builtin-apps-nav-render, shell-nav-personalization, theme-mode-persistence, keyboard-shortcut-surface, url-overlay-contract, home-admin-cluster-links, console-installability-indicators, app-management-toggle
 - devpath · 平台设置在界面里改:改完真的生效、留痕、密钥只存句柄 · platform-core · settings-hub-roundtrip
+- devpath · 遥测与生命周期数据按保留期回收,声明了归档的对象绝不热删 · platform-core · lifecycle-retention-sweep
 - devpath · 元数据注册表对外可读,只有可写的包改得动 · platform-core · metadata-registry-serving, metadata-authoring-roundtrip
 - records · 一条记录建出来、看见、改掉、删掉,也能照着再建一条 · records-forms · crud-roundtrip, record-clone-contract
 - records · 每种字段都渲染得出、收得下、存得住,错的当场拒 · records-forms · field-type-matrix, field-type-constraints, field-unique-enforcement, encrypted-field-behavior
@@ -66,7 +67,8 @@
 - api · 查询契约:算子、参数、聚合、日期窗口都有已知答案 · api-backend · query-contract-matrix, aggregate-contract-matrix, date-range-preset-matrix, filter-comparand-conformance
 - api · 批量与写入门逐行有结果;错误信封与路由台账:码是登记过的,挂出来的就是真在跑的 · api-backend · bulk-write-contract, batch-transactional-discovery, error-envelope-ledger, route-ledger-live-parity
 - api · 自己声明的 API 端点挂成真 URL,开发者控制台里当场试得通 · api-backend · declarative-endpoint-execution, api-console-discovery-execute
-- api · REST 面的构造契约:开关决定挂什么;公式与计时也归同一份契约管 · api-backend · rest-crud-config-contract, rest-batch-config-contract, rest-metadata-config-contract, rest-route-generation-tombstones, api-methods-verb-gate, server-timing-admin-gated, formula-gates, formula-stdlib-matrix
+- api · REST 面的构造契约:开关决定挂什么、哪些动词准过,计时只对管理员开 · api-backend · rest-crud-config-contract, rest-batch-config-contract, rest-metadata-config-contract, rest-route-generation-tombstones, api-methods-verb-gate, server-timing-admin-gated
+- api · 公式引擎:标准库函数逐个给出已知答案,写错的表达式在构建时就被挡下 · api-backend · formula-stdlib-matrix, formula-gates
 - api · 连上外部系统:连接器声明式落地、坏了只降级一个、鉴权与命令白名单、流程里调得到 · integration-system + automation · connector-declarative-boot, connector-degraded-recovery, connector-stdio-default-deny, connector-spec-path-no-escape, connector-descriptor-audit, connector-auth-kind-application, flow-connector-picker, automation.connector-dispatch-matrix
 - api · 外部数据源接进来当自己的对象用,密钥写不进也读不出 · integration-system + cli · external-datasource-federated-read, external-schema-introspection, external-schema-drift-gate, external-schema-browser-ui, datasource-admin-lifecycle, datasource-credential-refusal-matrix, cli.datasource-introspect-codegen
 - api · 往外发、往里收:webhook、定时任务、邮件模板、收件箱投递与订阅偏好、铃铛已读 · integration-system + platform-core · webhook-lifecycle, job-scheduled-run, email-template-render, notify-inbox-delivery, notification-preference-suppression, platform-core.notification-center
@@ -86,7 +88,7 @@
 - devpath · 装进来:兼容性、命名空间、启停与卸载,REST 侧同一套生命周期 · platform-core + api-backend · manifest-install-contract, package-lifecycle-enable-disable, api-backend.package-rest-lifecycle
 - devpath · 从市场装:有没有控制面都装得上,界面不说谎 · platform-core · marketplace-install-local-lifecycle, marketplace-console-honesty
 - devpath · 迁移:先看计划再动手,中断了说得出下一步,老写法给得出改法 · cli + platform-core · migrate-plan-apply-json, migrate-meta-codemod, migrate-duplicates-inventory, platform-core.interrupted-migration-boot-report
-- devpath · 随包发来的对象只能扩不能改,启停逐条记在激活台账上;过期数据按保留期回收 · platform-core + access-security · packaged-object-extend-only, activation-ledger-registration-home, activation-ledger-row-contract, lifecycle-retention-sweep, access-security.activation-write-operator-gate
+- devpath · 随包发来的对象只能扩不能改,启停逐条记在激活台账上 · platform-core + access-security · packaged-object-extend-only, activation-ledger-registration-home, activation-ledger-row-contract, access-security.activation-write-operator-gate
 - workflow · 随包发的流程与动作:停用要持久、被依赖时拒绝、可克隆、两道门一样严 · automation + api-backend + access-security · packaged-flow-disable-durable, packaged-flow-subflow-disable-refusal, packaged-flow-clone-contract, setup-packaged-automation-board, api-backend.packaged-action-disabled-dispatch, api-backend.action-activation-door-contract, access-security.packaged-flow-write-door-parity
 - access · 装进来的包带着它声明的能力与权限集,只读的包锁住 Studio · access-security + studio-authoring · capability-declaration-lifecycle, packaged-permission-set-lifecycle, readonly-package-locks-studio, studio-authoring.packaged-automation-studio-lock
 - studio · 随包发来的视图与仪表盘,是可以直接改的那一类 · studio-authoring · packaged-display-class-direct-edit
