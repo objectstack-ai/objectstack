@@ -19,12 +19,12 @@
 - 重挂前先查裁决:闸门标签缺失 ⇒ 先 grep 卡评论找复审结论;`get_reviews` 读空 ≠ 未复审。
 - PASS + 无标 + head 未动 = 已清标不是被剥;head 后移或无结论才重挂;清标缺引记录即半态。
 
-## 复核归属与资格(按车道)
+## 复核归属与资格(按面)
 
-- 归属派发席,交付后收集复核当轮完成;只 spec 与 skills 车道欠,新 spec 工作恒归 spec 席。
-- 按车道:spec 与 skills 席审契约增量;达档席内审,未达档 ⛔ 不自审,起达档子代理。
-- 复核面 = 出货给用户或 agent 的:`content/docs/**`、`apps/docs/**`、CHANGELOG/`.changeset` 散文。
-- 同含已发布 schema 与 governed 规则文本;三面皆不碰 ⇒ CI 加席位自读,⛔ 不起第二个 agent。
+- 欠不欠按面判 ⛔ 不按车道:diff 碰下列任一面即欠达档复核,交付后当轮完成。
+- 复核面 = 出货给用户或 agent 的五处:`content/docs/**`、`apps/docs/**`、CHANGELOG/`.changeset` 散文。
+- 加已发布 schema(`packages/spec/src/**` 非测试)与 governed 规则文本(统一定义见 SKILL.md)。
+- 五面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。
 - 复核记录 = 一条评论落 PR 或卡,席内与子代理同形;散文、dev 自评、`os-dev-report` 恒不算。
 - 同形 = `## Contract review` 题头、所审 head sha 独占码段、①②③ 逐项、独立性对、PASS/FAIL。
 - 同形含首行 `Served-tier:`:值写常量名 `CONTRACT_REVIEW_TIER`;无此行不成裁决,模板见 `--template`。
