@@ -645,7 +645,10 @@ function ledgerFaultFindings(faults: ReadonlyMap<string, LedgerFault>): Liveness
  *    `resolveLivenessDir`, and this package's `exports` map publishes exactly
  *    two subpaths (`.` → `dist/index.js`, `./runtime` → `dist/runtime.js`, both
  *    bundled by tsup from those two entries), so no consumer can reach either
- *    symbol and the built `.d.ts` surface is unchanged. ────────────────────
+ *    symbol and neither appears in the built `.d.ts`. That is scoped to these
+ *    two symbols on purpose: this change DOES add one published name, the
+ *    `LIVENESS_LEDGER_UNREADABLE` rule id, which the barrel re-exports
+ *    deliberately (#5648 — a rule id no barrel carries is unreachable).
  *
  * The whole rule, against a ledger directory the CALLER supplies.
  *
