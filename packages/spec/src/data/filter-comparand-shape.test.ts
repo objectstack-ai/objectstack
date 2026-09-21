@@ -21,7 +21,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { StandardErrorCode } from '../api/errors.zod';
-import { parseFilterAST, VALID_AST_OPERATORS } from './filter.zod';
+import { parseFilterAST, RangeOperatorSchema, VALID_AST_OPERATORS } from './filter.zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
 
 type Refusal = Error & { code?: string; status?: number };
@@ -151,13 +151,115 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       .toContain('where.$or[0].stage.$nin[0]');
   });
 
-  it('refuses ONLY null — falsy and empty-ish members are values, not absence', () => {
+  it('refuses ONLY null among the MEMBERS — falsy and empty-ish members are values', () => {
     // The carve-out is null-shaped and nothing wider: #5041's and #5234's
     // member questions stand untouched, and every falsy VALUE keeps working.
     expect(parseFilterAST({ n: { $in: [0, false, ''] } })).toEqual({ n: { $in: [0, false, ''] } });
     expect(parseFilterAST({ n: { $nin: [0, false, ''] } })).toEqual({ n: { $nin: [0, false, ''] } });
-    expect(parseFilterAST({ at: { $between: ['', ''] } })).toEqual({ at: { $between: ['', ''] } });
+    // A falsy ENDPOINT is still an endpoint — `0` is a bound like any other.
     expect(parseFilterAST({ n: { $between: [0, 0] } })).toEqual({ n: { $between: [0, 0] } });
+    // ⚠️ `{ at: { $between: ['', ''] } }` was pinned HERE as a value that
+    // passes. That row — and only that row — is INVERTED by the 2026-09-20
+    // ruling (#19071); it now lives in the blank-endpoint section below. The
+    // `$in` / `$nin` rows above are untouched, because falsy VALUES are values
+    // and a range ENDPOINT is a different question.
+  });
+
+  // ── the BLANK endpoint carve-out, ruled 2026-09-20 (#19071) ────────────
+
+  it.each([
+    ['both sides blank', { at: { $between: ['', ''] } }],
+    ['a blank MAX', { at: { $between: ['2026-07-01', ''] } }],
+    ['a blank MIN', { at: { $between: ['', '2026-07-31'] } }],
+    ['an absent MAX', { at: { $between: ['2026-07-01', undefined] } }],
+    ['an absent MIN', { at: { $between: [undefined, '2026-07-31'] } }],
+    ['the lowered array form', [['at', 'between', ['', '2026-07-31']]]],
+  ])('refuses a BLANK $between ENDPOINT — %s', (_label, where) => {
+    const err = refusalOf(() => parseFilterAST(where));
+    expect(err.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(err.status).toBe(400);
+  });
+
+  it('the blank-bound refusal names the SIDE and prescribes both remedies', () => {
+    // 2026-09-20: the refusal 「naming the blank side and carrying the same
+    // guidance as the schema door」 — with a padded pair both bounds are
+    // present, and the author is the one person who cannot see which is empty.
+    const err = refusalOf(() => parseFilterAST({ close_date: { $between: ['2026-07-01', ''] } }));
+    expect(err.message)
+      .toMatch(/^Operator "\$between" on field "close_date" requires two non-blank bounds/);
+    expect(err.message).toContain('an empty string at where.close_date.$between[1] (the MAX bound)');
+    expect(err.message).toContain('{"$gte": min} / {"$lte": max}');
+    expect(err.message).toMatch(/Authoring spellings: between\./);
+    expect(err.message).toMatch(/UNFILTERED result set/);
+    expect(refusalOf(() => parseFilterAST({ close_date: { $between: ['', '2026-07-31'] } })).message)
+      .toContain('where.close_date.$between[0] (the MIN bound)');
+    // An ABSENT bound says so in words: `undefined` inside an array renders as
+    // `null` through JSON.stringify, and null is the one blank spelling this
+    // message is NOT about.
+    expect(refusalOf(() => parseFilterAST({ close_date: { $between: [5, undefined] } })).message)
+      .toContain('Received undefined at where.close_date.$between[1] (the MAX bound)');
+  });
+
+  it('a blank bound is refused at its own path inside $and / $or / $not too', () => {
+    expect(refusalOf(() => parseFilterAST({ $not: { at: { $between: ['', 'M'] } } })).message)
+      .toContain('where.$not.at.$between[0]');
+    expect(refusalOf(() => parseFilterAST({ $or: [{ at: { $between: ['A', ''] } }] })).message)
+      .toContain('where.$or[0].at.$between[1]');
+  });
+
+  it('the null bound keeps the 2026-08-31 ruling\'s own message — two spellings, two remedies', () => {
+    // An author who wrote `null` was reaching for absence; an author who left
+    // a bound empty was reaching for a bound. If this went red the null author
+    // would be sent to a scalar comparison instead of the null predicate.
+    const err = refusalOf(() => parseFilterAST({ at: { $between: ['2026-07-01', null] } }));
+    expect(err.message).toContain('requires two non-null bounds');
+    expect(err.message).toContain('{"at": {"$null": true}}');
+    expect(err.message).not.toContain('non-blank');
+    // null is checked FIRST, so a pair that is blank on one side and null on
+    // the other keeps the message it has had since 2026-08-31.
+    expect(refusalOf(() => parseFilterAST({ at: { $between: ['', null] } })).message)
+      .toContain('requires two non-null bounds');
+  });
+
+  it('answers every endpoint spelling exactly as the SCHEMA door does', () => {
+    // The defect this ruling closes was one published sentence
+    // (`RANGE_ENDPOINT_DESCRIPTION`) with two truth values, so the pin is the
+    // AGREEMENT itself rather than a second hand-written list that can drift
+    // from the door it is supposed to match.
+    const endpointPairs: Array<[string, unknown[]]> = [
+      ["['', '']", ['', '']],
+      ["['2026-01-01', '']", ['2026-01-01', '']],
+      ["['', '2026-12-31']", ['', '2026-12-31']],
+      ['[5, undefined]', [5, undefined]],
+      ['[undefined, 5]', [undefined, 5]],
+      ['[null, 1]', [null, 1]],
+      ['[1, null]', [1, null]],
+      // Controls that must stay LEGAL at BOTH doors — a red here would mean a
+      // door started reading falsiness, or shortness, instead of blankness.
+      ['[0, 0]', [0, 0]],
+      ["['0', '9']", ['0', '9']],
+      ["['A', 'M']", ['A', 'M']],
+      ["['08:00:00', '18:00:00']", ['08:00:00', '18:00:00']],
+      ["['2026-01-01', '2026-12-31']", ['2026-01-01', '2026-12-31']],
+      // ⛔ Whitespace-only is NOT judged, at EITHER door: the 2026-09-17 ruling
+      // is the empty string, `filter.test.ts` pins the schema side of this very
+      // row, and a trim here would re-open the split in the other direction.
+      ["['   ', 'M']", ['   ', 'M']],
+    ];
+    const refused: string[] = [];
+    for (const [label, pair] of endpointPairs) {
+      const schemaRefuses = !RangeOperatorSchema.safeParse({ $between: pair }).success;
+      let runtimeRefuses = false;
+      try {
+        parseFilterAST({ close_date: { $between: pair } });
+      } catch {
+        runtimeRefuses = true;
+      }
+      expect(runtimeRefuses, `${label}: schema refuses=${schemaRefuses}`).toBe(schemaRefuses);
+      if (schemaRefuses) refused.push(label);
+    }
+    // Guards the loop from passing vacuously in either direction.
+    expect(refused).toHaveLength(7);
   });
 
   // ── the ordering carve-out, ruled 2026-09-01 (#14080) ──────────────────
@@ -266,6 +368,11 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       { stage: { $nin: [null] } },
       { close_date: { $between: [null, null] } },
       { close_date: { $between: ['2026-07-01', null] } },
+      // The 2026-09-20 blank carve-out (#19071): the named side and both
+      // prescriptions ride the same unrelaxed bound.
+      { close_date: { $between: ['2026-07-01', ''] } },
+      { close_date: { $between: ['', '2026-07-31'] } },
+      { close_date: { $between: [5, undefined] } },
       // The 2026-09-01 ordering carve-out (#14080): `$gte` / `$lte` carry the
       // longest spelling lists, so they are the tallest of the four.
       { close_date: { $gte: null } },
