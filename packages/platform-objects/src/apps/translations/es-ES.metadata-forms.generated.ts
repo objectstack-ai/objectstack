@@ -1475,54 +1475,54 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   dataset: {
-    label: "Dataset",
-    description: "Analytics semantic layer — dimensions & measures",
+    label: "Conjunto de datos",
+    description: "Capa semántica de analítica — dimensiones y medidas",
     sections: {
       basics: {
-        label: "Basics",
-        description: "Dataset identity."
+        label: "Aspectos básicos",
+        description: "Identidad del conjunto de datos."
       },
       source: {
-        label: "Source",
-        description: "The base object, the relationships to join, and the dataset’s intrinsic scope. Joins are derived from the object graph — pick relationship (lookup / master_detail) names, never write an ON clause."
+        label: "Origen de datos",
+        description: "El objeto base, las relaciones a unir y el ámbito intrínseco del conjunto de datos. Las uniones se derivan del grafo de objetos: elige nombres de relación (lookup / master_detail), nunca escribas una cláusula ON."
       },
       dimensions: {
-        label: "Dimensions",
-        description: "Groupable axes. Use a base field, or `relationship.field` (e.g. account.region) for a relationship included above."
+        label: "Dimensiones",
+        description: "Ejes agrupables. Usa un campo del objeto base o, para una relación incluida arriba, `relationship.field` (p. ej. account.region)."
       },
       measures: {
-        label: "Measures",
-        description: "Aggregatable values defined once and referenced by name. A measure is sum/avg/count/… of a field; a derived measure combines other measures (ratio/sum/difference/product). Measure-scoped filters and derived ops are edited per-row in the dataset designer."
+        label: "Medidas",
+        description: "Valores agregables definidos una vez y referenciados por nombre. Una medida es sum/avg/count/… de un campo; una medida derivada combina otras medidas (ratio/sum/difference/product). Los filtros por medida y las operaciones derivadas se editan por fila en el diseñador de conjuntos de datos."
       }
     },
     fields: {
       name: {
-        label: "Name",
-        helpText: "snake_case unique identifier"
+        label: "Nombre",
+        helpText: "Identificador único snake_case"
       },
       label: {
-        label: "Label",
-        helpText: "Display name"
+        label: "Etiqueta",
+        helpText: "Nombre mostrado"
       },
       description: {
-        label: "Description",
-        helpText: "What this dataset measures"
+        label: "Descripción",
+        helpText: "Qué mide este conjunto de datos"
       },
       object: {
-        label: "Object",
-        helpText: "Base object — the FROM"
+        label: "Objeto",
+        helpText: "Objeto base: el FROM"
       },
       include: {
-        label: "Include",
-        helpText: "Relationship (lookup / master_detail) field names to join — enables `relationship.field` dimensions/measures (e.g. include \"account\" → group by account.region)"
+        label: "Relaciones a incluir",
+        helpText: "Nombres de campo de relación (lookup / master_detail) a unir — habilita dimensiones/medidas `relationship.field` (p. ej. incluir \"account\" → agrupar por account.region)"
       },
       filter: {
-        label: "Filter",
-        helpText: "Intrinsic scope filter (e.g. exclude soft-deleted records), ANDed into every query"
+        label: "Filtro",
+        helpText: "Filtro de ámbito intrínseco (p. ej. excluir registros eliminados de forma lógica), combinado con AND en cada consulta"
       },
       dimensions: {
-        label: "Dimensions",
-        helpText: "Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity"
+        label: "Dimensiones",
+        helpText: "Cada dimensión: nombre (referenciado por las presentaciones), campo, tipo y, para fechas, una granularidad de agrupación predeterminada"
       },
       "dimensions.name": {
         label: "Nombre"

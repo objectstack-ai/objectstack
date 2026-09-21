@@ -4886,7 +4886,9 @@ export function declarationLimbTally(pairs) {
  * whether it is the current one. Reporting it as `missing` would send the seat
  * looking for a line that is there; reporting it as a `no` would manufacture a
  * decision nobody made. The sentence names the comment, says what governance
- * did instead, and gives the one remedy — a `Branch:` line of its own.
+ * did instead, and gives the one remedy — ONE comment carrying a `Claim:` line AND
+ * a `Branch:` line of its own, with a `Release:` first when the seat already holds
+ * a live claim here.
  *
  * ⛔ Nothing here widens the branch reader. The remedy is on the WRITE side,
  * which is the same call the sibling script's H34 makes for the claim marker
@@ -4910,10 +4912,14 @@ export function claimBranchUnparsedGap(pair, decl) {
     `parses to ZERO branches, so the carrier this limb reads cannot be resolved. ${instead}. ` +
     'An unparsed claim is an UNCLASSIFIED result, ⛔ never an absent declaration and ⛔ never a ' +
     'declared `no` — this pair is missing from the readings above, not clean in them and not ' +
-    'adverse in them. Remedy — the CLAIMING SEAT, with one comment: name the branch on a ' +
-    '`Branch:` line of its OWN (`` Branch: `claude/issue-<n>-<slug>` ``), ⛔ not inside the ' +
-    '`Claim:` sentence, which no reader parses. ⚠️ A whole shift of claims reading this way is a ' +
-    'SEAT TEMPLATE fault, not a typo. ' +
+    'adverse in them. Remedy — the CLAIMING SEAT, with ONE comment carrying BOTH lines: a line ' +
+    'beginning `Claim:` AND a `Branch:` line of its OWN (`` Branch: `claude/issue-<n>-<slug>` ``). ' +
+    '⛔ Not the branch named inside the `Claim:` sentence, which no reader parses, and ⛔ not a ' +
+    '`Branch:` line posted ALONE in a comment of its own, which carries no claim marker and is ' +
+    'therefore not a claim comment at all — that comment leaves this state exactly as it is. ' +
+    '⚠️ Already holding a LIVE claim on this card? Post `Release:` FIRST, so the new comment is ' +
+    'the only claim standing — a second `Claim:` under a live one is row C8, ⛔ not a repair. ' +
+    '⚠️ A whole shift of claims reading this way is a SEAT TEMPLATE fault, not a typo. ' +
     NEVER_WRITES
   );
 }
@@ -8174,6 +8180,21 @@ export async function selfTest() {
   t('…and that a whole shift reading this way is a TEMPLATE fault rather than a typo', says(unparsedGap, 'SEAT TEMPLATE fault'));
   t('⛔ and it raises NO C2 finding — an unclassified result must never be rendered as an adverse verdict', pairRows(unparsedPair).every((r) => r.code !== 'C2'));
   t('⛔ nor any other finding row on this pair', pairRows(unparsedPair).length === 0);
+  // #19414 — the REMEDY is its own proof. The sentence used to name ONE line of
+  // the shape the rule requires, so a seat that followed it walked exit 2 → exit 2
+  // → C8's exit 4 before reaching 0 (measured on card #19306 / PR #19411). The
+  // case below WRITES the comment the sentence now prescribes and reads it back
+  // through this same reader.
+  const U14 = (id, at, body) => ({ id, created_at: at, user: { login: 'os-seat-ai' }, body });
+  const U14_HELD = U14(7400000001, '2026-09-20T01:00:00Z', 'Claim: round 1 · claude/issue-4242-remedy\nClause-②: no');
+  const U14_BRANCH_ONLY = U14(7400000002, '2026-09-20T02:00:00Z', 'Branch: `claude/issue-4242-remedy`');
+  const U14_RELEASE = U14(7400000003, '2026-09-20T03:00:00Z', 'Release: session `session_01Demo`, cause: 本席重发认领, 去向: `pm:queue`');
+  const U14_CLAIM = U14(7400000004, '2026-09-20T04:00:00Z', 'Claim: round 2\nBranch: `claude/issue-4242-remedy`\nClause-②: no');
+  const U14_CODES = (rows) => pairRows(pair({ cardComments: rows })).map((r) => r.code);
+  t('⭐ #19414: a `Branch:` line posted ALONE carries no claim marker, so the OLD remedy left the thread in this SAME state', cardDeclaration([U14_HELD, U14_BRANCH_ONLY]).state === 'claim-branch-unparsed');
+  t('⭐ …and the comment the sentence NOW prescribes is the governing claim — both lines in one comment, the live claim released first', cardDeclaration([U14_HELD, U14_BRANCH_ONLY, U14_RELEASE, U14_CLAIM]).state === 'declared' && U14_CODES([U14_HELD, U14_BRANCH_ONLY, U14_RELEASE, U14_CLAIM]).length === 0);
+  t('⛔ CONTROL: post that same comment WITHOUT the `Release:` and row C8 answers instead — which is why the sentence names it', U14_CODES([U14_HELD, U14_BRANCH_ONLY, U14_CLAIM]).includes('C8'));
+  t('…and the sentence itself carries the whole shape: both lines, the `Release:` before a second claim, and the row one earns', says(unparsedGap, 'ONE comment carrying BOTH lines') && says(unparsedGap, '`Release:` FIRST') && says(unparsedGap, 'row C8'));
   // The live specimen, and the fallback shape at its sharpest: the older claim
   // names a DIFFERENT branch, so every reader downstream probes the wrong ref.
   const liveDecl = cardDeclaration([LIVE_PARSES, LIVE_BRANCHLESS]);

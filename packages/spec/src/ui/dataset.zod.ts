@@ -197,38 +197,47 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    *
    * A DATE-valued measure (`min` / `max` over a date field) never reads a date
    * PATTERN here: `"YYYY-MM-DD"` is accepted by this schema, reaches the
-   * renderer, and produces the locale default. The shared date path takes a
-   * named STYLE instead, so a date-only value reads `format` as `short`
-   * (`Jul 4, '24`) or `relative` (`3 days ago` inside a ±7-day window, the
-   * absolute locale form outside it) — the same two words `DateCellRenderer`
-   * honours from `field.format` — while a DATETIME value ignores `format`
-   * altogether.
+   * renderer, and produces that arm's default face. The shared date path takes
+   * a named STYLE instead, and BOTH arms honour the same two words — `short`
+   * (`Jul 4, '24` for a date, `9/11/2026 9:30 am` for a datetime) and
+   * `relative` (`3 days ago` inside a ±7-day window, the absolute form outside
+   * it) — the same two words `DateCellRenderer` honours from `field.format`.
+   *
+   * ⚠️ The datetime half of that sentence is NEW at the pin below and is the
+   * one thing this record's previous revision got wrong the moment the pin
+   * moved: until objectui#8352 a DATETIME value ignored `format` altogether,
+   * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `53ded82bf`; re-derived at that pin 2026-09-08 — BOTH files in this chain
-   * changed over the hop off `a472b0716` (`dataset-format.ts` +23 lines,
-   * `date-display.ts` +108 under objectui#7443, "one home for the datetime
-   * display convention"), so every anchor below was re-READ there and three of
-   * the four MOVED; the substance is unchanged — the date-only arm still
-   * threads `format` as a STYLE and the datetime arm still takes none) in
+   * `87af769e9`; re-derived at that pin 2026-09-20 — every anchor below MOVED
+   * on this hop and one of them changed SUBSTANCE, so nothing here is carried:
+   * `formatMeasureDate`'s datetime arm no longer calls
+   * `formatDateTime(v, { locale })` unconditionally, it SELECTS a formatter,
+   * because `formatDateTime(value, options?)` has no style parameter to thread
+   * into and widening that published signature was refused) in
    * objectui
    * `packages/core/src/utils/dataset-format.ts`: `formatMeasure` routes a
-   * non-numeric value through `formatMeasureDate` (`:185-198`, was `:184-197`),
+   * non-numeric value through `formatMeasureDate` (`:229-264`, was `:185-198`)
+   * at `:370`,
    * whose date-only arm threads `format` into the STYLE parameter of
-   * `formatDate` (`utils/date-display.ts:131-164`, was `:104-137`, whose
+   * `formatDate` (`utils/date-display.ts:198-233`, was `:131-164`, whose
    * `relative` branch falls back to the absolute form beyond ±7 days at
-   * `:117`, was `:90`), while its datetime arm calls
-   * `formatDateTime(v, { locale })` with no style at all (`:195`, was `:194`).
+   * `:152`, was `:117` — the fallback now strips the style through
+   * `absoluteFallbackOptions`), while its datetime arm answers `relative` with
+   * `formatRelativeDate` (`:260`), `short` with
+   * `formatDateTime(v, { locale, style: 'compact' })` (`:261`) and everything
+   * else — a date PATTERN included — with the bare
+   * `formatDateTime(v, { locale })` (`:262`).
    * Teaching
    * the shared path a pattern grammar would change every list cell that reads
-   * it, so the gap is DOCUMENTED here rather than closed (objectui#7178 ruled
-   * A; the datetime half is objectui#7443).
+   * it, so that gap is still DOCUMENTED here rather than closed (objectui#7178
+   * ruled A; the datetime half is objectui#7443 and objectui#8352).
    */
   format: z.string().optional().describe(
     'Numeral pattern for a NUMERIC measure — grouping, decimals, percent; e.g. "0,0.00", "0.0%". '
     + 'An amount takes its symbol from `currency`, not from a "$" in the pattern. A DATE-valued '
-    + 'measure never reads a date pattern: `"YYYY-MM-DD"` renders the locale default. A date-only '
-    + 'value reads `format` as a display style (`short`, `relative`); a datetime value ignores it.',
+    + 'measure never reads a date pattern: `"YYYY-MM-DD"` renders that arm\'s default face. A date '
+    + 'or datetime value reads `format` as a display style — `short` or `relative`, honoured on both.',
   ).meta({ title: 'Format' }),
   /**
    * Display currency (ISO 4217, e.g. "USD", "CNY"). Carried onto the result
