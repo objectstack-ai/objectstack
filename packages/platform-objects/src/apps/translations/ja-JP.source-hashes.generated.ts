@@ -18,17 +18,7 @@
  */
 
 export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.api.description": "62421e8039e013f5",
-  "metadataForms.api.label": "589af3fe4aab4af5",
-  "metadataForms.book.description": "45e72c8c74617530",
-  "metadataForms.book.label": "b48c719759fca087",
-  "metadataForms.capability.description": "1130a8a487c35f3d",
-  "metadataForms.capability.label": "cb58b72c5cc77632",
-  "metadataForms.doc.description": "f233af60238b0879",
-  "metadataForms.doc.label": "3f35cf5088b999ad",
   "metadataForms.email_template.fields.variables.helpText": "27197774c2cda633",
-  "metadataForms.mapping.description": "654a322ed6e264bb",
-  "metadataForms.mapping.label": "9baba989f46cd1e8",
   "metadataForms.object.fields.enable.activities.label": "1091422f7f3133d3",
   "metadataForms.object.fields.enable.apiEnabled.label": "34396a2f6cfda5d5",
   "metadataForms.object.fields.enable.clone.label": "48cbbe43b82f32c2",
@@ -78,8 +68,6 @@ export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.report.fields.runtimeFilter.label": "90fe0e44293633fa",
   "metadataForms.report.sections.dataset_binding.description": "54650ff5f09fd1bd",
   "metadataForms.report.sections.dataset_binding.label": "34d97a3093d6fc56",
-  "metadataForms.seed.description": "c22921feb0f06273",
-  "metadataForms.seed.label": "60e0e22a54230cab",
   "objects.sys_account._actions.link_social.params.provider.options.apple": "cfdc41e15ed6699b",
   "objects.sys_account._actions.link_social.params.provider.options.discord": "12f931cc062e76ae",
   "objects.sys_account._actions.link_social.params.provider.options.facebook": "7eea009178f5b807",
