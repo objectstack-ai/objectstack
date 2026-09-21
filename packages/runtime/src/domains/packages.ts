@@ -75,19 +75,21 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 // REFERENCE at the install door below. `ManifestSchema.shape.version` and
 // `ManifestSchema.shape.id` are the very field schemas
 // `PackageInstallRequestSchema` binds through `manifest: ManifestSchema` — not
-// copies of them. ⛔ A hand-written semver regex here would be the THIRD
-// judgment of that one key on this one surface (the `PATCH /packages/:id` door
-// further down already keeps its own copy), and the version-grammar canon is an
-// open question on its own card: asking the declaration means whatever that
-// canon decides reaches this door with no edit to this file. The same holds for
-// the id — `MANIFEST_ID_PATTERN` is declared ONCE in `kernel/manifest.zod.ts`
-// and shared with `PackageSchema.manifestId`, so ⛔ no reverse-domain regex is
-// spelled here either.
+// copies of them. ⛔ A hand-written semver regex here would be a SECOND grammar
+// for the version key on this one surface: the `PATCH /packages/:id` door
+// further down judges the same key and keeps no copy of its own either — it
+// references `MAJOR_MINOR_PATCH_VERSION_PATTERN`, the same constant
+// `ManifestSchema`'s own `version` field references (`@objectstack/spec`
+// `kernel/version-grammar.ts`). Both doors therefore read ONE declaration, and
+// a change to that declaration reaches both of them with no edit to this file.
+// The same holds for the id — `MANIFEST_ID_PATTERN` is declared ONCE in
+// `kernel/manifest.zod.ts` and shared with `PackageSchema.manifestId`, so ⛔ no
+// reverse-domain regex is spelled here either.
 //
 // `manifestIdRefusal` is imported for exactly one limb: the fallback when a
 // failed parse somehow carries no issue. Even that limb then prints the
 // DECLARATION's own sentence rather than a second one invented here.
-import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
+import { ManifestSchema, MAJOR_MINOR_PATCH_VERSION_PATTERN, manifestIdRefusal } from '@objectstack/spec/kernel';
 // [#17672] The repo's ONE message for a single-valued query parameter supplied
 // more than once, from the module whose header is the authority on the rule
 // (`packages/rest/src/query-multiplicity.ts`). Imported, never restated: this
@@ -1765,7 +1767,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (patch.name !== undefined && patch.name === '') {
                 return { handled: true, response: deps.error('name must not be empty', 400) };
             }
-            if (patch.version !== undefined && !/^\d+\.\d+\.\d+$/.test(patch.version)) {
+            if (patch.version !== undefined && !MAJOR_MINOR_PATCH_VERSION_PATTERN.test(patch.version)) {
                 return { handled: true, response: deps.error('version must be semantic (e.g. 1.0.0)', 400) };
             }
             if (patch.name === undefined && patch.description === undefined && patch.version === undefined) {
