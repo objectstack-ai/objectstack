@@ -381,8 +381,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "新建记录时的默认值"
       },
       placeholder: {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
+        label: "占位文本",
+        helpText: "显示在空输入框内的提示文本（输入内容后消失）；需要常驻帮助请使用 inlineHelpText"
       },
       minLength: {
         label: "最小长度",
@@ -393,12 +393,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "最多字符数"
       },
       valueDomain: {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
+        label: "值域",
+        helpText: "写入值必须归属的标准：iana_time_zone、iso_4217_currency 或 iso_3166_alpha2；写入非成员值将被拒绝"
       },
       rows: {
-        label: "Rows",
-        helpText: "Inline editor height in text rows"
+        label: "行数",
+        helpText: "内联编辑器高度，以文本行数计"
       },
       min: {
         label: "最小值",
@@ -447,8 +447,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "被引用记录删除时的处理方式"
       },
       relatedListFilter: {
-        label: "Related List Filter",
-        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
+        label: "关联列表筛选",
+        helpText: "该关系在父记录详情页上的关联列表的默认筛选——以 AND 方式与父记录匹配条件组合，标签页徽标统计的也是同一集合"
       },
       expression: {
         label: "表达式",
@@ -459,24 +459,24 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "父子关系下的汇总聚合配置"
       },
       "summaryOperations.object": {
-        label: "Object",
-        helpText: "Child object to aggregate"
+        label: "对象",
+        helpText: "参与聚合的子对象"
       },
       "summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "函数",
+        helpText: "聚合函数"
       },
       "summaryOperations.field": {
-        label: "Field",
-        helpText: "Child field to aggregate (ignored for count)"
+        label: "字段",
+        helpText: "参与聚合的子对象字段（count 时忽略）"
       },
       "summaryOperations.relationshipField": {
-        label: "Relationship Field",
-        helpText: "Child FK back to this parent (auto-detected when omitted)"
+        label: "关系字段",
+        helpText: "子对象上指回该父对象的外键（省略时自动探测）"
       },
       "summaryOperations.filter": {
-        label: "Filter",
-        helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
+        label: "筛选",
+        helpText: "仅聚合匹配该判定式的子记录（例如 status == received）"
       },
       externalId: {
         label: "外部 ID",
