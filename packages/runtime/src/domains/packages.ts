@@ -79,7 +79,7 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 // down already keeps its own copy), and the version-grammar canon is an open
 // question on its own card: asking the declaration means whatever that canon
 // decides reaches this door with no edit to this file.
-import { ManifestSchema } from '@objectstack/spec/kernel';
+import { ManifestSchema, MAJOR_MINOR_PATCH_VERSION_PATTERN } from '@objectstack/spec/kernel';
 // [#17672] The repo's ONE message for a single-valued query parameter supplied
 // more than once, from the module whose header is the authority on the rule
 // (`packages/rest/src/query-multiplicity.ts`). Imported, never restated: this
@@ -1677,7 +1677,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (patch.name !== undefined && patch.name === '') {
                 return { handled: true, response: deps.error('name must not be empty', 400) };
             }
-            if (patch.version !== undefined && !/^\d+\.\d+\.\d+$/.test(patch.version)) {
+            if (patch.version !== undefined && !MAJOR_MINOR_PATCH_VERSION_PATTERN.test(patch.version)) {
                 return { handled: true, response: deps.error('version must be semantic (e.g. 1.0.0)', 400) };
             }
             if (patch.name === undefined && patch.description === undefined && patch.version === undefined) {
