@@ -166,14 +166,14 @@ describe('Plugin Versioning Schemas', () => {
         ],
         migrationRequired: true,
         migrationComplexity: 'moderate' as const,
-        estimatedMigrationTime: 8,
+        estimatedMigrationTimeHours: 8,
         migrationScript: './scripts/migrate-v1-to-v2.ts',
         testCoverage: 95,
       };
       const result = CompatibilityMatrixEntrySchema.parse(entry);
       expect(result.compatibility).toBe('breaking-changes');
       expect(result.migrationRequired).toBe(true);
-      expect(result.estimatedMigrationTime).toBe(8);
+      expect(result.estimatedMigrationTimeHours).toBe(8);
     });
   });
 
@@ -421,7 +421,7 @@ describe('Plugin Versioning Schemas', () => {
         ],
         migrationRequired: true,
         migrationComplexity: 'major',
-        estimatedMigrationTime: 40,
+        estimatedMigrationTimeHours: 40,
       });
       expect(matrixEntry.migrationRequired).toBe(true);
       expect(matrixEntry.migrationComplexity).toBe('major');

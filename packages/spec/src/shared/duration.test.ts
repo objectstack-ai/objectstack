@@ -67,7 +67,8 @@ describe('the closed duration vocabulary — exactly two units (#18122)', () => 
 
 describe('the refinement, re-measured against the six genuine duration rows', () => {
   // The two rows of the six that carry a default today. The other four —
-  // `cors.maxAge`, `slideInterval`, `meta.duration` and `FileValue.duration` —
+  // `cors.maxAge`, `slideInterval`, `meta.duration` and `FileValue.durationSeconds`
+  // (spelled `FileValue.duration` when this census was taken; renamed by #18669) —
   // are `.optional()` with no default, so a default is not theirs to accept;
   // what they constrain is the FLOOR, asserted in the next case.
   it('accepts `shutdownTimeout`s 30000 — the only default in the ms half', () => {
