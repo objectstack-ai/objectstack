@@ -25318,11 +25318,13 @@ function selfTest() {
   t(`⛔ no RETIRED tier word survives in any live RULE — ladder, exits, clause-② note and suspicion line all read the constant (dirty: ${ladderRenderings.map((l, i) => RETIRED_TIER_WORDS.filter((w) => l.toLowerCase().includes(w)).map((w) => `${i}/${w}`).join(' ')).filter(Boolean).join(' ') || 'none'})`, ladderRenderings.every((l) => RETIRED_TIER_WORDS.every((w) => !l.toLowerCase().includes(w))));
   t('…and the guard is not reading an empty string — every rendering it clears still carries its own rule text', ladderRenderings.every((l) => l.includes('Model tier')) && ladderRenderings.some((l) => l.includes('Exits,')));
   t('the retired-spelling guard is not vacuous — it names at least one word, and none of them is a tier still in the ladder', RETIRED_TIER_WORDS.length > 0 && !RETIRED_TIER_WORDS.includes(TIER_FLOOR) && !RETIRED_TIER_WORDS.includes(TIER_DEFAULT) && !RETIRED_TIER_WORDS.includes(TIER_CEILING));
-  // The constant's docblock promises the model id is spelled as a VALUE on its
-  // own line and NOWHERE else across these two roots. That promise carried no
-  // pin, which is precisely how a second spelling could outlive a retirement:
-  // the seat edits the declaration, the copy stays, and nothing compares them.
-  // Read from the TREE, never from a list of files someone remembered.
+  // A sibling case further down pins the constant's CURRENT value to exactly
+  // one site under these roots. What that case cannot see is a RETIRED id left
+  // behind — it is not the current value, so nothing compares it to anything,
+  // and it reads to a grepping seat as a live tier rule. So this one asks the
+  // rulebook root a different question: does it spell a model id AT ALL? The
+  // skill's own rule is 「本文不写模型名」, and a retirement is the moment that
+  // promise pays for itself — the tree needs no edit, so it cannot go stale.
   const walkFilesUnder = (dir, out = []) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const abs = nodePath.join(dir, entry.name);
@@ -25331,27 +25333,15 @@ function selfTest() {
     }
     return out;
   };
-  const TIER_VALUE_ROOTS = ['scripts/pm', '.claude/skills/pm-dispatch'];
-  const scanTierRoots = (predicate) => {
-    const hits = [];
-    for (const rel of TIER_VALUE_ROOTS) {
-      for (const abs of walkFilesUnder(nodePath.join(ROOT, rel))) {
-        readFileSync(abs, 'utf8').split('\n').forEach((line, i) => {
-          const found = predicate(line);
-          if (found) hits.push({ at: `${nodePath.relative(ROOT, abs)}:${i + 1}`, found, line });
-        });
-      }
-    }
-    return hits;
-  };
-  const valueSites = scanTierRoots((line) => (line.includes(CONTRACT_REVIEW_TIER) ? CONTRACT_REVIEW_TIER : null));
-  t(`the tier's VALUE is spelled in exactly ONE place under ${TIER_VALUE_ROOTS.join(' and ')} (found: ${valueSites.map((h) => h.at).join(', ') || 'none'})`, valueSites.length === 1);
-  t('…and that one place is the `export const` DECLARATION, not a comment or a rule that quotes the id', valueSites.length === 1 && valueSites[0].line.startsWith('export const CONTRACT_REVIEW_TIER = ') && valueSites[0].at.startsWith('scripts/pm/dispatch-gates.mjs:'));
-  const skillIdSpellings = scanTierRoots((line) => {
-    const m = /\bclaude-[a-z]+-\d[\w.-]*/.exec(line);
-    return m === null ? null : m[0];
-  }).filter((h) => h.at.startsWith('.claude/skills/pm-dispatch/'));
-  t(`the pm-dispatch skill tree spells NO model id at all — it names the CONSTANT, which is why a retirement never edits it (found: ${skillIdSpellings.map((h) => h.at).join(', ') || 'none'})`, skillIdSpellings.length === 0);
+  const SKILL_RULEBOOK_ROOT = '.claude/skills/pm-dispatch';
+  const skillRulebookFiles = walkFilesUnder(nodePath.join(ROOT, SKILL_RULEBOOK_ROOT));
+  const skillIdSpellings = [];
+  for (const abs of skillRulebookFiles) {
+    readFileSync(abs, 'utf8').split('\n').forEach((line, i) => {
+      if (/\bclaude-[a-z]+-\d[\w.-]*/.test(line)) skillIdSpellings.push(`${nodePath.relative(ROOT, abs)}:${i + 1}`);
+    });
+  }
+  t(`${SKILL_RULEBOOK_ROOT} spells NO model id at all — ${skillRulebookFiles.length} file(s) read, and a RETIRED id left there is caught HERE, where a current-value pin cannot see it (found: ${skillIdSpellings.join(', ') || 'none'})`, skillRulebookFiles.length > 0 && skillIdSpellings.length === 0);
   // The rulebook half of the same coupling: the skill names the constant, and
   // its downgrade fuse carries the case the quota exemption never had.
   const fuseRules = readFileSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/contract-review.md'), 'utf8');
