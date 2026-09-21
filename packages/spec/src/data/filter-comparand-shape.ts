@@ -132,6 +132,40 @@
  *   gate does not descend into one: a comparand is data, and a stricter reading
  *   here would invent a contract no backend agrees with.
  *
+ * ## Refused BY RULING, 2026-09-20: a BLANK `$between` ENDPOINT (#19071)
+ *
+ * The runtime twin of the schema door's 2026-09-17 rule (#18012). That ruling
+ * wrote "BOTH are required NON-BLANK: an empty string, null and undefined are
+ * refused, and the refusal names the blank side" into the PUBLISHED endpoint
+ * contract (`RANGE_ENDPOINT_DESCRIPTION`, `./filter.zod.ts`) and enforced it at
+ * the schema door alone. This door went on lowering `{ $between: ['', ''] }`
+ * unchanged, so one published sentence had two truth values depending on which
+ * door a caller came through — and the door that passed it is the one an
+ * embedder reaches by handing a lowered filter straight to a driver, where the
+ * range stops bounding on the blank side while still reading as a complete
+ * range. Ruled 2026-09-20 (#19071, option A): the implementation follows the
+ * declaration.
+ *
+ * The scope is the SCHEMA door's notion of blank, ⛔ not a second one invented
+ * here — two doors disagreeing IS the defect:
+ *
+ * - **`''` and `undefined`** are refused, naming the blank side (MIN / MAX and
+ *   the index) and carrying the schema door's own prescription.
+ * - **`null`** keeps {@link nullRangeBoundError}, which prescribes the null
+ *   PREDICATE: an author who wrote `null` was reaching for absence, an author
+ *   who left a bound empty was reaching for a bound. Two blank spellings, two
+ *   intents, two remedies; ⛔ do not unify them. It is checked FIRST, so a pair
+ *   that is `null` on one side and blank on the other keeps the 2026-08-31
+ *   message it has always had.
+ * - **A whitespace-only endpoint is NOT judged**, because the schema door does
+ *   not judge one: `RangeOperatorSchema.safeParse({ $between: [' ', 'M'] })`
+ *   answers `success: true`, pinned deliberately in `filter.test.ts`. ⛔ A trim
+ *   here would re-open the very split this ruling closes, in the opposite
+ *   direction, and narrow a published face further than any ruling has.
+ * - **Falsiness is untouched**: `[0, 0]` and `['0', '9']` are ranges, and a
+ *   falsy `$in` / `$nin` MEMBER stays a value — #13357's rows stand, because
+ *   this ruling is about range ENDPOINTS and those are about VALUES.
+ *
  * ## Refusal envelope
  *
  * Every refusal carries `code: 'INVALID_FILTER'` and `status: 400` (ADR-0112
@@ -372,6 +406,45 @@ function nullRangeBoundError(
 }
 
 /**
+ * A `$between` bound that is BLANK — the empty string or `undefined`, at
+ * either end. Refused BY RULING, 2026-09-20 (#19071); see the module note's
+ * third "Refused BY RULING" section.
+ *
+ * Its own message rather than an arm of {@link nullRangeBoundError}: that one
+ * prescribes the null PREDICATE, which is the wrong remedy for a bound the
+ * author simply did not type. This one is the schema door's
+ * `blankRangeBoundMessage` (`./filter.zod.ts`) carrying the same two
+ * prescriptions — write the bound you meant, or, if only one side was ever
+ * bounded, drop `$between` for the scalar comparison that says so — in this
+ * door's own #5346/#5348 wording contract: operator, field, position, the
+ * named side, authoring spellings, front-loaded and inside the 500-char client
+ * bound. Reconciled by pin, as the null pair is.
+ *
+ * The received value is described in WORDS rather than previewed: `undefined`
+ * inside an array renders as `null` through `JSON.stringify`, which would show
+ * an author the one spelling this message is not about.
+ */
+function blankRangeBoundError(
+  context: string | undefined,
+  field: string,
+  bound: unknown,
+  index: number,
+  path: string,
+): Error {
+  const spellings = LIST_COMPARAND_OPERATORS.get('$between') ?? [];
+  return invalidFilterComparandError(
+    context,
+    `Operator "$between" on field "${field}" requires two non-blank bounds. Received ` +
+    `${bound === undefined ? 'undefined' : 'an empty string'} at ${path}[${index}] ` +
+    `(the ${index === 0 ? 'MIN' : 'MAX'} bound). A blank endpoint is compared as a value, so ` +
+    `the range stops bounding on that side. Write the bound you meant; for a genuinely ` +
+    `one-sided range use {"$gte": min} / {"$lte": max}. Authoring spellings: ` +
+    `${spellings.join(', ')}. The filter was NOT applied, and an unapplied filter would have ` +
+    `returned the UNFILTERED result set.`,
+  );
+}
+
+/**
  * A `null` comparand of `$gt` / `$gte` / `$lt` / `$lte` — refused BY RULING,
  * 2026-09-01 (#14080); see the module note's second "Refused BY RULING"
  * section.
@@ -493,6 +566,18 @@ function assertFieldListComparands(
       const nullBound = comparand.indexOf(null);
       if (nullBound !== -1) {
         throw nullRangeBoundError(context, field, comparand, nullBound, `${path}.${op}`);
+      }
+      // Then the BLANK carve-out (2026-09-20 ruling, #19071) — exactly the two
+      // spellings the schema door refuses as blank, so the two doors answer one
+      // question the same way. Strict equality against `''` and `undefined`:
+      // ⛔ no trim, because a whitespace-only endpoint PASSES the schema door
+      // and narrowing further here would re-open the split in the other
+      // direction; and `0` / `'0'` / `false` are endpoints, not blanks.
+      const blankBound = comparand.findIndex((bound) => bound === '' || bound === undefined);
+      if (blankBound !== -1) {
+        throw blankRangeBoundError(
+          context, field, comparand[blankBound], blankBound, `${path}.${op}`,
+        );
       }
       continue;
     }
