@@ -56,7 +56,11 @@
 import type { FilterCondition } from '../data/filter.zod.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { ExplainDecision, ExplainOperation } from '../security/explain.zod.js';
-import type { ObjectAccessScope, PermissionSet } from '../security/permission.zod.js';
+import type {
+  EffectiveObjectPermission,
+  ObjectAccessScope,
+  PermissionSet,
+} from '../security/permission.zod.js';
 
 /**
  * The context shape these methods accept.
@@ -362,7 +366,9 @@ export interface ISecurityService {
    * are the primitive for an audience check ("does this caller hold
    * `sales_manager`?"); the sets are the primitive for a MERGE. A consumer that
    * must fold the caller's grants into one answer — the object/field access map
-   * `/auth/me/permissions` serves, the capability + tab surface `/me/apps`
+   * `/auth/me/permissions` serves (whose `objects` half
+   * {@link resolveEffectiveObjectPermissions} now answers directly), the
+   * capability + tab surface `/me/apps`
    * filters its app list with — cannot do it from names, so it re-implements
    * set resolution locally instead. That local copy is the drift this method
    * exists to end: the same rule has now diverged from the enforcement path
@@ -383,6 +389,36 @@ export interface ISecurityService {
    * the same sets, and folding a merge in here would make this method the
    * fourth copy of a rule instead of the one source of its input.
    *
+   * ⚠️ **One of those four axes has since left that arrangement: `objects`.**
+   * Where {@link resolveEffectiveObjectPermissions} is available, take the
+   * `objects` axis from it rather than folding these sets — and not merely to
+   * avoid a second copy of the rule. A caller-side fold cannot reach the same
+   * answer even done correctly, because the server's derivation reads object
+   * SCHEMAS that a holder of these sets does not have: `enable` (API exposure)
+   * for the restricted-object seed, `managedBy` / `userActions` for the
+   * managed-write clamp. It also parts company with
+   * `PermissionEvaluator.checkObjectPermission` on the wildcard — a
+   * most-permissive fold treats `'*'` and named objects as independent keys,
+   * so a super-user grant is never propagated into a named entry at all,
+   * whatever any set says about that object (ADR-0124 D4). ⛔ Read that as
+   * non-propagation, not as "deny wins": most-permissive has no deny.
+   *
+   * ⚠️ **When that method is ABSENT the fallback is scoped by CONSUMER CLASS,
+   * and the two arms are ⛔ not interchangeable.**
+   *  - A consumer that SERVES a projection of its own — the
+   *    `/auth/me/permissions` and `/me/apps` handlers — keeps the caller-side
+   *    fold described above. It is the behaviour they already ship, and they
+   *    own the place where the residual corrections are applied.
+   *  - A consumer whose only job is to POPULATE a permission map for something
+   *    else to answer from — the engine filling `EvalContext.permissions` —
+   *    ⛔ builds no fold. There a map that is merely close is
+   *    indistinguishable from a correct one at the point of use, so the
+   *    fallback is to pass nothing;
+   *    {@link resolveEffectiveObjectPermissions} states that arm for its own
+   *    consumers.
+   *
+   * The other three axes are unaffected and stay exactly as stated above.
+   *
    * **Throws** on resolution failure, exactly as {@link resolvePermissionSetNames}
    * does; callers must fail CLOSED on a throw rather than reading it as "no sets".
    *
@@ -396,6 +432,105 @@ export interface ISecurityService {
    * accident.
    */
   resolvePermissionSetsForContext?(context?: SecurityContext): Promise<PermissionSet[]>;
+
+  /**
+   * [#19354 / #18783] The effective OBJECT PERMISSIONS for `context` — object
+   * name → the server-resolved entry for that object, merged across the
+   * caller's sets exactly as the enforcement path merges them.
+   *
+   * It is the `objects` map of `GetEffectivePermissionsResponse` — the same
+   * bytes `/auth/me/permissions` serves — and the type says so rather than
+   * restating the shape, so the two ends cannot drift apart key by key. Its
+   * first consumer is the ObjectQL engine, which must hand a predicate's
+   * `current_user.can(object, verb)` an answer sheet: `EvalContext.permissions`
+   * in `@objectstack/formula` is this exact type, and a value returned here is
+   * assignable to it with NO shaping step in between — deliberately, because a
+   * shaping step is where a permission map acquires a wrong `false`.
+   *
+   * ⚠️ **Assignable is not the same as unchecked, and it does not retire the
+   * door.** `@objectstack/formula`'s `toEvalPermissions` calls itself the ONE
+   * door permission data comes through, and it is not a no-op: it parses every
+   * entry with the published schema, strips retired-default residue and
+   * freezes. The division is what the caller is holding. An in-process caller
+   * holding THIS method's typed return — the engine, resolving the service
+   * from the same kernel — may assign it straight onto the context. A caller
+   * that has put the same map on a wire and read it back is holding `unknown`
+   * again, whatever its declaration file says, and goes through the door.
+   *
+   * **Why the whole map, when every other reader here takes an `object`.** The
+   * object name is chosen by the AUTHORED PREDICATE at evaluation time, not by
+   * the caller: a per-object reader would force the engine to guess which
+   * objects a predicate is going to name, and a guess that comes up short does
+   * not fault — an absent entry reads as "no grant" (`objectPermissionGrants`),
+   * so the missing object answers `false` and a correct predicate silently
+   * hides an option from someone entitled to it. The one shape that cannot fail
+   * that way is the whole effective set, which is also what
+   * `EvalPermissions` documents ("pass the whole effective set the endpoint
+   * returned, never a hand-picked subset").
+   *
+   * **Why not a caller-side fold of {@link resolvePermissionSetsForContext}.**
+   * That method hands over its INPUT — the sets, unmerged, in resolution order
+   * — because two consumers legitimately project different subsets of them. The
+   * merge onto one entry per object is not one of those projections: it is a
+   * single rule with a measured history of being re-implemented and drifting
+   * (#7608 / #7555 / #6334), and ADR-0124 D4 puts it on the server. This method
+   * is that merged answer, so a consumer needing it asks instead of folding.
+   * And it is not a fold anyone could write from those sets in any case: the
+   * derivation reads object schemas the set holder does not have (`enable` for
+   * the restricted-object seed, `managedBy` / `userActions` for the
+   * managed-write clamp), which is stated with the rest of the comparison in
+   * that sibling's own paragraph on merge semantics. That paragraph also
+   * carries the arm of the ABSENT case that does NOT apply here: a consumer
+   * that SERVES a projection of its own keeps its fold of those sets. The arm
+   * that applies to THIS method's consumers is under OPTIONAL below.
+   *
+   * **Entries, not verdicts.** Each value is the effective `allow*` +
+   * super-user entry, NOT a per-verb boolean: the fold from entry to verdict
+   * (`viewAllRecords`/`modifyAllRecords` bypasses, `allowExport` as
+   * `grant ∧ read`, `allowCreate` with no bypass) is `objectPermissionGrants`
+   * in `@objectstack/spec/security`, stated once so every reader of one of
+   * these maps returns the verdict the server's 403 would. An implementation
+   * that pre-folds hands its callers a fourth copy of that rule.
+   *
+   * **The wildcard is CARRIED, and absence still means "no grant".** A `'*'`
+   * super-user grant appears under its own key, and the named entries carry it
+   * folded in, mirroring what the endpoint serves. What neither this method nor
+   * the endpoint does is materialise an entry for every object in the
+   * deployment — so for an object no permission set mentions, the map is silent
+   * and every reader of it (this contract's included) answers "no grant". A
+   * consumer that must give a super-user the enforcement path's answer for such
+   * an object reads the `'*'` entry itself; it may not read the silence as one.
+   *
+   * **Throws** on resolution failure, exactly as {@link resolvePermissionSetNames}
+   * and {@link resolvePermissionSetsForContext} do. ⛔ It never degrades to an
+   * empty or partial map, because an EMPTY map is a real answer — "this subject
+   * holds nothing" — and a failure returned in that costume is a silent denial
+   * of everything. Callers must fail CLOSED on a throw.
+   *
+   * **Request-scoped.** The map is one principal's answer sheet pinned at one
+   * moment; a consumer calls it per request and ⛔ never memoises it across
+   * principals or across a grant change.
+   *
+   * **OPTIONAL, and absence is a defined state — not a bug.** A security
+   * service that predates this method omits it, and consumers feature-detect
+   * (`typeof svc.resolveEffectiveObjectPermissions === 'function'`). ⛔ For
+   * THIS method's consumer class — a caller that POPULATES a permission map
+   * for something else to answer from — the fallback is neither an empty map
+   * nor a locally merged one: it passes NOTHING, so the surface downstream
+   * refuses loudly rather than denying quietly — which is what `can()` already
+   * does when `EvalContext.permissions` is absent, and the reason it does it.
+   * ⚠️ A consumer that SERVES a projection of its own is in the OTHER class
+   * and keeps its existing fold of {@link resolvePermissionSetsForContext},
+   * where that arm is stated; the two arms are ⛔ not interchangeable, and a
+   * consumer picks by what it does with the map rather than by which paragraph
+   * it read first. Declaring the method optional is what makes that
+   * degradation a property of the type rather than a promise in prose: the
+   * unguarded call does not compile, so a consumer cannot skip the fallback by
+   * accident.
+   */
+  resolveEffectiveObjectPermissions?(
+    context?: SecurityContext,
+  ): Promise<Readonly<Record<string, EffectiveObjectPermission>>>;
 
   /**
    * [#3544] Whether `context` may EXPORT `object` — the user-level export axis
