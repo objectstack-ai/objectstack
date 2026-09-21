@@ -1356,17 +1356,54 @@
  *     `CONTAINER_ISSUE_CODES` (`shared/union-branch-policy.ts`) and
  *     `VIEW_WRITE_PATH_IDENTITY_KEYS` (`ui/view.zod.ts`).
  *
+ * ⚠️ AND ONE SHAPE THE SITE LIST ABOVE CANNOT REACH — RESTORED, because the
+ * round-3 head named it and this reading dropped the sentence while the shape
+ * stayed dark. A `new Set([` literal spelled INSIDE one of the four
+ * constructors puts the member's innermost `[` on the SET, so the head this
+ * reader asks answers `Set` and the member is `refused`: `z.enum([...new Set([`,
+ * `z.enum(Array.from(new Set([`, `z.enum([...KNOWN, ...new Set([` and
+ * `z.union([...new Set([` all go fully dark, with no opener row to compensate
+ * because the opener test reads the LINE and that line's own constructor is
+ * `new Set(`. Measured on the shape a real PR carries, base instrument → this
+ * reading: a member added under each of the four spellings 1 row → 0, and
+ * through the CLI `--declaration no --diff` the first is base exit 4 / here
+ * exit 0. ⭐ ZERO tree sites (`packages/spec/src`, non-test, at `57ceb9d6d2`)
+ * and ZERO landed rows carry it, so it costs nothing today and neither census
+ * below can contain it — which is exactly why it is DISCLOSED here rather than
+ * counted there. ⛔ A residual that claims to be named COMPLETELY owes the
+ * shapes with no population as well as the sites with one; completeness is the
+ * claim under test, and this shape is pinned in `--self-test` beside leg A.
+ *
  * ⛔ Which of them the silence actually costs, measured by reading the
  * consumers rather than the names: `VALUE_DOMAIN_FIELD_TYPES` refuses an
  * authored `valueDomain` at parse time and again at write time, and
  * `PUBLIC_FORM_SERVER_MANAGED_FIELDS` decides what an anonymous visitor may
- * send — those two are accept sets in the doctrine's sense, and so is
- * `VALID_AST_OPERATORS` (`data/filter.zod.ts`), which `isFilterAST` and three
- * `packages/lint` walks read to judge a filter. ⚠️ And one correction to the
- * record this round was dispatched against: `TEXT_OPERATOR_DOOR_PASSING_TYPES`
+ * send — those TWO are accept sets in the doctrine's sense, and they are the
+ * whole of what this silence costs on this tree.
+ *
+ * ⚠️ Two corrections to the record this round was dispatched against, both
+ * re-measured rather than recalled. FIRST: `TEXT_OPERATOR_DOOR_PASSING_TYPES`
  * has NO non-test consumer — `textOperatorDoorVerdict` reads the REFUSED set,
  * not this one — so it is a published derived constant whose own parity test
- * reds on a change, not a second live accept set.
+ * reds on a change, not a live accept set. SECOND, and it is the one every
+ * earlier record got wrong in the same direction: `VALID_AST_OPERATORS` is NOT
+ * A SITE OF THIS SILENCE AT ALL. On this tree it is
+ * `export const VALID_AST_OPERATORS = new Set(Object.keys(AST_OPERATOR_MAP));`
+ * (`data/filter.zod.ts:2139`) — one line, DERIVED, with no member line under
+ * it, so this reader never classifies anything for it and the site list above
+ * rightly omits it. It IS an accept set (`isFilterAST` reads it to judge a
+ * filter) and it IS dark, but not to this decline: a widening of it today is a
+ * new key on the `AST_OPERATOR_MAP` object literal it derives from
+ * (`data/filter.zod.ts:2036`), and measured on the shape a real PR carries
+ * that diff raises 0 rows on the base instrument, on the failed head and HERE
+ * alike, against `VALUE_DOMAIN_FIELD_TYPES`'s real member line as the firing
+ * control (base 1 row / here 0). ⇒ a PRE-EXISTING BLIND SPOT in the T2 member
+ * reading — a `{` frame, which this file leaves loud and unclassified — and
+ * ranging it under this silence charges this round for a hole it neither
+ * opened nor widened while hiding the hole that is really there. Its one
+ * landed `new Set([` row is `ee6d064db9` (2026-02-24), the day the binding was
+ * last spelled with members, and the census below counts that row and no
+ * other.
  *   `.default([`: `allowedLicenses` and `prohibitedLicenses`
  *     (`kernel/plugin-security.zod.ts`) and `redact` (`system/logging.zod.ts`)
  *     — a default VALUE list, which is the one member of this vocabulary whose
@@ -1379,13 +1416,35 @@
  * once the head is the same (`ReadonlySet<string> = new Set([` carries both an
  * accept set and #19314's private walk vocabulary), so what separates them is
  * CONSUMPTION — a FILE-level fact this hunk-shaped reader cannot reach and must
- * not pretend to. It is a different reading's card; this file states the
- * silence, names every site it covers, and pins both directions.
+ * not pretend to.
+ *
+ * ⛔ AND THE SILENCE IS PERMANENT, not pending a successor — a ruling, not a
+ * shrug. Ruling #202 B (charter #19457, stock cleanup #19458) makes the dev
+ * queue product-only: a tooling card closes at FIRST grading, and reopening one
+ * needs a named product PR it blocks or a customer-visible contract it
+ * protects. A file-scoped consumption reading is a tooling card by that text,
+ * so ⛔ no card is owed for it and ⛔ none may be promised here. A sentence
+ * that defers to a successor nobody will open is the same false disclosure as a
+ * census quoted from a different reader — it reads as "not yet" where the
+ * truth is "not ever, on present policy". ⇒ THE DISPOSITION: this file STATES
+ * the silence, names every site it covers and every shape it hides, and pins
+ * both directions, and that is the whole of it. The day a real PR is held by
+ * one of these declines, that PR is the reopen reading the ruling names, and
+ * the card is filed then — by the author it holds, against evidence, never in
+ * advance.
  *
  * ⛔ What is NOT in that list any more, because the vocabulary is read by NAME:
- * the receiver and the type arguments. `z.enum(`, `zod.enum(`, a chain-wrapped
- * `  .enum(` and `z.enum<Mode>(` are one form spelled four ways, and the
- * formatter decides which one tomorrow's file carries.
+ * the receiver, and ONE NON-NESTED type-argument group. `z.enum(`, `zod.enum(`,
+ * a chain-wrapped `  .enum(` and `z.enum<Mode>(` are one form spelled four
+ * ways, and the formatter decides which one tomorrow's file carries. ⛔ A
+ * NESTED type argument is deliberately NOT read and the sentence says so:
+ * `z.enum<Array<Mode>>([`, `new Set<Map<string, number>>([` and
+ * `Object.freeze<Array<string>>([` all answer `unread` and KEEP their row,
+ * because both heads spell the group as one pair of angle brackets with no
+ * angle bracket inside and a regex does not balance them. That is the loud
+ * direction, so the bound is STATED rather than widened; widening it means a
+ * balanced-bracket reader, which is a different instrument and not a
+ * docblock's promise.
  *
  * ## The shape this gate keeps firing on, and what to do about it — ruling D′
  *
@@ -1709,7 +1768,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
   '#19099 — the enclosing-delimiter walk says when it STOPPED READING and started guessing': 15,
-  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 66,
+  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 75,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2382,7 +2441,10 @@ const SCHEMA_PROPERTY = new RegExp(
  * keeps the `z.` receiver that has always bounded it. {@link closedSetMembership}
  * tests a bracket HEAD the delimiter walk reached AS CODE — strings and
  * comments skipped by construction — so it asks for the name alone and admits
- * ANY receiver and any type argument.
+ * ANY receiver and ONE NON-NESTED type-argument group. ⛔ Not "any type
+ * argument": the group is one pair of angle brackets with no angle bracket
+ * inside, so `z.enum<Array<Mode>>(` is not matched and its member keeps its row
+ * — loud, bounded and pinned, never widened by a sentence.
  *
  * ⭐ That asymmetry is the repair. Requiring the receiver on the HEAD side is
  * what made Prettier's chain wrap — `z` on one line, `  .enum([` on the next —
@@ -2865,8 +2927,14 @@ export function inParameterList(side, index) {
  *     discarded. ⭐ `z.enum(`, `zod.enum(`, a chain-wrapped bare `  .enum(` and
  *     `z.enum<Mode>(` are ONE form spelled four ways; the formatter decides
  *     which one tomorrow's file carries, so the reading may not depend on it.
- *   `(?:<[^<>]*>)?` — explicit type arguments, which a call may carry and which
- *     say nothing about which construct it is.
+ *   `(?:<[^<>]*>)?` — ONE explicit type-argument group, which a call may carry
+ *     and which says nothing about which construct it is. ⛔ Its own bound is
+ *     in its bytes: no angle bracket inside, so a NESTED group
+ *     (`z.enum<Array<Mode>>(`) does not match and the member falls to `unread`
+ *     and keeps its row. That is the loud direction, and it is the SAME bound
+ *     the refusal head carries in {@link CALL_HEAD_CALLEE} — two copies of one
+ *     group, each pinned by its own case, because deleting either one moves
+ *     rows in opposite directions.
  *   `[^()[\]{}]*$` — what makes it the delimiter's OWN call and not one
  *     anywhere to its left. `z.discriminatedUnion('type', [` leaves only
  *     `'type', ` between the two and matches; `z.enum(['a']).or(fn([` leaves a
@@ -2896,6 +2964,17 @@ const CLOSED_SET_ARGUMENT_HEAD = constructorArgumentHead(CLOSED_SET_CONSTRUCTOR_
  * the tell FIRING. That is the loud direction, and two of those three are where
  * the fourth closed-set form lives, one of them wrapped in a paren that reads
  * as a call to anything cruder than this.
+ *
+ * ⭐ `(?:<[^<>]*>)?` is the SECOND copy of the type-argument group
+ * {@link constructorArgumentHead} carries, and it is load-bearing in the
+ * OPPOSITE direction: on the declared head a missing group loses a `declared`
+ * (loud), here it loses a `refused` (also loud, and a genuine `new Set<string>([`
+ * silence returns). ⛔ Both copies are pinned by their own cases — the group
+ * stood here unpinned until the round that added them, and a piece whose
+ * deletion moves no case is a piece no case is pinning. Its bound is the same
+ * and is stated rather than widened: no angle bracket inside, so a NESTED group
+ * (`new Set<Map<string, number>>(`, `Object.freeze<Array<string>>(`) answers
+ * `null` and the member keeps its row.
  */
 const CALL_HEAD_CALLEE = /(?:\bnew[ \t]+)?(?:[A-Za-z_$][\w$]*[ \t]*\.[ \t]*)*([A-Za-z_$][\w$]*)[ \t]*(?:<[^<>]*>)?[ \t]*\($/;
 
@@ -2997,9 +3076,12 @@ const NON_SET_CALLEE_NAMES = Object.freeze(['Set', 'default']);
  *   `'declared'` — the hunk shows the innermost open delimiter where the
  *     element sits, and the CALLEE NAME its head ends in is one of the four
  *     ({@link CLOSED_SET_CONSTRUCTOR_NAMES}). The doctrine's row is then true
- *     as written. ⭐ Any receiver and any type argument: `z.enum(`, `zod.enum(`,
- *     a chain-wrapped `  .enum(` and `z.enum<Mode>(` are one form spelled four
- *     ways, and the formatter picks which one tomorrow's file carries.
+ *     as written. ⭐ Any receiver, and ONE NON-NESTED type-argument group:
+ *     `z.enum(`, `zod.enum(`, a chain-wrapped `  .enum(` and `z.enum<Mode>(`
+ *     are one form spelled four ways, and the formatter picks which one
+ *     tomorrow's file carries. ⛔ A NESTED type argument is not read and the
+ *     claim is bounded to say so: `z.enum<Array<Mode>>([` answers `'unread'`
+ *     and keeps its row — the loud direction, pinned by its own case.
  *   `'refused'` — the hunk shows that delimiter and the callee name its head
  *     ends in is one of a CLOSED vocabulary of names positively known to close
  *     no set and derive none ({@link NON_SET_CALLEE_NAMES}). ⛔ Never "any name
@@ -3012,22 +3094,36 @@ const NON_SET_CALLEE_NAMES = Object.freeze(['Set', 'default']);
  *     seven false positives — and this tree spells two real ACCEPT sets exactly
  *     the same way: `VALUE_DOMAIN_FIELD_TYPES` in `data/field.zod.ts`, whose
  *     `.has(field.type)` inside a `superRefine` REFUSES what an author wrote
- *     (its own docblock calls a member addition "a widening of this set"),
+ *     (its own docblock calls a member addition "a widening of this set"), and
  *     `PUBLIC_FORM_SERVER_MANAGED_FIELDS` in `security/public-form.ts`, which
- *     four seams of `rest-server.ts` read to refuse a visitor's value, and
- *     `VALID_AST_OPERATORS` in `data/filter.zod.ts`, which `isFilterAST` reads
- *     to judge a filter. Measured on the shape a real PR carries: adding
- *     `'email',` to the first is base exit 4 / this reading exit 0, and the
- *     header's census names every landed row the silence covers. ⛔ The rationale
+ *     four seams of `rest-server.ts` read to refuse a visitor's value. TWO, and
+ *     the header lists every site the decline reaches. Measured on the shape a
+ *     real PR carries: adding `'email',` to the first is base exit 4 / this
+ *     reading exit 0. ⛔ `VALID_AST_OPERATORS` is NOT a third — it is
+ *     `new Set(Object.keys(AST_OPERATOR_MAP))` on one line
+ *     (`data/filter.zod.ts:2139`) with no member line under it, so nothing here
+ *     ever classifies it; it is an accept set and it IS dark, to a `{` frame
+ *     this file leaves loud and unclassified, on the base instrument exactly as
+ *     here. The header says which hole that is and measures it.
+ *
+ *     ⚠️ AND THE OTHER HALF OF THE SAME RESIDUAL, which no site list can
+ *     reach: a `new Set([` literal spelled INSIDE one of the four
+ *     constructors — `z.enum([...new Set([`, `z.enum(Array.from(new Set([`,
+ *     `z.union([...new Set([` — puts the member's innermost `[` on the SET, so
+ *     the head answers `Set` and a GENUINE four-form set goes fully dark, with
+ *     no opener row to compensate. Zero tree sites and zero landed rows carry
+ *     it, so only a case can hold it and one does. ⛔ The rationale
  *     this bullet used to carry — "a set of internal discriminants is not an
  *     accept set, no author's document is ever parsed against it" — is FALSE of
  *     both. The two constructs are byte-indistinguishable INSIDE A HUNK: same
  *     `ReadonlySet<string> = new Set([` head, same element shape, same tail.
  *     What separates them is CONSUMPTION — one is read by a `superRefine`, the
  *     other by a wrapper-peeling walk — a FILE-level fact no hunk-shaped reader
- *     reaches, and a different reading's card. Both directions are pinned
- *     below, so this silence cannot move unnoticed and cannot spread: every
- *     other callee is loud.
+ *     reaches. ⛔ And the silence is PERMANENT rather than pending: ruling
+ *     #202 B (#19457) makes a tooling card close at first grading, so no
+ *     successor card is owed and none is promised here — the header states the
+ *     disposition in full. Both directions are pinned below, so this silence
+ *     cannot move unnoticed and cannot spread: every other callee is loud.
  *   `'unread'` — everything else, and it is the common answer: no delimiter
  *     shown where the line sits, a walk that stopped being a reading, or a
  *     delimiter this reader cannot classify — an array literal BOUND to a name,
@@ -3048,17 +3144,39 @@ const NON_SET_CALLEE_NAMES = Object.freeze(['Set', 'default']);
  * `'unread'` by a different route. ⇒ every `(` and `{` frame answers `'unread'`
  * and keeps its row.
  *
- * ⚠️ The population that leaves loud, measured over `packages/spec/src/**` at
- * `objectstack-ai/objectstack` `57ceb9d6d2` (= `origin/main`; this branch's diff
- * does not touch that tree, and the reading is byte-identical to the one taken
- * at the branch base `c27e16059d`) by feeding each bare-element line back
- * through this reader with its own 60 preceding lines: of 6,553 lines over
- * 1,014 files, 1,354 read
- * `declared`, 92 `refused` (`Object.freeze` 65, `new Set` 20, `.default` 7),
- * and of the 5,107 `unread` there are 442 inside a `(` — `.describe(` prose and
- * `retiredKey(` prescriptions, no closed-set member among the heads — and 1,791
- * inside a `{`. ⛔ Reaching them is a different reading's card, and this file
- * buys no silence it cannot pay for with evidence.
+ * ⚠️ The population that leaves loud, RE-MEASURED THROUGH THIS READER — the
+ * number below was quoted from an earlier one for two rounds, under a
+ * paragraph that says "this reader", which is the same class of false
+ * disclosure as a silence that is not named.
+ *
+ * The window, stated so the reading can be re-taken: repository
+ * `objectstack-ai/objectstack`, COMPLETE clone (no `.git/shallow`), subtree
+ * `packages/spec/src` at `57ceb9d6d2` (= `origin/main` at this branch's merge
+ * base; `git diff 57ceb9d6d2 HEAD -- packages/spec/src` is empty, so the
+ * reading is taken in the head worktree over those same bytes), 1,014 non-test
+ * files, every line `memberTellKind` calls T2 on the contract source surface
+ * fed back through `closedSetMembership` with its own 60 PRECEDING LINES as the
+ * hunk — 6,553 lines. THIS reader answers: 1,354 `declared`, 27 `refused`
+ * (`new Set(` 20, `.default(` 7, `Object.freeze(` ZERO) and 5,172 `unread`.
+ * Inside that `unread`: 1,791 in a `{`, 1,484 with no frame shown at all, 865
+ * where the walk reported it stopped reading, 590 in a `[` this reader cannot
+ * classify, and 442 in a `(` — `.describe(` prose and `retiredKey(`
+ * prescriptions, no closed-set member among the heads.
+ *
+ * ⭐ THE LIT CONTROL that makes it a reading and not a re-type: the round-3
+ * blob of this file, run over the SAME bytes with the SAME window, answers
+ * 1,354 / 92 / 5,107 with `Object.freeze` 65 — reproducing the quoted number
+ * exactly. So the 65 that moved are the freeze sites this round made
+ * TRANSPARENT, they moved `refused` → `unread` (the `[` bucket, 525 → 590) and
+ * nowhere else, and the shift is the reader's rather than the harness's. ⛔ The
+ * `(` and `{` counts did not move at all, which is the other half of the same
+ * evidence.
+ *
+ * ⛔ Reaching the `(` and `{` populations needs the callee NAME rather than the
+ * bracket — a different reading, and under ruling #202 B (#19457) not a card
+ * anybody opens in advance: it is filed on the day a real PR is held by one,
+ * which is that ruling's own reopen reading. This file buys no silence it
+ * cannot pay for with evidence.
  *
  * ⛔ AND THAT CENSUS CANNOT CONTAIN THE FAILURE THIS READER WAS REPAIRED FOR,
  * which is why it is quoted for what it bounds and never as a clearance. Every
@@ -4594,6 +4712,17 @@ export function tellsInFile(
     //     `z.enum([` whose opener sits above the hunk lands here, and so does a
     //     `CORE_PLUGIN_TYPES`-shaped `as const` array, whose `as const` is
     //     BELOW its members where no upward reader reaches it.
+    //
+    // ⛔ AND THIS READING SITS BELOW THE #16943 BUDGET DELIBERATELY — the
+    // ordering decides a row, so it is stated here and pinned by its own case.
+    // A refused element is still a T2-kind line, so it SPENDS the unit its
+    // block's removal earned, exactly as any other added member does. Hoist the
+    // refusal above the spend and that unit survives for the next added line,
+    // so a GENUINE member beside it goes silent — one report bought at the price
+    // of another, the same inversion #18629's spend note refuses on the other
+    // side of the question. Measured: a block whose removal buys one T2, whose
+    // first added member is refused and whose second is `declared`, reports 1
+    // row here and 0 with the refusal hoisted.
     if (onContractSource && kind === 'T2') {
       const membership = closedSetMembership(newFile, newAt.get(i));
       if (membership === 'refused') continue;
@@ -6124,6 +6253,85 @@ export function selfTest() {
   t('⚠️ THE RESIDUAL — `VALUE_DOMAIN_FIELD_TYPES` is a real ACCEPT set spelled `new Set([`, refused by a `superRefine` that reads it, and this reader silences it', closedSetMembership([CTX('export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set(['), CTX("  'text',")], 1) === 'refused');
   t('…so is `PUBLIC_FORM_SERVER_MANAGED_FIELDS`, which decides what an anonymous visitor may send — and PR #19314\'s internal discriminant set is BYTE-INDISTINGUISHABLE from both inside a hunk — same head, same element shape — which is why only CONSUMPTION separates them and no hunk-shaped reader can', closedSetMembership([CTX('export const PUBLIC_FORM_SERVER_MANAGED_FIELDS: ReadonlySet<string> = new Set(['), CTX("  'owner_id',")], 1) === 'refused' && closedSetMembership([CTX('const COLLECTION_WALK_WRAPPERS: ReadonlySet<string> = new Set(['), CTX("  'pipe',")], 1) === 'refused');
   // -- the readings the vocabulary is derived from, pinned as ONE ------------
+  // -- the OTHER half of the residual: a `new Set([` INSIDE a constructor ----
+  //
+  // ⚠️ RESTORED. The round-3 head named this shape in its header and the next
+  // head dropped the sentence while the shape stayed dark. It has ZERO tree
+  // sites and ZERO landed rows, so neither census can contain it and only a
+  // case can hold it — which is the whole reason a residual that claims to be
+  // named COMPLETELY owes the shapes with no population too.
+  const ENUM_OVER_SET = {
+    filename: 'packages/spec/src/a.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -3,3 +3,4 @@',
+      ' export const ModeSchema = z.enum([...new Set([',
+      "   'read',",
+      "+  'write',",
+      ' ])]);',
+    ].join('\n'),
+  };
+  const ENUM_OVER_SET_CONTROL = {
+    filename: 'packages/spec/src/a.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -3,3 +3,4 @@',
+      ' export const ModeSchema = z.enum([',
+      "   'read',",
+      "+  'write',",
+      ' ]);',
+    ].join('\n'),
+  };
+  t("⚠️ THE RESIDUAL'S OTHER HALF — a `new Set([` literal spelled INSIDE one of the four constructors puts the member's innermost `[` on the SET, so the head answers `Set` and a GENUINE four-form set is refused: the spread, the `Array.from` and the union spelling alike", closedSetMembership([CTX('export const M = z.enum([...new Set(['), CTX("  'read',")], 1) === 'refused' && closedSetMembership([CTX('export const M = z.enum(Array.from(new Set(['), CTX("  'read',")], 1) === 'refused' && closedSetMembership([CTX('export const A = z.union([...new Set(['), CTX('  ReadSchema,')], 1) === 'refused');
+  t('…and the ROW is gone with it — no member row and no opener row either, because the opener test reads the LINE and that line\'s own constructor is `new Set(`', tells(ENUM_OVER_SET).length === 0);
+  t('⛔ CONTROL — the identical member with the inner set spelled away FIRES and reads as measured, so the silence above is bought by the `new Set(` and never by the spread or by the fixture', tells(ENUM_OVER_SET_CONTROL).length === 1 && says(tells(ENUM_OVER_SET_CONTROL)[0]?.why, 'this hunk shows the element inside'));
+  // -- the type-argument group, pinned on the head that READS it -------------
+  //
+  // ⛔ Two heads carry the group and only the DECLARED one had a case: deleting
+  // it from `CALL_HEAD_CALLEE` left the whole suite green while
+  // `new Set<string>([` silently became `unread`. A piece whose deletion moves
+  // no case is a piece no case is pinning.
+  t('⭐ THE TYPE-ARGUMENT GROUP ON THE REFUSAL HEAD — `new Set<string>([` is the same call as `new Set([` and is refused, which pins the group in `CALL_HEAD_CALLEE` rather than only the copy in the declared head', closedSetMembership([CTX('const S: ReadonlySet<string> = new Set<string>(['), CTX("  'read',")], 1) === 'refused' && calleeOfFrameHead('const S: ReadonlySet<string> = new Set<string>(') === 'Set');
+  t('…and on a REFUSING METHOD head too, so the pin is not one callee\'s spelling', closedSetMembership([CTX('  kinds: z.array(z.string()).default<string[]>(['), CTX("    'read',")], 1) === 'refused');
+  t('⛔ THE BOUND, stated rather than widened — ONE non-nested group is read and a NESTED one is not, on BOTH heads at once: the declared head, the refusal head and the transparent wrapper all answer `unread` and KEEP their row', closedSetMembership([CTX('export const M = z.enum<Array<Mode>>(['), CTX("  'read',")], 1) === 'unread' && closedSetMembership([CTX('const S = new Set<Map<string, number>>(['), CTX("  'read',")], 1) === 'unread' && closedSetMembership([CTX('export const K = Object.freeze<Array<string>>(['), CTX("  'read',")], 1) === 'unread');
+  t('…and the ROW survives the nested case, so the docblock sentence is repaired in the direction that costs nothing', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+export const M = z.enum<Array<Mode>>([', "+  'read',") }).some((r) => r.line === 4 && r.tell === 'T2'));
+  // -- a REFUSED element still SPENDS, and the ordering is the case ----------
+  //
+  // ⛔ The new-side refusal is read AFTER the #16943 budget. Hoist it above the
+  // spend and a refused element stops consuming the block's unit, which then
+  // pays for the GENUINE member beside it — quieter than here, and unpinned
+  // until this case. The removal earns one T2, the refused `...new Set([`
+  // member consumes it, and the real member has nothing left to pay with.
+  const REFUSED_SPENDS = {
+    filename: 'packages/spec/src/a.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -10,4 +10,7 @@',
+      ' export const M = z.enum([',
+      "   'read',",
+      "-  'legacy',",
+      '+  ...new Set([',
+      "+    'x',",
+      '+  ]),',
+      "+  'write',",
+      ' ]);',
+    ].join('\n'),
+  };
+  const REFUSED_SPENDS_CONTROL = {
+    filename: 'packages/spec/src/a.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -10,4 +10,4 @@',
+      ' export const M = z.enum([',
+      "   'read',",
+      "-  'legacy',",
+      "+  'write',",
+      ' ]);',
+    ].join('\n'),
+  };
+  t("⭐ A REFUSED ELEMENT STILL SPENDS THE BLOCK'S UNIT — the removal buys one T2, the refused member inside the nested `new Set([` consumes it, and the genuine member beside it has nothing left to pay with and FIRES", tells(REFUSED_SPENDS).length === 1 && tells(REFUSED_SPENDS)[0]?.line === 15 && says(tells(REFUSED_SPENDS)[0]?.why, 'this hunk shows the element inside'));
+  t('⛔ CONTROL — the identical block WITHOUT the refused element spends that same unit on the genuine member and goes silent, so the case above measures the ORDERING and not the fixture', tells(REFUSED_SPENDS_CONTROL).length === 0);
+  // -- the readings the vocabulary is derived from, pinned as ONE ------------
   t('⭐ the `new` prefix is LOAD-BEARING on `before` and nowhere else — the NAME is found either way because the pattern is unanchored at its start, but the slice must begin AT `new` or a transparent strip leaves one behind', callHeadOfFrame('const S = new Set(')?.before === 'const S = ' && callHeadOfFrame('const S = new Set(')?.callee === 'Set');
   t('…and `before` is the text left of the WHOLE call, its receiver chain included', callHeadOfFrame('export const X = Object.freeze(')?.before === 'export const X = ' && callHeadOfFrame('export const X = Object.freeze(')?.callee === 'freeze');
   t('⭐ the four names are spelled ONCE in this file — ⛔ no reading hand-copies the alternation, which is the drift one vocabulary exists to prevent (two copies stood until this round: the opener-binding head and the opener head)', !readFileSync(fileURLToPath(import.meta.url), 'utf8').includes(CLOSED_SET_CONSTRUCTOR_NAMES.join('|')));
@@ -7020,7 +7228,9 @@ export function selfTest() {
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
       "#19099's walk saying when it STOPPED READING — the whole shown stack beside a flag raised on a possible regex literal, a type-blind pop and an unterminated string, with a lone slash read as the division it is, a hunk that BEGINS inside a JSDoc read rather than guessed at, each of the reset's three guards pinned against the frames it protects, the apostrophe residual pinned in the direction it fails, and the reset reaching `inParameterList` so an `@example` arrow cannot swallow the key line behind it, " +
-      "#19384's bare element that is not a member until the hunk shows one of the four forms above it — the card's three legs, where A and B now agree because the verdict is no longer keyed on line layout and C still fires, PR #19314's own seven discriminants silent beside the control that is the finding, and the loud direction pinned: an opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array, a property-valued array, a guessed stack, and the removed element that buys no budget with its removal and its addition in ONE change block beside the control that DOES pay — the four spellings of one form (chain-wrapped, generic, aliased, plain) each reading as measured under any receiver with `parseenum(` as the whole-token control, a sub-enum builder firing rather than declining while a sibling method is still refused, the `[`-only guard pinned on the `{` a call opened where alone it can be swallowed, the grouping paren that is not a call, the constructor that must be the delimiter's OWN, the NOT-MEASURED sentence claiming only what was not measured, `Object.freeze([` read THROUGH to the head left of it so the fourth form wrapped keeps its row while `z.enum(Object.freeze([` reads as measured, the refusal closed to a NAMED vocabulary so an unknown helper is loud, and `new Set([` pinned as the residual silence with the accept sets it covers named, " +
+      "#19384's bare element that is not a member until the hunk shows one of the four forms above it — the card's three legs, where A and B now agree because the verdict is no longer keyed on line layout and C still fires, PR #19314's own seven discriminants silent beside the control that is the finding, and the loud direction pinned: an opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array, a property-valued array, a guessed stack, and the removed element that buys no budget with its removal and its addition in ONE change block beside the control that DOES pay — the four spellings of one form (chain-wrapped, generic, aliased, plain) each reading as measured under any receiver with `parseenum(` as the whole-token control, a sub-enum builder firing rather than declining while a sibling method is still refused, the `[`-only guard pinned on the `{` a call opened where alone it can be swallowed, the grouping paren that is not a call, the constructor that must be the delimiter's OWN, the NOT-MEASURED sentence claiming only what was not measured, `Object.freeze([` read THROUGH to the head left of it so the fourth form wrapped keeps its row while `z.enum(Object.freeze([` reads as measured, the refusal closed to a NAMED vocabulary so an unknown helper is loud, `new Set([` pinned as the residual silence with the TWO accept sets it covers named " +
+      "and with the constructor-wrapped set literal that goes dark beside them, the type-argument group pinned on the REFUSAL head with its non-nested bound stated rather than widened, " +
+      "and a refused element still spending its block's unit so the genuine member beside it fires, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
