@@ -171,6 +171,7 @@ import {
   resolveSweepRepo,
   staleFindingScreen,
 } from './check-half-states.mjs';
+import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
 
 // dispatch-gates: no-path-population -- this tool reads no file in the tree at all; its whole input is the GitHub API (one label-scoped issue listing per board, plus the per-card label read-back each write verifies itself against), so no card's file surface can predict it and the honest derivation is a repo-wide undetermined one (#16904)
 
@@ -353,6 +354,10 @@ export function namesOf(payload) {
 // ---------------------------------------------------------------------------
 
 async function restLive(path, { method = 'GET', body = null } = {}) {
+  // ⏱ The throttle (#19572), on the write verbs only — the one `DELETE` that
+  // strips the stale grade. Steps 1 and 4 are reads and are never paced.
+  const paced = isWriteMethod(method);
+  if (paced) await paceWrite({ token: TOKEN, kind: `sweep-stale-finding ${method}` });
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
@@ -363,12 +368,17 @@ async function restLive(path, { method = 'GET', body = null } = {}) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   if (!res.ok) {
+    // ⏱ The body is read only to be CLASSIFIED — a secondary-rate-limit 403
+    // names itself in prose. The error keeps carrying exactly what it did.
+    const said = paced ? await res.text().catch(() => '') : '';
+    if (paced) noteResponse({ token: TOKEN, status: res.status, headers: res.headers, body: said });
     const err = new Error(`${method} ${path} -> HTTP ${res.status}`);
     err.status = res.status;
     err.retryAfter = res.headers?.get?.('retry-after') ?? null;
     err.rateRemaining = res.headers?.get?.('x-ratelimit-remaining') ?? null;
     throw err;
   }
+  if (paced) noteResponse({ token: TOKEN, status: res.status, headers: res.headers });
   if (res.status === 204) return null;
   return res.json();
 }
