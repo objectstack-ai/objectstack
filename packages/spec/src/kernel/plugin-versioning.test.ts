@@ -182,18 +182,24 @@ describe('Plugin Versioning Schemas', () => {
     // strip the old spelling in SILENCE and every assertion above would stay
     // green. The pin is on the PRESCRIPTION, not on "it throws" — a bare
     // unrecognized-key error would also throw, and would carry no rename.
-    it('refuses the retired `estimatedMigrationTime` with the rename prescription, not a bare unknown-key error', () => {
-      const retired = CompatibilityMatrixEntrySchema.safeParse({
+    // Asserted the way `rollout.duration`'s pin below already asserts it: the
+    // issue is looked up BY PATH and its `code` is read, so a refusal that
+    // arrived as a bare `unrecognized_keys` cannot satisfy this by happening to
+    // mention the key name somewhere in the envelope.
+    it('REFUSES the retired `estimatedMigrationTime` with the rename in the message', () => {
+      const result = CompatibilityMatrixEntrySchema.safeParse({
         from: '1.0.0',
         to: '2.0.0',
         compatibility: 'breaking-changes',
         estimatedMigrationTime: 8,
       });
-      expect(retired.success).toBe(false);
-      const text = JSON.stringify(retired.error);
-      expect(text).toContain('Rename the key to');
-      expect(text).toContain('estimatedMigrationTimeHours');
-      expect(text).not.toContain('unrecognized_keys');
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'estimatedMigrationTime');
+      expect(issue).toBeDefined();
+      expect(issue!.code).not.toBe('unrecognized_keys');
+      expect(issue!.message).toContain(
+        '`CompatibilityMatrixEntry.estimatedMigrationTime` was renamed to `estimatedMigrationTimeHours`',
+      );
     });
 
     // The no-narrowing half of the same ruling: the value type did not move, so
