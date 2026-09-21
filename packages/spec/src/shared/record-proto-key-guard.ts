@@ -50,9 +50,23 @@ import { z } from 'zod';
  * `constructor` and `prototype` are deliberately NOT handled here, in either
  * position: unlike `__proto__`, both reach the judging schema unskipped and
  * round-trip intact (measured at both sites), so a slot that wants to refuse
- * them too does it in its own key grammar instead (see `ObjectSchema.fields`
- * in `data/object.zod.ts`) — adding them to this guard would refuse a name for
- * slots whose accept set no ruling has narrowed.
+ * them too declares that refusal itself — adding them to this guard would
+ * refuse a name for slots whose accept set no ruling has narrowed.
+ *
+ * `ObjectSchema.fields` (`data/object.zod.ts`) is the slot that does, and since
+ * #19346 it refuses them with a RECORD-level `bannedKeys(['constructor',
+ * 'prototype'])` rather than in its key grammar. The reason is the PUBLISHED
+ * file and not the runtime: a `.refine()` on the key schema is a `custom`
+ * check, which `z.toJSONSchema()` has no arm for, so such a rule reaches the
+ * runtime and never `packages/spec/json-schema/**` — it held nine
+ * `fields.out.keyType` rows in `dropped-refinements.baseline.json` saying
+ * exactly that. Declared through the closed projection list's `banned-keys`
+ * arm, the same rule is published as `propertyNames` plus `not`.
+ *
+ * ⛔ That route is not open to `__proto__`, here or anywhere: this wrapper's
+ * guard is a pre-parse `z.preprocess` node, which the projection cannot see
+ * either — which is why the two names and the third are refused by two
+ * mechanisms rather than one.
  *
  * ## Why a `z.preprocess` and not a declared key
  *
