@@ -55,14 +55,16 @@
 //       invisible to the number that is supposed to find it. This ledger's walk
 //       is PER-LOCALE, so they are VISIBLE to it — counted, named by shape, and
 //       carried below as a declared deferral rather than silently excluded.
-//       ⛔ They are NOT decided here: they are round 9's declared scope, and a
-//       two-locale echo is exactly as undecided as a three-locale one.
+//       ⛔ They are NOT decided here. Round 9 took `report.*` — the last family
+//       the all-three predicate could see — so this deferral is ROUND 10's
+//       declared scope, and a two-locale echo is exactly as undecided as a
+//       three-locale one.
 //
 // ⭐ The deferral is written as a SHAPE (`lifecycle.*` in the two locales that
 // echo it), never as 64 hand-listed strings, and the assertion over it is
-// shrink-only: nothing OUTSIDE it may echo. So round 9 emptying it leaves this
-// file green, while a new row arriving in a collapsed section — the way this
-// defect class actually reproduces — reds it on the day it lands.
+// shrink-only: nothing OUTSIDE it may echo. So the round that empties it leaves
+// this file green, while a new row arriving in a collapsed section — the way
+// this defect class actually reproduces — reds it on the day it lands.
 //
 // ## ⚠️⚠️ The phantom-translation trap, which this family walks straight into
 //
@@ -405,9 +407,14 @@ const PANEL_LEAVES = leavesOf(COLLAPSED_SECTIONS);
 const OPEN_LEAVES = leavesOf(OPEN_SECTIONS);
 
 /**
- * ⭐ ROUND 9's DECLARED SCOPE — a shape, never a list of 64 strings. Every leaf
+ * ⭐ ROUND 10's DECLARED SCOPE — a shape, never a list of 64 strings. Every leaf
  * of this subtree that still echoes is DEFERRED, not decided; the assertions
- * over it are shrink-only, so round 9 emptying it leaves this file green.
+ * over it are shrink-only, so the round that empties it leaves this file green.
+ *
+ * ⚠️ Round 9 re-pointed this from "round 9" to "round 10" and did NOT touch the
+ * shape: round 9's family was `report.*`, the last one the card's all-three
+ * predicate could see. This subtree is invisible to that predicate and is the
+ * larger half of what is left.
  */
 const DEFERRED_SUBTREE = 'lifecycle';
 const inDeferral = (leaf: PanelLeaf): boolean => leaf.path === DEFERRED_SUBTREE || leaf.path.startsWith(`${DEFERRED_SUBTREE}.`);
@@ -804,13 +811,13 @@ describe('#19403 round 8 — the provenance table agrees these leaves are now au
       ).toEqual([]);
     });
 
-    it(`${locale}: ⭐ the second witness agrees with the round 9 deferral, and with zh-CN's own answer`, () => {
+    it(`${locale}: ⭐ the second witness agrees with the round 10 deferral, and with zh-CN's own answer`, () => {
       // The companion is an independent reading of the same fact, and here it
       // carries the evidence the deferral rests on: the lifecycle leaves are
       // recorded as unauthored fills in ja-JP and es-ES and in NEITHER zh-CN's
       // bundle nor zh-CN's companion, because zh-CN answered all sixteen
-      // concepts with authored words. Shrink-only in both directions: round 9
-      // emptying the ja/es rows leaves this green.
+      // concepts with authored words. Shrink-only in both directions: the round
+      // that empties the ja/es rows leaves this green.
       const lifecycleRows = Object.keys(table).filter((k) =>
         k.startsWith(`metadataForms.object.fields.${DEFERRED_SUBTREE}.`),
       );
@@ -909,7 +916,7 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // The card's headline predicate is "echoes in ALL THREE locales" and it
     // reads ZERO for this subtree, because zh-CN authored all of it. A ja-JP
     // author still reads the whole panel in English. This walk is per-locale, so
-    // it SEES them — and they are deferred to round 9, not decided here.
+    // it SEES them — and they are deferred to round 10, not decided here.
     const deferred = PANEL_LEAVES.filter(inDeferral);
     expect(deferred.length, 'the walk no longer reaches the lifecycle subtree').toBe(32);
     expect(deferred.filter((l) => l.prop === 'label').length).toBe(16);
@@ -920,12 +927,36 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     const zh = (zhCNMetadataForms as Record<string, any>);
     const zhEchoes = deferred.filter((l) => catalogLeaf(zh, l.path, l.prop) === l.en).map((l) => `${l.path}.${l.prop}`);
     expect(zhEchoes, 'zh-CN started echoing the lifecycle panel — the sibling-locale evidence is gone').toEqual([]);
-    // The other two are where the deferral lives. Shrink-only: round 9 drives
-    // this to 0 and the bound still holds.
+    // The other two are where the deferral lives.
     const twoLocale = deferred.filter((l) =>
       TRANSLATED_LOCALES.filter(([, forms]) => catalogLeaf(forms, l.path, l.prop) === l.en).length > 0,
     );
-    expect(twoLocale.length).toBeLessThanOrEqual(deferred.length);
+    // ⚠️ ROUND 9'S REPAIR OF A ROUND 8 SLIP, in the block round 9 had to edit
+    // anyway. This line read `toBeLessThanOrEqual(deferred.length)` — and
+    // `twoLocale` is `deferred.filter(…)`, so a subset was being bounded by the
+    // set it came out of: TRUE FOR EVERY TREE, a tautology sitting inside this
+    // round's ⭐⭐ headline control. The bound is now the RECORDED LITERAL, the
+    // spelling this same file already uses 105 lines up, and the two legs below
+    // prove what the old one could not.
+    const RECORDED_DEFERRAL = 32;
+    const withinRecorded = (n: number): boolean => n <= RECORDED_DEFERRAL;
+    expect(withinRecorded(twoLocale.length)).toBe(true);
+    // Dark, leg 1 — IT CAN SAY NO. A 33rd two-locale echo (a field added to a
+    // collapsed section tomorrow) breaks the bound. The OLD spelling is run on
+    // the same input beside it and still reads true, which is the defect
+    // executed rather than described.
+    const oldBound = (subset: readonly PanelLeaf[], superset: readonly PanelLeaf[]): boolean =>
+      subset.length <= superset.length;
+    const grown = [...deferred, deferred[0]];
+    expect(grown.length, 'the synthetic population is one larger than the recorded one').toBe(RECORDED_DEFERRAL + 1);
+    expect(oldBound(grown, grown), 'the OLD bound, on a population that grew past the recorded literal').toBe(true);
+    expect(withinRecorded(grown.length), 'the NEW bound, on the same input').toBe(false);
+    // …and the old bound is not merely weak, it is unfalsifiable: `twoLocale` is
+    // drawn FROM `deferred`, so no tree can make a subset outgrow its superset.
+    expect(oldBound(twoLocale, deferred), 'a filtered subset can never exceed the set it came from').toBe(true);
+    // Dark, leg 2 — SHRINK-ONLY. Round 10 empties the deferral and this stays
+    // green, which is the property the bound exists to have.
+    expect(withinRecorded(0)).toBe(true);
   });
 
   it('no leaf of this population reads its `en` source unless it is decided or declared DEFERRED', () => {
