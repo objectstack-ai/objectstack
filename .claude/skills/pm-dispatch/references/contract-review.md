@@ -38,7 +38,7 @@
 - 两者同 session ⇒ 报 SELF-REVIEW;只 `mode:remote` 可达,`mode:subagent` 席内审是设计;值紧跟冒号。
 - 清标即落地:PASS ⇒ 同席同笔剥双载体;清标同笔落 PR provenance 评论,引记录 id 与所判 head。
 - 轮次报告设复审清单专节,形状与代裁清单同为强制审计。
-- 落地前检三条:① 达档条款②复核 PASS 在案,即 PR 或卡上同形复核记录(spec、skills 每轮)。
+- 落地前检三条,过则 Tier S 入队、Tier H 等人批:① 达档条款②复核 PASS 在案(同形记录)。
 - ② 双载体已清,逐对机读 `PM_SWEEP_REPO=仓 node scripts/pm/check-clause2-carriers.mjs --pair N`。
 - 0 = 确定性行全清;4 = 任一不成立,只确定性行红才挡落地;3 = 环境答不了 ⛔ 不作干净。
 - 确定性行 = 记录在案、`Served-tier:`、双载体一致、认领形;C5 放宽 tell 只报告,归复核裁。
