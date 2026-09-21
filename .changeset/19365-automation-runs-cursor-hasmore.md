@@ -19,10 +19,10 @@ declares or sends it on any of the three run-list surfaces
 `client.environment(id).automation.listRuns`). It was declared on the wire,
 *validated* at the boundary, forwarded into the service contract, appended by
 the SDK, and read by no implementation. No emit site has ever written the
-response half `nextCursor`, and the only ordering this door has is an optional,
-non-unique `startedAt` — not a resume point anything could have been built
-on — so a caller looping "until the cursor runs out" re-read the first and only
-window forever, with no error.
+response half `nextCursor`, and the only ordering this door has is a required
+but non-unique `startedAt` timestamp that nothing ever minted a resume point
+from — so a caller looping "until the cursor runs out" re-read the first and
+only window forever, with no error.
 
 ```
 FROM  ListRunsRequestSchema.parse({ name: 'f', cursor: 'n_007' })

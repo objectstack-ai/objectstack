@@ -5857,14 +5857,14 @@ const step18: MigrationStep = {
         + 'authors a `ListRunsRequest` and nothing persists one. The `os migrate meta` house '
         + 'sentence is therefore correctly absent from the prescription. There is no '
         + '`acceptRetiredDefaultResidue` stage either: `cursor` carried no default, so it '
-        + 'materialized into no artifact and there is no residue to accept. ADR-0049 / '
+        + 'materialized into no artifact and there is no residue to accept. '
         + 'The SDK half is part of the retirement rather than a follow-up: `@objectstack/client` '
         + 'declared `cursor` and appended it on all three run-list surfaces, so retiring the key '
         + 'in the schema alone would have left the one generated client this repo ships typing it '
         + '`string` and sending it into a route that silently drops it — the ADR-0104 shape the '
         + 'tombstone exists to prevent, re-created one layer down. The same call was made when '
         + '#6361 retired the notifications `cursor`: the client dropped the option and recorded '
-        + 'the removal in its docblock. ADR-0087, #19365.',
+        + 'the removal in its docblock. ADR-0049 / ADR-0087, #19365.',
       acceptanceCriteria:
         'No caller sends `cursor` to `GET /api/automation/:name/runs`, and that is true of every '
         + 'channel this repo ships rather than of the schema alone. Writing it on a '
@@ -13313,10 +13313,11 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // measured false before this entry was written.
     //
     // What made `cursor` retirable is the response half: no emit site has ever
-    // written `nextCursor`, and the only ordering this door has is an optional,
-    // non-unique `startedAt` — not a resume point anything could have been built
-    // on — so nothing could ever have minted a value for a caller to send back. A caller looping "until the cursor runs out" re-read the first
-    // and only window forever.
+    // written `nextCursor`, and the only ordering this door has is a required but
+    // non-unique `startedAt` timestamp that nothing ever minted a resume point
+    // from — so nothing could ever have minted a value for a caller to send back.
+    // A caller looping "until the cursor runs out" re-read the first and only
+    // window forever.
     //
     // Same registration shape as the `/packages` pair: major 18 (the removal ships
     // on the 17.x line as a minor; the prescription lives at the major boundary

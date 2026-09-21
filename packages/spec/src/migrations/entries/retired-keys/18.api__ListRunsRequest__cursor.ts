@@ -15,10 +15,11 @@
 // measured false before this entry was written.
 //
 // What made `cursor` retirable is the response half: no emit site has ever
-// written `nextCursor`, and the only ordering this door has is an optional,
-// non-unique `startedAt` — not a resume point anything could have been built
-// on — so nothing could ever have minted a value for a caller to send back. A caller looping "until the cursor runs out" re-read the first
-// and only window forever.
+// written `nextCursor`, and the only ordering this door has is a required but
+// non-unique `startedAt` timestamp that nothing ever minted a resume point
+// from — so nothing could ever have minted a value for a caller to send back.
+// A caller looping "until the cursor runs out" re-read the first and only
+// window forever.
 //
 // Same registration shape as the `/packages` pair: major 18 (the removal ships
 // on the 17.x line as a minor; the prescription lives at the major boundary
