@@ -1,5 +1,5 @@
 ---
-"@objectstack/spec": patch
+"@objectstack/spec": minor
 ---
 
 fix(spec): state the row-cap guard `ElementDataSourceGate` implements, and record where the per-kind view `limit` actually lands (#19228)
@@ -8,6 +8,13 @@ Prose and pins only — zero accept-set movement, zero export movement. The same
 to the same values before and after. ⛔ No `.default()` moves, ⛔ no precedence is picked: which
 of the per-kind view `limit`, a view's `pagination.pageSize` and a component's flat `limit`
 should win is the open half of #19228 and is not answered here.
+
+⚠️ **Why `minor` when nothing behavioural moved.** `check-changeset-no-major`'s LEVEL axis
+(#16055 / #16776) requires a PR that declares `Clause-②: yes` to grade at least one package
+whose published source it moves `minor` or above, and this PR carries that declaration. The bump
+is therefore the gate's floor, ⛔ not a description of a behaviour change: no key is added,
+removed or renamed, no export moves, and every document that parsed before parses to the same
+value after. Upgrading gains corrected published prose and nothing else.
 
 ## What the published text said, and what the consumer does
 
