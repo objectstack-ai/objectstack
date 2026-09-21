@@ -1,7 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { BulkActionDefSchema } from './bulk-action.zod';
+import { BulkActionDefSchema, BulkActionParamSchema } from './bulk-action.zod';
+import { FieldSchema } from '../data/field.zod';
+import { formatZodError } from '../shared/error-map.zod';
 
 /** Parse and return the flattened issue messages (empty = clean). */
 const reject = (input: unknown): string[] => {
@@ -56,13 +58,26 @@ describe('BulkActionDefSchema (#4457)', () => {
       expect(def.params?.[0]).toMatchObject({ object: 'sys_user', labelField: 'name' });
     });
 
-    it('forwards unknown WIDGET config on a param — the renderer declares a catch-all', () => {
-      const def = ok({
+    // ── RE-JUDGED, NOT RE-SPELLED (#18177) ─────────────────────────────────
+    // This case used to be `forwards unknown WIDGET config on a param — the
+    // renderer declares a catch-all`, and it asserted that `min`/`max`/`step`
+    // rode through. That is the exact behaviour letter A removed, so the
+    // fixture could not be repaired by changing a spelling: what it pinned is
+    // gone, and the honest replacement pins the REFUSAL plus the prescription
+    // that now has to carry an author across. The keys really are read by a
+    // widget once they reach the field bag — which is why the message says so
+    // instead of implying the renderer ignores them.
+    it('REFUSES unknown widget config on a param, and the rejection names where the vocabulary IS real', () => {
+      const issues = reject({
         name: 'reschedule',
         operation: 'update',
         params: [{ name: 'shift_days', type: 'number', min: 1, max: 90, step: 1 }],
-      });
-      expect(def.params?.[0]).toMatchObject({ min: 1, max: 90, step: 1 });
+      }).join('\n');
+      expect(issues).toContain('min');
+      expect(issues).toContain('FieldSchema');
+      // ⛔ The prescription must NOT send the author to the field-backed route:
+      // the bulk surface has none, so that answer would be confidently wrong.
+      expect(issues).toContain('no field-backed param route');
     });
 
     // ── DELIBERATE OPENNESS — DO NOT "FIX" THIS INTO A STRICT SITE ──────────
@@ -285,6 +300,133 @@ describe('BulkActionDefSchema (#4457)', () => {
         .toContain('`permissions` → `requiredPermissions`');
       expect(reject({ name: 'purge_projects', operation: 'delete', requiredCapabilities: ['x'] }).join('\n'))
         .toContain('`requiredCapabilities` → `requiredPermissions`');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // #18177 — maintainer ruling batch #146 item 4, letter A.
+  //
+  // The card that produced this ruling turned on ONE measurement: the open
+  // shape accepted `zzz_nonsense_key_that_no_producer_emits_8755` in the same
+  // run that it accepted `dependsOn`, so its accept licensed neither. Both legs
+  // are pinned here in their POST-close form — the nonsense key is refused, and
+  // `dependsOn` parses because it is declared, not because nothing is checked.
+  // Keep the pair together: a `dependsOn` assertion alone would go green again
+  // the day someone re-opens the shape.
+  // ─────────────────────────────────────────────────────────────────────────
+  describe('— the shape is closed, so its accept means something (#18177)', () => {
+    const NONSENSE = 'zzz_nonsense_key_that_no_producer_emits_8755';
+
+    it('CONTROL (negative): the nonsense key the card measured is now refused by name', () => {
+      const r = BulkActionParamSchema.safeParse({ name: 'p', type: 'text', [NONSENSE]: 1 });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      expect(r.error.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+      expect(JSON.stringify(r.error.issues)).toContain(NONSENSE);
+    });
+
+    it('CONTROL (positive): a minimal valid param still parses — the door refuses, it does not jam', () => {
+      expect(BulkActionParamSchema.safeParse({ name: 'p', type: 'text' }).success).toBe(true);
+    });
+
+    it('the twin refuses the same nonsense key — one strictness across both param surfaces', () => {
+      // `ActionParamSchema` has been strict since #3746; this is the asymmetry
+      // the card was filed about, now closed from the other side.
+      const r = BulkActionParamSchema.safeParse({ name: 'p', type: 'text', [NONSENSE]: 1 });
+      expect(r.success).toBe(false);
+    });
+
+    it('`dependsOn` is DECLARED — both authored forms parse', () => {
+      const def = ok({
+        name: 'reassign',
+        operation: 'update',
+        params: [
+          { name: 'account', type: 'lookup', object: 'showcase_account' },
+          { name: 'contact', type: 'lookup', object: 'showcase_contact', dependsOn: ['account'] },
+          { name: 'owner', type: 'lookup', object: 'sys_user', dependsOn: [{ field: 'account', param: 'account_id' }] },
+        ],
+      });
+      expect(def.params?.[1]).toMatchObject({ dependsOn: ['account'] });
+      expect(def.params?.[2]).toMatchObject({ dependsOn: [{ field: 'account', param: 'account_id' }] });
+    });
+
+    // ⚠️ Read through `formatZodError`, the door an author really meets — NOT
+    // `issue.message`. A `dependsOn` entry sits behind a string-or-object
+    // union, whose top-level message is the bare `Invalid input`; the curated
+    // refusal lives one level down and is surfaced by `formatZodIssue`'s union
+    // descent. A raw-issue pin here would assert the union wrapper and report
+    // the rename as missing when it is rendered perfectly well (the exact
+    // misreading `shared/union-author-message-pins.test.ts` exists to stop).
+    it('the entry inside `dependsOn` is strict too — strictness does not recurse by itself', () => {
+      const r = BulkActionDefSchema.safeParse({
+        name: 'reassign',
+        operation: 'update',
+        params: [{ name: 'owner', type: 'lookup', object: 'sys_user', dependsOn: [{ local: 'account' }] }],
+      });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const message = formatZodError(r.error as Parameters<typeof formatZodError>[0]);
+      expect(message).toContain('`local` → `field`');
+      expect(message).toContain('this dependsOn entry');
+      // The STRING arm's kind mismatch is not a prescription — it must not be
+      // what the author is shown.
+      expect(message).not.toContain('expected string, received object');
+    });
+
+    // ⭐ The parity pin. The ruling said "the same shape and `describe` as the
+    // single-record twin", and the twin for THIS key is `FieldSchema.dependsOn`
+    // — `ActionParamSchema` declares no `dependsOn` at all, because the
+    // single-record dialog reaches it through the field-backed route. Pinning
+    // acceptance parity is what stops the two doors drifting into dialects.
+    it('accepts exactly what the FieldSchema twin accepts, and refuses exactly what it refuses', () => {
+      const asField = (dependsOn: unknown) =>
+        FieldSchema.safeParse({ name: 'owner', type: 'lookup', reference: 'account', dependsOn }).success;
+      const asBulkParam = (dependsOn: unknown) =>
+        BulkActionParamSchema.safeParse({ name: 'owner', type: 'lookup', object: 'account', dependsOn }).success;
+
+      const cases: unknown[] = [
+        ['account'],
+        [{ field: 'account' }],
+        [{ field: 'account', param: 'account_id' }],
+        ['account', { field: 'region', param: 'region_id' }],
+        [{ local: 'account' }],
+        [{ param: 'account_id' }],
+        'account',
+        [42],
+      ];
+      const twin = cases.map(asField);
+      const bulk = cases.map(asBulkParam);
+      expect(bulk).toEqual(twin);
+      // The comparison is only worth anything if both verdicts really occur.
+      expect(new Set(twin)).toEqual(new Set([true, false]));
+    });
+  });
+
+  describe('— the close carries the author across, it does not just say no (#18177)', () => {
+    const paramIssues = (param: Record<string, unknown>): string =>
+      reject({ name: 'd', operation: 'update', params: [{ name: 'p', type: 'text', ...param }] }).join('\n');
+
+    it('renames the ACTION-param spellings of the known divergence onto this surface words', () => {
+      expect(paramIssues({ helpText: 'x' })).toContain('`helpText` → `help`');
+      expect(paramIssues({ defaultValue: 'x' })).toContain('`defaultValue` → `default`');
+      expect(paramIssues({ reference: 'sys_user' })).toContain('`reference` → `object`');
+      expect(paramIssues({ displayField: 'name' })).toContain('`displayField` → `labelField`');
+    });
+
+    it('answers `field` with the route that does not exist rather than a spelling hint', () => {
+      const issues = paramIssues({ field: 'owner' });
+      expect(issues).toContain('FIELD-BACKED');
+      expect(issues).toContain('Declare the param inline');
+    });
+
+    it('sends a param-level `visible` to the DEF, where the predicate is really read', () => {
+      expect(paramIssues({ visible: 'true' })).toContain('bulkActionDefs[].visible');
+    });
+
+    it('answers the whole widget-config family with ONE prescription, not one per key', () => {
+      const issues = paramIssues({ min: 1, max: 9, step: 1 });
+      const occurrences = issues.split('widget-config keys like').length - 1;
+      expect(occurrences).toBe(1);
     });
   });
 });

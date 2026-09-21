@@ -363,3 +363,105 @@ export function inspectBundleFreshness(
       `   the .d.ts-reading gates next door that it blinds.)`,
   };
 }
+
+// ── The exit code a dist-precondition refusal answers with (#19227) ──────────
+
+/**
+ * PREREQUISITE NOT MET — the code every refusal composed here exits with.
+ *
+ * ## Why this constant exists at all
+ *
+ * The five gates that adopted the precondition above all spelled their refusal
+ * `process.exit(1)` — the number a REAL FINDING uses. At the only place a
+ * caller looks, "this tree is wrong" and "I could not read the tree" were the
+ * same reading, and the cost is not cosmetic: `scripts/pm/dispatch-gates.mjs
+ * --ran` derives its NOT-MEASURED class from the recorded exit code and counts
+ * anything else as a family that RAN, so a gate that refused before its first
+ * `.d.ts` read was reconciled as coverage the round did not have.
+ *
+ * ## Why 3, and why the value is hand-carried rather than imported
+ *
+ * 3 is this repo's declared vocabulary for these two words:
+ * `scripts/import-prerequisite.mjs:250` declares
+ * `export const EXIT_PREREQUISITE_NOT_MET = 3` and argues the case at length in
+ * its own docblock — that file is the authority, and it is NOT re-decided here.
+ *
+ * It is not IMPORTED from there for two measured reasons, and neither is a
+ * preference:
+ *
+ *   - that module is a dependency LOADER. Its frame (`requireDependency`,
+ *     `requireDefaultExport`) answers "can this gate import the package it
+ *     names?"; a stale `dist` is a different prerequisite reached a different
+ *     way, so adopting the frame would drag in machinery that has nothing to
+ *     say here while adopting none of the part that fits.
+ *   - `scripts/import-prerequisite.d.mts` is PARTIAL BY DESIGN and declares
+ *     only the two loaders — its own header says the exit-code constants are
+ *     deliberately omitted — so a TypeScript consumer importing this name gets
+ *     TS2305 until that declaration mirror is extended, which is a root-tree
+ *     edit outside this change's surface.
+ *
+ * What keeps the two in step is a pin on each side: that module's `--self-test`
+ * asserts `EXIT_PREREQUISITE_NOT_MET === 3`, and `dist-freshness.test.ts` pins
+ * this one to the same value and to being distinct from `EXIT_FINDINGS`. ⛔ Do
+ * not "simplify" either pin away — a second declaration whose value nothing
+ * asserts is how the vocabulary forks.
+ */
+export const EXIT_PREREQUISITE_NOT_MET = 3;
+
+/**
+ * A gate's real verdict, named here only so the refusal text can say which code
+ * it is distinct FROM. Mirrors `scripts/import-prerequisite.mjs`'s constant of
+ * the same name; ⛔ nothing in this file ever exits with it.
+ */
+export const EXIT_FINDINGS = 1;
+
+/**
+ * The refusal a dist-reading gate prints, in the shape the rest of the fleet
+ * already prints it.
+ *
+ * `<gate>: PREREQUISITE NOT MET — …` is not decoration: `check-dts-closure`,
+ * `check-dual-build-cjs-loads`, `check-i18n-bundles`, `check-i18n-coverage` and
+ * `check-closing-target-claim` all emit that exact phrase, so a reader (or a
+ * `grep` over a CI log) finds this refusal beside its siblings instead of
+ * having to know that `packages/spec` words the same event differently. The
+ * verdict's own `message` — the cause, the damage and the two-line build remedy
+ * — is passed through BYTE FOR BYTE; this only wraps it.
+ *
+ * The closing paragraph is the half the number alone cannot carry: a reader who
+ * sees a non-zero code and no sentence has no way to learn that nothing was
+ * measured, which is the whole defect #19227 names.
+ *
+ * The second argument arm exists because one adopter's build prerequisite is
+ * not an `inspectDistFreshness` verdict at all: `check:skill-examples` ALSO
+ * refuses a self-package whose `.d.ts` was never emitted, which the mtime rule
+ * reads as fresh. Same event, same remedy, same code — so it gets the same
+ * wrapper rather than a second trailer nobody keeps in step.
+ *
+ * @param gate    this gate's own name, e.g. `check:exported-any` — the caller's
+ *   identity, for the same reason `inspectDistFreshness` takes `rerun`: a
+ *   default would hand a new caller the previous gate's name (#7181).
+ * @param refusal the refusing verdict from `inspectDistFreshness` /
+ *   `inspectBundleFreshness`, or a caller-composed `{ headline, detail }`.
+ */
+export function prerequisiteNotMetText(
+  gate: string,
+  refusal: Extract<DistFreshness, { fresh: false }> | { headline: string; detail: string },
+): string {
+  const headline =
+    'headline' in refusal
+      ? refusal.headline
+      : refusal.state === 'missing'
+        ? 'this gate reads built output, and there is none to read'
+        : 'this gate reads built output, and what is on disk predates the sources';
+  const detail = 'headline' in refusal ? refusal.detail : refusal.message;
+  return (
+    `\n${gate}: PREREQUISITE NOT MET — ${headline}\n` +
+    `${detail}\n\n` +
+    `   Nothing was measured: this gate refused before reading a single declaration, so this\n` +
+    `   result says NOTHING about what it gates. It is NOT a finding, and it is not evidence\n` +
+    `   that anything in the tree is wrong.\n` +
+    `   (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
+    `   \`<command> > /tmp/gate.log 2>&1; echo "EXIT=$?"\`. Piped, \`$?\` is the LAST command's\n` +
+    `   status, and \`head\`/\`tail\` essentially never fail — that is the false green.)`
+  );
+}
