@@ -737,7 +737,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userFilters: {
         label: "Filtros de usuario",
-        helpText: "Barra de filtros rápidos: estilo de elemento (desplegable / pestañas / interruptor) + campos expuestos o preajustes de pestañas"
+        helpText: "Barra de filtros rápidos: estilo de elemento (dropdown / tabs / toggle) + campos expuestos o preajustes de pestañas"
       },
       tabs: {
         label: "Pestañas",
