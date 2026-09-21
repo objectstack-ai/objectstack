@@ -272,11 +272,11 @@ localStorage / auth gotchas.
     ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
     `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
     current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict, `check-clause2-carriers.mjs --pair N`
-    reads 0 and every check is green — the owning seat then lands it through the queue; the post-merge audit is the
-    compensating control. A PR whose only governed paths are register rows the queue leg regenerates byte-exact clears
-    with zero approvals — an uncertified recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent
-    seat submits an approving review on a governed-surface PR, under any account** — an authorized account is
-    agent-operated too; "CI is green" carries no information about a governance change.
+    reads 0 on its definite rows (⛔ never C5) and every check is green — the owning seat then lands it through the
+    queue; the post-merge audit is the compensating control. A PR whose only governed paths are register rows the queue
+    leg regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or a hand-authored sibling
+    keeps it governed. ⛔ **No agent seat submits an approving review on a governed-surface PR, under any account** —
+    an authorized account is agent-operated too; "CI is green" carries no information about a governance change.
 
     **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
     what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
