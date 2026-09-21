@@ -11,9 +11,12 @@ in this repo (including `.claude/skills/**`) conflicts with this one, **AGENTS.m
 This file carries principles, binding rules and lookup tables — rules only. A rule states
 what to do and what never to do, in one executable sentence; it carries no incident
 narrative, no ruling date or quotation, and no issue-number citation
-(`pnpm check:pm-skill-id-lint`) — a rule's provenance lives in the PR that landed it. Where
-a hook or CI gate enforces a rule mechanically, the rule is stated once here and the
-script's own header is the authority on detail.
+(`pnpm check:pm-skill-id-lint`) — a rule's provenance cites the ADR or ruling record that
+decided it, otherwise the commit sha in this repository's history; a PR number is a
+convenience link, ⛔ never the citation. Runtime strings — refusal prose, prescriptions,
+anything an author is shown — carry no tracker number (`pnpm check:doc-authoring`): the
+lesson goes into the text. Where a hook or CI gate enforces a rule mechanically, the rule is
+stated once here and the script's own header is the authority on detail.
 
 ---
 
@@ -52,12 +55,11 @@ out-of-repo path.
 gate sweep, an ablation — because the working tree is otherwise the only copy of your work.
 
 Type-check coverage and its debt counts are ratcheted in CI
-(`pnpm check:type-check-coverage`, `pnpm check:type-check-debt`; the script headers are
-the authority on detail): every package declares a `typecheck` script or carries a
-measured, shrink-only DEBT/EXEMPT ledger entry; new packages arrive covered; a package
-that graduates deletes its entry in the same PR; when a re-measure forces a count up,
-rewrite the entry's `note` too — a note naming only the old errors reads as "nearly
-graduated" to the next author.
+(`pnpm check:type-check-coverage`, `pnpm check:type-check-debt`): every package
+declares a `typecheck` script or carries a measured, shrink-only DEBT/EXEMPT ledger
+entry; new packages arrive covered; a package that graduates deletes its entry in the
+same PR; when a re-measure forces a count up, rewrite the entry's `note` too — a note
+naming only the old errors reads as "nearly graduated" to the next author.
 
 Three principles the ratchet's invariants encode:
 
@@ -446,10 +448,9 @@ a deviation; landed history is not rewritten) and a verbatim maintainer ruling p
 **GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
 Regex literals and script-tag-shaped tokens go in fenced code with the dangerous character
 spelled out, or are described in words (fences do NOT protect them); after writing any
-less-than fragment, read the body back and verify it survived. The two measured mutation
-shapes and their triggers live in pm-dispatch `references/platform-readings.md`. ⛔ A body
-reading short only through the API is probably intact — check the rendered page before
-"repairing" it; a rewrite destroys a correct card.
+less-than fragment, read the body back and verify it survived. ⛔ A body reading short
+only through the API is probably intact — check the rendered page before "repairing" it;
+a rewrite destroys a correct card.
 
 Even inside your own worktree, operate defensively:
 
@@ -745,18 +746,17 @@ Principles the wrapper encodes (its own output is the authority on detail):
   a name, with accepted cases in the shrink-only, hand-edited
   `dual-source-exports.baseline.json`.
 
-**`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against
-an implementation** — the props the spec zod schema declares vs the inputs the objectui
-registry config declares. A prop both sides declare and no renderer reads is, to this
-gate, perfect agreement. Its `spec-only` / `registry-only` / `missing` signals are real;
-just don't read it as proof anything renders. Its right-hand side is the **tracked
-repo-root `sdui.manifest.json`**, written by `node scripts/gen-sdui-manifest-node.mjs`
-beside `scripts/sdui-manifest.record.json` and held honest in the required lint job by
-`scripts/check-sdui-manifest.mjs` (shape, sha256 vs that record, record pin ==
-`.objectui-sha`) — so `lint.yml` runs this gate `--strict` against it on every PR. It
-still **exits 1** with no usable manifest — "could not run" is a failure, not a skip
-(Route & surface ownership §3) — and `check:generated` files it `EXTERNAL_INPUT_REQUIRED`
-because that aggregate hands it none. ⛔ Do not "fix" a red by re-adding a skip.
+**`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against an
+implementation** — the props the spec zod schema declares vs the inputs the objectui
+registry config declares. A prop both sides declare and no renderer reads is, to this gate,
+perfect agreement. Its `spec-only` / `registry-only` / `missing` signals are real; just
+don't read it as proof anything renders. Its right-hand side is the **tracked repo-root
+`sdui.manifest.json`**, written by `node scripts/gen-sdui-manifest-node.mjs` beside
+`scripts/sdui-manifest.record.json` and held honest in the required lint job by
+`scripts/check-sdui-manifest.mjs` — so `lint.yml` runs this gate `--strict` against it on
+every PR. It still **exits 1** with no usable manifest and `check:generated` files it
+`EXTERNAL_INPUT_REQUIRED` because that aggregate hands it none. ⛔ Do not "fix" a red by
+re-adding a skip.
 
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the wrapper reports that each run rather than staying silent.

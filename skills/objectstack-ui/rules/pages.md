@@ -336,9 +336,9 @@ src/docs/
    — a reference resolves by basename, never by path.
 2. **Namespace-prefixed filename.** The filename stem becomes the doc
    `name` (`^[a-z][a-z0-9_]*$`) and must start with the package namespace
-   (`crm_…`). Names share one flat, instance-global space with the URL, so
-   a bare `user_guide` would collide across packages and fail at install
-   (ADR-0048).
+   (`crm_…`). `os build` refuses a bare `user_guide`
+   (`docs/namespace-prefix`) — hygiene, not uniqueness: two packages
+   coexist on one bare name (ADR-0048 §3.4).
 3. **Title** resolves: frontmatter `title:` → first `#` heading → `name`.
    Optional frontmatter `description:` is a one-line summary the docs portal
    shows under the title — add it on index/overview docs.

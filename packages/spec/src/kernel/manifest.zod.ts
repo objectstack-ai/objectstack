@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
+import { MAJOR_MINOR_PATCH_VERSION_PATTERN } from './version-grammar';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { formatSuggestion } from '../shared/suggestions.zod';
@@ -411,7 +412,7 @@ export const ManifestSchema = strictObject({
    * @example "1.0.0"
    * @example "2.1.0"
    */
-  version: z.string().regex(/^\d+\.\d+\.\d+$/).describe('Package version (semantic versioning)'),
+  version: z.string().regex(MAJOR_MINOR_PATCH_VERSION_PATTERN).describe('Package version (semantic versioning)'),
   
   /** 
    * Type of the package in the ObjectStack ecosystem.
