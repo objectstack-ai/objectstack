@@ -381,6 +381,51 @@ function reportOptionalLoadFailure(ctx: PluginContext, err: unknown, spec: Optio
  * real service (e.g. `@objectstack/service-analytics` for `/analytics` — it
  * runs an InMemory strategy).
  *
+ * ## Malformed metadata: dev boot tolerates and reports (#15292)
+ *
+ * **Dev boot tolerates and reports; `os validate` / build / publish refuse.**
+ * A stack the platform will reject does not stop `os dev`: `init()` keeps
+ * booting, skips only the part it could not read, and says so at `error`.
+ * This is the shape every mainstream dev server takes — the error overlay
+ * stays on screen while the server keeps serving. The refusal belongs at the
+ * PRODUCTION doors, and they already have it; charging the inner loop for
+ * that consistency a second time bills the one user group this plugin exists
+ * for, whose metadata is routinely incomplete mid-edit. That is the normal
+ * state here, not an exceptional one.
+ *
+ * ⛔ Tolerating is never hiding. A boot that skipped something must never be
+ * byte-identical to a healthy one — a silent degrade lets an author (or an
+ * AI) read "it started" as "I wrote it correctly", which is the one outcome
+ * this posture exists to prevent.
+ *
+ * Two DIFFERENT malformations reach this plugin, through two different
+ * branches. They are exact complements — each fires in one branch and is
+ * invisible to the other — so neither is a second opinion on the other:
+ *
+ * | Malformation | Refuses in | Surfaces as |
+ * |---|---|---|
+ * | An app payload with no `manifest.id` / `manifest.name` | `new AppPlugin(stack)` (§3) — a bare `Error`, no ADR-0112 `code`/`status` | {@link reportOptionalLoadFailure}'s failed arm |
+ * | A `packages[]` entry that is not a package entry (ADR-0130 D4) | `AppPlugin.init()` — `INVALID_ARTIFACT_PACKAGE_ENTRY` / `422` | the child-`init()` loop's `error` line |
+ *
+ * ⛔ Do not read `new AppPlugin(stack)` as the stack's parse door. It reads
+ * `manifest.id` / `manifest.name` and nothing else; `collections` is a lazy
+ * getter first touched in `init()`, so a malformed `packages[]` passes the
+ * constructor untouched and refuses one branch later.
+ *
+ * §3b's i18n detector is the reference text for the diagnostic this posture
+ * wants: it reaches the SAME ADR-0130 D4 refusal and names the metadata
+ * defect and its remedy, never a package (#15232).
+ *
+ * ⛔ {@link reportOptionalLoadFailure} is not the vehicle for a
+ * metadata-shape defect: its text says the PACKAGE is installed but failed to
+ * initialize, which is precisely the mis-attribution #7926 removed from this
+ * file.
+ *
+ * One deliberate exception, and it is not about malformed metadata: a PRESENT
+ * `OrganizationsPlugin` that declines leaves the organization wall INACTIVE,
+ * and ADR-0093 D5 forbids serving traffic in that state, so the child-`init()`
+ * loop rethrows for that one plugin (#5301).
+ *
  * ## Production guard (ADR-0115 D6)
  *
  * `init()` refuses to run when `NODE_ENV === 'production'`: the assembly is
