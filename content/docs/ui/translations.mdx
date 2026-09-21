@@ -80,7 +80,8 @@ export default defineStack({
 | Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` — on a `kind: 'slotted'` page the header under `slots.header` is the page's header |
 | Page component copy, by component id | `pages.<name>.components.<id>.title` / `description` / `label` / `placeholder` / `emptyText` — reached under `regions[].components[]` and `slots.<slot>`, through `properties.children` and a `page:tabs` / `page:accordion` panel's `items[].children` |
 | Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` — see the boundary note below |
-| Global actions, settings, messages | `globalActions`, `settings`, `messages` |
+| Global actions, messages | `globalActions`, `messages` |
+| Settings UI shell copy (the source badge on a settings row) | `settingsCommon.sourceLabels.<layer>` — the per-namespace settings copy under `settings` is **platform-only**: an app bundle carrying it is refused by name, and the platform's own strings are translated in `@objectstack/service-settings`'s bundle |
 | A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
 
 The metadata types resolved per request are **object, view, action, app,
@@ -188,7 +189,8 @@ register. Common layouts:
 
 Files are not the only door. A `translation` metadata item — created in the
 Studio, through the metadata API, or by an agent — carries one locale's worth
-of the **same** groups a file bundle uses, plus the `locale` it translates:
+of the **same** groups a file bundle uses, bar the one exception noted below,
+plus the `locale` it translates:
 
 {/* os:check */}
 ```ts
@@ -215,7 +217,11 @@ Two things to know:
   a silent skip is the hardest kind of missing translation to diagnose.
 - Only the groups on this page are accepted, and since #4001 that is literally
   true: a key none of them declares is rejected, in a runtime item **and** in a
-  file-authored bundle. Keys from the retired `o.<object>` shape (`o`, `app`,
+  file-authored bundle. One group differs between the two doors: `settings` is
+  **platform-only** — a file bundle refuses it by name, and although the
+  registered `translation` item still declares it, the only namespaces it can
+  address are the platform's own, because only platform code declares a settings
+  manifest. Keys from the retired `o.<object>` shape (`o`, `app`,
   `nav`, `dashboard`, `_globalOptions`, `_meta`, …) carry a message naming the
   group to use instead — they used to save cleanly and then render nothing
   (#3778). Everything else gets the nearest declared key suggested.
