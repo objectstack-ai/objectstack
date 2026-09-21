@@ -392,11 +392,12 @@ export interface ISecurityService {
    * ⚠️ **One of those four axes has since left that arrangement: `objects`.**
    * Where {@link resolveEffectiveObjectPermissions} is available, take the
    * `objects` axis from it rather than folding these sets — and not merely to
-   * avoid a second copy of the rule. A caller-side fold cannot reach the same
-   * answer even done correctly, because the server's derivation reads object
-   * SCHEMAS that a holder of these sets does not have: `enable` (API exposure)
-   * for the restricted-object seed, `managedBy` / `userActions` for the
-   * managed-write clamp. It also parts company with
+   * avoid a second copy of the rule. These sets are not the whole INPUT: the
+   * server's derivation also reads object SCHEMAS, which the sets this method
+   * returns do not carry — `enable` (API exposure) for the restricted-object
+   * seed, `managedBy` / `userActions` for the managed-write clamp — so a fold
+   * of the sets alone cannot reach the same answer however correctly it is
+   * done. It also parts company with
    * `PermissionEvaluator.checkObjectPermission` on the wildcard — a
    * most-permissive fold treats `'*'` and named objects as independent keys,
    * so a super-user grant is never propagated into a named entry at all,
@@ -405,10 +406,12 @@ export interface ISecurityService {
    *
    * ⚠️ **When that method is ABSENT the fallback is scoped by CONSUMER CLASS,
    * and the two arms are ⛔ not interchangeable.**
-   *  - A consumer that SERVES a projection of its own — the
-   *    `/auth/me/permissions` and `/me/apps` handlers — keeps the caller-side
-   *    fold described above. It is the behaviour they already ship, and they
-   *    own the place where the residual corrections are applied.
+   *  - A consumer that SERVES a projection of its own — on the `objects` axis
+   *    that is the `/auth/me/permissions` handler alone — keeps the caller-side
+   *    fold described above. It is the behaviour it already ships, and it owns
+   *    the place where the residual corrections are applied. (`/me/apps` serves
+   *    a projection too, but of `systemPermissions` and `tabPermissions` only:
+   *    its handler never reads `objects`.)
    *  - A consumer whose only job is to POPULATE a permission map for something
    *    else to answer from — the engine filling `EvalContext.permissions` —
    *    ⛔ builds no fold. There a map that is merely close is
@@ -436,7 +439,18 @@ export interface ISecurityService {
   /**
    * [#19539 / #18783] The effective OBJECT PERMISSIONS for `context` — object
    * name → the server-resolved entry for that object, merged across the
-   * caller's sets exactly as the enforcement path merges them.
+   * caller's sets the way the endpoint derives the enforcement path's answer,
+   * which ⚠️ may be STRICTER than that path in one corner: the derivation
+   * merges the sets per object KEY, while `PermissionEvaluator` falls back to
+   * `'*'` per SET — so a non-super-user `'*'` grant in one set (carrying
+   * neither `viewAllRecords` nor `modifyAllRecords`) never reaches an object
+   * another set names explicitly. There the enforcement path reads that
+   * wildcard for the named object and ALLOWS, while the merged entry carries
+   * none of the wildcard's bits and reads as "no grant"; `foldWildcardSuperUser`
+   * does not close the gap, it propagates the two super-user bypasses alone.
+   * ADR-0124 D4 allows that direction — the client told less than the server
+   * permits — so ⛔ a consumer may not read a "no grant" here as proof that
+   * the server would refuse.
    *
    * It is the `objects` map of `GetEffectivePermissionsResponse` — the same
    * bytes `/auth/me/permissions` serves — and the type says so rather than
@@ -475,14 +489,15 @@ export interface ISecurityService {
    * single rule with a measured history of being re-implemented and drifting
    * (#7608 / #7555 / #6334), and ADR-0124 D4 puts it on the server. This method
    * is that merged answer, so a consumer needing it asks instead of folding.
-   * And it is not a fold anyone could write from those sets in any case: the
-   * derivation reads object schemas the set holder does not have (`enable` for
-   * the restricted-object seed, `managedBy` / `userActions` for the
-   * managed-write clamp), which is stated with the rest of the comparison in
-   * that sibling's own paragraph on merge semantics. That paragraph also
-   * carries the arm of the ABSENT case that does NOT apply here: a consumer
-   * that SERVES a projection of its own keeps its fold of those sets. The arm
-   * that applies to THIS method's consumers is under OPTIONAL below.
+   * And those sets are not the whole input in any case: the derivation also
+   * reads object schemas that the sets `resolvePermissionSetsForContext`
+   * returns do not carry (`enable` for the restricted-object seed, `managedBy`
+   * / `userActions` for the managed-write clamp), which is stated with the
+   * rest of the comparison in that sibling's own paragraph on merge semantics.
+   * That paragraph also carries the arm of the ABSENT case that does NOT apply
+   * here: a consumer that SERVES a projection of its own keeps its fold of
+   * those sets. The arm that applies to THIS method's consumers is under
+   * OPTIONAL below.
    *
    * **Entries, not verdicts.** Each value is the effective `allow*` +
    * super-user entry, NOT a per-verb boolean: the fold from entry to verdict

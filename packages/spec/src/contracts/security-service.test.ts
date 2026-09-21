@@ -345,9 +345,9 @@ describe('Security Service Contract', () => {
         // A wildcard "Modify All Data" grant, carried under its own key…
         '*': { modifyAllRecords: true },
         // …and folded into the named entries, as `/auth/me/permissions` serves
-        // them: `organization_admin` denies the write, the super-user bypass
-        // restores it, and the map states the ENFORCED answer, not the declared
-        // one (ADR-0124 D4).
+        // them: `organization_admin` does not grant the write, the super-user
+        // bypass supplies it, and the map states the ENFORCED answer, not the
+        // declared one (ADR-0124 D4).
         sys_user: { allowRead: true, allowEdit: true, modifyAllRecords: true },
         deal: { allowRead: true },
       }),
