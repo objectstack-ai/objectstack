@@ -640,7 +640,7 @@ function ledgerFaultFindings(faults: ReadonlyMap<string, LedgerFault>): Liveness
 
 /**
  * ── Walk seam (#19268 / #19276). Package-internal: NOT part of the published
- *    surface, the same posture as the #10262 seam below `getNested` — exported
+ *    surface, the same posture as the test seam below `getNested` — exported
  *    from the MODULE only. `src/index.ts` re-exports neither this nor
  *    `resolveLivenessDir`, and this package's `exports` map publishes exactly
  *    two subpaths (`.` → `dist/index.js`, `./runtime` → `dist/runtime.js`, both
@@ -662,8 +662,8 @@ function ledgerFaultFindings(faults: ReadonlyMap<string, LedgerFault>): Liveness
  *     continue` guard #11385 was filed for became unreachable THROUGH THE
  *     PUBLIC FUNCTION — with nothing to re-subject it to, because the field
  *     walk reads `field.json` and nothing else. That is the third time a
- *     correct ledger flip deleted this file's coverage (#7079, the #10262
- *     block above, now this), so the cure is that block's: give the walk a
+ *     correct ledger flip deleted this file's coverage (#7079, the array
+ *     fan-out seam above, now this), so the cure is that seam's: give the walk a
  *     subject no verdict can move. `checkItemAgainstWarnMap` cannot be that
  *     subject here — it takes one ITEM, and what #11385 guards is the walk
  *     that finds the items.
@@ -674,7 +674,7 @@ function ledgerFaultFindings(faults: ReadonlyMap<string, LedgerFault>): Liveness
  *
  * Both are driven the same way: copy the shipped ledger directory, change ONE
  * file in the copy, run the real rule against it. The cost is honest and
- * bounded, exactly as for the #10262 block: assertions made through this seam
+ * bounded, exactly as for the array fan-out seam above: assertions made through it
  * say nothing about what the SHIPPED ledgers classify — that stays the job of
  * every ledger-driven assertion in the test file.
  */

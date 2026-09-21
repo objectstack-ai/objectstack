@@ -1376,7 +1376,7 @@ describe('authorWarnedProperties', () => {
 //
 // Both blocks below drive the REAL rule against a COPY of the shipped ledger
 // directory with one file changed. That is deliberately the same trade the
-// #10262 block above makes and states: assertions made through this seam say
+// array fan-out block above makes and states: assertions made through this seam say
 // nothing about what the shipped ledgers classify — every other block in this
 // file is still a contract test against the real ones — and in exchange no
 // future ledger flip can empty them. The subject is the walker and the loader,
@@ -1412,7 +1412,7 @@ const writeLedger = (dir: string, type: string, body: unknown) =>
 
 /**
  * A `field.json` whose only row is synthetic. `status: 'dead'` is explicit for
- * the same reason the #10262 block says it is: `describe()` throws on a status
+ * the same reason the array fan-out block above says it is: `describe()` throws on a status
  * it does not recognise, and this fixture asserts nothing about verdicts.
  */
 const SYNTHETIC_FIELD_LEDGER = {
