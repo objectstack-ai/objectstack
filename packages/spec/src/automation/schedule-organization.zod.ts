@@ -84,12 +84,15 @@ import { z } from 'zod';
  * ⚠️ With ONE stated exception, so the sentence above is not read as a promise
  * it cannot keep. The two halves ask different questions and are answered by
  * different faces of the shared resolver: the history row is STAMPED (`who is
- * this row about` — `tenancy.organizationField` wins there, by the #8778 /
+ * this row about` — the platform stamp column wins there, by the #8778 /
  * cloud#1395 ruling), while the run's acting organization is a WALL reading
- * (`what is this row scoped by`, which never consults that key). They give the
- * same answer on every object where the two coincide — every ordinary object,
- * because a declared stamp column is what makes them differ and one shipped
- * object declares one (`sys_api_key`, deliberately unwalled, #8287). Sweeping
+ * (`what is this row scoped by`, which never consults that column). They give
+ * the same answer on every object where the two coincide — every ordinary
+ * object, because a stamp column is what makes them differ and exactly one
+ * shipped object has one (`sys_api_key`, deliberately unwalled, #8287; carried
+ * by `PLATFORM_STAMP_ORGANIZATION_COLUMNS` in `@objectstack/metadata-core`
+ * since the authorable `tenancy.organizationField` key was retired at protocol
+ * 18, #19054). Sweeping
  * THAT object under `group` stamps the history row from its stamp column while
  * the run itself acts as nothing and its inbox writes are refused. That is the
  * correct pair of answers rather than a residue of the old disagreement — a row
