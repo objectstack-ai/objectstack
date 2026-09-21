@@ -7,7 +7,7 @@
 // `api/package-api.zod.ts`.
 //
 // `GET /api/v1/packages` declared a window it has never applied. The serving
-// door filters on `status` / `type` and returns every remaining row, so a
+// door filters on `status` / `type` / `enabled` and returns every remaining row, so a
 // caller asking for one row was handed the whole table together with a
 // `hasMore: false` that agreed with it — the silent-widening half of the
 // ingress rule that names this exact parameter as the one whose drop is worst.
