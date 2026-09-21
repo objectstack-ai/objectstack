@@ -405,12 +405,21 @@ function reportOptionalLoadFailure(ctx: PluginContext, err: unknown, spec: Optio
  * | Malformation | Refuses in | Surfaces as |
  * |---|---|---|
  * | An app payload with no `manifest.id` / `manifest.name` | `new AppPlugin(stack)` (§3) — a bare `Error`, no ADR-0112 `code`/`status` | {@link reportOptionalLoadFailure}'s failed arm |
- * | A `packages[]` entry that is not a package entry (ADR-0130 D4) | `AppPlugin.init()` — `INVALID_ARTIFACT_PACKAGE_ENTRY` / `422` | the child-`init()` loop's `error` line |
+ * | A `packages[]` entry that is not a package entry (ADR-0130 D4) | `AppPlugin.init()`'s LAST statement — the `manifest` service's `register()`, which calls `resolveArtifactPackageOrder` unguarded — `INVALID_ARTIFACT_PACKAGE_ENTRY` / `422` | the child-`init()` loop's `error` line |
  *
  * ⛔ Do not read `new AppPlugin(stack)` as the stack's parse door. It reads
- * `manifest.id` / `manifest.name` and nothing else; `collections` is a lazy
- * getter first touched in `init()`, so a malformed `packages[]` passes the
- * constructor untouched and refuses one branch later.
+ * `manifest.id` / `manifest.name` and nothing else, so a malformed
+ * `packages[]` passes the constructor untouched and is refused one branch
+ * later: `AppPlugin.init()`'s LAST statement hands the bundle to the
+ * `manifest` service — registered by `ObjectQLPlugin.init` — whose
+ * `register()` calls `resolveArtifactPackageOrder` unguarded, and the
+ * child-`init()` loop below degrades that refusal to an `error` line.
+ *
+ * ⛔ Nor is the lazy `collections` getter that door. Measured on this tree,
+ * it is not read during `AppPlugin.init()` at all — its first read is in
+ * `AppPlugin.start()`, where it reaches the SAME refusal on the same bytes.
+ * The falsifier: replace the `manifest` service's `register()` with a no-op
+ * and the same malformed-`packages[]` `init()` resolves clean.
  *
  * §3b's i18n detector is the reference text for the diagnostic this posture
  * wants: it reaches the SAME ADR-0130 D4 refusal and names the metadata
@@ -551,9 +560,18 @@ export class DevPlugin implements Plugin {
         this.childPlugins.push(appPlugin);
         ctx.logger.info('  ✔ App metadata loaded from stack definition');
       } catch (err) {
-        // `new AppPlugin(stack)` parses the stack definition, so a malformed
-        // stack throws HERE — a construction failure with a real diagnosis,
-        // previously reported as an absent @objectstack/runtime.
+        // [#15292] `new AppPlugin(stack)` reads the envelope's IDENTITY —
+        // `manifest.id` / `manifest.name` — and nothing else, so what is
+        // refused HERE is an app payload that never says which app it is: a
+        // bare `Error` carrying no ADR-0112 `code`/`status`, previously
+        // reported as an absent @objectstack/runtime.
+        //
+        // ⛔ This is NOT the stack's parse door. A malformed `packages[]`
+        // (ADR-0130 D4) passes this constructor untouched and is refused one
+        // branch later, from `AppPlugin.init()`'s last statement — the
+        // `manifest` service's `register()`, which calls
+        // `resolveArtifactPackageOrder` unguarded — where the child-`init()`
+        // loop degrades it to an `error` line. See the class docblock.
         reportOptionalLoadFailure(ctx, err, {
           packages: ['@objectstack/runtime'],
           absent: '  ✘ @objectstack/runtime not installed — skipping app metadata',
@@ -589,8 +607,11 @@ export class DevPlugin implements Plugin {
         // so an artifact the ADR-0130 D4 gate refuses — a package body still
         // carrying authoring-time glob `objects`, for instance, which
         // `ArtifactPackageSchema` rejects by design — arrives here on the
-        // ordinary path. The inversion: twenty lines above, `new AppPlugin(...)`
-        // parses the SAME object and its refusal is degraded to a log line, so
+        // ordinary path. The inversion: the app-metadata branch above reaches
+        // the SAME parse of the SAME object — `AppPlugin.init()`'s last
+        // statement hands the bundle to the `manifest` service, whose
+        // `register()` calls `resolveArtifactPackageOrder` — and the
+        // child-`init()` loop degrades that refusal to a log line, so
         // refusing here would make "should I register a translation service?"
         // a harder gate than "should I register this app's metadata at all?".
         // A project like that boots today; it must keep booting.

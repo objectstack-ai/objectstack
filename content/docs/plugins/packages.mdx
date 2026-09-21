@@ -368,8 +368,10 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 #### Malformed metadata: dev boot tolerates and reports
 
-**`os dev` keeps booting on a stack the platform would reject; `os validate`, build
-and publish refuse it.** The dev server skips only the part it could not read, boots
+**`os dev` keeps booting on a stack the platform would reject; build and publish
+refuse it, and `os validate` reports it — as a failure for anything the stack schema
+refuses, and as an advisory that `--strict` promotes to one for the rest.** The dev
+server skips only the part it could not read, boots
 the rest, and prints an `error` line naming what was malformed and what was skipped —
 the shape every mainstream dev server takes, where the error overlay stays on screen
 while the server keeps serving.
@@ -391,9 +393,17 @@ metadata it names.
   Two different malformations reach this through two different branches, and they are
   exact complements — each is invisible to the other, so a clean boot past one is no
   evidence about the other. An app payload with no `manifest.id` / `manifest.name` is
-  refused as the app metadata is constructed; a `packages[]` entry that is not a
-  package entry (ADR-0130 D4) is refused later, when that app's own `init()` reads the
-  package list, and reports as `INVALID_ARTIFACT_PACKAGE_ENTRY` (422).
+  refused as the app metadata is constructed. A `packages[]` entry that is not a
+  package entry (ADR-0130 D4) walks past that construction untouched and is refused
+  one step later, when the app's own `init()` hands the stack to the kernel's
+  `manifest` service and its package list is parsed; it reports as
+  `INVALID_ARTIFACT_PACKAGE_ENTRY` (422) on the `error` line naming the app plugin.
+
+  The two differ at the `os validate` door as well. The malformed `packages[]` fails
+  the stack schema, so `os validate` exits 1 on it. The missing `manifest.id` parses
+  green and comes back as the advisory *"Missing manifest.id — required for
+  deployment"*, which exits 0 unless you pass `--strict`. Use `os validate --strict`
+  if you want that half to fail too.
 </Callout>
 
 ### @objectstack/plugin-approvals

@@ -11,16 +11,27 @@
 //
 // ── Why the division needs a pin of its own ────────────────────────────────
 // Two DIFFERENT malformations arrive at this plugin, and the file's own
-// comment at the `new AppPlugin(stack)` branch reads as though one branch
-// caught both ("a malformed stack throws HERE"). It does not. `AppPlugin`'s
-// constructor reads `manifest.id` / `manifest.name` and nothing else;
-// `collections` is a lazy getter first touched in `init()`, so a malformed
-// `packages[]` walks past the constructor and refuses one branch later, inside
-// the child-`init()` loop. The two are exact COMPLEMENTS — each fires in one
-// branch and is invisible to the other — which is why a clean boot past one
-// says nothing about the other, and why the healthy control below is not
-// optional: without it, two instruments that both simply always threw would
-// produce the same green.
+// comment at the `new AppPlugin(stack)` branch used to read as though one
+// branch caught both ("a malformed stack throws HERE"). It does not.
+// `AppPlugin`'s constructor reads `manifest.id` / `manifest.name` and nothing
+// else, so a malformed `packages[]` walks past it and is refused one branch
+// later: `AppPlugin.init()`'s LAST statement hands the bundle to the kernel's
+// `manifest` service, whose `register()` calls `resolveArtifactPackageOrder`
+// unguarded, and DevPlugin's child-`init()` loop degrades that refusal to an
+// `error` line.
+//
+// ⛔ The lazy `collections` getter is NOT on that path. It is not read during
+// `AppPlugin.init()` at all — its first read is in `AppPlugin.start()`, where
+// it reaches the same refusal on the same bytes. The third case below is the
+// falsifier for the superseded wording: with the `manifest` service's
+// `register()` replaced by a no-op, the same malformed-`packages[]` `init()`
+// resolves clean.
+//
+// The two malformations are exact COMPLEMENTS — each fires in one branch and
+// is invisible to the other — which is why a clean boot past one says nothing
+// about the other, and why the healthy control below is not optional: without
+// it, two instruments that both simply always threw would produce the same
+// green.
 
 import { describe, it, expect } from 'vitest';
 import { AppPlugin } from '@objectstack/runtime';
@@ -74,6 +85,35 @@ function raised(fn: () => unknown): { code?: string; status?: number; message: s
   }
 }
 
+/** {@link raised}, for an awaited call. */
+async function raisedAsync(
+  fn: () => Promise<unknown>,
+): Promise<{ code?: string; status?: number; message: string } | undefined> {
+  try { await fn(); return undefined; } catch (e) {
+    const err = e as { code?: string; status?: number; message?: string };
+    return { code: err?.code, status: err?.status, message: String(err?.message ?? e) };
+  }
+}
+
+/**
+ * A kernel context carrying exactly one service: `manifest`. `register` is the
+ * injection point — the real parse, or a no-op — which is what makes the
+ * falsifier below a measurement rather than a restatement.
+ */
+function appCtx(register: (artifact: unknown) => void) {
+  const noop = () => {};
+  return {
+    logger: { info: noop, debug: noop, warn: noop, error: noop },
+    getService: (n: string) => {
+      if (n === 'manifest') return { register };
+      throw new Error(`service '${n}' is not registered`);
+    },
+    getServices: () => new Map(),
+    registerService: noop,
+    hook: noop, trigger: noop, getKernel: () => undefined,
+  };
+}
+
 describe('#15292 — DevPlugin tolerates a malformed stack and reports it', () => {
   it('boots past a metadata malformation instead of refusing, and is not silent about it', async () => {
     const { ctx, lines } = mockCtx();
@@ -104,8 +144,9 @@ describe('#15292 — DevPlugin tolerates a malformed stack and reports it', () =
     const ctorMalformedPkgs = raised(() => new AppPlugin(MALFORMED_PACKAGES as never));
     const ctorHealthy = raised(() => new AppPlugin(HEALTHY as never));
 
-    // Branch 2 — the package-list parse, first reached from `AppPlugin.init()`
-    // and therefore caught by DevPlugin's child-`init()` loop, not by §3.
+    // Branch 2 — the package-list parse. On a real boot it is reached from
+    // `AppPlugin.init()`'s manifest registration (pinned below) and therefore
+    // caught by DevPlugin's child-`init()` loop, not by §3.
     const parseMissingId = raised(() => resolveArtifactPackageOrder(MISSING_IDENTITY as never));
     const parseMalformedPkgs = raised(() => resolveArtifactPackageOrder(MALFORMED_PACKAGES as never));
     const parseHealthy = raised(() => resolveArtifactPackageOrder(HEALTHY as never));
@@ -131,5 +172,66 @@ describe('#15292 — DevPlugin tolerates a malformed stack and reports it', () =
     // here trips both branches, so neither is a second opinion on the other.
     expect(ctorMissingId !== undefined && parseMissingId !== undefined).toBe(false);
     expect(ctorMalformedPkgs !== undefined && parseMalformedPkgs !== undefined).toBe(false);
+  }, 60_000);
+
+  it('the `packages[]` refusal surfaces from `AppPlugin.init()`\'s manifest registration, not from `collections`', async () => {
+    // What the real `manifest` service's `register()` does first, and
+    // unguarded: `ObjectQLPlugin.init` registers exactly this parse.
+    const realRegister = (artifact: unknown) => { resolveArtifactPackageOrder(artifact); };
+
+    // The measured path. `AppPlugin.init()`'s LAST statement is
+    // `getService('manifest').register(payload)`, so the ADR-0112 refusal
+    // arrives from there — with a code and a status, unlike the constructor's
+    // bare `Error`.
+    const viaManifest = await raisedAsync(
+      () => new AppPlugin(MALFORMED_PACKAGES as never).init(appCtx(realRegister) as never),
+    );
+    expect(viaManifest?.code).toBe('INVALID_ARTIFACT_PACKAGE_ENTRY');
+    expect(viaManifest?.status).toBe(422);
+
+    // THE FALSIFIER for "a lazy getter first touched in `init()`". Same bundle,
+    // same `init()`, `register()` replaced by a no-op: nothing else `init()`
+    // runs — the `collections` getter included — touches `packages[]`, so this
+    // resolves clean. Were `collections` read in `init()`, this row would throw.
+    expect(await raisedAsync(
+      () => new AppPlugin(MALFORMED_PACKAGES as never).init(appCtx(() => {}) as never),
+    )).toBeUndefined();
+
+    // THE LIT CONTROL for the first row: the real `register()` is not an
+    // instrument that simply always throws.
+    expect(await raisedAsync(
+      () => new AppPlugin(HEALTHY as never).init(appCtx(realRegister) as never),
+    )).toBeUndefined();
+  }, 60_000);
+
+  it('a whole DevPlugin boot tolerates a malformed `packages[]` and reports it on the child-`init()` loop\'s error line', async () => {
+    // The end-to-end shape the docblock and the docs page claim, on the branch
+    // §3's catch never sees. `objectql` is ON here — without it there is no
+    // `manifest` service to register into, and the refusal under test cannot be
+    // reached at all.
+    const boot = async (stack: unknown) => {
+      const { ctx, lines } = mockCtx();
+      const plugin = new DevPlugin({
+        stack: stack as never,
+        services: { ...ONLY_APP_METADATA, objectql: true, driver: true },
+        seedAdminUser: false,
+      });
+      await expect(plugin.init(ctx)).resolves.toBeUndefined();  // TOLERATES
+      return lines;
+    };
+
+    const degraded = await boot(MALFORMED_PACKAGES);
+    // The constructor ACCEPTED it — §3 logged its success line — which is the
+    // whole point: this malformation is invisible to that branch.
+    expect(degraded.some((l) => l.text.includes('App metadata loaded from stack definition'))).toBe(true);
+    // REPORTS — on the child-`init()` loop's error line, carrying the refusal
+    // verbatim. The refusal is asserted; the loop's own phrasing is not.
+    const errors = degraded.filter((l) => l.level === 'error');
+    expect(errors.some((l) => l.text.includes('is not a package entry'))).toBe(true);
+
+    // THE LIT CONTROL. A boot that skipped something is never byte-identical to
+    // a healthy one — so the healthy stack produces no error line at all.
+    const healthy = await boot(HEALTHY);
+    expect(healthy.filter((l) => l.level === 'error')).toEqual([]);
   }, 60_000);
 });
