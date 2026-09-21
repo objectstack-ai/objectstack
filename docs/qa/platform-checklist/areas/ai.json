@@ -669,6 +669,101 @@
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, cross-angle hit 1+4): the console-side AI gating had no coverage — the catalog-signal design (useAiSurfaceEnabled) hides FAB/dock/⌘⇧I/header/Home affordances and no-flash-redirects /ai on an agent-less boot, while SystemHubPage's 'AI Approvals' card is built ungated and its page polls the dead /ai/pending-actions endpoint every 5s (501) rendering a fake empty queue beside the error alert. Authored as a NEW browser sibling of ai.open-edition-honest-degradation (which keeps the API half) rather than extending it, so neither surface double-covers the other; the two K2 defect clauses are expected-fail probes, the defect row itself is the sweep's FOLLOW-UPS entry", "ref": "#sweep-2026-08-30" }
       ]
+    },
+    {
+      "id": "ai.mcp-oauth-private-host-transport",
+      "title": "the MCP OAuth transport rule is judged on the DEPLOYMENT's own host: a private / link-local plain-HTTP deployment serves the OAuth track and logs the unencrypted-transport warning; a public plain-HTTP one is still refused, fail-closed",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "THREE boots of the same build, differing only in the deployment base URL: (a) a PRIVATE address the host actually holds — a LAN address under `os dev`, e.g. http://192.168.x.x:PORT or http://10.x.x.x:PORT; (b) a PUBLIC host spelling — http://example.com or an http:// public IP literal, which needs no reachability because every clause here is about what the deployment ADVERTISES; (c) loopback (http://localhost:PORT), the unchanged control",
+          "the MCP HTTP surface at its default (on — served unless OS_MCP_SERVER_ENABLED=false) and the embedded AS at its default (follows the MCP surface — packages/plugins/plugin-auth/src/auth-manager.ts#resolveOidcProviderEnabled)",
+          "the boot log of each boot, captured from the first line — the transport warning is emitted ONCE at discovery-route mount and is not repeated per request",
+          "a second machine (or container) on the same private network for the (a) boot, if the run also drives a real MCP client end to end"
+        ]
+      },
+      "variants": [
+        "IPv4 private: 10.0.0.0/8 · 172.16.0.0/12 · 192.168.0.0/16 — and the RFC 1918 edges 172.15.x / 172.32.x, which are PUBLIC space",
+        "link-local: 169.254.0.0/16 · fe80::/10",
+        "IPv6 unique-local fc00::/7 — and fec0::/10 site-local, deprecated by RFC 3879 and OUTSIDE it",
+        "a non-IP intranet hostname (crm.corp, host.docker.internal) — a name, not an address: refused over plain HTTP by the pinned reading"
+      ],
+      "steps": [
+        "boot (a) on a private address over plain http; capture the boot log and record whether the unencrypted-transport warning 「OAuth 未加密:仅限可信内网」 appears, how many times, and whether it names the issuer URL",
+        "on boot (a), GET /.well-known/oauth-protected-resource and its path-inserted variant /.well-known/oauth-protected-resource/api/v1/mcp; record status and body",
+        "on boot (a), POST /api/v1/mcp with NO credentials; record the 401 and its WWW-Authenticate header, including whether a resource_metadata pointer is present",
+        "if a second machine is available, drive a real MCP client from it against boot (a) over http:// and record whether the client completes the OAuth flow, refuses the scheme up front, or fails elsewhere — RECORD WHICH, because a client-side scheme refusal changes what this compatibility is worth",
+        "boot (b) on a PUBLIC host spelling over plain http; capture the boot log and GET both protected-resource paths; record status and body",
+        "boot (c) on loopback; capture the boot log and the same two GETs",
+        "re-boot (a) with an https base URL (a self-signed terminator is enough — no client needs to trust it, only the deployment's own base URL has to be https); capture the boot log and record the ABSENCE of the warning"
+      ],
+      "acceptance": [
+        {
+          "clause": "boot (a) — private / link-local over plain HTTP — serves the OAuth track: /.well-known/oauth-protected-resource answers 200 with RFC 9728 metadata whose `resource` is this deployment's own <origin>/api/v1/mcp, and the anonymous /api/v1/mcp 401 carries a WWW-Authenticate resource_metadata pointer at it",
+          "oracle": "api",
+          "verify": "both discovery responses plus the 401 headers, against packages/plugins/plugin-auth/src/auth-manager.ts#getMcpProtectedResourceMetadata; the advertised resource must be the boot's OWN origin, never localhost",
+          "evidence": "the two metadata responses and the 401 head"
+        },
+        {
+          "clause": "boot (b) — a PUBLIC host over plain HTTP — is still refused, fail-closed and UNCHANGED: both protected-resource paths 404, nothing OAuth is advertised, and the boot log says the OAuth track is not live and why. ⛔ This clause is the security floor of the item: a 200 here means plaintext OAuth was opened to the public internet, which is worse than the refusal the rule relaxed",
+          "oracle": "api",
+          "verify": "404 on both paths + the mount-time warning naming the transport rule (auth-plugin.ts, the `MCP server is enabled but the OAuth track is NOT live` branch); confirm the unencrypted-transport warning of the clause below is NOT what was read instead — the two lines are different sentences",
+          "evidence": "the two 404s and the boot-log line"
+        },
+        {
+          "clause": "the unencrypted-transport warning carries the ruled wording 「OAuth 未加密:仅限可信内网」 and is emitted exactly once, at mount, on every plain-HTTP boot whose origin the transport rule ACCEPTS (a and c); NOT on the https re-boot, and NOT on the public plain-HTTP boot (b), whose OAuth track is dark — there the line would assert a posture that deployment does not have. It names the issuer URL",
+          "oracle": "log",
+          "verify": "grep the captured boot logs for the ruled wording 「OAuth 未加密:仅限可信内网」, which the acceptance requires the startup log to CARRY (the English clause `OAuth is served UNENCRYPTED` follows it on the same line and greps to the same count): exactly 1 occurrence on (a), exactly 1 on (c), 0 on (b), 0 on the https re-boot; the line names the issuer, the origin followed by /api/v1/auth",
+          "evidence": "the matching log lines with their counts, and the two empty results (the public boot and the https re-boot)"
+        },
+        {
+          "clause": "loopback (c) is unchanged — the OAuth track is live exactly as it was before the rule widened, with the same advertised metadata",
+          "oracle": "api",
+          "verify": "boot (c)'s two discovery responses match boot (a)'s shape with the loopback origin substituted",
+          "evidence": "the loopback metadata response"
+        },
+        {
+          "clause": "no configuration key and no environment variable can move any of the above: re-running boot (b) with OS_ALLOW_INSECURE_OAUTH_HTTP=true (the escape hatch the ruling refused) changes nothing — the public plain-HTTP boot is still refused",
+          "oracle": "api",
+          "verify": "boot (b) re-run with that variable exported answers the identical 404s; the variable is read nowhere in the tree (git grep it)",
+          "evidence": "the re-run 404s and the empty grep"
+        }
+      ],
+      "negative": [
+        "reading a 200 on boot (b) as 'the feature works' is the inverted verdict this item exists to prevent — the public arm answering anything but a refusal is a FAIL, not a pass with a wider surface",
+        "scoring boot (a) from a localhost request on the server itself: the request would be loopback, which was already eligible before this rule, so the private-address arm was never exercised — drive it from the private address, or at minimum assert the ADVERTISED origin is the private one",
+        "reading the mount-time 'OAuth track is NOT live' line as the unencrypted-transport warning (or vice versa): they are different sentences with opposite meanings, and a run that conflates them scores boot (b) as if it had served OAuth. Boot (b) carries the first and never the second",
+        "treating an intranet HOSTNAME boot (http://crm.corp) as the private-address case — it is a name, not an address, and the pinned reading refuses it; a run that uses one has tested the hostname reading, not this clause"
+      ],
+      "traps": [
+        "cache-staleness",
+        "dispatcher-vs-hono-route",
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-auth/src/auth-manager.mcp-oauth.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/auth-manager.ts#isOAuthEligibleBaseUrl (the transport rule, its ruled allow-list and the pinned hostname reading)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts#isMcpOAuthEnabled (AS enabled AND transport rule satisfied)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts (the discovery mount: the unencrypted-transport warning and the 'OAuth track is NOT live' branch)",
+        "packages/plugins/plugin-auth/src/mcp-oauth-plaintext-notice.test.ts (the warning's fire-once / not-under-TLS pins)",
+        "docs/qa/platform-checklist/areas/ai.json — item `ai.mcp-http-surface` (the surface this item shares — that one asserts the endpoint's gates, this one asserts WHICH DEPLOYMENTS get the OAuth track at all)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-21",
+          "change": "initial — authored with the card that widened the transport rule from loopback-only to loopback-or-private, under the maintainer ruling of 2026-09-21. No checklist item asserted MCP OAuth from a non-loopback host at all, so neither the arm that opened nor the public arm that must stay closed had a standing run",
+          "ref": "claude/issue-19489-oauth-private-host-transport-rule"
+        }
+      ]
     }
   ]
 }
