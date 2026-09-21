@@ -189,13 +189,18 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // and cancels, and a write's own collection already holds exactly one member
   // — its own item — so `positions[0]` IS this write and name-keying it would
   // say nothing the index does not (the `pages` reading in
-  // `runtime-gate.derived-name-keys.test.ts`). Twelve of the sixteen mappings
+  // `runtime-gate.derived-name-keys.test.ts`). Eleven of the fifteen mappings
   // above name a non-context key for the same reason — counted off this table,
   // where only `objects`, `permissions`, `books` and `datasets` are context
   // collections. (This sentence read «eight of the twelve» when #19370 wrote
-  // it; #19474's four rows landed in the same merge, so the count is restated
-  // against the merged table rather than left describing a table nobody has.
-  // The reasoning it carries is unchanged.) ⛔ Do not add a context row
+  // it, which was true of the table it was written against; #19474's three
+  // rows landed in the same merge, so the count is restated against the merged
+  // table rather than left describing a table nobody has. It was briefly
+  // restated as «twelve of the sixteen», counted while #19474 still carried a
+  // fourth row for `skill` — that row was withdrawn and the count with it. The
+  // reasoning the sentence carries is unchanged throughout, and the figure is
+  // arithmetic over the rows above: ⛔ recount them rather than adjusting it.)
+  // ⛔ Do not add a context row
   // "for symmetry": `RuntimeStackContext`'s set is bounded by what the wired
   // rules RESOLVE (measured, not projected), and every member of it costs the
   // publish door one indexed `sys_metadata` read per write.
