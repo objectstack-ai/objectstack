@@ -85,6 +85,17 @@
  * skipping a card on an unread signal and closing a card on an unread signal
  * are both verdicts taken from nothing.
  *
+ * ⛔ And ONE page is not the timeline. Measured on this tree while this script
+ * was being written: of the 90 cards in the first batch it was built for, one
+ * (#13799) carries more than 100 timeline events, so a single
+ * `?per_page=100` read returns a truncated history at HTTP 200 with nothing
+ * saying so — and a cross-reference on page 2 reads exactly like no
+ * cross-reference at all. The walk below therefore pages by NUMBER until a
+ * short page (the spelling `references/rest-channel.md` prescribes, cursor
+ * exhaustion having been measured to stop early on this platform), and a card
+ * whose timeline is still not exhausted at `TIMELINE_PAGE_CAP` pages STOPS the
+ * run rather than deciding on what it managed to read.
+ *
  * ## The three writes, in order, and the one state that must never be left
  *
  * Per actionable card, in this order:
@@ -162,6 +173,13 @@ export const RETRIAGE_LABEL = 'pm:retriage';
 export const STEPS = Object.freeze(['comment', 'label', 'close']);
 
 const DEFAULT_EXPECT_STATE = 'pm:queue';
+
+/**
+ * How many 100-event timeline pages one card may take before the walk refuses.
+ * ⛔ Not a paging convenience: it is the point at which "I have not finished
+ * reading" must stop being reported as "I read it all and found nothing".
+ */
+export const TIMELINE_PAGE_CAP = 30;
 
 const render = (values) => (values.length ? values.map((v) => `\`${v}\``).join(', ') : 'none');
 
@@ -364,6 +382,33 @@ export function openPrReferences(timeline) {
 }
 
 /**
+ * Every timeline event on a card, walked by PAGE NUMBER until a short page.
+ *
+ * ⛔ The completeness of this read is the whole value of the open-PR skip: a
+ * truncated timeline answers "no open PR references it" for a card that has
+ * one, at HTTP 200, with no header or field distinguishing it from a complete
+ * read. So the walk has exactly three outcomes and no fourth — exhausted,
+ * refused by the transport, or NOT FINISHED — and the third is reported rather
+ * than rounded down to the second page it did manage to read.
+ *
+ * ⛔ Page NUMBERS, not the `Link: rel="next"` cursor: cursor exhaustion has
+ * been measured on this platform to stop short of the real total, and this
+ * repo's channel table prescribes the page walk for that reason.
+ */
+export async function readTimeline(call, base, { pageSize = 100, cap = TIMELINE_PAGE_CAP } = {}) {
+  const events = [];
+  for (let page = 1; page <= cap; page++) {
+    const res = await call(`${base}/timeline?per_page=${pageSize}&page=${page}`, {});
+    const verdict = classifyHttp({ status: res.status, op: 'card-read', rateRemaining: res.rateRemaining });
+    if (verdict !== 'ok') return { ok: false, reason: 'transport', verdict, res, pages: page };
+    const rows = Array.isArray(res.json) ? res.json : [];
+    events.push(...rows);
+    if (rows.length < pageSize) return { ok: true, events, pages: page };
+  }
+  return { ok: false, reason: 'not-exhausted', verdict: 'prerequisite', events, pages: cap };
+}
+
+/**
  * Why this card is left alone, or `null` when it is actionable. The order is
  * the order the order was written in, and the FIRST reason is the one reported:
  * a closed card with an assignee is reported as closed, which is what a reader
@@ -549,18 +594,22 @@ export async function runCloseCards(options, deps = {}) {
     // requests rather than 180.
     let why = skipReason(card, { expectState, openPrs: [] });
     if (!why && skipPrReferenced) {
-      const timeline = await call(`${base}/timeline?per_page=100`, {});
-      const timelineVerdict = classifyHttp({ status: timeline.status, op: 'card-read', rateRemaining: timeline.rateRemaining });
-      if (timelineVerdict !== 'ok') {
-        record(`#${issue} COULD NOT READ THE TIMELINE — ${timeline.call} -> HTTP ${timeline.status}${timeline.detail ? ` (${timeline.detail})` : ''}`);
+      const timeline = await readTimeline(call, base);
+      if (!timeline.ok) {
+        record(
+          timeline.reason === 'not-exhausted'
+            ? `#${issue} TIMELINE NOT EXHAUSTED — still full pages at the ${timeline.pages}-page cap (${timeline.events.length} events read).`
+            : `#${issue} COULD NOT READ THE TIMELINE — ${timeline.res.call} -> HTTP ${timeline.res.status}${timeline.res.detail ? ` (${timeline.res.detail})` : ''}`,
+        );
         record(
           '⛔ STOPPING. The open-PR skip is ON, so this card cannot be judged — and closing it on an unread\n' +
-            '  signal is the same act as skipping it on one. Re-run when the route is back, or declare\n' +
-            '  `--no-skip-pr-referenced` if the reading is genuinely not wanted.',
+            '  signal is the same act as skipping it on one. A page of a timeline is not the timeline: a\n' +
+            '  cross-reference on the page nobody read is indistinguishable from none. Re-run when the route\n' +
+            '  is back, or declare `--no-skip-pr-referenced` if the reading is genuinely not wanted.',
         );
-        return result(timelineVerdict === 'refusal' ? EXIT_PLATFORM_REFUSAL : EXIT_PREREQUISITE, { stoppedAt: issue });
+        return result(timeline.verdict === 'refusal' ? EXIT_PLATFORM_REFUSAL : EXIT_PREREQUISITE, { stoppedAt: issue });
       }
-      why = skipReason(card, { expectState, openPrs: openPrReferences(timeline.json) });
+      why = skipReason(card, { expectState, openPrs: openPrReferences(timeline.events) });
     }
 
     if (why) {
@@ -651,13 +700,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the pre-flight: a closing comment no card should receive': 7,
   'the skip matrix: every reason a card is left alone': 14,
   'the open-PR reading: a cross-reference that is a PR, and open': 7,
+  'the timeline walk: one page is not the timeline': 8,
   'the happy path: three writes per card, in order': 10,
   'the half-write refusal: stop at the first card left in a state nobody asked for': 12,
   'the unreadable card: a verdict taken from nothing is not taken': 7,
   'the dry run: a plan that proves it wrote nothing': 7,
   'the sibling tools: driven, never re-implemented': 8,
 });
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -705,7 +755,16 @@ export function fakeApi(initial = {}) {
 
     const card = cards.get(number);
     if (!card) return wrap(404, { message: 'Not Found' });
-    if (kind === 'timeline') return wrap(200, card.timeline ?? []);
+    if (kind === 'timeline') {
+      // Paged for real: a fake that answered the whole timeline to every
+      // request would pass the walk's assertions while the truncation the walk
+      // exists for went untested.
+      const query = new URLSearchParams(path.slice(path.indexOf('?') + 1));
+      const size = Number(query.get('per_page') ?? 100);
+      const page = Number(query.get('page') ?? 1);
+      const all = card.timeline ?? [];
+      return wrap(200, all.slice((page - 1) * size, page * size));
+    }
     if (kind === 'patch') {
       card.state = init.body?.state ?? card.state;
       card.state_reason = init.body?.state_reason ?? card.state_reason;
@@ -833,6 +892,28 @@ export async function selfTest() {
   t('⛔ a malformed event does not throw', openPrReferences([{ event: 'cross-referenced' }, null]), []);
   t('⛔ a non-array timeline reads as no references, never as a crash', openPrReferences(null), []);
   t('several open PRs are all reported', openPrReferences([CROSS_REF(1, 'open'), CROSS_REF(2, 'closed'), CROSS_REF(3, 'open')]), [1, 3]);
+
+  // ── the timeline walk ─────────────────────────────────────────────────────
+  battery('the timeline walk: one page is not the timeline');
+  const BASE = '/repos/objectstack-ai/objectstack/issues/1';
+  const noise = (n) => Array.from({ length: n }, () => ({ event: 'labeled', label: { name: 'tooling' } }));
+  const oneShort = fakeApi({ cards: { 1: { state: 'open', timeline: noise(3) } } });
+  const short = await readTimeline(oneShort.call, BASE, { pageSize: 100 });
+  t('a short first page ends the walk in one request', [short.ok, short.pages], [true, 1]);
+  t('…and returns every event on it', short.events.length, 3);
+  const twoPages = fakeApi({ cards: { 1: { state: 'open', timeline: [...noise(100), CROSS_REF(777, 'open')] } } });
+  const walked = await readTimeline(twoPages.call, BASE, { pageSize: 100 });
+  t('a FULL page is followed by the next one', [walked.ok, walked.pages], [true, 2]);
+  t('…and a cross-reference on page 2 is SEEN — the measured truncation this walk closes', openPrReferences(walked.events), [777]);
+  const dead = fakeApi({ cards: { 1: { state: 'open', timeline: noise(300) } }, hooks: { timeline: [{ status: 200, json: noise(100) }, { status: 502, json: { message: 'Bad gateway' } }] } });
+  const broke = await readTimeline(dead.call, BASE, { pageSize: 100 });
+  t('⛔ a transport failure mid-walk is a refusal, never a short page', [broke.ok, broke.reason], [false, 'transport']);
+  const huge = fakeApi({ cards: { 1: { state: 'open', timeline: noise(50) } } });
+  const capped = await readTimeline(huge.call, BASE, { pageSize: 1, cap: 4 });
+  t('⛔ a timeline still full at the cap is NOT EXHAUSTED, not "nothing found"', [capped.ok, capped.reason], [false, 'not-exhausted']);
+  t('…and it reports how far it got, so the refusal can say so', [capped.pages, capped.events.length], [4, 4]);
+  const buried = await driveOffline({ numbers: [91] }, { cards: { 91: { state: 'open', labels: ['pm:queue'], assignees: [], timeline: [...noise(100), CROSS_REF(778, 'open')] } } });
+  t('a card whose only open-PR reference sits on page 2 is SKIPPED, not closed', buried.res.counts.skipped, 1);
 
   // ── the happy path ────────────────────────────────────────────────────────
   battery('the happy path: three writes per card, in order');
