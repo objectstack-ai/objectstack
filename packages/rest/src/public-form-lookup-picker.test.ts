@@ -634,3 +634,103 @@ describe('#18550 an UNREADABLE `reference` carrier is refused, not reported as a
         expect(findData.mock.calls[0][0].object).toBe('sys_user');
     });
 });
+
+/**
+ * [#19289] A `publicPicker` on a spec-complete `{ type: 'user' }` field must be
+ * ANSWERED — the second of the two CONFIRMED defects of the implicit-target
+ * census, and the LOUD one that graded this card `p1`.
+ *
+ * `IMPLICIT_REFERENCE_TARGETS` (`packages/spec/src/data/field-value.zod.ts`)
+ * declares a `user` field's target "a CONSTANT OF THE TYPE" (`sys_user`) and
+ * metadata authored without `reference` "fully specified, not
+ * under-specified". This read has no type gate at all — it resolves whatever
+ * field the picker names — so a `user` field reaches it, and #18550 pointed it
+ * at `referenceCarrierOf`, which answers what the CARRIER says. The carrier is
+ * absent on such a field, so the route answered
+ * `500 LOOKUP_TARGET_MISSING`: opening a reference picker on a "responsible
+ * person" column returned an error page for metadata the published contract
+ * already calls complete.
+ *
+ * ⛔ This is NOT a re-widening of #12920's narrowing, and the controls below
+ * are what say so rather than the prose: the rejected aliases still resolve
+ * NOTHING, and the alias suite above still passes unchanged. What is deleted
+ * is a mistaken REFUSAL of metadata the contract declares complete — the
+ * target comes from the spec's own constant, never from a second spelling.
+ */
+describe('#19289 a `user` field needs no carrier — the picker answers instead of 500ing', () => {
+    const NO_OBJECT_PICKER = { displayFields: ['name', 'email'], maxResults: 10 };
+    const savedWithoutObject = () => persistedBody(studioForm([{ field: 'owner', publicPicker: NO_OBJECT_PICKER }]));
+    const ownerDefIs = (ownerDef: unknown) => ({ ...leadObject, fields: { ...leadObject.fields, owner: ownerDef } });
+
+    const answerFor = async (ownerDef: unknown) => {
+        const stored = await savedWithoutObject();
+        const { findData, lookup } = routesOver(
+            stored,
+            [{ id: 'usr_1', name: 'Ada', email: 'ada@example.com' }],
+            ownerDefIs(ownerDef),
+        );
+        const res = mockRes();
+        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
+        return { res, findData };
+    };
+
+    it('THE DEFECT: `{ type: "user" }` with no `reference` answers 200 over `sys_user`, not 500', async () => {
+        const { res, findData } = await answerFor({ type: 'user', label: 'Owner' });
+        expect(res.body.code).not.toBe('LOOKUP_TARGET_MISSING');
+        expect(res.statusCode).toBe(200);
+        // ⛔ Not just "no longer 500": the route must query the object the TYPE
+        // names. A 200 over the wrong object is the same defect wearing a
+        // success code.
+        expect(findData).toHaveBeenCalledTimes(1);
+        expect(findData.mock.calls[0][0].object).toBe('sys_user');
+    });
+
+    it('the two legal spellings of one fully-specified field answer identically', async () => {
+        // `reference: 'sys_user'` MATERIALIZES the constant, it does not supply
+        // it, so writing it and omitting it are the same metadata.
+        const implicit = await answerFor({ type: 'user', label: 'Owner' });
+        const explicit = await answerFor({ type: 'user', reference: 'sys_user', label: 'Owner' });
+        expect(implicit.res.statusCode).toBe(explicit.res.statusCode);
+        expect(implicit.findData.mock.calls[0][0].object).toBe(explicit.findData.mock.calls[0][0].object);
+    });
+
+    // ── The boundary: `user` is the ONLY member of `IMPLICIT_REFERENCE_TARGETS`.
+    it.each([
+        ['lookup', 'lookup'],
+        ['master_detail', 'master_detail'],
+    ])('control: a carrier-less `%s` is STILL LOOKUP_TARGET_MISSING — nothing supplies a target for it', async (_l, type) => {
+        const { res, findData } = await answerFor({ type, label: 'Owner' });
+        expect(res.statusCode).toBe(500);
+        expect(res.body.code).toBe('LOOKUP_TARGET_MISSING');
+        expect(findData).not.toHaveBeenCalled();
+    });
+
+    it('control: the #12920 narrowing HOLDS — a `user` field spelling the target `referenceTo` resolves it from the TYPE, never from the alias', async () => {
+        // The discriminating case. `referenceTo: 'zzz_aliased_object'` is a
+        // rejected alias: if it were being folded, `findData` would be asked
+        // for `zzz_aliased_object`. It is asked for `sys_user` — the type's own
+        // constant — so the alias contributed NOTHING.
+        const { res, findData } = await answerFor({ type: 'user', referenceTo: 'zzz_aliased_object', label: 'Owner' });
+        expect(res.statusCode).toBe(200);
+        expect(findData.mock.calls[0][0].object).toBe('sys_user');
+        expect(findData.mock.calls[0][0].object).not.toBe('zzz_aliased_object');
+    });
+
+    it('control: a `lookup` spelling the target `referenceTo` STILL resolves nothing — the alias is still refused', async () => {
+        const { res, findData } = await answerFor({ type: 'lookup', referenceTo: 'zzz_aliased_object', label: 'Owner' });
+        expect(res.statusCode).toBe(500);
+        expect(res.body.code).toBe('LOOKUP_TARGET_MISSING');
+        expect(findData).not.toHaveBeenCalled();
+    });
+
+    it('control: an UNREADABLE carrier on a `user` field still REFUSES — the implicit target is not a fallback that swallows it', async () => {
+        // `referenceTargetOf` reads the carrier through `referenceCarrierOf`
+        // BEFORE it judges the type, so #18550's refusal is untouched: a broken
+        // carrier does not quietly become `sys_user`.
+        const { res, findData } = await answerFor({ type: 'user', reference: { object: 'sys_user' }, label: 'Owner' });
+        expect(res.statusCode).toBe(500);
+        expect(res.body.code).toBe('INTERNAL_ERROR');
+        expect(res.body.code).not.toBe('LOOKUP_TARGET_MISSING');
+        expect(findData).not.toHaveBeenCalled();
+    });
+});

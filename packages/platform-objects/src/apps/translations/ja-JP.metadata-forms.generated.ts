@@ -381,8 +381,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "新規レコードの既定値"
       },
       placeholder: {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
+        label: "プレースホルダー",
+        helpText: "空の入力欄の内側に表示されるヒント文言（値を入力すると消えます）。常時表示のヘルプには inlineHelpText を使用します"
       },
       minLength: {
         label: "最小長",
@@ -393,12 +393,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "最大文字数"
       },
       valueDomain: {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
+        label: "値ドメイン",
+        helpText: "書き込む値が属していなければならない標準：iana_time_zone、iso_4217_currency または iso_3166_alpha2。メンバー以外の値を含む書き込みは拒否されます"
       },
       rows: {
-        label: "Rows",
-        helpText: "Inline editor height in text rows"
+        label: "行数",
+        helpText: "インライン編集欄の高さ（テキストの行数）"
       },
       min: {
         label: "最小値",
@@ -447,8 +447,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "参照先レコード削除時の動作"
       },
       relatedListFilter: {
-        label: "Related List Filter",
-        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
+        label: "関連リストのフィルター",
+        helpText: "親レコードの詳細ページに表示される、この関係の関連リストの既定フィルター — 親レコードとの一致条件と AND で結合され、タブのバッジも同じ集合を数えます"
       },
       expression: {
         label: "式",
@@ -459,24 +459,24 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "ロールアップ集計設定（親子関係用）"
       },
       "summaryOperations.object": {
-        label: "Object",
-        helpText: "Child object to aggregate"
+        label: "オブジェクト",
+        helpText: "集計対象の子オブジェクト"
       },
       "summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "関数",
+        helpText: "集計関数"
       },
       "summaryOperations.field": {
-        label: "Field",
-        helpText: "Child field to aggregate (ignored for count)"
+        label: "フィールド",
+        helpText: "集計対象の子オブジェクトのフィールド（count では無視）"
       },
       "summaryOperations.relationshipField": {
-        label: "Relationship Field",
-        helpText: "Child FK back to this parent (auto-detected when omitted)"
+        label: "関係フィールド",
+        helpText: "この親を指し戻す子側の外部キー（省略時は自動検出）"
       },
       "summaryOperations.filter": {
-        label: "Filter",
-        helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
+        label: "フィルター",
+        helpText: "この述語に一致する子行のみが集計されます（例: status == received）"
       },
       externalId: {
         label: "外部 ID",
