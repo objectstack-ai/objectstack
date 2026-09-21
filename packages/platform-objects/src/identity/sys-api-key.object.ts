@@ -44,14 +44,21 @@ export const SysApiKey = ObjectSchema.create({
     reason: 'Identity table managed by better-auth — see ADR-0010.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
-  // [#8778, #8707 remainder] Stamp-only organization declaration — NOT a wall.
+  // [#19054] The stamp-only organization declaration that used to sit here
+  // (`organizationField: 'active_organization_id'`, #8778 / #8707 remainder) is
+  // GONE from the authorable surface in protocol 18 (ADR-0049 enforce-or-remove;
+  // maintainer ruling 2026-09-18, verbatim and untranslated:
+  // 「organizationField 撤出可授权面 同意你的建议」).
   //
-  // `organizationField` tells the audit writer which column carries the
-  // organization a key row is ABOUT, so history/revocation rows land behind
-  // the wall of the key's own organization instead of the revoker's active
-  // one (#8707's repro). It is read by audit stamping ONLY; no tenant-scoping
-  // path (`applyTenantScope` / `injectTenantOnInsert` /
-  // `computeTenantLayer0Filter`) reads it — pinned by tests beside each.
+  // ⛔ Nothing about this table's behaviour changed, and ⛔ nothing here needs
+  // to replace it. The fact it carried — "platform rows about a `sys_api_key`
+  // row are stamped from `active_organization_id`, not from any wall" — now
+  // lives in `@objectstack/metadata-core`'s
+  // `PLATFORM_STAMP_ORGANIZATION_COLUMNS`, keyed by this object's name, read by
+  // the three sanctioned platform-row writers (audit stamping, the approval-row
+  // writer, the automation-run recorder) and by nothing else. It was authorable
+  // by every application and declared, repo-wide, only here; a fact about one
+  // table we ship is not a knob customers configure.
   //
   // `enabled: false` states explicitly what this table's shape already
   // implies, and is measured behavior-identical to having no `tenancy` block
@@ -66,7 +73,7 @@ export const SysApiKey = ObjectSchema.create({
   // excludes NULL, and every pre-#8287 key vanishes from its own owner's
   // "My Keys" list — the defect #8287 exists to have removed (see the
   // `active_organization_id` field comment below).
-  tenancy: { enabled: false, organizationField: 'active_organization_id' },
+  tenancy: { enabled: false },
   description: 'API keys for programmatic access',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)

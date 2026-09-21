@@ -5211,7 +5211,22 @@ const step18: MigrationStep = {
     + 'dashboard widgets only — `ReportChartSchema` and the inline-data react `<ObjectChart>` '
     + 'tier keep their own axes — and the paired semantic entry carries what the stripped '
     + 'keys were saying, because an authored axis field may name a column the widget never '
-    + 'selected and no walker can move that intent into the dataset.',
+    + 'selected and no walker can move that intent into the dataset. '
+    + 'Finally it retires object `tenancy.organizationField` (#19054, ADR-0049 '
+    + 'enforce-or-remove). The key named the column a PLATFORM ROW is stamped from, as '
+    + 'opposed to the column the object is WALLED by (`tenantField`); on an ordinary object '
+    + 'those are the same column, and the entire protocol declared it exactly once — on '
+    + '`sys_api_key`, a better-auth-managed credential table this platform ships and no '
+    + 'application authors. Its three readers were all platform-row writers, scope-pinned by '
+    + 'name, so an application declaration was inert by construction while still forcing '
+    + 'every future piece of organization logic to ask "what if somebody set this?". The '
+    + 'divergence is NOT retired, only its authorability: it moves to '
+    + '`PLATFORM_STAMP_ORGANIZATION_COLUMNS` in `@objectstack/metadata-core`, keyed by object '
+    + 'name and read by the stamp face alone, so audit stamping, the approval-row writer and '
+    + 'the automation-run recorder keep their behaviour with no authorable input. The '
+    + 'conversion is a lossless delete and there is no semantic residue — an application '
+    + 'whose tenant column genuinely is not `organization_id` declares `tenancy.tenantField`, '
+    + 'which both walls the object and stamps its platform rows.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5244,6 +5259,7 @@ const step18: MigrationStep = {
     'page-assigned-profiles-removed',
     'chart-config-aria-removed',
     'dashboard-widget-chart-config-structure-removed',
+    'object-tenancy-organization-field-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by

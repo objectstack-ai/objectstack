@@ -1932,21 +1932,37 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
       .toEqual({ enabled: false, tenantField: 'workspace_id' });
   });
 
-  it('accepts the stamp-only `organizationField`, with no default materialized (#8778)', () => {
-    // The shipped shape: sys_api_key stays unwalled (`enabled: false`) while
-    // audit rows stamp the organization of the key they describe. The key is
-    // consulted by the sanctioned platform-row writers only — audit stamping
-    // today, plus `plugin-approvals` and the automation-run recorder once
-    // #10101 lands under the cloud#1395 widening of the #8778 scope pin. No
-    // read path reads it either way: read-neutrality is pinned beside each
-    // read path (driver tenant scope, Layer 0, injection plan), not here.
-    expect(
-      TenancyConfigSchema.parse({ enabled: false, organizationField: 'active_organization_id' }),
-    ).toEqual({ enabled: false, organizationField: 'active_organization_id' });
+  it('rejects the retired stamp-only `organizationField` with its prescription (#19054)', () => {
+    // The shape this used to accept, verbatim — the one declaration the whole
+    // protocol ever carried (`sys_api_key`, #8778). The block is `.strict()`,
+    // so the key is REFUSED with the guidance row rather than stripped: a
+    // silent strip would swap one no-op for another, which is the class
+    // ADR-0049 exists to end.
+    const result = TenancyConfigSchema.safeParse({
+      enabled: false,
+      organizationField: 'active_organization_id',
+    });
+    expect(result.success).toBe(false);
+    const message = result.error!.issues.map((i) => i.message).join('\n');
+    expect(message).toContain('`tenancy.organizationField` was removed in @objectstack/spec 18');
+    expect(message).toContain('ADR-0049');
+    // The prescription must say what to do INSTEAD, not only that the key is
+    // gone: delete it, and reach for `tenancy.tenantField` when the object's
+    // tenant column genuinely is not `organization_id`.
+    expect(message).toContain('Delete the key.');
+    expect(message).toContain('`tenancy.tenantField`');
+    expect(message).toContain('os migrate meta --from 17');
+  });
 
-    // Undeclared stays undeclared — same #5315 doctrine as `tenantField`.
-    const result = TenancyConfigSchema.parse({ enabled: true });
+  it('the surviving shape is exactly `enabled` + `tenantField` (#19054)', () => {
+    // The positive half of the retirement: what the credential table declares
+    // now parses, and carries no residue of the removed key.
+    const result = TenancyConfigSchema.parse({ enabled: false });
+    expect(result).toEqual({ enabled: false });
     expect('organizationField' in result).toBe(false);
+
+    expect(TenancyConfigSchema.parse({ enabled: true, tenantField: 'workspace_id' }))
+      .toEqual({ enabled: true, tenantField: 'workspace_id' });
   });
 
   it('rejects the retired `strategy` with a tombstone pointing at the two real modes', () => {

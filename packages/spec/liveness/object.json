@@ -161,12 +161,6 @@
           "status": "live",
           "evidence": "packages/drivers/driver-sql/src/sql-driver.ts",
           "note": "row-level tenant scoping (org-scoping plugin path) reads tenancy.tenantField — audit called it inert; corrected. strategy/crossTenantAccess were REMOVED after spec 15.0 (#2763): zero consumers; tenancy block is now .strict() with tombstone guidance."
-        },
-        "organizationField": {
-          "status": "live",
-          "evidence": "packages/metadata-core/src/record-organization.ts#resolveRecordOrganizationField (reads `tenancy.organizationField` as limb 0 of the precedence, and falls through when the object has no such column)",
-          "note": "STAMP-ONLY by the #8778 maintainer ruling (option A): consulted exclusively by resolveRecordOrganizationField when audit rows are stamped, so a credential table can stay unwalled while its trail follows the record's own organization (sys_api_key.active_organization_id, #8707/#8287). Deliberately read by NO tenant-scoping path; read-neutrality is pinned by tests beside applyTenantScope/injectTenantOnInsert (driver-sql), computeTenantLayer0Filter (plugin-security) and resolveInjectedSystemColumns (spec). 2026-08-25: REPOINTED — the evidence cited plugin-audit/src/audit-writers.ts, which has read the key through `createRecordOrganizationResolver` ever since #10101 promoted the resolver into @objectstack/metadata-core; audit-writers.ts:220 says so in its own re-export comment. The cited file still existed and the citation carried no line, so neither the existence check nor the #11210 line bound could see it. The stamping CALL SITE is audit-writers.ts:863 — kept here in prose rather than as a citation, because a call site that never names the key belongs in `producer`, not in `evidence`. 2026-08-28: RE-ANCHORED (#13003) — the ONLY entry in this batch whose citation was still accurate: `:177-180` still bracket the limb-0 read, so the range was correct and the migration is pure grammar. Worth recording as the control case — it is a 248-line file, and the batch's fourteen rotted siblings were all in files of 700 to 20255 lines.",
-          "verifiedAt": "2026-08-28"
         }
       }
     },

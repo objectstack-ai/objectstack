@@ -22,35 +22,80 @@
  * > SUBJECT record's organization; actor context is the fallback, never the
  * > primary.
  *
- * ⛔ The `tenancy.organizationField` key this resolver reads stays scope-pinned
- * (#8778, widened by name on cloud#1395 — the annotation beside the key in
- * `packages/spec/src/data/object.zod.ts` transcribes the ruling): exactly THREE
- * consumers are sanctioned — audit stamping, the approval-row writer, and the
- * automation-run recorder — and no others. A fourth consumer needs its own
- * maintainer ruling before reading the key, exactly as #8778 required. Sharing
- * the implementation here does not open the key: it closes the excuse for a
- * fourth copy.
+ * ⛔ The stamp-only divergence this resolver reads stays scope-pinned (#8778,
+ * widened by name on cloud#1395): exactly THREE consumers are sanctioned —
+ * audit stamping, the approval-row writer, and the automation-run recorder —
+ * and no others. A fourth consumer needs its own maintainer ruling, exactly as
+ * #8778 required. Sharing the implementation here does not open it: it closes
+ * the excuse for a fourth copy.
  *
- * ⭐ [#18378] This module now answers TWO questions, and only the first reads
- * that key. {@link resolveRecordOrganizationField} is the STAMP answer ("who is
- * this row about"), consumers still the three above;
+ * ⭐ [#19054] The divergence is no longer AUTHORABLE. It used to be declared by
+ * the `tenancy.organizationField` spec key, which every application could write
+ * and which the whole repository declared exactly once — on `sys_api_key`, a
+ * table this platform ships. Protocol 18 retires the key (ADR-0049
+ * enforce-or-remove) and moves the fact into
+ * {@link PLATFORM_STAMP_ORGANIZATION_COLUMNS} below. Nothing about the three
+ * writers' behaviour changes; what changes is that no application can put a
+ * fourth spelling of "who is this row about" into the platform's mouth.
+ *
+ * ⭐ [#18378] This module answers TWO questions, and only the first consults
+ * that table. {@link resolveRecordOrganizationField} is the STAMP answer ("who
+ * is this row about"), consumers still the three above;
  * {@link resolveRecordWallOrganizationField} is the WALL answer ("what is this
  * row scoped by", and so which organization work launched from it acts as),
  * which skips limb 0 entirely. A caller of the second is not a fourth consumer
- * of the key — it never reads it — and the split is what keeps the scope-pin
- * from being widened by callers who only ever wanted the wall.
+ * — it never reads the table — and the split is what keeps the scope-pin from
+ * being widened by callers who only ever wanted the wall.
  *
  * A platform row is stamped from the organization the record is ABOUT (#8287's
  * ruling). To do that the writer has to know which column holds it, and
  * `organization_id` is not universally the answer: `sys_api_key` carries
- * `active_organization_id` by deliberate design (#8287). Adding a second
- * literal name beside the first would make a writer correct for exactly two
- * objects and silently wrong for the third, so the question is asked of the
- * schema instead.
+ * `active_organization_id` by deliberate design (#8287). Hard-coding a second
+ * literal name inside each writer would make every one of them correct for
+ * exactly two objects and silently wrong for the third, so the question is
+ * asked ONCE here — of the platform table for limb 0, and of the object's own
+ * registered schema for limbs 1 to 4.
  */
 
 import { isTenancyDisabled } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
+
+/**
+ * [#19054] Limb 0's whole population — the platform tables whose rows are ABOUT
+ * an organization carried under a column that is deliberately NOT the tenant
+ * column, keyed by the object's registered name.
+ *
+ * It replaces the authorable `tenancy.organizationField` key, retired from
+ * `packages/spec` in protocol 18 (ADR-0049 enforce-or-remove; maintainer ruling
+ * 2026-09-18, verbatim and untranslated: 「organizationField 撤出可授权面
+ * 同意你的建议」). The key was authorable by every application and declared, in
+ * the entire repository, exactly once — here. The spec's own docblock said why
+ * it could never be more than that: on an ordinary object the stamp column and
+ * the tenant column are the same column, so a declaration either restated the
+ * default or asked for a divergence outside the three sanctioned writers. A
+ * fact about one table we ship belongs in a table we ship.
+ *
+ * ⛔ Adding a row is a PROTOCOL decision, not a convenience. Each row is an
+ * object whose platform rows are stamped from somewhere other than its wall,
+ * which is exactly the divergence the #8778 / cloud#1395 rulings scope-pinned;
+ * a new one needs its own ruling, the same bar a fourth consumer of the old key
+ * needed. ⛔ And it is never a substitute for `tenancy.tenantField`: an object
+ * whose tenant column genuinely is not `organization_id` declares that key,
+ * which both walls it and stamps its platform rows (limb 2 below).
+ *
+ * `sys_api_key` is the one row and the reason the mechanism exists: it is
+ * `managedBy: 'better-auth'`, so `resolveInjectedSystemColumns` bails before
+ * tenancy is consulted and no `organization_id` is ever injected; the column it
+ * really has is better-auth's `active_organization_id`. ⛔ Renaming that column
+ * to `organization_id` is NOT the simplification it looks like — in this
+ * platform "has an `organization_id` column" IS the wall, so the rename would
+ * wall the credential table on an equality that excludes NULL and every
+ * pre-#8287 key would vanish from its own owner's key list. That is the defect
+ * #8287 exists to have removed.
+ */
+const PLATFORM_STAMP_ORGANIZATION_COLUMNS: Readonly<Record<string, string>> = Object.freeze({
+  sys_api_key: 'active_organization_id',
+});
 
 /**
  * "Does this object's REGISTERED schema declare this field?", memoized per
@@ -144,20 +189,21 @@ export function createFieldPresenceProbe(
  * for the opt-out) and `SystemFieldName.ORGANIZATION_ID` — so the parts that
  * could drift are one definition, and only the ordering is restated.
  *
- *  0. **Declared `tenancy.organizationField`, when the object really has that
- *     field.** The read-neutral, STAMP-ONLY declaration #8778's ruling added
- *     for exactly this consumer (option A; #8707's remaining half). It
- *     answers "which column says who this row is ABOUT" — a different
- *     question from "what is this object walled by", which is why it wins
- *     over every limb below, the ADR-0066 opt-out included: an author who
- *     declares it on an unwalled object (`sys_api_key`, `enabled: false` by
- *     necessity — the credential table must never be org-walled, #8287) is
- *     stating precisely that the trail should follow the record's own
- *     organization even though no wall does. Honoured only when the field is
- *     really present, same #5315 guard as limb 2. ⛔ Stamp-only cuts both
- *     ways: the key's consumers are pinned to the THREE platform-row writers
- *     the cloud#1395 ruling names (audit, approvals, automation runs) — a
- *     fourth consumer, or any read path, needs its own ruling first.
+ *  0. **A {@link PLATFORM_STAMP_ORGANIZATION_COLUMNS} row for this object,
+ *     when the object really has that column.** The stamp-only divergence
+ *     #8778's ruling introduced (option A; #8707's remaining half), carried
+ *     since protocol 18 by the platform-internal table above instead of the
+ *     retired authorable `tenancy.organizationField` key. It answers "which
+ *     column says who this row is ABOUT" — a different question from "what is
+ *     this object walled by", which is why it wins over every limb below, the
+ *     ADR-0066 opt-out included: `sys_api_key` is `enabled: false` by
+ *     necessity (the credential table must never be org-walled, #8287) and its
+ *     trail must still follow the record's own organization even though no
+ *     wall does. Honoured only when the column is really present, same #5315
+ *     guard as limb 2. ⛔ Stamp-only cuts both ways: this limb is read by the
+ *     THREE platform-row writers the cloud#1395 ruling names (audit,
+ *     approvals, automation runs) — a fourth consumer, or any read path, needs
+ *     its own ruling first.
  *  1. **`tenancy.enabled === false` → `null`.** ADR-0066 platform-global
  *     objects (`sys_sso_provider` is the shipped example) keep an optional org
  *     FK while explicitly NOT being tenant-scoped. Stamping a platform row from
@@ -192,12 +238,19 @@ export function createFieldPresenceProbe(
  * it.
  *
  * `sys_api_key.active_organization_id` is reachable through limb 0 since
- * #8778 (it was the object that motivated the key). Its column is still not —
- * and must never become — the object's tenant-scope column:
+ * #8778 (it was the object that motivated the divergence). Its column is still
+ * not — and must never become — the object's tenant-scope column:
  * `tenancy.tenantField` feeds `applyTenantScope` / `injectTenantOnInsert`, so
  * declaring it there would wall the credential table on an equality that
  * excludes NULL — every pre-#8287 key would vanish from its own owner's
  * list, which is the defect #8287 exists to have removed.
+ *
+ * ⚠️ Limb 0 is keyed by the object's NAME since protocol 18, so this two-argument
+ * face reads it off `objectDef.name` — a definition that carries no `name`
+ * resolves limbs 1 to 4 only. That is not a degradation to design around: the
+ * engine-bound face below ({@link createRecordOrganizationResolver}), which is
+ * what all three sanctioned writers actually hold, passes the registered name it
+ * was asked about and never depends on the definition carrying one.
  *
  * @param objectDef the registered object definition (`engine.getSchema(name)`)
  * @param hasField the memoized field-presence probe for the SAME object — the
@@ -209,7 +262,10 @@ export function resolveRecordOrganizationField(
   objectDef: unknown,
   hasField: (field: string) => boolean,
 ): string | null {
-  return resolveOrganizationField(objectDef, hasField, { readStampKey: true });
+  return resolveOrganizationField(objectDef, hasField, {
+    objectName: objectNameOf(objectDef),
+    readStampColumn: true,
+  });
 }
 
 /**
@@ -221,21 +277,21 @@ export function resolveRecordOrganizationField(
  * exactly one place. "Which column says who this row is ABOUT" (stamping) and
  * "which column is this row WALLED by" (scope, and therefore the organization
  * work launched from the row acts as) coincide on every ordinary object, and
- * come apart only where an author declared `tenancy.organizationField` — which
+ * come apart only on a {@link PLATFORM_STAMP_ORGANIZATION_COLUMNS} row — which
  * is ONE shipped object, `sys_api_key`, whose whole point is that it is not
  * walled (#8287).
  *
- * ⛔ It does not read `tenancy.organizationField`, and that is the contract
- * rather than an omission. The key's consumers stay pinned to the THREE
- * platform-row writers the cloud#1395 ruling names; a caller asking the WALL
- * question is not a fourth consumer of the stamp key, it is a caller of a
- * different question. Reading limb 0 here would take a declaration meaning "the
- * audit trail should follow this row's own organization even though nothing
- * walls it" and turn it into an ACTING IDENTITY — a sweep over `sys_api_key`
- * would then launch runs acting as an organization derived from an annotation
- * that never meant "act as this". These limbs resolve `null` there instead, and
- * the caller takes the existing `walled-posture` refusal at its first
- * tenant-scoped write (ADR-0112), loudly and by name.
+ * ⛔ It does not read that table, and that is the contract rather than an
+ * omission. The divergence stays pinned to the THREE platform-row writers the
+ * cloud#1395 ruling names; a caller asking the WALL question is not a fourth
+ * consumer of the stamp column, it is a caller of a different question. Reading
+ * limb 0 here would take a row meaning "the audit trail should follow this
+ * row's own organization even though nothing walls it" and turn it into an
+ * ACTING IDENTITY — a sweep over `sys_api_key` would then launch runs acting as
+ * an organization derived from an annotation that never meant "act as this".
+ * These limbs resolve `null` there instead, and the caller takes the existing
+ * `walled-posture` refusal at its first tenant-scoped write (ADR-0112), loudly
+ * and by name.
  *
  * ⚠️ The twin of `@objectstack/objectql`'s `resolveTenantFieldName`, which says
  * the same of `SqlDriver.computeTenantField` — three spellings of one rule is
@@ -257,11 +313,21 @@ export function resolveRecordWallOrganizationField(
   objectDef: unknown,
   hasField: (field: string) => boolean,
 ): string | null {
-  return resolveOrganizationField(objectDef, hasField, { readStampKey: false });
+  return resolveOrganizationField(objectDef, hasField, {
+    objectName: objectNameOf(objectDef),
+    readStampColumn: false,
+  });
+}
+
+/** The registered name a definition carries, when it carries one. */
+function objectNameOf(objectDef: unknown): string | undefined {
+  if (!objectDef || typeof objectDef !== 'object') return undefined;
+  const name = (objectDef as { name?: unknown }).name;
+  return typeof name === 'string' && name.length > 0 ? name : undefined;
 }
 
 /**
- * The limbs themselves, in ONE place — `readStampKey` selects limb 0 alone.
+ * The limbs themselves, in ONE place — `readStampColumn` selects limb 0 alone.
  *
  * A parameter rather than two bodies because limbs 1 to 4 are shared BY
  * CONTRACT: the precedence doc above states at length that a platform row's
@@ -272,19 +338,19 @@ export function resolveRecordWallOrganizationField(
 function resolveOrganizationField(
   objectDef: unknown,
   hasField: (field: string) => boolean,
-  { readStampKey }: { readStampKey: boolean },
+  { objectName, readStampColumn }: { objectName: string | undefined; readStampColumn: boolean },
 ): string | null {
   if (!objectDef || typeof objectDef !== 'object') return null;
-  const tenancy = (objectDef as { tenancy?: { organizationField?: unknown; tenantField?: unknown } }).tenancy;
-  // Limb 0 — the explicit stamp-only declaration (#8778) wins over everything,
+  // Limb 0 — the platform's own stamp-only divergence (#8778, carried by
+  // `PLATFORM_STAMP_ORGANIZATION_COLUMNS` since #19054) wins over everything,
   // the ADR-0066 opt-out below included: see the precedence doc above. Reached
   // by the three sanctioned platform-row writers and by nobody else.
-  if (readStampKey) {
-    const stampField = tenancy?.organizationField;
-    if (typeof stampField === 'string' && stampField.length > 0 && hasField(stampField)) return stampField;
+  if (readStampColumn && objectName !== undefined) {
+    const stampColumn = PLATFORM_STAMP_ORGANIZATION_COLUMNS[objectName];
+    if (stampColumn !== undefined && hasField(stampColumn)) return stampColumn;
   }
   if (isTenancyDisabled(objectDef)) return null;
-  const declared = tenancy?.tenantField;
+  const declared = (objectDef as { tenancy?: { tenantField?: unknown } }).tenancy?.tenantField;
   if (typeof declared === 'string' && declared.length > 0 && hasField(declared)) return declared;
   if (hasField(SystemFieldName.ORGANIZATION_ID)) return SystemFieldName.ORGANIZATION_ID;
   return null;
@@ -322,7 +388,7 @@ export interface RecordOrganizationResolver {
  * context fallback instead of failing the write.
  */
 export function createRecordOrganizationResolver(engine: unknown): RecordOrganizationResolver {
-  return createResolver(engine, resolveRecordOrganizationField);
+  return createResolver(engine, true);
 }
 
 /**
@@ -338,12 +404,20 @@ export function createRecordOrganizationResolver(engine: unknown): RecordOrganiz
  * treating empty as absent" is where the next drift starts.
  */
 export function createRecordWallOrganizationResolver(engine: unknown): RecordOrganizationResolver {
-  return createResolver(engine, resolveRecordWallOrganizationField);
+  return createResolver(engine, false);
 }
 
+/**
+ * ⚠️ It passes the name it was ASKED about into limb 0, never
+ * `objectDef.name`. The registered name is the thing the caller holds and the
+ * thing the platform table is keyed by; a definition is free not to repeat it
+ * (several engine doubles in this monorepo do not), and reading limb 0 off the
+ * definition would make the stamp column depend on whether a schema echoes its
+ * own name — a difference no caller can see and no test would state.
+ */
 function createResolver(
   engine: unknown,
-  resolveField: (objectDef: unknown, hasField: (field: string) => boolean) => string | null,
+  readStampColumn: boolean,
 ): RecordOrganizationResolver {
   const hasField = createFieldPresenceProbe(engine);
   const columnCache = new Map<string, string | null>();
@@ -357,7 +431,10 @@ function createResolver(
     } catch {
       /* ignore — best-effort; absence just means the caller falls back */
     }
-    const resolved = resolveField(objectDef, (field) => hasField(objectName, field));
+    const resolved = resolveOrganizationField(objectDef, (field) => hasField(objectName, field), {
+      objectName,
+      readStampColumn,
+    });
     columnCache.set(objectName, resolved);
     return resolved;
   };

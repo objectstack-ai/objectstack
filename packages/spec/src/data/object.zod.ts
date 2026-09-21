@@ -536,6 +536,20 @@ const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     'never had a consumer; setting it granted nothing. Cross-tenant visibility is ' +
     'governed by sharing rules / OWD (ADR-0056), `externalSharingModel` (ADR-0090 ' +
     'D11), and the object access posture. Delete the key.',
+  organizationField:
+    '`tenancy.organizationField` was removed in @objectstack/spec 18 (ADR-0049) — it ' +
+    'named the column a platform row is stamped from, and exactly one table in the ' +
+    'whole protocol ever needed one: the better-auth credential table, whose rows are ' +
+    'about the organization a key authenticates into while the table itself must stay ' +
+    'unwalled. That is a fact about a platform table, not a knob an application ' +
+    'declares, and on an ordinary object the stamp column and the tenant column are ' +
+    'the same column — so every declaration outside the platform either restated the ' +
+    'default or asked for a divergence no sanctioned consumer would honour. Delete ' +
+    'the key. Stamping now reads a platform-internal table in ' +
+    '`@objectstack/metadata-core`; an object whose tenant column genuinely is not ' +
+    '`organization_id` declares `tenancy.tenantField`, which both walls it and stamps ' +
+    'its platform rows. ' +
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
 };
 
 /**
@@ -587,56 +601,35 @@ const TENANCY_MODES_EXPLAINER =
  * (`organization` is the product's noun). Undeclared now stays `undefined` and
  * the driver's fallback is the single source of truth.
  *
- * `organizationField` (#8707 / #8778, maintainer-ruled option A) is the
- * STAMP-ONLY sibling: it answers "which column says who this row is ABOUT",
- * where `tenantField` answers "what is this object WALLED by". For ordinary
- * objects the two coincide and `organizationField` is never needed; for
- * credential tables they deliberately do not — `sys_api_key` records the
- * organization a key authenticates into under `active_organization_id`
- * precisely so the credential table does NOT become org-walled (#8287). The
- * key is consulted only by platform-row stamping — the three sanctioned
- * writers below, via `@objectstack/metadata-core`'s
- * `resolveRecordOrganizationField` (plugin-audit re-exports it from its
- * original path; public surface unchanged) — never by a read path, and that
- * read-neutrality is pinned by tests beside each read path. ⛔ Scope-pinned by
- * the #8778 ruling: this is ONE stamp-only declaration key, not the opening
- * move of a general field-roles mechanism — a consumer other than the three
- * sanctioned writers needs its own ruling before reading it.
+ * `organizationField` is RETIRED from this shape (protocol 18, ADR-0049;
+ * maintainer ruling 2026-09-18, verbatim and untranslated:
+ * 「organizationField 撤出可授权面 同意你的建议」). It answered "which column says
+ * who this row is ABOUT" while `tenantField` answers "what is this object
+ * WALLED by", and on an ordinary object the two are the same column — the
+ * former prose in this docblock said so in as many words ("for ordinary
+ * objects the two coincide and `organizationField` is never needed"). Exactly
+ * ONE table in the protocol ever diverged, and it is a table the platform
+ * itself ships: `sys_api_key` records the organization a key authenticates
+ * into under `active_organization_id` precisely so the credential table does
+ * NOT become org-walled (#8287). A fact about one platform table is not a knob
+ * an application declares — an authorable key here made every future piece of
+ * organization logic ask "what if somebody set this?" for a divergence no
+ * sanctioned consumer would have honoured anyway.
  *
- * That pin is WIDENED **by name** by the maintainer ruling recorded on
- * cloud#1395, 2026-08-17T03:18Z, accepting the decision-inbox recommendations
- * in full — verbatim: 「新进卡六张 同意你的建议」. It is transcribed here so the
- * widening is declared, not discovered (#10110):
+ * The divergence itself is unchanged and still shipped: stamping resolves it
+ * from a platform-internal table in `@objectstack/metadata-core`
+ * (`PLATFORM_STAMP_ORGANIZATION_COLUMNS`, read by the STAMP face alone), so
+ * the three sanctioned platform-row writers — audit stamping, the
+ * approval-row writer in `plugin-approvals`, and the automation-run recorder
+ * in `service-automation` — keep the behaviour they had, byte for byte, with
+ * no authorable input. The WALL face
+ * (`resolveRecordWallOrganizationField`, #18378) never read the key and is
+ * untouched.
  *
- * > Ruled: Option A — extend the #8778 ruling: `resolveRecordOrganizationField`
- * > is promoted to a shared resolver used by all three platform-row writers
- * > (approvals, automation runs, audit). A platform row's organization is the
- * > SUBJECT record's organization; actor context is the fallback, never the
- * > primary.
- *
- * The ruling sanctions exactly THREE consumers of this key, and no others:
- *
- *   1. **audit stamping** — `@objectstack/metadata-core`'s
- *      `resolveRecordOrganizationField`; the original #8778 consumer
- *      (plugin-audit re-exports it from its original path; public surface
- *      unchanged);
- *   2. **`plugin-approvals`** — the approval-row writer (`openNodeRequest`,
- *      the only `sys_approval_request` insert site);
- *   3. **the automation-run recorder** — both write paths of
- *      `ObjectStoreSuspendedRunStore` in `service-automation` (`serialize()`
- *      for paused rows, `recordTerminal()` for terminal rows).
- *
- * All three are live on `main`: #10101's PR #11311 (merged 2026-08-23)
- * promoted `resolveRecordOrganizationField` to the shared resolver in
- * `@objectstack/metadata-core` and wired all three platform-row writers to
- * it — each resolves the SUBJECT record's organization first, falling back
- * to actor context, exactly as the ruling above states. The `.describe()`
- * below names all three consumers accordingly.
- *
- * ⛔ The refusal posture is UNCHANGED for a FOURTH consumer. Three named
- * platform-row writers are still not a general field-roles mechanism: anything
- * outside the list above needs its own maintainer ruling before reading this
- * key, exactly as #8778 required.
+ * ⛔ What does NOT come back with a new spelling: an application-declared
+ * "stamp column" of any name. The retirement is the ADR-0049 answer to a key
+ * whose only real declaration was ours; re-opening it needs its own maintainer
+ * ruling, exactly as the #8778 scope-pin required of a fourth consumer.
  *
  * @example Shared database, platform-default tenant column (organization_id)
  * {
@@ -649,11 +642,9 @@ const TENANCY_MODES_EXPLAINER =
  *   tenantField: 'workspace_id'
  * }
  *
- * @example An unwalled credential table whose audit rows still stamp the
- * organization of the record they describe (sys_api_key, #8778)
+ * @example An object that opts out of org row-scoping entirely (ADR-0066)
  * {
- *   enabled: false,
- *   organizationField: 'active_organization_id'
+ *   enabled: false
  * }
  */
 export const TenancyConfigSchema = lazySchema(() => strictObject({
@@ -670,25 +661,13 @@ export const TenancyConfigSchema = lazySchema(() => strictObject({
     'object really has that field — otherwise the same `organization_id` ' +
     'fallback applies. No default is materialized here on purpose.',
   ),
-  organizationField: z.string().optional().describe(
-    'STAMP-ONLY: column carrying the ' +
-    'organization a row is ABOUT, consulted by the three sanctioned ' +
-    'platform-row writers — audit stamping, the approval-row writer ' +
-    '(`plugin-approvals`), and the automation-run recorder ' +
-    '(`service-automation`) — via the shared `resolveRecordOrganizationField` ' +
-    'resolver in `@objectstack/metadata-core`. It does NOT tenant-scope ' +
-    'anything — no read path (`applyTenantScope`, ' +
-    '`injectTenantOnInsert`, `computeTenantLayer0Filter`) reads it, so ' +
-    'declaring it never walls the object and never hides rows. Declare it ' +
-    'only when the organization a row belongs to lives under a column that ' +
-    'deliberately is NOT the tenant column: `sys_api_key` is the shipped ' +
-    'example — a credential table that must stay unwalled (`enabled: false`) ' +
-    'while history/revocation audit rows stamp the organization of the key ' +
-    'they describe (`active_organization_id`). Ordinary tenant objects omit ' +
-    'it; their stamp column is resolved from `tenantField` / ' +
-    '`organization_id` already. Honoured only when the object really has ' +
-    'the field, like `tenantField`.',
-  ),
+  // `organizationField` was REMOVED here in protocol 18 (ADR-0049) — see the
+  // docblock above. This shape is `.strict()`, so the key is rejected with its
+  // prescription from `TENANCY_RETIRED_KEY_GUIDANCE` rather than stripped, and
+  // the D2 conversion `object-tenancy-organization-field-removed` deletes it
+  // from older sources and stored rows. The `sys_api_key` divergence it used to
+  // carry now lives in `@objectstack/metadata-core`'s
+  // `PLATFORM_STAMP_ORGANIZATION_COLUMNS`, which no author writes.
 }));
 
 /**
