@@ -608,12 +608,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   seed: {
-    label: "Seed Data",
-    description: "Fixture / initialization data applied on publish"
+    label: "种子数据",
+    description: "发布时应用的预置/初始化数据"
   },
   mapping: {
-    label: "Import Mapping",
-    description: "Reusable import/export field mapping (rename + transforms), referenced by name at import"
+    label: "导入映射",
+    description: "可复用的导入/导出字段映射（重命名 + 转换），在导入时按名称引用"
   },
   view: {
     label: "视图",
@@ -1708,8 +1708,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "外部目录"
   },
   api: {
-    label: "API Endpoint",
-    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+    label: "API 端点",
+    description: "声明式 HTTP 端点——在既有管道之上提供稳定的 URL 与策略层（ADR-0121）"
   },
   translation: {
     label: "翻译"
@@ -1795,12 +1795,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   doc: {
-    label: "Documentation",
-    description: "Package documentation — flat Markdown items (ADR-0046)"
+    label: "文档",
+    description: "软件包文档——扁平的 Markdown 文档项（ADR-0046）"
   },
   book: {
-    label: "Documentation Book",
-    description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
+    label: "文档手册",
+    description: "文档导航主干——有序分组，成员由派生确定（ADR-0046 §6）"
   },
   permission: {
     label: "权限集",
@@ -1875,8 +1875,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   capability: {
-    label: "Capability",
-    description: "Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)"
+    label: "能力",
+    description: "软件包声明的授权能力——ADR-0066 D1 的定义侧（授予在权限集上；要求在资源上）"
   },
   agent: {
     label: "AI 代理",

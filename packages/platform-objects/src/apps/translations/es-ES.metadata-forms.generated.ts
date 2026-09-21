@@ -608,12 +608,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   seed: {
-    label: "Seed Data",
-    description: "Fixture / initialization data applied on publish"
+    label: "Datos semilla",
+    description: "Datos predefinidos / de inicialización aplicados al publicar"
   },
   mapping: {
-    label: "Import Mapping",
-    description: "Reusable import/export field mapping (rename + transforms), referenced by name at import"
+    label: "Mapeo de importación",
+    description: "Mapeo de campos de importación/exportación reutilizable (renombrado + transformaciones), referenciado por nombre al importar"
   },
   view: {
     label: "Vista",
@@ -1708,8 +1708,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "Catálogo externo"
   },
   api: {
-    label: "API Endpoint",
-    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+    label: "Endpoint API",
+    description: "Endpoint HTTP declarativo — una URL estable y una capa de política sobre un pipeline existente (ADR-0121)"
   },
   translation: {
     label: "Traducción"
@@ -1795,12 +1795,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   doc: {
-    label: "Documentation",
-    description: "Package documentation — flat Markdown items (ADR-0046)"
+    label: "Documentación",
+    description: "Documentación del paquete — elementos Markdown planos (ADR-0046)"
   },
   book: {
-    label: "Documentation Book",
-    description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
+    label: "Libro de documentación",
+    description: "Columna vertebral de navegación de la documentación — grupos ordenados con pertenencia derivada (ADR-0046 §6)"
   },
   permission: {
     label: "Conjunto de permisos",
@@ -1875,8 +1875,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   capability: {
-    label: "Capability",
-    description: "Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)"
+    label: "Capacidad",
+    description: "Capacidad de autorización declarada por el paquete — el lado de la DEFINICIÓN de ADR-0066 D1 (las concesiones residen en los conjuntos de permisos; los requisitos, en los recursos)"
   },
   agent: {
     label: "Agente de IA",

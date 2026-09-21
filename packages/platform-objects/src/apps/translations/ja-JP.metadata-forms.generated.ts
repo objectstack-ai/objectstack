@@ -608,12 +608,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   seed: {
-    label: "Seed Data",
-    description: "Fixture / initialization data applied on publish"
+    label: "シードデータ",
+    description: "公開時に適用されるフィクスチャ／初期化データ"
   },
   mapping: {
-    label: "Import Mapping",
-    description: "Reusable import/export field mapping (rename + transforms), referenced by name at import"
+    label: "インポートマッピング",
+    description: "再利用可能なインポート／エクスポートのフィールドマッピング（リネーム + 変換）。インポート時に名前で参照します"
   },
   view: {
     label: "ビュー",
@@ -1708,8 +1708,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "外部カタログ"
   },
   api: {
-    label: "API Endpoint",
-    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+    label: "API エンドポイント",
+    description: "宣言的な HTTP エンドポイント — 既存のパイプラインの上に安定した URL とポリシー層を提供（ADR-0121）"
   },
   translation: {
     label: "翻訳"
@@ -1795,12 +1795,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   doc: {
-    label: "Documentation",
-    description: "Package documentation — flat Markdown items (ADR-0046)"
+    label: "ドキュメント",
+    description: "パッケージのドキュメント — フラットな Markdown 項目（ADR-0046）"
   },
   book: {
-    label: "Documentation Book",
-    description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
+    label: "ドキュメントブック",
+    description: "ドキュメントナビゲーションの骨格 — 順序付きグループと派生されたメンバーシップ（ADR-0046 §6）"
   },
   permission: {
     label: "権限セット",
@@ -1875,8 +1875,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   capability: {
-    label: "Capability",
-    description: "Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)"
+    label: "ケイパビリティ",
+    description: "パッケージが宣言する認可ケイパビリティ — ADR-0066 D1 の定義側（付与は権限セットに、要件はリソースに）"
   },
   agent: {
     label: "AI エージェント",
