@@ -13899,6 +13899,19 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `AggregationPipeline.options`, which no `stack.zod.ts` collection declares
     // and no `sys_metadata` row stores. See `data-nosql-query-options-timeout-unit-in-key`.
     'data/NoSQLQueryOptions:timeout',
+    // #19054 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-18, verbatim
+    // and untranslated: 「organizationField 撤出可授权面 同意你的建议」).
+    // `TenancyConfig.organizationField` named the column a platform row is STAMPED
+    // from, as opposed to the column the object is WALLED by (`tenantField`). On an
+    // ordinary object those are the same column, and the whole protocol declared it
+    // exactly once — on `sys_api_key`, a table this platform ships and no
+    // application authors. The `tenancy` block is `.strict()`, so the key is
+    // removed from the shape and its prescription is served from
+    // `TENANCY_RETIRED_KEY_GUIDANCE`. The divergence itself is unchanged: it moves
+    // to `PLATFORM_STAMP_ORGANIZATION_COLUMNS` in `@objectstack/metadata-core`, read
+    // by the three sanctioned platform-row writers alone. D2:
+    // `object-tenancy-organization-field-removed`.
+    'data/TenancyConfig:organizationField',
     // #15680 (stack card 5/6 of #14478) — ruling B. `TursoConfig.timeout` said
     // "Operation timeout in milliseconds" in prose and carried a `.meta({ title:
     // 'Timeout (ms)' })` no parse reads — and sat two keys below

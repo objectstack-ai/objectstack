@@ -329,7 +329,7 @@ Create a new object
 | **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused. |
 | **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization' }[]` | optional | Database performance indexes |
 | **fieldGroups** | `{ key: string; label: string; icon?: string; description?: string; … }[]` | optional | Ordered list of field groups (array order = display order). See ObjectFieldGroupSchema. |
-| **tenancy** | `{ enabled: boolean; tenantField?: string; organizationField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
+| **tenancy** | `{ enabled: boolean; tenantField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
 | **access** | `{ default?: Enum<'public' \| 'private'> }` | optional | [ADR-0066 D2] Object exposure posture (public-by-default vs private secure-by-default). |
 | **requiredPermissions** | `string[] \| { read?: string[]; create?: string[]; update?: string[]; delete?: string[] }` | optional | [ADR-0066 D3/⑤] Capabilities required to access this object (AND-gate) — `string[]` gates all CRUD, or a `{read,create,update,delete}` map gates per operation. |
 | **lifecycle** | `{ class: Enum<'record' \| 'audit' \| 'telemetry' \| 'transient' \| 'event'>; retention?: object; ttl?: object; storage?: object; … }` | optional | Data lifecycle contract (ADR-0057): class + retention/ttl/rotation/archive policies enforced by the platform LifecycleService. |
@@ -614,7 +614,7 @@ Create a new object
 | **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused. |
 | **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization' }[]` | optional | Database performance indexes |
 | **fieldGroups** | `{ key: string; label: string; icon?: string; description?: string; … }[]` | optional | Ordered list of field groups (array order = display order). See ObjectFieldGroupSchema. |
-| **tenancy** | `{ enabled: boolean; tenantField?: string; organizationField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
+| **tenancy** | `{ enabled: boolean; tenantField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
 | **access** | `{ default?: Enum<'public' \| 'private'> }` | optional | [ADR-0066 D2] Object exposure posture (public-by-default vs private secure-by-default). |
 | **requiredPermissions** | `string[] \| { read?: string[]; create?: string[]; update?: string[]; delete?: string[] }` | optional | [ADR-0066 D3/⑤] Capabilities required to access this object (AND-gate) — `string[]` gates all CRUD, or a `{read,create,update,delete}` map gates per operation. |
 | **lifecycle** | `{ class: Enum<'record' \| 'audit' \| 'telemetry' \| 'transient' \| 'event'>; retention?: object; ttl?: object; storage?: object; … }` | optional | Data lifecycle contract (ADR-0057): class + retention/ttl/rotation/archive policies enforced by the platform LifecycleService. |
