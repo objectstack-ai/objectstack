@@ -147,6 +147,9 @@ export const TOKEN_KEY_LENGTH = 12;
 const LOCK_WAIT_MS = 5_000;
 const LOCK_STALE_MS = 15_000;
 const LOCK_POLL_MS = 40;
+// The second bound. See `withPaceLock`: a deadline read from an injected clock
+// is not a bound on its own.
+const LOCK_MAX_ATTEMPTS = 400;
 
 // ---------------------------------------------------------------------------
 // Pure core — every decision this file makes is one of the functions below,
@@ -373,6 +376,26 @@ export function stoppedText(d) {
   ].join('\n');
 }
 
+/**
+ * The log could not be written.
+ *
+ * `paceWrite` FAILS CLOSED here, and the asymmetry with `noteResponse` below is
+ * deliberate: a throttle that cannot record cannot enforce a budget, so it
+ * cannot honestly let the write through either — writing unrecorded is exactly
+ * the state that suspended two accounts. It runs BEFORE the request, so nothing
+ * is half-written, and the remedy is one line long.
+ */
+export function unrecordableText(file, error) {
+  return [
+    `✗ write-pace: REFUSED — the throttle cannot write its log at ${file}`,
+    `  (${error?.message ?? String(error)}).`,
+    '  A throttle that cannot record cannot count, so it cannot allow this write either — writing',
+    '  unrecorded is the state this instrument exists to prevent. ⛔ Nothing was written.',
+    '  Fix: make that path writable, or point `OS_PM_WRITE_PACE_FILE` at a path that is.',
+    `  Exit ${EXIT_WRITE_PACE_REFUSED} is this refusal and nothing else.`,
+  ].join('\n');
+}
+
 /** Rule ① — the pause, said out loud. */
 export function gapText(d, kind) {
   return (
@@ -444,29 +467,41 @@ export function withPaceLock(file, fn, { now = () => Date.now(), sleep = sleepSy
   const lock = `${file}.lock`;
   const deadline = now() + LOCK_WAIT_MS;
   let held = false;
-  for (;;) {
+
+  // Outside the retry, because its failures are not contention. A recursive
+  // mkdir over a path that exists and is NOT a directory answers EEXIST — the
+  // same code lock contention answers — so leaving it inside made an unusable
+  // PATH look like a busy lock and spun. `fn()` below reports it properly.
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+  } catch {
+    /* fn() will fail with the real reason, and paceWrite refuses on it */
+  }
+
+  // ⛔ Bounded by ATTEMPTS as well as by the deadline. A deadline alone is not
+  // a bound: it is read from an injected clock, and a clock that does not
+  // advance — a test's, a suspended container's — turns `now() >= deadline` into
+  // a condition that is never true. Two bounds, so neither can be the only one.
+  for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS && now() < deadline; attempt++) {
     try {
-      mkdirSync(dirname(file), { recursive: true });
       mkdirSync(lock);
       held = true;
       break;
     } catch (e) {
-      if (e?.code !== 'EEXIST') break;
-      let age = 0;
+      if (e?.code !== 'EEXIST') break; // an unusable lock never blocks a write
+      let age = null;
       try {
         age = now() - statSync(lock).mtimeMs;
       } catch {
-        continue; // it went away between the mkdir and the stat — try again
+        age = null; // it went away between the mkdir and the stat
       }
-      if (age > LOCK_STALE_MS) {
+      if (age !== null && age > LOCK_STALE_MS) {
         try {
           rmdirSync(lock);
         } catch {
           /* someone else broke it first */
         }
-        continue;
       }
-      if (now() >= deadline) break;
       sleep(LOCK_POLL_MS);
     }
   }
@@ -519,16 +554,22 @@ export async function paceWrite({ token, kind = 'write' } = {}, deps = {}) {
   const nowMs = now();
   let decision;
 
-  withPaceLock(
-    file,
-    () => {
-      const kept = pruneRecords(readRecordsFrom(file), nowMs);
-      decision = decidePace({ records: kept, key, nowMs, minGapMs, hourlyMax });
-      if (decision.verdict === 'ok') kept.push({ t: decision.issueAtMs, k: key, kind });
-      writeRecordsTo(file, kept);
-    },
-    { now, sleep: deps.sleepSync ?? sleepSync },
-  );
+  try {
+    withPaceLock(
+      file,
+      () => {
+        const kept = pruneRecords(readRecordsFrom(file), nowMs);
+        decision = decidePace({ records: kept, key, nowMs, minGapMs, hourlyMax });
+        if (decision.verdict === 'ok') kept.push({ t: decision.issueAtMs, k: key, kind });
+        writeRecordsTo(file, kept);
+      },
+      { now, sleep: deps.sleepSync ?? sleepSync },
+    );
+  } catch (e) {
+    log(unrecordableText(file, e));
+    exit(EXIT_WRITE_PACE_REFUSED);
+    return { verdict: 'unrecordable', key, refused: true, exitCode: EXIT_WRITE_PACE_REFUSED, file, error: e?.message ?? String(e) };
+  }
 
   if (decision.verdict === 'stopped') {
     log(stoppedText(decision));
@@ -566,17 +607,33 @@ export function noteResponse({ token, status, headers, body, verdict } = {}, dep
   if (!signal) return null;
 
   const key = tokenKey(token);
-  withPaceLock(
-    file,
-    () => {
-      const kept = pruneRecords(readRecordsFrom(file), nowMs);
-      kept.push({ stop: signal.untilMs, k: key, why: signal.why, at: nowMs });
-      writeRecordsTo(file, kept);
-    },
-    { now, sleep: deps.sleepSync ?? sleepSync },
-  );
+  try {
+    withPaceLock(
+      file,
+      () => {
+        const kept = pruneRecords(readRecordsFrom(file), nowMs);
+        kept.push({ stop: signal.untilMs, k: key, why: signal.why, at: nowMs });
+        writeRecordsTo(file, kept);
+      },
+      { now, sleep: deps.sleepSync ?? sleepSync },
+    );
+  } catch (e) {
+    // ⛔ This half NEVER throws, and that is not the same judgement as
+    // `paceWrite`'s. It is called on a transport's error path, one line before
+    // the caller throws the platform's own refusal — an exception raised here
+    // would REPLACE that error and hide what the platform said. So it reports
+    // the consequence instead, in the one line it has, and lets the real error
+    // travel.
+    log(
+      `write-pace: ⚠ could not record the stop marker in ${file} (${e?.message ?? String(e)}). ` +
+        `${signal.why}, so this identity has been asked to back off until ${stampUtc(signal.untilMs)} — but the ` +
+        'NEXT write by this token will NOT be refused, because nothing is on disk to refuse it. Stop writing by ' +
+        'hand until then, and fix the path or point `OS_PM_WRITE_PACE_FILE` somewhere writable.',
+    );
+    return { ...signal, key, file, recorded: false };
+  }
   log(markerText(signal, key, nowMs));
-  return { ...signal, key, file };
+  return { ...signal, key, file, recorded: true };
 }
 
 /** `--status`: this token's budget and any active marker, without writing anything. */
@@ -634,7 +691,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'rule ②: the 41st is REFUSED, with a prescription': 8,
   'rule ③: what writes a stop marker, how long it lasts, what it refuses': 10,
   'the prune: the trailing hour for writes, the expiry for markers': 6,
-  'the log, --status and the CLI: what lands on disk, and what must never': 9,
+  'the log, --status and the CLI: what lands on disk, and what must never': 14,
   'the wiring: both halves, in every write transport, on write verbs only': 7,
 });
 const SELF_TEST_BATTERY_FLOOR = 9;
@@ -873,6 +930,27 @@ export async function selfTest() {
       });
       t('the CLI reports a budget nobody has spent yet, at exit 0', spawned.status === 0 && spawned.stdout.includes(`budget    : 0 of ${DEFAULT_HOURLY_MAX}`), true, JSON.stringify(spawned.stdout));
       t('an unrecognised flag is usage, ⛔ never a silent pass', spawnSync(process.execPath, [SELF, '--paec'], { encoding: 'utf8' }).status, EXIT_USAGE);
+
+      // An unwritable log: the parent of the path is a FILE, so every mkdir on
+      // the way to it fails. The two halves answer this DIFFERENTLY on purpose.
+      const blocker = join(dir, 'not-a-directory');
+      writeFileSync(blocker, 'x', 'utf8');
+      const bad = harness(join(blocker, 'pace.jsonl'));
+      const unrecordable = await paceWrite({ token: TOKEN, kind: 'label-write POST' }, bad.deps);
+      t('⛔ a log it cannot write REFUSES the write — unrecorded is the state this exists to prevent', [unrecordable.verdict, bad.state.exits], ['unrecordable', [EXIT_WRITE_PACE_REFUSED]]);
+      t('…naming the path and the one-line remedy', bad.text().includes('OS_PM_WRITE_PACE_FILE'));
+      const noted = noteResponse({ token: TOKEN, status: 429 }, bad.deps);
+      t('⛔ but `noteResponse` does NOT throw — it runs one line before the caller throws the platform\'s own error', [noted.recorded, noted.why], [false, 'HTTP 429']);
+
+      // ⛔ THE case the attempt bound exists for, found by the case above: a
+      // lock somebody else holds, plus a clock that does not advance. The
+      // deadline can then never fire, so only the attempt bound ends the wait.
+      const heldFile = join(dir, 'held.jsonl');
+      mkdirSync(`${heldFile}.lock`, { recursive: true });
+      let ran = false;
+      withPaceLock(heldFile, () => { ran = true; }, { now: () => T0, sleep: () => {} });
+      t('⛔ a held lock under a FROZEN clock still returns — the attempt bound, never the deadline, ends it', ran);
+      t('…and the lock it could not take is left alone, ⛔ never stolen', existsSync(`${heldFile}.lock`));
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
