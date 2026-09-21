@@ -13,6 +13,7 @@ import {
   PERMISSION_SET_DECLARATION_UNOWNED,
   PERMISSION_SET_ROWS_UNREADABLE,
 } from './seed-refusal-diagnostics.js';
+import { permissionSetRowFields } from './permission-set-projection.js';
 
 /** [#18091] Seeded from this file, for the class pin at the bottom. */
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -393,5 +394,109 @@ describe('[#18091] the two remaining permission-set refusals reach the author', 
     // ⚠️ The INFO channel keeps its outer `?.` deliberately — a healthy pass
     // must stay silent on every console channel, per the CONTROL above.
     expect(source).toContain("options.logger?.info?.(");
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#18571] The unowned refusal's PROGRAMMATIC half. #18564 gave this branch an
+// author-visible line; the outcome still came back with every counter at zero,
+// so a caller that reads no log at all could not tell a pass that refused a
+// declaration from a pass with nothing to do. The capability axis has counted
+// the same refusal at the same ADR-0086 D3 boundary since #4967.
+// ───────────────────────────────────────────────────────────────────────────
+
+/** Silent sink — these tests assert the COUNTER, and #18091 owns the line. */
+const mute = () => ({ info: () => {}, warn: () => {} });
+
+describe('[#18571] the unowned permission-set refusal moves a counter', () => {
+  it('BOOT-LOOP DOOR: an unowned declaration increments skippedUnowned', async () => {
+    const ql = makeQl([declaredSet({ _packageId: undefined })]);
+
+    const r = await bootstrapDeclaredPermissions(ql, undefined, { logger: mute() });
+
+    expect(r.skippedUnowned).toBe(1);
+    // ⛔ The refusal itself is UNCHANGED — an unowned `managed_by:'package'`
+    //    row is the ADR-0086 D3 ambiguity this branch exists to prevent.
+    expect(ql.rows).toHaveLength(0);
+    expect(r.seeded + r.updated + r.unchanged).toBe(0);
+    // ⛔ And it lands in its OWN counter, never borrowed from a sibling: an
+    //    unowned declaration is not a foreign row and not an env-authored one.
+    expect(r.skippedForeign).toBe(0);
+    expect(r.skippedEnvAuthored).toBe(0);
+    expect(r.unreadable).toBe(0);
+  });
+
+  it('PUBLISH DOOR (ADR-0086 P2): the materializer increments it too', async () => {
+    // ⚠️ The second door onto the same branch, and the reason testing one is
+    // testing half: the publish materializer upserts ONE set and passes no
+    // collector, so a fix wired into the boot loop's aggregation alone would
+    // leave this caller's outcome exactly as silent as before.
+    const ql = makeQl();
+
+    const r = await upsertPackagePermissionSet(ql, declaredSet({ _packageId: undefined }), null, mute());
+
+    expect(r.skippedUnowned).toBe(1);
+    expect(ql.rows).toHaveLength(0);
+    expect(r.seeded).toBe(0);
+  });
+
+  it('CONTROL: a pass that refuses nothing leaves it at 0 through both doors', async () => {
+    // ⛔ The discriminating half. Without it, a counter incremented on every
+    //    declaration would satisfy both assertions above.
+    const boot = await bootstrapDeclaredPermissions(makeQl([declaredSet()]), undefined, { logger: mute() });
+    expect(boot).toMatchObject({ seeded: 1, skippedUnowned: 0 });
+
+    const publish = await upsertPackagePermissionSet(makeQl(), declaredSet(), 'com.example.crm', mute());
+    expect(publish).toMatchObject({ seeded: 1, skippedUnowned: 0 });
+  });
+
+  it('⭐ CONSERVATION: every named declaration lands in exactly one counter', async () => {
+    // Modelled on the capability axis' `materializedNames reconciles with the
+    // outcome counters`. The point is not the six numbers — it is that they
+    // SUM to the input, which is precisely what an uncounted refusal broke.
+    const body = (name: string, over: Record<string, any> = {}) =>
+      declaredSet({ name, _packageId: 'com.a', ...over });
+    const sets = [
+      body('crm_new'),                                     // → seeded
+      body('crm_own', { label: 'Fresh' }),                 // → updated
+      body('crm_same'),                                    // → unchanged
+      body('crm_env'),                                     // → skippedEnvAuthored
+      body('crm_foreign'),                                 // → skippedForeign
+      declaredSet({ name: 'crm_orphan', _packageId: undefined }), // → skippedUnowned
+    ];
+    const ql = makeQl(sets);
+    // Its own row, stale — the stored label is not what the declaration says.
+    ql.rows.push({
+      id: 'ps_own', name: 'crm_own', managed_by: 'package', package_id: 'com.a',
+      ...permissionSetRowFields(body('crm_own', { label: 'Stale' })),
+    });
+    // Its own row, already converged — `recordDiffersFromBody` calls it equal,
+    // so no UPDATE is issued and the name lands in `unchanged`, not `updated`.
+    ql.rows.push({
+      id: 'ps_same', name: 'crm_same', managed_by: 'package', package_id: 'com.a',
+      ...permissionSetRowFields(body('crm_same')),
+    });
+    ql.rows.push({ id: 'ps_env', name: 'crm_env', managed_by: 'user', object_permissions: '{"kept":true}' });
+    ql.rows.push({ id: 'ps_far', name: 'crm_foreign', managed_by: 'package', package_id: 'com.z', object_permissions: '{}' });
+
+    const out = await bootstrapDeclaredPermissions(ql, undefined, { logger: mute() });
+
+    expect(out).toMatchObject({
+      seeded: 1, updated: 1, unchanged: 1,
+      skippedEnvAuthored: 1, skippedForeign: 1, skippedUnowned: 1,
+      unreadable: 0,
+    });
+    // ⚠️ The sum is taken over EVERY counter the outcome declares, so a future
+    //    counter added without a home here fails this pin instead of hiding in
+    //    a hand-picked subset — the failure mode `skippedUnowned` itself was.
+    const counted = out.seeded + out.updated + out.unchanged
+      + out.skippedEnvAuthored + out.skippedForeign + out.skippedUnowned + out.unreadable;
+    expect(counted).toBe(sets.length);
+    // …and the refusal that wrote nothing really wrote nothing: five inputs
+    // reached a row, the sixth did not.
+    expect(ql.rows.map((r) => r.name).sort()).toEqual(
+      ['crm_env', 'crm_foreign', 'crm_new', 'crm_own', 'crm_same'],
+    );
+    expect(ql.rows.some((r) => r.name === 'crm_orphan')).toBe(false);
   });
 });
