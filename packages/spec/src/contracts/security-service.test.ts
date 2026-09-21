@@ -301,7 +301,7 @@ describe('Security Service Contract', () => {
     expect(sets).toHaveLength(2);
   });
 
-  it('[#19354] resolveEffectiveObjectPermissions is OPTIONAL — and the fallback is NOT an empty map (compile-time)', () => {
+  it('[#19354] resolveEffectiveObjectPermissions is OPTIONAL — the unguarded call does not compile, and absence is undefined rather than an empty map', () => {
     // THE structural pin behind "a consumer that can no longer answer passes
     // NOTHING". Optional is what makes that a property of the TYPE: a security
     // service that predates the method still satisfies the contract, and the
@@ -317,11 +317,21 @@ describe('Security Service Contract', () => {
     expect(typeof mustNotCompileWithoutAGuard).toBe('function');
 
     // The shape a consumer writes: absence yields `undefined`, which is NOT the
-    // same value as an empty map and must not be flattened into one. `{}` is a
-    // real answer ("this subject holds nothing"), and substituting it for "no
-    // answer" turns a missing implementation into a denial of everything.
+    // same value as an empty map. `{}` is a real answer ("this subject holds
+    // nothing"), and substituting it for "no answer" turns a missing
+    // implementation into a denial of everything.
+    //
+    // ⚠️ What this line does NOT prove, stated so the title cannot be read as
+    // claiming it: the compiler does not stop a consumer writing `?? {}`. That
+    // rule lives in the docblock's prose, and nothing on this side can pin it.
     const answer = withoutIt.resolveEffectiveObjectPermissions?.({ userId: 'u1' });
     expect(answer).toBeUndefined();
+
+    // `context` is optional, so the zero-argument call is part of the signature
+    // — a pin that goes red if the parameter is ever made required, which would
+    // break the platform-internal callers that hold no context at all.
+    const noContext = withoutIt.resolveEffectiveObjectPermissions?.();
+    expect(noContext).toBeUndefined();
   });
 
   it('[#19354] the values are effective ENTRIES, not per-verb verdicts — the fold stays in objectPermissionGrants', async () => {

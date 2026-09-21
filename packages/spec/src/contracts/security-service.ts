@@ -366,7 +366,9 @@ export interface ISecurityService {
    * are the primitive for an audience check ("does this caller hold
    * `sales_manager`?"); the sets are the primitive for a MERGE. A consumer that
    * must fold the caller's grants into one answer — the object/field access map
-   * `/auth/me/permissions` serves, the capability + tab surface `/me/apps`
+   * `/auth/me/permissions` serves (whose `objects` half
+   * {@link resolveEffectiveObjectPermissions} now answers directly), the
+   * capability + tab surface `/me/apps`
    * filters its app list with — cannot do it from names, so it re-implements
    * set resolution locally instead. That local copy is the drift this method
    * exists to end: the same rule has now diverged from the enforcement path
@@ -386,6 +388,17 @@ export interface ISecurityService {
    * `tabPermissions`. Two consumers legitimately project different subsets of
    * the same sets, and folding a merge in here would make this method the
    * fourth copy of a rule instead of the one source of its input.
+   *
+   * ⚠️ **One of those four axes has since left that arrangement: `objects`.**
+   * Where {@link resolveEffectiveObjectPermissions} is available, take the
+   * `objects` axis from it instead of folding these sets. The caller-side
+   * most-permissive fold described above is not merely a second copy of that
+   * rule — it is measurably STRICTER than enforcement, because it treats `'*'`
+   * and named objects as independent keys and so never propagates a super-user
+   * grant into an entry another set denied (ADR-0124 D4). It remains correct,
+   * and remains the only route, for a service that predates that method: it is
+   * the FALLBACK on this axis, no longer the preferred path. The other three
+   * axes are unaffected and stay exactly as stated above.
    *
    * **Throws** on resolution failure, exactly as {@link resolvePermissionSetNames}
    * does; callers must fail CLOSED on a throw rather than reading it as "no sets".
@@ -415,6 +428,16 @@ export interface ISecurityService {
    * assignable to it with NO shaping step in between — deliberately, because a
    * shaping step is where a permission map acquires a wrong `false`.
    *
+   * ⚠️ **Assignable is not the same as unchecked, and it does not retire the
+   * door.** `@objectstack/formula`'s `toEvalPermissions` calls itself the ONE
+   * door permission data comes through, and it is not a no-op: it parses every
+   * entry with the published schema, strips retired-default residue and
+   * freezes. The division is what the caller is holding. An in-process caller
+   * holding THIS method's typed return — the engine, resolving the service
+   * from the same kernel — may assign it straight onto the context. A caller
+   * that has put the same map on a wire and read it back is holding `unknown`
+   * again, whatever its declaration file says, and goes through the door.
+   *
    * **Why the whole map, when every other reader here takes an `object`.** The
    * object name is chosen by the AUTHORED PREDICATE at evaluation time, not by
    * the caller: a per-object reader would force the engine to guess which
@@ -433,6 +456,11 @@ export interface ISecurityService {
    * single rule with a measured history of being re-implemented and drifting
    * (#7608 / #7555 / #6334), and ADR-0124 D4 puts it on the server. This method
    * is that merged answer, so a consumer needing it asks instead of folding.
+   * That sibling's own paragraph on merge semantics carries the other half of
+   * this sentence: the `objects` axis now prefers this method, and the
+   * caller-side fold is the fallback for a service that predates it. ⛔ The two
+   * passages are one instruction, not two — a consumer that reads only one of
+   * them must not come away with a different rule.
    *
    * **Entries, not verdicts.** Each value is the effective `allow*` +
    * super-user entry, NOT a per-verb boolean: the fold from entry to verdict
