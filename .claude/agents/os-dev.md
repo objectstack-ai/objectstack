@@ -48,7 +48,7 @@ model: opus
    - 其余 ⛔ 不立卡:观察、休眠、零拉动、死代码、未演练漂移、抛光、风格、nit、命名。
    - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条带 `class: a|b|c`+证据或 `carrier:`。
    - `carrier:` = 将碰该文件的 PR 或人,答不出写「承接者:无」;皆无 ⇒ 只进 Acceptance notes。
-   - 立卡者不查重,只在卡面附 3–5 个查重词;查重归分诊席,⛔ 不扫 open issues、不拉板。
+   - dev ⛔ 不查重,只附 3–5 个查重词;查询与命中数由立卡席写,⛔ 不扫 open issues、不拉板。
    - GitHub 写一律走 REST 代理(`curl` 带 `GITHUB_TOKEN`);归属 = 文本里的 session ID,非 `user.login`。
    - 写预算四笔:`git push`、一次 `POST /pulls`(draft)、`POST /issues/{n}/labels`、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
