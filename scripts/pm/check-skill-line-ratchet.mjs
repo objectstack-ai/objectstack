@@ -332,7 +332,33 @@ export const CEILINGS = new Map([
   // clause is refused on the state-machine precedent. Ruled content is not
   // growth (the 811 → 812 entry above). Landed count, headroom 0, same
   // convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 813],
+  // Raised 813 → 819 by the product-only-queue charter ruling — an ORDINARY
+  // raise under this map's own maintainer exit, ⛔ not a cross-file move.
+  // Maintainer, 2026-09-21, live PM chat with the director seat, verbatim and
+  // untranslated: 「205 否，天花板抬到 819」 — the second clause is this ruling
+  // (the first is batch #205 item 1, on a different card); recorded by the
+  // director on #19457, comment 5754521737. The content is the six ruled edits
+  // of #19457 (ruling batch #202, letter B, plus the audit-retirement directive
+  // 「受管合并审计 以后不需要了，浪费时间。」 landed as its edit 6): the dev queue
+  // becomes product-only and a `tooling` card enters `pm:queue` only with an
+  // `Unblocks: #N` line or a named published surface; triage closes at first
+  // grading; a gate that misfires twice is deleted rather than repaired; at most
+  // one tooling card is dispatched fleet-wide; and `tooling` becomes a
+  // first-touch label with four named readers.
+  // It could not be paid in place — measured over three rounds, not assumed: the
+  // cost went 9 → 8 → 6 as everything payable was paid (three rules folded into
+  // existing lines, the four readers folded into the length-exempt glossary ROW,
+  // the close rule folded onto the 「无则关」 clause a sibling PR had landed
+  // meanwhile, and edit 6's deletions gave two lines back); every ceilinged file
+  // in this map stands at headroom 0, so no reference file can absorb the rest;
+  // the six that remain are one ruled rule each, 78–120 bytes, and no two of them
+  // pair under the 120-byte cap; and a declared cross-file move is zero-sum by
+  // construction — the destination's raise may not exceed the source's net
+  // decrease — so it can fund a move but never new content. Ruled content is not
+  // growth (the 811 → 812 entry above). SKILL.md is not a CROSS_FILE_MOVES
+  // destination, so no `ruledRaises` record applies. Landed count, headroom 0,
+  // same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 819],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
