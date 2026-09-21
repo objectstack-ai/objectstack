@@ -12119,9 +12119,27 @@ export function residueLines(
  * gate's accept set is the maintainer's decision, not a refresh-time
  * convenience. The review label deliberately names WHAT is reviewed, never a
  * model (maintainer, 2026-08-16: 「needs:fable-review 这个标签不好,下次模型升级怎么办」).
+ *
+ * ## A tier that is GONE is not a tier that is EXHAUSTED (#19544)
+ *
+ * The exits below carry a QUOTA exemption: a tier that is exhausted comes
+ * back, so the card waits out of the queue and the review is never downgraded
+ * and never self-reviewed. A tier that has been RETIRED never comes back, and
+ * the two cases differ on WHO MAY ACT: a seat reading 「⛔ 不许降档」 onto a
+ * vanished tier holds its whole lane forever, and a seat picking the
+ * replacement itself is the silent downgrade the fuse exists to stop. So a
+ * retirement is a maintainer ruling and ⛔ never a seat's reading — and when
+ * the ruling lands, this VALUE is the one line that moves. The ceiling of the
+ * ladder `tierLines` prints is DERIVED from it ({@link TIER_CEILING}) so the
+ * two cannot drift apart. This value moved off the retired ceiling on the
+ * maintainer's 2026-09-21 ruling — verbatim: 「fable 没有了」, answered with
+ * 「改成 opus」 — which is why the docblocks below still name the retired tier
+ * where they record what was ruled AT THE TIME; a record of what was served
+ * then stays true. Rule text: `references/contract-review.md` 「降档保险丝」.
+ *
  * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
  */
-export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
+export const CONTRACT_REVIEW_TIER = 'claude-opus-5';
 
 /**
  * The globs that MANDATE a model tier for any card whose file surface touches
@@ -12201,9 +12219,10 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  *
  * The sanctioned exits from a mandate — the one-line-class mechanical-edit
  * downgrade (a card CONTENT judgment, like clause ②), the measured quota
- * exemption (fable unavailable ⇒ opus, never lower) and the proactive
- * low-headroom downgrade — are claim-time judgments, not properties of the
- * file surface. This tool states the mandate; the seat records any exit and
+ * exemption (the mandated tier EXHAUSTED ⇒ the default tier, never lower — a
+ * tier that is RETIRED is not exhausted and is a maintainer ruling instead,
+ * ⛔ never a seat's reading) and the proactive low-headroom downgrade — are
+ * claim-time judgments, not properties of the file surface. This tool states the mandate; the seat records any exit and
  * its reason in the claim comment. ONE exit is path-shaped, and so it IS
  * encoded: the one-line-class downgrade does not exist for a surface under
  * `skills/**` — the 2026-09-10 ruling's 必须, because a closed enumeration
@@ -12332,6 +12351,49 @@ export const TIER_FLOOR = 'sonnet';
 export const TIER_DEFAULT = 'opus';
 
 /**
+ * The FAMILY word inside a model id — `claude-<family>-<version>` ⇒ `family`.
+ *
+ * The ladder the claim comment quotes is written in family words (`sonnet`,
+ * `opus`), while {@link CONTRACT_REVIEW_TIER} is a full model id, so the
+ * ceiling has to cross between the two vocabularies somewhere. It crosses
+ * HERE, by derivation, because the alternative — writing the ceiling's word
+ * down beside the constant — is the second value site the constant's own
+ * docblock refuses, and it is exactly how the ladder came to read 「ceiling
+ * fable」 for a tier the harness had stopped serving.
+ *
+ * An id this cannot read returns VERBATIM rather than throwing or guessing: a
+ * ladder printing the whole model id is louder than one printing a family word
+ * nobody ruled, and `--tier` runs on every dispatch, so a model id in an
+ * unfamiliar shape must not take the tool down. Both directions are pinned.
+ */
+export function tierWordOf(modelId) {
+  const m = /^claude-([a-z]+)-/.exec(String(modelId ?? ''));
+  return m === null ? String(modelId ?? '') : m[1];
+}
+
+/**
+ * The ladder's CEILING — the contract-review tier, in the ladder's vocabulary.
+ *
+ * ⛔ Not a constant of its own: derived from {@link CONTRACT_REVIEW_TIER} so a
+ * retirement ruling moves ONE line and the ladder follows. The day the ceiling
+ * and the default read the same word is not a bug — it is what a retired
+ * ceiling falling to the default LOOKS like, and the ladder says so rather
+ * than keeping a tier nobody can be dispatched at.
+ */
+export const TIER_CEILING = tierWordOf(CONTRACT_REVIEW_TIER);
+
+/**
+ * Tier family words this ladder once printed and must never print again.
+ *
+ * ⛔ Not a tier table and ⛔ not an ordering — a RETIRED-SPELLING guard, the
+ * same shape as the retired clause-② keys pinned further down. The self-test
+ * asserts no rendering contains one, so the day a ceiling is written down by
+ * hand again it reds instead of quietly outliving the harness that served it.
+ * A word leaves this list only when a maintainer ruling brings the tier back.
+ */
+export const RETIRED_TIER_WORDS = Object.freeze(['fable']);
+
+/**
  * Place a card's file surface against the mandatory globs. Pure over its
  * inputs, so the self-test can drive every branch offline.
  *
@@ -12394,7 +12456,7 @@ export function tierLines(result) {
   if (!mandatory) {
     return [
       `Model tier — no path-derived mandate: the surface hits none of the ${declared} declared glob(s), derived here, not recalled.`,
-      `  The tier stays the PM's per-card judgment call (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling fable).`,
+      `  The tier stays the PM's per-card judgment call (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING}).`,
       clause2,
       ...suspicion,
     ];
@@ -12415,7 +12477,8 @@ export function tierLines(result) {
     `Model tier — MANDATORY: ${tier} (derived from the file surface, not recalled).`,
     ...hits.map((h) => `  - ${h.path} ⇢ '${h.glob}' — ${h.why}`),
     `  Exits, each recorded with its reason in the claim comment's \`Container & model\` line: ${oneLineExit};` +
-      ' the measured quota exemption (fable unavailable ⇒ opus, never lower); the proactive low-headroom downgrade.',
+      ` the measured quota exemption (the mandated tier EXHAUSTED ⇒ ${TIER_DEFAULT}, never lower — a tier that is` +
+      " RETIRED is a maintainer ruling instead, ⛔ never a seat's reading); the proactive low-headroom downgrade.",
     clause2,
     ...suspicion,
   ];
@@ -25231,6 +25294,62 @@ function selfTest() {
   t('the frame-sync COPIES table is readable and non-empty, so the pin below is not vacuous', frameProbe.status === 0 && Array.isArray(frameFiles) && frameFiles.length > 0);
   t(`every frame-sync-enforced copy is fable-mandated (unmandated: ${frameFiles.filter((f) => !deriveTier([f]).mandatory).join(', ') || 'none'})`, frameFiles.length > 0 && frameFiles.every((f) => deriveTier([f]).tier === CONTRACT_REVIEW_TIER));
   t('the SKILL.md main file and the dev-agent definition are declared in their own right, not only via the frame table', MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md') && MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/agents/os-dev.md'));
+
+  // ── The ladder's CEILING and the constant, pinned TOGETHER (#19544) ───────
+  //
+  // The ceiling used to be a WORD written beside the constant, and the pair
+  // drifted in the one direction nothing could see: the harness stopped
+  // serving the tier, the constant kept naming it, and the ladder went on
+  // printing its family word as a LIVE rule for a tier no dispatch could
+  // reach. The ceiling is derived now, so these cases hold the RENDERING
+  // against the constant rather than against a remembered word — write the
+  // ceiling by hand again and they red, whichever half was edited.
+  const ladderRenderings = [plainLines, mandLines, catalogLines, tierLines(fableOf(['packages/spec/src/api/error-code-ledger.zod.ts'])).join('\n')];
+  t('the ladder prints a ceiling DERIVED from the contract-review constant, so the two cannot drift apart', plainLines.includes(`ceiling ${tierWordOf(CONTRACT_REVIEW_TIER)}`), plainLines.split('\n').find((l) => l.includes('ceiling')) ?? 'no ladder line was rendered at all');
+  t("…in the ladder's own vocabulary — the constant's FAMILY word, never the raw model id", TIER_CEILING === tierWordOf(CONTRACT_REVIEW_TIER) && !plainLines.includes(CONTRACT_REVIEW_TIER));
+  t('tierWordOf reads the family out of an id, and hands an unreadable one back VERBATIM rather than guessing a word', tierWordOf('claude-example-9-9') === 'example' && tierWordOf('an-unfamiliar-shape') === 'an-unfamiliar-shape' && tierWordOf(null) === '');
+  t(`⛔ no RETIRED tier word survives in any rendering — ladder, exits and suspicion line all read the constant (dirty: ${ladderRenderings.map((l, i) => RETIRED_TIER_WORDS.filter((w) => l.toLowerCase().includes(w)).map((w) => `${i}/${w}`).join(' ')).filter(Boolean).join(' ') || 'none'})`, ladderRenderings.every((l) => RETIRED_TIER_WORDS.every((w) => !l.toLowerCase().includes(w))));
+  t('the retired-spelling guard is not vacuous — it names at least one word, and none of them is a tier still in the ladder', RETIRED_TIER_WORDS.length > 0 && !RETIRED_TIER_WORDS.includes(TIER_FLOOR) && !RETIRED_TIER_WORDS.includes(TIER_DEFAULT) && !RETIRED_TIER_WORDS.includes(TIER_CEILING));
+  // The constant's docblock promises the model id is spelled as a VALUE on its
+  // own line and NOWHERE else across these two roots. That promise carried no
+  // pin, which is precisely how a second spelling could outlive a retirement:
+  // the seat edits the declaration, the copy stays, and nothing compares them.
+  // Read from the TREE, never from a list of files someone remembered.
+  const walkFilesUnder = (dir, out = []) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const abs = nodePath.join(dir, entry.name);
+      if (entry.isDirectory()) walkFilesUnder(abs, out);
+      else if (entry.isFile()) out.push(abs);
+    }
+    return out;
+  };
+  const TIER_VALUE_ROOTS = ['scripts/pm', '.claude/skills/pm-dispatch'];
+  const scanTierRoots = (predicate) => {
+    const hits = [];
+    for (const rel of TIER_VALUE_ROOTS) {
+      for (const abs of walkFilesUnder(nodePath.join(ROOT, rel))) {
+        readFileSync(abs, 'utf8').split('\n').forEach((line, i) => {
+          const found = predicate(line);
+          if (found) hits.push({ at: `${nodePath.relative(ROOT, abs)}:${i + 1}`, found, line });
+        });
+      }
+    }
+    return hits;
+  };
+  const valueSites = scanTierRoots((line) => (line.includes(CONTRACT_REVIEW_TIER) ? CONTRACT_REVIEW_TIER : null));
+  t(`the tier's VALUE is spelled in exactly ONE place under ${TIER_VALUE_ROOTS.join(' and ')} (found: ${valueSites.map((h) => h.at).join(', ') || 'none'})`, valueSites.length === 1);
+  t('…and that one place is the `export const` DECLARATION, not a comment or a rule that quotes the id', valueSites.length === 1 && valueSites[0].line.startsWith('export const CONTRACT_REVIEW_TIER = ') && valueSites[0].at.startsWith('scripts/pm/dispatch-gates.mjs:'));
+  const skillIdSpellings = scanTierRoots((line) => {
+    const m = /\bclaude-[a-z]+-\d[\w.-]*/.exec(line);
+    return m === null ? null : m[0];
+  }).filter((h) => h.at.startsWith('.claude/skills/pm-dispatch/'));
+  t(`the pm-dispatch skill tree spells NO model id at all — it names the CONSTANT, which is why a retirement never edits it (found: ${skillIdSpellings.map((h) => h.at).join(', ') || 'none'})`, skillIdSpellings.length === 0);
+  // The rulebook half of the same coupling: the skill names the constant, and
+  // its downgrade fuse carries the case the quota exemption never had.
+  const fuseRules = readFileSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/contract-review.md'), 'utf8');
+  t('the rulebook names the contract-review tier by its CONSTANT, so a retirement moves the value and the prose follows', fuseRules.includes('`CONTRACT_REVIEW_TIER`'));
+  t('…and its fuse keeps the quota exemption pointed at DISPATCH, never at the review', /额度耗尽豁免[^\n]*⛔[^\n]*不及复核/.test(fuseRules));
+  t('…and carries the case it never had: a RETIRED tier is not an exhausted one, and it is a maintainer ruling, ⛔ never a seat\'s reading', /档位退役[^\n]*≠[^\n]*耗尽[^\n]*维护者裁决[^\n]*⛔[^\n]*非席位读数/.test(fuseRules));
 
   // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
   //
