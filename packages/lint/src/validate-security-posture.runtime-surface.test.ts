@@ -39,19 +39,39 @@
 //    (this 422 table answers first; the ADR-0094-seam 403 R1 door answers
 //    for what passes lint), and the same ruling retired the plugin gate's
 //    R2 `owd_external_wider` arm as this door's duplicate.
+//  - #19370 (this state): `security-role-word` crosses too, and also WHOLE —
+//    `position` / `app` join `TYPE_TO_STACK_KEY`, and the entry declares the
+//    write type of all six collections the rule judges. The maintainer ruling
+//    (batch #203 item 3, letter B, 「203 同意」) REFUSED the other way out of
+//    that state: retiring `allowRuntimeCreate` on the two types would close
+//    Studio's own app designer, a shipped tenant capability, so the rules are
+//    made real on every door instead (`docs/NORTH-STAR.md` 〈优先级〉 4
+//    「声明了的…在运行时兑现」; ADR-0010). The snapshot did NOT grow to carry
+//    `positions` / `apps`: this rule resolves no references across
+//    collections, so mapping the two write types was the whole unblock.
 //
 // ## What each case is evidence FOR
 //
 //  1. `the mirror still matches the real gate (flow)` — non-vacuity for
 //     `wouldGateAdd` (builder-vs-gate parity on a wired type).
-//  2. The crossing pins: `seed`/`permission`/`book`/`object` all reach this
-//     block at the REAL gate; `position`/`app` reach no rule (role-word's
-//     residue — see 3).
-//  3. `security-role-word` stays behind WHOLE: its entry is CLI-only, no
-//     runtime-gated type reaches it, and the door does NOT refuse a
-//     `role_manager`-named permission set for it — while the CLI still
-//     refuses exactly what it refused before the split (both entries run on
-//     all three commands; the union of their findings is the pre-split set).
+//  2. The crossing pins: `seed`/`permission`/`book`/`object` all reach the
+//     `validateSecurityPosture` block at the REAL gate; `position`/`app` reach
+//     the vocabulary freeze and map to their stack keys (#19370 — the pin
+//     INVERTED there, it used to record that they reached no rule at all).
+//  3. `security-role-word` crosses WHOLE: its entry is `CLI_AND_RUNTIME`
+//     declaring the write type of every collection it judges, it carries no
+//     `surfaceReason` (that field says why a rule does NOT cross), the door
+//     now DOES refuse a `role_manager`-named permission set for it, and the
+//     CLI still refuses exactly what it refused before the split (both
+//     entries run on all three commands; the union of their findings is the
+//     pre-split set). #7220's one-id-one-side discipline is what the case
+//     measures in both directions — only the side moved.
+//  3b. #19370's behavioural acceptance: one refusal case per collection the
+//     crossing newly reaches (`position`, `app`), each with a LIT CONTROL
+//     proving a clean write passes and the rule RAN; the same for the three
+//     types already at the door; and the decision NOT to carry
+//     `positions`/`apps` as context collections, pinned so a future seat has
+//     to edit it deliberately.
 //  4. The `object` crossing, at the real gate: an OWD-less object publish IS
 //     refused (`security-owd-unset` — the ruled strictness), the platform's
 //     own create seed is clean (#8308's repair), a clean write is not blamed
@@ -65,6 +85,10 @@
 //     enrichment turns the agreement half red in the predicted direction:
 //     MORE findings than whole-stack).
 //  6. The seed-pair cases (#8307), unchanged.
+
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
@@ -92,6 +116,42 @@ import {
 } from './validate-security-posture.js';
 
 type AnyRec = Record<string, unknown>;
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The stack-level collections `validateSecurityRoleWord` judges, read off the
+ * RULE'S OWN SOURCE rather than restated from its registry declaration.
+ *
+ * [#19370] Why this exists at all. The whole-means-whole case below used to
+ * loop over a literal identical to the `runtimeTypes` literal it was checking,
+ * while its comment claimed it asked "the six collections the rule reads". It
+ * did not: nothing in this file read the rule's collection set, so a
+ * collection ADDED to the rule with no declaration beside it was a SILENCE,
+ * and the comment promised a guarantee the test did not provide. The removal
+ * direction was always caught (a declared type with no rule behind it reddens
+ * elsewhere); this closes the other one.
+ *
+ * Five keys, not six: the "six collections" the prose counts are objects,
+ * fields, actions, permission sets, positions and apps (plus books) — fields
+ * and actions are judged INSIDE `stack.objects` and are not stack keys of
+ * their own. What a write type can be declared for is a stack key, so that is
+ * the granularity this derives.
+ *
+ * Source-scanned rather than probed, for `authoring-rule-wiring.test.ts`'s
+ * reason one file over: vitest inlines imports through its transform, so a spy
+ * cannot prove which collections a pure function reached for. The path is
+ * seeded from `import.meta.url` and stays inside this package.
+ */
+function stackKeysJudgedByRoleWord(): string[] {
+  const source = readFileSync(join(HERE, 'validate-security-posture.ts'), 'utf8');
+  const start = source.indexOf('export function validateSecurityRoleWord');
+  expect(start, 'validateSecurityRoleWord left its module \u2014 re-point this derivation').toBeGreaterThan(-1);
+  const end = source.indexOf('\n}\n', start);
+  expect(end, "the rule's body must terminate at column 0 \u2014 re-point this derivation").toBeGreaterThan(start);
+  const body = source.slice(start, end);
+  return [...new Set([...body.matchAll(/\bstack\.([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]))].sort();
+}
 
 const ENTRY = AUTHORING_RULES.find((r) => r.name === 'validateSecurityPosture')!;
 const ROLE_ENTRY = AUTHORING_RULES.find((r) => r.name === 'validateSecurityRoleWord')!;
@@ -282,11 +342,13 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     // position named `sales_role` walked through.
     //
     // #7220's discipline is unchanged and is what this still measures: ONE
-    // rule id, ONE side of the wall. Only the side moved. The entry now
-    // declares the write type of every one of the six collections, so the
-    // subset door the old pin existed to prevent cannot be reached from here
-    // in either direction — a future NARROWING of `runtimeTypes` fails this
-    // case exactly as a partial widening would have failed its predecessor.
+    // rule id, ONE side of the wall. Only the side moved. The entry declares a
+    // write type for every stack collection the rule judges, so the subset
+    // door the old pin existed to prevent cannot be reached from here in
+    // EITHER direction — a NARROWING of `runtimeTypes` fails the dispatch loop
+    // below, and a collection ADDED to the rule without a declaration fails
+    // the derivation above it (#19370: that second direction used to be a
+    // silence this comment claimed it covered).
     expect(ROLE_ENTRY, 'the split entry must exist — role-word may not ride the crossed entry').toBeDefined();
     expect(ROLE_ENTRY.surfaces).toEqual(['cli', 'runtime-publish']);
     expect(ROLE_ENTRY.runtimeTypes).toEqual(['object', 'permission', 'book', 'position', 'app']);
@@ -297,10 +359,31 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     // reason would have been a stale answer to a question no longer asked.
     expect(ROLE_ENTRY.surfaceReason).toBeUndefined();
     // Whole means whole, from the other side: every collection the rule judges
-    // has its write type at the door. Asserted against the six collections the
-    // rule reads, not against the list above, so a collection added to the
-    // rule without a declaration here is a failure rather than a silence.
-    for (const type of ['object', 'permission', 'book', 'position', 'app']) {
+    // has its write type at the door. ⭐ This is asked against the collections
+    // the rule's own SOURCE reads — not against the literal above, which would
+    // only compare that literal with itself.
+    const judged = stackKeysJudgedByRoleWord();
+    // The blindness floor first: a scan that stops matching measures zero and
+    // must land HERE, red, rather than making every cross-check below vacuous.
+    // ⛔ This list is a statement about the RULE, so a collection genuinely
+    // added to or removed from it is a deliberate edit to this line — and to
+    // `runtimeTypes`, which is exactly the pairing the next assertion enforces.
+    expect(judged).toEqual(['apps', 'books', 'objects', 'permissions', 'positions']);
+
+    // The invariant, with the two sides read from different places: the keys
+    // the rule judges, and the keys the registry declaration reaches through
+    // `TYPE_TO_STACK_KEY`. A collection added to the rule with no write type
+    // declared for it now fails here, naming the collection.
+    const declaredStackKeys = (ROLE_ENTRY.runtimeTypes ?? []).map((t) => stackKeyForType(t));
+    expect(
+      judged.filter((key) => !declaredStackKeys.includes(key)),
+      'collection(s) the rule judges that NO declared runtimeType reaches — the #7220 split, ' +
+        'in the direction a literal-vs-literal loop could never see',
+    ).toEqual([]);
+
+    // And the dispatch really happens for each declared type (the removal
+    // direction, which was always covered).
+    for (const type of ROLE_ENTRY.runtimeTypes ?? []) {
       expect(
         runtimeAuthoringRulesFor(type).map((r) => r.name),
         `role-word must run for '${type}' writes — anything less is the #7220 split`,

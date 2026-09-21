@@ -131,9 +131,10 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // `allowRuntimeCreate: true`, so Studio's app designer, REST `/meta` and an
   // MCP/AI author all mint them at runtime, and until the rule declared them a
   // position named `sales_role` walked through the one door a tenant has while
-  // an object of that name was refused. `validateSecurityRoleWord` opens with
-  // `recordsOf(stack.positions)` / `recordsOf(stack.apps)`, so the keys named
-  // here are keys a crossed rule READS — not the `seed: 'data'` shape.
+  // an object of that name was refused. `validateSecurityRoleWord` READS
+  // `stack.positions` and `stack.apps` — it opens on `objects` /
+  // `permissions` and reaches these two further down — so the keys named here
+  // are keys a crossed rule really consults, not the `seed: 'data'` shape.
   //
   // ⛔ NOT accompanied by a `RuntimeStackContext` row, and that asymmetry is
   // the measured answer rather than a half-landing. A collection joins the
@@ -146,8 +147,10 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // and cancels, and a write's own collection already holds exactly one member
   // — its own item — so `positions[0]` IS this write and name-keying it would
   // say nothing the index does not (the `pages` reading in
-  // `runtime-gate.derived-name-keys.test.ts`). Eight of the ten mappings above
-  // name a non-context key for the same reason. ⛔ Do not add a context row
+  // `runtime-gate.derived-name-keys.test.ts`). Eight of the twelve mappings
+  // above name a non-context key for the same reason — counted off this table,
+  // where only `objects`, `permissions`, `books` and `datasets` are context
+  // collections. ⛔ Do not add a context row
   // "for symmetry": `RuntimeStackContext`'s set is bounded by what the wired
   // rules RESOLVE (measured, not projected), and every member of it costs the
   // publish door one indexed `sys_metadata` read per write.
