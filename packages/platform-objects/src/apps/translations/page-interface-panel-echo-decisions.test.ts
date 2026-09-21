@@ -583,12 +583,20 @@ describe('#19403 round 2 — the provenance table agrees these leaves are now au
       // finds it. Deliberately matched by pattern rather than pinned to a
       // family, so a later round of this card cannot red this control by
       // fixing one.
-      const sample = Object.keys(table).find((k) => /^metadataForms\.[^.]+\.(fields|sections)\..+\.[^.]+$/.test(k));
-      expect(sample, `${locale} provenance table records no metadata-form leaf`).toBeTruthy();
-      const parts = /^metadataForms\.([^.]+)\.(fields|sections)\.(.+)\.([^.]+)$/.exec(sample!);
+      // ⚠️ ROUND 9 RE-SEEDED THIS DRAW, for the reason round 7's provenance
+      // floor had: a control whose positive half is drawn from the population
+      // this card SHRINKS expires by design. It read `metadataForms.` keys only,
+      // and round 9 decided the last metadata-form leaf `zh-CN` still read in
+      // English, so that slice is now EMPTY there and the draw returned
+      // `undefined`. Widened to the WHOLE table — the sibling `objects.` slice is
+      // a population this card does not touch, so it cannot empty — and every
+      // claim below is unchanged.
+      const sample = Object.keys(table).find((k) => /^(metadataForms|objects)\.[^.]+\..+\.[^.]+$/.test(k));
+      expect(sample, `${locale} provenance table records no leaf at all`).toBeTruthy();
+      const parts = /^(metadataForms|objects)\.([^.]+)\.(.+)\.([^.]+)$/.exec(sample!);
       expect(parts, 'the table key does not decompose').toBeTruthy();
-      const [, type, scope, key, prop] = parts!;
-      const rebuilt = `metadataForms.${type}.${scope}.${key}.${prop}`;
+      const [, prefix, type, key, prop] = parts!;
+      const rebuilt = `${prefix}.${type}.${key}.${prop}`;
       expect(rebuilt, 'composing the key back from its parts must reproduce it').toBe(sample);
       expect(table[rebuilt], 'the lookup this file performs finds a key the table holds').toBeTruthy();
       // And the composer under test builds exactly that template.
