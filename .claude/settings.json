@@ -52,6 +52,10 @@
       "Bash(curl -sS -X PUT https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/ccr/auto_merge *)",
       "Bash(node --use-env-proxy scripts/pm/post-stamped.mjs *)",
       "Bash(node --use-env-proxy scripts/pm/label-write.mjs *)",
+      "Bash(node scripts/pm/post-stamped.mjs *)",
+      "Bash(node scripts/pm/label-write.mjs *)",
+      "Bash(node scripts/pm/close-cards.mjs *)",
+      "Bash(node --use-env-proxy scripts/pm/close-cards.mjs *)",
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectstack/issues/* *)",
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectui/issues/* *)"
     ],

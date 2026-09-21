@@ -1307,6 +1307,29 @@ jobs:
       - name: Label-write helper self-test
         run: pnpm check:pm-label-write
 
+      # Card-closure helper self-test (#19469) — same family and the same split
+      # as the two steps above, and it drives BOTH of them: `close-cards.mjs` is
+      # the three-step closure (comment · label · close) as one named command,
+      # so a seat's batch closure is one allow-listed prefix instead of a loop
+      # the session's write classifier judges act by act. The LIVE path posts
+      # comments, strips labels and closes cards, so it is emphatically not a
+      # thing CI runs against the board; the offline half is all CI can hold.
+      #
+      # What the self-test instruments is the set of rules a clean tree cannot
+      # exercise, every one of which is silent when it breaks: the skip matrix
+      # (not open · assigned · `pm:retriage` · a pm-state that is not EXACTLY
+      # the expected one · an open PR cross-referencing the card); that an
+      # unreadable card or timeline STOPS the run rather than being read as a
+      # "no"; that a 200 whose body does not read back `closed`, or reads back
+      # another `state_reason`, is not a close; and — the one this tool exists
+      # for — that a comment which lands whose label write then fails STOPS at
+      # that card, naming it and which of the three writes landed, instead of
+      # turning one half-state into a page of them. Weakening any of them leaves
+      # every ordinary invocation just as green, which is the shape
+      # `check:self-test-wired` requires this step for.
+      - name: Card-closure helper self-test
+        run: pnpm check:pm-close-cards
+
       # Board-snapshot archiver self-test (#17390) — same family and the same
       # split as every step around it. The LIVE run reads the whole board over
       # REST and commits the result to an orphan branch, so it is not a thing
