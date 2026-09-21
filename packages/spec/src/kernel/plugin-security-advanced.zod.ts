@@ -13,8 +13,13 @@ import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
  * - Fine-grained permission system
  * - Resource access control
  * - Sandboxing and isolation
- * - Security scanning and verification
  * - Runtime security monitoring
+ *
+ * ⛔ NOT security scanning. The scan-result family — `KernelSecurityScanResult`,
+ * `KernelSecurityVulnerability`, `PluginSecurityManifest.scanResults` and its
+ * sibling list `.vulnerabilities` — was retired under ADR-0049 enforce-or-remove
+ * (#15932), after the runtime scanner that was its last type-only importer went
+ * the same way (#14919). Nothing on this platform scans a plugin.
  */
 
 /**
@@ -346,6 +351,30 @@ const DISCLOSURE_RESPONSE_TIME_RETIRED =
   + 'name on `PluginHealthReport.metrics` was milliseconds — which is the confusion the rule '
   + 'exists to remove. Rename the key to `responseTimeHours`; the value (hours) is unchanged.';
 
+// The scan-result family's two tombstones (#15932, ADR-0049 enforce-or-remove).
+// Their value types — `KernelSecurityScanResult` and `KernelSecurityVulnerability` —
+// are gone from this build entirely; see the header note above.
+const SCAN_RESULTS_RETIRED =
+  '`PluginSecurityManifest.scanResults` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing on this platform ever produced, stored or read a security '
+  + 'scan result, so an authored array parsed cleanly and changed nothing. Delete the key. '
+  + 'There is no replacement key: plugin security scanning is not a platform capability. What '
+  + 'this manifest still enforces is `permissions` and `sandbox`; artifact provenance is '
+  + 'answered by the plugin signature verifier, which tells you an artifact is the one its '
+  + 'publisher signed and never that it is safe. Audit dependencies with a tool built for it '
+  + '(npm audit, pnpm audit, Dependabot, the GitHub Advisory Database, OSV).';
+
+const MANIFEST_VULNERABILITIES_RETIRED =
+  '`PluginSecurityManifest.vulnerabilities` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — it was an array of `KernelSecurityVulnerability`, the other half of '
+  + 'the scan-result family, and leaves with it: nothing ever wrote the list and nothing ever '
+  + 'read it, so declaring a known vulnerability against a plugin warned nobody and blocked '
+  + 'no install. Delete the key. There is no replacement key: plugin security scanning is not '
+  + 'a platform capability. Publish vulnerability contact and disclosure terms through the '
+  + 'surviving `securityContact` and `vulnerabilityDisclosure` blocks on this same manifest, '
+  + 'and audit dependencies with a tool built for it (npm audit, pnpm audit, Dependabot, the '
+  + 'GitHub Advisory Database, OSV).';
+
 /**
  * Sandbox Configuration
  * Defines how plugin is isolated
@@ -432,171 +461,6 @@ export const SandboxConfigSchema = lazySchema(() => z.object({
     allowedVars: z.array(z.string()).optional(),
     deniedVars: z.array(z.string()).optional(),
   }).optional(),
-}));
-
-/**
- * Security Vulnerability
- * Represents a known security vulnerability
- */
-export const KernelSecurityVulnerabilitySchema = lazySchema(() => z.object({
-  /**
-   * CVE identifier
-   */
-  cve: z.string().optional(),
-  
-  /**
-   * Vulnerability identifier
-   */
-  id: z.string(),
-  
-  /**
-   * Severity level
-   */
-  severity: z.enum(['critical', 'high', 'medium', 'low', 'info']),
-  
-  /**
-   * Category (e.g., SAST, DAST, Dependency)
-   */
-  category: z.string().optional(),
-
-  /**
-   * Title
-   */
-  title: z.string(),
-  
-  /**
-   * Location of the vulnerability
-   */
-  location: z.string().optional(),
-
-  /**
-   * Remediation steps
-   */
-  remediation: z.string().optional(),
-
-  /**
-   * Description
-   */
-  description: z.string(),
-  
-  /**
-   * Affected versions
-   */
-  affectedVersions: z.array(z.string()),
-  
-  /**
-   * Fixed in versions
-   */
-  fixedIn: z.array(z.string()).optional(),
-  
-  /**
-   * CVSS score
-   */
-  cvssScore: z.number().min(0).max(10).optional(),
-  
-  /**
-   * Exploit availability
-   */
-  exploitAvailable: z.boolean().default(false),
-  
-  /**
-   * Patch available
-   */
-  patchAvailable: z.boolean().default(false),
-  
-  /**
-   * Workaround
-   */
-  workaround: z.string().optional(),
-  
-  /**
-   * References
-   */
-  references: z.array(z.string()).optional(),
-  
-  /**
-   * Discovered date
-   */
-  discoveredDate: z.string().datetime().optional(),
-  
-  /**
-   * Published date
-   */
-  publishedDate: z.string().datetime().optional(),
-}));
-
-/**
- * Security Scan Result
- * Result of security scanning
- */
-export const KernelSecurityScanResultSchema = lazySchema(() => z.object({
-  /**
-   * Scan timestamp
-   */
-  timestamp: z.string().datetime(),
-  
-  /**
-   * Scanner information
-   */
-  scanner: z.object({
-    name: z.string(),
-    version: z.string(),
-  }),
-  
-  /**
-   * Overall status
-   */
-  status: z.enum(['passed', 'failed', 'warning']),
-  
-  /**
-   * Vulnerabilities found
-   */
-  vulnerabilities: z.array(KernelSecurityVulnerabilitySchema).optional(),
-  
-  /**
-   * Code quality issues
-   */
-  codeIssues: z.array(z.object({
-    severity: z.enum(['error', 'warning', 'info']),
-    type: z.string().describe('Issue type (e.g., sql-injection, xss)'),
-    file: z.string(),
-    line: z.number().int().optional(),
-    message: z.string(),
-    suggestion: z.string().optional(),
-  })).optional(),
-  
-  /**
-   * Dependency vulnerabilities
-   */
-  dependencyVulnerabilities: z.array(z.object({
-    package: z.string(),
-    version: z.string(),
-    vulnerability: KernelSecurityVulnerabilitySchema,
-  })).optional(),
-  
-  /**
-   * License compliance
-   */
-  licenseCompliance: z.object({
-    status: z.enum(['compliant', 'non-compliant', 'unknown']),
-    issues: z.array(z.object({
-      package: z.string(),
-      license: z.string(),
-      reason: z.string(),
-    })).optional(),
-  }).optional(),
-  
-  /**
-   * Summary statistics
-   */
-  summary: z.object({
-    totalVulnerabilities: z.number().int(),
-    criticalCount: z.number().int(),
-    highCount: z.number().int(),
-    mediumCount: z.number().int(),
-    lowCount: z.number().int(),
-    infoCount: z.number().int(),
-  }),
 }));
 
 /**
@@ -721,14 +585,17 @@ export const PluginSecurityManifestSchema = lazySchema(() => z.object({
   policy: KernelSecurityPolicySchema.optional(),
   
   /**
-   * Security scan results
+   * Tombstone: the scan-result surface is RETIRED (#15932, ADR-0049
+   * enforce-or-remove). `KernelSecurityScanResult` and
+   * `KernelSecurityVulnerability` left this build with it — the last importer
+   * of either type went with `PluginSecurityScanner` (#14919). Not a bare
+   * deletion: this shape is not `.strict()`, so zod would strip an authored
+   * key in silence (ADR-0104).
    */
-  scanResults: z.array(KernelSecurityScanResultSchema).optional(),
-  
-  /**
-   * Known vulnerabilities
-   */
-  vulnerabilities: z.array(KernelSecurityVulnerabilitySchema).optional(),
+  scanResults: retiredKey(SCAN_RESULTS_RETIRED),
+
+  /** Tombstone for the sibling list — same retirement, same reasoning. */
+  vulnerabilities: retiredKey(MANIFEST_VULNERABILITIES_RETIRED),
   
   /**
    * Code signing
@@ -793,12 +660,6 @@ export type RuntimeConfigParsed = z.infer<typeof RuntimeConfigSchema>;
 export type SandboxConfig = z.input<typeof SandboxConfigSchema>;
 /** Post-parse shape of {@link SandboxConfig} — defaults applied, transforms run (ADR-0122). */
 export type SandboxConfigParsed = z.infer<typeof SandboxConfigSchema>;
-export type KernelSecurityVulnerability = z.input<typeof KernelSecurityVulnerabilitySchema>;
-/** Post-parse shape of {@link KernelSecurityVulnerability} — defaults applied, transforms run (ADR-0122). */
-export type KernelSecurityVulnerabilityParsed = z.infer<typeof KernelSecurityVulnerabilitySchema>;
-export type KernelSecurityScanResult = z.input<typeof KernelSecurityScanResultSchema>;
-/** Post-parse shape of {@link KernelSecurityScanResult} — defaults applied, transforms run (ADR-0122). */
-export type KernelSecurityScanResultParsed = z.infer<typeof KernelSecurityScanResultSchema>;
 export type KernelSecurityPolicy = z.input<typeof KernelSecurityPolicySchema>;
 /** Post-parse shape of {@link KernelSecurityPolicy} — defaults applied, transforms run (ADR-0122). */
 export type KernelSecurityPolicyParsed = z.infer<typeof KernelSecurityPolicySchema>;

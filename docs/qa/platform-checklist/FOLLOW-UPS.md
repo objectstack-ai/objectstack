@@ -183,12 +183,26 @@ governance hole.
 
 | surface | evidence | the deadness, precisely |
 |---|---|---|
-| `KernelSecurityScanResult` / `KernelSecurityVulnerability` / `PluginSecurityManifest.scanResults` (`packages/spec/src/kernel/plugin-security-advanced.zod.ts,476,625`) | no `.parse`/`.safeParse` site anywhere; **zero** consumers of any kind since #14919 retired the dead scanner that was the last type-only importer | 22 rows published to `packages/spec/authorable-surface/kernel.json` with zero authors and zero parsers. The whole `plugin-security-advanced` module has no runtime consumer. |
-| `PluginQualityMetrics.securityScan` (`packages/spec/src/kernel/plugin-registry.zod.ts`) | spec self-test only | Nothing reads or writes it at runtime. |
+| ~~`KernelSecurityScanResult` / `KernelSecurityVulnerability` / `PluginSecurityManifest.scanResults`~~ (`packages/spec/src/kernel/plugin-security-advanced.zod.ts`) | no `.parse`/`.safeParse` site anywhere; **zero** consumers of any kind since #14919 retired the dead scanner that was the last type-only importer | **CLOSED by removal, #15932** (ruling below). The count this row carried was **22**; the retirement measured **27** authorable rows for the named surface — 8 + 17 for the two defs, plus one each for `PluginSecurityManifest.scanResults` and `PluginQualityMetrics.securityScan`. The 22 is not reconciled, only superseded. |
+| ~~`PluginQualityMetrics.securityScan`~~ (`packages/spec/src/kernel/plugin-registry.zod.ts`) | spec self-test only | **CLOSED by removal, #15932** — tombstoned with the family it mirrored. |
 | Marketplace/incident scan vocab (`marketplace.zod.ts` 'scanning' status, `marketplace-admin.zod.ts,193`, `incident-response.zod.ts` 'malware') | declared-only enum members, no producer in this repo | Cloud/EE surface. Same shape as the `'failed'`/`'expired'` upload statuses #7667 had to close: declared, published, no writer. |
 | MetadataPlugin FS scan + `metadata-fs` boot scan (`packages/metadata/src/plugin.ts,270` — `watch ?? false`; `packages/runtime/src/standalone-stack.ts` hard-off; `metadata-fs` unwired from any `os dev`/`os serve` lane) | unit-pinned in-package only | No reachable fixture from any shipped boot; if a future lane wires `metadata-fs`, the boot-scan/watcher dot-entry divergence is the risk to test first. |
 
-The scanner row above was **CLOSED by removal** in #14919 (maintainer ruling,
+**The first two rows above were CLOSED by removal in #15932** (maintainer ruling,
+director seat, decision batch #65, 2026-09-07, adopted verbatim 「同意」): the two defs
+left the build whole (`RETIRED_DEFS_BY_MAJOR[18]`), and the authorable carriers —
+`PluginSecurityManifest.scanResults`, its sibling list `.vulnerabilities` and
+`PluginQualityMetrics.securityScan` — are `retiredKey()` tombstones registered in
+`RETIRED_KEYS_BY_MAJOR[18]`. "Declare an owner to enforce" was refused by name: it would
+rebuild the scanner #14919 had just retired for the same reason. ⛔ Do not re-derive it.
+
+⚠️ **The third row is NOT closed and was NOT checked.** The ruling made the marketplace
+`'scanning'` status and the incident `'malware'` type conditional on a producer grep of
+`objectstack-ai/cloud`, and that repository was not reachable from the session that
+executed #15932 — so those members are untouched, and their absence from a diff is not
+evidence about them. The ready-to-run command is on #15932.
+
+The scanner row further down was **CLOSED by removal** in #14919 (maintainer ruling,
 director summon #14, decision batch #42): the class, its barrel export, its
 `packages/core/examples/` demonstration and the `PHASE2_IMPLEMENTATION.md` section that
 advertised it are gone, and that section now states plainly that plugin security scanning

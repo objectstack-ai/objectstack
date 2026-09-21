@@ -10619,6 +10619,85 @@ const step18: MigrationStep = {
         + 'the source manifest and republishing.',
     },
     {
+      id: 'plugin-security-scan-result-surface-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface: 'the plugin-security scan-result family: the defs '
+        + 'KernelSecurityScanResult and KernelSecurityVulnerability '
+        + '(kernel/plugin-security-advanced.zod.ts), their two authorable carriers on '
+        + 'PluginSecurityManifest — scanResults and vulnerabilities — and the sibling '
+        + 'verdict block PluginQualityMetrics.securityScan (kernel/plugin-registry.zod.ts)',
+      replacement:
+        'nothing to re-declare — delete the keys and every import of the two types. Plugin '
+        + 'security scanning is not a platform capability and there is no replacement schema. '
+        + 'What the platform does still enforce, and what to reach for instead: `permissions` and '
+        + '`sandbox` on the same PluginSecurityManifest are unchanged, and artifact provenance is '
+        + 'answered by `verifyPluginArtifactIntegrity` and the plugin signature verifier — which '
+        + 'tell you an artifact is the one its publisher signed, and never that it is safe. For '
+        + 'dependency vulnerabilities use the tools built for it against your own project (npm '
+        + 'audit / pnpm audit, Dependabot, the GitHub Advisory Database, OSV) and treat an '
+        + 'unaudited third-party plugin as untrusted code. A publisher who used scanResults to '
+        + 'advertise diligence keeps the surviving securityContact and vulnerabilityDisclosure '
+        + 'blocks, which are contact terms rather than a verdict.',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-07 on #15932 (director seat, decision batch #65, adopted verbatim 「同意」). '
+        + 'This is the second half of #14919. That card retired PluginSecurityScanner — a '
+        + '@objectstack/core class that shipped as a SECURITY control and could not fail, whose '
+        + 'verdict was status "passed" for every plugin it was ever handed. The SCHEMAS the '
+        + 'scanner fed survived it, and the scanner had been their only importer of any kind (a '
+        + 'type-only import in packages/core/src/security/security-scanner.ts), so the family went '
+        + 'from one type-only importer to zero consumers while staying fully published: 27 '
+        + 'authorable rows across kernel.json, six api-surface exports, two authorable defaults '
+        + 'and two json-schema manifest keys. An author could write any of it, be accepted, and '
+        + 'get nothing — declared-not-enforced, Prime Directive #10, one layer out from the class '
+        + 'removed for the same reason. The census was taken on origin/main after #14919 landed, '
+        + 'with a lit control (five hits for PluginSecurityManifest inside the declaring module) '
+        + 'proving the file greppable, and found no .parse or .safeParse site against either '
+        + 'schema anywhere in packages/**. securityScan is the sharpest member: scanResults '
+        + 'published a report, but securityScan.passed published a VERDICT, so a plugin could '
+        + 'declare itself clean with nothing behind it. Route: the two defs leave the build whole '
+        + '(RETIRED_DEFS_BY_MAJOR[18]) because nothing parses them and a prescription nobody can '
+        + 'receive is not worth its cost; the three authorable keys are retiredKey() tombstones '
+        + '(RETIRED_KEYS_BY_MAJOR[18]) because both carrying shapes are non-strict, where a bare '
+        + 'deletion is a silent strip (ADR-0104). Why this entry and not a D2 conversion: a plugin '
+        + 'security manifest and a plugin registry entry are package artifacts a publisher ships, '
+        + 'never stack collection members and never stored sys_metadata rows, so the conversion '
+        + 'chain has no seam that would see one — the disposition the sibling '
+        + 'kernel-plugin-security-durations-unit-in-key entry already records for this same '
+        + 'manifest. No deprecation window (maintainer 2026-08-27: 「项目在创业阶段，用户也很少，短期不考虑渐进」). '
+        + 'Scope note, recorded rather than acted on: PluginSecurityManifest.vulnerabilities is a '
+        + 'forced consequence rather than a name the ruling listed — it was the last authorable '
+        + 'referent of KernelSecurityVulnerability and could not outlive the def. Two neighbours '
+        + 'the ruling made CONDITIONAL are deliberately untouched here because the repository the '
+        + 'condition names, objectstack-ai/cloud, is not reachable from the session that executed '
+        + 'this: the marketplace "scanning" status and the incident "malware" type stay exactly as '
+        + 'they are, unremoved and not recorded as checked. '
+        + '⚠️ The out-of-repo consumer population is NOT MEASURED. @objectstack/spec is published, '
+        + 'so this removal is breaking for consumers no download, dependent or source telemetry '
+        + 'was consulted for — accepted as an input to the ruling, exactly as #14919 states of its '
+        + 'own three exports, and not a reason to soften the removal. #15932, #14919, ADR-0049, ADR-0087.',
+      acceptanceCriteria:
+        'No source imports KernelSecurityScanResult, KernelSecurityVulnerability or either '
+        + 'Schema from @objectstack/spec/kernel: both defs are absent from the built kernel '
+        + 'barrel and from api-surface/kernel.json, so a TypeScript consumer gets the refusal at '
+        + 'compile time at the import site rather than a missing runtime value. Authoring '
+        + 'PluginSecurityManifest.scanResults, PluginSecurityManifest.vulnerabilities or '
+        + 'PluginQualityMetrics.securityScan fails to compile (input type `never`) and fails to '
+        + 'parse with the tombstone prescription naming that key — verified by refusal pins that '
+        + 'assert the issue code, the path naming WHICH key was refused, and the prescription '
+        + 'text, plus a positive pin that the surrounding manifest still parses and grows no such '
+        + 'property. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
+        + 'nothing ever read any of these keys, so deleting one removes no check that was running. '
+        + 'A publisher who believed a declared scanResults entry gated anything was never getting '
+        + 'that gate; the remediation is to audit with a real tool, not to find a replacement key. '
+        + 'The surviving neighbours must still parse and still be exported — permissions, sandbox, '
+        + 'policy, codeSigning, certifications, securityContact and vulnerabilityDisclosure on the '
+        + 'manifest, testCoverage/documentationScore/codeQuality/conformanceTests on the quality '
+        + 'metrics, and the separately-declared SecurityScanResultSchema / '
+        + 'SecurityVulnerabilitySchema in kernel/plugin-security.zod.ts, which this change does '
+        + 'not touch.',
+    },
+    {
       id: 'plugin-security-scanner-retired',
       surface:
         '`@objectstack/core` runtime exports: `PluginSecurityScanner`, and the two types '
@@ -14734,6 +14813,73 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (`packages/core/src/health-monitor.ts`), never authored. See
     // `kernel-plugin-health-report-durations-unit-in-key`.
     'kernel/PluginHealthReport:metrics.uptime',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). `PluginQualityMetrics.securityScan` is
+    // the scan-result family's sibling on the plugin registry entry, named by the
+    // ruling alongside it: a last-scan date, per-severity vulnerability counts and a
+    // `passed` boolean, read by no scanner, registry, installer or UI. The census put
+    // every reference in `packages/spec/src/kernel/plugin-registry.test.ts` — the
+    // spec's own self-test and nothing else.
+    //
+    // It is the sharper half of the family for an author: `scanResults` published a
+    // report, but `securityScan.passed` published a VERDICT, so a plugin could ship
+    // `passed: true` with nothing at all behind it and a consumer reading the
+    // registry entry had no way to tell that from a real result.
+    //
+    // Tombstoned with `retiredKey()`: `PluginQualityMetricsSchema` is a plain
+    // `z.object`, so a bare deletion would strip an authored block in silence
+    // (ADR-0104). The key carried NO default of its own — the defaults inside it
+    // (`critical`/`high`/`medium`/`low = 0`, `passed = false`) fired only for an
+    // author who wrote the block — so `acceptRetiredDefaultResidue` is not owed:
+    // there is no value a released toolchain materialized into an artifact whose
+    // author never typed the key.
+    //
+    // No D2 conversion: a plugin registry entry is a published package artifact, not
+    // a stack collection member or a stored `sys_metadata` row. The ledger channel is
+    // `plugin-security-scan-result-surface-retired`.
+    'kernel/PluginQualityMetrics:securityScan',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). `PluginSecurityManifest.scanResults`
+    // published an array of `KernelSecurityScanResult` on the authorable surface with
+    // zero authors and zero parsers: no `.parse`/`.safeParse` site existed anywhere
+    // against the scan-result schemas, so a publisher could declare a clean scan on a
+    // plugin manifest, be accepted, and get nothing — the declared-not-enforced shape
+    // Prime Directive #10 names, one layer out from the runtime scanner #14919
+    // removed for the same reason.
+    //
+    // Tombstoned with `retiredKey()`, not deleted: `PluginSecurityManifestSchema` is a
+    // plain `z.object`, not `.strict()`, so a bare deletion would strip an authored
+    // key in silence (ADR-0104) — swapping an inert declaration for an invisible one.
+    // The value type leaves this build entirely (`RETIRED_DEFS_BY_MAJOR[18]`,
+    // `kernel/KernelSecurityScanResult`).
+    //
+    // No D2 conversion: a security manifest is a package artifact a publisher ships,
+    // never a stack collection member and never a stored `sys_metadata` row, so the
+    // chain has no seam that would see one — the disposition the sibling
+    // `vulnerabilityDisclosure.responseTime` entry on this same schema already
+    // records. The prescription an author meets is the tombstone itself; the ledger
+    // channel is `plugin-security-scan-result-surface-retired`.
+    'kernel/PluginSecurityManifest:scanResults',
+    // #15932 — ADR-0049 enforce-or-remove, decision batch #65.
+    // `PluginSecurityManifest.vulnerabilities` was an array of
+    // `KernelSecurityVulnerability` and is this retirement's FORCED CONSEQUENCE
+    // rather than a name the ruling listed: it was the last authorable referent of a
+    // def the ruling retires by name, so it cannot survive the def, and keeping the
+    // def alive only to carry it would be keeping the retired family alive under a
+    // second name. It is inert on its own terms too — nothing ever wrote the list and
+    // nothing ever read it, so declaring a known vulnerability against a plugin
+    // warned nobody and blocked no install.
+    //
+    // ⚠️ This is the ONE key outside the four names the #15932 dispatch fenced
+    // (`KernelSecurityScanResult`, `KernelSecurityVulnerability`,
+    // `PluginSecurityManifest.scanResults`, `PluginQualityMetrics.securityScan`), and
+    // it is reported as such on the card and in the landing PR rather than absorbed
+    // silently. It is not a neighbour retired by proximity — the fence's stated
+    // concern — it is a referent of a named retiree.
+    //
+    // Tombstoned with `retiredKey()` for the reason its `scanResults` sibling records
+    // (non-strict shape, ADR-0104 silent strip). No D2 conversion, same reasoning.
+    'kernel/PluginSecurityManifest:vulnerabilities',
     // #15678 (stack card 3/6 of #14478) — ruling B.
     // `PluginSecurityManifest.vulnerabilityDisclosure.responseTime` said "Expected
     // response time in hours" in prose and nothing else. Renamed to
@@ -17213,6 +17359,57 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // keeps emitting — see `18.kernel__PluginStartupResult__health.ts`. Route 3;
     // the D3 semantic entry `startup-orchestrator-retired` carries the record.
     'kernel/HealthStatus',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). `KernelSecurityScanResult` declared a
+    // complete scan report — timestamp, scanner name/version, a passed/failed/warning
+    // status, vulnerability and code-issue lists, dependency findings, license
+    // compliance and a six-number summary — and no layer ever emitted, stored, parsed
+    // or read one. Its only importer of any kind was `PluginSecurityScanner`, a
+    // type-only import from `packages/core/src/security/security-scanner.ts`, and
+    // #14919 deleted that file; the census after it landed put every remaining
+    // reference inside the declaring module itself, against a lit control (five hits
+    // for `PluginSecurityManifest` in the same file), so the zero is a reading.
+    //
+    // Whole-def retirement, not a tombstone: nothing parses this def, so there is no
+    // author to hand a prescription to and no `${defKey}:${name}` key leaving a live
+    // shape. `RETIRED_DEFS_BY_MAJOR[18]` plus the semantic entry
+    // `plugin-security-scan-result-surface-retired` ARE the declaration — the
+    // #11825 / #8715 shape. The two authorable carriers that pointed here,
+    // `PluginSecurityManifest.scanResults` and `.vulnerabilities`, are separately
+    // tombstoned and registered in `RETIRED_KEYS_BY_MAJOR[18]`.
+    //
+    // No D2 conversion: a plugin security manifest is a package artifact a publisher
+    // ships, never a stack collection member and never a stored `sys_metadata` row,
+    // so the conversion chain has no seam that would see one (the sibling
+    // `kernel/PluginSecurityManifest:vulnerabilityDisclosure.responseTime` entry
+    // records the same reasoning for the same schema).
+    'kernel/KernelSecurityScanResult',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). The other half of the scan-result
+    // family: a CVE-shaped vulnerability record (severity, CVSS score, affected and
+    // fixed versions, exploit/patch availability, remediation, disclosure dates) that
+    // nothing ever constructed, validated or consulted. It reached this build through
+    // exactly three referents, all now gone — `KernelSecurityScanResult.vulnerabilities`
+    // and `.dependencyVulnerabilities[].vulnerability` (that def leaves in the same
+    // change) and `PluginSecurityManifest.vulnerabilities` (tombstoned). Retired
+    // together with `KernelSecurityScanResult` because declaring a vulnerability
+    // vocabulary with no scan to carry it reads as a capability, which is the
+    // ADR-0049 shape.
+    //
+    // Whole-def retirement for the reason its sibling entry records, and the same
+    // disposition: `RETIRED_DEFS_BY_MAJOR[18]` plus
+    // `plugin-security-scan-result-surface-retired`, no D2 conversion, no tombstone
+    // of its own. Its two authorable defaults —
+    // `KernelSecurityVulnerability:exploitAvailable = false` and
+    // `:patchAvailable = false` — leave `authorable-defaults/kernel.json` with the
+    // def; nothing ever parsed this schema, so no released toolchain ever
+    // materialized either value into an artifact and there is no residue to accept.
+    //
+    // ⛔ NOT in scope, and deliberately untouched: the unprefixed
+    // `SecurityVulnerabilitySchema` / `SecurityScanResultSchema` pair in the sibling
+    // module `kernel/plugin-security.zod.ts`. Those are separate defs with their own
+    // self-test and are outside this ruling.
+    'kernel/KernelSecurityVulnerability',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of

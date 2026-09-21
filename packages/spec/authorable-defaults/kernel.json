@@ -51,8 +51,6 @@
     "kernel/InstalledPackage:status = \"installed\"",
     "kernel/KernelContext:features = {}",
     "kernel/KernelContext:mode = \"production\"",
-    "kernel/KernelSecurityVulnerability:exploitAvailable = false",
-    "kernel/KernelSecurityVulnerability:patchAvailable = false",
     "kernel/Manifest:defaultDatasource = \"default\"",
     "kernel/Manifest:scope = \"project\"",
     "kernel/MetadataDiffItem:hasConflict = false",
