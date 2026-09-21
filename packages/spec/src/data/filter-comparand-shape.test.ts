@@ -357,6 +357,41 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       .toEqual({ a: { $gte: { $field: 'b' }, $lte: { $field: 'c' } } });
   });
 
+  it('re-routes the pairs the comparand-TYPE door used to answer — convergence, pinned', () => {
+    // ⚠️ This is the one part of the delta that is NOT "was accepted, is now
+    // refused". A pair whose OTHER element the comparand-TYPE door would have
+    // refused now meets this door first, so it answers with the reference
+    // sentence instead of the type one: same code, same status, and the schema
+    // door already answered every one of these with the reference message, so
+    // the two doors CONVERGE rather than diverge. Pinned rather than left to
+    // the reader, because "nothing else changed" is not true of these rows.
+    const mixed = refusalOf(() => parseFilterAST({ at: { $between: [{ $field: 'a' }, { nope: 1 }] } }));
+    expect(mixed.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(mixed.status).toBe(400);
+    expect(mixed.message).toContain('does not accept a { "$field": … } reference');
+    // …and it names the REFERENCE's index, not the other element's.
+    expect(mixed.message).toContain('where.at.$between[0]');
+    // A non-string referent, and a reference reached through the PROTOTYPE, are
+    // the shape the author wrote — at both doors. The TYPE door would have
+    // called each of them a plain object and prescribed a literal, which is the
+    // wrong remedy for someone who was reaching for a column.
+    for (const bound of [{ $field: 42 }, Object.create({ $field: 'a' }) as object]) {
+      expect(refusalOf(() => parseFilterAST({ at: { $between: [bound, 'M'] } })).message)
+        .toContain('does not accept a { "$field": … } reference');
+    }
+    // A pair carrying NO reference is untouched: it still reaches the TYPE door
+    // and still answers with the TYPE door's own sentence.
+    expect(refusalOf(() => parseFilterAST({ at: { $between: [{ nope: 1 }, 'M'] } })).message)
+      .toContain('plain object');
+  });
+
+  it.todo(
+    'the $in / $nin MEMBER positions of the same 2026-08-11 ruling still DISAGREE across the two '
+    + 'doors — FieldOperatorsSchema refuses a { $field } member, parseFilterAST lowers it '
+    + 'unchanged (measured on this branch). Filed separately; ⛔ not pinned green here, because a '
+    + 'green pin would read as a ruling nobody made',
+  );
+
   // ⚠️ `$in` / `$nin` MEMBERS carrying a `{ $field }` reference are the SAME
   // #7596 ruling one position over, published by `SET_MEMBER_DESCRIPTION`, and
   // this door still lowers them unchanged — measured under #19377 and filed
