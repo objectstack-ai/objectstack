@@ -359,7 +359,20 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
       bad({ type }, { name: 'x' }, 'expanded');   // object without url — the tightening
       bad({ type }, { size: 10 }, 'expanded');    // ditto
     }
-    ok({ type: 'video' }, { url: 'https://cdn/v.mp4', duration: 12 }, 'expanded');
+    ok({ type: 'video' }, { url: 'https://cdn/v.mp4', durationSeconds: 12 }, 'expanded');
+    // #18669 ruling A: the rename carries NO narrowing, so a fractional second
+    // — the ordinary shape of a media length — is still legal. A closed
+    // `DurationSeconds` (`.int().nonnegative()`) would have refused this, which
+    // is why the ruling declined one.
+    ok({ type: 'video' }, { url: 'https://cdn/v.mp4', durationSeconds: 12.34 }, 'expanded');
+    // The retired spelling is refused with the rename prescription, not with a
+    // bare unrecognized-key error — and on a `looseObject` a bare deletion
+    // would have waved it through as an extra key instead.
+    const retiredDuration = valueSchemaFor({ type: 'video' }, 'expanded')
+      .safeParse({ url: 'https://cdn/v.mp4', duration: 12 });
+    expect(retiredDuration.success).toBe(false);
+    expect(JSON.stringify((retiredDuration as { error: unknown }).error))
+      .toContain('Rename the key to `durationSeconds`');
   });
 
   it('structured JSON types', () => {
