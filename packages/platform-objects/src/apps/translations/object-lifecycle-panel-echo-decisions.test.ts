@@ -156,8 +156,6 @@ const PROVENANCE: ReadonlyArray<readonly [string, Readonly<Record<string, string
   ['es-ES', esESGeneratedSourceHashes],
 ];
 
-const LOCALES = ['zh-CN', 'ja-JP', 'es-ES'] as const;
-
 /** The two locales this round decides. `zh-CN` had already authored all 33. */
 const DECIDED_LOCALES = ['ja-JP', 'es-ES'] as const;
 
