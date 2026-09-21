@@ -8,9 +8,11 @@ export const entry: SemanticMigration = {
   // code span AND a table cell.
   surface:
     'api.listRuns cursor — the pagination query parameter of '
-    + 'GET /api/automation/:name/runs declared by ListRunsRequestSchema, and its slot on '
-    + 'IAutomationService.listRuns. The limit parameter of the same door is NOT part of this '
-    + 'retirement and is unchanged, default(20) included',
+    + 'GET /api/automation/:name/runs declared by ListRunsRequestSchema, its slot on '
+    + 'IAutomationService.listRuns, and its option on all three @objectstack/client run-list '
+    + 'surfaces (automation.runs.list, automation.listRuns, environment().automation.listRuns). '
+    + 'The limit parameter of the same door is NOT part of this retirement and is unchanged, '
+    + 'default(20) included',
   replacement:
     'a wider `limit` — this door does read it, bounded to 1..100, and it is spent as the run '
     + "store's history window. There is no replacement for `cursor` itself, deliberately: "
@@ -59,13 +61,27 @@ export const entry: SemanticMigration = {
     + 'sentence is therefore correctly absent from the prescription. There is no '
     + '`acceptRetiredDefaultResidue` stage either: `cursor` carried no default, so it '
     + 'materialized into no artifact and there is no residue to accept. ADR-0049 / '
-    + 'ADR-0087, #19365.',
+    + 'The SDK half is part of the retirement rather than a follow-up: `@objectstack/client` '
+    + 'declared `cursor` and appended it on all three run-list surfaces, so retiring the key '
+    + 'in the schema alone would have left the one generated client this repo ships typing it '
+    + '`string` and sending it into a route that silently drops it — the ADR-0104 shape the '
+    + 'tombstone exists to prevent, re-created one layer down. The same call was made when '
+    + '#6361 retired the notifications `cursor`: the client dropped the option and recorded '
+    + 'the removal in its docblock. ADR-0087, #19365.',
   acceptanceCriteria:
-    'No caller sends `cursor` to `GET /api/automation/:name/runs`: writing it on a '
-    + '`ListRunsRequest` is a `tsc` error (the input type is `never`), which is the enforced '
-    + 'channel, and any value reaching a parse raises the prescription rather than a generic '
-    + 'unrecognized-key issue. The option is gone from `IAutomationService.listRuns` too, so '
-    + 'an implementation can no longer declare a slot for it. '
+    'No caller sends `cursor` to `GET /api/automation/:name/runs`, and that is true of every '
+    + 'channel this repo ships rather than of the schema alone. Writing it on a '
+    + '`ListRunsRequest` is a `tsc` error (the input type is `never`), and any value reaching a '
+    + 'parse raises the prescription rather than a generic unrecognized-key issue. The option is '
+    + 'gone from `IAutomationService.listRuns`, so an implementation can no longer declare a slot '
+    + 'for it. ⭐ It is also gone from the SDK, which is the channel most callers actually reach '
+    + 'this door through: `@objectstack/client` no longer declares `cursor` on '
+    + '`automation.runs.list`, `automation.listRuns` or '
+    + '`client.environment(id).automation.listRuns`, and no longer appends `?cursor=` on any of '
+    + 'the three — so the key cannot be smuggled past the retired schema by an untyped caller. '
+    + 'Without that half the retirement would have re-created its own defect one layer down: '
+    + 'the schema typing the key `never` while the shipped client typed it `string` and sent it, '
+    + 'silently dropped by a route that no longer reads it (ADR-0104). '
     + '⚠️ ONE wire behaviour CHANGES and must be verified as such, because it reverses a '
     + 'decision recorded under #7300: a repeated `?cursor=a&cursor=b` used to answer '
     + '`400 VALIDATION_FAILED` with a `details.fields[]` entry naming `cursor`, and now '

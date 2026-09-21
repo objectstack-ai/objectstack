@@ -522,9 +522,10 @@ const RUNS_LIST_CURSOR_REMOVED =
   '`cursor` was removed from GET /api/automation/:name/runs in @objectstack/spec 17.5.0 '
   + '(ADR-0049 enforce-or-remove) — it was VALIDATED at the boundary and then read by nothing: '
   + 'the option reached the service and the engine never looked at it, no emit site has ever '
-  + 'written the response half `nextCursor`, and this collection has no ordering key a resume '
-  + 'could have been built from — so a caller looping "until the cursor runs out" re-read the '
-  + 'first and only window forever, with no error. Delete the key. `limit` is the real window '
+  + 'written the response half `nextCursor`, and the only ordering this door has is an optional, '
+  + 'non-unique `startedAt` — not a resume point anything could have been built on — so a caller '
+  + 'looping "until the cursor runs out" re-read the first and only window forever, with no '
+  + 'error. Delete the key. `limit` is the real window '
   + 'and STAYS: it is read end to end (boundary to service to store) and bounded to 1..100, so '
   + 'ask for a wider window instead of a next page. Read the response `hasMore` to learn whether '
   + 'the window was short — it is now COMPUTED from the engine rather than the constant `false` '
@@ -592,7 +593,11 @@ export const ListRunsResponseSchema = lazySchema(() => BaseResponseSchema.extend
     // candidate set overflowed the caller's `limit`. It used to be a literal
     // `false` shipped beside a list that had been truncated — a caller asking
     // for one row was handed one row and told that was all of them.
-    hasMore: z.boolean().describe('Whether more runs are available than this response carries'),
+    hasMore: z.boolean().describe(
+      'Whether more runs matched than this response carries — widen `limit` to see them. '
+      + 'Under `status`, `false` means no further match within the scanned window rather than '
+      + 'none at all: the window is taken before the filter is applied.',
+    ),
   }),
 }));
 export type ListRunsResponse = z.input<typeof ListRunsResponseSchema>;

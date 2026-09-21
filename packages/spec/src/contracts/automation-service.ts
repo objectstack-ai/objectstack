@@ -564,6 +564,13 @@ export interface RunListResult {
      * carries. ⛔ Never a hard-coded constant: an implementation establishes
      * it by over-reading its sources, because `runs.length === limit` cannot
      * tell a flow with exactly `limit` runs from one with far more.
+     *
+     * ⚠️ **Qualified under a status filter.** An implementation may take its
+     * window BEFORE narrowing by `status` — the reference one does, because
+     * its durable history source has no status slot — in which case `false`
+     * means "no further match inside the window that was scanned", ⛔ not "no
+     * further match exists". Unfiltered, it is exact. Read it as a floor on
+     * what a wider `limit` would reveal, never as a count of the whole set.
      */
     hasMore: boolean;
 }
@@ -704,6 +711,12 @@ export interface IAutomationService {
      * there is nothing to send back — and it is ⛔ NOT a statement about runs
      * the deployment's retention policy has already discarded; those do not
      * exist any more and are not "more".
+     *
+     * ⚠️ And it is qualified under `status`: an implementation whose window is
+     * taken before the filter is applied can only answer about the rows it
+     * scanned, so a status-filtered `false` does not promise that no older run
+     * of that status exists. {@link RunListResult.hasMore} carries the full
+     * statement; ⛔ do not restate it more strongly at a call site.
      *
      * OPTIONAL, and its absence is a DECLARED degradation rather than a silent
      * one: a door that needs `hasMore` answers `501` naming this member, and

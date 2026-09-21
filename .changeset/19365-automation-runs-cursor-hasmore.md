@@ -2,6 +2,7 @@
 '@objectstack/spec': minor
 '@objectstack/runtime': minor
 '@objectstack/service-automation': minor
+'@objectstack/client': minor
 ---
 
 feat(automation): `GET /automation/:name/runs` retires `cursor` and computes `hasMore` (#19365)
@@ -11,13 +12,17 @@ literal, that there was nothing more to fetch. Both halves are closed here, per
 the maintainer-approved ruling of 2026-09-21 (decision batch #204 item 2,
 letter C of three).
 
-**BREAKING** — `cursor` no longer parses on `ListRunsRequestSchema`, and its
-slot is gone from `IAutomationService.listRuns`. It was declared on the wire,
-*validated* at the boundary, forwarded into the service contract, and read by no
-implementation. No emit site has ever written the response half `nextCursor`,
-and this collection carries no ordering key a resume could have been built
-from — so a caller looping "until the cursor runs out" re-read the first and
-only window forever, with no error.
+**BREAKING** — `cursor` no longer parses on `ListRunsRequestSchema`, its slot
+is gone from `IAutomationService.listRuns`, and `@objectstack/client` no longer
+declares or sends it on any of the three run-list surfaces
+(`automation.runs.list`, `automation.listRuns`,
+`client.environment(id).automation.listRuns`). It was declared on the wire,
+*validated* at the boundary, forwarded into the service contract, appended by
+the SDK, and read by no implementation. No emit site has ever written the
+response half `nextCursor`, and the only ordering this door has is an optional,
+non-unique `startedAt` — not a resume point anything could have been built
+on — so a caller looping "until the cursor runs out" re-read the first and only
+window forever, with no error.
 
 ```
 FROM  ListRunsRequestSchema.parse({ name: 'f', cursor: 'n_007' })
@@ -34,6 +39,27 @@ whatever a generated client kept sending — a clean parse and a parameter that
 never takes effect, which is this defect re-created one layer down (ADR-0104).
 Writing the key is now a `tsc` error and a parse error carrying the
 prescription.
+
+**The SDK is retired in the same stroke, and that is what makes the sentence
+above true.** Retiring the key in the schema alone would have left the one
+generated client this repo ships typing it `string` and sending it into a route
+that no longer reads it — the exact ADR-0104 shape the tombstone exists to
+prevent, re-created one layer down, for the channel most callers actually reach
+this door through. So the option is gone from all three surfaces and no
+`?cursor=` is appended on any of them; an untyped caller cannot smuggle it past
+the retired schema either, which is pinned. Same call as when #6361 retired the
+notifications `cursor`: the client dropped the option and recorded the removal
+in its docblock.
+
+```
+FROM  client.automation.runs.list('f', { limit: 5, cursor: 'abc' })
+      -> GET …/automation/f/runs?limit=5&cursor=abc   // the key is dropped server-side
+
+TO    client.automation.runs.list('f', { limit: 5 })
+      -> GET …/automation/f/runs?limit=5
+      // `{ cursor }` is now a TS2353 excess-property error; widen `limit`
+      // (1..100) and read `hasMore` instead.
+```
 
 **⛔ `limit` is NOT retired, and its `.default(20)` stays.** The sibling
 `/packages` door retired *its* `limit` alongside `cursor` (#17667) because

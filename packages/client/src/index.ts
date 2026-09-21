@@ -5534,13 +5534,20 @@ export class ObjectStackClient {
        */
       runs: {
           /**
-           * List execution runs for a flow
+           * List execution runs for a flow.
+           *
+           * Returns the newest `limit` runs — a WINDOW, not a page. The
+           * `cursor` parameter was removed in protocol 18 (#19365): it was
+           * appended to the query string here and read by nothing on the
+           * server, so a caller paginating by it re-read the first window
+           * forever. Omit `limit` to take the server's window (20, clamped to
+           * 1..100); raise it to see further back. There is no continuation
+           * token — read `hasMore` to learn whether the window was short.
            */
-          list: async (flowName: string, options?: { limit?: number; cursor?: string }): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
+          list: async (flowName: string, options?: { limit?: number }): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
               const route = this.getRoute('automation');
               const params = new URLSearchParams();
               if (options?.limit) params.set('limit', String(options.limit));
-              if (options?.cursor) params.set('cursor', options.cursor);
               const qs = params.toString();
               const res = await this.fetch(`${this.baseUrl}${route}/${flowName}/runs${qs ? `?${qs}` : ''}`);
               return this.unwrapResponse(res);
@@ -5606,15 +5613,20 @@ export class ObjectStackClient {
           });
           return this.unwrapResponse(res) as Promise<T>;
       },
-      /** Alias for `automation.runs.list`. */
+      /**
+       * Alias for `automation.runs.list`.
+       *
+       * `cursor` was removed in protocol 18 (#19365) — see that method for the
+       * reason. A window, not a page: widen `limit` (1..100, default 20) and
+       * read `hasMore`.
+       */
       listRuns: async <T extends { runs: ExecutionLog[]; hasMore: boolean } = { runs: ExecutionLog[]; hasMore: boolean }>(
           flowName: string,
-          opts?: { limit?: number; cursor?: string; status?: ExecutionStatus },
+          opts?: { limit?: number; status?: ExecutionStatus },
       ): Promise<T> => {
           const route = this.getRoute('automation');
           const params = new URLSearchParams();
           if (opts?.limit != null) params.set('limit', String(opts.limit));
-          if (opts?.cursor) params.set('cursor', opts.cursor);
           // [#7359] The route's declared `status` filter, now that the boundary
           // honours it instead of dropping it. Until this card the typed client
           // could not send it at all — which is why nothing had tripped over the
@@ -8086,14 +8098,19 @@ export class ScopedEnvironmentClient {
       });
       return this.parent._unwrap<T>(res);
     },
-    /** List recent runs for a flow, optionally narrowed to one status. */
+    /**
+     * List recent runs for a flow, optionally narrowed to one status.
+     *
+     * `cursor` was removed in protocol 18 (#19365) — see
+     * `automation.runs.list` for the reason. A window, not a page: widen
+     * `limit` (1..100, default 20) and read `hasMore`.
+     */
     listRuns: async <T extends { runs: ExecutionLog[]; hasMore: boolean } = { runs: ExecutionLog[]; hasMore: boolean }>(
       flowName: string,
-      opts?: { limit?: number; cursor?: string; status?: ExecutionStatus },
+      opts?: { limit?: number; status?: ExecutionStatus },
     ): Promise<T> => {
       const params = new URLSearchParams();
       if (opts?.limit != null) params.set('limit', String(opts.limit));
-      if (opts?.cursor) params.set('cursor', opts.cursor);
       // [#7359] — see the sibling `listRuns` alias above.
       if (opts?.status) params.set('status', opts.status);
       const qs = params.toString();

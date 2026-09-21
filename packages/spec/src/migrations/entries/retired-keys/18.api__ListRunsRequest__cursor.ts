@@ -15,9 +15,9 @@
 // measured false before this entry was written.
 //
 // What made `cursor` retirable is the response half: no emit site has ever
-// written `nextCursor`, and this collection has no ordering key a resume could
-// have been built from, so nothing could ever have minted a value for a caller
-// to send back. A caller looping "until the cursor runs out" re-read the first
+// written `nextCursor`, and the only ordering this door has is an optional,
+// non-unique `startedAt` — not a resume point anything could have been built
+// on — so nothing could ever have minted a value for a caller to send back. A caller looping "until the cursor runs out" re-read the first
 // and only window forever.
 //
 // Same registration shape as the `/packages` pair: major 18 (the removal ships
