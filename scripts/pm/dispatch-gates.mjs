@@ -20667,9 +20667,15 @@ function selfTest() {
   for (const f of readdirSync(wfDirLive).filter((x) => /\.ya?ml$/.test(x))) {
     eventsOfWorkflow.set(f, declaredTriggerEvents(readFileSync(nodePath.join(wfDirLive, f), 'utf8')));
   }
+  // ⚠️ The specimen lost its SCHEDULE on 2026-09-21 (ruling #208 on #19491,
+  // executed by #19497: the patrol is `workflow_dispatch`-only now, and no line
+  // of the sweeper was edited for it). Both cases below are re-pointed at the
+  // fact each was always about — the PR-time trigger, and the withholding class
+  // — and ⛔ nothing is added: pinning the absence of the schedule would be a
+  // new ratchet, which this file may not grow without the maintainer's word.
   t(
-    '⭐ the card\'s own specimen declares a pull_request trigger beside its schedule — half-state-patrol.yml is not a workflow no PR runs',
-    ['schedule', 'workflow_dispatch', 'pull_request'].every((e) => (eventsOfWorkflow.get('half-state-patrol.yml') ?? []).includes(e)),
+    '⭐ the card\'s own specimen declares a pull_request trigger beside its workflow_dispatch — half-state-patrol.yml is not a workflow no PR runs',
+    ['workflow_dispatch', 'pull_request'].every((e) => (eventsOfWorkflow.get('half-state-patrol.yml') ?? []).includes(e)),
   );
   t(
     'and a genuinely scheduled-only workflow reads as one, so the predicate is not answering `pull_request` to everything (stale.yml)',
@@ -20722,10 +20728,9 @@ function selfTest() {
   // 3m09s it measured is gone without any scheduled-only rule existing.
   const sweepEntry = triggerFamilies.find((e) => e.check.startsWith('scripts/pm/check-half-states.mjs'));
   t(
-    'the card\'s specimen is still discovered, still reached only through its patrol, and still classified VALUE-BEARING — not withheld for being scheduled',
+    'the card\'s specimen is still discovered, still reached only through its patrol, and still classified VALUE-BEARING — withheld by that class and by nothing else',
     Boolean(sweepEntry)
       && [...sweepEntry.workflows].join('|') === 'half-state-patrol.yml'
-      && isScheduled('half-state-patrol.yml')
       && reachesPRTime(sweepEntry.workflows)
       && Boolean(sweepEntry.notRunnable)
       && !sweepEntry.ciOnly,

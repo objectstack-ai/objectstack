@@ -1,6 +1,7 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md. NOTE: AI is deliberately absent from the showcase app (ADR-0063 — platform-owned), so most items here carry explicit fixture requirements instead of assuming showcase seeds. BOUNDARY: the in-product agent runtime (`@objectstack/service-ai`) is Cloud/EE (cloud repo) — the OPEN framework serves the metadata surface, the MCP surface (packages/mcp), and honest 501s on /ai/** (route-ledger '* /ai/**' row); items below only assert what the open framework actually runs.",
   "area": "ai",
+  "axis": "ai",
   "title": "AI — agents, tools, skills, MCP",
   "items": [
     {

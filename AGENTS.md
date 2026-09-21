@@ -261,7 +261,9 @@ localStorage / auth gotchas.
     `CLAUDE.md` — the file you are reading is one — and a mixed diff is governed whole on a single path hit. The
     register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
     adding a surface is an edit *there*, never here, and `pnpm check:pm-governed-prose` reds per-PR when this
-    paragraph names fewer surfaces than the register — or more. When it reds, name the surface here.
+    paragraph names fewer surfaces than the register — or more. When it reds, name the surface here. A fork PR
+    (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies, queues, arms
+    auto-merge on or approves it; the owning seat adopts the diff onto an internal branch and lands that.
 
     **Authoring stays open to every seat** — drafting, pushing, opening and revising the PR. What is reserved is the
     **landing**: on a PR whose diff touches a governed surface ⛔ never merge, ⛔ never queue, ⛔ never arm
@@ -274,11 +276,11 @@ localStorage / auth gotchas.
     ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
     `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
     current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict, `check-clause2-carriers.mjs --pair N`
-    reads 0 and every check is green — the owning seat then lands it through the queue; the post-merge audit is the
-    compensating control. A PR whose only governed paths are register rows the queue leg regenerates byte-exact clears
-    with zero approvals — an uncertified recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent
-    seat submits an approving review on a governed-surface PR, under any account** — an authorized account is
-    agent-operated too; "CI is green" carries no information about a governance change.
+    reads 0 on its definite rows (⛔ never C5) and every check is green — the owning seat then lands it through the
+    queue; the post-merge audit is the compensating control. A PR whose only governed paths are register rows the queue
+    leg regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or a hand-authored sibling
+    keeps it governed. ⛔ **No agent seat submits an approving review on a governed-surface PR, under any account** —
+    an authorized account is agent-operated too; "CI is green" carries no information about a governance change.
 
     **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
     what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
@@ -796,8 +798,6 @@ working in its domain — browse the directory, never a hand-written list here:
 - `skills/` — the **published** catalog (it ships to customer projects).
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
   `metadata.internal: true`.
-
-⛔ **Both roots are governed surfaces** — `skills/` is Tier H, `.claude/skills/` Tier S (**Prime Directive #14**).
 
 ---
 

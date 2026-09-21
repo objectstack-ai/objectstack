@@ -567,8 +567,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Tiempo de espera por invocación (ms)"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "Memoria (MB)",
+        helpText: "Límite de memoria por invocación (MB, máx. 256)"
       },
       handler: {
         label: "Manejador",
@@ -582,8 +582,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Al error"
       },
       timeoutMs: {
-        label: "Timeout Ms",
-        helpText: "Abort the hook after N milliseconds"
+        label: "Tiempo de espera (ms)",
+        helpText: "Abortar el hook después de N milisegundos"
       },
       runAs: {
         label: "Ejecutar como",
@@ -594,16 +594,16 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Fórmula opcional — omite el hook cuando evalúa a false"
       },
       retryPolicy: {
-        label: "Retry Policy",
-        helpText: "Retry on failure — most useful for async hooks"
+        label: "Política de reintentos",
+        helpText: "Reintentar al fallar — especialmente útil para hooks asíncronos"
       },
       "retryPolicy.maxRetries": {
-        label: "Max Retries",
-        helpText: "Maximum retry attempts"
+        label: "Reintentos máximos",
+        helpText: "Número máximo de reintentos"
       },
       "retryPolicy.backoffMs": {
-        label: "Backoff Ms",
-        helpText: "Delay between retries (ms)"
+        label: "Retroceso (ms)",
+        helpText: "Retraso entre reintentos (ms)"
       }
     }
   },
@@ -737,7 +737,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userFilters: {
         label: "Filtros de usuario",
-        helpText: "Barra de filtros rápidos: estilo de elemento (desplegable / pestañas / interruptor) + campos expuestos o preajustes de pestañas"
+        helpText: "Barra de filtros rápidos: estilo de elemento (dropdown / tabs / toggle) + campos expuestos o preajustes de pestañas"
       },
       tabs: {
         label: "Pestañas",
