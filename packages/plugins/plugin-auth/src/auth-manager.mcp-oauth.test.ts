@@ -132,6 +132,15 @@ describe('isOAuthEligibleBaseUrl (OAuth 2.1 transport rule — TLS public, plain
     // space, and a `172.` prefix test would hand both of them plaintext.
     ['http://172.15.0.1', false],
     ['http://172.32.0.1', false],
+    // The other three IPv4 blocks owe the same neighbours. Without these,
+    // widening 10.0.0.0/8 to /7 or /6, or 192.168.0.0/16 to /8, or
+    // 169.254.0.0/16 to /15, changes no assertion in this tree — a range
+    // this table spells in one character is one a typo can move.
+    ['http://11.0.0.1', false],
+    ['http://192.167.0.1', false],
+    ['http://192.169.0.1', false],
+    ['http://169.253.0.1', false],
+    ['http://169.255.0.1', false],
     // A hostname that merely BEGINS with a private IPv4 string. Its owner
     // points it wherever they like; a `startsWith('10.')` test opens it.
     ['http://10.0.0.5.evil.com', false],

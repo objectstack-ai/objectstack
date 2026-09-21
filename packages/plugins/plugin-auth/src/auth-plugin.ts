@@ -3128,10 +3128,12 @@ export class AuthPlugin implements Plugin {
 
     // ── Plain-HTTP OAuth notice (maintainer ruling 2026-09-21) ────────
     //
-    // The ruling's wording for this line, preserved verbatim as the quotation
-    // it is — the line itself is an ordinary English repository artefact:
-    //
-    //     「OAuth 未加密:仅限可信内网」
+    // The ruling fixes this line's wording verbatim, and its acceptance says
+    // the startup log CARRIES it — so the phrase is in the emitted STRING,
+    // not only in this comment, and the English detail follows it on the same
+    // line. The specific ruling outranks the repository's general
+    // English-artefact convention here; whether that convention should be
+    // amended is a separate decision, not this call site's to make.
     //
     // `isOAuthEligibleBaseUrl` accepts plain HTTP when the deployment's own
     // host is loopback or a private / link-local address, so an unencrypted
@@ -3156,12 +3158,12 @@ export class AuthPlugin implements Plugin {
     const authIssuer = this.authManager!.getAuthIssuer();
     if (/^http:\/\//i.test(authIssuer) && isOAuthEligibleBaseUrl(authIssuer)) {
       ctx.logger.warn(
-        `OAuth is served UNENCRYPTED — trusted intranet only: this deployment's authorization server ` +
-          `is published over plain HTTP (${authIssuer}). Authorization codes, access tokens and bearer ` +
-          'headers cross the network in the clear, so anything that can observe it can replay them. The ' +
-          'transport rule accepts this origin only because the host is loopback or a private / ' +
-          'link-local address; put TLS in front of any deployment reachable from a public network, ' +
-          'where the same origin is refused outright.',
+        'OAuth 未加密:仅限可信内网 — OAuth is served UNENCRYPTED: this deployment publishes its ' +
+          `authorization server over plain HTTP (${authIssuer}), so authorization codes, access tokens ` +
+          'and bearer headers cross the network in the clear and anything that can observe it can ' +
+          'replay them. The transport rule accepts this origin only because the host is loopback or a ' +
+          'private / link-local address; put TLS in front of any deployment reachable from a public ' +
+          'network, where the same origin is refused outright.',
       );
     }
 

@@ -38,13 +38,16 @@ vi.mock('@better-auth/oauth-provider', () => ({
 import { AuthPlugin } from './auth-plugin';
 
 /**
- * The observable head of the notice. The ruling's own wording
- * (「OAuth 未加密:仅限可信内网」) is preserved verbatim in the code comment
- * above the emit site, as the quotation it is; the LOG LINE is an ordinary
- * English repository artefact, and this is the token anything scoring a boot
- * log greps for — the platform-checklist item included.
+ * The ruled wording, verbatim — ⛔ never paraphrase this constant. The
+ * ruling fixes the warning's text and its acceptance says the startup log
+ * CARRIES it, so this is what a boot log is scored on (the platform-checklist
+ * item greps the same string). `ENGLISH_HEAD` below pins the operational
+ * clause that follows it on the same line.
  */
-const NOTICE_MARKER = 'OAuth is served UNENCRYPTED';
+const NOTICE_MARKER = 'OAuth 未加密:仅限可信内网';
+
+/** The English half of the same line — held so neither half can drift off. */
+const ENGLISH_HEAD = 'OAuth is served UNENCRYPTED';
 
 const savedMcpEnv = process.env.OS_MCP_SERVER_ENABLED;
 
@@ -106,6 +109,8 @@ describe('plain-HTTP OAuth startup notice', () => {
     const { warns } = await mountDiscoveryFor('http://192.168.1.10:3000');
     const notices = noticesIn(warns);
     expect(notices).toHaveLength(1);
+    // Both halves of the ruled line, on the one emitted string.
+    expect(notices[0]).toContain(ENGLISH_HEAD);
     // The URL a client is actually sent to, not a generic phrase.
     expect(notices[0]).toContain('http://192.168.1.10:3000/api/v1/auth');
     // The consequence, concretely — what crosses the wire in the clear.
