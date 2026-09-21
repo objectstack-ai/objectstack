@@ -850,6 +850,13 @@ export {
   // HERE by measurement but genuinely enforced in a sibling repo, so it must
   // never share the `dead` id: the two ask the author for opposite actions.
   LIVENESS_LIVE_ELSEWHERE_PROPERTY,
+  // #19276 — not a verdict: the rule reporting that a per-type ledger could not
+  // be read at all, so every author warning for that type is switched off.
+  // Published for the same reason as the four above — `f.rule` is what `--json`
+  // consumers and `suppressWarnings` compare against — and load-bearing here,
+  // because this is the one finding whose presence means the OTHER four cannot
+  // be trusted for that type.
+  LIVENESS_LEDGER_UNREADABLE,
 } from './lint-liveness-properties.js';
 
 export { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';

@@ -8,6 +8,8 @@ import {
   authorWarnedProperties,
   lintLivenessProperties,
   LIVENESS_DEAD_PROPERTY,
+  LIVENESS_EXPERIMENTAL_PROPERTY,
+  LIVENESS_LEDGER_UNREADABLE,
   // #10262 test seam — package-internal (not re-exported by `src/index.ts`, not
   // in the package's `exports` map). See the block below `getNested` in the
   // source for why this ONE property is tested off the ledger.
@@ -16,10 +18,11 @@ import {
   // #14057 coverage seam — the statuses the shipped ledgers actually carry, so
   // the coverage pin below is derived from the ledgers rather than hand-listed.
   shippedLedgerStatuses,
-  // #19268 walk seam — package-internal, same posture as the two above (module
-  // exports; `src/index.ts` re-exports neither, and the package's `exports` map
-  // publishes only `.` and `./runtime`). The rule against a ledger directory the
-  // test controls, and the resolver that finds the real one to copy.
+  // #19268/#19276 walk seam — package-internal, same posture as the two above
+  // (module exports; `src/index.ts` re-exports neither, and the package's
+  // `exports` map publishes only `.` and `./runtime`). The rule against a
+  // ledger directory the test controls, and the resolver that finds the real
+  // one to copy.
   lintLivenessPropertiesFromLedgerDir,
   resolveLivenessDir,
 } from './lint-liveness-properties.js';
@@ -1338,16 +1341,26 @@ describe('authorWarnedProperties', () => {
   });
 
   it('returns the empty set for a type with no ledger, rather than throwing', () => {
-    // The fail-quiet path both halves share: no ledger ⇒ this rule warns on
-    // nothing and the CLI gates nothing. They go silent together; the state
-    // that must never happen is one of them speaking alone.
+    // The fail-quiet path both halves share for a type nothing governs: this
+    // rule never asks about it and the CLI gates nothing. They go silent
+    // together; the state that must never happen is one of them speaking alone.
+    //
+    // #19276 narrowed where that silence is acceptable, and only there: for one
+    // of the types the rule DOES walk, a ledger that cannot be read is now
+    // reported once by `lintLivenessProperties` (see the block below), because
+    // silence about a governed type is indistinguishable from a clean bill of
+    // health. This set still answers empty — a decision procedure returning a
+    // set has no way to report a failed read — and `os lint` runs both halves
+    // in one pass, so the run says it once rather than never.
     expect([...authorWarnedProperties('no-such-metadata-type')]).toEqual([]);
   });
 });
 
 // ── #19268 / #19276: the walk seam, and the ledger reads it makes ───────────
 //
-// #19268 — `lintLivenessProperties` puts the whole field loop behind
+// Two findings, one file, one shape: an empty warn map silently kills a walk.
+//
+//   - #19268 — `lintLivenessProperties` puts the whole field loop behind
 //     `if (fieldWarn.size > 0)`. `field.relatedListFilter` was the ONE
 //     `authorWarn` row on `field.json` at any depth, so when #19187 correctly
 //     flipped it `live` the loop stopped executing and #11385's
@@ -1480,5 +1493,92 @@ describe('the object/field walk, against a synthetic ledger directory (#19268)',
       objects: [{ name: 'widget', fields: [{ name: 'a', type: 'text', label: 'A' }] }],
     });
     expect(findings).toEqual([]);
+  });
+});
+
+describe('a per-type ledger that could not be READ is reported once (#19276)', () => {
+  // The load-bearing discrimination, both directions in one test: a ledger that
+  // warns on nothing is a READING (silence is the right answer), and the same
+  // type with no ledger at all is a FAULT (silence would be a lie). Before
+  // #19276 these two produced byte-identical output.
+  it('tells "this ledger warns on nothing" apart from "there is no ledger"', () => {
+    const readsClean = ledgerDirWith((dir) =>
+      writeLedger(dir, 'object', { props: { somethingLive: { status: 'live' } } }),
+    );
+    expect(lintLivenessPropertiesFromLedgerDir(readsClean, {})).toEqual([]);
+
+    const missing = ledgerDirWith((dir) => rmSync(join(dir, 'object.json')));
+    const findings = lintLivenessPropertiesFromLedgerDir(missing, {});
+    expect(findings.map((f) => f.where)).toEqual(["liveness ledger 'object'"]);
+    expect(findings[0].rule).toBe(LIVENESS_LEDGER_UNREADABLE);
+  });
+
+  it('a MISSING ledger names the type, the file and the remedy — on an empty stack, too', () => {
+    const findings = lintLivenessPropertiesFromLedgerDir(
+      ledgerDirWith((dir) => rmSync(join(dir, 'translation.json'))),
+      {},
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('no ledger file was found for it');
+    expect(findings[0].message).toContain('`translation.json`');
+    expect(findings[0].message).toContain('every author warning for `translation` metadata is switched off');
+    expect(findings[0].hint).toContain('@objectstack/spec');
+  });
+
+  it('an UNPARSEABLE ledger is reported too, and says so in different words', () => {
+    const findings = lintLivenessPropertiesFromLedgerDir(
+      ledgerDirWith((dir) => writeLedger(dir, 'translation', '{ "props": { broken')),
+      {},
+    );
+    expect(findings.map((f) => f.where)).toEqual(["liveness ledger 'translation'"]);
+    expect(findings[0].message).toContain('does not parse as a ledger');
+    expect(findings[0].message).not.toContain('no ledger file was found');
+  });
+
+  // A document that PARSES but is not a ledger is the same failed read, and the
+  // `null` case is also a throw the old code could take: `ledger.props` off a
+  // parsed `null` is a TypeError, through the one input an author cannot
+  // influence — our own shipped data — against a rule that promises never to
+  // throw.
+  it('a ledger that parses to something that is not a ledger is a fault, never a throw', () => {
+    for (const document of ['null', '[]', '"a string"', '42', '{}']) {
+      const findings = lintLivenessPropertiesFromLedgerDir(
+        ledgerDirWith((dir) => writeLedger(dir, 'view', document)),
+        {},
+      );
+      expect(findings.map((f) => f.where)).toEqual(["liveness ledger 'view'"]);
+    }
+  });
+
+  it('reports the fault ONCE per run, not once per authored item', () => {
+    const findings = lintLivenessPropertiesFromLedgerDir(
+      ledgerDirWith((dir) => rmSync(join(dir, 'agent.json'))),
+      { agents: [{ name: 'ag1' }, { name: 'ag2' }, { name: 'ag3' }] },
+    );
+    expect(findings.filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE)).toHaveLength(1);
+  });
+
+  it('keeps walking the types whose ledgers ARE readable, and puts the fault first', () => {
+    // agent.memory is a real `experimental` row, so this proves the fault does
+    // not abort the pass: one type is dark, the rest still enforce, and the
+    // line that explains the darkness is the one a reader meets first.
+    const findings = lintLivenessPropertiesFromLedgerDir(
+      ledgerDirWith((dir) => rmSync(join(dir, 'object.json'))),
+      { agents: [{ name: 'ag1', memory: { kind: 'buffer' } }] },
+    );
+    expect(findings.map((f) => f.rule)).toEqual([LIVENESS_LEDGER_UNREADABLE, LIVENESS_EXPERIMENTAL_PROPERTY]);
+    expect(findings[0].where).toBe("liveness ledger 'object'");
+  });
+
+  // Anti-vacuity control for every assertion above: on an INTACT copy of the
+  // shipped directory the fault channel is silent, so a test that expects one
+  // fault is reading the file it removed and not a permanent noise floor. The
+  // second half says the same of the real directory through the public
+  // function, which is what ships.
+  it('an intact ledger directory raises no fault at all — the control', () => {
+    expect(lintLivenessPropertiesFromLedgerDir(ledgerDirWith(() => {}), {})).toEqual([]);
+    expect(
+      lintLivenessProperties({}).filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE),
+    ).toEqual([]);
   });
 });
