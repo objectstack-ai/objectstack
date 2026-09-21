@@ -1216,7 +1216,7 @@ export const CEILINGS = new Map([
   // seat applies. A new pm-dispatch references file belongs in this map by the
   // header's own definition of the covered surface — the map is an
   // ENUMERATION, so a file that is merely absent is silently unratcheted.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 57],
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 61],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
