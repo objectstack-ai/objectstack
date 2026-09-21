@@ -56,7 +56,7 @@
 import type { FilterCondition } from '../data/filter.zod.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { ExplainDecision, ExplainOperation } from '../security/explain.zod.js';
-import type { ObjectAccessScope, PermissionSet } from '../security/permission.zod.js';
+import type { EffectiveObjectPermission, ObjectAccessScope, PermissionSet } from '../security/permission.zod.js';
 
 /**
  * The context shape these methods accept.
@@ -396,6 +396,66 @@ export interface ISecurityService {
    * accident.
    */
   resolvePermissionSetsForContext?(context?: SecurityContext): Promise<PermissionSet[]>;
+
+  /**
+   * [maintainer ruling 2026-09-18, decision batch 156 item 5 letter A] The
+   * EFFECTIVE object-permission map for `context` — object name ->
+   * `EffectiveObjectPermission`, server-resolved: the caller's permission sets
+   * merged most-permissively, the super-user folds applied, and each entry's
+   * effective API-operation set annotated. Byte-for-byte the `objects` slot of
+   * the published `/auth/me/permissions` response
+   * (`GetEffectivePermissionsResponseSchema`), because it is the same answer
+   * computed once rather than twice.
+   *
+   * **Why the map, when {@link resolvePermissionSetsForContext} already hands
+   * over the sets.** That method's note — the merge stays with the CALLER,
+   * because two consumers legitimately project different subsets — is about
+   * projections that DIFFER. This one is the projection two consumers need to
+   * be IDENTICAL: the effective map `/auth/me/permissions` serves is also the
+   * map the permission predicate reads, and the second consumer cannot tell a
+   * wrong map from a right one. `@objectstack/formula` states the hazard at its
+   * own door (`toEvalPermissions`): a hand-built permission map "has no shape of
+   * its own to be wrong against — it parses, `can()` answers from it, and the
+   * answer is a confident silent denial". So the merge is single-sourced here,
+   * and a consumer that needs the SETS still asks the sets method.
+   *
+   * **The WHOLE map, and there is no object parameter — that is a safety
+   * property, not an omission.** An entry the map omits is read as "no grant"
+   * and answers `false`, which is indistinguishable from a measured denial. A
+   * caller therefore cannot narrow the map to the objects it believes will be
+   * asked about: a predicate names its objects in its own source, the objects
+   * it names are not known to the site that assembles the context, and every
+   * object left out silently denies. Implementations return every object the
+   * subject's resolution mentions, plus the entries that resolution seeds — not
+   * the subset one call site asked for.
+   *
+   * **THROWS on resolution failure, exactly as {@link resolvePermissionSetNames}
+   * and {@link resolvePermissionSetsForContext} do — and ⛔ NEVER answers `{}`
+   * instead.** An empty map is a REAL answer here (this subject holds nothing,
+   * every `can()` is `false`), so a failure that degraded to `{}` would be
+   * published as a measured denial of everything. Callers fail CLOSED on the
+   * throw; ⛔ they may not read it as "no grants".
+   *
+   * **Request-scoped: resolve it ONCE per request, ⛔ never per evaluation and
+   * ⛔ never cached across requests.** The map is pinned data — an evaluator
+   * re-reads it for free — so re-resolving per predicate buys nothing and pays a
+   * full set resolution each time; holding one across requests serves a grant
+   * that may since have been revoked.
+   *
+   * **OPTIONAL, and absence is a defined state — not a bug.** A security service
+   * that predates this method omits it, and consumers feature-detect
+   * (`typeof svc.getEffectiveObjectPermissions === 'function'`). ⛔ The fallback
+   * for an absent method is NOT an empty map and NOT a locally merged one: a
+   * caller that cannot get this answer passes NO permission data at all, which
+   * leaves a permission-gated predicate loudly unevaluable instead of quietly
+   * denied — the same distinction the map's own consumer draws between "absent"
+   * and "empty". Declaring it optional is what makes that degradation a property
+   * of the type rather than a promise in prose: the unguarded call does not
+   * compile, so a consumer cannot skip the absent branch by accident.
+   */
+  getEffectiveObjectPermissions?(
+    context?: SecurityContext,
+  ): Promise<Readonly<Record<string, EffectiveObjectPermission>>>;
 
   /**
    * [#3544] Whether `context` may EXPORT `object` — the user-level export axis
