@@ -1475,54 +1475,54 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   dataset: {
-    label: "Dataset",
-    description: "Analytics semantic layer — dimensions & measures",
+    label: "数据集",
+    description: "分析语义层 — 维度与度量",
     sections: {
       basics: {
-        label: "Basics",
-        description: "Dataset identity."
+        label: "基础信息",
+        description: "数据集标识"
       },
       source: {
-        label: "Source",
-        description: "The base object, the relationships to join, and the dataset’s intrinsic scope. Joins are derived from the object graph — pick relationship (lookup / master_detail) names, never write an ON clause."
+        label: "数据来源",
+        description: "基础对象、要关联的关系，以及数据集的固有范围。关联由对象关系图推导 — 选择关系（lookup / master_detail）字段名，不要手写 ON 子句"
       },
       dimensions: {
-        label: "Dimensions",
-        description: "Groupable axes. Use a base field, or `relationship.field` (e.g. account.region) for a relationship included above."
+        label: "维度",
+        description: "可分组的轴。使用基础对象的字段，或对上方已包含的关系使用 `relationship.field`（如 account.region）"
       },
       measures: {
-        label: "Measures",
-        description: "Aggregatable values defined once and referenced by name. A measure is sum/avg/count/… of a field; a derived measure combines other measures (ratio/sum/difference/product). Measure-scoped filters and derived ops are edited per-row in the dataset designer."
+        label: "度量",
+        description: "定义一次即可按名称引用的可聚合值。度量是某个字段的 sum/avg/count/…；派生度量由其他度量组合而成（ratio/sum/difference/product）。度量级筛选与派生运算在数据集设计器中逐行编辑"
       }
     },
     fields: {
       name: {
-        label: "Name",
-        helpText: "snake_case unique identifier"
+        label: "名称",
+        helpText: "snake_case 唯一标识符"
       },
       label: {
-        label: "Label",
-        helpText: "Display name"
+        label: "显示名称",
+        helpText: "显示名"
       },
       description: {
-        label: "Description",
-        helpText: "What this dataset measures"
+        label: "描述",
+        helpText: "此数据集衡量什么"
       },
       object: {
-        label: "Object",
-        helpText: "Base object — the FROM"
+        label: "对象",
+        helpText: "基础对象 — 即 FROM"
       },
       include: {
-        label: "Include",
-        helpText: "Relationship (lookup / master_detail) field names to join — enables `relationship.field` dimensions/measures (e.g. include \"account\" → group by account.region)"
+        label: "包含关联",
+        helpText: "要关联的关系（lookup / master_detail）字段名 — 用于启用 `relationship.field` 维度/度量（例如 include \"account\" → 按 account.region 分组）"
       },
       filter: {
-        label: "Filter",
-        helpText: "Intrinsic scope filter (e.g. exclude soft-deleted records), ANDed into every query"
+        label: "筛选",
+        helpText: "固有范围筛选（例如排除软删除记录），以 AND 方式并入每个查询"
       },
       dimensions: {
-        label: "Dimensions",
-        helpText: "Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity"
+        label: "维度",
+        helpText: "每个维度：名称（供展示层引用）、字段、类型，以及日期类型的默认分桶粒度"
       },
       "dimensions.name": {
         label: "名称"
