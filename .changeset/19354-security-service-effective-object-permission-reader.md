@@ -2,7 +2,7 @@
 "@objectstack/spec": minor
 ---
 
-feat(spec): `ISecurityService` gains `resolveEffectiveObjectPermissions`, the effective-object-permission reader (#19354)
+feat(spec): `ISecurityService` gains `resolveEffectiveObjectPermissions`, the effective-object-permission reader (#19539)
 
 Clause-②: yes (widening)
 

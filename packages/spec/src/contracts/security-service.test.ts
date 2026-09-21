@@ -301,7 +301,7 @@ describe('Security Service Contract', () => {
     expect(sets).toHaveLength(2);
   });
 
-  it('[#19354] resolveEffectiveObjectPermissions is OPTIONAL — the unguarded call does not compile, and absence is undefined rather than an empty map', () => {
+  it('[#19539] resolveEffectiveObjectPermissions is OPTIONAL — the unguarded call does not compile, and absence is undefined rather than an empty map', () => {
     // THE structural pin behind "a consumer that can no longer answer passes
     // NOTHING". Optional is what makes that a property of the TYPE: a security
     // service that predates the method still satisfies the contract, and the
@@ -334,7 +334,7 @@ describe('Security Service Contract', () => {
     expect(noContext).toBeUndefined();
   });
 
-  it('[#19354] the values are effective ENTRIES, not per-verb verdicts — the fold stays in objectPermissionGrants', async () => {
+  it('[#19539] the values are effective ENTRIES, not per-verb verdicts — the fold stays in objectPermissionGrants', async () => {
     // Why the entry and not a boolean: the entry still carries the super-user
     // axes, and folding them into a verdict is `objectPermissionGrants` — one
     // reading, shared with `PermissionEvaluator.checkObjectPermission`, so a

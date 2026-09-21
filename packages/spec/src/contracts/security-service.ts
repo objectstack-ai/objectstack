@@ -434,7 +434,7 @@ export interface ISecurityService {
   resolvePermissionSetsForContext?(context?: SecurityContext): Promise<PermissionSet[]>;
 
   /**
-   * [#19354 / #18783] The effective OBJECT PERMISSIONS for `context` — object
+   * [#19539 / #18783] The effective OBJECT PERMISSIONS for `context` — object
    * name → the server-resolved entry for that object, merged across the
    * caller's sets exactly as the enforcement path merges them.
    *
