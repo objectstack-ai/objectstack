@@ -18,18 +18,6 @@
  */
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.action.fields.ai.helpText": "e8c9a5009eb96ef6",
-  "metadataForms.action.fields.ai.label": "17ad12a926c9f22d",
-  "metadataForms.action.fields.body.capabilities.helpText": "2db3f83342bd3fa1",
-  "metadataForms.action.fields.body.capabilities.label": "0b59005e10add41f",
-  "metadataForms.action.fields.body.language.helpText": "b0ad78a396675964",
-  "metadataForms.action.fields.body.language.label": "012664c233fc15b0",
-  "metadataForms.action.fields.body.memoryMb.helpText": "f53c826ce3c94ad9",
-  "metadataForms.action.fields.body.memoryMb.label": "a1e1612eff7f82ea",
-  "metadataForms.action.fields.body.source.helpText": "3a066e75948ec72c",
-  "metadataForms.action.fields.body.source.label": "8fe786e8e29c8cec",
-  "metadataForms.action.fields.body.timeoutMs.helpText": "47042e57f537d281",
-  "metadataForms.action.fields.body.timeoutMs.label": "2b887c62238d3532",
   "metadataForms.api.description": "62421e8039e013f5",
   "metadataForms.api.label": "589af3fe4aab4af5",
   "metadataForms.book.description": "45e72c8c74617530",

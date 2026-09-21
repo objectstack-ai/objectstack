@@ -1239,24 +1239,24 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Una expresión L1 o un body JS L2 en sandbox"
       },
       "body.language": {
-        label: "Language",
-        helpText: "expression = pure formula; js = sandboxed JavaScript"
+        label: "Idioma",
+        helpText: "expression = fórmula pura; js = JavaScript en sandbox"
       },
       "body.source": {
-        label: "Source",
-        helpText: "Function body source — no top-level imports"
+        label: "Código fuente",
+        helpText: "Código fuente del body de la función — sin imports de nivel superior"
       },
       "body.capabilities": {
-        label: "Capabilities",
-        helpText: "Allowed ctx APIs (api.read, api.write, crypto.uuid, log, …)"
+        label: "Capacidades",
+        helpText: "API ctx permitidas (api.read, api.write, crypto.uuid, log, …)"
       },
       "body.timeoutMs": {
-        label: "Timeout Ms",
-        helpText: "Per-invocation timeout (ms)"
+        label: "Tiempo de espera (ms)",
+        helpText: "Tiempo de espera por invocación (ms)"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "Memoria (MB)",
+        helpText: "Límite de memoria por invocación (MB, máx. 256)"
       },
       params: {
         label: "Parámetros",
@@ -1345,8 +1345,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Expresión CEL: desactivar cuando la condición sea true"
       },
       ai: {
-        label: "Ai",
-        helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
+        label: "Exposición a IA",
+        helpText: "Exposición a IA (voluntaria): establece ai.exposed=true y escribe ai.description (≥40 caracteres) para que los agentes puedan llamarla."
       },
       recordIdParam: {
         label: "Parámetro de ID de registro",

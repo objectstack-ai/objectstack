@@ -759,7 +759,7 @@
       "title": "Email templates materialize to sys_email_template, resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
@@ -815,9 +815,9 @@
           "evidence": "the error"
         },
         {
-          "clause": "(name, locale) resolution picks the best locale row and falls back to en-US — two rows with one name are an i18n bundle, both reachable by recipient locale",
+          "clause": "(name, locale) resolution is an EXACT match with no language-subtag folding — two rows with one name are an i18n bundle, each reachable ONLY from its own exact tag; a call naming a locale with no row retries the single literal rung en-US and then raises TEMPLATE_NOT_FOUND, and a call naming no locale starts at en-US",
           "oracle": "log",
-          "verify": "the zh-CN recipient gets the zh-CN render; the unmatched recipient gets the fallback",
+          "verify": "the zh-CN recipient gets the zh-CN render; a recipient whose locale has no row (e.g. zh) gets the en-US row, NOT the zh-CN one",
           "evidence": "the two renders"
         },
         {
@@ -891,6 +891,12 @@
           "date": "2026-08-11",
           "change": "CORRECTION from run #7690: the raw-send step named a { to, subject, bodyHtml } message body, but those are the TEMPLATE authoring fields — the wire keys are `html`/`text` (SendEmailInput, email-service.ts), and the literal shape the step named is refused 400 'at least one of text or html is required'. Corrected the step and the clause, added the wrong-vocabulary probe that pins the two vocabularies apart, added a NOT-a-FAIL negative so the refusal is not filed as a defect next run, and cited the contract + normalizeMessage in source",
           "ref": "#7745"
+        },
+        {
+          "revision": 5,
+          "date": "2026-09-21",
+          "change": "CORRECTION: the locale clause said resolution \"picks the best locale row\", a sentence packages/plugins/plugin-email/src/template-loader.ts enumerates as one of three false declarations. The resolver matches (name, locale) exactly, folds no language subtag, retries the single literal rung en-US for a call that named a locale and then raises TEMPLATE_NOT_FOUND. Corrected the clause and its verify line so the run cannot tick a best-match behaviour the code has never had",
+          "ref": "#18499"
         }
       ]
     },

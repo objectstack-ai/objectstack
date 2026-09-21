@@ -15,11 +15,19 @@
  * that; three separate places declare the opposite:
  *
  *  - `SendTemplateInput.locale` (spec contract): *"Falls back to `'en-US'`"*.
- *  - `EmailTemplateDefinitionSchema.locale`: *"the service picks the best match
- *    for the recipient's locale, falling back to `en-US`"*.
- *  - `sys_email_template`'s own object doc: *"Resolved by `(name, locale)`; the
- *    EmailService picks the best-matching locale for the recipient, falling
- *    back to `en-US`"*.
+ *  - `EmailTemplateDefinitionSchema.locale`: the resolver *"matches
+ *    `(name, locale)` **exactly**"* and, for a call that named a locale,
+ *    retries exactly one rung — `EMAIL_TEMPLATE_FLOOR_LOCALE`.
+ *  - `sys_email_template`'s own object doc: resolved by an exact
+ *    `(name, locale)` match with that same single `en-US` rung.
+ *
+ * Those last two bullets are CITED, not quoted in full, and deliberately:
+ * both sentences once read "picks the best match for the recipient's locale"
+ * / "picks the best-matching locale for the recipient" — the claim the rule
+ * below says the resolver has never implemented. They were corrected to the
+ * ladder as built (#18499), together with `sys_notification_template.locale`
+ * and the platform checklist's locale clause; a quotation is what stranded
+ * them here in the first place.
  *
  * ## The rule this implements
  *
