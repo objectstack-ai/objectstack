@@ -81,7 +81,13 @@ describe('scaffolded project description (#9263)', () => {
 
   it('still rewrites id/namespace/name — the description drop does not regress the existing rewrite', () => {
     const cfg = fs.readFileSync(path.join(projectDir, 'objectstack.config.ts'), 'utf8');
-    expect(cfg).toContain("id: 'support-desk'");
+    // The id is the reverse-domain form, not the bare project name (#17534):
+    // `ManifestSchema.id` refuses a value with no dot, so the bare word this
+    // line used to assert is metadata the scaffold's own `os validate` rejects.
+    // Note the two identifiers are derived from one project name under
+    // contradictory rules — hyphen in the id, underscore in the namespace — so
+    // neither can be read off the other.
+    expect(cfg).toContain("id: 'com.example.support-desk'");
     expect(cfg).toContain("namespace: 'support_desk'");
     expect(cfg).toContain("name: 'Support Desk'");
     // The line immediately after the (now-removed) description must still be

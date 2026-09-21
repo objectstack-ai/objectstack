@@ -82,7 +82,7 @@ describe('resolveArtifactCollections', () => {
         // The D7 branch: every single-package artifact and every `defineStack()`
         // config the platform has ever booted takes it, and identity is the only
         // way to say "this cannot have moved" rather than to hope so.
-        const single = { manifest: { id: 'a', name: 'A' }, objects: [obj('o')] };
+        const single = { manifest: { id: 'com.example.a', name: 'A' }, objects: [obj('o')] };
         expect(resolveArtifactCollections(single)).toBe(single);
         expect(resolveArtifactCollections(null)).toBe(null);
         expect(resolveArtifactCollections(undefined)).toBe(undefined);
@@ -102,7 +102,7 @@ describe('resolveArtifactCollections', () => {
         // fresh copy, `{ ...artifact }` would fire and every reader downstream
         // would be handed a different object than the one it was given.
         const objects = [obj('account')];
-        const empty = { manifest: { id: 'a', name: 'A' }, objects, packages: [] as unknown[] };
+        const empty = { manifest: { id: 'com.example.a', name: 'A' }, objects, packages: [] as unknown[] };
         const resolved = resolveArtifactCollections(empty);
         expect(resolved).toBe(empty);
         expect(resolved.objects).toBe(objects);

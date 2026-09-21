@@ -185,19 +185,31 @@ describe('#13457 — a consent record that binds to nothing is said out loud', (
 // emits it under NO name, so to a consumer that case is indistinguishable from
 // "no consent record".
 //
-// ⚠️ An earlier revision of this block claimed that case "cannot reach this
-// seam", closed by two doors. MEASURED FALSE (#13457 contract review ⑤): the
-// doors refuse two spellings and the THIRD — `{ id: '', name: 'x' }` — walks
-// through both, because `artifactPackageId` is `id || name`. The fixture hid it
-// by setting id and name to `''` together. Corrected here, and the case that
-// escapes is pinned rather than described.
+// ⚠️ HISTORY, kept because both corrections are load-bearing. An earlier
+// revision of this block claimed that case "cannot reach this seam", closed by
+// two doors. MEASURED FALSE (#13457 contract review ⑤): the doors refused two
+// spellings and the THIRD — `{ id: '', name: 'x' }` — walked through both,
+// because `artifactPackageId` is `id || name`. The fixture had hidden it by
+// setting id and name to `''` together, and the escape was pinned here rather
+// than described.
 //
-// ⛔ Each door test pins ITS OWN door. The earlier spelling asserted
+// ⭐ #17534 CLOSED that escape, and this block now pins the closure.
+// `ManifestSchema.id` carries `MANIFEST_ID_PATTERN`
+// (`packages/spec/src/kernel/manifest.zod.ts`) — the reverse-domain rule the
+// registry face has always enforced — so `''` is no longer a valid manifest id
+// to the SCHEMA. Every `''` spelling, the bare one and the
+// `{ id: '', name: 'x' }` one that used to walk through, is now refused at
+// DOOR 1, before `artifactPackageId` is ever consulted. ⇒ the `id || name`
+// fallback is unreachable for `''`, and the fail-OPEN residual the last case in
+// this block used to pin is GONE — the artifact is refused outright instead.
+//
+// ⛔ Each door test still pins ITS OWN door. The pre-#13457 spelling asserted
 // `/no usable package id|not a package entry/` on BOTH, so either test passed on
 // either door: it pinned "refused by some door", never which — an alternation
 // that would survive deleting a whole door. Both doors raise the SAME ADR-0112
-// code and status, so only the message separates them.
-describe('#13457 — which unattributable-consent spellings the doors refuse, and the one they do not', () => {
+// code and status, so only the message separates them, and every case below
+// asserts its own door's message AND the absence of the other's.
+describe('#13457 / #17534 — which unattributable-consent spellings the doors refuse, and at which door', () => {
     /** The refusal both doors share, so the message assertions carry the rest. */
     const envelope = (err: any) => {
         expect(err).toBeDefined();
@@ -210,8 +222,10 @@ describe('#13457 — which unattributable-consent spellings the doors refuse, an
     };
 
     it('DOOR 1 (schema) — no top-level `id` is refused by `ArtifactPackageSchema`, which names `manifest.id`', () => {
-        // `ManifestSchema.id` is a required `z.string()`, so the entry never
-        // reaches the id door at all.
+        // `ManifestSchema.id` is REQUIRED, so a missing id is a schema issue
+        // and the entry never reaches the id door at all. This case turns on
+        // requiredness alone — it predates `MANIFEST_ID_PATTERN` and is
+        // unaffected by it, which is why it was already green.
         const err = thrownBy(() => carriedPackageIds({ packages: [{ manifest: { name: '', version: '1.0.0' } }] }));
         envelope(err);
         expect(err.message).toContain('is not a package entry');
@@ -220,33 +234,70 @@ describe('#13457 — which unattributable-consent spellings the doors refuse, an
         expect(err.message).not.toContain('no usable package id');
     });
 
-    it('DOOR 2 (id) — `\'\'` passes the schema and is refused by `artifactPackageId`, one door later', () => {
-        // `z.string()` has no `.min(1)`, so `''` is a VALID manifest id to the
-        // schema; it is `artifactPackageId` that yields `undefined` for it.
+    it('DOOR 1 (schema) — `\'\'` is refused by `MANIFEST_ID_PATTERN`, so the id door one later never runs', () => {
+        // ⭐ #17534 moved this case one door EARLIER, which is why it is a
+        // DOOR 1 pin now and was a DOOR 2 pin before. `ManifestSchema.id` used
+        // to be a bare `z.string()`, so `''` was a VALID manifest id to the
+        // schema and it was `artifactPackageId` that yielded `undefined` for it,
+        // one door later. The id now carries the reverse-domain pattern, so the
+        // entry never survives the schema at all.
         const err = thrownBy(() => carriedPackageIds({ packages: [{ manifest: body('') }] }));
         envelope(err);
-        expect(err.message).toContain('no usable package id');
-        // ⛔ THIS door, not the other one: the schema admitted the entry.
-        expect(err.message).not.toContain('is not a package entry');
+        expect(err.message).toContain('is not a package entry');
+        expect(err.message).toContain('manifest.id');
+        // The refusal ECHOES the value it refused (#4001), so an author who
+        // wrote an empty id is told which key was empty rather than only which
+        // rule was broken.
+        expect(err.message).toContain("Invalid package id ''");
+        // ⛔ THIS door, not the other one: the id door never ran.
+        expect(err.message).not.toContain('no usable package id');
     });
 
-    // ⭐ The correction: the spelling NEITHER door refuses.
-    it('NEITHER door refuses `{ id: \'\', name: \'x\' }` — `artifactPackageId` is `id || name`, so it is carried as `x`', () => {
-        expect(carriedPackageIds({ packages: [{ manifest: body('', { id: '', name: 'x' }) }] }))
-            .toEqual(['x']);
+    // ⭐ The escape #13457 corrected this block to pin, now CLOSED by #17534.
+    // `artifactPackageId` is still `id || name` — ⛔ untouched by that change —
+    // but DOOR 1 refuses the entry before the fallback is ever consulted, so an
+    // empty id can no longer be carried under a sibling `name`.
+    it('`{ id: \'\', name: \'x\' }` is refused at DOOR 1 too — the `id || name` fallback never runs for `\'\'`', () => {
+        const err = thrownBy(
+            () => carriedPackageIds({ packages: [{ manifest: body('', { id: '', name: 'x' }) }] }),
+        );
+        // That it THREW is the assertion that it was not carried: before #17534
+        // this exact call returned `['x']` and never reached here.
+        envelope(err);
+        expect(err.message).toContain('is not a package entry');
+        expect(err.message).toContain('manifest.id');
+        expect(err.message).toContain("Invalid package id ''");
+        // ⛔ THIS door, not the other one: the sibling `name` was never
+        // consulted, so the id door had nothing to refuse.
+        expect(err.message).not.toContain('no usable package id');
     });
 
-    it('so a consent record keyed by the unattributable `\'\'` binds to NOTHING — loudly, and fail-OPEN', () => {
-        // ⛔ What this pins is that the residual is fail-OPEN, not that it is
-        // handled: the `''` key names no carried package, so it is reported as
-        // `unbound` and registered nowhere. Nothing is silently DENIED — the
-        // package still loads with no consent record at all, exactly as an
-        // artifact that never declared one does. Whether an unbindable consent
-        // record should instead REFUSE the artifact is an open decision
-        // (#17148), and this test is what will go red when it is taken.
+    it('so an artifact whose consent record is keyed by `\'\'` never materializes — nothing is registered, and the residual is fail-CLOSED', () => {
+        // ⭐ #17534 REVERSED the direction this case pins, and that reversal is
+        // why the changeset names it. What it used to pin was a fail-OPEN
+        // residual: the `''` key named no carried package, so it was reported
+        // `unbound`, the package still loaded with no consent record at all, and
+        // nothing was denied. DOOR 1 now refuses the entry, so the whole
+        // artifact is refused at materialize time and NO package loads —
+        // fail-CLOSED.
+        //
+        // ⛔ Read the refusal's provenance precisely: it is the artifact PACKAGE
+        // door (`resolveArtifactPackageOrder`) refusing a malformed manifest id,
+        // NOT the permission seam acquiring teeth. Nothing on this tree queries
+        // the registry these entries land in — see this file's header, and
+        // `granted-permissions-not-enforced.pin.test.ts` in `@objectstack/core`
+        // for the repo-wide measurement, which is still green.
+        //
+        // ⛔ #17148 is NOT what took this red, and is NOT settled by it. Whether
+        // an UNBINDABLE consent record should refuse the artifact is still open,
+        // and still open for every key that is unbindable while being a LEGAL
+        // id — `{ 'com.acme.ghost': … }`, pinned earlier in this file, still
+        // binds to nothing and still only warns. What closed here is narrower:
+        // `''` stopped being a legal id at all, so this one spelling can no
+        // longer reach the unbindable state.
         const e = enforcer();
         const log = logger();
-        const binding = registerArtifactGrantedPermissions(
+        const err = thrownBy(() => registerArtifactGrantedPermissions(
             {
                 manifest: { id: 'com.acme.crm', name: 'Acme CRM', version: '1.0.0', type: 'app' },
                 packages: [{ manifest: body('', { id: '', name: 'x' }) }],
@@ -254,17 +305,24 @@ describe('#13457 — which unattributable-consent spellings the doors refuse, an
             },
             e,
             { logger: log as never },
-        );
+        ));
 
-        expect(binding.carried).toEqual(['x']);
-        expect(binding.registered).toEqual([]);
-        expect(binding.unbound).toEqual(['']);
-        // Through the enforcer's OWN readback: neither the unattributable key
-        // nor the package it failed to name is registered, so neither is denied.
+        envelope(err);
+        expect(err.message).toContain('manifest.id');
+        // ⛔ THIS door, not the other one.
+        expect(err.message).not.toContain('no usable package id');
+
+        // The "loudly" half of the old title is gone with the residual it
+        // described: the refusal itself is the loud part now, and the
+        // bound-to-NO-package warning is never reached.
+        expect(log.warn).not.toHaveBeenCalled();
+
+        // Through the enforcer's OWN readback — this file's standing discipline:
+        // the binding record is what this module says it did, the enforcer is
+        // what actually happened. Neither the unattributable key nor the package
+        // it failed to name is registered, and unlike the fail-OPEN residual this
+        // replaces, the package it would have named did not load either.
         expect(e.getPluginPermissions('')).toBeUndefined();
         expect(e.getPluginPermissions('x')).toBeUndefined();
-        expect(
-            log.warn.mock.calls.some((c: unknown[]) => String(c[0]).includes('bound to NO package')),
-        ).toBe(true);
     });
 });

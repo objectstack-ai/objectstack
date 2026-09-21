@@ -85,7 +85,7 @@ export const SessionGatedEndpoint: ApiEndpoint = {
 
 export const endpointPolicyFixtureStack = defineStack({
   manifest: {
-    id: 'com.dogfood.endpoint_policy_fixture',
+    id: 'com.dogfood.endpoint-policy-fixture',
     namespace: 'e8policy',
     version: '0.0.0',
     type: 'app',

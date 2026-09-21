@@ -931,16 +931,26 @@ restores durability, or the explicit opt-out that makes the degradation delibera
 (`suspendedRunStore: 'memory'`, `OS_SKIP_SCHEMA_SYNC`). Say it **once**, at the first
 degradation, not once per failed write.
 
-**Do not over-apply it.** Escalating a functional degradation to `error` trains
-everyone to skim `error`. An `if (!service)` composition branch is usually functional
-and belongs at `warn`; a `catch` around a write, a DDL call, or a store initialization
-is where this rule bites. **And a failure handed to the CALLER is not a degradation at
-all** — the third legal answer: a `catch` that answers `errorFromThrown(e, 400)`, or a
-batch whose contract IS a per-item outcome report, does not look normal from the
-outside — the requester was told. Do **not** bolt a `logger.error` onto such a site;
-declare **how it delivers** instead — `FAILURE_PROPAGATION_CALLEES` (repo-wide names)
-or the function-scoped `FAILURE_PROPAGATION_SITES` in the checker, which then proves
-structurally that *every* path out of the `catch` delivers.
+**Do not over-apply it.** Escalating a functional degradation to `error` trains everyone
+to skim `error`. An `if (!service)` composition branch is usually functional and belongs
+at `warn`; a `catch` around a write, a DDL call, or a store initialization is where this
+rule bites. **And a failure handed to the CALLER is not a degradation at all** — the
+third legal answer: a `catch` that answers `errorFromThrown(e, 400)`, or a batch whose
+contract IS a per-item outcome report, does not look normal from the outside — the
+requester was told. Do **not** bolt a `logger.error` onto such a site; declare **how it
+delivers** instead — and which declaration exists depends on how the failure leaves the
+`catch`. Delivered by CALLING something: name that callee, repo-wide in
+`FAILURE_PROPAGATION_CALLEES` or function-scoped in `FAILURE_PROPAGATION_SITES`, and the
+checker then proves structurally that *every* path out of the `catch` reaches it.
+Delivered by **RETURNING** an outcome object — `return { ok: false, error }`, a `failed`
+receipt — there is **no callee to declare**: the delivery IS the constructed value, and
+both maps key on a name. ⛔ Never add such a seam to `DURABILITY_CRITICAL_CALLEES` or to
+either `FAILURE_PROPAGATION_*` map, ⛔ never baseline it, ⛔ never bolt on a
+`logger.error` to green the checker: the shape is outside its reach by construction. Pin
+it in **its own file's test** asserting the returned failure outcome (the
+`failed`-receipt case is the reference shape), and read its population from
+`scripts/measure-return-propagating-durability-seams.mjs`. ⭐ The invariant does not
+move: silent data loss must be loud, so what this checker cannot see, that test holds.
 
 **It has teeth**: `pnpm check:durability-log-level`
 (`scripts/check-durability-degradation-log-level.mjs`; its header is the authority)

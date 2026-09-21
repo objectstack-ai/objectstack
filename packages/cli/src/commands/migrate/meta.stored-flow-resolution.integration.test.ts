@@ -41,7 +41,7 @@ const SYSTEM = { context: { isSystem: true } };
 
 const ARTIFACT = {
   // #8687: manifest fields under `manifest:` — the flat spelling is refused.
-  manifest: { id: 'stored_flow_smoke', name: 'Stored Flow Smoke', version: '0.0.0', type: 'app' },
+  manifest: { id: 'com.example.stored-flow-smoke', name: 'Stored Flow Smoke', version: '0.0.0', type: 'app' },
   objects: [{ name: 'sfs_lead', fields: { title: { type: 'text' } } }],
 };
 

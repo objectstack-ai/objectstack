@@ -28,6 +28,11 @@ import { z } from 'zod';
  * Package visibility — controls who can discover and install the package.
  */
 import { lazySchema } from '../shared/lazy-schema';
+// The reverse-domain rule is declared ONCE, on the authoring surface that owns
+// it (`ManifestSchema.id`), and referenced here. This registry field and that
+// authoring key name the same identity; two independent copies of the pattern
+// are what let them drift apart in the first place.
+import { MANIFEST_ID_PATTERN, manifestIdRefusal } from '../kernel/manifest.zod';
 export const PackageVisibilitySchema = lazySchema(() => z
   .enum(['private', 'org', 'marketplace'])
   .describe(
@@ -166,7 +171,7 @@ export const PackageSchema = lazySchema(() => z.object({
    */
   manifestId: z
     .string()
-    .regex(/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/)
+    .regex(MANIFEST_ID_PATTERN, { error: (iss) => manifestIdRefusal('manifestId', iss.input) })
     .describe('Globally unique reverse-domain package identifier (e.g. com.acme.crm)'),
 
   /**

@@ -99,6 +99,7 @@ import {
   assertPermissionSetNotPackageDeclared,
   type LayeredProbe,
 } from './packaged-permission-set-lock.js';
+import { PermissionSetNameConflictError } from './errors.js';
 
 export const SYSTEM_CTX = { isSystem: true };
 
@@ -1206,12 +1207,6 @@ export function createPermissionSetWriteThrough(
       const results: any[] = [];
       for (const row of rows) {
         const name = String(row.name);
-        const dup = (await tryFind(ql, 'sys_permission_set', { name }, 1))[0];
-        if (dup) {
-          const err: any = new Error(`[Security] permission set '${name}' already exists`);
-          err.status = 409;
-          throw err;
-        }
         // [2026-08-24 ruling — lock the base, clone to customize] A name an
         // installed package DECLARES is not available for an environment
         // definition: with the `OS_METADATA_WRITABLE=permission` operator hatch
@@ -1220,9 +1215,34 @@ export function createPermissionSetWriteThrough(
         // that overlay onto the record on every boot, unconditionally, forever.
         // Refused here, before the write, with a message that names the clone
         // path. Fail-closed: unresolvable provenance refuses too.
+        //
+        // [#19307] ⭐ It runs BEFORE the duplicate-name check below, and the
+        // order is the fix rather than a tidy-up. A package-declared set has a
+        // PROJECTED ROW, so its name is duplicate AND locked at once — and the
+        // admin most likely to arrive here is the one who opened the Clone
+        // dialog on a packaged set and typed the base set's own name, which is
+        // the single most likely thing to type. Duplicate-first answered that
+        // caller `already exists`: true, and the less useful of two true
+        // refusals — it names no remedy, while `NOT_OVERRIDABLE` is the one
+        // that explains the actual situation and teaches the clone path. So
+        // the refusal that carries the remedy speaks first, and the ordinary
+        // duplicate (verdict `org`) still falls through to the check below
+        // unchanged.
+        //
+        // ⚠️ One case moves besides the packaged one: an ordinary duplicate
+        // attempted while NO artifact source can answer now takes the lock's
+        // fail-closed `unknown` refusal (403, retry when the metadata layer is
+        // readable) instead of the 409. Both are refusals and neither writes,
+        // which is why the ordering is judged on the case that is reachable on
+        // purpose; pinned so it is declared rather than incidental.
         assertPermissionSetNotPackageDeclared(
           name, ql, 'insert', (await probeLayered(protocol, name)).probe,
         );
+        // [#19307] The duplicate-name refusal carries `UNIQUE_VIOLATION` — the
+        // wire identity this collision already has when the `name` index
+        // catches it instead. See `PermissionSetNameConflictError`.
+        const dup = (await tryFind(ql, 'sys_permission_set', { name }, 1))[0];
+        if (dup) throw new PermissionSetNameConflictError(name);
         // The metadata write is the authoritative one; spec validation
         // (PermissionSetSchema) runs inside saveMetaItem and rejects an
         // off-contract body with a structured 422.

@@ -291,7 +291,7 @@ describe('validateObjectReferences — artifact packages[] as resolution context
     // content (ADR-0130 D4). Inventing a name for such an entry would silence
     // the ladder, which is the one mistake this context must not make.
     const findings = validateObjectReferences(
-      perPackageStack(ORDERS_BODY, [{ ref: 'sha256-x' }, { manifest: { id: 'x' } }, 'not-an-entry']),
+      perPackageStack(ORDERS_BODY, [{ ref: 'sha256-x' }, { manifest: { id: 'com.example.x' } }, 'not-an-entry']),
     );
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('objects[0].fields.account.reference');
