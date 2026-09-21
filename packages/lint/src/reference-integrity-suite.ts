@@ -380,7 +380,23 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // every page-door binding as unresolvable. Its page-typed sibling above
   // takes the default for the same reason.
   { name: 'validatePageVisualizationBindings', run: validatePageVisualizationBindings },
-  { name: 'validateChartBindings', run: validateChartBindings },
+  // [#19474] `runtimeTypes` gains `report` under the ADR-0049 ruling, and ONLY
+  // `report`. On a report write this member is the subject-reader: it opens
+  // with `recordsOf(stack.reports)` and resolves that report's own `dataset` /
+  // `rows` / `columns` / `values` and its chart's axes against `stack.datasets`
+  // — the one collection this resolution needs and the one the per-write
+  // snapshot already carries (#7529), so it has no missing-collection
+  // false-positive channel. ⛔ NOT `dashboard` or `view`: on those writes the
+  // report/board surfaces the rule walks are the collections the snapshot does
+  // NOT carry, which is the `dataset` door's own DARK pin one file over.
+  //
+  // ⚠️ A REFUSAL widening, like #15254's and #19143's: a report republished
+  // with a dangling dataset binding or a dimension the dataset does not
+  // declare is now refused (422) rather than stored silently. MEASURED over
+  // the shipped report corpus at the door's own snapshot shape before
+  // crossing: 9 reports (showcase 4, todo 5), 8 of them binding a real dataset
+  // with `rows`/`values` — 0 findings, with a lit synthetic probe refused.
+  { name: 'validateChartBindings', runtimeTypes: ['flow', 'report'], run: validateChartBindings },
   // [#14105] One level BELOW the two members above it. `validateChartBindings`
   // and `validateWidgetBindings` resolve a presentation's binding against the
   // dataset (#7529/#8902); this one resolves the DATASET's own references —
@@ -444,7 +460,33 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateTranslatableSections', run: validateTranslatableSections },
   { name: 'validateFlowTemplatePaths', run: validateFlowTemplatePaths },
   { name: 'validateAiSurfaceAffinity', run: validateAiSurfaceAffinity },
-  { name: 'validateAiToolReferences', run: validateAiToolReferences },
+  // [#19474] `runtimeTypes` gains `skill` under the ADR-0049 ruling — the
+  // measurement's named bridge for the type. It opens with
+  // `recordsOf(stack.skills)` and paths its findings `skills[si].tools[ti]`,
+  // so on a skill write the WRITTEN skill is the subject, not a universe for
+  // someone else's reference.
+  //
+  // ⚠️ Its tool universe is PARTIAL at this door, and that is a measured fact
+  // rather than an oversight: `collectToolUniverse` unions
+  // `PLATFORM_PROVIDED_TOOL_NAMES` ∪ `stack.tools` ∪ the materialised action
+  // family from `stack.actions` and every object's `actions`. A per-write
+  // snapshot carries `objects` (so object-level `action_<name>` resolves) but
+  // no `tools` and no `actions` collection, so a skill naming a STACK-LEVEL
+  // declared tool or a stack-level `action_<name>` reads as unresolved here
+  // while the same skill is clean on the whole stack. What bounds it: ADR-0109
+  // states the default authoring path declares NO tool records at all, and
+  // this member is `severity: 'warning'` throughout — it advises, it can never
+  // refuse a publish. Both directions are pinned in
+  // `runtime-gate.inert-type-writes.test.ts` so the limitation is a recorded
+  // reading rather than a surprise. ⛔ Closing it means carrying `tools` /
+  // `actions` in `RuntimeStackContext`, which is an edit in
+  // `@objectstack/metadata-protocol`'s routing table as well — outside this
+  // card's file surface and its own decision.
+  //
+  // ⚠️ NOT MEASURED over a corpus: the shipped examples author ZERO skills, so
+  // there is no population to take a false-positive budget from. Said rather
+  // than glossed — the only evidence here is synthetic.
+  { name: 'validateAiToolReferences', runtimeTypes: ['flow', 'skill'], run: validateAiToolReferences },
   { name: 'validateAiAgentAuthoring', run: validateAiAgentAuthoring },
   // Field names WRITTEN by an L2 hook body (`ctx.input.x = …`,
   // `ctx.api.object('y').update({ x })`), resolved against the target object's

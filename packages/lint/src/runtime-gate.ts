@@ -125,6 +125,41 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // `datasets[].object`. The door controls that prove each one fires live in
   // `runtime-gate.dataset-writes.test.ts`.
   dataset: 'datasets',
+  // [#19474] The four rows the ADR-0049 ruling 「declared ⇒ honoured; not
+  // honourable ⇒ retired」 needs for its groups A and C. `action` and `hook`
+  // above were already here and INERT — the gate filters by `runtimeTypes`
+  // before it consults this table, so a row with no declaring rule dispatches
+  // nothing — and the same ruling crosses their rules in this commit, which is
+  // what lights those two rows rather than any edit to them.
+  //
+  // ⛔ NOT mappings ahead of their rules (the `seed: 'data'` failure above).
+  // Each key below names a collection some rule crossed in THIS commit reads
+  // with the written item as the finding's SUBJECT:
+  //
+  // - `reports` — `validatePresetComparands` and `validateEmptyCombinators`
+  //   scan it as a first-class authored-filter surface (`{ key: 'reports',
+  //   kind: 'report' }`), and the suite member `validateChartBindings` opens
+  //   with `recordsOf(stack.reports)` and resolves each report's dataset
+  //   binding against `stack.datasets`, a collection the snapshot carries.
+  // - `skills` — `validateAiToolReferences` opens with `recordsOf(stack.skills)`
+  //   and paths its findings `skills[si].tools[ti]`.
+  // - `emailTemplates` / `mappings` — `lintLivenessProperties` walks them
+  //   through its own `TYPE_COLLECTIONS` rows, with `checkItem(type, item, …)`
+  //   making the written item the subject. ⚠️ That rule is LEDGER-DRIVEN and
+  //   `continue`s on an empty warn map: both ledgers carry 0 warn keys today,
+  //   so these two rows are wired-and-silent BY CONSTRUCTION until a property
+  //   needs a row. The ruling dispatched the wiring and ⛔ no ledger
+  //   population («the empty warn maps stay empty until a real property needs
+  //   a row»), so this is the ruled end state, not a half-landing — and
+  //   `runtime-gate.inert-type-writes.test.ts` pins the silence so it stays a
+  //   measured fact instead of an assumption.
+  //
+  // The door controls that prove what each row does — and, for the two above,
+  // what it does not — live in `runtime-gate.inert-type-writes.test.ts`.
+  report: 'reports',
+  skill: 'skills',
+  email_template: 'emailTemplates',
+  mapping: 'mappings',
 };
 
 /**
