@@ -19,7 +19,9 @@ import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
  * `KernelSecurityVulnerability`, `PluginSecurityManifest.scanResults` and its
  * sibling list `.vulnerabilities` — was retired under ADR-0049 enforce-or-remove
  * (#15932), after the runtime scanner that was its last type-only importer went
- * the same way (#14919). Nothing on this platform scans a plugin.
+ * the same way. That scanner retirement was issue 14919 — a number DELETED from
+ * the board and no longer resolving; its live record is PR #15930, which landed
+ * the removal. Nothing on this platform scans a plugin.
  */
 
 /**
@@ -588,7 +590,8 @@ export const PluginSecurityManifestSchema = lazySchema(() => z.object({
    * Tombstone: the scan-result surface is RETIRED (#15932, ADR-0049
    * enforce-or-remove). `KernelSecurityScanResult` and
    * `KernelSecurityVulnerability` left this build with it — the last importer
-   * of either type went with `PluginSecurityScanner` (#14919). Not a bare
+   * of either type went with `PluginSecurityScanner` (issue 14919, a number
+   * deleted from the board; live record: PR #15930). Not a bare
    * deletion: this shape is not `.strict()`, so zod would strip an authored
    * key in silence (ADR-0104).
    */

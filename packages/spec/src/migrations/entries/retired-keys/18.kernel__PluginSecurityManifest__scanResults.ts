@@ -6,8 +6,9 @@
 // zero authors and zero parsers: no `.parse`/`.safeParse` site existed anywhere
 // against the scan-result schemas, so a publisher could declare a clean scan on a
 // plugin manifest, be accepted, and get nothing — the declared-not-enforced shape
-// Prime Directive #10 names, one layer out from the runtime scanner #14919
-// removed for the same reason.
+// Prime Directive #10 names, one layer out from the runtime scanner that PR
+// #15930 removed for the same reason (that PR closed issue 14919, a number since
+// deleted from the board and no longer resolving).
 //
 // Tombstoned with `retiredKey()`, not deleted: `PluginSecurityManifestSchema` is a
 // plain `z.object`, not `.strict()`, so a bare deletion would strip an authored

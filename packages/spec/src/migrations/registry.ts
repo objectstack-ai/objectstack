@@ -14844,8 +14844,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // zero authors and zero parsers: no `.parse`/`.safeParse` site existed anywhere
     // against the scan-result schemas, so a publisher could declare a clean scan on a
     // plugin manifest, be accepted, and get nothing — the declared-not-enforced shape
-    // Prime Directive #10 names, one layer out from the runtime scanner #14919
-    // removed for the same reason.
+    // Prime Directive #10 names, one layer out from the runtime scanner that PR
+    // #15930 removed for the same reason (that PR closed issue 14919, a number since
+    // deleted from the board and no longer resolving).
     //
     // Tombstoned with `retiredKey()`, not deleted: `PluginSecurityManifestSchema` is a
     // plain `z.object`, not `.strict()`, so a bare deletion would strip an authored
@@ -17366,7 +17367,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // compliance and a six-number summary — and no layer ever emitted, stored, parsed
     // or read one. Its only importer of any kind was `PluginSecurityScanner`, a
     // type-only import from `packages/core/src/security/security-scanner.ts`, and
-    // #14919 deleted that file; the census after it landed put every remaining
+    // PR #15930 deleted that file (it closed issue 14919, a number since deleted
+    // from the board and no longer resolving); the census after it landed put every remaining
     // reference inside the declaring module itself, against a lit control (five hits
     // for `PluginSecurityManifest` in the same file), so the zero is a reading.
     //
@@ -17374,7 +17376,9 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // author to hand a prescription to and no `${defKey}:${name}` key leaving a live
     // shape. `RETIRED_DEFS_BY_MAJOR[18]` plus the semantic entry
     // `plugin-security-scan-result-surface-retired` ARE the declaration — the
-    // #11825 / #8715 shape. The two authorable carriers that pointed here,
+    // #11825 shape (its sibling in the pair this tree usually cites, issue 8715, is
+    // a number deleted from the board; 11825 is the half that still resolves).
+    // The two authorable carriers that pointed here,
     // `PluginSecurityManifest.scanResults` and `.vulnerabilities`, are separately
     // tombstoned and registered in `RETIRED_KEYS_BY_MAJOR[18]`.
     //
