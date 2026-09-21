@@ -1251,6 +1251,11 @@ export type Iso651 = Assert<Eq< z.input< typeof M152.ActionResultDialogTranslati
 export type Iso652 = Assert<Eq< z.input< typeof M152.ObjectTranslationDataSchema >, z.infer< typeof M152.ObjectTranslationDataSchema > >>;
 export type Iso653 = Assert<Eq< z.input< typeof M152.TranslationDataSchema >, z.infer< typeof M152.TranslationDataSchema > >>;
 export type Iso654 = Assert<Eq< z.input< typeof M152.TranslationBundleSchema >, z.infer< typeof M152.TranslationBundleSchema > >>;
+// #15178 split the bundle type in two. The platform face is the per-app shape
+// plus one more optional group, so its two states coincide exactly as the
+// per-app face's do — pinned rather than given a permanent `XParsed` synonym.
+export type Iso877 = Assert<Eq< z.input< typeof M152.PlatformTranslationDataSchema >, z.infer< typeof M152.PlatformTranslationDataSchema > >>;
+export type Iso878 = Assert<Eq< z.input< typeof M152.PlatformTranslationBundleSchema >, z.infer< typeof M152.PlatformTranslationBundleSchema > >>;
 export type Iso655 = Assert<Eq< z.input< typeof M152.TranslationConfigSchema >, z.infer< typeof M152.TranslationConfigSchema > >>;
 export type Iso656 = Assert<Eq< z.input< typeof M152.TranslationItemSchema >, z.infer< typeof M152.TranslationItemSchema > >>;
 export type Iso657 = Assert<Eq< z.input< typeof M152.TranslationDiffStatusSchema >, z.infer< typeof M152.TranslationDiffStatusSchema > >>;
