@@ -381,8 +381,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Valor predeterminado para registros nuevos"
       },
       placeholder: {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
+        label: "Marcador de posición",
+        helpText: "Texto de ayuda que se muestra dentro del campo vacío (desaparece al introducir un valor); usa inlineHelpText para ayuda siempre visible"
       },
       minLength: {
         label: "Longitud mínima",
@@ -393,12 +393,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Longitud máxima de caracteres"
       },
       valueDomain: {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
+        label: "Dominio de valores",
+        helpText: "Estándar al que debe pertenecer el valor escrito: iana_time_zone, iso_4217_currency o iso_3166_alpha2; se rechaza una escritura con un valor que no pertenezca"
       },
       rows: {
-        label: "Rows",
-        helpText: "Inline editor height in text rows"
+        label: "Filas",
+        helpText: "Altura del editor en línea, en filas de texto"
       },
       min: {
         label: "Mínimo",
@@ -447,8 +447,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Qué ocurre cuando se elimina el registro referenciado"
       },
       relatedListFilter: {
-        label: "Related List Filter",
-        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
+        label: "Filtro de lista relacionada",
+        helpText: "Filtro predeterminado para la lista relacionada de esta relación en la página de detalle del registro padre: combinado con AND con la coincidencia del registro padre, y el distintivo de la pestaña cuenta el mismo conjunto"
       },
       expression: {
         label: "Expresión",
@@ -459,24 +459,24 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Configuración de resumen roll-up (para relaciones padre-hijo)"
       },
       "summaryOperations.object": {
-        label: "Object",
-        helpText: "Child object to aggregate"
+        label: "Objeto",
+        helpText: "Objeto hijo que se agrega"
       },
       "summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "Función",
+        helpText: "Función de agregación"
       },
       "summaryOperations.field": {
-        label: "Field",
-        helpText: "Child field to aggregate (ignored for count)"
+        label: "Campo",
+        helpText: "Campo del objeto hijo que se agrega (se ignora para count)"
       },
       "summaryOperations.relationshipField": {
-        label: "Relationship Field",
-        helpText: "Child FK back to this parent (auto-detected when omitted)"
+        label: "Campo de relación",
+        helpText: "Clave foránea del hijo que apunta de vuelta a este padre (se detecta automáticamente si se omite)"
       },
       "summaryOperations.filter": {
-        label: "Filter",
-        helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
+        label: "Filtro",
+        helpText: "Solo se agregan las filas hijas que coinciden con este predicado (p. ej. status == received)"
       },
       externalId: {
         label: "ID externo",
