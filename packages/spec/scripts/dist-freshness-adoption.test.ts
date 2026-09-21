@@ -43,6 +43,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { EXIT_PREREQUISITE_NOT_MET } from './lib/dist-freshness';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
 const REPO_ROOT = path.resolve(PKG, '../..');
@@ -181,9 +183,20 @@ function runGate(spec: string, script: string, args: string[] = []): SpawnSyncRe
   });
 }
 
-/** Both halves of the refusal: it fired, and it named the right gate. */
+/**
+ * All three halves of the refusal: it fired, it named the right gate, and it
+ * answered with the code that says NOTHING WAS MEASURED.
+ *
+ * The third half moved in #19227 and this helper is where its pin lives. It was
+ * `1` — a real finding's code — which is what let `dispatch-gates --ran`
+ * reconcile a gate that refused before its first `.d.ts` read as a family that
+ * ran. ⛔ Do not relax it back to "non-zero": that assertion passes for exactly
+ * the defect this card removed.
+ */
 function expectRefusal(run: SpawnSyncReturns<string>, rerun: string): void {
-  expect(run.status).toBe(1);
+  expect(run.status).toBe(EXIT_PREREQUISITE_NOT_MET);
+  expect(run.stderr).toContain('PREREQUISITE NOT MET');
+  expect(run.stderr).toContain('Nothing was measured');
   expect(run.stderr).toContain('OLDER than packages/spec/src');
   expect(run.stderr).toContain('pnpm --filter @objectstack/spec build');
   expect(run.stderr).toContain(rerun);
@@ -245,7 +258,9 @@ describe('check:dual-source-exports refuses a stale dist (#7181)', () => {
     seedDualBaseline(tree.spec);
 
     const run = runGate(tree.spec, DUAL, ['--update']);
-    expect(run.status).toBe(1);
+    // The WRITING half refuses with the same code (#19227): it wrote nothing,
+    // so it has no ratchet verdict to report and did not measure one.
+    expect(run.status).toBe(EXIT_PREREQUISITE_NOT_MET);
     expect(run.stderr).toContain('WRITE a baseline');
     expect(fs.readFileSync(path.join(tree.spec, DUAL_BASELINE), 'utf8')).toBe(SENTINEL);
   });

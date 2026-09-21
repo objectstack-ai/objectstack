@@ -84,7 +84,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { inspectDistFreshness } from './lib/dist-freshness';
+import { EXIT_PREREQUISITE_NOT_MET, inspectDistFreshness, prerequisiteNotMetText } from './lib/dist-freshness';
 
 const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const SELF_TEST = process.argv.includes('--self-test');
@@ -447,8 +447,11 @@ const freshness = inspectDistFreshness(
   'pnpm --filter @objectstack/spec check:exported-any',
 );
 if (!freshness.fresh) {
-  console.error(freshness.message);
-  process.exit(1);
+  // PREREQUISITE NOT MET, not a finding (#19227). The `process.exit(1)` above —
+  // the self-test's — stays exactly what it was: that one IS a finding about
+  // the detector. This path measured nothing at all.
+  console.error(prerequisiteNotMetText('check:exported-any', freshness));
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 const entries = collectEntries();
