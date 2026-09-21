@@ -54,7 +54,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `triage` | 以分诊座位身份运行(只扫/分类/路由,永不认领) | — |
 | `<domain>`(如 `spec`、`skills`) | 以该 `domain:*` 车道的执行座位身份运行 | — |
 | `epic:#<n>` | 以父单 #n 的 epic PM 身份运行(见 Epic 子树车道 节) | — |
-| `director` | 以项目总监席身份运行(人工召唤;四职见 升级与决策 节与 `references/lanes/director.md`) | — |
+| `director` | 以项目总监席身份运行(人工召唤;三职见 升级与决策 节与 `references/lanes/director.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
 | `batch:<n>` | 同时在飞的 dev 上限 | 默认 `3`;`n` 的维护者天花板 `5` |
@@ -679,9 +679,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 ### 轮次报告与节奏
 
 - 每轮向维护者打中文轮次报告(chat 通道):issue → 判决 → PR 链接 → 备注的表。
-- 报告加升级项、代裁清单(分诊)、awaiting a human merge 项、governed 合并审计清单。
-- 审计清单实跑 `node scripts/pm/check-governed-merges.mjs --since <上轮>`,⛔ 不凭记忆汇总。
-- 车道审计是早警;权威合并窗口与认定/回滚处置归总监席,见 `references/lanes/director.md`。
+- 报告加升级项、代裁清单(分诊)、awaiting a human merge 项。
 - 报告含 `UNRECOGNISED` 行:对本轮门禁日志 grep `UNRECOGNISED` 逐行照录,`NOT APPLICABLE` 行也在内。
 - 健康指标五个:可派发库存(open `pm:queue` 未认领及趋势);决策箱(待维护者数)。
 - 决策箱指标还要点名带开放下游依赖的决策卡,从 `Blocked-by:` 反向索引现算。
@@ -772,7 +770,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `AskUserQuestion` 只是在场加速器:仅当维护者在本会话 ~30 分钟内有过人类输入才可发。
 - 每问必带推荐项,被 Skip 或长挂即转卡通道,⛔ 不重弹。
 - 项目总监席:维护者在所在仓召唤 `/pm-dispatch director`;⛔ 无 Routine/cron;未回字 = 不在 = 停。
-- 四职 = `needs:contract-review` 事后审计、决裁勤务、维护者动作台账、governed 合并审计。
+- 三职 = `needs:contract-review` 事后审计、决裁勤务、维护者动作台账。
 - 每场召唤把带席内 ACCEPT 的受管草稿呈为一批 ≤5 行决裁;批准与合并仍是维护者的点击。
 - 总监席档位由维护者按项目人工定,每场记入摘要台账;⛔ 无档位硬门、无免档整理态。
 - 总监席是唯一裁决者:决策箱、代裁与一类自裁只出自本席,⛔ 无子代理无自述。
@@ -794,7 +792,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `scripts/pm/check-skill-line-ratchet.mjs` | 本文件行数只降不升(`pnpm check:pm-skill-ratchet`);抬上限需维护者裁决引用在 PR 正文;⛔ re-wrap 不得用作筹行,新增以删减付账;不买内容的密度修复允许 |
 | `scripts/pm/check-skill-id-lint.mjs` | 本技能与 os-dev 定义的操作文本 ⛔ 不引用 issue 编号(`pnpm check:pm-skill-id-lint`) |
 | `scripts/pm/check-half-states.mjs` | label/assignee/PR 半状态的 report-only 巡查(含已复核就绪却无人落地的孤儿 PR 检测) |
-| `scripts/pm/check-governed-merges.mjs` | governed 面合并清单的 report-only 审计(事后防线;轮报载体,本地枚举零 API,仅归因走查询) |
+| `scripts/pm/check-governed-merges.mjs` | governed 面合并清单的 report-only 审计(事后防线;本地枚举零 API,仅归因走查询) |
 | `scripts/pm/dispatch-gates.mjs` | 文件面 → 该跑的门禁族(派发令取数) |
 | `scripts/pm/git-history.mjs` | 窗口化 commit 计数:回答或 REFUSE(浅 clone 对窗口化 `git log`/`rev-list` 以 exit 0 无警告答错);`historyHorizon()` 是只读谓词 |
 | `scripts/pm/os-regen-merge.sh` | 碰生成物 PR 的 merge 四步序(防静默吞并与锚点倒退) |
