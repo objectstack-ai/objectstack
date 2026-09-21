@@ -44,6 +44,27 @@ import {
 
 function makeProtocol() {
     const registry = new SchemaRegistry({ multiTenant: false });
+    // [#19474] The live resolution universe this harness hands the runtime
+    // publish gate. `find` is mocked to `[]` and nothing is ever read back, so
+    // without this seed the universe is permanently EMPTY — and since the
+    // report door opened, a `report` fixture must bind a dataset (ReportSchema
+    // refines it to required) that something can actually resolve. Seeding it
+    // here rather than saving it first is deliberate and matches the landed
+    // pattern in `protocol.dashboard-dataset-publish-gate.test.ts`: `creatable`
+    // below is SORTED, so a saved-first arrangement would silently depend on
+    // alphabetical order, and this harness never reads saves back anyway.
+    //
+    // ⛔ This is a TENANT the fixtures are judged against, not a relaxation:
+    // a report binding a dataset nobody declares is still refused, which is the
+    // #19474 door working. The dimension and measure names are exactly what the
+    // `report` fixture's `rows` / `values` select.
+    registry.registerItem('dataset', {
+        name: 'sweep_account_metrics',
+        label: 'Account Metrics',
+        object: 'sweep_account',
+        dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
+        measures: [{ name: 'amount_sum', label: 'Amount', aggregate: 'sum', field: 'amount' }],
+    });
     const mockEngine: any = {
         registry,
         find: vi.fn().mockResolvedValue([]),
@@ -73,7 +94,14 @@ const FIXTURES: Record<string, Fixture> = {
             // (`security-owd-unset` refuses absence), so a "valid" object
             // fixture must author its posture.
             sharingModel: 'private',
-            fields: { amount: { name: 'amount', label: 'Amount', type: 'number' } },
+            // [#19474] `stage` joins `amount` so the dataset seeded into this
+            // harness's live universe is COHERENT with the object this tenant
+            // declares — its one dimension is over a field `sweep_account` really
+            // has. The `report` fixture groups by that dimension.
+            fields: {
+                amount: { name: 'amount', label: 'Amount', type: 'number' },
+                stage: { name: 'stage', label: 'Stage', type: 'text' },
+            },
         },
         invalid: { label: 'No Name' },
         invalidatedField: 'name',
@@ -150,6 +178,8 @@ const FIXTURES: Record<string, Fixture> = {
     },
     report: {
         // ADR-0021 single-form: a report binds a dataset + selects values by name.
+        // The bound dataset is the fixture directly above, and its dimension and
+        // measure names are what `rows` / `values` select.
         valid: {
             name: 'sweep_report',
             label: 'Sweep',

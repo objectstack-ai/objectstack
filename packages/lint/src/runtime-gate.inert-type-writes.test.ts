@@ -59,10 +59,12 @@ import { AUTHORING_RULES } from './authoring-rules.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
 import {
+  buildRuntimeWriteSnapshots,
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   runtimeGatedTypes,
   stackKeyForType,
+  type RuntimeStackContext,
 } from './runtime-gate.js';
 
 /**
@@ -531,9 +533,28 @@ describe('#19474 — `skill` is held out of this landing, on a measurement', () 
     };
     const rule = REFERENCE_INTEGRITY_RULES.find((r) => r.name === 'validateAiToolReferences')!;
 
-    // What a per-write snapshot can see: `objects` only. The action is
-    // stack-level, so the `action_*` limb of the universe is simply not there.
-    const atDoorShape = rule.run({ objects: OBJECTS, skills: [writtenSkill] }, {});
+    // ⭐ The door's context shape is DERIVED, not restated. `actions` is handed
+    // to the real builder alongside `objects`; the builder carries only the
+    // collections `RuntimeStackContext` declares, so today it DROPS `actions`
+    // and the universe loses the `action_*` limb — which is the whole reading.
+    //
+    // ⛔ A hand-written `{ objects, skills }` here would pass for the wrong
+    // reason: measured, adding `actions` to `RuntimeStackContext` leaves such a
+    // pin green, so the day the obstacle is actually removed the pin would go
+    // on asserting a falsehood. Derived, this case goes RED on that change —
+    // which is the signal that `skill` can be crossed.
+    const doorContext = buildRuntimeWriteSnapshots({
+      type: 'report', // any MAPPED type: what is wanted is the context half
+      item: { name: 'probe_report', label: 'Probe', type: 'summary' },
+      context: { objects: OBJECTS, actions: [exposedAction] } as RuntimeStackContext,
+    })!.baseline;
+    expect(
+      Object.keys(doorContext),
+      'if `actions` is carried now, the obstacle this block records is GONE — cross `skill` '
+        + 'and replace these pins, rather than keeping a reading that no longer holds',
+    ).not.toContain('actions');
+
+    const atDoorShape = rule.run({ ...doorContext, skills: [writtenSkill] }, {});
     expect(
       atDoorShape.map((f) => f.rule),
       'the snapshot shape yields the FALSE advisory — this is the reading that held `skill` out',
