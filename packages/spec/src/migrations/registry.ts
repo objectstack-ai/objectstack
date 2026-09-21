@@ -5800,6 +5800,88 @@ const step18: MigrationStep = {
         'and that anonymous sign-up now answers 403 SELF_REGISTRATION_CLOSED.',
     },
     {
+      id: 'automation-runs-cursor-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'api.listRuns cursor — the pagination query parameter of '
+        + 'GET /api/automation/:name/runs declared by ListRunsRequestSchema, and its slot on '
+        + 'IAutomationService.listRuns. The limit parameter of the same door is NOT part of this '
+        + 'retirement and is unchanged, default(20) included',
+      replacement:
+        'a wider `limit` — this door does read it, bounded to 1..100, and it is spent as the run '
+        + "store's history window. There is no replacement for `cursor` itself, deliberately: "
+        + 'nothing ever minted one, so no caller holds a value to carry over, and the response '
+        + '`nextCursor` it would have paired with has never been emitted. Read the response '
+        + '`hasMore` to learn whether the window was short — it is now computed from the engine '
+        + 'rather than the constant `false` it used to be, so for the first time it answers the '
+        + 'question a caller reaching for a cursor was actually asking',
+      reason:
+        'ADR-0049 enforce-or-remove (director seat, decision batch #204 item 2, maintainer '
+        + '「204 同意」 2026-09-21, letter C of three for this door; letter A — build a cursor '
+        + 'protocol for a 100-row window — and letter B — retire the key and leave the '
+        + '`hasMore` lie standing — were both considered and refused). `cursor` was declared on '
+        + 'the request, VALIDATED at the boundary, forwarded into a `cursor?: string` slot on '
+        + 'the service contract, and read by no implementation: the engine never looked at the '
+        + 'option, and no emit site has ever written the response half `nextCursor`, so a caller '
+        + 'looping until the cursor ran out re-read the first and only window forever with no '
+        + 'error. '
+        + '⭐ The `limit` half of this door was NOT retired, and the distinction is the ruling, '
+        + 'not an oversight. The sibling `/packages` door retired its `limit` with its `cursor` '
+        + '(#17667, decision batch #126 item 1) because nothing read it; the parent ruling '
+        + 'explicitly does not transfer here. On this door `limit` is read end to end — the '
+        + 'boundary enforces the declared 1..100 range off the schema itself, the service takes '
+        + 'it as an option, and the engine spends it as `RunStore.listHistory`\'s window — and '
+        + "the Console's flow-runs page sends it today. Retiring it would have been a "
+        + 'regression, and its `.default(20)` stays with it. '
+        + 'The same card computes `hasMore`, which is the half a bare retirement would have left '
+        + 'lying. `GET /api/automation/:name/runs` shipped a literal `hasMore: false` beside a '
+        + 'list the engine had already truncated with `.slice(0, limit)`, so a caller asking for '
+        + 'one row of a thousand was handed one row and told that was all of them. The engine '
+        + 'now reports truncation to the door through a new optional contract member, '
+        + '`IAutomationService.listRunsPage`, which returns `{ runs, hasMore }`: it over-reads '
+        + 'its history source by exactly one row and compares the merged, filtered, ordered set '
+        + 'to the caller\'s window. The over-read is what makes the answer sound — '
+        + '`runs.length === limit` cannot tell a flow with exactly `limit` runs from one with '
+        + 'ten thousand, and `RunStore.listHistory`\'s signature is deliberately unchanged '
+        + 'because over-reading is expressible in the `limit` it already takes. '
+        + 'There IS a tombstone: the request schema is non-strict, so a bare deletion would have '
+        + 'made Zod SILENTLY STRIP whatever a generated client kept sending — a clean parse and '
+        + "a parameter that never takes effect, which is this card's own defect re-created one "
+        + 'layer down (ADR-0104). `cursor` is therefore a `retiredKey()`, typed `never` for tsc '
+        + 'and raising the prescription at any parse, and is registered in '
+        + 'RETIRED_KEYS_BY_MAJOR[18]. There is NO D2 conversion: a conversion rewrites an '
+        + 'authored source or a stored `sys_metadata` row, and this shape is HTTP-only — nobody '
+        + 'authors a `ListRunsRequest` and nothing persists one. The `os migrate meta` house '
+        + 'sentence is therefore correctly absent from the prescription. There is no '
+        + '`acceptRetiredDefaultResidue` stage either: `cursor` carried no default, so it '
+        + 'materialized into no artifact and there is no residue to accept. ADR-0049 / '
+        + 'ADR-0087, #19365.',
+      acceptanceCriteria:
+        'No caller sends `cursor` to `GET /api/automation/:name/runs`: writing it on a '
+        + '`ListRunsRequest` is a `tsc` error (the input type is `never`), which is the enforced '
+        + 'channel, and any value reaching a parse raises the prescription rather than a generic '
+        + 'unrecognized-key issue. The option is gone from `IAutomationService.listRuns` too, so '
+        + 'an implementation can no longer declare a slot for it. '
+        + '⚠️ ONE wire behaviour CHANGES and must be verified as such, because it reverses a '
+        + 'decision recorded under #7300: a repeated `?cursor=a&cursor=b` used to answer '
+        + '`400 VALIDATION_FAILED` with a `details.fields[]` entry naming `cursor`, and now '
+        + 'answers `200` with the key ignored like any other unrecognised query name. #7300 '
+        + 'validated the key rather than deciding it, so that a future cursor implementation '
+        + 'would not be the one to discover the type was unenforced; this ruling decides it '
+        + 'instead — there will be no cursor implementation on this door — so the refusal would '
+        + 'be validating a key the contract no longer has. This route declares no closed query '
+        + 'set (ADR route-ownership rule 5), so an unrecognised name has never been refused here '
+        + 'on its own account. '
+        + '⚠️ `hasMore` also changes, from a constant to an answer: a request whose window is '
+        + 'shorter than the matching run set now receives `hasMore: true` where it previously '
+        + 'received `false`. A caller that treated `false` as "this is the whole history" was '
+        + 'always wrong and is now told so. `nextCursor` stays absent — nothing mints one — and '
+        + '`limit` behaves exactly as it did, including its `.default(20)`. '
+        + 'A deployment whose automation service does not implement `listRunsPage` answers `501` '
+        + 'naming the member, and ⛔ never a `200` carrying an invented `hasMore`.',
+    },
+    {
       id: 'autonumber-default-unique-organization',
       surface: '`fields.<name>.unique` on a `type: \'autonumber\'` field when the author OMITS the key — '
         + 'the contract default moves from `false` (no index) to `\'organization\'` (one holder per '
@@ -13195,6 +13277,34 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `api/ListNotificationsRequest:cursor` (#6361) already took for the same
     // shape one route over.
     'api/ListInstalledPackagesRequest:limit',
+    // #19365 — ADR-0049 enforce-or-remove (director seat, decision batch #204
+    // item 2, maintainer 「204 同意」 2026-09-21, letter C for this door). The
+    // prescription is `RUNS_LIST_CURSOR_REMOVED` in `api/automation-api.zod.ts`.
+    //
+    // ⭐ `cursor` retires ALONE here, and the asymmetry with the sibling
+    // `/packages` retirement is the whole point of the ruling. On that door both
+    // `limit` and `cursor` were decorative, so both went (#17667,
+    // `api/ListInstalledPackagesRequest:limit` / `:cursor`). On THIS door `limit`
+    // is read end to end — boundary bounds check, service option, then the run
+    // store's history window — and the Console's flow-runs page sends it today, so
+    // retiring it would have been a regression rather than a narrowing. The card's
+    // own body called it "declared, never read"; that sentence is false and was
+    // measured false before this entry was written.
+    //
+    // What made `cursor` retirable is the response half: no emit site has ever
+    // written `nextCursor`, and this collection has no ordering key a resume could
+    // have been built from, so nothing could ever have minted a value for a caller
+    // to send back. A caller looping "until the cursor runs out" re-read the first
+    // and only window forever.
+    //
+    // Same registration shape as the `/packages` pair: major 18 (the removal ships
+    // on the 17.x line as a minor; the prescription lives at the major boundary
+    // where `migrate meta` users look), and NO D2 conversion, because a conversion
+    // rewrites an authored source or a stored `sys_metadata` row and this shape is
+    // HTTP-only — nobody authors a `ListRunsRequest` and nothing persists one. The
+    // D3 semantic entry `automation-runs-cursor-retired` carries the record to
+    // `spec-changes.json`, the generated upgrade guide and `os migrate meta`.
+    'api/ListRunsRequest:cursor',
     // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
     // executing the #14369 liveness census (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`

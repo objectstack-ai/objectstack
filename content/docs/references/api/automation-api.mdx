@@ -524,7 +524,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **name** | `string` | ✅ | Flow machine name (snake_case) |
 | **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused'>` | optional | Filter by execution status |
 | **limit** | `integer` | optional (default: `20`) | Maximum number of runs to return |
-| **cursor** | `string` | optional | Cursor for pagination |
+| **cursor** | `never` | optional | [REMOVED] `cursor` was removed from GET /api/automation/:name/runs in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it was VALIDATED at the boundary and then read by nothing: the option reached the service and the engine never looked at it, no emit site has ever written the response half `nextCursor`, and this collection has no ordering key a resume could have been built from — so a caller looping "until the cursor runs out" re-read the first and only window forever, with no error. Delete the key. `limit` is the real window and STAYS: it is read end to end (boundary to service to store) and bounded to 1..100, so ask for a wider window instead of a next page. Read the response `hasMore` to learn whether the window was short — it is now COMPUTED from the engine rather than the constant `false` it used to be. |
 
 
 ---
@@ -570,7 +570,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **runs** | `{ id: string; flowName: string; flowVersion?: integer; status: Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| …>; … }[]` | ✅ | Execution run logs |
 | **total** | `integer` | optional | Total matching runs |
 | **nextCursor** | `string` | optional | Cursor for the next page |
-| **hasMore** | `boolean` | ✅ | Whether more runs are available |
+| **hasMore** | `boolean` | ✅ | Whether more runs are available than this response carries |
 
 
 ---
