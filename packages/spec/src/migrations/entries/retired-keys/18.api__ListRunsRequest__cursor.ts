@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #19365 — ADR-0049 enforce-or-remove (director seat, decision batch #204
+// #19543 — ADR-0049 enforce-or-remove (director seat, decision batch #204
 // item 2, maintainer 「204 同意」 2026-09-21, letter C for this door). The
 // prescription is `RUNS_LIST_CURSOR_REMOVED` in `api/automation-api.zod.ts`.
 //

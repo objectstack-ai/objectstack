@@ -1539,7 +1539,7 @@ async function consumedSuspensionSurvives(
  *   GET    /:name/runs           → listRunsPage (query: limit — validated AND
  *                                  honoured end to end, #7300 / #8054; status —
  *                                  validated AND honoured, #7359; cursor —
- *                                  RETIRED, #19365, so a value carrying it is
+ *                                  RETIRED, #19543, so a value carrying it is
  *                                  ignored rather than validated). `hasMore` is
  *                                  computed from the engine's own truncation
  *                                  report, never a constant. A service without
@@ -2571,7 +2571,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 //    first implementation that starts honouring cursors must not
                 //    be the one that discovers the type was never enforced.
                 //
-                // [#19365] ⚠️ THAT SECOND BULLET IS NOW HISTORY, AND ITS
+                // [#19543] ⚠️ THAT SECOND BULLET IS NOW HISTORY, AND ITS
                 // DECISION IS REVERSED ON PURPOSE. #7300 chose to validate a
                 // key rather than decide it, on the reasoning that a future
                 // cursor implementation must not be the one to discover the
@@ -2662,7 +2662,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 const { runs, hasMore } = await automationService.listRunsPage(name, options);
                 return { handled: true, response: deps.success({ runs, hasMore }) };
             }
-            // [#19365] A service that does not implement `listRunsPage` is told
+            // [#19543] A service that does not implement `listRunsPage` is told
             // so, and ⛔ never answered 200 with an invented `hasMore`. Falling
             // through to the domain's 404 would have been the silent form: the
             // caller cannot tell "this deployment mounts no run listing" from

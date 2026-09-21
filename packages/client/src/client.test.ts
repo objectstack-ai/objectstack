@@ -1433,7 +1433,7 @@ describe('ObjectStackClient.automation', () => {
 
         // `limit` is the whole query surface of this door now. It used to be
         // pinned here alongside `cursor=abc`; that half moved to the absence
-        // pin below when #19365 retired the key.
+        // pin below when #19543 retired the key.
         await client.automation.runs.list('my_flow', { limit: 5 });
         expect(fetchMock).toHaveBeenCalledWith(
             'http://localhost:3000/api/v1/automation/my_flow/runs?limit=5',
@@ -1441,13 +1441,13 @@ describe('ObjectStackClient.automation', () => {
         );
     });
 
-    it('[#19365] never puts a `cursor` on the query string — on ANY of the three run-list surfaces', async () => {
+    it('[#19543] never puts a `cursor` on the query string — on ANY of the three run-list surfaces', async () => {
         // This test used to assert the OPPOSITE — it pinned the URL
         // `…/runs?limit=5&cursor=abc`, i.e. that the SDK produced the key. That
         // is what made the parameter harmful rather than inert: `cursor` was
         // accepted at the boundary and read by nothing, so a caller paginating
         // by the published contract re-read the first window forever with no
-        // error. #19365 retires it, and the assertion inverts on the same input.
+        // error. #19543 retires it, and the assertion inverts on the same input.
         //
         // The type surface is the enforced channel — `list({ cursor })` is a
         // TS2353 excess-property error, which a runtime assertion cannot reach.

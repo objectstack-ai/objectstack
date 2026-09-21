@@ -612,7 +612,7 @@ describe('ListRunsRequestSchema', () => {
   });
 
   it('should accept full request', () => {
-    // `cursor` left this fixture when it was retired (#19365) — it is a
+    // `cursor` left this fixture when it was retired (#19543) — it is a
     // `retiredKey()` tombstone now and any value raises. Its own cases are the
     // block at the end of this describe.
     const result = ListRunsRequestSchema.parse({
@@ -645,7 +645,7 @@ describe('ListRunsRequestSchema', () => {
     }
   });
 
-  // ── #19365 ───────────────────────────────────────────────────────────────
+  // ── #19543 ───────────────────────────────────────────────────────────────
   // `cursor` retires; `limit` explicitly does NOT. Both halves are pinned,
   // because the card that retired `cursor` arrived claiming `limit` was
   // equally inert and the measurement said otherwise.

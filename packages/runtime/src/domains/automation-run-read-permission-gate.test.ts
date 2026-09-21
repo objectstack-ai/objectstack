@@ -94,7 +94,7 @@ function makeDispatcher(
 ): Harness {
     const explainCalls: ExplainCall[] = [];
     const getRun = vi.fn(async () => PAUSED_RUN as unknown);
-    // [#19365] The door reads the PAGE member — `listRuns` alone cannot
+    // [#19543] The door reads the PAGE member — `listRuns` alone cannot
     // report truncation, so a door that has to answer `hasMore` calls this
     // one. The gate under test is unaffected either way: it refuses ahead of
     // the service probe, deliberately, so that a 501-vs-403 is not what tells

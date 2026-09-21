@@ -297,7 +297,7 @@ describe('HttpDispatcher', () => {
                 execute: vi.fn().mockResolvedValue({ success: true, output: {} }),
                 toggleFlow: vi.fn().mockResolvedValue(undefined),
                 listRuns: vi.fn().mockResolvedValue([{ id: 'run_1', status: 'completed' }]),
-                // [#19365] The run-list door calls the PAGE member; `listRuns`
+                // [#19543] The run-list door calls the PAGE member; `listRuns`
                 // stays declared here because the CONTRACT still declares it,
                 // and this mock's subject is contract completeness (#4127).
                 listRunsPage: vi.fn().mockResolvedValue({

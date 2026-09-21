@@ -4568,7 +4568,7 @@ export class AutomationEngine implements IAutomationService {
         flowName: string,
         options?: { limit?: number; status?: ExecutionStatus },
     ): Promise<ExecutionLogEntry[]> {
-        // [#19365] ONE implementation, two projections — `listRunsPage` is the
+        // [#19543] ONE implementation, two projections — `listRunsPage` is the
         // whole method and this is its `runs` half. ⛔ Never re-derive the
         // listing here: a second copy of the merge/filter/sort would be the
         // fork the route-ownership rule refuses, and it is the half that would
@@ -4577,7 +4577,7 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [#19365] The run listing AND whether it was truncated — the member the
+     * [#19543] The run listing AND whether it was truncated — the member the
      * REST door builds `hasMore` from.
      *
      * ## What "truncated" means at this seam, and why `runs.length === limit` is not it
@@ -4701,7 +4701,7 @@ export class AutomationEngine implements IAutomationService {
         let durable: ExecutionLogEntry[] = [];
         if (this.store?.listHistory) {
             try {
-                // [#19365] `limit + 1`, not `limit` — the over-read that makes
+                // [#19543] `limit + 1`, not `limit` — the over-read that makes
                 // `hasMore` answerable at all. Asking for exactly `limit` makes a
                 // saturated window and a complete one identical; one extra row
                 // tells them apart, and `.slice(0, limit)` below drops it again
@@ -4795,7 +4795,7 @@ export class AutomationEngine implements IAutomationService {
             : [...byId.values()].filter(e => e.status === status);
         const ordered = merged
             .sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
-        // [#19365] The comparison is against the ORDERED, FILTERED set, not
+        // [#19543] The comparison is against the ORDERED, FILTERED set, not
         // against what any single source returned: a row can reach `ordered`
         // from the ring or the paused arm without the history arm knowing, and
         // a `?status=` filter can drop the over-read row specifically. Reading

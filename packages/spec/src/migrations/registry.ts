@@ -5864,7 +5864,7 @@ const step18: MigrationStep = {
         + '`string` and sending it into a route that silently drops it — the ADR-0104 shape the '
         + 'tombstone exists to prevent, re-created one layer down. The same call was made when '
         + '#6361 retired the notifications `cursor`: the client dropped the option and recorded '
-        + 'the removal in its docblock. ADR-0049 / ADR-0087, #19365.',
+        + 'the removal in its docblock. ADR-0049 / ADR-0087, #19543.',
       acceptanceCriteria:
         'No caller sends `cursor` to `GET /api/automation/:name/runs`, and that is true of every '
         + 'channel this repo ships rather than of the schema alone. Writing it on a '
@@ -13398,7 +13398,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `api/ListNotificationsRequest:cursor` (#6361) already took for the same
     // shape one route over.
     'api/ListInstalledPackagesRequest:limit',
-    // #19365 — ADR-0049 enforce-or-remove (director seat, decision batch #204
+    // #19543 — ADR-0049 enforce-or-remove (director seat, decision batch #204
     // item 2, maintainer 「204 同意」 2026-09-21, letter C for this door). The
     // prescription is `RUNS_LIST_CURSOR_REMOVED` in `api/automation-api.zod.ts`.
     //

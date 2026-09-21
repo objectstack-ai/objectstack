@@ -68,7 +68,7 @@ import { validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validatio
  * An automation slot whose `listRunsPage` records exactly what it was asked
  * for.
  *
- * [#19365] The double serves `listRunsPage` — the page-shaped member the door
+ * [#19543] The double serves `listRunsPage` — the page-shaped member the door
  * now calls — rather than `listRuns`. The recorded OPTIONS object is what
  * every preservation row below pins, and it is unchanged by that switch except
  * for the retired `cursor` key: the door still forwards the caller's own
@@ -157,7 +157,7 @@ describe('#7300 — GET /automation/:name/runs refuses a malformed `limit` inste
     });
 });
 
-describe('#19365 — `cursor` is RETIRED, so this boundary stops reading it', () => {
+describe('#19543 — `cursor` is RETIRED, so this boundary stops reading it', () => {
     // ⚠️ This block SUPERSEDES #7300's cursor refusal cases rather than
     // extending them, and the supersession is a deliberate reversal, not a
     // relaxation that slipped through. #7300 refused `?cursor=a&cursor=b` with
@@ -209,7 +209,7 @@ describe('#19365 — `cursor` is RETIRED, so this boundary stops reading it', ()
     });
 });
 
-describe('#19365 — `hasMore` is RELAYED from the service, never a constant', () => {
+describe('#19543 — `hasMore` is RELAYED from the service, never a constant', () => {
     // The defect this closes, in the source's own words: the door returned
     // `deps.success({ runs, hasMore: false })` — a literal — beside a list the
     // engine had already cut with `.slice(0, limit)`. A caller asking for one
@@ -401,7 +401,7 @@ describe('#7300 — every value that had a defensible answer keeps it', () => {
         ['no parameters at all', {}, { limit: undefined, status: undefined }],
         // The three `?cursor=` preservation rows that stood here — a verbatim
         // string, the empty spelling, and `limit` + `cursor` together — are
-        // superseded by the `#19365` block above rather than deleted outright:
+        // superseded by the `#19543` block above rather than deleted outright:
         // the key is retired, so "reaches the service unchanged" is no longer
         // the behaviour to preserve. What replaced them asserts the opposite
         // on the same inputs, which is the same supersession shape #7359 and

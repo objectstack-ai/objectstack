@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #19365 — `AutomationEngine.listRunsPage` and the truncation boundary.
+ * #19543 — `AutomationEngine.listRunsPage` and the truncation boundary.
  *
  * `GET /api/automation/:name/runs` used to answer `{ runs, hasMore: false }`
  * with the `false` written as a literal, beside a list the engine had already
@@ -83,7 +83,7 @@ async function pageOf(count: number, limit: number) {
     return engine.listRunsPage(FLOW, { limit });
 }
 
-describe('#19365 — hasMore at the truncation boundary', () => {
+describe('#19543 — hasMore at the truncation boundary', () => {
     it.each([
         ['far fewer than the window', 3, 10, false, 3],
         ['one short of the window', 9, 10, false, 9],
@@ -117,7 +117,7 @@ describe('#19365 — hasMore at the truncation boundary', () => {
 
     it('asks the STORE for `limit + 1` — the over-read is where the fact comes from', async () => {
         // The mechanism pin. `RunStore.listHistory`'s signature is deliberately
-        // unchanged (#19365): over-reading is expressible in the `limit` it
+        // unchanged (#19543): over-reading is expressible in the `limit` it
         // already takes, so the truncation signal costs the store contract
         // nothing. A regression to `listHistory(flow, limit)` would make the
         // EXACTLY-the-window case above indistinguishable from the one above
@@ -179,7 +179,7 @@ describe('#19365 — hasMore at the truncation boundary', () => {
     });
 });
 
-describe('#19365 — `listRuns` is the `runs` half of the same call', () => {
+describe('#19543 — `listRuns` is the `runs` half of the same call', () => {
     it('returns the identical window, and reports no truncation of its own', async () => {
         // ONE implementation, two projections. A second merge/filter/sort here
         // would be the fork the route-ownership rule refuses, and it is the

@@ -509,7 +509,7 @@ export type ToggleFlowResponseParsed = z.infer<typeof ToggleFlowResponseSchema>;
 // ==========================================
 
 /**
- * `cursor` retires alone — `limit` is NOT part of this retirement (#19365).
+ * `cursor` retires alone — `limit` is NOT part of this retirement (#19543).
  *
  * Tombstoned rather than deleted for the ADR-0104 reason these request schemas
  * keep paying for: this object is not `.strict()`, so a bare deletion makes Zod
@@ -538,7 +538,7 @@ const RUNS_LIST_CURSOR_REMOVED =
  * serving door — `handleAutomationRequest`'s `parts[1] === 'runs'` GET branch
  * in `packages/runtime/src/domains/automation.ts` — actually reads, and every
  * key that door reads is here. `status` (#7359) and `limit` (#7300 / #8054)
- * are both read end to end; `cursor` was the one that never was, and #19365
+ * are both read end to end; `cursor` was the one that never was, and #19543
  * retires it (maintainer ruling, decision batch #204 item 2, letter C).
  *
  * ⛔ `limit` is NOT a retirement candidate on this door and its `.default(20)`
@@ -581,14 +581,14 @@ export const ListRunsResponseSchema = lazySchema(() => BaseResponseSchema.extend
   data: z.object({
     runs: z.array(ExecutionLogSchema).describe('Execution run logs'),
     total: z.number().int().optional().describe('Total matching runs'),
-    // Never emitted, and since #19365 retired the request half that is true by
+    // Never emitted, and since #19543 retired the request half that is true by
     // construction rather than merely unimplemented: with no `cursor` to send,
     // nothing can ask for a page, so there is no next one to name. The key
     // stays declared and OPTIONAL, which is honest — an absent optional key
     // promises nothing. ⛔ Do not start minting one without a request-side way
-    // to spend it; that is letter A of the #19365 ruling, explicitly not taken.
+    // to spend it; that is letter A of the #19543 ruling, explicitly not taken.
     nextCursor: z.string().optional().describe('Cursor for the next page'),
-    // [#19365] COMPUTED, never hard-coded. The door asks the engine for the
+    // [#19543] COMPUTED, never hard-coded. The door asks the engine for the
     // page rather than the rows, and the engine answers whether its merged
     // candidate set overflowed the caller's `limit`. It used to be a literal
     // `false` shipped beside a list that had been truncated — a caller asking

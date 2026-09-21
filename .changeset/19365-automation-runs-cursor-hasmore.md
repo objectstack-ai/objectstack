@@ -5,7 +5,7 @@
 '@objectstack/client': minor
 ---
 
-feat(automation): `GET /automation/:name/runs` retires `cursor` and computes `hasMore` (#19365)
+feat(automation): `GET /automation/:name/runs` retires `cursor` and computes `hasMore` (#19543)
 
 This door declared a pagination parameter it never spent and then reported, as a
 literal, that there was nothing more to fetch. Both halves are closed here, per

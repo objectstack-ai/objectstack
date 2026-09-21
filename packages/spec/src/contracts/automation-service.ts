@@ -546,13 +546,13 @@ export interface FlowRuntimeState {
 
 /**
  * One window of execution runs, plus the truncation fact the window alone
- * cannot carry (#19365).
+ * cannot carry (#19543).
  *
  * The sibling shape is `ExportJobListResult` (`contracts/export-service.ts`),
  * and the difference from it is deliberate: there is ⛔ NO `nextCursor` here.
  * Nothing on this door has ever minted a continuation token, the request half
  * that would have spent one is a retired key, and a `nextCursor` no caller can
- * send back is the same declared-and-unusable shape #19365 exists to close.
+ * send back is the same declared-and-unusable shape #19543 exists to close.
  * `hasMore` is actionable without one — the caller widens `limit`, which this
  * door does read, up to its declared maximum of 100.
  */
@@ -668,7 +668,7 @@ export interface IAutomationService {
      * store it merges; a filter that sees only half the rows is the same class
      * of confident wrong answer as not filtering at all.
      *
-     * ⛔ `cursor` is GONE from these options (#19365, maintainer ruling,
+     * ⛔ `cursor` is GONE from these options (#19543, maintainer ruling,
      * decision batch #204 item 2, letter C). It was declared here, forwarded
      * from the HTTP boundary, and read by no implementation; the wire half is
      * a `retiredKey()` tombstone on `ListRunsRequestSchema`. ⛔ Do not add it
@@ -680,7 +680,7 @@ export interface IAutomationService {
      * answer `hasMore`. This member reports the window's CONTENTS and cannot
      * report whether anything was left outside it, so a door built on it alone
      * has nothing honest to put in that field — which is exactly the defect
-     * #19365 closed, where the run-list door shipped a literal `hasMore: false`
+     * #19543 closed, where the run-list door shipped a literal `hasMore: false`
      * beside a list the engine had already truncated.
      *
      * @param flowName - Flow name (snake_case)
@@ -694,7 +694,7 @@ export interface IAutomationService {
 
     /**
      * List one WINDOW of execution runs, and say whether more were left
-     * outside it (#19365).
+     * outside it (#19543).
      *
      * The truncation half is the reason this member exists and is not a
      * convenience wrapper over {@link IAutomationService.listRuns}: only the

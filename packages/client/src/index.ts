@@ -5538,15 +5538,24 @@ export class ObjectStackClient {
            *
            * Returns the newest `limit` runs — a WINDOW, not a page. The
            * `cursor` parameter was removed in `@objectstack/spec` 17.5.0
-           * (#19365): it was appended to the query string here and read by
-           * nothing on the server, so a caller paginating by it re-read the
-           * first window forever.
+           * (#19543): it was appended to the query string here, validated at
+           * the boundary and read by nothing beyond it, so a caller
+           * paginating by it re-read the first window forever.
            *
-           * Omit `limit` to take the server's window (20). It is
-           * bounded to 1..100 and a value outside that range is REFUSED with
-           * `400 VALIDATION_FAILED`, never clamped — so raise it deliberately
-           * to see further back. There is no continuation token — read
-           * `hasMore` to learn whether the window was short.
+           * Omit `limit` to take the server's window (20). The declared range
+           * is 1..100, and a value this method SENDS that falls outside it is
+           * REFUSED with `400 VALIDATION_FAILED`, never clamped — so raise it
+           * deliberately to see further back.
+           *
+           * ⚠️ `0` and `NaN` are the exception, and they are dropped rather
+           * than refused: the guard below is truthy, so a falsy `limit` never
+           * leaves the client and the server answers its DEFAULT window
+           * instead. `-5`, `1.5` and `101` are truthy, are sent, and are
+           * refused. The two `listRuns` surfaces guard on `!= null` and do
+           * send `0`.
+           *
+           * There is no continuation token — read `hasMore` to learn whether
+           * the window was short.
            */
           list: async (flowName: string, options?: { limit?: number }): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
               const route = this.getRoute('automation');
@@ -5620,7 +5629,7 @@ export class ObjectStackClient {
       /**
        * Alias for `automation.runs.list`.
        *
-       * `cursor` was removed in `@objectstack/spec` 17.5.0 (#19365) — see that
+       * `cursor` was removed in `@objectstack/spec` 17.5.0 (#19543) — see that
        * method for the reason. A window, not a page: widen `limit`
        * (1..100, default 20) and read `hasMore`.
        */
@@ -8105,7 +8114,7 @@ export class ScopedEnvironmentClient {
     /**
      * List recent runs for a flow, optionally narrowed to one status.
      *
-     * `cursor` was removed in `@objectstack/spec` 17.5.0 (#19365) — see
+     * `cursor` was removed in `@objectstack/spec` 17.5.0 (#19543) — see
      * `automation.runs.list` for the reason. A window, not a page: widen
      * `limit` (1..100, default 20) and read `hasMore`.
      */
