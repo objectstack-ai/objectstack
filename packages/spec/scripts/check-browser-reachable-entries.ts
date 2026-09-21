@@ -154,7 +154,11 @@ import { fileURLToPath } from 'node:url';
 
 import { buildStamp } from '../../../scripts/check-regen-pending.mjs';
 import { scanSource } from '../../../scripts/js-comment-mask.mjs';
-import { inspectBundleFreshness } from './lib/dist-freshness';
+import {
+  EXIT_PREREQUISITE_NOT_MET,
+  inspectBundleFreshness,
+  prerequisiteNotMetText,
+} from './lib/dist-freshness';
 
 const PKG_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const LEDGER_PATH = join(PKG_DIR, 'browser-reachable-entries.json');
@@ -518,8 +522,11 @@ function reconcile(exportsMap: ExportsMap, ledger: Ledger, problems: string[]): 
 function audit(): never {
   const freshness = inspectBundleFreshness(PKG_DIR, 'check', RERUN);
   if (!freshness.fresh) {
-    console.error(`❌  check:browser-reachable-entries — NOT MEASURED.${freshness.message}`);
-    process.exit(1);
+    // This refusal already SAID "NOT MEASURED" in prose and then exited with a
+    // finding's code, so the sentence and the number disagreed and only the
+    // number is machine-read (#19227). Both now say the same thing.
+    console.error(prerequisiteNotMetText('check:browser-reachable-entries', freshness));
+    process.exit(EXIT_PREREQUISITE_NOT_MET);
   }
 
   const pkg = JSON.parse(readFileSync(join(PKG_DIR, 'package.json'), 'utf8')) as {

@@ -65,7 +65,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { inspectDistFreshness } from './lib/dist-freshness';
+import { EXIT_PREREQUISITE_NOT_MET, inspectDistFreshness, prerequisiteNotMetText } from './lib/dist-freshness';
 
 const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const BASELINE_PATH = resolve(PKG_DIR, 'dual-source-exports.baseline.json');
@@ -396,8 +396,16 @@ const freshness = inspectDistFreshness(
     : 'pnpm --filter @objectstack/spec check:dual-source-exports',
 );
 if (!freshness.fresh) {
-  console.error(freshness.message);
-  process.exit(1);
+  // PREREQUISITE NOT MET, not a finding (#19227) — in BOTH modes. `--update` is
+  // the writing half, and a refusal there is still "nothing was measured": the
+  // baseline on disk is untouched, so no ratchet verdict exists to report.
+  console.error(
+    prerequisiteNotMetText(
+      UPDATE ? 'check-dual-source-exports.ts --update' : 'check:dual-source-exports',
+      freshness,
+    ),
+  );
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 const entries = collectEntries();
