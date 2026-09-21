@@ -69,15 +69,15 @@ export default defineStack({
 
 ### Full Configuration Reference
 
-`defineStack()` accepts an `ObjectStackDefinitionInput`. Each top-level key
-holds one metadata kind — `manifest`, `objects`, `objectExtensions`,
-`views`, `apps`, `pages`, `dashboards`, `reports`, `datasets`,
-`actions`, `flows`, `jobs`, `emailTemplates`, `docs`, `books`,
-`positions`, `permissions`, `capabilities`, `sharingRules`, `apis`,
-`webhooks`, `api`, `server`, `agents`, `tools`, `skills`, `hooks`,
-`functions`, `mappings`, `analyticsCubes`, `connectors`, `data` (seed),
-`datasources`, `datasourceMapping`, `translations`, `i18n`, `plugins`,
-`devPlugins`, `requires`, `tiers`.
+`defineStack()` accepts an `ObjectStackDefinitionInput` whose top-level keys
+are `manifest`, `packages`, `objects`, `objectExtensions`, `views`, `apps`,
+`pages`, `dashboards`, `reports`, `datasets`, `actions`, `flows`, `jobs`,
+`emailTemplates`, `docs`, `books`, `positions`, `permissions`,
+`capabilities`, `sharingRules`, `apis`, `webhooks`, `api`, `server`,
+`agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
+`analyticsCubes`, `connectors`, `data` (seed), `datasources`,
+`datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
+`devHint`, `devLogins`, `requires`, `tiers`, `onEnable`.
 
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is authored as a flow with Approval nodes (ADR-0019), and record

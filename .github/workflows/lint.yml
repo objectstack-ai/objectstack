@@ -31,9 +31,12 @@ on:
   # the push-on-`main` run of THIS workflow is the only post-merge full-battery
   # run of the families `scripts/ci/select-gate-families.sh` scopes away on
   # merge groups (the PM dispatch-gates self-test, both ratchets, the
-  # verify-lock self-test, the comment-mask corpus). A scoped family that goes
-  # red on `main` after a queue build skipped it had, until this trigger, no
-  # run that would notice and no filer that would say so.
+  # verify-lock self-test, the comment-mask corpus — and since #19498 the
+  # entry-guard sweep, the declared-population gate, the bare-root worklist
+  # self-test and the self-test workflow-command gate, whose whole-tree reads
+  # that ruling took off the PR path). A scoped family that goes red on `main`
+  # after a queue build skipped it had, until this trigger, no run that would
+  # notice and no filer that would say so.
   #
   # The selector already treats every event that is neither `merge_group` nor
   # `pull_request` as "run every family", so this trigger alone restores the
@@ -245,18 +248,33 @@ jobs:
       # over the ten merge-group runs measured for #16496; the PM dispatch-gates
       # self-test alone 597 s), and none of its expensive steps read a
       # merge group's file surface: a docs-only group paid the full battery.
-      # So on `merge_group` and `pull_request` the FIVE scoped families below
+      # So on `merge_group` and `pull_request` the NINE scoped families below
       # -- each step carrying `if: steps.gate-families.outputs.<id> != 'skip'`
       # -- run only when the changed paths touch the files that family reads.
       # `push` on main and the scheduled full run keep the whole battery: the
       # script runs everything for any event it does not scope.
+      #
+      # #19498 added four of those nine (`entry_guard`,
+      # `declared_population_live`, `bare_root_worklist`,
+      # `self_test_workflow_commands`) and narrowed `pm_dispatch_gates`, on
+      # ruling #208 on #19491 (R4) and the maintainer's sentence quoted in the
+      # selector's header: the tooling's self-tests were 18.6 minutes of the
+      # 27.4-minute job a three-file `packages/spec` PR paid. ⛔ Product
+      # ratchets and censuses stay unconditional -- the tenancy and
+      # tenant-audit censuses, the engine gates and everything else here judge
+      # product code and are not in that ruling.
       #
       # ⭐ The invariant is FAIL-OPEN, and it holds at both layers. The script
       # runs every family when the base cannot be resolved, the diff fails or
       # is empty, a path is one it does not classify (a new top-level
       # directory, an unlisted root file), or any change is a deletion, rename
       # or type change; a family is skipped ONLY when every changed path is
-      # positively classified into a class that family provably never reads.
+      # positively classified into a class that family's DECLARED read-set
+      # excludes. For the other four -- both ratchets, the corpus walk and the
+      # verify-lock self-test -- that read-set is what the family provably
+      # reads. For the five tooling self-tests it is the tool's OWN INPUTS,
+      # which is a weaker claim; it is argued where it is declared, in the
+      # selector's header.
       # The `!= 'skip'` spelling means an ABSENT output -- the selector never
       # ran, or wrote nothing -- also runs the step. Both halves are pinned by
       # `scripts/ci/select-gate-families.selftest.sh` (`check:select-gate-
@@ -575,8 +593,18 @@ jobs:
       # `scripts/invoked-as.mjs` may read `process.argv[1]`, and that module's
       # own self-test drives a real probe through a real symlink. Rationale and
       # the rejected behavioural-sweep alternative: the gate script's header.
-      # Scans ~115 files, no spawns; ~0.2s.
+      # Scans ~115 files, no spawns; ~0.2s of work, measured at 0.62 min as a
+      # step on run 35506407130.
+      #
+      # Scoped (#19498): its population is `scripts/**` — its own
+      # ROOT_DIR_WATCH_HINTS declaration, held against the root it really walks
+      # by its own self-test — so a group that changes no file under scripts/
+      # (and no root configuration) skips it. The selection step at the top of
+      # this job decides that, `push` on main and the hourly run keep it
+      # unconditional, and the ruling that authorizes moving a tooling
+      # self-test off the PR path is quoted in the selector's header.
       - name: scripts/ entry guards go through one predicate
+        if: steps.gate-families.outputs.entry_guard != 'skip'
         run: pnpm check:entry-guard
 
       # Every `scripts/**` TypeScript parse goes through ONE module (#10133 /
@@ -911,19 +939,28 @@ jobs:
       # listed, with no reader of what the test actually reads. What runs
       # here now is different in kind and was the maintainer's call (#16496,
       # 「同意你的建议，你负责执行派发所有可行的优化」): the selection step at
-      # the top of this job classifies every changed path against this
-      # self-test's MEASURED read-set (every workflow, every gate source under
-      # `scripts/**` and `packages/*/scripts/**`, every `package.json`,
-      # `.claude/**`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, `tsconfig.json`,
-      # every `.gitignore` -- nested ones included -- the CONTENT of every
-      # JS/TS file in the tree (the compound-anchor census of
-      # `function ...SelfTest...(` declarations and the exposed-scratch-dir
-      # sweep of every mkdtempSync/mkdirSync caller both assert over it), and
-      # the tracked NAME set it sweeps -- so any added, deleted or renamed
-      # file runs it too), and skips this step only when every path is one
-      # the test provably never reads: a modified doc, changeset or non-source
-      # workspace file. Every doubt runs it, the self-test of the selector
-      # pins that, and `push` on main keeps it unconditional.
+      # the top of this job classifies every changed path against a declared
+      # read-set for this step, and skips it when no changed path is in that
+      # set. Every doubt runs it, the self-test of the selector pins that, and
+      # `push` on main keeps it unconditional.
+      #
+      # ⚠️ Since #19498 that read-set is NARROWER than what the battery reads,
+      # and the gap is stated rather than papered over. The read-set is the
+      # tool's own inputs: every workflow and composite action, every gate
+      # source under `scripts/**` and a workspace package's own `scripts/`,
+      # every `package.json`, `.claude/**`, `skills/**`, `AGENTS.md`,
+      # `CLAUDE.md` and root configuration. The battery ALSO reads the CONTENT
+      # of every JS/TS and `.sh` file in the tree (the compound-anchor census
+      # of `function ...SelfTest...(` declarations and the exposed-scratch-dir
+      # sweep of every mkdtempSync/mkdirSync caller, with the nested
+      # `.gitignore` files it consults) and the tracked NAME set it sweeps —
+      # which is why, until #19498, any added file anywhere ran it. On PR
+      # #19314 this step alone was 11.8 minutes of a 27.4-minute job for a
+      # three-file `packages/spec` diff, and ruling #208 on #19491 (R4) took
+      # those whole-tree reads off the PR path on the maintainer's sentence,
+      # quoted in the selector's header. ⛔ A defect in that wider set can now
+      # first appear on `main`; the push-on-main and hourly full runs are what
+      # bound it, and widening the skip further is again a maintainer call.
       #
       # The gate runs the SELF-TEST only. The live derivation
       # (`node scripts/pm/dispatch-gates.mjs <path>`) answers a question about a
@@ -997,8 +1034,18 @@ jobs:
       # names — the stronger rule ("a gate that enumerates a directory must
       # declare one") was implemented, measured at 86 findings over 114
       # enumerating gate files, and refused as an allowlist with a verdict
-      # attached. Reads the derivation once over the tracked corpus; ~5s.
+      # attached. Reads the derivation once over the tracked corpus; ~5s of
+      # work, measured at 0.40 min as a step on run 35506407130.
+      #
+      # Scoped (#19498): it imports `discoverFamilies` and `trackedFiles` from
+      # the dispatch derivation, so its inputs are the workflow tree, every
+      # gate source that discovery resolves, and the tracked NAME set — and
+      # only a name that DISAPPEARS can turn a live declaration dead, which is
+      # a structural change the selector already runs everything for. A group
+      # confined to product source, tests, docs or changesets skips it here and
+      # pays for it on `push` to main and on the hourly run.
       - name: A declared gate population reaches the tree
+        if: steps.gate-families.outputs.declared_population_live != 'skip'
         run: pnpm check:declared-population-live
 
       # ADR-0087 D4's per-release correctness gate (#17080). The REAL run needs
@@ -1029,21 +1076,32 @@ jobs:
       # `dispatch-gates.mjs` reads the worklist, and no verdict in it reaches a
       # dispatch prompt.
       #
-      # Unconditional, for the same reason as the step above: a self-test that
-      # can be skipped is the gap moving rather than closing. Reads the workflow
-      # tree and every gate source once; ~0.5s.
+      # Reads the workflow tree and every gate source once; ~0.5s of work,
+      # measured at 0.32 min as a step on run 35506407130.
+      #
+      # ⚠️ This step WAS unconditional, on the reasoning that a self-test which
+      # can be skipped is the gap moving rather than closing. #19498 scopes it
+      # anyway, and the trade is explicit rather than reasoned away: it imports
+      # the same derivation as the two steps above, so its inputs are the
+      # workflow tree and the gate sources, and on a group touching neither the
+      # gap does move — to `push` on main and the hourly full run, which keep
+      # the whole battery. Gate weakening is a maintainer floor; the sentence
+      # that authorizes this one is quoted in the selector's header.
       - name: PM bare-root worklist self-test
+        if: steps.gate-families.outputs.bare_root_worklist != 'skip'
         run: node scripts/pm/bare-root-worklist.mjs --self-test
 
       # Part-of/closing-keyword guard self-test (#8476). The guard itself is a
       # PR-scoped blocking check in its own workflow — it needs a pull request
       # body to judge, which this job does not have — so what runs HERE is its
       # self-test, which is the half with a verdict independent of any PR.
-      # Unconditional for the same reason as the two steps above: a self-test
-      # that runs only when someone remembers is a check whose coverage is a
-      # function of who remembered, and the failure it hides is quiet — a break
-      # in the verdict layer lands green and surfaces later as a card silently
-      # closed by the sentence written to keep it open.
+      # Unconditional, and not on the two steps above's borrowed reason — they
+      # are scoped since #19498 and this one is not, because the cost that
+      # bought that ruling is not here: this step is a tenth of a second, and a
+      # self-test that runs only when someone remembers is a check whose
+      # coverage is a function of who remembered. The failure it hides is quiet
+      # — a break in the verdict layer lands green and surfaces later as a card
+      # silently closed by the sentence written to keep it open.
       #
       # The self-test also pins the WIRING (the guard workflow still invokes
       # the script, still subscribes to `edited`, still passes the body through
@@ -1727,8 +1785,17 @@ jobs:
       # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias:
       # see the GATE INVOCATION IDIOM note at the top of this file. Reads
       # `scripts/` and `.github/workflows/` off disk and spawns the selected
-      # self-tests; no network.
+      # self-tests; no network. Measured at 0.48 min as a step on run
+      # 35506407130.
+      #
+      # Scoped (#19498): its declared population is
+      # `scripts/**/*.mjs`, `scripts/**/*.mts` and `scripts/**/*.sh`, and the
+      # rest of its read-set is the workflow tree and `.github/actions` it
+      # discovers the runnable self-tests from — so a group touching none of
+      # those skips it here and runs it on `push` to main and on the hourly
+      # full run.
       - name: Self-test workflow-command gate
+        if: steps.gate-families.outputs.self_test_workflow_commands != 'skip'
         run: |
           node scripts/check-self-test-workflow-commands.mjs --self-test
           node scripts/check-self-test-workflow-commands.mjs
@@ -1806,8 +1873,11 @@ jobs:
       # silently degrading every gate failure from "here is the command" into
       # "no substitute available".
       #
-      # Unconditional and un-`if:`-ed, like every self-test above it — an
-      # exemption is precisely what a self-test must not have, or the gap moves.
+      # Unconditional and un-`if:`-ed — an exemption is precisely what a
+      # self-test must not have, or the gap moves. (Five self-tests in this job
+      # do carry one since #19498: each cost minutes on every product PR, and
+      # each was moved by the ruling quoted in the selector's header. This one
+      # costs seconds and is not among them.)
       #
       # NO NETWORK, measured rather than assumed (#9898), because a self-test
       # that reached GitHub would put this required context at the mercy of API
@@ -1848,9 +1918,10 @@ jobs:
       # future edit invalidates silently and precisely the rows no reviewer reads.
       # Nothing but this step is an instrument for them.
       #
-      # Unconditional and un-`if:`-ed, like every self-test around it — an
-      # exemption is precisely what a self-test must not have, or the gap simply
-      # moves. One `--self-test` per `run:` block, deliberately: the masking shape
+      # Unconditional and un-`if:`-ed — an exemption is precisely what a
+      # self-test must not have, or the gap simply moves; the five self-tests
+      # scoped in #19498 are the ruled exception and this sub-second one is not
+      # among them. One `--self-test` per `run:` block, deliberately: the masking shape
       # `check-step-collectors.mjs` guards is a block driving TWO OR MORE distinct
       # scripts. A discovery collector over `scripts/pm/*.sh --self-test` — which
       # would also catch the next such script arriving unwired — is ruled out of
@@ -5491,6 +5562,24 @@ jobs:
       # where a major bump is what makes the declarations stale in the first place.
       - name: Check SKILL.md compatibility declarations match the workspace majors
         run: pnpm check:skill-compatibility
+
+      # The fifth reader of skills/objectstack-platform/SKILL.md, and the first
+      # to read its `defineStack()` top-level key enumeration. That list is
+      # where an AI author learns which keys the top level accepts, on a page
+      # that says an unknown key is refused; nothing reconciled it, and it drifted
+      # to four missing keys (`packages`, `onEnable`, `devHint`, `devLogins`)
+      # while the four gates above were green — each judges something else. This
+      # one reads the enumeration and the keys of `COMPOSE_KEY_DISPOSITIONS` out
+      # of packages/spec/src/stack.zod.ts as SOURCE TEXT (this job precedes the
+      # workspace build) and fails on any key in one and not the other, both
+      # directions. Two machine-written keys are declared out with a witness the
+      # gate re-checks on every run; the script header is the authority.
+      #
+      # Same job and same reasons as its neighbours: no paths filter and required,
+      # so it cannot go dormant on the PR that adds a top-level key without
+      # touching the skill — which is exactly how the four went missing.
+      - name: Check the platform skill enumerates every authorable top-level stack key
+        run: pnpm check:skill-top-level-keys
 
       # The fourth gate over the .claude/ file tree, and the first to read
       # .claude/agents/ at all (#6803). An agent definition that declares no `model:`
