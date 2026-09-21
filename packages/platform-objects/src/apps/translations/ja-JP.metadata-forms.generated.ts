@@ -1239,24 +1239,24 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "L1 式または L2 サンドボックス JS body"
       },
       "body.language": {
-        label: "Language",
-        helpText: "expression = pure formula; js = sandboxed JavaScript"
+        label: "言語",
+        helpText: "expression = 純粋な数式; js = サンドボックス化 JavaScript"
       },
       "body.source": {
-        label: "Source",
-        helpText: "Function body source — no top-level imports"
+        label: "ソース",
+        helpText: "関数 body ソース — トップレベル import 不可"
       },
       "body.capabilities": {
-        label: "Capabilities",
-        helpText: "Allowed ctx APIs (api.read, api.write, crypto.uuid, log, …)"
+        label: "機能",
+        helpText: "許可する ctx API（api.read, api.write, crypto.uuid, log, …）"
       },
       "body.timeoutMs": {
-        label: "Timeout Ms",
-        helpText: "Per-invocation timeout (ms)"
+        label: "タイムアウト（ms）",
+        helpText: "呼び出しごとのタイムアウト（ms）"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "メモリ（MB）",
+        helpText: "呼び出しごとのメモリ上限（MB、最大 256）"
       },
       params: {
         label: "パラメーター",
@@ -1345,8 +1345,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "CEL 式: 条件が true の場合に無効化"
       },
       ai: {
-        label: "Ai",
-        helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
+        label: "AI 公開",
+        helpText: "AI 公開（オプトイン）: ai.exposed=true を設定し、ai.description（≥40 文字）を記述すると、エージェントから呼び出せるようになります。"
       },
       recordIdParam: {
         label: "レコード ID パラメーター",
