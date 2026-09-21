@@ -246,6 +246,28 @@ export interface PermissionSeedOutcome {
   unreadable: number;
   skippedEnvAuthored: number;
   skippedForeign: number;
+  /**
+   * [#18571] Declarations refused for want of an owning package
+   * (`_packageId`/`packageId` both absent), so no `managed_by:'package'` row
+   * was written — the ADR-0086 D3 ambiguity the refusal exists to prevent.
+   *
+   * ⚠️ Required, not optional: it is a REFUSAL count, and an absent key on a
+   * pass that refused reads exactly like a pass that had nothing to refuse.
+   * Every door that returns this outcome initializes it, so a caller may add
+   * it into the accounting unconditionally — `seeded + updated + unchanged +
+   * skippedEnvAuthored + skippedForeign + skippedUnowned + unreadable` is the
+   * number of named declarations this pass read. (Pre-existing caveat,
+   * unchanged: a write the engine REJECTS increments no counter — `tryInsert`
+   * answers `null` and `tryUpdate` `false`, and the refusal travels on
+   * `SeedWriteRefusals` instead.) Before this counter existed that sum was
+   * short by every unowned declaration, and the outcome said nothing at all
+   * about them.
+   *
+   * Named for its `CapabilitySeedOutcome.skippedUnowned` sibling on the
+   * capability axis, which counts the same refusal at the same ADR-0086 D3
+   * boundary — ⛔ not a new vocabulary for one seeder.
+   */
+  skippedUnowned: number;
   /** Records retired because their definition was deleted from metadata. */
   deleted?: number;
   /**
@@ -566,7 +588,7 @@ export async function upsertEnvPermissionSet(
     existing?: ExistingByNameIndex;
   },
 ): Promise<PermissionSeedOutcome> {
-  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
+  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0, skippedUnowned: 0 };
   if (!ql || typeof ql.find !== 'function' || !ps?.name) return out;
 
   // [ADR-0094] `customized` marks a PACKAGE-owned row that an env overlay is
@@ -749,7 +771,7 @@ async function retirePermissionSetRecord(
   name: string,
   logger?: ProjectionLogger,
 ): Promise<PermissionSeedOutcome> {
-  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0, deleted: 0 };
+  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0, skippedUnowned: 0, deleted: 0 };
   const existing = (await tryFind(ql, 'sys_permission_set', { name }, 1))[0];
   if (!existing?.id) return out;
   if (existing.managed_by === 'package') {
