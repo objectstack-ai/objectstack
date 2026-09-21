@@ -1217,9 +1217,21 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  * replaces — the author needs to know the cap is visible, and the renderer
  * author needs to know it is owed.
  *
- * ⚠️ WHAT THIS KEY REACHES TODAY — recorded, not repaired (#19228). Measured
- * first-hand at the pin this repo builds against (`.objectui-sha` =
- * `87af769e9`), 2026-09-21T08:05Z, with TWO instruments, because one was not
+ * ⚠️ WHICH FACE THIS KEY IS ON, and why that has to be said first. There are
+ * TWO `limit`s a reader can confuse, on two different documents, and three
+ * rounds of #19228 went wrong on the boundary:
+ *   · **VIEW FACE** — THIS key. A member of a `ListViewSchema` document's
+ *     `kanban` / `gallery` / `timeline` block. An ADAPTER turns that document
+ *     into a rendered node; no renderer reads this document directly.
+ *   · **ELEMENT FACE** — a page component node's OWN `limit`
+ *     (`ObjectKanbanPropsSchema`, `ObjectTimelinePropsSchema`),
+ *     declared in `component.zod.ts`, with no applied default. That is the key
+ *     every renderer and `ElementDataSourceGate` actually read.
+ * Every sentence below names its face before it says anything else.
+ *
+ * ⚠️ WHAT THIS VIEW-FACE KEY REACHES TODAY — recorded, not repaired (#19228).
+ * Measured first-hand at the pin this repo builds against (`.objectui-sha` =
+ * `87af769e9`), 2026-09-21T09:15Z, with TWO instruments, because one was not
  * enough and the first one's answer was wrong:
  *
  *  1. PROPERTY-ACCESS spellings — `.kanban.limit` / `.gallery.limit` /
@@ -1227,37 +1239,48 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  *     identical shape, `.kanban.groupByField` / `.gallery.coverField` /
  *     `.timeline.scale`: **13** lines. A live instrument, and a WRONG answer.
  *  2. ⭐ SPREADS — a spread carries a key without ever spelling it, so it is
- *     the hole instrument 1 cannot see by construction. Lit control:
- *     `...mergedTimeline`, 1 line. It returns FOUR, and they overturn the zero:
+ *     the hole instrument 1 cannot see by construction. ⛔ Re-take it by its
+ *     PREDICATE, not by its count: **a spread whose target is the object
+ *     literal an adapter RETURNS as the node** — flattening onto the node —
+ *     as against a merge that builds a nested config (`...mergedTimeline` is
+ *     the lit control for the instrument AND the example of what the predicate
+ *     excludes). A grep broad enough to find these also returns the nested
+ *     merges, so the rule, not the number, is what makes it reproducible.
+ *     Under that predicate, at that pin, the VIEW-face per-kind blocks give:
  *       `plugin-list/src/ListView.tsx:2979`   `...restKanban`
  *       `plugin-view/src/ObjectView.tsx:1638`  `...restKanban`
  *       `plugin-view/src/ObjectView.tsx:1697`  `...(viewOptions.gallery || {})`
  *       `plugin-view/src/ObjectView.tsx:1725`  `...(viewOptions.timeline || {})`
  *     Neither `restKanban` destructure strips `limit` (`ListView.tsx:2952`,
- *     `ObjectView.tsx:1579`), so a view's per-kind `limit` — INCLUDING the 100
- *     this applied default materializes — lands on the generated node's FLAT
- *     `limit`, which is the key the renderers read.
+ *     `ObjectView.tsx:1579`), so a VIEW's per-kind `limit` — INCLUDING the 100
+ *     this applied default materializes — becomes the generated node's
+ *     ELEMENT-face flat `limit`, which is the key the renderers read.
  *
- * ⇒ **kanban and timeline: the key LANDS and IS READ.**
- *   `ObjectKanban.tsx:553` / `ObjectTimeline.tsx:279` run
- *   `describeRefusedRowLimit(schema.limit, …)` unconditionally.
- *   ⚠️ The `$top` it would govern (`ObjectKanban.tsx:676`,
- *   `ObjectTimeline.tsx:407`) is not issued on either adapter route today:
- *   both hosts hand rows down as a React `data` prop (`ListView.tsx:4702`,
- *   `ObjectView.tsx:2319`) and both children short-circuit their own fetch on
- *   it (`ObjectKanban.tsx:559`, `ObjectTimeline.tsx:420`). So it governs no
- *   query ON THOSE ROUTES — ⛔ which is not the same claim as 「reaches no
- *   consumer」, and the difference is the whole correction.
- * ⇒ **gallery, and gallery alone: carried flat and read by NOBODY.**
- *   `ObjectView.tsx:1697` delivers it; `ObjectGallery.tsx` contains no `limit`
- *   at all (0 occurrences, case-insensitive, against a lit control
- *   `schema.imageField` / `schema.titleField` at `:340` / `:348`). ⛔ Do not
- *   generalise that asymmetry to the other two — it is gallery's alone.
+ * ⇒ **A view's `kanban.limit`: flattened on BOTH adapter routes, and read.**
+ *   `ObjectKanban.tsx:553` runs `describeRefusedRowLimit(schema.limit, …)`
+ *   unconditionally.
+ * ⇒ **A view's `timeline.limit`: ROUTE-DEPENDENT.** `plugin-view` flattens it
+ *   (`ObjectView.tsx:1725`) and the node it returns carries no `timeline`
+ *   block at all, so the value arrives as the node's flat `limit` and
+ *   `ObjectTimeline.tsx:279` reads it. `plugin-list` instead forwards the
+ *   block NESTED (`ListView.tsx:3084`), where nothing reads it.
+ * ⇒ **A view's `gallery.limit`: flattened by `ObjectView.tsx:1697` and read by
+ *   NOBODY** — `ObjectGallery.tsx` contains no `limit` at all (0 occurrences,
+ *   case-insensitive, against a lit control `schema.imageField` /
+ *   `schema.titleField` at `:340` / `:348`). ⛔ Do not generalise that
+ *   asymmetry to the other two; it is gallery's alone.
+ *
+ * ⚠️ Where it IS read, the `$top` it would govern (`ObjectKanban.tsx:676`,
+ * `ObjectTimeline.tsx:407`) is still not issued on either adapter route today:
+ * both hosts hand rows down as a React `data` prop (`ListView.tsx:4702`,
+ * `ObjectView.tsx:2319`) and both children short-circuit their own fetch on it
+ * (`ObjectKanban.tsx:559`, `ObjectTimeline.tsx:420`). ⛔ That is a statement
+ * about the QUERY, not about the key being unread.
  *
  * ⚠️ A consequence of APPLIED that the open decision needs: through those
- * spreads a spec-parsed view emits a node carrying an authored-LOOKING flat
- * `limit: 100` that no author wrote. ⛔ Flagged, not acted on — changing it is
- * a contract direction, not a tidy-up.
+ * spreads a spec-parsed view emits a node carrying an authored-LOOKING
+ * ELEMENT-face `limit: 100` that no author wrote. ⛔ Flagged, not acted on —
+ * changing it is a contract direction, not a tidy-up.
  *
  * ⛔ Which of the row bounds wins is NOT decided here and NOT implied by this
  * declaration: #19228 opens that question and picks nothing, and neither does

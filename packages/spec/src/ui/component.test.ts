@@ -3833,12 +3833,13 @@ describe('row caps on the object-bound blocks — what #19228 recorded', () => {
 
   it('materializes the NESTED `timeline.limit` on a node whose flat `limit` stays absent', () => {
     // The shape the record is about: one strictObject, two authorable row
-    // caps, and an applied default on the nested one. ⚠️ Where that 100 then
-    // GOES is route-dependent and is deliberately not asserted here: at the
-    // pin `ObjectView.tsx:1725` spreads the block FLAT (so it becomes the flat
-    // `limit` the rail reads) while `ListView.tsx:3084` forwards it nested (so
-    // nothing reads it). This pin is about the PARSE, which is the only half a
-    // schema owns.
+    // caps, and an applied default on the nested one. ⚠️ Faces, because this
+    // card keeps confusing them: the NESTED key asserted below is the ELEMENT
+    // face, and at the pin no renderer reads it on any route. The
+    // route-dependent one is a VIEW document's `timeline.limit`, a different
+    // key on a different document, which `ObjectView.tsx:1725` flattens onto
+    // a generated node's FLAT `limit`. Neither is asserted here: this pin is
+    // about the PARSE, which is the only half a schema owns.
     const result = timeline.safeParse({
       objectName: 'task',
       timeline: { startDateField: 'start_date', titleField: 'name' },

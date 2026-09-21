@@ -3113,8 +3113,12 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * ⛔ This note reports the guard; it picks no precedence.
    *
    * ⚠️ It takes a THIRD door, and missing it is what the at-tier review of
-   * #19533 caught. The ADAPTERS spread the view's kanban block FLAT onto the
-   * generated node — `plugin-list/src/ListView.tsx:2979` and
+   * #19533 caught. Stated with its faces named, because that is where this
+   * card keeps going wrong: `kanban.limit` is a VIEW-FACE key (a member of a
+   * `ListViewSchema` document's `kanban` block) and THIS `limit` is the
+   * ELEMENT-FACE key on the node; the third door is the one that turns the
+   * first into the second. The ADAPTERS spread the view's kanban block FLAT
+   * onto the generated node — `plugin-list/src/ListView.tsx:2979` and
    * `plugin-view/src/ObjectView.tsx:1638`, both `...restKanban`, and neither
    * destructure (`ListView.tsx:2952`, `ObjectView.tsx:1579`) strips `limit`.
    * So a view's `kanban.limit`, INCLUDING the 100 its applied default
@@ -3983,10 +3987,10 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * the header names: `:407`, the fetch's one top-level `$top`, through
  * `resolveRowLimit(schema.limit, DEFAULT_TIMELINE_LIMIT)` with the default
  * `100` at `:29` and the refused-cap diagnostic at `:279`. ⚠️ It is this FLAT
- * key that is read, and the nested `timeline` block REACHES it: the
- * `plugin-view` adapter spreads that block flat at `ObjectView.tsx:1725`
- * (`plugin-list` forwards it nested instead). See the `timeline` door below),
- * `items` (`:170`, `:247`, `:299`,
+ * key that is read — this node's own nested `timeline.limit` is not, on any
+ * route. What reaches this flat key is a VIEW document's `timeline.limit`,
+ * flattened onto the generated node by `ObjectView.tsx:1725`; see the
+ * `timeline` door below), `items` (`:170`, `:247`, `:299`,
  * `:480` — the authored pass-through that short-circuits the object query),
  * `data` (`:171`, `:247`, `:254`, `:256` — the pre-fetched record source,
  * read off REACT PROPS rather than `schema`; the door's own docblock carries
@@ -4016,18 +4020,41 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * strictObject, beside the flat `limit` below — two authorable row caps on one
  * node, and the nested one carries an APPLIED default, so every parsed node
  * with a `timeline` block materializes `timeline.limit: 100` (#19228).
- * Measured at the pin `87af769e9`, 2026-09-21T08:05Z, the two adapter routes
- * DISAGREE about that key and both readings are needed:
- *  - `plugin-view/src/ObjectView.tsx:1725` spreads the whole block FLAT
- *    (`...(viewOptions.timeline || {})`), so `timeline.limit` becomes the flat
- *    `limit` that `ObjectTimeline.tsx:279` reads and `:407` would lower.
- *  - `plugin-list/src/ListView.tsx:3062-3117` forwards it NESTED (`:3084`) and
- *    hoists only `startDateField` / `endDateField` / `titleField` /
- *    `groupByField` / `colorField` / `scale` — `limit` is not among them, so
- *    on that route it stays nested and nothing reads it.
- * ⛔ So 「inert」 is route-dependent and was stated flatly here before the
- * at-tier review of #19533 measured the spread. Recorded, not repaired: which
- * key should carry a timeline's row cap is the open half of #19228.
+ *
+ * ⛔ THE TWO ARE ON DIFFERENT FACES, and #19228 has now gone wrong on that
+ * boundary in both directions — once putting a view-face fact on the element
+ * key, once the reverse. So each statement names its face first. Measured at
+ * the pin `87af769e9`, 2026-09-21T09:15Z:
+ *  - **ELEMENT FACE — THIS node's own nested `timeline.limit`: read on NO
+ *    route.** `ObjectTimeline` binds `timelineConfig = schema.timeline`
+ *    (`ObjectTimeline.tsx:262`) and reads exactly eight members off it —
+ *    `startDateField`, `dateField`, `titleField`, `endDateField`,
+ *    `groupByField`, `colorField`, `metaFields` (`:520`, through an `as any`
+ *    cast, which is why a `timelineConfig?.x` sweep alone under-counts) and
+ *    `scale`. `limit` is not among them, and NO spread of a node's own
+ *    `timeline` block exists anywhere in objectui (0 hits; lit control, same
+ *    shape, the view-block spreads `...mergedTimeline` /
+ *    `...(viewOptions.timeline || {})`, which do fire). The
+ *    `ElementDataSourceGate` mapping is `limit: 'limit'`
+ *    (`plugin-timeline/src/index.tsx:333`) — FLAT, so it never touches the
+ *    nested key either.
+ *  - **VIEW FACE — a `ListViewSchema` document's `timeline.limit`: that is
+ *    the route-dependent one**, and it is a different key on a different
+ *    document. `ObjectView.tsx:1725` flattens the view block onto the node it
+ *    returns (which then carries no `timeline` block at all), so the value
+ *    arrives as this node's FLAT `limit` and is read; `ListView.tsx:3084`
+ *    forwards it nested instead, where nothing reads it. Recorded on
+ *    `rowLimitKey` in `view.zod.ts`, which is where that key lives.
+ *
+ * ⚠️ Flagged, not fixed — a THIRD route neither the card nor the first two
+ * reviews described: a hand-authored `object-timeline` node reaching
+ * `ObjectTimeline` through `SchemaRenderer` with no adapter in between. Its
+ * nested `timeline.limit` is unread there too (it is the same element-face
+ * key as the first bullet), and that route is the one an AUTHOR face is
+ * written for — so it is the route the open question most concerns.
+ *
+ * ⛔ Recorded, not repaired: which key should carry a timeline's row cap is
+ * the open half of #19228.
  * `mapping` stays `z.unknown()`: its contract
  * (`TimelineMappingSchema`) still lives in objectui, which is the
  * `object-calendar.calendar` posture this section's header prescribes for
@@ -4051,7 +4078,7 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
   objectName: z.string().optional()
     .describe('Object this timeline binds to. Optional because the component-level `dataSource` binding can supply the object instead — this block registers through `ElementDataSourceGate`, which lowers the binding onto this key before the renderer sees the node'),
   timeline: TimelineConfigSchema.optional()
-    .describe('Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: { startDateField, endDateField, titleField, groupByField, colorField, scale, limit }. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling. ⚠️ `limit` is the one member whose effect depends on which adapter rendered the node: one spreads this block flat, so it becomes the flat `limit` beside this key, and one forwards it nested, where nothing reads it. Write the flat `limit` when you mean the row cap for the rail'),
+    .describe('Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: { startDateField, endDateField, titleField, groupByField, colorField, scale, limit }. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling. ⚠️ `limit` is the one member of this block NO renderer reads on any route: the rail is capped by the FLAT `limit` beside this key, which is also the only one a bound `dataSource` lowers into. A `limit` written inside this block is accepted, defaulted to 100, and never read'),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
   filter: z.array(ViewFilterRuleSchema, {
     error: ruleArrayFilterError({
