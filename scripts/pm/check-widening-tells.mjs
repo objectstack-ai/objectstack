@@ -1441,10 +1441,10 @@
  * *loud* means the row FIRES, which is exactly what every `(` and `{` frame
  * does here — {@link closedSetMembership} says so in its own words, "keeps its
  * row". A future repairer sent after the frame reader would rebuild the one
- * limb that is already firing (the 442 `(` and 1,791 `{` bare-element lines
- * that census counts) and leave this limb dark. The shape is pinned by its own
- * case beside the constructor-wrapped set literal, so the 0 rows cannot move
- * unnoticed.
+ * limb that is already firing — the 442 `(` and 1,791 `{` bare-element lines
+ * {@link closedSetMembership}'s own tree census counts — and leave this limb
+ * dark. The shape is pinned by its own case beside the constructor-wrapped set
+ * literal, so the 0 rows cannot move unnoticed.
  *   `.default([`: `allowedLicenses` and `prohibitedLicenses`
  *     (`kernel/plugin-security.zod.ts`) and `redact` (`system/logging.zod.ts`)
  *     — a default VALUE list, which is the one member of this vocabulary whose
