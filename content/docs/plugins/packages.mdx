@@ -368,12 +368,15 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 #### Malformed metadata: dev boot tolerates and reports
 
-**`os dev` keeps booting on a stack the platform would reject; build and publish
-refuse it, and `os validate` reports it — as a failure for anything the stack schema
-refuses, and as an advisory that `--strict` promotes to one for the rest.** The dev
-server skips only the part it could not read, boots the rest, and prints an `error`
-line naming what was malformed and what was skipped — the shape every mainstream dev
-server takes, where the error overlay stays on screen while the server keeps serving.
+**`os dev` keeps booting on a stack the platform would reject; refusing belongs to
+the doors an artifact leaves your machine through — and those doors are not uniform
+about it.** `os validate` and `os build` both parse your stack against the same
+protocol schema and exit 1 when it fails; what that schema accepts but a deployment
+still needs comes back from `os validate` as an advisory instead, which `--strict`
+promotes to a failure. The dev server skips only the part it could not read, boots the
+rest, and prints an `error` line naming what was malformed and what was skipped — the
+shape every mainstream dev server takes, where the error overlay stays on screen while
+the server keeps serving.
 
 This is deliberate, and it is one posture rather than two. Metadata that is incomplete
 halfway through an edit is the **normal** state of a project you are actively working
@@ -398,11 +401,12 @@ metadata it names.
   `manifest` service and its package list is parsed; it reports as
   `INVALID_ARTIFACT_PACKAGE_ENTRY` (422) on the `error` line naming the app plugin.
 
-  The two differ at the `os validate` door as well. The malformed `packages[]` fails
-  the stack schema, so `os validate` exits 1 on it. The missing `manifest.id` parses
-  green and comes back as the advisory *"Missing manifest.id — required for
-  deployment"*, which exits 0 unless you pass `--strict`. Use `os validate --strict`
-  if you want that half to fail too.
+  The two differ at the production doors as well. The malformed `packages[]` fails
+  the protocol schema, so both `os validate` and `os build` exit 1 on it. The missing
+  `manifest.id` parses green for both: `os validate` reports it as the advisory
+  *"Missing manifest.id — required for deployment"*, which exits 0 unless you pass
+  `--strict`, and `os build` does not report it at all. So run `os validate --strict`
+  if you want that half to fail too — a green `os build` is not evidence about it.
 </Callout>
 
 ### @objectstack/plugin-approvals

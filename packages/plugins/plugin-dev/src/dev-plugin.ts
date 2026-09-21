@@ -383,7 +383,17 @@ function reportOptionalLoadFailure(ctx: PluginContext, err: unknown, spec: Optio
  *
  * ## Malformed metadata: dev boot tolerates and reports (#15292)
  *
- * **Dev boot tolerates and reports; `os validate` / build / publish refuse.**
+ * **Dev boot tolerates and reports; refusing belongs to the PRODUCTION
+ * doors — and they are not uniform about it.** Measured: `os validate` and
+ * `os build` both parse the stack against `ObjectStackDefinitionSchema`
+ * (`packages: z.array(ArtifactPackageSchema)`) and exit 1 when it fails, so
+ * both refuse row 2 of the table below. Row 1 parses GREEN at both: a stack
+ * carrying no `manifest.id` is reported only as `os validate`'s structural
+ * advisory "Missing manifest.id — required for deployment", which exits 0
+ * unless `--strict`, and `os build` never computes that advisory at all.
+ * ⛔ So do not write "the production doors refuse it" flat — that is a claim
+ * over BOTH rows, and it is false of row 1.
+ *
  * A stack the platform will reject does not stop `os dev`: `init()` keeps
  * booting, skips only the part it could not read, and says so at `error`.
  * This is the shape every mainstream dev server takes — the error overlay

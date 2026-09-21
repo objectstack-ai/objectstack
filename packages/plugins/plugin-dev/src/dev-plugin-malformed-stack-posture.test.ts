@@ -1,7 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // #15292 — the documented boot posture: dev boot TOLERATES a malformed stack
-// and REPORTS it; `os validate` / build / publish are the doors that refuse.
+// and REPORTS it; refusing belongs to the production doors — which are NOT
+// uniform about it. `os validate` and `os build` both parse the stack against
+// `ObjectStackDefinitionSchema` and exit 1 on a malformed `packages[]`; an app
+// payload with no `manifest.id` parses green for both, surfacing only as
+// `os validate`'s structural advisory, which exits 0 unless `--strict`.
 //
 // What this file pins is the posture and its DIVISION, not any diagnostic's
 // wording. The wording of the malformed-metadata diagnostic is the subject of
@@ -123,8 +127,16 @@ describe('#15292 — DevPlugin tolerates a malformed stack and reports it', () =
       seedAdminUser: false,
     });
 
-    // TOLERATES — the whole posture in one assertion. `os validate`, build and
-    // publish are the doors that refuse this same stack.
+    // TOLERATES — the whole posture in one assertion.
+    //
+    // ⛔ And mind WHICH HALF this fixture is. `MISSING_IDENTITY` carries no
+    // `manifest.id`, and that is the half the production doors do NOT refuse:
+    // `ObjectStackDefinitionSchema` accepts a stack with no `manifest` block,
+    // so plain `os validate` exits 0 on it and reports only the structural
+    // advisory "Missing manifest.id — required for deployment" (`--strict`
+    // promotes it), while `os build` never computes that advisory at all. The
+    // half those doors really do refuse is `MALFORMED_PACKAGES` — see the last
+    // case in this file.
     await expect(plugin.init(ctx)).resolves.toBeUndefined();
 
     // REPORTS — the transcript of a degraded boot is never the transcript of a
