@@ -464,8 +464,9 @@ export const DEFAULT_TEMPLATE_LOCALE = 'en-US';
 
 /**
  * Loader for sys_email_template rows. Injected by EmailServicePlugin
- * on `kernel:ready`. Returns the best-matching row for `(name, locale)`
- * or `null` when none exists / inactive.
+ * on `kernel:ready`. Returns the row `(name, locale)` resolves to under
+ * the exact rule below — there is no "best match" and no language-subtag
+ * folding — or `null` when none exists / inactive.
  *
  * `locale` set → an EXACT match for that locale, or `null`; the en-US fallback
  * lives in {@link EmailService.sendTemplate}'s ladder rather than in the
