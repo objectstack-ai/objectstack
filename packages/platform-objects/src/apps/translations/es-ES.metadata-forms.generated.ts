@@ -258,68 +258,68 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "ID de fuente de datos de destino (valor predeterminado: \"default\")"
       },
       lifecycle: {
-        label: "Lifecycle",
-        helpText: "Data lifecycle contract (ADR-0057): how long rows live and how space is reclaimed. Leave empty for permanent record semantics. Non-record classes require at least one bounding policy (retention, TTL, or rotation)."
+        label: "Ciclo de vida de los datos",
+        helpText: "Contrato de ciclo de vida de los datos (ADR-0057): cuánto viven las filas y cómo se recupera el espacio. Déjalo en blanco para una semántica record permanente. Las clases distintas de record requieren al menos una política acotante (retención, TTL o rotación)."
       },
       "lifecycle.class": {
-        label: "Class",
-        helpText: "Persistence contract for the rows of this object"
+        label: "Clase de ciclo de vida",
+        helpText: "Contrato de persistencia de las filas de este objeto"
       },
       "lifecycle.retention": {
-        label: "Retention",
-        helpText: "Age-based retention window"
+        label: "Retención",
+        helpText: "Ventana de retención basada en la antigüedad de las filas"
       },
       "lifecycle.retention.maxAge": {
-        label: "Max Age",
-        helpText: "Rows older than this (by created_at) are reaped. Duration literal: h/d/w/y, e.g. \"30d\""
+        label: "Antigüedad máxima",
+        helpText: "Las filas más antiguas que este valor (según created_at) se eliminan. Literal de duración: h/d/w/y, p. ej. \"30d\""
       },
       "lifecycle.ttl": {
-        label: "Ttl",
-        helpText: "Per-row TTL expiry"
+        label: "Caducidad por TTL",
+        helpText: "Caducidad por TTL de cada fila"
       },
       "lifecycle.ttl.field": {
-        label: "Field",
-        helpText: "Timestamp field the TTL is measured from (e.g. expires_at)"
+        label: "Campo de marca temporal",
+        helpText: "Campo de marca temporal desde el que se mide el TTL (p. ej. expires_at)"
       },
       "lifecycle.ttl.expireAfter": {
-        label: "Expire After",
-        helpText: "Rows expire this long after the field, e.g. \"1d\""
+        label: "Plazo de caducidad",
+        helpText: "Las filas caducan este tiempo después del campo, p. ej. \"1d\""
       },
       "lifecycle.storage": {
-        label: "Storage",
-        helpText: "Physical rotation for high-frequency telemetry (SQLite: O(1) shard DROP)"
+        label: "Almacenamiento",
+        helpText: "Rotación física para telemetría de alta frecuencia (SQLite: DROP de fragmento en O(1))"
       },
       "lifecycle.storage.strategy": {
-        label: "Strategy",
-        helpText: "Storage strategy"
+        label: "Estrategia",
+        helpText: "Estrategia de almacenamiento"
       },
       "lifecycle.storage.shards": {
-        label: "Shards",
-        helpText: "Shards retained; total window = shards × unit"
+        label: "Número de fragmentos",
+        helpText: "Número de fragmentos que se conservan; ventana total = fragmentos × unidad"
       },
       "lifecycle.storage.unit": {
-        label: "Unit",
-        helpText: "Time width of one shard"
+        label: "Unidad de fragmento",
+        helpText: "Amplitud temporal de un fragmento"
       },
       "lifecycle.archive": {
-        label: "Archive",
-        helpText: "Cold-store hand-off (audit class). Rows are never hot-deleted before the archive copy succeeded."
+        label: "Archivado",
+        helpText: "Traspaso al almacenamiento en frío (clase audit). Las filas nunca se eliminan en caliente antes de que la copia de archivado haya finalizado correctamente."
       },
       "lifecycle.archive.after": {
-        label: "After",
-        helpText: "Archive rows older than this — must equal retention.maxAge"
+        label: "Antigüedad de archivado",
+        helpText: "Archiva las filas más antiguas que este valor — debe coincidir con retention.maxAge"
       },
       "lifecycle.archive.to": {
-        label: "To",
-        helpText: "Target datasource name for cold storage"
+        label: "Fuente de datos de archivado",
+        helpText: "Nombre de la fuente de datos de destino para el almacenamiento en frío"
       },
       "lifecycle.archive.keep": {
-        label: "Keep",
-        helpText: "How long the archive keeps rows (empty = forever), e.g. \"7y\""
+        label: "Retención en archivado",
+        helpText: "Cuánto tiempo conserva las filas el archivado (en blanco = para siempre), p. ej. \"7y\""
       },
       "lifecycle.reclaim": {
-        label: "Reclaim",
-        helpText: "Reclaim driver space after sweeps (default on for non-record classes)"
+        label: "Recuperación de espacio",
+        helpText: "Recupera el espacio del driver después de los barridos (activado de forma predeterminada en las clases distintas de record)"
       }
     }
   },
@@ -1774,7 +1774,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       variables: {
         label: "Variables de plantilla",
-        helpText: "[{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
+        helpText: "Ejemplo: [{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
       },
       fromOverride: {
         label: "Sobrescritura de remitente",
