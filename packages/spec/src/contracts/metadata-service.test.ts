@@ -559,8 +559,10 @@ describe('Metadata Service Contract', () => {
     it('answers (key, body) pairs, and an empty set for a type nothing holds', async () => {
       const service: IMetadataService = {
         ...baseService(),
-        loadManyKeyed: async (type: string) =>
-          type === 'customization' ? [{ name: 'account', data: namelessBody }] : [],
+        // Generic, because the declaration is: a double holding one fixed body
+        // can only answer under the `T` its CALLER names.
+        loadManyKeyed: async <T = unknown>(type: string) =>
+          type === 'customization' ? [{ name: 'account', data: namelessBody as T }] : [],
       };
 
       const keyed = await service.loadManyKeyed!<typeof namelessBody>('customization');
@@ -572,7 +574,7 @@ describe('Metadata Service Contract', () => {
     it('carries the key BESIDE the body — nothing is folded into `data`', async () => {
       const service: IMetadataService = {
         ...baseService(),
-        loadManyKeyed: async () => [{ name: 'account', data: namelessBody }],
+        loadManyKeyed: async <T = unknown>() => [{ name: 'account', data: namelessBody as T }],
       };
 
       const keyed = await service.loadManyKeyed!<typeof namelessBody>('customization');
@@ -589,7 +591,7 @@ describe('Metadata Service Contract', () => {
 
       const service: IMetadataService = {
         ...baseService(),
-        loadManyKeyed: async () => [{ name: 'account', data: namelessBody }],
+        loadManyKeyed: async <T = unknown>() => [{ name: 'account', data: namelessBody as T }],
       };
 
       // Type-level shape assertion: these annotations only compile against the
