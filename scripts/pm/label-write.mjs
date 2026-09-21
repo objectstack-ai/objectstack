@@ -103,6 +103,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
+import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
   PM_EXCLUSIVE_STATE_LABELS,
@@ -327,6 +328,11 @@ const render = (values) => (values.length ? values.map((v) => `\`${v}\``).join('
 // ---------------------------------------------------------------------------
 
 async function rest(path, { method = 'GET', body = null } = {}) {
+  // ⏱ The throttle (#19572), on the write verbs only. `paceWrite` reserves
+  // this write's slot and sleeps the minimum gap; a spent budget or a live stop
+  // marker refuses here and the request is never made.
+  const paced = isWriteMethod(method);
+  if (paced) await paceWrite({ token: TOKEN, kind: `label-write ${method}` });
   let res;
   try {
     res = await fetch(`${API}${path}`, {
@@ -349,6 +355,18 @@ async function rest(path, { method = 'GET', body = null } = {}) {
     } catch {
       json = null;
     }
+  }
+  // ⏱ …and the other half: a back-off signal in this answer writes the stop
+  // marker every later write by this token is refused against. `classifyHttp`'s
+  // own verdict is handed over rather than re-derived there.
+  if (paced) {
+    noteResponse({
+      token: TOKEN,
+      status: res.status,
+      headers: res.headers,
+      body: json,
+      verdict: classifyHttp({ status: res.status, rateRemaining: rateRemaining === null ? null : Number(rateRemaining) }),
+    });
   }
   return {
     status: res.status,

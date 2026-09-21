@@ -87,6 +87,7 @@
     "check:pm-prior-rulings": "node scripts/pm/check-prior-rulings.mjs --self-test",
     "check:pm-closed-card-sweep": "node scripts/pm/sweep-closed-cards.mjs --self-test",
     "check:pm-stale-finding": "node scripts/pm/sweep-stale-finding.mjs --self-test",
+    "check:pm-write-pace": "node scripts/pm/write-pace.mjs --self-test",
     "check:pm-post-stamped": "node scripts/pm/post-stamped.mjs --self-test",
     "check:pm-label-write": "node scripts/pm/label-write.mjs --self-test",
     "check:pm-close-cards": "node scripts/pm/close-cards.mjs --self-test",

@@ -770,6 +770,7 @@ import {
   threadReadField,
 } from './check-half-states.mjs';
 import { readClause2Line } from './check-clause2-carriers.mjs';
+import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const API = 'https://api.github.com';
@@ -2539,6 +2540,11 @@ export function parseOptions(argv) {
 // ---------------------------------------------------------------------------
 
 async function rest(path, { method = 'GET', body = null } = {}) {
+  // ⏱ The throttle (#19572), on the write verbs only — the comment `POST` and
+  // the body `PATCH`. A spent budget or a live stop marker refuses here, before
+  // the request is made and therefore before anything can be half-written.
+  const paced = isWriteMethod(method);
+  if (paced) await paceWrite({ token: TOKEN, kind: `post-stamped ${method}` });
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
@@ -2554,11 +2560,17 @@ async function rest(path, { method = 'GET', body = null } = {}) {
     // the refusal reports carry it either way: a 3 that prints only a status
     // code hides the one line that says what went wrong.
     const said = platformRefusalText(await res.text().catch(() => ''));
+    // ⏱ …and the sentence is what names a SECONDARY rate limit, so the marker
+    // is written from the failing answer BEFORE this throws past every caller.
+    if (paced) noteResponse({ token: TOKEN, status: res.status, headers: res.headers, body: said });
     const err = new Error(`${method} ${path} -> HTTP ${res.status}`);
     err.status = res.status;
     err.refusalText = said;
     throw err;
   }
+  // ⏱ A 2xx carries a signal too: `x-ratelimit-remaining: 0` on the answer that
+  // spent the last unit is the one reading that precedes the first refusal.
+  if (paced) noteResponse({ token: TOKEN, status: res.status, headers: res.headers });
   if (res.status === 204) return null;
   return res.json();
 }

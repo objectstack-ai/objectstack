@@ -153,6 +153,7 @@ import {
   proxyRearmPlan,
   resolveSweepRepo,
 } from './check-half-states.mjs';
+import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const API = 'https://api.github.com';
@@ -495,6 +496,10 @@ export function summariseRun(rows) {
 // ---------------------------------------------------------------------------
 
 async function rest(path, { method = 'GET', body = null } = {}) {
+  // ⏱ The throttle (#19572), on the write verbs only — one `DELETE` per residue
+  // label and one comment `POST`. The listing walk is a read and is never paced.
+  const paced = isWriteMethod(method);
+  if (paced) await paceWrite({ token: TOKEN, kind: `sweep-closed-cards ${method}` });
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
@@ -505,10 +510,16 @@ async function rest(path, { method = 'GET', body = null } = {}) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   if (!res.ok) {
+    // ⏱ The body is read only to be CLASSIFIED: a secondary-rate-limit 403
+    // names itself in prose and nowhere else. The error carries the status, as
+    // it always has.
+    const said = paced ? await res.text().catch(() => '') : '';
+    if (paced) noteResponse({ token: TOKEN, status: res.status, headers: res.headers, body: said });
     const err = new Error(`${method} ${path} -> HTTP ${res.status}`);
     err.status = res.status;
     throw err;
   }
+  if (paced) noteResponse({ token: TOKEN, status: res.status, headers: res.headers });
   if (res.status === 204) return null;
   return res.json();
 }

@@ -1336,6 +1336,31 @@ jobs:
       # this step for. It shares `H56_STAMP_TOLERANCE_MIN` and the position
       # reader with `check-half-states.mjs`, so the write side and the read-side
       # patrol cannot come to disagree about what a stamp is.
+      # Write-pace throttle self-test (#19572) — the shared throttle the four
+      # steps below and `sweep-stale-finding` all issue their writes through,
+      # under the maintainer's 「截流应该要加」. Two seat accounts were suspended
+      # during bulk issue operations; this file is what makes pacing a property
+      # of the write path rather than of who remembered it.
+      #
+      # It has no production run at all: the live path is every OTHER tool's
+      # write, so the self-test is not "the half CI can hold", it is the only
+      # instrument there is. What it exercises is exactly what a clean tree
+      # cannot — that the 41st write in an hour is REFUSED with a distinct exit
+      # code and a prescription rather than slept on (a silent hour-long wait
+      # inside a write path is a hang with a good excuse); that a 429 writes a
+      # stop marker every later write is refused against; that an unexpired
+      # marker survives the trailing-hour prune by its own expiry; and that the
+      # token itself never reaches the cache file, only a SHA-256 prefix of it.
+      # Weakening any of them leaves every ordinary invocation just as green —
+      # the throttle would simply stop throttling — which is the shape
+      # `check:self-test-wired` requires this step for.
+      #
+      # Its last battery is the wiring: the five write transports each call both
+      # halves, and the roster IS the set of files under scripts/pm that issue a
+      # write verb, so a SIXTH write path cannot land unpaced.
+      - name: Write-pace throttle self-test
+        run: pnpm check:pm-write-pace
+
       - name: Stamped-post helper self-test
         run: pnpm check:pm-post-stamped
 

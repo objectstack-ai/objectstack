@@ -141,6 +141,7 @@ import {
   resolveSweepRepo,
 } from './check-half-states.mjs';
 import { classifyHttp, parseOptions as parseLabelWriteOptions, runLabelWrite } from './label-write.mjs';
+import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
 import {
   EXIT_NOT_STORED as POST_STAMPED_EXIT_NOT_STORED,
   STAMP_TOKEN,
@@ -437,6 +438,11 @@ export function skipReason(card, { expectState, openPrs = [] } = {}) {
 // ---------------------------------------------------------------------------
 
 async function rest(path, { method = 'GET', body = null } = {}) {
+  // ⏱ The throttle (#19572), on the write verbs only — the `PATCH` that
+  // closes a card. The comment this tool posts goes through `post-stamped.mjs`
+  // as a child process, which is paced by its own transport.
+  const paced = isWriteMethod(method);
+  if (paced) await paceWrite({ token: TOKEN, kind: `close-cards ${method}` });
   let res;
   try {
     res = await fetch(`${API}${path}`, {
@@ -459,6 +465,16 @@ async function rest(path, { method = 'GET', body = null } = {}) {
     } catch {
       json = null;
     }
+  }
+  // ⏱ …and the other half, with the verdict `classifyHttp` already reached.
+  if (paced) {
+    noteResponse({
+      token: TOKEN,
+      status: res.status,
+      headers: res.headers,
+      body: json,
+      verdict: classifyHttp({ status: res.status, rateRemaining: rateRemaining === null ? null : Number(rateRemaining) }),
+    });
   }
   return {
     status: res.status,
