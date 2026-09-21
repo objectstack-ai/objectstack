@@ -345,6 +345,143 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     expect(validateSecurityRoleWord(roleWordy).every((f) => f.severity === 'error')).toBe(true);
   });
 
+  // ── #19370: the crossing measured as BEHAVIOUR, not as a `surfaces` field ──
+  //
+  // The ruling's own acceptance sentence: "Not measured and still owed …
+  // whether the rule FIRES on a real write". One refusal case per collection
+  // the crossing newly reaches, each through `runRuntimeAuthoringRules` — the
+  // gate `evaluateRuntimeAuthoringGate` calls, never a mirror of it — and each
+  // paired with a lit control, because a door that refuses everything and a
+  // door that works are the same test without one.
+
+  it('[#19370] a POSITION write carrying the reserved word is REFUSED at the real gate', () => {
+    // The shape the old pin named as the one that walked through: a position
+    // called `sales_role`, minted by Studio / REST `/meta` / an MCP author.
+    const refused = runRuntimeAuthoringRules({
+      type: 'position',
+      item: { name: 'sales_role', label: 'Sales' },
+    });
+    expect(refused.errors.map((f) => f.rule)).toEqual([SECURITY_ROLE_WORD]);
+    expect(refused.errors[0].severity).toBe('error');
+    expect(refused.errors[0].path).toBe('positions[0].name');
+    expect(refused.errors[0].where).toBe('position "sales_role"');
+    // #4463 D3's 422 envelope: a refusal the author cannot act on is not a
+    // gate. The fix-it names the vocabulary ADR-0090 D3 freezes.
+    expect(refused.errors[0].message).toContain('reserved word "role"');
+    expect(refused.rulesRun).toContain('validateSecurityRoleWord');
+
+    // The LABEL half of the same rule, at the same door — a clean identifier
+    // does not buy a role-worded heading through.
+    const labelled = runRuntimeAuthoringRules({
+      type: 'position',
+      item: { name: 'field_ops', label: 'Sales Role' },
+    });
+    expect(labelled.errors.map((f) => f.rule)).toEqual([SECURITY_ROLE_WORD]);
+    expect(labelled.errors[0].path).toBe('positions[0].label');
+
+    // ⭐ The lit control. Without it this case is indistinguishable from a
+    // door that refuses every position write. `rulesRun` is asserted too, so
+    // "clean" and "nothing ran" stay distinguishable — the #4449 shape would
+    // pass the two lines above it and fail this one.
+    const clean = runRuntimeAuthoringRules({
+      type: 'position',
+      item: { name: 'field_ops', label: 'Field Operations' },
+    });
+    expect(clean.errors).toEqual([]);
+    expect(clean.advisories).toEqual([]);
+    expect(clean.rulesRun).toEqual(['validateSecurityRoleWord']);
+  });
+
+  it('[#19370] an APP write carrying the reserved word is REFUSED at the real gate', () => {
+    // The second collection, and the one the ruling refused to close the other
+    // way: `app` stays `allowRuntimeCreate: true` because retiring it would
+    // shut Studio's own app designer, so the vocabulary is met at the door.
+    const refused = runRuntimeAuthoringRules({
+      type: 'app',
+      item: { name: 'role_hub', label: 'Hub' },
+    });
+    expect(refused.errors.map((f) => f.rule)).toEqual([SECURITY_ROLE_WORD]);
+    expect(refused.errors[0].severity).toBe('error');
+    expect(refused.errors[0].path).toBe('apps[0].name');
+    expect(refused.errors[0].where).toBe('app "role_hub"');
+    expect(refused.rulesRun).toContain('validateSecurityRoleWord');
+
+    const labelled = runRuntimeAuthoringRules({
+      type: 'app',
+      item: { name: 'ops_hub', label: 'Role Hub' },
+    });
+    expect(labelled.errors.map((f) => f.rule)).toEqual([SECURITY_ROLE_WORD]);
+    expect(labelled.errors[0].path).toBe('apps[0].label');
+
+    // ⭐ The lit control, same job as the position one above.
+    const clean = runRuntimeAuthoringRules({
+      type: 'app',
+      item: { name: 'ops_hub', label: 'Operations Hub' },
+    });
+    expect(clean.errors).toEqual([]);
+    expect(clean.advisories).toEqual([]);
+    expect(clean.rulesRun).toEqual(['validateSecurityRoleWord']);
+  });
+
+  it('[#19370] the two types already at the door gain the freeze too, with their controls', () => {
+    // `object`, `permission` and `book` were already gated by
+    // `validateSecurityPosture`; what changes for them is that the vocabulary
+    // freeze now runs there as well. Refusal + lit control for each, so a
+    // narrowing of `runtimeTypes` cannot pass as "nothing to see".
+    const cases = [
+      { type: 'object', bad: { name: 'sales_role', label: 'Sales', sharingModel: 'private', fields: {} },
+        good: { name: 'sales_team', label: 'Sales Team', sharingModel: 'private', fields: {} },
+        path: 'objects.sales_role.name' },
+      { type: 'permission', bad: { name: 'role_manager', label: 'Manager', objects: {} },
+        good: { name: 'billing_manager', label: 'Manager', objects: {} },
+        path: 'permissions.role_manager.name' },
+      { type: 'book', bad: { name: 'role_guide', label: 'Guide' },
+        good: { name: 'billing_guide', label: 'Guide' },
+        path: 'books.role_guide.name' },
+    ] as const;
+
+    for (const c of cases) {
+      const refused = runRuntimeAuthoringRules({ type: c.type, item: c.bad });
+      expect(
+        refused.errors.map((f) => f.rule),
+        `a ${c.type} write named for the reserved word must be refused`,
+      ).toContain(SECURITY_ROLE_WORD);
+      // [#10064] These three ARE context collections, so the wire path
+      // name-keys the finding: an index into the gate's private snapshot is
+      // an offset no caller can resolve. `positions`/`apps` are not context
+      // collections, which is why their paths above stay positional — a
+      // write's own collection holds exactly one member, its own item.
+      expect(refused.errors.find((f) => f.rule === SECURITY_ROLE_WORD)!.path).toBe(c.path);
+      expect(refused.rulesRun).toContain('validateSecurityRoleWord');
+
+      const clean = runRuntimeAuthoringRules({ type: c.type, item: c.good });
+      expect(clean.errors, `${c.type}: the lit control must pass`).toEqual([]);
+      expect(clean.rulesRun).toContain('validateSecurityRoleWord');
+    }
+  });
+
+  it('[#19370] `positions` / `apps` are written-into keys, not context collections', () => {
+    // The half of the road note that was NOT taken, pinned so it is a decision
+    // rather than an omission. The rule crossed by MAPPING the two types; it
+    // did not need them carried in `RuntimeStackContext`, because it resolves
+    // no references — it judges each identifier and label on its own, so the
+    // universe a position write needs is the written position.
+    //
+    // Consequences, both asserted: the baseline carries no `positions` key at
+    // all (adding one would cost the publish door an indexed `sys_metadata`
+    // read per write for a collection whose findings cancel in the
+    // differential anyway), and the candidate holds exactly the written item,
+    // which is what makes `positions[0]` unambiguous above.
+    const snapshots = buildRuntimeWriteSnapshots({ type: 'position', item: { name: 'sales_role' } })!;
+    expect(snapshots, 'the mapping must yield a snapshot — without one the gate refuses nothing').not.toBeNull();
+    expect(snapshots.baseline).not.toHaveProperty('positions');
+    expect(snapshots.candidate.positions).toEqual([{ name: 'sales_role' }]);
+
+    const appSnapshots = buildRuntimeWriteSnapshots({ type: 'app', item: { name: 'role_hub' } })!;
+    expect(appSnapshots.baseline).not.toHaveProperty('apps');
+    expect(appSnapshots.candidate.apps).toEqual([{ name: 'role_hub' }]);
+  });
+
   it('[#8309] the stack-key wiring the flip stands on', () => {
     // Landed AHEAD of the registration (#8309), the same order `seed` arrived
     // in (#7576 → #8307) — which is what kept #8310 a registry data edit.
