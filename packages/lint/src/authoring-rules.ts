@@ -901,12 +901,20 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // crossing, at the door's own snapshot shape: 11 datasets
     // (platform-objects 5, showcase 4, crm 1, todo 1) — 0 findings, with a lit
     // synthetic probe refused.
-    // [#19474] `skill` and `report` join under the ADR-0049 ruling, and the
-    // same granularity mechanism keeps both NARROW: this entry says which
-    // WRITES dispatch the suite, the suite's own per-member `runtimeTypes` says
-    // which MEMBERS judge that snapshot. A `skill` write reaches exactly
-    // `validateAiToolReferences`; a `report` write reaches exactly
+    // [#19474] `report` joins under the ADR-0049 ruling, and the same
+    // granularity mechanism keeps it NARROW: this entry says which WRITES
+    // dispatch the suite, the suite's own per-member `runtimeTypes` says which
+    // MEMBERS judge that snapshot. A `report` write reaches exactly
     // `validateChartBindings`. Every other member keeps its declaration.
+    //
+    // ⛔ `skill` is NOT here. It was crossed in an earlier revision of this
+    // card and is held out on a measurement: `validateAiToolReferences`
+    // resolves into `stack.tools` and `stack.actions`, neither of which the
+    // per-write snapshot carries, so the shipped corpus's own AI-exposed
+    // stack-level action reads as unresolved at the door and the rule ships a
+    // false advisory into Studio. The member carries the measurement; the type
+    // takes the ruling's group B treatment of `tool`, the same universe
+    // obstacle read from the other side.
     //
     // ⛔ `action` and `hook` are deliberately NOT here, although this card
     // crosses both types on `validateStackExpressions` above. The suite carries
@@ -918,7 +926,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // measurement that named their bridge named `validateStackExpressions`, a
     // CEL-only rule, for exactly this reason.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'skill', 'report'],
+    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`

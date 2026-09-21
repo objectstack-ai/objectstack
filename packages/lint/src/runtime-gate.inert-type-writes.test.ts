@@ -2,7 +2,9 @@
 
 /**
  * #19474 — the six write doors that dispatched NOTHING, under the ADR-0049
- * ruling 「declared ⇒ honoured; not honourable ⇒ retired」.
+ * ruling 「declared ⇒ honoured; not honourable ⇒ retired」. FIVE are wired
+ * here; `skill` is held out on a measurement and has its own block, whose
+ * pins hold it absent rather than describing it.
  *
  * ## The state this closes
  *
@@ -21,13 +23,23 @@
  * The ruling carried its own NOT MEASURED item forward unchanged — 「whether a
  * wired rule fires on a real write」 — and made acceptance behavioural: a
  * `surfaces` / `runtimeTypes` field that merely changed is not the deliverable.
- * So every type below has BOTH legs through the real door: a write the wired
+ * So every WIRED type below has BOTH legs through the real door: a write the
  * rule must judge IS judged, and a good write of the same type passes. The
  * `seed: 'data'` note in `runtime-gate.ts` records what a file like this
  * refuses to let happen — a mapping onto a collection nothing reads keeps every
  * gate green and reports `rulesRun` while running on nothing.
  *
- * ## ⚠️ Two of the six are wired-and-SILENT, on purpose, and that is pinned too
+ * ## ⚠️ `skill` is the fourth of group A, and it is NOT wired
+ *
+ * Its bridge resolves into two collections the door does not carry, so on the
+ * shipped corpus a GOOD skill write does not pass clean — the card's own
+ * acceptance fails for it. An earlier revision crossed it and pinned that
+ * false advisory green; the at-tier review called pinning a measured falsehood
+ * the defect, and it was right. The type now takes the ruling's group B
+ * treatment: a reading first. Its block below holds both halves of the wiring
+ * ABSENT and keeps the measurement executable.
+ *
+ * ## ⚠️ Two of the five wired types are SILENT, on purpose, and that is pinned
  *
  * `email_template` and `mapping` bridge through `lintLivenessProperties`, which
  * is LEDGER-DRIVEN and `continue`s on an empty warn map. Both ledgers carry 0
@@ -36,7 +48,10 @@
  * wiring is the whole deliverable»). So for those two the honest reading is
  * "the rule is dispatched and judges nothing today", and the zero carries a LIT
  * CONTROL on the same instrument in the same process so it can never be
- * confused with a broken dispatch or an unreadable ledger.
+ * confused with a broken dispatch or an unreadable ledger. ⚠️ Their wiring is
+ * proved by a TABLE PIN rather than a door reading — the size of that proof is
+ * stated where those cases are, and it is why the string assertion in the
+ * first block is load-bearing rather than decorative.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -50,8 +65,15 @@ import {
   stackKeyForType,
 } from './runtime-gate.js';
 
-/** The six types this card wires, in the ruling's own grouping order. */
-const GROUP_A = ['action', 'hook', 'report', 'skill'] as const;
+/**
+ * The types this card WIRES, in the ruling's own grouping order.
+ *
+ * Group A is THREE, not the ruling's four: `skill` is held out on a
+ * measurement and has its own describe block below, whose pins hold it absent.
+ * ⛔ Adding it back here without carrying `actions` / `tools` in
+ * `RuntimeStackContext` re-ships the false advisory those pins record.
+ */
+const GROUP_A = ['action', 'hook', 'report'] as const;
 const GROUP_C = ['email_template', 'mapping'] as const;
 
 /**
@@ -70,9 +92,10 @@ const OBJECTS = [
       total: { type: 'currency', label: 'Total' },
       done: { type: 'boolean', label: 'Done' },
     },
-    // An OBJECT-level AI-exposed action. It rides in on `objects`, which is why
-    // `action_acme_ping` resolves for a skill write and a stack-level action
-    // does not — see the partial-universe reading below.
+    // An OBJECT-level AI-exposed action. It rides in on `objects`, which is
+    // the ONLY limb of `collectToolUniverse` a per-write snapshot supplies —
+    // the half that made the `skill` crossing look safe until the stack-level
+    // case was measured. See the held-out block below.
     actions: [
       {
         name: 'acme_ping',
@@ -103,7 +126,7 @@ const dump = (r: { errors: readonly unknown[]; advisories: readonly unknown[] })
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('#19474 — the six doors are declared, mapped and reachable', () => {
+describe('#19474 — the five wired doors are declared, mapped and reachable', () => {
   it.each([...GROUP_A, ...GROUP_C])('`%s` dispatches at least one rule and maps to a stack key', (type) => {
     // Three halves, because any one of them alone is the "looks wired,
     // enforces nothing" state: the type is gated, some rule runs for it, and
@@ -120,9 +143,13 @@ describe('#19474 — the six doors are declared, mapped and reachable', () => {
     expect(stackKeyForType('action')).toBe('actions');
     expect(stackKeyForType('hook')).toBe('hooks');
     expect(stackKeyForType('report')).toBe('reports');
-    expect(stackKeyForType('skill')).toBe('skills');
+    // ⭐ These two are the WHOLE proof that group C's wiring is right — see the
+    // note over that block. Their rules judge nothing at this door, so no
+    // behavioural case can tell `'mappings'` from a `'mapping'` typo; ablating
+    // either key reds exactly this assertion and nothing else.
     expect(stackKeyForType('email_template')).toBe('emailTemplates');
     expect(stackKeyForType('mapping')).toBe('mappings');
+    // `skill` is held out — asserted absent in its own block, not here.
   });
 
   it('the written item really lands in that collection', () => {
@@ -430,85 +457,96 @@ describe('#19474 — the `report` door (three rules, one document)', () => {
   });
 });
 
-// ─── Group A · `skill` ───────────────────────────────────────────────────────
+// ─── Group A · `skill` — HELD OUT, and this is the pin that holds it ────────
 
-describe('#19474 — the `skill` door (validateAiToolReferences)', () => {
-  const skill = (tools: string[]) => ({
-    name: 'acme_skill',
-    label: 'Invoice Skill',
-    description: 'Answers invoice questions.',
-    tools,
+describe('#19474 — `skill` is held out of this landing, on a measurement', () => {
+  /**
+   * The card crossed `skill` in an earlier revision and the at-tier contract
+   * review returned FAIL on it. The ground was not that the limitation was
+   * missed — it was recorded and pinned in both directions — but that PINNING A
+   * MEASURED FALSEHOOD GREEN is itself the defect. These cases replace that pin
+   * with its opposite, so the reading cannot be quietly re-crossed.
+   *
+   * What was measured, on the SHIPPED corpus rather than a synthetic:
+   * `app-showcase` declares exactly one AI-exposed action and it exists at
+   * STACK level only (`showcase_portfolio_snapshot`; todo's six are mirrored
+   * under `objects[].actions`, so those resolve, and crm has none). A skill
+   * naming `action_showcase_portfolio_snapshot` was advised
+   * `ai-skill-tool-unresolved` at the door while the same rule over the whole
+   * stack answers `[]` — and the advisory reaches
+   * `SaveMetaItemResponseSchema.advisories`, which Studio renders, carrying a
+   * hint that prescribes exactly what the author had already done.
+   *
+   * Structurally: `collectToolUniverse` resolves into `stack.tools` and
+   * `stack.actions`, and the per-write snapshot carries NEITHER, so at this
+   * door the rule has no truthful `unresolved` verdict at all — only its clean
+   * answers are reliable. That is the ruling's own group B obstacle for `tool`
+   * («the `tools` universe rule … can only remove findings»), the same rule
+   * read from the other side, so `skill` takes group B's treatment: a reading
+   * first, not a wiring. Crossing it needs `actions` / `tools` carried in
+   * `RuntimeStackContext` + `CONTEXT_STACK_KEYS`, a
+   * `CLOSURE_CONTEXT_KEY_BY_TYPE` row and two more door gathers in
+   * `@objectstack/metadata-protocol` — a second package and its own card.
+   */
+  it('⭐ DARK — a `skill` write dispatches NOTHING, and has no stack key', () => {
+    // Both absences together, because either alone is a half-state this whole
+    // file exists to refuse: a `runtimeTypes` declaration with no mapping runs
+    // on nothing, and a mapping with no declaration is inert. Held out means
+    // BOTH are absent — which is exactly what the gate reads as "not gated".
+    expect(runtimeAuthoringRulesFor('skill')).toEqual([]);
+    expect(stackKeyForType('skill')).toBeNull();
+    expect(runtimeGatedTypes()).not.toContain('skill');
   });
 
-  it('⭐ LIT — a skill naming a tool nothing can resolve IS judged (advisory, never a refusal)', () => {
-    // The whole reading for this type, stated rather than implied: the rule
-    // FIRES on a real write — which is the ruling's own NOT MEASURED item —
-    // and it fires at `warning`, so it advises and can never block a publish.
-    const result = runRuntimeAuthoringRules({
-      type: 'skill',
-      item: skill(['forecast_revenue']),
-      context: CONTEXT,
-    });
-
-    expect(result.rulesRun).toContain('validateReferenceIntegrity');
-    expect(result.errors, 'this member is warning-tier throughout').toEqual([]);
-    expect(ruleIds(result.advisories), dump(result)).toContain('ai-skill-tool-unresolved');
-    expect(result.advisories[0]?.path).toBe('skills[0].tools[0]');
-  });
-
-  it('⭐ CONTROL — a skill naming a PLATFORM tool publishes clean', () => {
-    const result = runRuntimeAuthoringRules({
-      type: 'skill',
-      item: skill(['query_data']),
-      context: CONTEXT,
-    });
-
-    expect(result.rulesRun).toContain('validateReferenceIntegrity');
-    expect(result.errors, dump(result)).toEqual([]);
-    expect(result.advisories, dump(result)).toEqual([]);
-  });
-
-  it('⭐ CONTROL — a skill naming an OBJECT-level action tool publishes clean', () => {
-    // The action family resolves here because the materialised universe is
-    // built from `stack.actions` ∪ every object's `actions`, and `objects` is
-    // a collection the snapshot carries.
-    const result = runRuntimeAuthoringRules({
-      type: 'skill',
-      item: skill(['action_acme_ping']),
-      context: CONTEXT,
-    });
-
-    expect(result.errors, dump(result)).toEqual([]);
-    expect(result.advisories, dump(result)).toEqual([]);
-  });
-
-  it('⚠️ RECORDED — the tool universe is PARTIAL at this door, and this is what that costs', () => {
-    // Not a wish: the measured shape of the crossing. `collectToolUniverse`
-    // unions the platform registry ∪ `stack.tools` ∪ the action family from
-    // `stack.actions` and every object's `actions`. A per-write snapshot
-    // carries neither `tools` nor `actions`, so a skill naming a STACK-LEVEL
-    // declared tool reads as unresolved at this door while it is clean on the
-    // whole stack.
-    //
-    // Pinned in BOTH directions so it can only change deliberately: the same
-    // skill, same rule, judged once at the door and once on a stack that
-    // carries the collection.
-    const atTheDoor = runRuntimeAuthoringRules({
-      type: 'skill',
-      item: skill(['acme_declared_tool']),
-      context: CONTEXT,
-    });
+  it('⭐ DARK — `validateAiToolReferences` keeps the frozen `flow` default', () => {
+    // `['flow']` restated rather than imported: the suite's
+    // `DEFAULT_MEMBER_RUNTIME_TYPES` is module-private, and the assertion below
+    // is about the member NOT naming `skill`, which no default can supply.
+    const member = REFERENCE_INTEGRITY_RULES.find((r) => r.name === 'validateAiToolReferences');
+    expect(member, 'the member left the suite — re-point this pin or retire it').toBeDefined();
     expect(
-      ruleIds(atTheDoor.advisories),
-      'the door cannot see `stack.tools`, so it advises — ADR-0109 says the default authoring '
-        + 'path declares no tool records, and this member can never refuse, which is what bounds it',
+      member!.runtimeTypes ?? ['flow'],
+      'crossing this member needs `actions`/`tools` carried in RuntimeStackContext first — '
+        + 'without them it advises `unresolved` about a reference that does resolve',
+    ).not.toContain('skill');
+  });
+
+  it('⭐ LIT — the reason, reproduced: one skill, one rule, two universes', () => {
+    // The measurement that decided this, kept executable rather than described,
+    // so re-crossing the type without carrying the collections cannot look
+    // harmless. Left leg: the universe the door would hand the rule. Right leg:
+    // the same universe with `actions` present, as a whole stack has it.
+    const exposedAction = {
+      name: 'showcase_portfolio_snapshot',
+      label: 'Portfolio Snapshot',
+      type: 'script',
+      target: 'portfolioSnapshot',
+      ai: { exposed: true, description: 'Summarise the portfolio.' },
+    };
+    const writtenSkill = {
+      name: 'showcase_portfolio_skill',
+      label: 'Portfolio Skill',
+      description: 'Answers portfolio questions.',
+      tools: ['action_showcase_portfolio_snapshot'],
+    };
+    const rule = REFERENCE_INTEGRITY_RULES.find((r) => r.name === 'validateAiToolReferences')!;
+
+    // What a per-write snapshot can see: `objects` only. The action is
+    // stack-level, so the `action_*` limb of the universe is simply not there.
+    const atDoorShape = rule.run({ objects: OBJECTS, skills: [writtenSkill] }, {});
+    expect(
+      atDoorShape.map((f) => f.rule),
+      'the snapshot shape yields the FALSE advisory — this is the reading that held `skill` out',
     ).toContain('ai-skill-tool-unresolved');
 
-    const onTheWholeStack = REFERENCE_INTEGRITY_RULES.find((r) => r.name === 'validateAiToolReferences')!
-      .run({ skills: [skill(['acme_declared_tool'])], tools: [{ name: 'acme_declared_tool' }] }, {});
+    // What the whole stack sees: same skill, same rule, clean.
+    const wholeStack = rule.run(
+      { objects: OBJECTS, actions: [exposedAction], skills: [writtenSkill] },
+      {},
+    );
     expect(
-      onTheWholeStack,
-      'lit control on the same rule: given the collection, the same reference resolves',
+      wholeStack,
+      'lit control: given `stack.actions`, the reference resolves and the rule is silent',
     ).toEqual([]);
   });
 });
@@ -516,6 +554,23 @@ describe('#19474 — the `skill` door (validateAiToolReferences)', () => {
 // ─── Group C · `email_template` and `mapping` ────────────────────────────────
 
 describe('#19474 — group C: wired, dispatched, and silent by ledger (email_template · mapping)', () => {
+  /**
+   * ⚠️ Read the size of this group's proof before trusting it.
+   *
+   * Because these two rules judge NOTHING at this door, no behavioural case
+   * below can tell a RIGHT `TYPE_TO_STACK_KEY` key from a WRONG one: ablating
+   * `mapping: 'mappings'` to `'mapping'` — the `seed: 'data'` shape exactly —
+   * leaves every case in this block GREEN, and the same for
+   * `email_template: 'emailTemplates'`. What catches either is ONE string
+   * assertion, `each stack key is the collection the crossed rules actually
+   * read` in the first block of this file.
+   *
+   * So for group C the wiring is held by a TABLE PIN, not a door reading. That
+   * is acceptable under the ruling's fence (「the wiring is the whole
+   * deliverable」, ⛔ no ledger population) — but it is the honest size of the
+   * proof, and ⛔ that string assertion must not be deleted as redundant with
+   * these cases, because for these two rows it is the only thing there is.
+   */
   it.each(GROUP_C)('`%s` writes DO dispatch the ledger rule', (type) => {
     const item = type === 'email_template'
       ? { name: 'acme_welcome', label: 'Welcome', subject: 'Hi', bodyHtml: '<p>Hi</p>' }
@@ -604,7 +659,7 @@ describe('#19474 — group C: wired, dispatched, and silent by ledger (email_tem
 
 // ─── The fences ──────────────────────────────────────────────────────────────
 
-describe('#19474 — DARK: what the six crossings did NOT widen', () => {
+describe('#19474 — DARK: what the five crossings did NOT widen', () => {
   it('`action` and `hook` writes do NOT dispatch the reference-integrity suite', () => {
     // The one crossing that would turn `runtime-lazy-deps.test.ts` tier 1
     // («typescript / sucrase load NEVER») from a standing fact into a red: the
@@ -619,7 +674,7 @@ describe('#19474 — DARK: what the six crossings did NOT widen', () => {
     }
   });
 
-  it('a `skill` write reaches exactly ONE suite member, and a `report` write exactly one', () => {
+  it('a `report` write reaches exactly ONE suite member, and a `skill` write none', () => {
     // The entry-level `runtimeTypes` says which WRITES dispatch the suite; the
     // per-member `runtimeTypes` says which MEMBERS judge that snapshot. Asked
     // against the real table so a member widened without this file noticing
@@ -627,8 +682,10 @@ describe('#19474 — DARK: what the six crossings did NOT widen', () => {
     const membersFor = (type: string) =>
       REFERENCE_INTEGRITY_RULES.filter((m) => (m.runtimeTypes ?? ['flow']).includes(type)).map((m) => m.name);
 
-    expect(membersFor('skill')).toEqual(['validateAiToolReferences']);
     expect(membersFor('report')).toEqual(['validateChartBindings']);
+    // Held out — the entry does not dispatch a skill write and no member
+    // claims one, so the two halves agree. See the `skill` block above.
+    expect(membersFor('skill')).toEqual([]);
   });
 
   it('the ledger rule reaches ONLY the two types group C names', () => {
@@ -640,8 +697,8 @@ describe('#19474 — DARK: what the six crossings did NOT widen', () => {
     expect(gated.sort()).toEqual(['email_template', 'mapping']);
   });
 
-  it('crossing these six widened no OTHER type s roster', () => {
-    // The card is six metadata types. `translation` is the standing
+  it('crossing these five widened no OTHER type s roster', () => {
+    // The card is six metadata types, five of them wired. `translation` is the standing
     // ungated control — its own ruling group (B) reads first.
     expect(runtimeAuthoringRulesFor('translation')).toEqual([]);
     expect(runtimeAuthoringRulesFor('doc')).toEqual([]);

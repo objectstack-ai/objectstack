@@ -125,7 +125,7 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // `datasets[].object`. The door controls that prove each one fires live in
   // `runtime-gate.dataset-writes.test.ts`.
   dataset: 'datasets',
-  // [#19474] The four rows the ADR-0049 ruling 「declared ⇒ honoured; not
+  // [#19474] The three rows the ADR-0049 ruling 「declared ⇒ honoured; not
   // honourable ⇒ retired」 needs for its groups A and C. `action` and `hook`
   // above were already here and INERT — the gate filters by `runtimeTypes`
   // before it consults this table, so a row with no declaring rule dispatches
@@ -141,8 +141,6 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   //   kind: 'report' }`), and the suite member `validateChartBindings` opens
   //   with `recordsOf(stack.reports)` and resolves each report's dataset
   //   binding against `stack.datasets`, a collection the snapshot carries.
-  // - `skills` — `validateAiToolReferences` opens with `recordsOf(stack.skills)`
-  //   and paths its findings `skills[si].tools[ti]`.
   // - `emailTemplates` / `mappings` — `lintLivenessProperties` walks them
   //   through its own `TYPE_COLLECTIONS` rows, with `checkItem(type, item, …)`
   //   making the written item the subject. ⚠️ That rule is LEDGER-DRIVEN and
@@ -150,14 +148,23 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   //   so these two rows are wired-and-silent BY CONSTRUCTION until a property
   //   needs a row. The ruling dispatched the wiring and ⛔ no ledger
   //   population («the empty warn maps stay empty until a real property needs
-  //   a row»), so this is the ruled end state, not a half-landing — and
-  //   `runtime-gate.inert-type-writes.test.ts` pins the silence so it stays a
-  //   measured fact instead of an assumption.
+  //   a row»), so this is the ruled end state, not a half-landing.
   //
-  // The door controls that prove what each row does — and, for the two above,
-  // what it does not — live in `runtime-gate.inert-type-writes.test.ts`.
+  //   ⚠️ Read the size of that proof honestly, because it is smaller than the
+  //   others on this table: since those two rules judge NOTHING at this door,
+  //   no behavioural case can tell a right key from a wrong one, and a
+  //   `mapping: 'mapping'` typo — the `seed: 'data'` shape exactly — leaves
+  //   every group C door case GREEN. What catches it is one string assertion,
+  //   `each stack key is the collection the crossed rules actually read` in
+  //   `runtime-gate.inert-type-writes.test.ts`, measured by ablating both keys.
+  //   A table pin, not a door reading. ⛔ Do not delete that assertion as
+  //   redundant with the door cases — for these two rows it is the only proof.
+  //
+  // ⛔ `skill` is deliberately NOT here, and its absence is a measured reading
+  // rather than an omission — see the `validateAiToolReferences` member in
+  // `reference-integrity-suite.ts`, which carries the measurement and the
+  // reason, and the DARK pin that holds this row absent.
   report: 'reports',
-  skill: 'skills',
   email_template: 'emailTemplates',
   mapping: 'mappings',
   // [#19143 above, #19370 here] `position` / `app` — the two collections only

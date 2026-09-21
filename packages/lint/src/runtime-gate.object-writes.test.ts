@@ -163,12 +163,23 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // `surfaceReason` once it is on the surface, and the registry's own
       // guard is what asks for one on a rule that is off it.
       //
-      // So the fence now asks the question directly, and the crossed arm is
-      // the STRONGER of the two: a declared `runtimeTypes` that omits `object`
-      // is mechanical, where a `surfaceReason` is prose that can go stale.
-      // ⛔ Neither arm is a way around the fence — `object` appearing in
-      // `runtimeTypes` fails here exactly as it did before, and the
-      // `atDoor.has(name)` assertion above is unchanged.
+      // So the fence now asks the NARROWER question, directly. ⚠️ Read that as
+      // what it is, because an earlier draft of this comment called it «the
+      // stronger arm» and that was false: `runtimeAuthoringRulesFor` IS
+      // `surfaces ∋ 'runtime-publish' ∧ runtimeTypes ∋ 'object'`, so the
+      // crossed arm is IMPLIED by the `atDoor.has(name) === false` assertion
+      // above and adds no discriminating power of its own. Against the clause
+      // it replaces it is strictly WEAKER: `surfaceReason ≥ 40`, with the
+      // wiring guard behind it, meant a fenced advisory rule could not sit on
+      // the runtime surface at all without prose; now one may cross to `view`,
+      // `permission` or `page` with no second pin.
+      //
+      // That relaxation is deliberate and is faithful to #4716's remit, which
+      // is the OBJECT door and nothing else — an object crossing is still
+      // refused here, pinned by ablation. What is NOT claimed is that the new
+      // arm guards anything the old one did beyond that door. A fenced rule
+      // crossing to some other door is a decision for whoever makes it; this
+      // fence no longer asks about it, and says so rather than implying it.
       if (entry!.surfaces.includes('runtime-publish')) {
         expect(entry!.runtimeTypes ?? [], `${name} is on the runtime surface AND declares `
           + `'object' — the #4716 adjudication fenced the advisory tier out of THIS door; `

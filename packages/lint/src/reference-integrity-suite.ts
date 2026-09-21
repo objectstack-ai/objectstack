@@ -460,33 +460,46 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateTranslatableSections', run: validateTranslatableSections },
   { name: 'validateFlowTemplatePaths', run: validateFlowTemplatePaths },
   { name: 'validateAiSurfaceAffinity', run: validateAiSurfaceAffinity },
-  // [#19474] `runtimeTypes` gains `skill` under the ADR-0049 ruling — the
-  // measurement's named bridge for the type. It opens with
-  // `recordsOf(stack.skills)` and paths its findings `skills[si].tools[ti]`,
-  // so on a skill write the WRITTEN skill is the subject, not a universe for
-  // someone else's reference.
+  // [#19474] NO `runtimeTypes`, i.e. the frozen `flow` default — and `skill` is
+  // HELD OUT of the ADR-0049 wiring deliberately, on a measurement, not
+  // forgotten. This member is the measurement's named bridge for the type and
+  // it does read the written skill as its subject (`recordsOf(stack.skills)`,
+  // findings pathed `skills[si].tools[ti]`), so on paper it crosses. What
+  // stops it is the UNIVERSE it resolves into.
   //
-  // ⚠️ Its tool universe is PARTIAL at this door, and that is a measured fact
-  // rather than an oversight: `collectToolUniverse` unions
-  // `PLATFORM_PROVIDED_TOOL_NAMES` ∪ `stack.tools` ∪ the materialised action
-  // family from `stack.actions` and every object's `actions`. A per-write
-  // snapshot carries `objects` (so object-level `action_<name>` resolves) but
-  // no `tools` and no `actions` collection, so a skill naming a STACK-LEVEL
-  // declared tool or a stack-level `action_<name>` reads as unresolved here
-  // while the same skill is clean on the whole stack. What bounds it: ADR-0109
-  // states the default authoring path declares NO tool records at all, and
-  // this member is `severity: 'warning'` throughout — it advises, it can never
-  // refuse a publish. Both directions are pinned in
-  // `runtime-gate.inert-type-writes.test.ts` so the limitation is a recorded
-  // reading rather than a surprise. ⛔ Closing it means carrying `tools` /
-  // `actions` in `RuntimeStackContext`, which is an edit in
-  // `@objectstack/metadata-protocol`'s routing table as well — outside this
-  // card's file surface and its own decision.
+  // `collectToolUniverse` unions `PLATFORM_PROVIDED_TOOL_NAMES` ∪
+  // `stack.tools` ∪ the materialised action family from `stack.actions` and
+  // every object's `actions`. A per-write snapshot carries `objects` — so an
+  // object-level `action_<name>` resolves — but NEITHER `tools` NOR `actions`.
+  // Two of the three limbs are missing, so at this door the rule has no
+  // truthful `unresolved` verdict at all: only its CLEAN answers are reliable.
   //
-  // ⚠️ NOT MEASURED over a corpus: the shipped examples author ZERO skills, so
-  // there is no population to take a false-positive budget from. Said rather
-  // than glossed — the only evidence here is synthetic.
-  { name: 'validateAiToolReferences', runtimeTypes: ['flow', 'skill'], run: validateAiToolReferences },
+  // ⚠️ Measured on the SHIPPED corpus, not synthetically. `app-showcase`
+  // declares exactly one AI-exposed action, `showcase_portfolio_snapshot`, and
+  // it exists at stack level only (todo's six are mirrored under
+  // `objects[].actions`, so those resolve; crm has none). A skill naming
+  // `action_showcase_portfolio_snapshot` is advised `ai-skill-tool-unresolved`
+  // at the door while the same member over the whole showcase stack answers
+  // `[]`. The advisory's own hint tells the author to declare the action and
+  // opt it in with `ai.exposed: true` — which is exactly what the author did —
+  // and it reaches `SaveMetaItemResponseSchema.advisories`, which Studio
+  // renders. A user would see a warning that is not true.
+  //
+  // ⛔ ADR-0109 does NOT bound this. Its 「the default path declares no tool
+  // records」 covers tool RECORDS; the `action_<name>` family IS that default
+  // path, so the bound argues the opposite way.
+  //
+  // So the type takes the ruling's OWN group B treatment of `tool` — 「the
+  // `tools` universe rule … can only remove findings ⇒ a reading, not a
+  // ruling」 — which is this same rule read from the other side. Crossing it
+  // needs `actions` / `tools` carried in `RuntimeStackContext` +
+  // `CONTEXT_STACK_KEYS`, a `CLOSURE_CONTEXT_KEY_BY_TYPE` row and two more
+  // door gathers in `@objectstack/metadata-protocol` — a second package, a
+  // snapshot widening on EVERY gated write, and its own card. `skill` has no
+  // `TYPE_TO_STACK_KEY` row either, so the two absences are CONSISTENT and the
+  // gate dispatches nothing for it; `runtime-gate.inert-type-writes.test.ts`
+  // holds both absent and records the measurement that put them there.
+  { name: 'validateAiToolReferences', run: validateAiToolReferences },
   { name: 'validateAiAgentAuthoring', run: validateAiAgentAuthoring },
   // Field names WRITTEN by an L2 hook body (`ctx.input.x = …`,
   // `ctx.api.object('y').update({ x })`), resolved against the target object's
