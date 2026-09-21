@@ -26,7 +26,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { defineStack } from './stack.zod';
 import { EmailTemplateDefinitionSchema, EMAIL_TEMPLATE_FLOOR_LOCALE } from './system/email-template.zod';
 
-const MANIFEST = { id: 'acme', name: 'acme', version: '1.0.0', namespace: 'acme', type: 'app' as const };
+const MANIFEST = { id: 'com.example.acme', name: 'acme', version: '1.0.0', namespace: 'acme', type: 'app' as const };
 
 const tpl = (locale: string | undefined, name = 'acme.welcome') => ({
   name,

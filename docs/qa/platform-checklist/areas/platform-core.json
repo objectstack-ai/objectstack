@@ -1281,7 +1281,7 @@
       "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1292,7 +1292,7 @@
         "requires": [
           "a runtime that accepts package install over HTTP — os dev's dispatcher install route, POST /api/v1/packages → protocol.installPackage (the same door api-backend.package-rest-lifecycle drives for its 201/409/PATCH contract; this item drives the manifest GATES that run BEFORE the row is written)",
           "the RUNNING runtime's protocol major, read from the server rather than assumed — every engines range below is derived from it as RT. A literal '^11' rots the moment the major turns, and a rotted range makes the compatible and incompatible legs swap places silently",
-          "scratch package ids only (qa_manifest_probe_*, com.example.leave, com.example.holiday) so no shipped package is mutated"
+          "scratch package ids only (com.example.qa-manifest-probe-*, com.example.leave, com.example.holiday) so no shipped package is mutated"
         ],
         "knownGaps": [
           "the DURABLE half of the handshake is NOT scored here: ADR-0087 also refuses an incompatible `sys_packages` row during boot-time rehydration, with boot CONTINUING (v15 release notes). Staging it needs an already-stored incompatible row — DB-level access, or a runtime whose major moved under a previously-installed package. Record blocked(fixture) if attempted. The install-path refusal this item does score is the same assertProtocolCompat call one boundary earlier, so a green here says nothing about the rehydration arm",
@@ -1303,13 +1303,13 @@
       },
       "steps": [
         "boot showcase isolated; sign in as admin. Read the runtime's protocol version from the running server (the boot banner / GET /api/v1/meta), take its leading major as RT, and derive every range below from RT — never from a literal",
-        "BASELINE: POST /api/v1/packages with { manifest: { id: 'qa_manifest_probe_a', name: 'Manifest Probe A', version: '1.0.0', scope: 'custom', type: 'app', namespace: 'qa_mfp', engines: { protocol: '^RT' } } }; capture status + body and GET it back — this is the compatible control every refusal below is judged against",
-        "INCOMPATIBLE: POST id 'qa_manifest_probe_old' with engines: { protocol: '^(RT-1)' }; capture the refusal IN FULL (status, code, message, rangeSource, targetMajor, migrateCommand). Then GET /api/v1/packages/qa_manifest_probe_old and GET /api/v1/packages and confirm NO row exists for that id",
-        "PRECEDENCE, both directions: POST 'qa_manifest_probe_prec_ok' with engines: { protocol: '^RT', platform: '^(RT-1)' } → expect install (protocol is consulted first, so the incompatible platform range is never reached); POST 'qa_manifest_probe_prec_no' with engines: { protocol: '^(RT-1)', platform: '^RT' } → expect refusal whose diagnostic names `engines.protocol` as the range source",
-        "LEGACY leg: POST 'qa_manifest_probe_legacy' with NO `engines` and engine: { objectstack: '^(RT-1)' } → expect refusal whose diagnostic names `engine.objectstack` as the source; repeat with '^RT' → expect install. This proves the third precedence rung is wired, not merely typed",
-        "GRANDFATHERED: POST 'qa_manifest_probe_norange' with no `engines` and no `engine` at all → expect install, plus the server's `[protocol] package '…' declares no engines.protocol range` warning in the log",
-        "UNPARSED: POST 'qa_manifest_probe_wsrange' with engines: { protocol: 'workspace:*' } → expect install, plus the `declares an unrecognized engines.protocol range` warning. This is the direction that would break every workspace-linked package if it inverted",
-        "NAMESPACE OWNERSHIP, three legs: (a) POST 'qa_manifest_probe_b' declaring namespace 'qa_mfp' — the one probe A already owns → expect refusal naming the namespace, the current owner and the incoming id; (b) re-POST probe A's OWN manifest unchanged (same id, same namespace) → expect NO conflict (reinstall/HMR is a normal path); (c) POST 'qa_manifest_probe_shared' declaring a shareable platform namespace (base / system / sys) → expect NO conflict (shareable namespaces are exempt)",
+        "BASELINE: POST /api/v1/packages with { manifest: { id: 'com.example.qa-manifest-probe-a', name: 'Manifest Probe A', version: '1.0.0', scope: 'custom', type: 'app', namespace: 'qa_mfp', engines: { protocol: '^RT' } } }; capture status + body and GET it back — this is the compatible control every refusal below is judged against",
+        "INCOMPATIBLE: POST id 'com.example.qa-manifest-probe-old' with engines: { protocol: '^(RT-1)' }; capture the refusal IN FULL (status, code, message, rangeSource, targetMajor, migrateCommand). Then GET /api/v1/packages/com.example.qa-manifest-probe-old and GET /api/v1/packages and confirm NO row exists for that id",
+        "PRECEDENCE, both directions: POST 'com.example.qa-manifest-probe-prec-ok' with engines: { protocol: '^RT', platform: '^(RT-1)' } → expect install (protocol is consulted first, so the incompatible platform range is never reached); POST 'com.example.qa-manifest-probe-prec-no' with engines: { protocol: '^(RT-1)', platform: '^RT' } → expect refusal whose diagnostic names `engines.protocol` as the range source",
+        "LEGACY leg: POST 'com.example.qa-manifest-probe-legacy' with NO `engines` and engine: { objectstack: '^(RT-1)' } → expect refusal whose diagnostic names `engine.objectstack` as the source; repeat with '^RT' → expect install. This proves the third precedence rung is wired, not merely typed",
+        "GRANDFATHERED: POST 'com.example.qa-manifest-probe-norange' with no `engines` and no `engine` at all → expect install, plus the server's `[protocol] package '…' declares no engines.protocol range` warning in the log",
+        "UNPARSED: POST 'com.example.qa-manifest-probe-wsrange' with engines: { protocol: 'workspace:*' } → expect install, plus the `declares an unrecognized engines.protocol range` warning. This is the direction that would break every workspace-linked package if it inverted",
+        "NAMESPACE OWNERSHIP, three legs: (a) POST 'com.example.qa-manifest-probe-b' declaring namespace 'qa_mfp' — the one probe A already owns → expect refusal naming the namespace, the current owner and the incoming id; (b) re-POST probe A's OWN manifest unchanged (same id, same namespace) → expect NO conflict (reinstall/HMR is a normal path); (c) POST 'com.example.qa-manifest-probe-shared' declaring a shareable platform namespace (base / system / sys) → expect NO conflict (shareable namespaces are exempt)",
         "NAMESPACE DERIVATION: POST id 'com.example.leave' with NO namespace declared → GET it back and read manifest.namespace; then POST 'com.example.holiday' WITH an explicit namespace 'timeoff' → GET it back and confirm the declared value survived untouched",
         "teardown: DELETE every scratch package created above, or simply discard the isolated file DB — the cheaper path an isolated boot makes free. ⚠️ Several legs here are NOT re-runnable in place (step 8b depends on probe A still being installed, and 8a stops being a conflict once probe A is gone), so a re-run starts from a clean DB rather than from the tail of the previous one"
       ],
@@ -1377,6 +1377,12 @@
           "date": "2026-08-24",
           "change": "new — authored to classify the `manifest` capability for the coverage ratchet, which had flagged it UNCLASSIFIED since its liveness ledger landed. Grounding decided the shape: the manifest is an authored, enforced surface (namespace ownership refuses at install, an incompatible engines range refuses before the registry write, a namespace-less runtime package has one derived), not an internal ledger, so it earns items rather than a waiver. This item takes the INSTALL boundary; cli.plugin-manifest-build-contract takes the packaging boundary; api-backend.package-rest-lifecycle already covered the install door's 201/409/PATCH contract and is mapped alongside them. Every range in the steps is derived from the running runtime's major rather than written literally, so the compatible and incompatible legs cannot swap places when the major turns",
           "ref": "#11421"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-20",
+          "change": "the scratch probe ids these steps POST are rewritten to reverse-domain spellings (com.example.qa-manifest-probe-*) — `ManifestSchema.id` now carries `MANIFEST_ID_PATTERN`, so the underscored spellings this item used to name are refused by every door but the HTTP install door, and a checklist that teaches one is the trap the pattern was added to close. Steps, legs and expected verdicts are otherwise unchanged",
+          "ref": "#18319"
         }
       ]
     },
