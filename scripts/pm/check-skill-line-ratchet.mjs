@@ -1211,6 +1211,12 @@ export const CEILINGS = new Map([
   // Landing it in SKILL.md alone was option C, refused by the ruling: the twin
   // obligation is not waived. Landed count, headroom 0, same convention.
   ['.claude/skills/pm-dispatch/references/core-rules.md', 151],
+  // New file, landed at its own count (headroom 0, same convention as every
+  // entry above): the filing gate and the grading/reading criteria the triage
+  // seat applies. A new pm-dispatch references file belongs in this map by the
+  // header's own definition of the covered surface — the map is an
+  // ENUMERATION, so a file that is merely absent is silently unratcheted.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 58],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
@@ -1943,6 +1949,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/true-green.md', 0],
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 352],
   ['.claude/skills/pm-dispatch/references/core-rules.md', 0],
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 0],
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 219],
   ['.claude/skills/pm-dispatch/references/lanes/engine.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/services.md', 0],
