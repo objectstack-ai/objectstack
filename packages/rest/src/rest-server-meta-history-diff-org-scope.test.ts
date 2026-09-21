@@ -277,7 +277,30 @@ function makeStubEngine() {
         async syncObjectSchema() { return true; },
         registry: {
             registerItem: () => {}, registerObject: () => {},
-            listItems: () => [], getItem: () => undefined,
+            // [#19474] The live resolution universe the runtime publish gate
+            // reads. It answered `[]` for every type, which was harmless while
+            // no rule judged the types this file writes — since the report door
+            // opened, `bodyFor('report')` binds `orders_ds` and
+            // `validateChartBindings` resolves that binding, so an empty
+            // universe refuses the fixture with `chart-dataset-unknown` before
+            // the READ this file exists to exercise is ever reached.
+            //
+            // ⛔ Not a relaxation: a report binding a dataset nobody declares is
+            // still refused. This gives the fixture a tenant to be valid in —
+            // `ReportSchema` refines `dataset` to REQUIRED, so there is no
+            // dataset-free report to fall back on. Its measure name is exactly
+            // what `bodyFor` selects in `values`. Same shape as the landed
+            // `protocol.dashboard-dataset-publish-gate.test.ts` double.
+            listItems: (type: string) => (type === 'dataset'
+                ? [{
+                    name: 'orders_ds',
+                    label: 'Orders',
+                    object: 'task',
+                    dimensions: [{ name: 'status', label: 'Status', field: 'status', type: 'string' }],
+                    measures: [{ name: 'order_count', label: 'Orders', aggregate: 'count' }],
+                }]
+                : []),
+            getItem: () => undefined,
             getObject: () => undefined, getPackage: () => undefined,
             getArtifactItem: () => undefined,
             isPackageDisabled: () => false,
