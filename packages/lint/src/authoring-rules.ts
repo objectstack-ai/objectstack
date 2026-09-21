@@ -792,12 +792,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // the door. ⛔ The other four filter-carrying types are untouched here —
     // this card is the six `allowRuntimeCreate` types, not P2's remainder.
     //
-    // ⚠️ NOT MEASURED, and said rather than glossed: the shipped corpus's 9
-    // reports (showcase 4, todo 5) carry NO `filters` block at all, so the
-    // 0-finding corpus reading is vacuous for this rule and for its sibling's
-    // report surface. What IS measured is the synthetic pair in
-    // `runtime-gate.inert-type-writes.test.ts` — one refused report, one lit
-    // control.
+    // MEASURED over the shipped report corpus at the door's own snapshot shape
+    // before crossing, and NON-VACUOUSLY: 9 reports (showcase 4, todo 5), of
+    // which 5 carry an authored filter key this rule and its sibling walk
+    // (`runtimeFilter`, one of them nested under `blocks[]`) — 0 findings, with
+    // lit synthetic probes refused per arm.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'report'],
     run: (stack) => validateEmptyCombinators(stack),
