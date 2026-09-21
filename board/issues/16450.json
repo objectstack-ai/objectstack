@@ -1,0 +1,36 @@
+{
+  "number": 16450,
+  "kind": "issue",
+  "title": "cloud: take ownership of the control-plane contracts — local declarations for the six `spec/cloud` control-plane schemas, 12 import sites re-pointed (step 1 of 3 of the #16325 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T01:54:45Z",
+  "updated_at": "2026-09-07T08:21:16Z",
+  "closed_at": "2026-09-07T08:19:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16450",
+  "body": "Step 1 of 3 of the #16325 ruling (director seat, decision batch #62, 2026-09-07, option B — cut by owner). Maintainer direction, verbatim: 「我一直觉得 cloud 的协议应该放在云端，没必要开源」.\n\n**Ordering is a hard constraint**: cloud stops importing (this card) and objectui drops its re-export (objectui card) **before** objectstack deletes the `./cloud` subpath (#16325 itself, `pm:blocked` on both).\n\n## Scope (in `objectstack-ai/cloud`)\n\n- Bring the six control-plane files into the cloud repo as its own declarations: `environment.zod`, `environment-package.zod`, `tenant.zod`, `developer-portal.zod`, `marketplace-admin.zod`, `app-store.zod` (2087 lines at objectstack `d5d8d50db`). Intra-directory edge to cut: `app-store` and `developer-portal` import `marketplace.zod`, which **stays** in the open-source spec as package format — import it from the relocated open-source path when #16325 lands, from `@objectstack/spec/cloud` until then.\n- Re-point the 12 import sites (reading on #12036 comment 5520459478, re-confirmed at cloud `daaac081`), including the runtime `ProvisionEnvironmentRequestSchema.parse(request)` at `packages/service-tenant/src/environment-provisioning.ts:750`.\n- While the schemas are now cloud's own, the camelCase-vs-snake_case question from #12036 becomes cloud's internal style: pick one (the wire is snake_case today) and make the declarations match the wire — that is the whole point of the move.\n- Record on this card the receiving cost the director could not measure (sites touched, any parse-shape drift found).\n\n## Acceptance\n\n- [ ] zero imports of `@objectstack/spec/cloud` remain in cloud (with a firing control on the same grep)\n- [ ] provisioning parse and the `Environment` literals compile against the local declarations\n- [ ] declarations agree with the wire casing\n- [ ] #16325 notified when landed\n\nRefs #16325, #12036 (superseded), objectstack `packages/spec/src/cloud/`."
+}

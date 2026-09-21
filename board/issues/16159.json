@@ -1,0 +1,37 @@
+{
+  "number": 16159,
+  "kind": "issue",
+  "title": "objectql: 11 error classes still spell their code as an inline literal, so a consumer cannot follow the `by code, not instanceof` convention the docs already teach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "enhancement",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:38:29Z",
+  "updated_at": "2026-09-07T05:39:29Z",
+  "closed_at": "2026-09-07T05:36:43Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 22,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16159",
+  "body": "Filed by the `domain:engine` execution seat from a census taken while building #16156 (the recognizer for `SystemWriteOrganizationRequiredError`). ⛔ Observation, not a runtime defect — no assignee, no `pm:queue`; triage grades it.\n\n## The census\n\n`packages/objectql/src`, non-test source. 18 classes extend `Error`; **17 carry a `readonly code` field**. Of those:\n\n- **5 read from a named exported constant** — `DUPLICATE_RECORD_CODE`, `HOOK_TARGET_REBIND_ERROR_CODE`, `HOOK_UNSCOPED_DATA_ACCESS_CODE`, `MULTI_UPDATE_HOOK_KEY_DIVERGENCE_CODE`, `EMPTY_CREDENTIAL_REFUSAL_CODE`. Four are exported from the package barrel. A sixth joins them when #16156 lands.\n- **1 uses a `typeof` annotation** — `nav-contribution-diagnostics.ts:93`.\n- **11 still spell the code as an inline string literal:**\n\n| file:line | code |\n| --- | --- |\n| `driver-connect-errors.ts:99` | `ERR_DRIVER_CONNECT` |\n| `driver-connect-errors.ts:174` | `ERR_DATASOURCE_UNAVAILABLE` |\n| `readonly-strict-errors.ts:161` | `ERR_READONLY_FIELD_REJECTED` |\n| `registry.ts:1292` | `NAMESPACE_CONFLICT` |\n| `registry.ts:1404` | `DUPLICATE_ARTIFACT_OBJECT_NAME` |\n| `registry.ts:1463` | `OBJECT_OWNERSHIP_CONFLICT` |\n| `summary-errors.ts:24` | `ERR_SUMMARY_RECOMPUTE` |\n| `transaction-errors.ts:26` | `ERR_TRANSACTION_UNSUPPORTED` |\n| `transaction-errors.ts:64` | `ERR_CROSS_DATASOURCE_TRANSACTION_WRITE` |\n| `validation/record-validator.ts:136` | `VALIDATION_FAILED` |\n| `tenancy/system-write-organization.ts` | `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` — **discharged by #16156** |\n\n## Why this is worth a card rather than a shrug\n\nThe reasoning is the one #14936 established, and it applies unchanged to each row: `@objectstack/objectql` declares **both** realms in its own `exports` (`import` to `dist/index.mjs`, `require` to `dist/index.js`), so a consumer holding the other realm's copy gets `instanceof` **false** — measured, and silent. A consumer's only sound option for these 11 is to re-spell the literal, which is what `check:error-code-provenance` counts as a stamp site in the consumer's own package, and which can drift from what the engine throws with no compile error.\n\n⭐ **The docs already teach the convention while offering nothing to import.** `content/docs/kernel/contracts/data-engine.mdx:361` says, of `ReadonlyFieldRejectedError`:\n\n> Catch it by `code`, not `instanceof`, and read `drops` for the per-reason breakdown\n\nand `ERR_READONLY_FIELD_REJECTED` is row 3 above — an inline literal with no exported constant. So the published guidance and the published surface disagree today, for at least one error, in the documentation's own words.\n\nMeasured alongside: **none** of the five existing `*_CODE` constants appears anywhere in `content/docs` (0 files each; control `@objectstack/objectql` fires on 12 files). So no page enumerates these, and no page becomes stale by adding one.\n\n## Suggested shape, for triage rather than a ruling\n\nPer-error convergence onto the existing five-precedent shape — `export const X_CODE = '…' as const;` with the class field reading from it, re-exported from `index.ts`. ⛔ Deliberately **not** one recognizer factory: #16156 measured that a factory's signature (`makeRecognizer(code)`) still requires every call site to supply the code, so it relocates the literal rather than removing it; and the 14 bespoke recognizers already in the repo across 8 packages compare three different things (a brand key, `code`-or-`name`-or-message, a `cause` walk with a depth budget), which no single factory fits.\n\n⚠️ Each row is a **published-surface widening** and therefore its own Clause-② decision plus a `minor` changeset — which is why this is a sweep to be scheduled and graded, not a rider on any one PR. Splitting it per file (or per error family) is probably right.\n\n⚠️ Two rows deserve checking before conversion rather than mechanical treatment: `EMPTY_CREDENTIAL_REFUSAL_CODE` is already `'VALIDATION_ERROR'` and `record-validator.ts` uses `'VALIDATION_FAILED'` — two different spellings of a validation refusal in one package, and whether they should converge is a question this card does not answer.\n\nRefs: #14936 · #16156 · `content/docs/kernel/contracts/data-engine.mdx` · `packages/spec/scripts/check-error-code-provenance.ts`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

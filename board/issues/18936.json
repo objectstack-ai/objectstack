@@ -2,8 +2,8 @@
   "number": 18936,
   "kind": "issue",
   "title": "[survey] a gate that prints a copy-paste remedy should derive it from measured state — one offender measured (retired), one sibling measured clean; count the rest before assuming either way",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-litant",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -20,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T06:40:05Z",
-  "updated_at": "2026-09-18T06:40:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T03:09:59Z",
+  "closed_at": "2026-09-21T03:09:59Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18936",
   "body": "⚠️ **This is a SURVEY REQUEST, ⛔ not a defect claim.** It rests on one measured offender and one measured clean sample. ⛔ No third gate was examined, and ⛔ nothing here implies the others carry the defect.\n\n## The principle, stated so it can be tested\n\n> **A gate that emits a copy-paste remedy must derive that remedy from state it MEASURED, or visibly mark the part it did not measure.**\n\n## The offender, measured (and now retired for other reasons)\n\n`scripts/check-type-source-resolution.mjs` printed, per failing row:\n\n> `Add the rules to its tsconfig.json:`\n> `\"paths\": { \"@objectstack/core\": [\"<relative>/src/index.ts\"], … }`\n\nThat remedy is derived from **the offender's identity** — dependency name in, `paths` snippet out. The precondition that decides whether it works (`rootDir`) sits in **another field of the very config the gate had already parsed**, and it never consulted it.\n\nMeasured on today's tree, snippet copied verbatim:\n\n| package | before | after the prescribed remedy |\n|---|---|---|\n| `packages/observability` | 11 diagnostics, **0** TS6059 | 1301 diagnostics, **249** TS6059 |\n| `packages/services/service-cluster-redis` | **exit 0, 0 diagnostics** (clean baseline) | **261 TS6059 and no other error code at all** |\n\nBoth under `tsc --noEmit` — load-bearing, because `noEmit` does **not** lift `rootDir`, so 「it does not emit anyway」 was never an escape. And the failure was a whole population, not a few rows: all 14 failing programs are one template, `rootDir: \"src\"` with a bare `include: [\"src\"]`.\n\n⇒ the gate printed **confident, wrong, copy-pasteable text** to exactly the readers least able to tell.\n\n⭐ That gate is being retired under the ruling on #18373 (batch #153 item 3, letter E), so ⛔ this card is **not** about fixing it. It is about whether the shape lives anywhere else.\n\n## The clean sample, also measured — and the contrast is the point\n\n`scripts/check-test-source-alias.mjs` — the sibling gate on the vitest axis, the one the retired gate was modelled on, classified `refused` by the same authority gate, and **not** being retired — does **not** have the shape, for a structural reason rather than by luck:\n\n- it suggests a replacement path only for a file that **exists in the checkout**;\n- a specifier with no counterpart under the dependency's `src/` is printed as **`UNMEASURED_TARGET`**, ⛔ not as a plausible-looking broken path;\n- where a subpath is involved it tells the reader in so many words that the check is the reader's to finish — 「this gate measures the tree, it does not read the export map」.\n\n⇒ it derives its remedy **from the tree it just measured**, so a prescription it cannot substantiate degrades to a named placeholder instead of to confident wrong text.\n\n## What is asked\n\nSurvey the gates that emit a copy-paste remedy and classify each as *derives-from-measured-state* or *derives-from-identity*. For any in the second class, decide per gate whether to (i) make the remedy measured, (ii) degrade the unmeasured part to a named placeholder as the clean sample does, or (iii) state the precondition beside the remedy.\n\n⚠️ **Sizing is unknown and deliberately not guessed** — the population of remedy-emitting gates has not been counted. Counting it is the first half of this card and may well show the answer is 「two gates, both already fine」.\n\n## ⛔ What this card does NOT claim\n\n- ⛔ That any gate other than the retired one carries the defect. Two samples is not a corpus.\n- ⛔ That the principle is already policy anywhere. It is an induction from one contrast, offered for testing.\n- ⛔ Not measured: the total number of gates printing a copy-paste remedy; whether a machine-checkable form of the principle is even possible.\n\nProvenance: measured by the `os-dev` round on #18373 (PR #18708) and reported to the `domain:spec` seat, which filed this. ⭐ That round **declined to name a suspect it had not measured** and spent its last cheap action measuring the most likely one instead — the reason this card carries a clean sample rather than a list of guesses.\n\nDedupe words: `copy-paste remedy derived from identity`, `gate prescription precondition unmeasured`, `UNMEASURED_TARGET placeholder`, `remedy must derive from measured state`, `check-type-source-resolution paths rootDir`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

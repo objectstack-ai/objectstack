@@ -1,0 +1,36 @@
+{
+  "number": 15420,
+  "kind": "issue",
+  "title": "write down the app-vs-platform boundary: which work belongs in a metadata app and which is a platform gap — into AGENTS.md, and evaluate whether the published skills should carry it too",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T15:05:09Z",
+  "updated_at": "2026-09-07T11:00:47Z",
+  "closed_at": "2026-09-07T11:00:44Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15420",
+  "body": "Maintainer-requested, 2026-09-04, verbatim: 「原则应该写入 本项目agent 记忆。哪些应该在元数据应用中开发,哪些应该完善平台能力。」 and 「包括评估是否应该更新objectstac官方skills」.\n\n## Why now\n\nThe boundary has been decided ad hoc, several times, by different seats, on the same day — and each time from scratch. Three worked rulings from 2026-09-04, all with measurements behind them:\n\n- **#15261** — a new module was needed by four call sites inside one package. Ruled: **do not publish it** from `@objectstack/core`; keep it package-private and decide its home when a second consumer appears.\n- **#15325** — an app needs the platform's hook-body lowering pass to test what actually ships; 17.3.0 sealed the subpath. Half the need turned out to be **already an `os` command** (`os build --strict-body`, which turns \"bundled instead of lowered\" into exit 1). The card had asserted an `os lint` rule that **does not exist anywhere in the tree**.\n- **#15418** (open) — hotcrm carries **69,419 lines of hand-written test against a 39,734-line metadata app**, and a first pass suggests a large share of it asserts only that the metadata is self-consistent — work a platform can derive.\n\nNothing in `AGENTS.md`, `CLAUDE.md` or `skills/**` states the rule. So every seat re-derives it, and the re-derivations differ.\n\n## The rule to write down\n\nNot new policy — the rule those three rulings already followed, stated once so it stops being re-derived.\n\n**The question that decides it:** *could this be written by something that has only the metadata, and no knowledge of this company?*\n\n| | belongs in | examples measured on hotcrm |\n|:--|:--|:--|\n| **No** — it encodes a company's own judgement | **the metadata app** | a discount ceiling, who a case is assigned to, how won/lost is booked; the company's own objects, views, flows |\n| **Yes** — it only asks whether the metadata is self-consistent | **the platform** | reference integrity, translation coverage, view rosters, sharing-rule coverage, CRUD round-trips, RLS probes per declared position |\n| the subject is **platform behaviour**, the cost lands on the app | **the platform**, and it is a gap until it does | asserting what a hook does inside the platform's own sandbox (#15325) |\n\n**Second question, for a capability an app wants published:** *if a second app needed this, would it copy the implementation?* Yes ⇒ platform. That is the #15261 test, and it is why one consumer defers rather than publishes: **one consumer is a use, two is a contract.**\n\n### Two anti-patterns, both measured today, both worth naming\n\n- ⛔ **An app hand-copying a platform rule.** A copy passes while diverging from the rule the build actually applies — the app's tests stay green while the platform refuses. #15325's harness header states exactly this and refuses to take that route; #15357 is the same shape one level up, where a rule shipped claiming \"0 findings over the corpus\" against a corpus that was not the app it named.\n- ⛔ **A platform capability that under-delivers silently.** `os verify` on a multi-package app derived **zero** cases and reported success (#15210). An app that meets that writes its own — and never comes back. So the order is fixed: **make the derived half trustworthy first, then take the hand-written half back.** Reversing it just deletes protection.\n\n## Where it goes\n\n**1. `AGENTS.md`.** The source of truth this repo's agents read.\n\n⚠️ Two hazards, both real:\n\n- `AGENTS.md` is a **governed surface** (§522). ⛔ Auto-merge is never armed on it; it lands by human review.\n- It is under the shrink-only `check:pm-skill-ratchet` line ceiling, last re-anchored at **1162 lines** by PR #15290. **Measure the ceiling before writing and make the addition fit** — reflow the section you add to rather than pushing the file over. ⛔ Do not raise the ceiling to make room.\n- ⚠️ **PR #15290 is open right now and touches `AGENTS.md` and `CLAUDE.md`.** Branch from `main`, keep the addition in its own section away from #15290's claim paragraph, and check `git merge-tree --write-tree --name-only origin/main <your head>` before you report — a silent conflict on this file cost five hours today on a different PR.\n\n**2. `CLAUDE.md`** gets the condensed mirror only if the rule meets that file's own stated bar (\"the rules that must never be missed, because missing one wastes or corrupts other agents' work\"). **Argue it either way — ⛔ do not assume it qualifies.**\n\n**3. The published `skills/` — evaluate, do not assume.** There are 11 published skills (`objectstack-ai`, `api`, `automation`, `data`, `formula`, `i18n`, `platform`, `pm-dispatch`, `query`, `ui`, `upgrade`). This rule is aimed at **someone building an app on the platform**, which is exactly that audience.\n\nRead them and answer, with reasons:\n- Does one of them already own this question? `objectstack-platform` and `objectstack-upgrade` are the obvious candidates by name — **check, don't assume**.\n- Is the app-facing half (\"before you hand-write it, ask whether the platform should derive it\") a fit for a published skill, or is it internal contributor guidance that would just be noise to a customer?\n- ⛔ If the answer is \"no published skill should carry this\", **say so and why** — that is a perfectly good outcome and better than a paragraph nobody reads.\n\n## Acceptance\n\n- The rule stated once, in prose an agent can apply without a worked example — the deciding question, the second question for publication, and the two anti-patterns.\n- Every claim traceable: cite the ruling or the measurement, ⛔ never \"as a rule we prefer…\".\n- `check:pm-skill-ratchet` green, with the line count read out.\n- A stated verdict on `CLAUDE.md` and on each candidate published skill, including the \"no\" verdicts.\n- ⛔ No other edits to `AGENTS.md`. ⛔ Do not tidy neighbouring sections.\n\n## ⛔ Not in this card\n\n⛔ Do not change any code, any test, or `os verify`. ⛔ Do not act on #15418's audit — it is running in parallel and its numbers are its own deliverable. This card writes the rule; that card measures the debt."
+}

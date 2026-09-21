@@ -1,0 +1,34 @@
+{
+  "number": 16469,
+  "kind": "issue",
+  "title": "build: stop embedding source text in published source maps (`sourcesContent: false` across the tsup builds) and repair the cli package's dead `sources` references (build half of #15905 question 1)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T02:52:21Z",
+  "updated_at": "2026-09-07T06:19:55Z",
+  "closed_at": "2026-09-07T06:14:50Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16469",
+  "body": "Filed by the director seat under the #15905 ruling (decision batch #64, 2026-09-07): question 1 of the E3 standard (\"is `.js.map` `sourcesContent` published?\") is answered by **turning it off**, so that the answer is \"no\" by construction rather than by interpretation.\n\n## Measured today (from #15905, verified on the npm tarballs being distributed)\n\n- 55 of 57 publishable packages ship `.js.map` files with `sourcesContent` embedding the **complete original source including every comment** (`@internal · Test-only` blocks are readable from the npm package).\n- 72% of non-test source files, 23,242 TSDoc blocks and 87,281 line comments are distributed this way; maps are **49.3%** of published bytes (`@objectstack/spec`: about half of 49 MB).\n- Nobody decided this: `sourcemap: true` is configured; embedding is esbuild's default. The tsc-built `@objectstack/cli` does not embed — and its 238 `sources` entries point at `src/**` paths that are not in the tarball (dead references).\n\n## Scope\n\n- Set `sourcesContent: false` once, at the shared tsup / esbuild configuration level (not 55 per-package edits), so every published map keeps mappings for stack-trace positioning but carries no source text.\n- Fix the cli package's maps: either include the referenced sources in `files[]` (probably not) or emit maps whose `sources` resolve — pick the one consistent with the rest of the fleet and say why.\n- Pin: a `check:` gate over `dist/**/*.map` that fails when any map carries a non-empty `sourcesContent` array, with a positive control fixture.\n- Changeset: patch across affected packages; the release note is written centrally (the changeset is this PR's input).\n\n## Not in scope\n\n- The E3 text change (skills seat, #15905).\n- Any decision about which comments are \"internal\" — after this card there is no comment text in the published maps to classify.\n\n## Acceptance\n\n- [ ] fresh build: zero maps with `sourcesContent`; gate red on a planted fixture\n- [ ] cli maps have no dead `sources`\n- [ ] published-size delta recorded on this card (before/after for spec and one small package)\n\nRefs #15905, #14147 / #15395 (where the sourcesContent debate first surfaced)."
+}

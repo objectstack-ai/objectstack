@@ -1,0 +1,32 @@
+{
+  "number": 13689,
+  "kind": "issue",
+  "title": "Seam (enterprise organizations package): its `ensureDefaultOrganization` wiring still triggers on grant inserts, which never fire on a fresh walled rig — adopt the exported `isDefaultOrganizationBootstrapTrigger`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T06:48:12Z",
+  "updated_at": "2026-09-07T12:00:53Z",
+  "closed_at": "2026-09-07T12:00:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13689",
+  "body": "Filed by the `domain:services` PM seat (#6021) under the multi-repo seam rule, as the coordination half of #11973 (platform-admin re-anchor **L3**). Provenance: PR #13685 §\"The interim window L4 opened\", which names this rather than assuming it closed.\n\n**⛔ Why this card lives in `objectstack` and not at destination.** The fix lands in the **enterprise organizations package**, which is out of this repo. It has no `repo:*` lane label (checked: `repo:enterprise` does not exist in this repo's label set) and is outside the PM session's GitHub scope, so the file-at-destination rule cannot be executed by this seat. The substance here is the **ordering** — objectstack published the predicate, the enterprise wiring must adopt it — which is what a seam card is for. **A maintainer must route the implementation half**; this card is the objectstack-side anchor and the named-reader queue entry, not the implementation.\n\n## Named readers (the seam rule requires this, not just the label)\n\n- **`domain:services` seat (#6021)** — reads this before declaring #11973's acceptance complete; #11973 stays open until this closes or a maintainer rules the window acceptable.\n- **The maintainer / director seat (`/pm-dispatch director`)** — reads this to route the enterprise-repo half, which no seat here can file.\n\n## The defect\n\n`ensureDefaultOrganization` is exported from `@objectstack/plugin-auth` and reused by the enterprise organizations package with **its own wiring**, which fires on `sys_user_permission_set` inserts (the pre-L3 trigger).\n\nAfter **L4** (#11974, landed `b9972720f`), bootstrap under a walled posture no longer grants — so on a **fresh walled rig no `sys_user_permission_set` insert ever happens**. The enterprise wiring's trigger therefore never fires from the event side.\n\n**L3 (#11973 / PR #13685) fixed this in-repo and shrank the out-of-repo half, but did not close it:**\n\n| | before L3 | after L3 |\n| --- | --- | --- |\n| `plugin-auth`'s own wiring | grant inserts only | `isDefaultOrganizationBootstrapTrigger` — `sys_user` insert/create, `sys_user` update touching `email`/`email_verified`, plus the legacy grant-insert arm |\n| enterprise package's wiring | grant inserts only | **unchanged — still grant inserts only** |\n| fresh-walled-rig window | forever | **until the next process start** (their `kernel:ready` pass now resolves a config-anchored admin, because L3 re-pointed the *population*, and the function signature did not change) |\n\nSo the enterprise package is not broken — its calls keep working and its `kernel:ready` path recovers — but its **event-driven** bootstrap is dead on fresh walled rigs, and a rig that never restarts never bootstraps.\n\n## The fix\n\nOne import. The predicate was exported precisely so the two triggers cannot drift:\n\n```ts\nimport { isDefaultOrganizationBootstrapTrigger } from '@objectstack/plugin-auth';\n\n// replace the hand-spelled grant-insert condition with:\nif (isDefaultOrganizationBootstrapTrigger(opCtx)) { /* … */ }\n```\n\nPublished surface confirmed on this repo's side at PR #13685's head `df17ff0a7`: `packages/plugins/plugin-auth/src/index.ts:13` is `export * from './ensure-default-organization.js';`, and the predicate is a top-level `export function` in that module. It takes `{ object?, operation?, data? }` and returns `boolean` — no plugin-auth internals cross the seam.\n\n## ⛔ What this card is NOT\n\n- **Not** a request to change anything in `objectstack`. The objectstack side is complete; re-spelling the predicate here would create the second trigger site the export exists to prevent.\n- **Not** a duplicate of the *other* open half of #11973 (the walled-rig end-to-end acceptance pass, whose in-plan vehicle is the L6 rig #11978). These are two independent halves; closing this one does not close that one.\n\n## Acceptance\n\n- The enterprise organizations package's bootstrap wiring calls `isDefaultOrganizationBootstrapTrigger` instead of a hand-spelled grant-insert condition.\n- A control that the window is actually closed, not just narrowed: on a **fresh** walled rig with no process restart, a declared administrator registering and verifying their address triggers the default-organization bootstrap. \"It works after a restart\" is the pre-existing behaviour and is **not** this acceptance.\n- Confirmation posted back here with the enterprise-side reference, so #11973 can be disposed of.\n\nBlocks: #11973 (partially — the coordination half only)."
+}

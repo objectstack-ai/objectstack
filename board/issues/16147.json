@@ -1,0 +1,35 @@
+{
+  "number": 16147,
+  "kind": "issue",
+  "title": "i18n: the extractor omits an id key `translatePage` reads and PREFERS — region-level `page:header` carrying an id (the second half of the #13109 pair)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:13:57Z",
+  "updated_at": "2026-09-07T13:23:05Z",
+  "closed_at": "2026-09-07T13:22:39Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16147",
+  "body": "Measured at **`@objectstack/spec` 17.3.0 / `@objectstack/cli` 17.3.0**, as installed by `objectstack-ai/hotcrm` at `db5fe702`.\n\nFiled from the HotCRM seat under the \"a platform gap is filed upstream, never compensated for locally\" rule. This observation was first seen at 17.1.0 and **deliberately not filed then** — no reproduction, and #13109 / #13215 were actively reworking these walks. It is filed now because it survives into 17.3.0 and is reproducible against a current version.\n\n## The invariant this appears to violate\n\n`walkAddressedPageComponents` was exported (#13218, completing #13109's precedent) so the resolver and the CLI extractor cannot drift. Its own doc names the failure pair it exists to prevent:\n\n> the extractor offering an id the resolver ignores, **or omitting one it reads** (#13109 was the second half going live)\n\nWhat follows looks like that second half, still open for one component type.\n\n## Measurement\n\nA page with ONE region-level `page:header` that **carries an id** (`home_header`), plus a `page:card` with a nested child, matching HotCRM's real `sales_home_page`.\n\n**Leg A — the resolver (`translatePage`, `@objectstack/spec/system`).** Bundle written three ways, `locale: 'zh-CN'`:\n\n```\n1/page-name route only:      header.title -> \"ZH-by-page-name\"     (control: harness translates)\n2/id route only:             header.title -> \"ZH-by-ID\"            <-- the id key IS read\n3/BOTH routes present:       header.title -> \"ZH-by-ID\"            <-- and it WINS\n                             header.subtitle -> \"ZH-sub-by-page-name\"\n```\n\nSo for a region-level `page:header` with an id, `pages.PAGE.components.HEADERID.title` is honoured **and takes precedence** over `pages.PAGE.title`. This matches `translatePage`'s own doc (\"Because the id route is the more specific of the two, it wins wherever both could apply (a `page:header` that does carry an id)\").\n\nNote `subtitle` behaves differently: it is not in `PAGE_COMPONENT_COPY_KEYS` (`title`, `description`, `label`, `placeholder`, `emptyText`), so it has no id route at all and only ever resolves by page name. One component, two keys, two different addressing rules.\n\n**Leg B — the extractor (`collectExpectedEntries`, `@objectstack/cli/dist/utils/i18n-extract.js`).** Same page:\n\n```\npages.sales_home_page.label\npages.sales_home_page.title            <-- header copy offered by PAGE NAME\npages.sales_home_page.subtitle\npages.sales_home_page.components.kpi_card.title\npages.sales_home_page.components.kpi_won.label\n```\n\nNo `components.home_header.*` entry. This is deliberate and documented in the extractor:\n\n> `page:header` is deliberately skipped AT REGION LEVEL: its copy is addressed by page name above, and emitting it here too would offer one string under two keys.\n\nRun against HotCRM's real page metadata the same holds: **54** page-scoped keys offered, **zero** for any of the five region-level `page:header` ids it authors (`home_header`, `lead_header`, `case_header`, `opp_header`, `launcher_header` — all five carry ids).\n\n**Leg C — the key is schema-legal.** In `TranslationBundleSchema`, `pages` is a record keyed by any string; its `components` is a record keyed by any string with a strict value object declaring `title`. Nothing distinguishes a `page:header` id from any other component id, so an author can legally write the key that Leg B never offers and Leg A prefers.\n\n## Consequence\n\nAn author who writes `pages.PAGE.components.HEADERID.title` — a natural thing to reach for, since *every other* component is addressed exactly that way — silently overrides `pages.PAGE.title`, which is the key `os i18n extract` offers and `os i18n coverage` counts. One string, two keys; the one that wins is invisible to the tooling, and the one the tooling reports as translated is the one that loses.\n\n## Both sides are deliberate, so this is a contract call, not an obvious bug\n\nThe extractor's rationale (do not offer one string under two keys) and the resolver's rationale (the more specific route wins) are each sound alone. They just disagree about which key is canonical for a region-level header's `title`. Two candidate resolutions, both cheap:\n\n1. **Resolver stops reading the id route for a region-level `page:header`** — makes the page-name route canonical, matching what the extractor offers. Nested `page:header` components stay id-only, which `translatePage` already documents (\"a `page:header` nested inside a container is not it\"). Behaviour change for anyone relying on the override today.\n2. **Extractor offers the id key too** — keeps the resolver's precedence, at the cost the extractor comment names.\n\nI have no basis to prefer one; the precedence rule is a published contract and this seat does not own it. Deferring to whoever owns the #13109 / #13218 line.\n\n## Not measured\n\nWhether the served `/i18n/translations` catalog endpoint mirrors the extractor exactly. Both legs above are direct function-level readings against the installed packages, not a running server.\n\nOrigin: objectstack-ai/hotcrm#1376 (verification card), first recorded in objectstack-ai/hotcrm#1004."
+}

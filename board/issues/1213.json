@@ -1,0 +1,35 @@
+{
+  "number": 1213,
+  "kind": "pull_request",
+  "title": "fix(server): replace Function constructor with proper dynamic imports for esbuild bundling",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-23T08:01:58Z",
+  "updated_at": "2026-09-07T04:49:15Z",
+  "closed_at": "2026-04-23T08:03:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-23T08:03:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1213",
+  "body": "Vercel deployments failed with `Cannot find module '/var/task/apps/server/objectstack.config.ts'` because the bundler couldn't analyze dynamic imports wrapped in `new Function()`.\n\n## Problem\n\nThe bootstrap code used `new Function('s', 'return import(s)')` to bypass TypeScript's rootDir constraints. This pattern prevented esbuild from detecting and bundling the config files:\n\n```typescript\n// Before: bypasses static analysis\nconst dyn = (spec: string) =>\n    (new Function('s', 'return import(s)') as (s: string) => Promise<any>)(spec);\nconst stackConfig = (await dyn('../objectstack.config.ts')).default;\n```\n\nAt runtime, the bundled `api/_handler.js` tried to import source `.ts` files that weren't deployed to Vercel.\n\n## Changes\n\n- **Single kernel bootstrap** (`bootstrapSingle`): Replaced Function constructor with direct `import()` statement\n- **Multi-project bootstrap** (`bootstrapMultiProject`): Replaced Function constructor pattern for example app configs\n- **Import paths**: Changed from `.ts` to `.js` extensions (standard ESM convention - esbuild resolves to source automatically)\n\n```typescript\n// After: esbuild can analyze and bundle\nconst stackConfig = (await import('../objectstack.config.js')).default;\n\n// Example configs also use proper imports\nconst [crm, todo, bi] = await Promise.all([\n    import('../../../examples/app-crm/objectstack.config.js'),\n    import('../../../examples/app-todo/objectstack.config.js'),\n    import('../../../examples/plugin-bi/objectstack.config.js'),\n]);\n```\n\nWith standard `import()` syntax, esbuild now bundles all config files into the self-contained serverless function."
+}

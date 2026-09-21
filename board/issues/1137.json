@@ -1,0 +1,36 @@
+{
+  "number": 1137,
+  "kind": "pull_request",
+  "title": "docs: add comprehensive READMEs for all service packages and create package overview guide",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T07:48:17Z",
+  "updated_at": "2026-09-07T04:49:36Z",
+  "closed_at": "2026-04-14T07:49:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T07:49:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1137",
+  "body": "Scanned codebase and systematically documented all packages with comprehensive READMEs and a central package overview guide in fumadocs.\n\n## Service Package READMEs (10 packages)\n\nCreated production-ready documentation for all platform services:\n\n- **service-ai** - Multi-provider LLM support (OpenAI, Anthropic, Google), conversation management, tool registry, streaming\n- **service-analytics** - Multi-driver analytics (NativeSQL/ObjectQL/InMemory), aggregations, time series, funnels\n- **service-automation** - DAG flow execution engine, autolaunched/screen/scheduled flows, visual builder integration\n- **service-cache** - In-memory and Redis adapters, TTL, namespaces, pattern matching\n- **service-feed** - Activity streams, comments, @mentions, reactions, field change tracking\n- **service-i18n** - Multi-language support, interpolation, pluralization, fallback chains\n- **service-job** - Cron and interval scheduling, retry logic, execution history\n- **service-queue** - Priority queues with BullMQ/in-memory, worker pools, rate limiting\n- **service-realtime** - WebSocket pub/sub, presence tracking, collaborative features\n- **service-storage** - File upload/download with local filesystem and S3, signed URLs, multipart uploads\n\n## Driver/Plugin READMEs (3 packages)\n\n- **driver-sql** - PostgreSQL, MySQL, SQLite support via Knex.js, migrations, connection pooling\n- **plugin-audit** - CRUD audit trails, field-level changes, SOC 2/HIPAA/GDPR compliance\n- **plugin-mcp-server** - Model Context Protocol server, exposes ObjectStack tools/resources/prompts to AI clients (Claude Desktop, Cursor, Cline)\n\n## Documentation Site Updates\n\nCreated `/content/docs/guides/packages.mdx` - comprehensive package overview organized by category:\n- Core packages (spec, core, runtime, objectql, metadata, rest)\n- Client packages (client, client-react)\n- Data drivers (memory, sql, turso)\n- Platform services (10 services)\n- Official plugins (8 plugins)\n- Framework adapters (7 adapters)\n- Developer tools (cli, create-objectstack, vscode-objectstack)\n\nUpdated main documentation index with package overview card and navigation.\n\n## Documentation Standards\n\nEach README follows consistent structure:\n- Features, installation (with mode-specific dependencies), configuration\n- Service API with code examples, advanced features, best practices\n- Performance considerations, contract implementation, troubleshooting\n- Cross-references to related packages and guides\n\nAll documentation is production-ready with real-world examples and comprehensive coverage for enterprise use."
+}

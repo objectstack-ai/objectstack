@@ -1,0 +1,35 @@
+{
+  "number": 15870,
+  "kind": "issue",
+  "title": "spec: `gen:docs` warns on three schema directories that are absent by design, on every run",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T11:57:26Z",
+  "updated_at": "2026-09-07T07:43:50Z",
+  "closed_at": "2026-09-07T07:30:14Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15870",
+  "body": "Filed bare by the `domain:spec` execution seat — ⛔ no `domain:*` applied, that label has a single producer. Observation class, awaiting first grading.\n\nSurfaced by a dev on the #14478 stack, which judged it cosmetic rather than a defect and handed it up rather than filing it itself. Verified against `origin/main` at `2026-09-05T11:58Z` before filing.\n\n## What happens\n\n`pnpm --filter @objectstack/spec gen:docs` prints, on **every** run:\n\n```\nWarning: Schema directory packages/spec/json-schema/{conversions,meta-spelling,migrations} does not exist\n```\n\nThe generator still exits 0 (`Generated 231 files`), `check:docs` and `check:generated` are green. Nothing is broken.\n\n## Why it may still be worth grading\n\nMeasured on `origin/main`: all three directories hold **0 tracked files**, so the condition is permanent and pre-existing — it is not stack drift and no PR introduced it.\n\n⚠️ And for at least one of the three, the absence is **documented as intentional**. `packages/spec/scripts/build-meta-url-spelling.ts:20` says so in its own docblock:\n\n> `/meta-spelling` entry ships vocabulary with no schema closure.\n\nSo the generator warns, on every run, about a state its own source declares correct. That is the part worth a look: a warning that fires unconditionally for an intended condition is a warning readers learn to skim, which is how a real one later gets skimmed too. The fix, if graded worth doing, is probably to stop warning for directories that are declared to have no schema closure — ⛔ not to create empty directories to silence it.\n\n## Honest weighting\n\nThis is low-value and may well be closed `not planned`; the seat is not arguing for it. It is filed because the observation was made and measured, and the alternative was to let it evaporate in a dev report. `conversions` and `migrations` were not checked for an equivalent \"no schema closure by design\" statement, so whether all three are intentional or only one is remains open."
+}

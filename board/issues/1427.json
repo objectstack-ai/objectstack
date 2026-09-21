@@ -1,0 +1,33 @@
+{
+  "number": 1427,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0027 metadata-authoring — staged authoring, publish & promotion lifecycle",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T00:44:12Z",
+  "updated_at": "2026-09-07T04:49:27Z",
+  "closed_at": "2026-06-01T01:42:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T01:42:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1427",
+  "body": "## What\n\nAdds **ADR-0025** proposing `@objectstack/metadata-authoring` — a server-side, transport-agnostic package that owns the metadata authoring lifecycle in **two phases**:\n\n- **Stage** (high-frequency, cheap, zero runtime impact): every visual edit accumulates as a *draft* in a workspace bound to a **package version under development**. No DDL, no live activation.\n- **Publish** (low-frequency, batched, transactional): validate the whole draft as a set → compute & preview the migration plan → run batched physical DDL → seal an immutable `sys_package_version` (semver + checksum) → swap the env's active-version pointer. Rollback = swap the pointer back.\n\n## Why\n\nThe first draft modelled a single `commit(change)` that persisted + ran DDL + hot-activated on **every edit** — an anti-pattern for low-code (no mainstream platform `ALTER TABLE`s production on each canvas click). This revision splits it into `stage()` + `publish()` and makes the **package version** — not a person's env-local overlay rows — the unit of work.\n\nThe design is grounded in how mainstream systems handle this (comparison table in the ADR): Salesforce sandbox + Unlocked Package deploy, ServiceNow Update Sets, Mendix Team Server + deploy-time DB sync, OutSystems 1-Click Publish + LifeTime promotion, Hasura migrations. It revives **ADR-0016 §2's draft-workspace north-star** (the §9 MVP took a local-first shortcut).\n\n## Design highlights\n\n- Two cadences: `stage()` (draft, no DDL) vs `publish()` (batched DDL + seal + pointer-swap activation).\n- L2 physical DDL deferred to publish and planned/previewed as a set (dry-run).\n- **Dependency-cycle-free**: depends only on `spec` + `metadata-core`; reaches storage/DDL/activation via injected **ports** (adapters in `objectql`/`runtime`).\n- Activation is a pointer swap → failed publish leaves the running app untouched; rollback swaps back.\n- Explicit schema-ahead recovery for non-transactional DDL; honors `schemaMode: external`.\n- Incremental 5-phase migration plan, each phase shipping green.\n\n## Scope\n\nDocumentation only (ADR). No code changes yet — package scaffold (Phase 0) is a follow-up once the design is reviewed.\n\nBuilds on ADR-0003 / ADR-0005 / ADR-0008 / ADR-0010 / ADR-0016.\n\nhttps://claude.ai/code/session_01G33V5WWZc13ptd8ELBLkQg"
+}

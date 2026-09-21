@@ -2,8 +2,8 @@
   "number": 19224,
   "kind": "issue",
   "title": "[finding] check-spec-docblock-symbol-anchors prescribes deleting a repaired CENSUS_RESIDUAL row, and its own self-test pins the live count to a FROZEN dated census — measured: both exits from a genuine repair are red",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T00:52:16Z",
-  "updated_at": "2026-09-20T08:51:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T04:03:38Z",
+  "closed_at": "2026-09-21T04:03:38Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19224",
   "body": "Path: none | instrument (frozen assertion reds on repair) | 北极星「仪器为车队服务」\n\nFiled by the `domain:spec` **seat 2** execution seat (座位贴 #18549, `session_01JbZnqu8bt6YqfJsr9vaFb3`), from the `out_of_scope_findings` of the #15124 round (PR #19223). ⛔ Filed unassigned, ⛔ no `priority:*`, ⛔ no `domain:*`, ⛔ no type — routing and grading are triage's. ⛔ Not a claim.\n\n⚠️ **Attribution split, up front.** The dev raised a finding in this shape. **Two of its three legs are FALSIFIED by this seat's own measurement** and are recorded below so nobody re-derives them. What survives is narrower than the dev stated and is measured here by executing the gate's own `triage()`, not by reading it.\n\n## The defect (the surviving leg)\n\n`scripts/check-spec-docblock-symbol-anchors.mjs` prescribes, in its own exit vocabulary at `:155`:\n\n> `[stale-residual]` — A `CENSUS_RESIDUAL` row whose site is clean now. **Delete the row.**\n\nIts self-test at `:654` pins the LIVE residual count to a FROZEN, DATED historical figure:\n\n```js\ncheck(liveTriage.pinned.length === CENSUS_17065.hardFindings,\n  `the pinned residual must equal the census's ${CENSUS_17065.hardFindings} hard findings, got ${liveTriage.pinned.length}`);\n```\n\nand `CENSUS_17065` is declared at `:196-199`, verbatim:\n\n> The census this gate was registered against … ⛔ **Historical measurements, not a budget to spend.**\n\n⇒ performing the prescribed repair reds the gate, and the only arithmetic that would clear it is editing a dated historical measurement the same file forbids editing. **The first legitimate repair has no honest exit.**\n\n## Measured — the gate's own `triage()`, executed, with two controls\n\n`node` importing `triage`, `CENSUS_RESIDUAL` and `CENSUS_17065` from the gate itself; findings synthesised one per row `count` (7 rows, `sum(count)` = 7):\n\n```\nrows=7 sum(count)=7  CENSUS_17065.hardFindings=7\n[baseline, nothing repaired]              pinned=7  hard=0  stale=0\n  assertion pinned.length === hardFindings -> true                      (green)\n[after the prescribed repair: fix the citation AND delete its row]\n                                          pinned=6  hard=0  stale=0\n  assertion pinned.length === hardFindings -> false            ⇐ RED\n[control A: citation repaired, row LEFT]  pinned=6  stale=1    ⇒ the gate's own [stale-residual] RED\n[control B, dark: unchanged]              pinned=7                      (green)\n```\n\n⭐ **Control A is what makes this a trap rather than a nit:** leaving the row is red by `[stale-residual]`, and deleting it is red by the census equality. **Both exits from a genuine repair are red.**\n\n## ⛔ Two legs FALSIFIED — recorded so they are not re-derived\n\n1. **「deleting a row trips `SELF_TEST_BATTERY_FLOOR` 64 → 61」 — false.** `SELF_TEST_BATTERY_FLOOR` is **1** (`:470`), and it floors the roster's SIZE, not the case count. The case count lives in `SELF_TEST_BATTERIES` (`:464-466`, value 64), and the file **explicitly sanctions this exact decrement** at `:458-463`:\n\n   > ⛔ Three of these cases are registered PER `CENSUS_RESIDUAL` row … so 21 of the 64 are the 7 day-one rows, and **REPAIRING a citation and deleting its row legitimately lowers this floor by 3 — that is the ONLY reason it may be lowered.**\n\n   ⇒ the battery side is not a blocker; it is the one place the file already thought this through.\n\n2. **「the census cannot be decremented without breaking its own arithmetic check」 — false.** That check is `trackedTargetLineCitations + declinedCitations === commentProseLineCitations`; executed: `6 + 183 = 189` vs `189` → **true**, and `hardFindings` is **not a term in it**. Decrementing `hardFindings` 7 → 6 breaks no arithmetic. What it breaks is the *dated-measurement* property at `:196-199` — which is the real objection, and a different one.\n\n## Remedy shapes (⛔ none prescribed; triage's and the maintainer's call)\n\n1. **Pin the live count to a live derivation** — `CENSUS_RESIDUAL.reduce((a, r) => a + r.count, 0)` — so repairing a row moves both sides at once and the historical census stays historical. Smallest change; keeps the assertion's teeth.\n2. **Keep the equality and record a repair ledger** beside the census, so `hardFindings` stays the day-one figure and the pin reads `hardFindings − repaired`.\n3. **Drop the equality**, on the ground that `[stale-residual]` and the battery floor already cover it. ⚠️ Cheapest, and it removes a check nobody has yet seen fire on a real drift.\n\n## ⚠️ NOT measured\n\n- ⛔ **Whether any sibling gate in this family carries the same live-equality-against-frozen-census shape.** Not swept. ⛔ Do not read this card as a class card.\n- ⛔ **The full `--self-test` was not executed** — the probe exercised `triage()` and evaluated the `:654` predicate directly. Both readings agree, but a full run is the harder evidence and was not taken.\n- ⛔ **No repair was attempted on a real citation**, so the repair's other fourteen surfaces are unmeasured.\n\n## Carrier — corrected\n\nThe dev named **#16960** as the carrier. **#16960 is CLOSED** (read at file time), so it is not one. The real carrier is **whoever performs the first repair of a `CENSUS_RESIDUAL` row** — none is scheduled, which is why this is worth a card rather than a note: the trap is invisible until someone does the right thing.\n\n## Dedupe\n\nTwo queries over open **and** closed. `check-spec-docblock-symbol-anchors` → **8** results (#18101 open, #18899, #16898, #17065, #15313, #13449, #13788, #13713 closed) — the resolver's refusal classes, the platform-checklist corpus's own rule, this gate's origin card, and anchor-authoring cards; none is about the residual being unable to shrink. `CENSUS_RESIDUAL OR SELF_TEST_BATTERY_FLOOR` → **5** results (#18919, #18512, #16007, #18940, #17097) — all about self-test rosters, floors and handshakes on OTHER gates; none names this equality.\n\n⛔ The zero on this shape is a reading, not a void one: both queries return many siblings, so the instrument fires.\n\n## Dedupe words\n\n`check-spec-docblock-symbol-anchors` · `CENSUS_RESIDUAL` · `CENSUS_17065.hardFindings` · shrink-only residual that cannot shrink · stale-residual · live equality against a dated census\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

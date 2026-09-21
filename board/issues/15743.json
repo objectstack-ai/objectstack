@@ -1,0 +1,38 @@
+{
+  "number": 15743,
+  "kind": "issue",
+  "title": "Move the `pages.*` i18n parity verdict off the nav roster onto the page test, then translate the three English platform page labels",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "i18n",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T05:20:11Z",
+  "updated_at": "2026-09-07T06:41:12Z",
+  "closed_at": "2026-09-07T06:40:53Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15743",
+  "body": "Filed **unassigned and bare** by the `domain:cli` execution PM seat (#6024), from measurements taken by the `os-dev` seat while landing #14817 (PR #15739). ⛔ Not graded here — no `domain:*`, no type, no priority.\n\nThis is the **decision half** that #14817 deliberately did not carry. That card shipped the decision-free instrument; this is the ruled follow-up.\n\n## The debt\n\nThree page-level labels — **User / Organization / Position** — render in **English in every locale**. 3 keys × 3 locales = **9 units**. They are the only real user-visible debt #14817 found; the other 45 authored labels are unreachable **by a standing ruling** (see below) and are not in scope here.\n\n## Why it is not a one-line translation\n\nTranslating them requires a `pages.*` bundle entry, and that makes `check:app-nav-i18n` **RED** on two of the three — `pages.sys_user_detail` and `pages.sys_organization_detail` come back as *\"the booted composition contains no page by that name\"* (its phantom-key verdict).\n\nThe cause is that gate's `CONTRIBUTORS` roster in `packages/cli/scripts/check-app-nav-i18n.mjs`: it is a **NAV** roster, and `@objectstack/plugin-auth` — which contributes those two pages — is not in it. Measured, adding it is **not mechanical**:\n\n- `new AuthPlugin({})` **refuses to boot**: `secret is required`;\n- the roster separately requires every entry to land **at least one nav id**, which `plugin-auth`'s **conditional** `nav_sso_providers` cannot promise.\n\nOnly `sys_position_detail` (from `plugin-security`, which **is** in the roster) verifies clean today.\n\n## The ruling: option **B**\n\n⇒ **Move the `pages.*` parity verdict out of the nav gate entirely** and onto `packages/cli/test/platform-page-i18n-parity.test.ts`, which already imports the pages from the `@objectstack/platform-objects/pages` barrel and **needs no boot at all**. The nav gate keeps nav; the page test keeps pages. Then translate the three labels.\n\nRuled by the `domain:cli` seat at PR #15739 (`5549604828`), on the four axes with 项目长远合理性 weighted ≥50% per the 2026-09-01 maintainer ruling. The decisive reasoning, from the measuring agent:\n\n> the defect class this whole card is about is **ONE roster silently serving TWO populations** — exactly what produced the ambiguous 0\n\nOption **A** (split the roster into NAV and PAGE populations, boot `plugin-auth` with a test secret, exempt pages from the nav-id invariant) was **refused**: it fixes the symptom by making the same roster serve two populations *explicitly*, with a hand-carved exemption — the original defect with better documentation — and it needs a **credential fixture plus an invariant exemption** before it can even run. Three new commitments to translate three strings.\n\n⛔ **This is not a governed-surface decision.** It concerns where a verdict lives inside `packages/cli` (`scripts/**`, `packages/cli/**`), reverses no ruling, and touches no `docs/adr/**`. It was ruled by the execution seat rather than escalated, and that boundary is stated so the next reader can check it.\n\n## ⚠️ Explicitly OUT of scope — do not widen the walk\n\nThe other **45** authored labels sit under `slots.*` and are unreachable by the shared i18n walk. That is **not** a defect: `packages/spec/src/system/translation.zod.ts` records the **2026-08-06 maintainer ruling** that the inline locale map is a delivered capability, declines `content` on the bundle face for the identical shape, and **defers extractor visibility to #14749**.\n\n⛔ Widening the walk here would reverse a standing maintainer ruling in passing. Anyone taking this card must leave `packages/spec/src/system/i18n-resolver.ts` alone.\n\n## Corrections to #14817's numbers, carried forward\n\n- \"48 of 48 sit under `slots.*`\" is **45 of 48** — the other three are page-level `label`, not under slots, and reachable. Those three are this card.\n- \"neither plugin has an `i18n-extract.config.ts` at all\" is **false for `plugin-security`** (it exists, baselined at 0). True only for `plugin-auth`.\n\n## Dedup — bounded, and the bound is stated\n\nA pattern sweep (`app-nav-i18n` / `nav roster` / `pages.*` / `page-level label` / `check-app-nav`) over a **376-issue snapshot of all open issues** taken earlier in this session. **One hit: #14817 itself.** Two live positive controls passed — the corpus demonstrably contains **#14817** and **#14749** — so the result is a reading, not a silent zero.\n\n⚠️ The live search channel is rate-limited for this seat right now, and the snapshot predates cards filed in the last hours. Worth one more check when the channel recovers.\n\nRefs: #14817 (the instrument half, PR #15739), #14749 (the deferred extractor-visibility question — ⛔ independent of this card)."
+}

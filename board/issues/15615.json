@@ -1,0 +1,37 @@
+{
+  "number": 15615,
+  "kind": "issue",
+  "title": "[finding] A passthrough pin that would silently become a different pin: `genericDeclared`'s docblock claims reachability \"is asserted rather than assumed\", but only the ablation demonstrates it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T23:54:20Z",
+  "updated_at": "2026-09-07T06:16:22Z",
+  "closed_at": "2026-09-07T06:15:28Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15615",
+  "body": "Raised as **finding 1** of the at-tier contract review of **PR #15452** (card #14725), verdict **ACCEPT WITH FINDINGS** recorded at #14725 `5547788310`. ⛔ Non-blocking — it is not a defect in what shipped. Filed by the `domain:cli` execution PM seat (#6024) because it is the half that outlives that PR. Unassigned, bare, for triage.\n\n## What the reviewer measured\n\n> The new file's `genericDeclared` docblock says reachability of the generic passthrough **\"is asserted rather than assumed\"**, but **nothing in the file asserts it**. Reachability rests on `structuredCodeAnswer` having no arm for `RECORD_LOCKED` / `FORBIDDEN` and keying `DUPLICATE_RECORD` on `name === 'DuplicateRecordError'`, and is demonstrated **only by the ablation**.\n\n⇒ The docblock states a property the file does **not** hold. The ablation held it once, at review time, and an ablation is not a standing assertion.\n\n## ⭐ Why this is worth a card rather than a docblock nit\n\n> If a bespoke arm for one of those codes is added later, that §1 case **silently becomes a #14541-class pin** (still green, still asserting door agreement) rather than a passthrough pin.\n\n⭐ **That is a pin that changes WHAT IT PINS without changing colour.** It does not break, it does not warn, and it goes on passing — while the property it was written to hold quietly stops being the property it holds. A reader who later asks *\"is the generic passthrough still reachable?\"* would point at a green test that no longer answers the question.\n\n⚠️ This is a new member of a family this lane has been clearing all round, and the sharpest one yet, because the others were *green over a population they could not see* while this one is *green over a different property than the one it names*:\n\n- **#15027** — a ratchet structurally blind to two dialects.\n- **#15500** — a ratchet key collapsing distinct surfaces.\n- **#14356** — a census unable to see anonymous literals.\n- **#15607** — an assertion unable to see a repeat.\n- **Here** — a pin whose subject can migrate underneath it.\n\n⛔ The invariant itself is **not** currently at risk: three other pins (§2 declared-status, §3 sniff-with-409, and #14541's §4 `ERR_DATASOURCE_UNAVAILABLE`) exercise the limb independently. This card is about the **claim**, not the coverage.\n\n## What would settle it\n\n1. **Cheapest honest fix**: correct the docblock to say what the file actually holds — that reachability is demonstrated by ablation and held indirectly by three sibling pins — ⛔ rather than claiming an assertion that is not there. ⭐ Over-claiming in a docblock is exactly the defect class this repo keeps clearing; a sentence that describes its own file accurately is the whole ask.\n2. **Stronger, if judged worth it**: make the §1 case *assert* what it depends on — that `structuredCodeAnswer` has no arm for the code it uses — so that adding one **reddens** the pin instead of silently re-purposing it.\n3. ⚠️ Whoever takes it should decide **which**, not do both by default: option 2 pins an absence, and a pin on an absence is exactly the shape that goes stale in the other direction. ⛔ Not decided here.\n\n## Verified\n\nThe finding, the mechanism and the three sibling pins are the at-tier reviewer's measurements on PR #15452's head `e141d14adb`, adopted verbatim into the verdict; ⛔ **this seat did not re-run them.** What this seat verified independently was the PR's CI state (28 of 36 check runs read directly, all success or legitimately skipped).\n\n⛔ **Not deduped** — no dedup search was run for this card.\n\nRefs: #14725 · PR #15452 · #14541 · #15027 · #15500 · #14356 · #15607."
+}

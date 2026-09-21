@@ -1,0 +1,35 @@
+{
+  "number": 1404,
+  "kind": "pull_request",
+  "title": "fix(i18n): system-metadata translation audit — locale fallback, app/dashboard localization, coverage gaps",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T02:46:23Z",
+  "updated_at": "2026-09-07T04:49:27Z",
+  "closed_at": "2026-05-31T04:23:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T04:23:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1404",
+  "body": "## Summary\n\nAudit and fix of system-object metadata + server-side translations. Switching the UI language left many surfaces in English (\"切换语言之后很多都不生效\"), many strings were missing, and some non-English bundles contained English placeholder text (\"假的翻译\"). Three root causes are addressed.\n\n### 1. Locale fallback (server) — the keystone fix\nThe metadata translation resolver (`@objectstack/spec` `i18n-resolver`) only did **exact** locale matching, so a request for `zh` (base language, no region) fell back to English instead of hitting the registered `zh-CN` bundle. `pickData` now resolves the requested locale against the locales actually present in the bundle (exact → case-insensitive → base-language → variant), mirroring `resolveLocale` in `@objectstack/core`. This benefits **every** resolver (objects, views, actions, settings, metadata-forms) — the single highest-leverage fix for \"switching language doesn't take effect\".\n\n### 2. App & dashboard localization (server)\nApp labels, sidebar/navigation group labels, and dashboard titles/widgets were **never localized** at the REST `/meta` boundary even though the translation data existed. Added `translateApp` / `translateDashboard` resolvers and wired `app`/`dashboard` into the REST translation path (`TRANSLATABLE_META_TYPES`).\n\n### 3. Coverage & quality (data)\n- Added translations for the previously **untranslated** platform objects `sys_share_link`, `sys_view_definition`, `sys_metadata_audit` across en/zh-CN/ja-JP/es-ES (label, fields, help, picklist options, views) — they were absent from every bundle.\n- Registered those three objects in the i18n-extract config so future `os i18n extract` runs keep them (root cause: they were never in the extraction set).\n- Replaced English placeholder strings left in the zh-CN/ja-JP/es-ES object and metadata-form bundles — notably action `confirmText` / `successMessage` confirmation prompts and the new objects' picklist option labels.\n- Added the missing `es-ES` built-in Settings bundle in `@objectstack/service-settings` (loaded automatically by the settings plugin; verified structurally identical to `en`).\n\nRemaining identical leaves across locales are intentional exceptions (acronyms / loanwords / format hints: `URL`, `Token`, `Webhook`, `API`, `snake_case`, `GET / POST / …`, and Spanish-identical words like `Actor`/`Error`/`Global`).\n\n## Tests\n- New resolver tests: BCP-47 locale fallback (`zh`→`zh-CN`, case-insensitive, variant), `translateApp` (nested navigation), `translateDashboard`.\n- `@objectstack/spec` 6616 passing · `@objectstack/rest` 78 · `@objectstack/platform-objects` 78 · `@objectstack/service-settings` 78.\n- Full monorepo build green (63/63 packages).\n\n## Notes\n- The client already sends `Accept-Language` on every request (#1319), so the base-language fallback fix completes that path end-to-end.\n- A changeset is included (`@objectstack/spec`, `@objectstack/rest`, `@objectstack/platform-objects`, `@objectstack/service-settings` — patch).\n\n## ⚠️ Known unrelated CI failure (not introduced by this PR)\n`Test Core` fails on `packages/objectql/src/metadata-validation-sweep.test.ts` — the `workflow` sweep fixture (`sweep_wf`) still uses the **old** workflow shape (`triggerType`/`criteria`/`objectName`) and fails the new state-machine workflow schema (`id`/`initial`/`states`) introduced in #1398 / #1403. The fixture is **byte-identical between `main` (`fa64f4b`) and this branch** — this PR does not touch `packages/objectql`. It surfaces here only because `Test Core` runs when a PR touches a \"core\" package (this one touches `spec`), whereas translation/UI-only PRs skip it. To be fixed separately in a workflow-focused change. (The `driver-mongodb` red check is an environment-only blocked binary download.)"
+}

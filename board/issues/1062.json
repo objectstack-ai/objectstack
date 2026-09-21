@@ -1,0 +1,35 @@
+{
+  "number": 1062,
+  "kind": "pull_request",
+  "title": "fix: increase Vercel maxDuration to 300s for AI chat operations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T09:42:00Z",
+  "updated_at": "2026-09-07T04:49:18Z",
+  "closed_at": "2026-04-02T09:42:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-02T09:42:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1062",
+  "body": "AI chat endpoint timing out after 60 seconds on Vercel deployment (`play.objectstack.ai/api/v1/ai/chat`).\n\n## Changes\n\n- **`apps/studio/vercel.json`**: Increased `maxDuration` from 60s to 300s (5 minutes)\n\n## Context\n\nAI chat operations with tool calling frequently exceed 60s due to:\n- Multiple LLM round trips for tool execution\n- Agent planning iterations (`maxIterations`)\n- Tool registry execution overhead\n- LLM provider latency\n\n300s provides sufficient headroom while staying within Vercel Enterprise tier limits (900s max)."
+}

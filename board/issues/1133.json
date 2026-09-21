@@ -1,0 +1,35 @@
+{
+  "number": 1133,
+  "kind": "pull_request",
+  "title": "Configure Studio to use server mode for app-host production deployment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T06:47:55Z",
+  "updated_at": "2026-09-07T04:49:04Z",
+  "closed_at": "2026-04-14T06:48:05Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T06:48:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1133",
+  "body": "When Studio is deployed as part of app-host, it should connect to the app-host API server instead of using MSW (Mock Service Worker) with an in-browser kernel.\n\n## Changes\n\n- **Added `apps/studio/.env.production`** — Sets `VITE_RUNTIME_MODE=server` and `VITE_SERVER_URL=` (empty for same-origin) for production builds\n- **Updated `apps/studio/.env.example`** — Clarified that `.env.production` is used for production builds while `.env.example`/`.env.local` are for development\n\n## Build Behavior\n\n```bash\n# Development (default): MSW mode with in-browser kernel\npnpm dev  # Uses .env.local or defaults to msw\n\n# Production (app-host deployment): Server mode connecting to real API\npnpm turbo run build --filter=@objectstack/studio  # Loads .env.production\n```\n\nVite automatically loads `.env.production` during `vite build`, injecting `VITE_RUNTIME_MODE=server`. The Studio app then connects to `/api/v1/*` served by app-host instead of starting MSW."
+}

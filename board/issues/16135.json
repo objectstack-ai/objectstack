@@ -1,0 +1,35 @@
+{
+  "number": 16135,
+  "kind": "issue",
+  "title": "[finding] spec(liveness): translation.json's WALK BOUNDARY sentence claims \"every group is a z.record\" — `settingsCommon` is a plain strictObject",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:56:33Z",
+  "updated_at": "2026-09-07T12:06:54Z",
+  "closed_at": "2026-09-07T12:05:26Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16135",
+  "body": "Found by the `os-dev` seat while fixing #15775 (the same file's `_note`, its summary-count sentence). **Not fixed there on purpose** — that card is fenced to the summary claim with the rest of the header required byte-identical, so this is filed rather than ridden in. Unassigned; nobody is working on it.\n\n## The reading\n\n`packages/spec/liveness/translation.json`'s `_note` header states:\n\n> WALK BOUNDARY: every group is a z.record keyed by target names — the drill sees each record's VALUE shape one level; the deeper per-key conventions […] are governed by the resolvers cited per row, not by ledger rows.\n\nMeasured on `main` at `1f2a02ba`, straight off `translationDataShape()` in `packages/spec/src/system/translation.zod.ts` — the function whose keys **are** the translation groups (`TranslationItemSchema` spreads it, then adds `locale`, `name`, `label` and the ADR-0010 envelope):\n\n```\nobjects         z.record\napps            z.record\nmessages        z.record\nglobalActions   z.record\ndashboards      z.record\ndatasets        z.record\npages           z.record\nflows           z.record\nsettings        z.record\nmetadataForms   z.record\nsettingsCommon  strictObject      <-- not a record, and not keyed by target names\n```\n\n`settingsCommon` is declared as `strictObject({ ... }, { sourceLabels: strictObject(...) })` — a fixed shape whose one member is itself a fixed shape with five named string keys (`env`, `global`, `tenant`, `user`, `default`). Nothing about it is \"keyed by target names\": there are no target names, the key set is closed, and the ADR-0010 / settings resolution order is exactly why it is closed (its own comment says so: \"the layers are a closed set […] so an unknown one here is a badge that will never render\").\n\nSo the universal is false for one of the eleven groups, and it is false in the direction that matters: the sentence is the header's statement of **how far down the ledger's rows are claimed to reach**, and for `settingsCommon` the drill's one level lands on named keys rather than on a record's value shape.\n\n## Why it is a card and not a `sed`\n\nThe sentence is not just an adjective — it is the file's declaration of its own walk granularity, and it is the premise the per-row blanket verdicts lean on. Repairing it is a judgement about what the boundary now is for a group that is not a record, not a word swap:\n\n- Either the sentence says \"every group but `settingsCommon` is a z.record …\" and then states what the boundary is for the fixed-shape one, or\n- `settingsCommon`'s row grows a declared blanket verdict of its own (the `undrilled-containers.baseline.json` shape), or\n- the claim is narrowed to what it actually governs.\n\nWhich of those is right is a call for whoever holds the ledger, and it wants the `sourceLabels` sub-shape looked at rather than assumed.\n\n## Grading\n\nObservation, not a defect an author can trip over: every per-prop `status` in the file is accurate, `check:liveness` is green, and no authoring surface is affected. Same class as #15775 and the family the triage of that card registered (#15754, #15765, objectui#7702) — **prose in a header that outlived its subject** — but a different sentence and a different subject, so it is not merged into it.\n\n`packages/spec/liveness/translation.json` — the `_note` header only. Nothing in `content/docs/` is implicated. #15775 is not addressed by this card, and this card does not block it.\n\n## Dedup\n\nSearched open and closed issues before filing (keyword sweep over the liveness-ledger prose family, control term verified to return #15775). #15775 owns the summary-count sentence and is explicitly fenced to it; #15540 and #15568 are `liveness/field.json` notes; #15310 is `COMPOUND_ANCHOR_LEDGER`'s docblock. No issue names this sentence.\n"
+}

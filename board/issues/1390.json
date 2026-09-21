@@ -1,0 +1,36 @@
+{
+  "number": 1390,
+  "kind": "pull_request",
+  "title": "feat: External Datasource Federation (ADR-0015) — backend (P1–P4, P6)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-30T09:30:17Z",
+  "updated_at": "2026-09-07T04:49:09Z",
+  "closed_at": "2026-05-30T12:53:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-30T12:53:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1390",
+  "body": "## Summary\n\nImplements the **backend** of [ADR-0015 — External Datasource Federation](../blob/main/docs/adr/0015-external-datasource-federation.md): connect a mature external database (Postgres, Snowflake, …), register its tables as ObjectStack objects **without ever touching the remote schema**, and let the whole stack (ObjectQL, REST, Views, AI) use them — enforced by three runtime gates.\n\nA federated object stays a normal `Object`; its remote-ness is the datasource (`schemaMode !== 'managed'`) + an `object.external` binding. All changes are additive and backward-compatible (`schemaMode` defaults to `'managed'`).\n\n## What's included\n\n**P1 — Spec + DDL gate (Gate 1)** · `@objectstack/spec`, `@objectstack/driver-sql`\n- `Datasource.schemaMode` + `Datasource.external`; `Object.external` binding; cross-field `superRefine`.\n- `shared/external-errors.ts`: `ExternalSchemaMismatchError` / `ExternalWriteForbiddenError` / `ExternalSchemaModeViolationError` + `SchemaDiffEntry`.\n- `driver-sql`: `assertSchemaMutable()` blocks DDL (`initObjects`/`syncSchema`/`dropTable`) when not managed.\n\n**P2 — Service + type matrix + REST + CLI** · `@objectstack/spec`, `@objectstack/service-external-datasource` (new), `@objectstack/rest`, `@objectstack/cli`, `@objectstack/objectql`\n- `data/type-compat.ts`: dialect-aware SQL↔field matrix (postgres/mysql/sqlite/snowflake/bigquery/mongo).\n- `IExternalDatasourceService` + `ExternalDatasourceService`: `listRemoteTables` / `generateObjectDraft` (reviewable `*.object.ts`) / `validateObject` / `validateAll` / `refreshCatalog`.\n- REST `registerExternalDatasourceRoutes` → `/api/v1/datasources/:name/external/*` (tables, draft, refresh-catalog, validate), wired into the REST API plugin; `503 external_service_unavailable` when the service is absent.\n- CLI `os datasource list-tables | introspect | validate`.\n- `engine.introspectDatasource(name)` end-to-end introspection.\n\n**P3 — Boot validation (Gate 2) + catalog type** · `@objectstack/runtime`, `@objectstack/spec`\n- `ExternalValidationPlugin` (exported): on `kernel:ready`, enforces `external.validation.onMismatch` (fail/warn/ignore).\n- `external_catalog` metadata type + `ExternalCatalogSchema`.\n\n**P4 — AI awareness** · `@objectstack/service-ai`\n- `SchemaRetriever` badges federated objects `[external, read-only, datasource=…]`; `query_data` already clamps limits.\n\n**P6 — Write gate (Gate 3)** · `@objectstack/objectql`\n- `assertWriteAllowed()` blocks insert/update/delete on federated datasources unless `datasource.external.allowWrites` **and** `object.external.writable`.\n\n## Out of scope\n- **P5 (Studio UI)** lives in the separate `../objectui` repo (not in this environment).\n- **P7 (extra driver adapters)** is non-blocking extension work.\n- **Boot wiring**: `ExternalDatasourceServicePlugin` (service) + `ExternalValidationPlugin` (Gate 2) are exported for the host to `.use()`; not force-registered in runtime (consistent with other opt-in services). REST routes mount unconditionally and degrade gracefully; the CLI talks to them over HTTP.\n\n## Verification (per-package, local)\nspec federation **151**, driver-sql DDL gate **8**, objectql write-gate/introspect **11**, service-external-datasource **15**, runtime boot-gate **7**, service-ai **3** — **195 tests, all green**. Affected builds (incl. DTS) pass for spec, driver-sql, objectql, runtime, rest, cli, service-ai, service-external-datasource. Changeset fixed-group in sync (62 packages).\n\n## Known pre-existing CI failures (NOT from this PR)\nSurfaced only because the new package changed the lockfile (path-filtered workflows that rarely run on `main`); each reproduced on a clean `main` checkout:\n- **Test Core** — `objectql/protocol-meta.test.ts` provenance (`_packageId`/`_provenance`).\n- **Build Docs** — App-schema `` `{<id>}` `` breaks the new Turbopack/fumadocs MDX parser.\n- **Validate Deps** — `pnpm audit` high on `tar` via the `sqlite3` **peer** dep.\n\nCodeQL findings in this PR's own code (ReDoS in `type-compat`; network-data-to-file in `os datasource introspect --out`, which now sandboxes `--out` to the CWD) are addressed.\n\nRefs ADR-0015.\n\nhttps://claude.ai/code/session_019FweBAH7Af5HzMWNQ84nPd"
+}

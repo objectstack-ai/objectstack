@@ -1,0 +1,35 @@
+{
+  "number": 15631,
+  "kind": "issue",
+  "title": "[finding] content/docs/api/error-catalog.mdx lists `DUPLICATE_RECORD` under Conflict Errors (409) with no note that the wire spelling is `UNIQUE_VIOLATION`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T00:53:44Z",
+  "updated_at": "2026-09-07T13:47:56Z",
+  "closed_at": "2026-09-07T12:15:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15631",
+  "body": "Recorded while fixing #15362 (which corrected the same confusion on `content/docs/protocol/kernel/error-handling.mdx`). #15362's own body listed this page as **not measured**, so it is filed rather than fixed there; the #15362 PR touches one file only.\n\n## What the page says\n\n`content/docs/api/error-catalog.mdx` on `origin/main` `6b8c67778`:\n\n- line 355, under `## Conflict Errors (409)`: `### DUPLICATE_RECORD` — \"A record with the same unique key already exists.\"\n- line 796, the HTTP Status Quick Reference: `| 409 | conflict | CONCURRENT_MODIFICATION, DUPLICATE_RECORD, DELETE_RESTRICTED |`\n\n`UNIQUE_VIOLATION` appears nowhere on the page.\n\n## What the platform does\n\nMaintainer ruling on #14723 (2026-09-03): a unique-constraint refusal has ONE wire spelling on every route, `UNIQUE_VIOLATION`; the engine's `DuplicateRecordError.code` stays `DUPLICATE_RECORD` in-process only. The translation happens at the REST door — `packages/rest/src/error-response.ts:992`, `structuredCodeAnswer`'s `DuplicateRecordError` arm, which answers `status: 409` with `code: 'UNIQUE_VIOLATION'` — and is pinned by `packages/rest/src/rest-duplicate-record-arm.test.ts` section 1.\n\nSo the catalog's 409 conflict section names an in-process code and omits the one a client actually branches on.\n\n## Why this is not simply the same fix as #15362\n\nThe catalog is a code catalog, not an HTTP body reference: its entries carry Cause / Fix / Retry and no `**HTTP Status:**` line, so `check:error-status-conformance` reads them only through the section heading and the quick-reference row. That quick-reference row IS a per-code status claim in that gate's grading, so moving `DUPLICATE_RECORD` out of it, or adding `UNIQUE_VIOLATION` to it, changes what the gate reconciles.\n\nGrading needed on whether the catalog should (a) rename the entry as #15362 did, (b) keep `DUPLICATE_RECORD` and add a sibling `UNIQUE_VIOLATION` entry naming the in-process / wire split, or (c) stay as-is because it catalogs the vocabulary rather than the wire.\n\n## Not measured here\n\nWhether the same distinction is missing from `content/docs/references/api/error-code-ledger.mdx` (generated) or from any other catalog surface."
+}

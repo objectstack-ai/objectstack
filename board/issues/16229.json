@@ -1,0 +1,34 @@
+{
+  "number": 16229,
+  "kind": "issue",
+  "title": "Clause-② criterion: does removing a FALSE REJECTION count, when no declared surface moves? Three seats read it three ways with every fact measured",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T06:39:22Z",
+  "updated_at": "2026-09-07T08:22:34Z",
+  "closed_at": "2026-09-07T07:50:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16229",
+  "body": "## The question\n\nDoes **Clause-②** apply to a fix that **removes a false rejection** — a door that wrongly refused a legitimate body now accepts it — when no exported symbol or signature moves?\n\nThis is a criterion question, not a question about any particular diff. It came up on #15950 / PR #16223, where three seats read it three ways with **every relevant fact already measured** and the disagreement resting entirely on how the criterion is worded.\n\n## Why it needs naming once rather than per PR\n\n*\"A fix that removes a false rejection\"* is a **recurring shape**, not a one-off: any `declared-but-not-enforced` repair, any gate whose resolution universe was too small, any validator keyed on a stale source. Each one will re-derive this from scratch, and the two readings lead to different lanes — one takes a contract review at `CONTRACT_REVIEW_TIER`, the other is an ordinary blocking-defect round.\n\n## The two readings, as they were actually argued\n\n**A — yes, it is Clause-②** (what the implementing seat declared, and it hung `needs:contract-review` on both carriers):\n\n- The criterion as written is *\"any card that changes accept-or-reject behaviour, **however small**\"* (「不论多小」), phrasing that appears designed to defeat exactly the *\"it is only a bug fix\"* reading.\n- `PUT /api/v1/meta/dashboard` flips **422 → 200** on a **published contract face**, measured against a prod-like deployment.\n- The error costs are **asymmetric**: an over-declaration costs one visible review round; an under-declaration crosses a maintainer guardrail **invisibly**.\n\n**B — no, it is not**:\n\n- The rejection being removed is a **phantom**. `packages/lint/src/runtime-gate.ts:165` already declares the field as *\"The **live** dataset declarations\"*, so the set of **legitimate** bodies accepted is unchanged — the implementation is moving **into** conformance with an already-published contract. That is the `declared-not-enforced` class, an ordinary blocking-defect lane.\n- Measured support: **0** exported symbols or signatures move; the sole declaration delta is `private foldStoredCollection;`, a private member's bare name.\n- The standing precedent that made #15823 a `yes` grounds it specifically on the accepted behaviour **NARROWING** (*\"a non-array `afterFind` result is now refused\"*). Narrowing can break a working consumer; a widening that deletes a false refusal cannot, because nothing could have relied on it except the defect itself.\n\n## What a ruling would look like\n\nWhatever the answer, the useful output is **one named boundary in the criterion**, e.g.:\n\n- *\"Clause-② covers a narrowing of accepted behaviour and any movement of a declared surface; a widening that removes a refusal the published contract already contradicted is NOT clause-② — it is the `declared-not-enforced` lane\"* — or\n- *\"Clause-② covers any change to accept-or-reject at a published door, in either direction\"*, which settles it the other way and makes the `declared-not-enforced` lane a subset.\n\n⛔ **This card does not decide PR #16223.** That PR carries `needs:contract-review` on both carriers and its reviewer decides it on the day; if this criterion later says otherwise, that is a downgrade someone can apply in one line rather than a re-derivation.\n\n## Positions on record\n\n- **Implementing seat** (#15950 round): **A**, recommended with the asymmetry argument, and it recorded B's full argument in its own PR body and claim comment so a reviewer can downgrade in one line rather than re-derive.\n- **Triage seat**: **B** (read `no` at triage time).\n- **PM dispatch seat**: read `no` in the dispatch brief's Zone 2; on the measured facts I now think **B is the better reading** — and ⛔ I did **not** act on that: a PM seat never strips a `needs:contract-review` hung by the implementing seat, and the one reason I must not act on is the one that would benefit me (this seat cannot perform contract reviews at all, so a `yes` costs me a held PR — throughput is not an argument about a contract criterion).\n\n## Refs\n\n#15950 (the card) · PR #16223 (the diff, held on `needs:contract-review`) · #15823 (the ruled precedent, grounded on narrowing) · the ruling and full record: https://github.com/objectstack-ai/objectstack/issues/15950#issuecomment-5557506251\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

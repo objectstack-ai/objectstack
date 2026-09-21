@@ -2,8 +2,8 @@
   "number": 19063,
   "kind": "issue",
   "title": "[finding] a `live` liveness row whose evidence is entirely FOREIGN gets no gate in either direction — `live-elsewhere` is used on 1 row while 120 `cross-repo` declarations sit at `live`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
@@ -20,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T15:01:17Z",
-  "updated_at": "2026-09-18T15:09:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T05:49:29Z",
+  "closed_at": "2026-09-21T05:49:29Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19063",
   "body": "Reading taken 2026-09-18T14:59Z. Code line numbers and ledger greps are against `origin/main@221dabb72`; the row census is a seat-built probe whose limits are stated below.\n\n## Defect\n\n`#13483` established that a key enforced only in a sibling repo cannot be graded from this checkout, and PR #14056 answered it with a fifth verdict plus a gate that can actually fail: `live-elsewhere` must carry a foreign pointer, a declared `cross-repo` scope, and a dated attestation, and its attestation **expires** — `elsewhereMalformed` and `elsewhereExpired` are both in the `failed` expression, and the code says why in as many words: expiry failing the build \"is the only mechanical event this repo can generate about a claim it cannot re-measure locally\".\n\nThat gate is keyed on the status:\n\n```\n:502  const EVIDENCE_SCANNED_STATUSES = new Set(['live', 'planned', 'experimental', 'live-elsewhere']);\n:887  if (status === LIVE_ELSEWHERE_STATUS && led !== null) { ... checkElsewhereEntry ... }\n```\n\nThe four evidence checks (existence, line bound, symbol anchor, key mention) run over the LOCAL bucket only — the file states it: \"Cross-repo attribution never reaches this list: checkEvidence only resolves the LOCAL bucket\" (`:1317-1318`).\n\nSo a row that makes the *same* claim under `status: \"live\"` gets **nothing in either direction**: no local resolution (there is no local path to resolve), no shape check (`checkElsewhereEntry` never runs), and no expiry (`report.verification.errors` — a *malformed* date — is in the `failed` expression; `verification.stale` is a printed report line, and `verifiedAt` is optional to begin with). `live` + foreign evidence is an unchecked spelling of the thing the fifth verdict was built to gate.\n\n## Measurement\n\n**Ledger greps** (`git grep -o … origin/main -- 'packages/spec/liveness/*.json'`, unit = occurrences):\n\n- `\"live-elsewhere\"` → **1** (`manifest.json`, the `runtime` row from #13483 itself).\n- `\"cross-repo\"` → **120**.\n\nThe verdict that carries the gate is used once; the scope declaration that describes the same situation appears 120 times.\n\n**Row census** (seat probe, unit = ledger rows): 39 ledgers, 922 rows in the `props` trees, 707 at a scanned status (`live` 688, `planned` 13, `experimental` 5, `live-elsewhere` 1).\n\n- zero local evidence path after the realm split: **306**\n- **lit control:** ≥1 local path, i.e. rows the existing checks CAN fail on: **401**\n\nBreakdown of the 306:\n\n| rows | status | scope | evidence |\n|---|---|---|---|\n| 164 | `live` | none | **absent entirely** |\n| 63 | `live` | none | present, all paths foreign/prose |\n| **62** | **`live`** | **`cross-repo`** | **present** |\n| 7 | `planned` | none | absent |\n| 4 | `experimental` | none | present |\n| 2 | `planned` | `cross-repo` | absent |\n| 2 | `live` | `in-repo` | absent |\n| 1 | `experimental` | `cross-repo` | present |\n| 1 | `live-elsewhere` | `cross-repo` | present — **the one row a gate can fail on** |\n\nThe sharpest sub-class is the 62: they *declare* `cross-repo` scope under a `live` verdict. They state the condition #13483 named unfalsifiable, in the field #14056 added for it, while sitting at the one status that skips its gate.\n\n## Instrument, and its limits\n\nThe shared checkout has no installed dependencies, so `scanEvidence` from `packages/spec/scripts/liveness/evidence.mts` could not be imported; the seat re-implemented its realm split in plain node and self-tested it on three cases before use:\n\n- `cloud @cb8ee7ff: packages/service-ai/src/agent-runtime.ts#listAgents …` → 0 local, 1 foreign ✓\n- `packages/core/src/x.ts:12 reads it` → 1 local ✓ (lit)\n- `objectui: packages/a/b.ts; packages/core/src/y.ts` → 1 local + 1 foreign ✓ (realm scope ends at `;`)\n\n**Three enumerations disagree about the population, and none of them is the gate's:**\n\n| enumeration | rows |\n|---|---|\n| this probe — naive full-depth walk of each ledger's `props` tree | 922 total / 707 scanned / 306 zero-local |\n| the gate's own published census (`packages/spec/liveness/state-counts.md`, generated) | 1094 classified / 915 `live` / 1 `elsewhere` |\n| the `os-dev` probe that surfaced this (report on #18304) | 481 scanned / 61 zero-local |\n\nThe gate walks the SCHEMA at \"one-level walk granularity … plus the ADR-0010 protection envelope\" (`state-counts.md`), not the ledger file tree, which is the likeliest source of the spread. **Settling the population is part of this card's work, and no row count here should be quoted as the gate's own reading.** What does *not* depend on the enumeration: the code paths quoted above, the single `live-elsewhere` row, and the 120 `cross-repo` declarations — all plain greps on a named ref.\n\n## Dedup words\n\n`liveness foreign evidence unfalsifiable`, `cloud realm marker resolve`, `evidenceScope cross-repo attestation`, `live-elsewhere used once`\n\n## Adjacent — read, and not the same subject\n\n- #13483 → created the verdict, closed by PR #14056. It asked \"what evidence shape does a non-local pointer take\"; it did not ask what stops a row from making the claim at another status.\n- #14058 → the `spec-property-retirement` skill's prose half of the same verdict.\n- #16362 → re-derivation of the `dead` / `live-elsewhere` rows before they warn authors.\n- #5623 → stale-evidence ⚠→red and the \"N resolved\" miscount; about LOCAL paths that rot, not paths that were never local.\n\n## Provenance\n\nOut-of-scope finding from the `os-dev` report on #18304 (PR #19059). The seat re-measured it before filing and **narrowed the claim**: the dev's \"no gate can ever fail on them in either direction\" is true of the 305 non-`live-elsewhere` rows but not of `live-elsewhere` itself, where a shape check and a 180-day expiry both red the build. Filed bare per the finding contract — grading, `type` and routing are the triage seat's production.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

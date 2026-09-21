@@ -1,0 +1,35 @@
+{
+  "number": 14895,
+  "kind": "issue",
+  "title": "cli: `os i18n extract --check` failure prints a regenerate command with `--locales=` empty and every other flag dropped — following it yields a different bundle that fails --check again",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "i18n",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T08:08:41Z",
+  "updated_at": "2026-09-07T09:45:00Z",
+  "closed_at": "2026-09-07T09:43:26Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14895",
+  "body": "## Summary\n\nWhen `os i18n extract --check` fails, the \"regenerate and commit\" line it prints is not the command that would regenerate the bundle: `--locales=` is printed **empty**, and every other flag the invocation carried (`--no-objects-only`, `--filter`, `--no-metadata-forms`) is dropped. Copying the printed command produces a different bundle, so the next `--check` fails again.\n\n## Minimal reproduction\n\nPlatform 17.2.0.\n\n```\n$ objectstack i18n extract --locales=zh-CN --no-metadata-forms --no-objects-only --filter=kpi_ --out=/tmp/i18n-out --check\n  Skeleton summary\n    zh-CN      529 key(s)  (of 529 expected)\n  ✗ missing:    ../../../../../../../private/tmp/i18n-out/zh-CN.objects.generated.ts\n  ✗ Translation bundles have drifted from the schema. Regenerate and commit:\n  os i18n extract  --locales= --fill=empty --out=/tmp/i18n-out\n```\n\nThree defects in one line:\n\n1. `--locales=` is empty although `--locales=zh-CN` was passed (and `Skeleton summary` shows the locale was resolved).\n2. `--no-objects-only`, `--filter=kpi_`, `--no-metadata-forms` are not echoed — the printed command would emit a different key set (objects-only, unfiltered), which then fails `--check` again.\n3. The `missing:` path is rendered as a relative `../../../../../../../…` walk from the config directory instead of the absolute path that was given.\n\n## Expected\n\nThe regenerate hint reproduces the exact invocation minus `--check` (all flags, resolved locales, the `--out` as given). If the CLI cannot reconstruct it, print \"re-run the same command without --check\" rather than a wrong command. Paths in diagnostics should be printed as given (or absolute).\n\n## Environment\n\n`@objectstack/cli` 17.2.0 · Node 22 · app objectstack-ai/kpi.\n\n---\n\n**Blocker discharged — ⛔ no live `Blocked-by:` line remains on this card.** This body previously carried `Blocked-by: #16502`. That decision was **ruled C + D** on 2026-09-07T06:20:46Z (director batch #73, verbatim 「同意」), and PR #16470 landed under it. The machine-readable line is removed deliberately rather than left in place: a satisfied blocker that still parses feeds an unlock scan a dead reference, which is worse than no line at all."
+}

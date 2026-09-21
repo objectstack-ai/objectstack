@@ -1,0 +1,34 @@
+{
+  "number": 16201,
+  "kind": "issue",
+  "title": "[finding] `.claude/agents/os-dev.md:190` tells every dispatched dev that `gen:schema` rewrites `authorable-surface.base.json` \"as an expected artifact\" — measured false, and backwards for a deletion-gate anchor",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T05:44:18Z",
+  "updated_at": "2026-09-07T12:55:03Z",
+  "closed_at": "2026-09-07T12:52:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16201",
+  "body": "Surfaced by the `os-dev` seat working **#14612** (PR #16199) and **independently re-measured by the `domain:spec` PM seat** (#6017, `session_01T6HeZvT9wdSJD1ZxJb5Eno`) before filing, because the subject is a **governed** file (`.claude/**`) and a dev's report is not sufficient evidence to change one. Unassigned, no `domain:*` — routing and grading are triage's.\n\n## The two readings, both on `origin/main`\n\n**The instruction** — `.claude/agents/os-dev.md:190`:\n\n> `packages/spec`:`gen:schema` 会重写 `authorable-surface.base.json`,这是预期产物。\n\n**The code** — `packages/spec/scripts/build-schemas.ts:108`:\n\n> `--update-base` `gen:authorable-surface-base` — the **ONLY** mode that writes the …\n\n⇒ Since **#5358**, a plain `gen:schema` does **not** write that file; only `--update-base` (`gen:authorable-surface-base`) does. The #14612 dev corroborated it behaviourally: a full `@objectstack/spec` build left `git status` empty.\n\n## Why this is worth a card rather than a shrug\n\nThe clause is not merely stale — it points the **wrong way for this particular file**, and this file is unusually unforgiving:\n\n- `authorable-surface.base.json` is the **pinned anchor for the deletion gate**. Its whole job is to be hard to change: `readCommittedSurfaceBase()` byte-compares the committed file against `serializeSurfaceBase()`, and `check:authorable-surface` fails on any difference it did not generate. A PR that edits it to hide a deletion is supposed to go red.\n- Telling a dev that churn in that file is \"预期产物\" (an expected artifact) invites exactly the two failures the gate exists to catch: **committing a rewrite it did not intend**, or **not investigating when the file moves**. For a gate whose failure direction is a silently-hidden deletion, \"expected artifact\" is the most costly possible framing.\n- It also mis-sets expectations in the other direction: a dev who edits the JSON alone and sees no rewrite may conclude the tooling is broken, when in fact the one-sided edit is fatal by construction (#14612 measured this — the constant `SURFACE_BASE_DESCRIPTION` in `build-schemas.ts` is the only producer of that string, so the JSON cannot be edited on its own at all).\n\n⚠️ The clause's **operative half is fine and should survive any rewrite**: never revert the file, never hand-edit it to satisfy an equality, and the assertion that counts is `check:authorable-surface` green. #14612's dev obeyed that half and said so. It is only the causal claim — *which command writes it, and whether seeing it move is expected* — that is false.\n\n## Suggested shape (⛔ not a decision)\n\nNarrow the clause to what is true: the file is written by `build-schemas.ts` **only in `--update-base` mode** (`gen:authorable-surface-base`), never by a plain build; if it moves on a plain build, that is a finding, not an artifact. Keep the operative prohibitions verbatim.\n\n⚠️ Whoever takes it should know that #14612's PR (#16199) **corrects the same causal claim in `build-schemas.ts`'s own doc comment**, so the wording to converge on already exists in that diff — read it rather than inventing a second phrasing.\n\n**Expected lane** (for triage, not a routing claim): `.claude/agents/os-dev.md` is named in `pm-dispatch/SKILL.md` as part of the 协议语义面 ⇒ reads as `domain:skills`, and any PR touching it is a **governed** surface with the human-merge endgame.\n\n## Dedup\n\n`search_issues` for this clause returned **0** — and that zero is backed by a control run in the same session: `authorable-surface anchor` returned **#13713** (the card whose 532-key figure #14612 re-measured) and **#11979**, so the instrument answers. No existing card names the `os-dev.md` clause.\n\nRefs: #14612 / PR #16199 (where it was found and where the sibling correction lives) · #5358 (the change that made `--update-base` the only writer) · #5235 / #4650 (the anchor and its gate)."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 13563,
+  "kind": "issue",
+  "title": "cloud control plane: re-verify manifest.integrity digests at .osplugin unpack — the enforce leg of the #11331 ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T01:26:05Z",
+  "updated_at": "2026-09-07T12:27:05Z",
+  "closed_at": "2026-09-07T12:26:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13563",
+  "body": "Seam card (true coordination card): the fix lands in the `cloud` control plane, but that repo is not writable to this seat (`add_repo` denied — carried on #11331 from #10627), so per the seam-card fallback this card lands in `objectstack` with `repo:cloud`.\n\n**Named reader: the `repo:cloud` execution seat (seat post #6026) — next candidate pass.** This card is the dispatch entry for the enforce leg; nothing else carries it as a card.\n\n## Provenance\n\n- Ruling on #11331 (maintainer batch, 2026-08-30): **enforce** `manifest.integrity` — make the shipped documentation true (ADR-0025 §3.2/§3.5 step 5: per-file digests re-verified at unpack).\n- Locating read #13455 (closed, evidence on-card): **`objectstack` has no unpack.** ADR-0025 §3.5 steps 4–7 are unimplemented there; the only `.osplugin` read is in-memory at publish and discards the tree. The unpack the spec's promise refers to is a control-plane path.\n- Framework leg **already landed**: #13464 via PR #13502 (publish-preflight `verifyIntegrity` self-check + truthful TSDoc + liveness-ledger note). Its own framing: it does **not** discharge the unpack-time promise — after it, digests are checked by the publisher pre-upload only.\n\n## The ask (lands in `cloud`)\n\nImplement digest re-verification when the control plane unpacks a published `.osplugin` (ADR-0025 §3.5 step 5): recompute per-file digests of the unpacked tree and refuse on mismatch, loudly (refusal/diagnostic, no silent skip). Absent `integrity` block behaviour should follow the trust-tier posture already recorded in `manifest.zod.ts`'s TSDoc rather than a new policy invented in cloud.\n\nSuggested shape from the #13455 read (suggestion, not a ruling): consume a shared `verifyIntegrityMap` helper living in `packages/core/src/security/` beside `plugin-artifact-signature.ts` (already byte-mirrored by cloud's `package-signing.ts`) so cloud consumes rather than re-derives. If the helper route is taken, the framework half is a `domain:spec`/`domain:engine` card to file first with this card `Blocked-by:` it — the cloud seat should answer that fold-or-split at claim time.\n\nCross-repo consumability note (dispatch-time check, per the pin-lag rule): if the helper lands framework-side, verify the cloud pin covers it before dispatching the consuming half.\n\n## Acceptance sketch\n\n- A tampered artifact (one byte changed in one packaged file after digest emission) is refused at unpack with a named error; the untampered control passes.\n- The ledger row `packages/spec/liveness/manifest.json` for `integrity` stays `dead` in `objectstack` (the verifier is not in that repo); only its `note` may be corrected — per the clause-② reading recorded on #11331.\n\nUpstream tracking parent: #11331 (stays open until this closes; its `Blocked-by:` points here)."
+}

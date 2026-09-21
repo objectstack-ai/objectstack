@@ -1,0 +1,35 @@
+{
+  "number": 16536,
+  "kind": "pull_request",
+  "title": "fix(cli): derive a parseable JS identifier for the emitted plugin symbol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T07:50:29Z",
+  "updated_at": "2026-09-07T09:23:20Z",
+  "closed_at": "2026-09-07T09:23:19Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": "2026-09-07T09:23:18Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16536",
+  "body": "Fixes #15892\n\n`os create plugin foo.bar` exited 0 having written `export const foo.barPlugin: Plugin = {` — a property access where a binding name belongs — so the project the scaffolder emitted did not parse.\n\n## The ruling this implements\n\nComment `5564368535` on the card (director seat, decision batch #64, 2026-09-07T02:52:30Z) records the maintainer's reply, verbatim 「同意」, adopting **option 2**:\n\n> `os create` keeps accepting exactly what npm accepts (the #15816 validator is right). The emitted identifier is **derived**, not copied: every character legal in an npm name but illegal in a JS identifier folds the way `-` already does (`foo.bar` → `fooBarPlugin`; `_`, `~`, and a leading digit handled likewise, e.g. a leading digit gets a fixed prefix). This is the completion of the existing `toCamelCase`, in the same spirit as `sanitizeNamespace()` one line away — not a third naming philosophy on the emitted manifest: the package name stays exactly what the user typed (#15530 / #15816), only the code identifier is normalised, which is the JS ecosystem's universal convention.\n\nAcceptance is untouched: `validateProjectName` still admits exactly what npm admits, and the emitted package name, its scope and the project directory stay byte-for-byte what the user typed. Only the code identifier is normalised. The emitted scope question raised on #15530 stays with the maintainer and is not addressed here.\n\n## What changed\n\n`toCamelCase` in `packages/cli/src/commands/create.ts` folded `-x` into `X` and passed every other character straight through. `sanitizeIdentifier` generalises that one fold: every run of characters illegal in a JS identifier is treated as the separator `-` already was, and a leading digit takes the `a` prefix `sanitizeNamespace()` has always used for the same rule. It is used at all four emission sites the ruling names — `src/index.ts` twice, `README.md` twice — and the emitted README now names the derived symbol in prose, so the mapping from package name to exported symbol is stated once where the user reads it.\n\nNo reserved-word handling, deliberately: every emission site appends `Plugin`, so the identifier that lands is never a bare keyword.\n\n## Driven verification\n\nBuilt, then driven through the published entry into a scratch directory, exit code read before any pipe, and each emitted file handed to TypeScript's own parser (`ts.createSourceFile` + `getSyntacticDiagnostics`, no lib, no resolution):\n\n```\nname      exit  package.json name               symbol         src/index.ts  README fence\nfoo.bar   0     @objectstack/plugin-foo.bar     fooBarPlugin   0 diags       0 diags\n1foo      0     @objectstack/plugin-1foo        a1fooPlugin    0 diags       0 diags\na_b       0     @objectstack/plugin-a_b         aBPlugin       0 diags       0 diags\nmy-app    0     @objectstack/plugin-my-app      myAppPlugin    0 diags       0 diags\n\nCANARY (the pre-fix bytes for foo.bar): 1 diagnostic — \"',' expected.\"\n```\n\n`my-app` is the control in both directions and still yields `myAppPlugin`. The canary is what makes a zero a reading rather than an inert harness: the same instrument, over the bytes this change replaces, reports the defect — and it reproduces the count the card measured.\n\n## Tests\n\n`packages/cli/test/create-plugin-identifier-parses.test.ts` (unit tier) drives the same instrument over the rendered template for all four names and both placements, and additionally pins:\n\n- the mapping for each name, because `a_b` does not discriminate on parseability — `a_bPlugin` was always legal TypeScript, so it is asserted on the fold instead;\n- that `validateProjectName` still accepts every one of them, which is this PR's own re-derivation that npm acceptance did not move;\n- that the emitted package name and directory are the input string, unchanged;\n- the emission-site counts, so a new site has to be added here deliberately;\n- the canary above.\n\nA tilde is worth recording: the card lists `~` as a shape that reaches the emission, and at `origin/main` it does not — `validateProjectName`'s charset is `^[a-z0-9][a-z0-9._-]*$`, which refuses it before any write. The sanitiser folds it anyway; the test states which of the two refuses it.\n\n## 验收备注\n\nNoted, not filed — the PM seat opens the card if it wants one:\n\n- **`os generate` carries the same class, and has no validator in front of it.** Reproduced on this branch, driven: `os generate object foo.bar` exits 0 and writes `const foo.bar: Data.ServiceObject = {` in `src/objects/foo.bar.object.ts` (1 syntactic diagnostic) and `export { default as foo.bar } from './foo.bar.object';` in `src/objects/index.ts` (1 syntactic diagnostic). `generate.ts` runs no name validation at all, so its accepted set is wider than `create`'s. This PR is scoped to `create.ts` by the ruling and does not touch it.\n- The two sibling copies of the helper (`generate.ts` and `init.ts`) fold `[-_]([a-z])`, not `-([a-z])` — they are not byte-identical to the one this PR replaced, so a future consolidation is a behaviour decision about `init` and `generate`, not a lift-and-drop.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01YFY46JydE1gMxQG1TqBcMZ)_"
+}

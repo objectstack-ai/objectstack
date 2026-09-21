@@ -1,0 +1,36 @@
+{
+  "number": 1214,
+  "kind": "pull_request",
+  "title": "fix(auth): resolve /api/v1/auth/config 404 on Vercel deployment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-23T08:18:23Z",
+  "updated_at": "2026-09-07T04:49:09Z",
+  "closed_at": "2026-04-23T08:18:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-23T08:18:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1214",
+  "body": "The `/api/v1/auth/config` endpoint returned 404 on Vercel while working locally. Root cause: route ordering conflict between Hono adapter's catch-all `/auth/*` route and AuthPlugin's specific `/auth/config` registration.\n\n## Changes\n\n**Hono Adapter** (`packages/adapters/hono/src/index.ts`)\n- Intercept `/auth/config` requests before forwarding to better-auth\n- Call `authService.getPublicConfig()` directly for this endpoint\n\n**AuthPlugin** (`packages/plugins/plugin-auth/src/auth-plugin.ts`)\n- Remove duplicate `/auth/config` route registration from `registerAuthRoutes()`\n- Add comment explaining the endpoint is now handled in the adapter\n\n**Tests** (`packages/plugins/plugin-auth/src/auth-manager.test.ts`)\n- Update expectations to include `type: 'social'` field in provider responses\n\n## Technical Detail\n\nHono uses first-match-wins routing. The adapter creates its Hono app with a catch-all `/api/v1/auth/*` route before AuthPlugin can register specific routes in the `kernel:ready` hook. Since `better-auth` doesn't handle `/config` (it's an ObjectStack-specific endpoint), requests were falling through to the dispatcher's mock fallback which doesn't implement this endpoint.\n\n```typescript\n// Now handled in adapter before better-auth forwarding\nif (path === 'config' && method === 'GET' && authService) {\n  const config = authService.getPublicConfig();\n  return c.json({ success: true, data: config });\n}\n```"
+}

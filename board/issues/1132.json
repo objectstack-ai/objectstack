@@ -1,0 +1,37 @@
+{
+  "number": 1132,
+  "kind": "pull_request",
+  "title": "fix(driver-turso): make better-sqlite3 optional peer dependency for Vercel compatibility",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T06:38:31Z",
+  "updated_at": "2026-09-07T04:49:14Z",
+  "closed_at": "2026-04-14T06:47:26Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T06:47:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1132",
+  "body": "`driver-turso` was forcing `better-sqlite3` installation for all users, causing Vercel deployments to fail due to native binding compilation errors. The driver only needs `better-sqlite3` in local/replica modes, not remote mode.\n\n## Changes\n\n- **Move `better-sqlite3` to optional peer dependency** — allows remote-only users to skip installation\n- **Add `better-sqlite3` to devDependencies** — preserves test compatibility\n- **Document dependency requirements by mode** — clarifies when `better-sqlite3` is needed\n\n## Usage\n\n**Remote mode (Vercel/Edge):**\n```bash\npnpm add @objectstack/driver-turso\n# better-sqlite3 NOT required\n```\n\n**Local/Replica modes:**\n```bash\npnpm add @objectstack/driver-turso better-sqlite3\n```\n\nThe driver auto-detects mode from the URL — remote mode (`libsql://`) uses only `@libsql/client`, while local/replica modes (`file:`) extend `SqlDriver` and require `better-sqlite3`."
+}

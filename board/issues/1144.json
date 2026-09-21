@@ -1,0 +1,35 @@
+{
+  "number": 1144,
+  "kind": "pull_request",
+  "title": "fix: resolve TypeScript compilation errors in ObjectQL engine datasource mapping",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T12:24:46Z",
+  "updated_at": "2026-09-07T04:49:13Z",
+  "closed_at": "2026-04-14T12:57:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T12:57:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1144",
+  "body": "## Summary\n\nFixes TypeScript compilation errors (TS2339) in `packages/objectql/src/engine.ts` that were blocking CI builds.\n\n## Problem\n\nThe code was attempting to access `object.packageId` where `object` is of type `ServiceObject`, but `packageId` is not a property of `ServiceObject` - it's a property of `ObjectContributor`.\n\n**Error:**\n```\npackages/objectql/src/engine.ts:621:20 - error TS2339: Property 'packageId' does not exist on type 'ServiceObject'\npackages/objectql/src/engine.ts:622:23 - error TS2339: Property 'packageId' does not exist on type 'ServiceObject'\npackages/objectql/src/engine.ts:627:22 - error TS2339: Property 'packageId' does not exist on type 'ServiceObject'\n```\n\n## Solution\n\nChanged from accessing `object.packageId` (incorrect) to using `SchemaRegistry.getObjectOwner(objectName)?.packageId` (correct), which properly retrieves the packageId from the object's owner contributor.\n\n## Changes\n\n- Updated datasource resolution logic in `resolveDatasource()` method (lines 620-634)\n- Changed from `object?.packageId` to `owner?.packageId` where `owner = SchemaRegistry.getObjectOwner(objectName)`\n- Maintains same functional behavior while being type-safe\n\n## Testing\n\n- Fix resolves TypeScript compilation errors\n- CI build should now pass\n- No functional changes to datasource resolution logic"
+}

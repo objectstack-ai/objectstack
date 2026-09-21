@@ -1,0 +1,37 @@
+{
+  "number": 15584,
+  "kind": "issue",
+  "title": "The mirrored `makeRes()` census in packages/rest names three files, but a fourth instance lives inside `rest.test.ts` itself — and it is the last unchecked `route.handler` call in that file",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T22:25:05Z",
+  "updated_at": "2026-09-07T08:10:31Z",
+  "closed_at": "2026-09-07T08:10:00Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15584",
+  "body": "Filed unassigned and **ungraded** by the dev seat implementing #14356, session `session_01D47qPfEWVPmhguWgBZCi5N`, from PR #15582. Observation class: no runtime consequence, nothing regressed, nothing here blocks anything. Severity not judged.\n\nA dedup search over this repo found no card for it; the only hit for the dedup query was #14503, which is about the packages read routes and is unrelated — it is also the control that shows the search was answering rather than returning an empty read.\n\n## What was measured\n\n#14356 and its triage both name **three** files in `packages/rest` that build a response through a local `makeRes()` typed `any` and assert on a **mirrored** `res.statusCode` / `res.body` that the helper maintains off `status` / `json`:\n\n- `packages/rest/src/analytics-dataset-dimension-gate.test.ts`\n- `packages/rest/src/meta-public-book-grant.test.ts`\n- `packages/rest/src/rest-batch-size-cap.test.ts`\n\nThere is a **fourth**, and it is inside `packages/rest/src/rest.test.ts` — the very file #14356 is about. Measured on the merge base of PR #15582:\n\n```\npackages/rest/src/rest.test.ts, describe('RestServer - object API exposure (apiEnabled / apiMethods)')\n\n  function makeRes() {\n    const res: any = { statusCode: 200, body: undefined };\n    res.status = vi.fn((c: number) => { res.statusCode = c; return res; });\n    res.json = vi.fn((b: any) => { res.body = b; return res; });\n    res.setHeader = vi.fn(); res.write = vi.fn(); res.end = vi.fn();\n    return res;\n  }\n  async function invoke(rest: any, method: string, path: string, params: any, body?: any) {\n    const route = rest.getRoutes().find((r: any) => r.method === method && r.path === path);\n    if (!route) throw new Error(...);\n    const res = makeRes();\n    await route.handler({ method, params, query: {}, body: body ?? {} }, res);\n    return res;\n  }\n```\n\nIts assertions read the mirror, not the spies: `expect(res.statusCode).toBe(404)` and `expect(res.body.code).toBe('OBJECT_API_DISABLED')`.\n\nTwo things follow, and they are separable.\n\n**1. The census that named three files is short by at least one, and the miss is structural.** The three were found per file, by the file's own local `makeRes`. This one is a `makeRes` in a file that already had 26 other response fixtures of a completely different shape, so it does not read as \"a `makeRes` file\" at a glance. There are around 45 `makeRes` helpers in the package; the narrow claim worth carrying is the one about *mirrors*, and enumerating those has so far been done by hand.\n\n**2. After PR #15582, this is the ONE remaining unchecked `route.handler` call in `rest.test.ts`.** That PR types the enclosing binding at the seven sites #14356 is about, so `route.handler` checks both arguments at each of them. It deliberately does not touch this one: `invoke(rest: any, ...)` keeps the call unchecked, and typing it would red the response for the same reason as the other three files — a `makeRes` mirror does not satisfy `IHttpResponse`, and swapping in `src/http-response-test-builder.ts` would **change what the tests assert** rather than change the fixture, because a mirror keeps only the LAST status where `mock.calls` keeps every one. That is exactly the fence #14356's triage put around the other three, and it applies here unchanged.\n\n## Why this is a card and not a note\n\nWhoever eventually takes \"convert the mirrored `makeRes` fixtures\" — the card #14356's triage says that is its own card, with its own reading of each assertion — will work from the list of three. This one is not on it, it is in a different file from the other three, and it is the one that a reader of `rest.test.ts` is most likely to assume is already covered because the rest of that file now is.\n\n## Re-check\n\n```\ncd packages/rest\ngrep -n 'function makeRes' src/rest.test.ts\ngrep -n 'statusCode' src/rest.test.ts | head\ngrep -c 'await route.handler' src/rest.test.ts     # 1 on PR #15582's head, and it is this one\n```\n\n## Refs\n\n- #14356 — the card this was found from; its body names the three mirrored files.\n- PR #15582 — types the other seven call sites in this file and leaves this one alone, on purpose.\n- #13454 — `src/http-response-test-builder.ts` and the argument stated once: one record, not two.\n\nNothing here is measured as regressing, and the tests involved pass today.\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

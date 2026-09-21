@@ -1,0 +1,35 @@
+{
+  "number": 1064,
+  "kind": "pull_request",
+  "title": "Fix discovery API path missing /api/v1 prefix on Vercel deployment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T10:35:41Z",
+  "updated_at": "2026-09-07T04:49:14Z",
+  "closed_at": "2026-04-02T11:10:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-02T11:10:04Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1064",
+  "body": "## Problem\n\nAfter deploying to Vercel, the discovery endpoint (`GET /api/v1/discovery`) returns API paths without the `/api/v1` prefix. For example, routes appear as `/auth`, `/data` instead of `/api/v1/auth`, `/api/v1/data`, causing the API console to break. Locally this issue was hidden because the MSW-based dev environment only registers minimal services, so the wrong routes were never actually used.\n\n## Root Cause\n\nAll framework adapters registered an explicit discovery handler only at `GET prefix` (e.g., `GET /api/v1`), but not at `GET prefix/discovery` (e.g., `GET /api/v1/discovery`). When the frontend fetched `/api/v1/discovery`, the catch-all handler stripped the prefix and called `dispatcher.dispatch('GET', '/discovery', ...)`. Inside `dispatch()`, the discovery branch called `getDiscoveryInfo('')` with an **empty prefix**, returning routes like `/data` and `/auth` instead of `/api/v1/data` and `/api/v1/auth`.\n\nOn Vercel, all services (auth, ai, security, audit, feed, etc.) are fully registered, so the broken routes from discovery were actually consumed by the API console, causing it to fail. Locally with MSW, only minimal services are registered and the console falls back to hardcoded defaults, masking the bug.\n\n## Changes\n\n**`packages/runtime/src/http-dispatcher.ts`**\n- Added optional `prefix` parameter (6th arg, backward-compatible) to `dispatch()` method\n- `dispatch()` now passes `prefix` to `getDiscoveryInfo()` when handling the `/discovery` route, instead of using an empty string\n\n**All adapters — Added explicit `GET ${prefix}/discovery` route**\n- `packages/adapters/hono/src/index.ts` — Added explicit `GET ${prefix}/discovery` route calling `getDiscoveryInfo(prefix)` (**primary Vercel fix**)\n- `packages/adapters/fastify/src/index.ts` — Same fix\n- `packages/adapters/nuxt/src/index.ts` — Same fix\n- `packages/adapters/sveltekit/src/index.ts` — Handles `discovery` segment before catch-all\n- `packages/adapters/nextjs/src/index.ts` — Handles `discovery` segment before catch-all\n- `packages/adapters/express/src/index.ts` — Passes prefix to `dispatch()` (already had explicit `/discovery` route)\n\n**`packages/plugins/plugin-msw/src/msw-plugin.ts`**\n- Added explicit `GET baseUrl/discovery` MSW handler with correct prefix\n- Passes `baseUrl` as prefix to `dispatcher.dispatch()` in the catch-all\n\n**`packages/adapters/hono/src/hono.test.ts`**\n- Updated all `dispatch()` call assertions to include the new `prefix` 6th argument\n- Added tests for `GET /api/discovery` and `GET /api/v1/discovery` endpoints via the Vercel delegation pattern\n\n## Example\n\n```typescript\n// Before: GET /api/v1/discovery falls through to dispatch('/discovery')\n// which calls getDiscoveryInfo('') — routes returned without prefix\n// { routes: { data: '/data', auth: '/auth' } }  ← wrong!\n\n// After: GET /api/v1/discovery is handled by explicit route\n// which calls getDiscoveryInfo('/api/v1') — routes include correct prefix\n// { routes: { data: '/api/v1/data', auth: '/api/v1/auth' } }  ← correct!\n```\n\nThis ensures discovery responses always include the correct API prefix across all deployment environments (Vercel, local, etc.)."
+}

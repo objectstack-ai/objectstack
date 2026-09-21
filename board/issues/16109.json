@@ -1,0 +1,35 @@
+{
+  "number": 16109,
+  "kind": "issue",
+  "title": "lint: `security-owd-alias` cannot fire through `defineStack` — `sharingModel` is a closed enum that refuses every alias the rule exists to name",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T01:29:04Z",
+  "updated_at": "2026-09-07T07:23:04Z",
+  "closed_at": "2026-09-07T07:20:13Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16109",
+  "body": "Found while surveying which platform rules fire on `objectstack-ai/hotcrm` (its #1621, step 3 of epic #1579). Read-only survey, report-first, unassigned.\n\nMeasured against the **pinned `@objectstack/spec@17.3.0` / `@objectstack/lint@17.3.0`**, hotcrm at `1670557`.\n\n## The rule\n\n`validate-security-posture.ts` carries, in one `if / else if` on the same value:\n\n```\nif (owd == null)                              -> SECURITY_OWD_UNSET      (error)\nelse if (typeof owd === \"string\" && OWD_ALIAS_FIX[owd]) -> SECURITY_OWD_ALIAS (error)\n```\n\nwith `OWD_ALIAS_FIX = { read: 'public_read', read_write: 'public_read_write', full: 'public_read_write', public: 'public_read_write' }`.\n\n## Measurement — the two branches, same file, same anchor\n\n`src/objects/contract.object.ts`, the single line `sharingModel: 'private',`:\n\n| injection | result | exit |\n|:--|:--|--:|\n| line removed entirely | **`security-owd-unset` at `error`** | **1** |\n| `sharingModel: 'read_write'` (an `OWD_ALIAS_FIX` key) | **no rule verdict** — `defineStack` refuses first | 1 |\n\nThe refusal, verbatim from `objectstack lint --json`:\n\n```\n{\"error\":\"[{\\\"code\\\":\\\"invalid_value\\\",\\\"values\\\":[\\\"private\\\",\\\"public_read\\\",\\\"public_read_write\\\",\\\"controlled_by_parent\\\"],\\\"path\\\":[\\\"sharingModel\\\"],\\\"message\\\":\\\"Invalid option: expected one of \\\\\\\"private\\\\\\\"|\\\\\\\"public_read\\\\\\\"|\\\\\\\"public_read_write\\\\\\\"|\\\\\\\"controlled_by_parent\\\\\\\"\\\"}]\"}\n```\n\nThe sibling branch firing at `error`/exit 1 on the byte-adjacent injection is the working control: the rule file is reached, the object is walked, and only the alias branch is unreachable.\n\n## What this means\n\n`sharingModel` is a closed Zod enum containing exactly the four canonical values. Every key in `OWD_ALIAS_FIX` is refused at config load, so on any `defineStack`-authored app **`security-owd-alias` is dead code**: the value it exists to diagnose can never reach it.\n\nThat is not necessarily a defect — it may be correct that the schema is the stricter gate, and the rule may exist for a different intake (a raw JSON/YAML metadata path, an older artifact, a migration reader) that this repo does not exercise. What it *is*, definitely, is a reachability fact worth recording, because the rule is being counted as live coverage:\n\n- it is claimed as `error`-severity coverage on hotcrm's step-3 retirement table (its #1586), where an `error` rule reads as \"already gating, retire the local duplicate today\";\n- if the only intake it guards is one no app in this shape uses, that row is a false credit and the local assertion has to stay.\n\nThe ask is a **statement of which intake `security-owd-alias` is for**, and — if the answer is \"none that survives the spec enum\" — its retirement or re-scoping.\n\n## Dedupe\n\nTargeted search returned 7 on-topic results in this repo (`#8308`, `#8207`, `#7404`, `#7889`, `#7281`, `#5493`, …) — non-zero and on-topic, which is the control that the search was not silently answering empty. None names `security-owd-alias`'s reachability."
+}

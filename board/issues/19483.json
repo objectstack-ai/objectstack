@@ -1,0 +1,36 @@
+{
+  "number": 19483,
+  "kind": "issue",
+  "title": "Charter: the feature axis — `area:*` (11 values from the North Star definition line), the North Star 「路」 section rewritten as an ordered list of feature points, cross-layer features default to parent + per-layer sub-issues, `domain:*` retreats to file ownership",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-21T02:39:39Z",
+  "updated_at": "2026-09-21T07:42:57Z",
+  "closed_at": "2026-09-21T07:41:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19483",
+  "body": "Path: none | Unblocks: the maintainer's planning of every product card (the feature axis is how priority is judged from now on) — a charter card admitted on that line.\n\nRuling: maintainer directive · 「把北极星的「路」那一节改成可读的功能点顺序 立」 2026-09-21T02:4xZ (chat) — on this seat's proposal, adopted in three steps; the axis list below is the seat's proposal put to the maintainer in the same exchange and to be confirmed or amended by the maintainer on this card before the PR lands\n\nDirector seat, summon #25 (`session_012GcsUbuqFGBibkEDMRC1eE`). Filed, labelled and dispatched under the maintainer's words (direct-dispatch channel); the director's own `os-dev` round; Tier H (`docs/NORTH-STAR.md`, `.claude/skills/pm-dispatch/**`) — the maintainer merges by hand.\n\n## The maintainer's reading, verbatim (chat, 2026-09-21)\n\n「关于任务的车道，我觉得现在是有问题的，应该是按照功能点划分车道我更容易判断优先级和安排，而且一个功能点应该覆盖从协议开始到运行时到前端。不应该按照我们的文件夹划分。」 / 「或者是否建议再加一组label？」 / 「有了功能轴之后我应该怎么安排任务？」 / 「包括我们应该划分哪些功能轴」 / 「把北极星的「路」那一节改成可读的功能点顺序 立」.\n\n## What changes — three steps, all deletions or re-purposings of existing machinery\n\n**1. A feature axis, `area:*`, one per card, 11 values = the North Star definition line (「做出来的是什么」) plus the road.** The planning axis; priority is judged on it. Values and the checklist areas that map onto each (item ids unchanged; each area file gains a top-level `axis` field):\n\n| `area:` | customer capability | checklist areas today |\n|---|---|---|\n| `records` | 业务对象、记录、看数据的视图、能用的表单、搜索 | records-forms, search |\n| `access` | 真挡得住的权限 | access-security |\n| `workflow` | 审批与自动化 | approvals, automation |\n| `reports` | 经营报表 | dashboards |\n| `identity` | 登录与身份 | identity-auth |\n| `api-integration` | 可对外的 API 与集成 | api-backend, integration-system |\n| `files` | 文件 | attachments-storage |\n| `i18n` | 客户的语言 | i18n |\n| `studio` | 不写代码在运行中改应用(含文档编写与门户) | studio-authoring (+ the docs-portal items of platform-core) |\n| `ai` | AI 原生:agent / tool / skill 元数据、MCP 面 | ai |\n| `devpath` | 那条路:create → dev → verify → publish/install → 接 Agent → 迭代;启动、健康、打包、marketplace | cli, platform-core (the rest) |\n\nRules: triage applies `area:*` at first grading in the same write as `domain:*` / `priority:*`; filers may pre-apply; a tooling card carries the area it protects (no area ⇒ it is not filed, ruling #202 B); ⛔ no backfill of the existing backlog — applied when a card is next touched. Named readers (「一个标签存在当且仅有具名读者」): (i) the maintainer's board view by area; (ii) triage grading — the card's priority is inherited from the checklist item in that area (#19459's contract, now keyed by the label); (iii) the parent-card grouping in step 2; (iv) the candidate order in step 3. Label objects: `scripts/pm/ensure-pm-labels.sh` gains the 11 rows (≤100-char descriptions).\n\n**2. The North Star 「路」 section becomes an ordered list of feature points.** Today 「唯一的度量,那条路」 is a paragraph naming the developer journey; it stays as the measure. Beneath it a new list 「路上的功能点」 orders the feature points the maintainer wants next, each one line: `area` · the feature in business words · the checklist item id(s) it must pass · 路步. The list is the roadmap: changing it changes priority; ⛔ no card's priority is edited by hand. Triage grades from this list (the `Path:` line's 定义项 reads off it); a feature point that spans ≥2 layers (spec / runtime / 前端, across repos) is filed by triage as ONE parent card (`area:*`, `pm:epic`, priority from the checklist item) with per-layer sub-issues ordered by `Blocked-by:`, driven end to end by an epic PM (`/pm-dispatch epic:#n`, the existing mechanism made the default for cross-layer features). The first list is written from the maintainer's stated needs in chat (the docs-authoring feature #19482 / objectui#10188 is the first entry) and whatever the checklist's open P0/P1 items say; the maintainer edits it thereafter.\n\n**3. `domain:*` retreats to file ownership.** It keeps deciding which seat may claim which files (the anchoring rule, hot-file serial queues, single-claim paths) and nothing else: it is no longer a queue or a priority unit. Execution seats' candidate order is the roadmap order (the parent's priority), ⛔ not per-lane queues; at most one feature point per `area` in flight at a time unless their file surfaces are disjoint. The lane text that says otherwise (〈候选与批次〉 order, 〈分诊座位职责〉 grading references, `references/lanes/*.md` where they describe queues by domain) is edited in place — shorter, not longer. Seat posts and `pm:seat` stay as they are this round.\n\n## Not in this card\nRenaming checklist item ids (kept stable; the `axis` field is the mapping); re-seating PMs by feature (the epic PM mechanism covers it; domain seats shrink by attrition as #202 B empties the tooling queue); backfilling `area:*` on the existing backlog.\n\n## Verification the PR shows\n`docs/NORTH-STAR.md` carries the ordered feature-point list under 「唯一的度量,那条路」 and the priority rules cite it; every `docs/qa/platform-checklist/areas/*.json` has an `axis` value in the 11-value set and the checklist gates stay green; `ensure-pm-labels.sh` names the 11 `area:*` rows and `check:pm-label-desc-cap` is green; the charter edits pass `check:pm-skill-ratchet` (headroom is 0 everywhere — pay in place; if a line cannot be paid, report the exact count for a ceiling sentence); `git grep -n 'area:' -- .claude/skills/pm-dispatch/SKILL.md` non-zero with the reader list.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

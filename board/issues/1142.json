@@ -1,0 +1,35 @@
+{
+  "number": 1142,
+  "kind": "pull_request",
+  "title": "fix: resolve TypeScript build errors in plugin-hono-server and runtime",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T12:06:26Z",
+  "updated_at": "2026-09-07T04:49:10Z",
+  "closed_at": "2026-04-14T12:07:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T12:07:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1142",
+  "body": "CI builds were failing due to TypeScript errors introduced by recent refactoring: accessing private `context` property in `plugin-hono-server` and unused variables in `runtime`.\n\n## Changes\n\n**plugin-hono-server** - Fixed service access pattern\n- Import `IDataEngine` from `@objectstack/core`\n- Replace `ctx.getKernel().context?.getService('objectql')` with `ctx.getService<IDataEngine>('objectql')`\n- Properly types the ObjectQL service and uses public API instead of accessing private kernel internals\n\n**runtime/http-dispatcher** - Cleaned up unused code\n- Prefix unused `context` parameters with `_context` in `handleMetadata`, `handleData`, and `handlePackages` methods\n- Remove unused `capitalize` helper method\n\n```typescript\n// Before\nconst getObjectQL = () => ctx.getKernel().context?.getService('objectql');\n\n// After\nconst getObjectQL = () => ctx.getService<IDataEngine>('objectql');\n```\n\nAll builds pass, 150 tests passing."
+}

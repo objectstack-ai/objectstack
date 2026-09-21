@@ -1,0 +1,35 @@
+{
+  "number": 1210,
+  "kind": "pull_request",
+  "title": "feat(studio): restyle top bar left segment to Supabase style",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-22T02:53:29Z",
+  "updated_at": "2026-09-07T04:49:33Z",
+  "closed_at": "2026-04-22T04:04:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-04-22T04:04:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1210",
+  "body": "Restyled the Studio header to match Supabase's visual language: replaced vertical separators between switchers with lightweight forward-slash dividers, removed lucide icons from switcher triggers, and added a clickable brand mark on the far left.\n\n## Changes\n\n- **New components**: Added `StudioBrand` (clickable `Boxes` icon linking to `/`) and `SlashDivider` (muted `/` separator) inline in `top-bar.tsx`\n- **OrganizationSwitcher**: Removed `Building2` icon from trigger, tightened chevron to `h-3 w-3 opacity-50`\n- **ProjectSwitcher**: Removed `Layers` icon from trigger, tightened chevron to `h-3 w-3 opacity-50`, kept `ProjectBadge` for environment indicator\n- **Top bar layout**: New left segment reads `[Logo] / Org ⌄ / Project ⌄ | Breadcrumb …` with `gap-1.5` spacing\n- **Removed PackageSwitcher**: Eliminated from header and `__root.tsx` props (project = package going forward)\n\n## Visual result\n\nHeader now renders: **`[◧] / Object Stack / Project Name [PROD] | Overview`**\n\nBehavior of switchers unchanged—this is a visual-only refactor."
+}

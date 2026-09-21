@@ -1,0 +1,33 @@
+{
+  "number": 1048,
+  "kind": "pull_request",
+  "title": "Fix metadata filtering by package in Studio",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T01:20:50Z",
+  "updated_at": "2026-09-07T04:49:16Z",
+  "closed_at": "2026-04-02T02:42:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-02T02:42:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1048",
+  "body": "When switching packages in Studio's left sidebar, the metadata panel displayed items from all packages instead of filtering by the selected package. Two root causes: (1) `selectedMeta` state persisted across package switches, and (2) `client.meta.getItem()` lacked package filtering despite `getItems()` already supporting it.\n\n## Changes\n\n**Frontend**\n- Clear `selectedMeta` state in `handleSelectPackage` to prevent stale metadata display\n- Thread `packageId` through `PluginHost` → `MetadataViewerProps` → `MetadataInspector`\n- Pass `selectedPackage.manifest.id` from App to both object and metadata views\n\n**Client API**\n- Add optional `packageId` parameter to `meta.getItem(type, name, options?)` \n- Construct `?package=` query string when packageId provided\n\n**Backend**\n- Extract `packageId` from `query.package` in `/metadata/:type/:name` handler\n- Pass to `protocol.getMetaItem({ type, name, packageId })`\n\nAll changes maintain backward compatibility—`packageId` is optional throughout.\n\n```typescript\n// Before: metadata from all packages displayed\nawait client.meta.getItem('flow', 'my_flow')\n\n// After: scoped to selected package\nawait client.meta.getItem('flow', 'my_flow', { packageId: 'my-package' })\n```"
+}

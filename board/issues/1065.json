@@ -1,0 +1,37 @@
+{
+  "number": 1065,
+  "kind": "pull_request",
+  "title": "Fix CI test failures: manifest service mocks and I18nLabel schema migration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T10:36:49Z",
+  "updated_at": "2026-09-07T04:49:11Z",
+  "closed_at": "2026-04-02T10:37:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-02T10:37:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1065",
+  "body": "Three test suites were failing due to (1) missing manifest service in mock contexts and (2) outdated assertions expecting I18nLabel as objects instead of strings.\n\n## Changes\n\n**@objectstack/plugin-setup**\n- Pre-register `manifest` service in `createMockContext()`\n- Update I18nLabel assertions: `typeof label === 'object'` → `typeof label === 'string'`\n- Change test assertions from `ctx.registerService.mock.calls` to `manifestService.register.mock.calls`\n\n**@objectstack/plugin-security**  \n- Add manifest service mock using `mockImplementation` pattern in 4 test cases\n\n**@objectstack/service-ai**\n- Pre-populate manifest service in services Map within `createMockContext()`\n\n## Pattern\n\n```typescript\nfunction createMockContext() {\n  const services = new Map<string, any>();\n  \n  // Pre-register the manifest service\n  const manifestService = { register: vi.fn() };\n  services.set('manifest', manifestService);\n  \n  return {\n    getService: vi.fn((name: string) => services.get(name)),\n    services,\n    manifestService, // Expose for assertions\n  } as any;\n}\n```\n\nTests now align with current plugin lifecycle where plugins call `ctx.getService('manifest').register()` during initialization."
+}

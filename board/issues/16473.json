@@ -1,0 +1,34 @@
+{
+  "number": 16473,
+  "kind": "issue",
+  "title": "[finding] measure-test-shard-timings: a file-sharded package bypasses the median merge rule — one run wins, and slices from different runs are summed as one measurement",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T03:18:50Z",
+  "updated_at": "2026-09-07T09:44:57Z",
+  "closed_at": "2026-09-07T09:43:43Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16473",
+  "body": "`scripts/measure-test-shard-timings.mjs` merges repeated measurements of a package by **median across summaries** — that is its stated rule, it is spelled in `provenance.mergeRule`, and it is why feeding several runs is supposed to be more trustworthy than feeding one. For a **file-sharded** package (today: `@objectstack/cli`, the heaviest suite in the workspace) the median rule does not apply. That package gets exactly **one** sample no matter how many runs are fed, and the sample is whichever run was read **last**.\n\n## Where\n\n`buildDataset` in `scripts/measure-test-shard-timings.mjs`. Slices are held back in a ledger keyed `name -> sliceCount -> sliceIndex -> seconds`, and the innermost value is overwritten by each successive summary that carries that index. The completed set is then summed and pushed into the median pool as ONE sample. Nothing keys the ledger by the run a summary came from, and a run summary carries no run identifier for it to key on.\n\n## Measured, with a repro\n\nDriving the exported `buildDataset` directly with three runs' worth of slices for one sliced package, plus an unsliced control fed the same three values:\n\n```\nrun A slices 100 + 100 = 200s\nrun B slices 300 + 300 = 600s\nrun C slices 500 + 500 = 1000s\n\nsliced package    = 1000     (median across the three runs would be 600)\nunsliced control  = 300      (median across the same three values, correct)\n```\n\nThe control proves the median rule is alive and that the sliced path alone bypasses it.\n\n## The sharper half: a cross-run splice, unreported\n\nThe ledger's indices are overwritten independently, so a set completed from **different runs** is summed as though it were one measurement:\n\n```\nrun B slices 1/2 = 300, 2/2 = 300\nrun C slice  1/2 = 500          (run C's 2/2 not fed, or fed earlier)\n\nrecorded whole-package weight = 800s\nskippedIncompleteSlices       = []      (empty — nothing warns)\n```\n\n800s is a duration no run observed. The file's own `skippedIncompleteSlices` guard does not fire, because from the ledger's point of view the set **is** complete — it just is not from one run.\n\n## Why this matters more than it looks\n\nThe script's header already names this exact hazard for the other direction (\"a wrong number that reads exactly like a right one... n times too small\") and refuses cache hits and incomplete slice sets to prevent it. The same hazard survives on the axis of *which run*, undefended, on the one package the slicing machinery exists for and the one whose mis-weighting killed a shard twelve times in a day.\n\nIt is also live for the current refresh procedure rather than hypothetical: the refresh ruling on #16173 directs feeding **eighteen** summaries from three fully green runs. Under that plan every ordinary package is a median of three observations and `@objectstack/cli` is a single observation from whichever run sorts last — the least robust reading for the package that most needs a robust one, with no line of output saying so.\n\n## Not a duplicate\n\nChecked against the open cards on this dataset: #16173 (the stale dataset and its refresh), #16222 (the refresh path is unreachable from an agent container), #16464 (a scheduled refresh workflow — it feeds ONE run's six artifacts, so this defect is outside its completion scope), #16465 (the drift alarm). None of them touches the merge rule. Channel note: the repo-scoped REST search path answers 403 for this session (\"sessions are bound to their configured repositories\"), so the dedup sweep was one targeted MCP `search_issues` over this repo's open issues.\n\n## Shapes, not a ruling\n\n- **A. Key the ledger per input group.** Treat each summary as belonging to a run and complete slice sets within a run, so a sliced package contributes one sample **per run** to the median pool. Needs a grouping key the summaries do not carry today; the caller knows it (the six files of one run are named and fetched together), so it could be passed in rather than inferred.\n- **B. Refuse the ambiguity.** If more than one value is ever seen for the same package, slice count and slice index, fail loudly instead of taking the last. Cheapest, keeps the file honest, and turns a silent wrong number into a named refusal — at the cost of making multi-run refreshes of a sliced package impossible until A lands.\n- **C. Report it.** Keep last-wins but name the sliced package in the generator's stderr summary and in the dataset, the way `skippedIncompleteSlices` already names its case. Weakest: it documents the defect rather than removing it.\n\nFiled unassigned by the `domain:devx` execution seat while working #16173; #16173 is not addressed by this card and remains open.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

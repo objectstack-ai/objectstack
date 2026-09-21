@@ -1,0 +1,33 @@
+{
+  "number": 15360,
+  "kind": "issue",
+  "title": "How many runs are already stranded? — a question no diff can answer, split off #13909 so it stops riding a dev-dispatchable card",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T12:46:13Z",
+  "updated_at": "2026-09-07T11:59:52Z",
+  "closed_at": "2026-09-07T11:59:29Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15360",
+  "body": "Split off **#13909** by the `domain:services` execution seat (session `session_01XpTx2tbq3pZRYAdoGt6E6Y`, `os-warren`, seat post #6021) when that card closed with all four of its deliverables discharged. Unassigned; `domain:*`, type and priority are triage's.\n\n⛔ **This is not a dev-dispatchable card and should never be dispatched as one.** It is filed precisely so that it stops living on one.\n\n## The question\n\nHow many runs on a real deployment are already stranded — i.e. reached a terminal state mid-resume with their pause consumed, and are sitting there unrepaired?\n\n## Why no diff can answer it\n\n#13909 stated this and it still holds: the in-product answer is untrustworthy by construction. Until PR #13934 (`59c089149`) the inspector's oracle **skipped** the shape entirely, so the product's own count was `0` **because of the blindness**, not because of the truth. ⚠️ And per **#15358**, the count is now imprecise in the other direction — it over-reports, because the oracle keys on `status === 'failed'` rather than on the strand discriminator the engine calls authoritative.\n\n⇒ Neither the pre-#13934 zero nor today's count is the answer. A zero measured in this repo is **NOT MEASURED**, not absence.\n\n## What would answer it\n\nAn operator census against a real deployment — `sys_automation_run` (`status='failed'`) joined against `sys_approval_request` (terminal status with `flow_run_id` set), read on the deployment rather than in this repo.\n\n⭐ **It is materially more tractable now than when #13909 was written**, and that is the reason to record it rather than let it lapse. PR #15237 (`5964124dd`) made a stranded row *distinguishable*: the **pause** node is written into `node_id` on every path (not the node that threw), and an over-budget snapshot is recorded as a `$consumedSuspensionDropped` notice in `variables_json` instead of leaving bare NULLs. A census written today can separate a genuine strand from a completed-after-restore row; one written three weeks ago could not.\n\n⚠️ Whoever runs it should read **#15358** first: if that decision lands as option B, the discriminator becomes visible through the inspector itself and the census may be answerable in-product rather than by hand.\n\n## Why it was filed rather than dropped\n\n⛔ A question that only an operator can answer, carried as one deliverable among four on a dev card, is invisible: the card gets dispatched, the three code deliverables get done, and the question rides along until the card closes and takes it with it. #13909 spent three weeks in exactly that shape — and its body was re-quoted as live scope **four days after** its own slice 1 had fixed the defect being quoted.\n\n⇒ Filed with no assignee and no queue label. ⚠️ It is legitimate for this to sit until someone has a deployment to look at; what is not legitimate is for it to disappear because its host card closed.\n\n## Refs\n\n#13909 (closed; the parent) · #15358 (the over-reporting decision — read first) · #13937 / PR #15237 (`5964124dd`, what made a strand distinguishable) · #13934 (`59c089149`, the oracle widening) · #15222 · #15336"
+}

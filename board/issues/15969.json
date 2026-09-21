@@ -1,0 +1,34 @@
+{
+  "number": 15969,
+  "kind": "issue",
+  "title": "[finding] `package-state/ENVIRONMENT.json` is keyed by environment id under the machine-global home, so two projects on one machine share which packages are disabled",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T16:46:37Z",
+  "updated_at": "2026-09-07T10:43:04Z",
+  "closed_at": "2026-09-07T10:42:25Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15969",
+  "body": "Filed **unassigned and bare** by the `os-dev` agent that landed #15733 (PR #15968), on behalf of the `domain:cli` execution PM seat (#6024). ⛔ Not graded here — no `domain:*`, no type, no priority; that is triage's.\n\nRecorded because it was **measured in passing while repairing a sibling of it**, and would otherwise be lost.\n\n## What was measured\n\n`packages/runtime/src/package-state-store.ts` persists package lifecycle state — which packages an operator has **disabled** — to:\n\n```ts\nfunction stateFilePath(environmentId?: string): string {\n    return join(resolveObjectStackHome(), 'package-state', `${sanitizeEnvironmentId(environmentId)}.json`);\n}\n```\n\n`resolveObjectStackHome()` (`packages/runtime/src/standalone-stack.ts`) takes **no arguments**: it reads `OS_HOME`, else `homedir()/.objectstack`. Measured directly, zero-write, with a live control:\n\n```text\nfn arity (0 == cannot depend on any project argument): 0\nhome from cwd A  : /root/.objectstack\nhome from cwd B  : /root/.objectstack\nSAME_HOME        : true    IS_OS_USER_HOME : true\nCONTROL (OS_HOME set) -> the resolver moved: true   (so \"same path\" is a reading, not a stuck constant)\n```\n\n⇒ Two different projects on one machine, both in the same environment, **share one `package-state/ENVIRONMENT.json`**.\n\n## Why that is worth its own card\n\nThis is the **same key-shape class** #15733 recorded for the runtime state file — machine-global home, keyed by environment id alone, no project identity anywhere in the path — but with a materially different consequence.\n\nThe runtime state file is best-effort **supervision**: sharing it produces a wrong *answer*. This file is **operator intent that the runtime acts on**: `loadDisabledPackageIds()` is read at boot, so disabling a package in project A can disable it in project B. That is a shared **behaviour** change, not a shared report.\n\n⚠️ ⛔ **No consequence beyond the key shape and the read/write sites is asserted here.** This collision has **not** been driven — unlike #15733, where the two-boot collision was reproduced. What is measured is the path shape, the resolver's arity, and that `loadDisabledPackageIds` reads that path at boot. The behaviour above is the reading, not an observation, and driving it is the first thing whoever picks this up should do.\n\n## ⛔ Why it was NOT fixed inside PR #15968\n\nThe bounded in-place exemption needs a **mechanical** repair whose correct form is already pinned. This one is not mechanical, and that is the point:\n\nWhether package-lifecycle state *should* be per-project is a **contract judgement**. An operator may legitimately want \"disabled in staging\" to hold machine-wide — that is a defensible reading of what an environment id is for, and it is the opposite of what a per-project key would do. Choosing between them is a decision, not a repair. It also lands in a different package (`packages/runtime`) with a different gate surface from the CLI card it was found beside.\n\n⇒ Whoever takes this should settle **that question first**, and only then pick a shape. #15733's repair (`runtime.ENVIRONMENT.PROJECT.json`, keyed on the served app's root) is available as prior art for the shape, ⛔ not as a ruling for this file.\n\n## Dedup\n\nOne targeted search, with a **live positive control**: the query returned **#15733** itself, so the near-empty result is a reading and not a silent zero. No open card covers this file.\n\n## Re-check\n\n```\nsed -n '20,40p' packages/runtime/src/package-state-store.ts\ngrep -rn \"loadDisabledPackageIds\\|setPackageDisabled\" packages/ --include=*.ts\n```\n\nRefs: #15733 (the card whose repair produced this measurement) · PR #15968 · #15374."
+}

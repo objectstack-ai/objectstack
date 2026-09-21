@@ -1,0 +1,36 @@
+{
+  "number": 1063,
+  "kind": "pull_request",
+  "title": "feat: add plugin-setup and services to Studio deployment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T10:27:30Z",
+  "updated_at": "2026-09-07T04:49:09Z",
+  "closed_at": "2026-04-02T10:30:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-02T10:30:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1063",
+  "body": "Studio Vercel deployment was missing `plugin-setup`, preventing access to the Setup UI. This adds essential plugins and services for comprehensive testing and feature parity between local and production environments.\n\n## Changes\n\n**Dependencies** (`apps/studio/package.json`)\n- Added `@objectstack/plugin-setup` - Setup App for platform administration\n- Added `@objectstack/service-automation` - Workflow/automation engine  \n- Added `@objectstack/service-analytics` - Analytics and reporting\n\n**Vercel Kernel** (`apps/studio/server/index.ts`)\n- Registered SetupPlugin, AutomationServicePlugin, AnalyticsServicePlugin\n- Maintains registration order: Auth/Security/Audit → Services → Setup\n\n**MSW/Browser Kernel** (`apps/studio/src/mocks/createKernel.ts`)\n- Added FeedServicePlugin, MetadataPlugin, AIServicePlugin for parity\n- Added AutomationServicePlugin, AnalyticsServicePlugin, SetupPlugin\n- Ensures MSW mode matches server mode capabilities\n\n**Browser Polyfills** (`apps/studio/mocks/node-polyfills.ts`)\n- Added `randomUUID` export (required by service-ai crypto usage)\n- Added `renameSync` export (required by driver-memory)\n\n## Impact\n\nBundle size increases from ~735 KB to ~3,085 KB (839 KB gzipped) due to additional services. Acceptable trade-off for full testing environment with Setup UI, automation workflows, and analytics capabilities."
+}

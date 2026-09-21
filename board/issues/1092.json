@@ -1,0 +1,35 @@
+{
+  "number": 1092,
+  "kind": "pull_request",
+  "title": "Fix AI chat object visibility by bridging SchemaRegistry to metadata service",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-09T02:16:33Z",
+  "updated_at": "2026-09-07T04:49:10Z",
+  "closed_at": "2026-04-09T02:29:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-09T02:29:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1092",
+  "body": "AI chat in Studio reported zero objects despite system objects existing in the kernel. The root cause: objects in SchemaRegistry (from both `sys_metadata` database and plugin registrations) were invisible to `IMetadataService.listObjects()`, which the AI tools query.\n\n## Changes\n\n**ObjectQLPlugin.bridgeObjectsToMetadataService()** - New dedicated method that bridges ALL SchemaRegistry objects:\n- Runs after `syncRegisteredSchemas()` at the end of `ObjectQLPlugin.start()`\n- Iterates all SchemaRegistry objects via `getAllObjects()`\n- Checks `metadataService.getObject()` to prevent duplicates\n- Registers missing objects with `metadataService.register('object', ...)`\n- Logs bridged count and total for observability\n\n**ObjectQLPlugin.restoreMetadataFromDb()** - Simplified to only handle DB restoration:\n- Removed conditional bridging logic that only ran when `loaded > 0`\n- DB restoration now focuses solely on loading from `sys_metadata` into SchemaRegistry\n\n## Architecture\n\nTwo separate registries existed:\n- **SchemaRegistry** (ObjectQL) ← `sys_metadata` database records + plugin-registered objects\n- **MetadataManager** (metadata service) ← filesystem `.ts`/`.yaml` definitions\n\nAI tools query the metadata service, which had no visibility into SchemaRegistry objects. The bridge ensures all sources are queryable via `IMetadataService`.\n\n## Key Fix\n\nThe original implementation only bridged objects when they were loaded from the database (`if (loaded > 0)`), missing objects registered by plugins during `init()` phase (like `sys_user`, `sys_session`, etc.). The new approach bridges ALL objects regardless of source.\n\n```typescript\n// After all objects are registered and schemas synced\nconst objects = this.ql.registry.getAllObjects();\nfor (const obj of objects) {\n  const existing = await metadataService.getObject(obj.name);\n  if (!existing) {\n    await metadataService.register('object', obj.name, obj);\n  }\n}\n```\n\nGracefully degrades if metadata service unavailable. Execution order ensures filesystem objects load first (MetadataPlugin.start), then all SchemaRegistry objects bridge (ObjectQLPlugin.start)."
+}

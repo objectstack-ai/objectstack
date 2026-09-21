@@ -1,0 +1,36 @@
+{
+  "number": 15867,
+  "kind": "issue",
+  "title": "spec/ai: `KnowledgeRefreshPolicy.cron`'s docblock, shipped describe and test comments attribute the cron syntax verdict to `@objectstack/formula`'s cron-engine \"when the expression is evaluated\" — nothing evaluates that slot, and that engine has no caller outside formula",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T11:51:28Z",
+  "updated_at": "2026-09-07T08:50:48Z",
+  "closed_at": "2026-09-07T08:27:05Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15867",
+  "body": "Recorded by the os-dev seat on #15527 (session `session_01M59rPZZFzqhfMUPFqqZTkf`, branch `claude/issue-15527-cron-dialect-row-names-croner`) while rewriting the Expression Protocol dialect table. Out of #15527's scope: that card's file surface is the docblock rows of `packages/spec/src/shared/expression.zod.ts` and the page generated from it. Filed as a sub-issue of #15035 because #15035 is where \"where does the cron syntax verdict live\" gets decided, and this describe has to say whatever that answer turns out to be. Unassigned, no labels, for triage.\n\n## What\n\n`packages/spec/src/ai/knowledge-source.zod.ts` on `origin/main` `59953d5a3` (2026-09-05):\n\n- `:35-38` (docblock): \"It does NOT judge cron syntax: that verdict is the `cron` dialect engine's (`@objectstack/formula` cron-engine — 5- or 6-field, or an `@yearly`…`@reboot` alias) when the expression is evaluated\"\n- `:45-49` (the `.describe()` on `cron`): \"cron syntax (5- or 6-field, or an `@` alias) is the `cron` dialect engine's verdict when the expression is evaluated, not checked here.\"\n- `packages/spec/src/ai/knowledge-source.test.ts:17-20` and `:96-98` repeat the same attribution in comments.\n\nMeasured (the same walk as #15527; details in #15035 comment 5551551797):\n\n- `cronEngine` (`packages/formula/src/cron-engine.ts:63`) is registered only in formula's own registry (`packages/formula/src/registry.ts:43`). `git grep -n -E 'cronEngine|cron-engine' -- . ':!packages/formula'` returns prose only: this file, a CHANGELOG line, and the D7 ledger notes. No non-test source outside spec/formula constructs or evaluates a `dialect: 'cron'` envelope, and `packages/lint/src/validate-expressions.ts:369` skips every non-`cel` dialect.\n- `refresh.cron` itself is evaluated by nothing: `service-knowledge` reads `refresh.onRecordChange` and never `refresh.cron` (the D7 ledger row `cron-knowledge-refresh` records this, and the describe's own second half says the value is only surfaced for an external scheduler).\n\nSo \"when the expression is evaluated\" names an event that does not occur, and names the wrong evaluator if it did — the only evaluator any spec cron slot meets is `croner`, on `CronSchedule.expression`, not this slot.\n\n## Why it matters\n\nThe `.describe()` is customer-facing: it is the `cron` row of `content/docs/references/ai/knowledge-source.mdx` (`:68` and `:133` on the same commit). An author is told which engine will judge their syntax and when; both halves are wrong — the same shape #15527 corrected in the dialect table. The first half of the describe (\"not checked here\": a non-empty string or an envelope, normalized to the envelope) is accurate and should stay.\n\n## Likely resolution, not a decision\n\nRewrite the attribution in the docblock, the describe and the two test comments to what is true today — no engine evaluates `refresh.cron`; syntax is judged by whatever external scheduler the author hands the value to — then `pnpm --filter @objectstack/spec gen:docs` and a `@objectstack/spec` patch changeset. If #15035 lands a parse-time or lint-time verdict, the same sentence changes again, which is why this sits under that card. The pin test's behaviour (the parse does not refuse `'not a cron'`) is correct as it stands; only its comments are wrong.\n\n## Verified\n\n- Dedup (2026-09-05, REST `issues?state=open&since=2026-09-04`, 5 pages, 394 open issues, grepped locally for knowledge-source / KnowledgeRefresh / refresh.cron; controls #15527, #15035 and #15028 all present in the read): the only hits are #15035 and #15028 themselves, and neither names this file's describe. #15527's own dedup of 2026-09-04 (`search_issues`, #15027/#15028 control) stands for the earlier window.\n- Positive control for the engine grep: the same pattern inside `packages/formula` returns the definition, the registry registration and the index export.\n\nRefs: #15527 · #15035 · #15028 · #14825 · ADR-0049 · ADR-0058."
+}

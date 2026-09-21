@@ -1,0 +1,37 @@
+{
+  "number": 1194,
+  "kind": "pull_request",
+  "title": "feat(metadata): implement dual-table projection for queryable metadata",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-20T12:10:57Z",
+  "updated_at": "2026-09-07T04:49:36Z",
+  "closed_at": "2026-04-20T13:50:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-20T13:50:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1194",
+  "body": "Completes Phase 1 of the ObjectOS implementation by enabling metadata to be queried via the Object Protocol. When metadata is saved to `sys_metadata` (source of truth), it's automatically projected to type-specific tables (`sys_object`, `sys_view`, `sys_agent`, `sys_tool`, `sys_flow`) that Studio can query using standard CRUD operations.\n\n## Implementation\n\n**MetadataProjector Service** (`packages/metadata/src/projection/`)\n- Transforms metadata envelopes into denormalized table rows for efficient querying\n- Supports `object`, `view`, `agent`, `tool`, `flow` metadata types\n- Flattens complex structures (fields, capabilities, configs) into queryable columns\n- Works with both IDataDriver and IDataEngine backends\n\n**DatabaseLoader Integration**\n- Projection triggered automatically in `save()` and `delete()` operations\n- New `enableProjection` config option (default: `true`)\n- Dual writes: `sys_metadata` + type-specific table in single transaction context\n\n**System Object Registration**\n- MetadataPlugin now registers all ObjectOS system objects from `@objectstack/objectos`\n- Makes `sys_object`, `sys_view`, `sys_agent`, `sys_tool`, `sys_flow` available as queryable tables\n\n## Usage\n\n```typescript\n// Saving metadata now writes to both tables automatically\nawait metadataService.register('object', 'account', {\n  name: 'account',\n  label: 'Account',\n  fields: { /* ... */ },\n});\n\n// sys_metadata: Full JSON envelope (source of truth)\n// sys_object: Denormalized projection (queryable)\n\n// Studio queries via Object Protocol\nconst objects = await client.data.find('sys_object', {\n  filter: { namespace: 'crm', active: true },\n  sort: 'name',\n});\n```\n\n## Architecture\n\n```\nPackage Loader\n     ↓\nsys_metadata (envelope, versioning, package tracking)\n     ↓ (automatic projection)\nsys_object, sys_view, etc. (denormalized, queryable)\n     ↓\nStudio UI (Object Protocol API)\n```\n\nThis follows the Salesforce CustomObject and ServiceNow sys_dictionary patterns where metadata is stored as queryable data structures rather than opaque configuration blobs."
+}

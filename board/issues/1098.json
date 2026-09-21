@@ -1,0 +1,37 @@
+{
+  "number": 1098,
+  "kind": "pull_request",
+  "title": "Fix AI Chat Reasoning Display with Vercel AI SDK Data Stream Protocol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "size/xs",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-09T05:08:25Z",
+  "updated_at": "2026-09-07T04:49:20Z",
+  "closed_at": "2026-04-09T06:37:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-09T06:37:36Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1098",
+  "body": "Fixes the reasoning/thinking display in the Studio AI chat by correcting both the backend stream encoding and frontend parsing to align with the Vercel AI SDK v6 Data Stream Protocol.\n\n## Problem\n\nThe AI chat panel was only showing \"thinking\" without displaying actual reasoning content or step progress indicators. This was due to a protocol mismatch between how the backend encoded reasoning events and how the frontend parsed them.\n\n## Root Cause\n\n1. **Backend**: Was encoding reasoning events in standard SSE format (`data: {\"type\":\"reasoning-delta\",...}`) instead of Vercel AI SDK Data Stream Protocol format\n2. **Frontend**: Was attempting to access reasoning through the `data` property instead of the `message.parts` array where it actually appears\n\n## Changes Made\n\n### Backend (packages/services/service-ai/)\n\n- **vercel-stream-encoder.ts**: \n  - Added `dataStreamLine()` helper function for Data Stream Protocol formatting\n  - Fixed reasoning event encoding to use `g:` prefix:\n    - `reasoning-start` → `g:{\"text\":\"\"}\\n`\n    - `reasoning-delta` → `g:{\"text\":\"...\"}\\n`\n    - `reasoning-end` → empty string\n  - Aligns with Vercel AI SDK protocol specification\n\n- **__tests__/vercel-stream-encoder.test.ts**:\n  - Updated tests to expect `g:` prefix format for reasoning events\n  - All 17 tests passing\n\n### Frontend (apps/studio/)\n\n- **AiChatPanel.tsx**:\n  - Changed to extract reasoning from `message.parts` array instead of `data` property\n  - Process `reasoning-delta`/`reasoning` parts for thinking display\n  - Process `step-start`/`step-finish` parts for progress tracking\n  - Removed unused stream event type interfaces (fixed TypeScript warnings)\n\n## Technical Details\n\nThe Vercel AI SDK v6 Data Stream Protocol uses prefix identifiers:\n- `0:` - Text content\n- `2:` - Custom data annotations\n- `g:` - Reasoning/thinking content (DeepSeek R1, OpenAI o1-style models)\n\nThe backend now correctly encodes reasoning using the Data Stream Protocol format, and the frontend properly parses it from the `message.parts` array.\n\n## Testing\n\n- ✅ All stream encoder tests pass (17/17)\n- ✅ TypeScript compilation clean for modified files\n- ✅ Reasoning display should now work correctly with models that support reasoning streams (DeepSeek R1, OpenAI o1-style models)"
+}

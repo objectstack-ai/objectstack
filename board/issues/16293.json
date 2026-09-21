@@ -1,0 +1,35 @@
+{
+  "number": 16293,
+  "kind": "issue",
+  "title": "spec: define the confirmation contract behind `action.ai.requiresConfirmation` — an unconfirmed `run_action` on a gated action is refused, and the refusal carries the way to confirm",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T12:34:28Z",
+  "updated_at": "2026-09-07T11:24:09Z",
+  "closed_at": "2026-09-07T10:22:53Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16293",
+  "body": "Split from #15942 by the director seat under decision batch #54 (maintainer 「同意」 on recommendation A, 2026-09-06). This is the **spec half**; #15942 stays the **runtime half** (MCP `run_action` enforcement) and is `pm:blocked` on this card.\n\n## The ruling this card implements\n\n`action.ai.requiresConfirmation` is a safety flag that today only fills one field of the MCP `list_actions` summary; the spec's own guidance (`packages/spec/src/ai/tool.zod.ts:59-68`) and the ADR-0049 ledger entry `17.tool-requires-confirmation-retired.ts` tell authors it \"actually stops execution\". The maintainer ruled **A — enforce it**, in the minimal shape:\n\n- a `run_action` (MCP, and any other AI-facing action door) against an action declaring `ai.requiresConfirmation: true` **must carry an explicit confirmation** — a `confirm: true` request member or an equivalent confirmation token — or it is **refused loudly** with a registered ADR-0112 code and a response that tells the caller how to confirm and retry;\n- no approval queue, no parking, no server-side HITL workflow in this card — that is a separate, larger decision if ever wanted;\n- `list_actions` keeps reporting the flag truthfully (unchanged).\n\n## What this card owns (spec surface)\n\n1. The **request-side contract**: where the confirmation rides on the AI action request (`packages/spec/src/contracts/ai-service.ts` around `:190`, and the MCP request shape), spelled as a closed member — not a free-form header.\n2. The **refusal**: one new `ERROR_CODE_LEDGER` member (e.g. `ACTION_CONFIRMATION_REQUIRED`) under the owning package, status 4xx (the request is valid but incomplete — the caller can fix it), with the response carrying the action name and the exact member to set.\n3. **Rewrite the two misleading passages** so they describe the enforced behaviour rather than a queue: `tool.zod.ts:59-68` and the ADR-0049 ledger entry's `replacement` prose. The runtime's own \"HITL hint\" comment becomes false once #15942 lands and is that card's to update.\n4. Changeset `minor` on `@objectstack/spec` (additive: one request member, one code); `Clause-②: yes` on both carriers.\n\n## Not in this card\n\n- The runtime enforcement itself (`packages/runtime/src/action-execution.ts`, `invokeBusinessAction` pre-dispatch checks) — #15942.\n- Any per-principal opt-in mode (option C was not chosen).\n\n## Re-check before claiming\n\n```\ngrep -n \"requiresConfirmation\" packages/runtime/src/action-execution.ts   # expect exactly :980 (read) and :1014 (list_actions projection) on main\ngrep -n \"requiresConfirmation\" packages/spec/src/ai/tool.zod.ts packages/spec/src/migrations/entries/semantic/17.tool-requires-confirmation-retired.ts\n```"
+}

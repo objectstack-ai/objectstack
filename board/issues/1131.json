@@ -1,0 +1,35 @@
+{
+  "number": 1131,
+  "kind": "pull_request",
+  "title": "feat(app-host): serve Studio UI on homepage",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T06:28:00Z",
+  "updated_at": "2026-09-07T04:49:24Z",
+  "closed_at": "2026-04-14T06:32:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T06:32:42Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1131",
+  "body": "The deployed app-host was showing \"Fetching Protocol & Data...\" instead of the Studio UI. This configures app-host to build and serve the compiled Studio React application.\n\n## Changes\n\n- **Build script** (`scripts/build-vercel.sh`): Build Studio alongside app-host and copy its `dist/` output to `public/`\n- **Vercel config** (`vercel.json`): Add SPA routing to serve Studio UI for non-API routes, plus cache headers for static assets\n\n## Result\n\nThe homepage now loads the full Studio React UI. API routes continue to work via `/api/*`, and client-side routing works correctly for the SPA."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 16445,
+  "kind": "issue",
+  "title": "[temporary] raise `Test Core (N/6)` timeout-minutes 30 → 45 while #16173's shard balance is unfixed — and un-censor the readings that #16173 needs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T01:45:07Z",
+  "updated_at": "2026-09-07T07:54:06Z",
+  "closed_at": "2026-09-07T03:28:19Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16445",
+  "body": "**Maintainer directive, verbatim: 「临时抬墙」** (2026-09-07, in session `session_01T6HeZvT9wdSJD1ZxJb5Eno`), chosen from three options put to the maintainer: sanction a re-run / raise the wall / assign a devx seat.\n\n⚠️ **Seat note, stated rather than hidden:** the landing point is `.github/workflows/**`, so this card is `domain:devx` by shape. It is being claimed and dispatched by the **`domain:spec` PM seat** because the maintainer directed that seat to execute it. Recorded here so the claim does not read as a lane trespass.\n\n## What to change — one line\n\n`.github/workflows/ci.yml:295` — `timeout-minutes: 30` on the `test` job (`name: Test Core (${{ matrix.shard }}/6)`) → **45**.\n\n45 is not an arbitrary number: the same file already runs `console-pin` at `timeout-minutes: 45`, so this is a value the repo already tolerates on a required job.\n\n## Why 45, from measurement\n\n`Test Core (5/6)` has been killed at the 30-minute wall repeatedly today — 12+ observations at **30:16 ×7 · 30:17 ×2 · 30:18 ×2 · 30:21**, every other job in every one of those runs green.\n\nThose numbers are **not measurements of the shard.** They are readings of `timeout-minutes`: the true duration is `≥ 30:16`, censored and unbounded above. The only uncensored shard-5 readings are **25:32** and **27:36**, and shard 6/6 — which has never been killed — has been observed as high as **28:56**.\n\nSo the observed green band is 25:30–28:56 against a 30:00 wall: a margin of about a minute at the top. 45 restores real headroom without approaching `console-pin`'s precedent from above.\n\n## ⭐ The second reason, which is the more valuable one\n\nI recorded on #16173 that **the shard timings cannot be re-derived from CI history, because every observation in the tail is censored by the wall.** Raising the wall fixes that: the next runs will show how long shard 5 *actually* takes, which is precisely the input #16173 needs to rebalance the shards properly.\n\n⇒ This raise is an instrument as well as an unblock. Whoever fixes #16173 should read the uncensored durations this produces before touching `scripts/test-shard-timings.json`.\n\n## Scope fences — binding\n\n- ⛔ Change **only** the `timeout-minutes` on the `Test Core (N/6)` matrix job at `:295`. The file has nine other `timeout-minutes` values (`filter` 10, aggregate `Test Core` 10, `temporal-conformance` 30, `dogfood` 30, `dogfood-verify` 20, `dogfood-gate` 10, `build-core` 30, `build-docs` 30, `console-pin` 45). ⛔ None of them moves.\n- ⛔ Do **NOT** touch `scripts/test-shard-timings.json`. That constraint was not lifted and the rebalance is #16173's, owned by a devx seat.\n- ⛔ Do **NOT** re-run any cancelled shard. That option was not the one chosen.\n- ⛔ Do not \"also fix\" the shard split, skip a test, or change any `vitest` config.\n\n## Temporary means it carries its own expiry\n\nThe new value must carry an inline comment naming **#16173** as the reason and stating the revert condition explicitly — this returns to 30 once the shard balance is fixed. A temporary raise with no expiry written next to it becomes permanent by forgetting, which is the failure mode this repo's ratchets exist to prevent.\n\n## Revert trigger\n\nClose this card by reverting to `30` when #16173 lands a rebalance. Until then this card stays open as the record that a wall was raised and why."
+}

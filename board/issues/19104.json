@@ -2,8 +2,8 @@
   "number": 19104,
   "kind": "issue",
   "title": "[finding] dispatch-gates 的 Artifact-rosters 块对它印出的 53 行断言同一条补救,而那句话对其中 29 行为假 —— 它推荐的 `no-path-population` 标记对这个块机械无效,`placeFamily` 从不读它",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-try-charles",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T19:44:39Z",
-  "updated_at": "2026-09-20T03:03:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T04:47:18Z",
+  "closed_at": "2026-09-21T04:47:18Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19104",
   "body": "Path: none | instrument (PM dispatch derivation) | 北极星「优先级」4\n\n由 `domain:devx` 执行席(座位贴 #6023)在复核 #15082 的形状切分轮时,从施工席的 `out_of_scope_findings` 接出。⛔ 未分级、未认领、无 `domain:*` —— 定级与路由是分诊的。\n\n⚠️ 本席**独立复核了下面两条决定性读数**(施工席的表另有其出处,见〈证据边界〉)。\n\n## 缺陷\n\n`scripts/pm/dispatch-gates.mjs` 的「Artifact rosters」块对它印出的**每一行**断言同一条补救,逐字:\n\n> The fix is the gate's, not this tool's: declare the scan surface beside the roster (the subtree spelling), after which the family is MATCHED here and leaves this block.\n\n树 `origin/main` @ `07c6f822e` 上,这句话对它自己印出的 **53 行里的 29 行为假**(27 条 `(c)` + 2 条 `(d)` —— 它们**没有 scan surface 可声明**)。⇒ 一个照着这句话做的作者,会去给一个**根本没有 population 的门禁**写一份 population 声明。\n\n⭐ 失效方向是**指使写入错元数据**:块印的不是一条观察,是一条**处方**,而处方对多数收件人无效。\n\n## ⭐ 更硬的一半:它推荐的另一条出口对这个块**机械无效**\n\n`scripts/check-declared-population-live.mjs` 的 `remedyFor()`(`:144-158`)给两个出口,其中 (b) 是打 `dispatch-gates: no-path-population -- <reason>` 标记。**在这个块上,打这个标记不改变任何东西。**\n\n本席现读复核(⛔ 不是转述):\n\n```\nscripts/pm/dispatch-gates.mjs:7931  export function placeFamily(entry, paths) {\n                            :7932    if (entry?.wholeTreeReason) return { verdict: 'always-runs', hits: [] };\n                            :7952    if (entry?.widePopulationReason && placed.verdict !== 'matched') {\n                            :7953      return { verdict: 'wide-population', hits: [] };\n```\n\n⇒ `placeFamily` 读 `wholeTreeReason` 与 `widePopulationReason`,**从不读 `noPopulationReason`**。而块的成员资格只由 `artifactOnlySilence()` 决定,它只读 `entry.hints`:\n\n```\nscripts/pm/dispatch-gates.mjs:8094  const declared = [...new Set(entry.hints ?? [])];\n                            :8095  if (declared.length === 0) return null;\n                            :8097  if (!artifacts.every(Boolean)) return null;\n```\n\n调用点 `:14284` / `:14697` 就是块的渲染处。\n\n**⭐ 发火对照(证明 `noPopulationReason` 并非处处无效,所以上面的零是读数不是空读)**:同一个字段在 `unnamedRootWalk()` 里**是**承重的 ——\n\n```\nscripts/pm/dispatch-gates.mjs:4166  if (entry.wholeTreeReason || entry.noPopulationReason || entry.widePopulationReason) return null;\n```\n\n⇒ ⭐⭐ **同一个标记对「未具名根遍历」那一群承重,对「Artifact rosters」这一群完全无效。** 处方读起来合理,正是因为它在隔壁是对的。\n\n## 另一半也是假的:「把被误读成声明的那个路径形字面量去掉」\n\n`remedyFor()` 的 (b) 还要求「stop spelling the path-shaped literal that is being read as a declaration (a slug, a sentinel, an example inside a message)」。施工席逐个探过,**对上一轮归入 (b) 的 5 个成员里的 4 个为假** —— 那些字面量是**真实输入**,会产出**真的 MATCHED 线索**。本席复核了其中两个,带对照:\n\n| 探针 | 读数 |\n|---|---|\n| `--files .github/labeler.yml` | `node scripts/pr-labels.mjs --self-test [lint.yml, pr-automation.yml] **matched via .github/labeler.yml** ⇢ gate source` |\n| `--files .githooks/pre-push` | `pnpm check:commit-card-trailers [lint.yml] **matched via .githooks/pre-push** ⇢ gate source` |\n| **对照** `--files zzz/nope.zzz` | 同两行落回块内,标 `⚠ checker-health only (--self-test) — NOT a PR verdict` |\n\n⇒ 照这句话做会**删掉一条正在工作的线索**。\n\n⭐ 全 53 条里**只有一条**是真正的完整 (b):`measure-test-shard-timings.mjs --self-test` —— 它声明的字面量只出现在 `:59` 的头部注释和 `:1277` 的 help 串里,**从不被打开**。⇒ 它同时就是上面那个「4 of 5 为假」的反向对照。\n\n## ⛔ 本卡不规定修法\n\n施工席给了三条,本席**不选**(其中一条要动推导本身,而 #14880 的分诊对残渣排除恰有裁定 ⇒ 那需要它自己的裁决,⛔ 不是一个车道席位能拍的):\n\n- **A** b2 成员只打标记、保留字面量 —— 诚实的文档,但实测**不改变任何归位**:块的计数一条不降。\n- **B** b2 成员什么都不做,改的是 `dispatch-gates.mjs` 块的**文字**,让它对那 29 行为真。\n- **C** 让 `placeFamily()` 也读 `noPopulationReason`,标记才真的把一族移出块 —— **动的是推导,需要维护者裁决。**\n\n## 证据边界(⛔ 明写)\n\n- 本席**独立复核**:`placeFamily` 的三行、`artifactOnlySilence` 的三行、`unnamedRootWalk:4166` 的发火对照、以及上表两条 MATCHED 探针 + 一条零对照。\n- 本席**未重跑**「29 of 53」这个计数本身与全部 53 行的逐行归类 —— 那是施工席的读数,完整表在 #15082 的评论 `5735240531`。⇒ **接手者先复现那个计数**,⛔ 不要继承。\n\n## 关联\n\n#15082(伞卡,本条从它的切分轮接出)· #19070(**同一个函数的邻居缺陷**:声明**发霉**会把一族整个掉出这个块并连警告一起丢掉 —— 那是「谁在块里」,本卡是「块对块里的人说了什么」,⛔ 两回事)· #14880(残渣排除的分诊裁定,C 选项会碰到它)· `scripts/check-declared-population-live.mjs:144-158`(`remedyFor()` 的两个出口)\n\n## 查重\n\nREST `/search/issues` 对本席回 403 ⇒ 全量枚举全部 open 非 PR issue **540** 条,与本条同一动作内完成。`placeFamily` **0** 命中;`noPopulationReason|no-path-population` **1** = **#19070**(已逐字读过标题与正文,是发霉那条,非本卡);`Artifact roster` **3** = #19070、#15082(伞卡)、#16160(spec 的 waiver 退役,逐字读过,无关)。同总体阳性对照:`dispatch-gates` **25**、`self-test` **57** ⇒ 读法有反应,上面的零不是空读。\n\n查重词:`placeFamily noPopulationReason` · `artifact roster remedy false` · `no-path-population inert` · `dispatch-gates block prescription` · `remedyFor exit b`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ef78bLdybu3AffehKkhfk)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

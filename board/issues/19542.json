@@ -1,0 +1,33 @@
+{
+  "number": 19542,
+  "kind": "issue",
+  "title": "[rebuild of #19474] spec(lint): wire the inert runtime-create rules for `action` / `hook` / `report` / `skill` / `email_template` / `mapping` — six types, one edit (ruling #203/4 group A+C)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "needs:contract-review",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-21T08:14:28Z",
+  "updated_at": "2026-09-21T08:15:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19542",
+  "body": "⭐ **REBUILD of card #19474**, whose original is unreachable. Filed by the `domain:spec` seat 4 (`session_01AmH9bKvGoLjiY86Q4Z3og2`, seat post #18917) on 2026-09-21, under the same instruction that rebuilt #19384 as #19541: the original was filed by the banned `os-sam` account.\n\n⛔ The original is **not** deleted and ⛔ nothing here overrules it. Measured at this act, exit codes captured before any pipe:\n\n| path | reading |\n| --- | --- |\n| `GET …/issues/19474` | **404** Not Found |\n| `PATCH …/issues/19474` | **404** — it cannot be edited, labelled or closed |\n| `…/issues/19474/comments` · `/timeline` | **200** — the claim, the corrections and all 16 timeline events still resolve |\n| control, a card this seat filed | `…/issues/19491` **200** |\n\n### ⇒ Why a rebuild was not optional here\n\nThis card has a **live delivery**: PR **#19517**, draft, head `72de2b946301aa59f624da807ae7fc383e82b81e`, 6 files, +1018 / −11. The unreadable card blocks it mechanically, ⛔ not cosmetically:\n\n```\nPM_SWEEP_REPO=objectstack-ai/objectstack node scripts/pm/check-clause2-carriers.mjs --pair 19517   → exit 2\n✗ UNJUDGED: card #19474's labels could not be read.\n```\n\nand\n\n```\nnode scripts/pm/label-write.mjs --issue 19474 --add domain:spec --dry-run   → exit 5\n① read — COULD NOT READ: GET …/issues/19474 -> HTTP 404\n```\n\n⇒ the clause-② enqueue gate can never be satisfied for #19517 while its card cannot be read, and this seat cannot hang or strip `needs:contract-review` on the card side of the ruled **dual** carrier. **The PR could never land.** That is the whole reason this card exists.\n\n### The delivery's state, carried over so nothing is re-derived\n\n| what | where it still reads |\n| --- | --- |\n| the round-1 at-tier contract review, **VERDICT: FAIL** on head `33db31d234` | PR comment `5756052587` |\n| this seat's handback adopting it | comment `5756068299` on the old card |\n| the seat correction withdrawing a wrongly-written review exemption | comment `5755777834` on the old card |\n| the blocker record when the review tier went unavailable | comment `5756460515` on the old card |\n| the original claim | comment `5755122378` on the old card |\n\n⚠️ **Round 2 has NOT been judged.** Two dispatches of the delta review both died on their first model request with HTTP 429 「You've reached your Fable limit」 (`claude-fable-5-1` = `CONTRACT_REVIEW_TIER`), and the maintainer has since stated 「fable 没有了」. The review is **ABSENT** — ⛔ not FAIL, ⛔ not PASS — and PR #19517 stays draft, out of the queue, until the tier question is settled.\n\n⚠️ The dev took the review's **route (b)** and **held `skill` out**, so group A lands as **three** types, not four. Whether that is inside the ruling's logic or a scope reduction its author should decide is the **open question** the absent round-2 review was dispatched to answer. ⛔ It is not settled, and ⛔ this seat has not settled it.\n\nThe hand-off card the hold-out produced is **#19527**.\n\n---\n\n## The original card, reproduced verbatim below, ⛔ not rewritten\n\n\nFiled by the `domain:spec` execution seat 3 (`os-sam`, `session_01HnRAeVTLJevtQ5iCPX6JSm`) at 2026-09-21T02:02Z, as the split **ruling 5754204885 on #19275 explicitly instructs this seat to perform** (batch #203 item 4, letter B, maintainer 「203 同意」). ⛔ Not a new finding, ⛔ not a re-grading: `priority:p1` and `domain:spec` are inherited from #19275, whose split this is.\n\n**The policy, ruled once for all ten types:** 「declared ⇒ honoured; not honourable ⇒ retired」.\n\n**Read before writing:** ruling `5754204885` · measurement round `5750725047` (the specification) · triage's grouping `5750895260`. Sibling ruling for `app`/`position`: #19370 (B, same policy).\n\n## Scope — six types, ONE card\n\n**Group A — `action` · `hook` · `report` · `skill`.** The ruling: 「wire the existing candidate rules (`runtimeTypes` rows / `TYPE_TO_STACK_KEY` rows already present, **inert only because the gate filters on `runtimeTypes` first**)」. ⭐ **One execution card for the four, ⛔ not four** — the ruling says so in those words.\n\n**Group C — `email_template` · `mapping`.** 「wire the ledger-driven rule the same way」, and the ruling **folds group C into this card**.\n\n## ⛔ Fences, quoted from the ruling rather than paraphrased\n\n- ⛔ **No ledger-population work is dispatched** for group C: 「the empty warn maps stay empty until a real property needs a row — ⛔ no ledger-population work is dispatched (**zero pull**), **the wiring is the whole deliverable**」.\n- ⛔ Do not widen scope to the other four of the ten. `doc` / `external_catalog` retire under a separate card; `translation` / `tool` are read first under two more. Each has its own carrier.\n- ⛔ Do not re-litigate letter B. The policy is ruled.\n\n## Acceptance\n\nPer type: a real runtime write that the wired rule must refuse is **refused**, plus a lit control that a good write **passes**. ⛔ A `surfaces` / `runtimeTypes` field that merely changed is not the deliverable.\n\n## ⚠️ The ruling's own NOT MEASURED, carried in unchanged\n\n> Still NOT MEASURED on any of the ten: **whether a wired rule fires on a real write**; the dispatch order names it as the report's first reading.\n\n⇒ acceptance is behavioural. ⛔ A diff that changes a declaration without a test proving a real write is judged does not close this card.\n\n## 查重词\n\n`allowRuntimeCreate` · `runtimeTypes` · `TYPE_TO_STACK_KEY` · inert runtime-create declaration · declared but never honoured\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

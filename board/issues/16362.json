@@ -1,0 +1,34 @@
+{
+  "number": 16362,
+  "kind": "issue",
+  "title": "spec: re-derive the liveness ledger before its `dead` / `live-elsewhere` verdicts start warning authors — `view.json` `list.tabs` re-read plus a sampled audit of the 90 `dead` rows (ledger half of #16094)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T15:25:47Z",
+  "updated_at": "2026-09-07T09:41:43Z",
+  "closed_at": "2026-09-07T09:15:53Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16362",
+  "body": "Ledger half of #16094, split by director ruling (decision batch #60, 2026-09-06, option A — `dead` and `live-elsewhere` will imply `authorWarn`, but the ledger is audited first). #16094 (the `shouldWarn` change in `packages/lint`) is `pm:blocked` on this card.\n\n## Why first\n\nThe day the lint flip lands, every `dead` row starts warning every downstream author. One wrong verdict is one platform-wide false alarm. #16094 already found one suspicious row: `packages/spec/liveness/view.json` says `list.tabs` is `live`, while hotcrm's `test/view-tab-label-inert.test.ts` (premise hotcrm#1307) asserts the object-view switcher never reads `list.tabs`.\n\n## Scope\n\n1. **`list.tabs`**: re-derive the verdict against the shipped switcher (objectui console + the served view resolver); correct `view.json` or file the hotcrm test premise as wrong on hotcrm#1307's successor. Record the reading with a firing control.\n2. **Sampled audit of `dead` rows**: at least 10 of the 90 (spread across files, not one file), each re-derived against `origin/main` with a positive control on the same instrument; correct any row that is wrong. Record the error rate on this card — that number is the maintainer's evidence that the flip is safe.\n3. **The one `live-elsewhere` row**: re-derive it too (it is the only member of its class).\n4. Do not touch `shouldWarn` — that is #16094.\n\n## Acceptance\n\n- [ ] `list.tabs` verdict re-derived and the losing side corrected\n- [ ] ≥10 `dead` rows audited with controls; corrections landed; error rate recorded here\n- [ ] `live-elsewhere` row re-derived\n- [ ] changeset present if any ledger row changed"
+}

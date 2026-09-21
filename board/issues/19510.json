@@ -1,0 +1,26 @@
+{
+  "number": 19510,
+  "kind": "issue",
+  "title": "Registry canary failed: fresh npx create-objectstack install is broken",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-21T04:54:04Z",
+  "updated_at": "2026-09-21T04:54:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19510",
+  "body": "The weekly publish-smoke registry canary failed: a fresh `npx create-objectstack@latest` project no longer completes the first-run path against the npm registry — scaffold, npm install, npm run build, then auth + REST CRUD.\n\nThis job installs PUBLISHED artifacts, so a fix already merged to `main` does NOT clear it — only a release does. Check whether the range or template at fault is already fixed on `main` before opening new work.\n\nRead the run log to see WHICH step failed, because these classes have different owners. **Read the boot log before the probes** — a failed probe is usually a consequence, not the defect:\n\n- **a `failed to load` WARN in the boot log** — a dependency-range problem, and the FIRST thing to check whenever an auth or CRUD probe fails. Specimen: `⚠ AuthPlugin failed to load: The requested module @better-auth/core/db does not provide an export named createLocalAccountIssuer`. A static ESM named import of a missing export is a link-time SyntaxError, so the plugin never loads AT ALL and every later symptom follows from that one failure — core service missing, `sys_*` tables never created, sharing rules never seeded, and the probe failure this job finally exits on. Go to the DECLARED dependency range, NOT to the probe, and establish whether the vendor REMOVED or RENAMED the symbol: the two have different fixes. Reproduce it without waiting for a release using the vendor export-contract check in its resolve mode, which the daily Validate Dependencies workflow already runs: it installs every version each declared range admits and checks that export surface against the symbols we import.\n- **npm run build failed** — the published scaffold is broken on its own second command. This is the #4902/#7644/#8677 class; the fix is in create-objectstack or the template it ships.\n- **an auth or CRUD probe failed over a CLEAN boot log** — this is the #3091 class hitting ALREADY-published versions (e.g. a transitive dependency released into a ^ range).\n\n⚠ `✓ Server is ready` and the plugin count print on a DEGRADED boot too (#16630), so neither is evidence that the boot was healthy and neither narrows the branches above.\n\nRun log: https://github.com/objectstack-ai/objectstack/actions/runs/35562508082"
+}

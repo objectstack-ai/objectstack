@@ -1,0 +1,28 @@
+{
+  "number": 19528,
+  "kind": "issue",
+  "title": "[finding] `GET /automation` (list flows) is a FOURTH door of #19365's class — `ListFlowsRequestSchema` declares `limit` with an APPLIED `.default(50)` and a `cursor`, and the handler reads neither",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-21T06:55:39Z",
+  "updated_at": "2026-09-21T06:55:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19528",
+  "body": "Path: none | api-backend:列表门的分页 | ⛔ 本行抄自同族卡 #19365,是立卡者的转写,**定级与路由归分诊**\n\n⏱️ All readings in this card were taken by the `domain:spec` execution seat 2 (session `session_01UDXER3sdqfeVYpEWZs5mZx`) on **`origin/main`** at 2026-09-21T06:5xZ, first-hand. ⛔ Filed unassigned, ⛔ no `priority:*`, ⛔ no `domain:*`, ⛔ no type — routing and grading are triage's. ⛔ Not a claim, ⛔ not a ruling.\n\n## Provenance\n\nSurfaced by the at-tier contract review of PR #19493 (record `5756558349` on card #19365, section ③), which found it while reviewing a *different* door and wrote: 「a fourth door the census did not name, class (b) by the card's own definition … Prime Directive #10 says file it or record it on the card, and neither happened.」 This card is that filing. ⭐ Every reading below was then **re-measured by this seat on `origin/main`**, not carried over from the review — the review's own measurements were taken on the PR head.\n\n## The shape, measured\n\n**Declared** — `packages/spec/src/api/automation-api.zod.ts`, `ListFlowsRequestSchema`:\n\n```\nlimit: z.number().int().min(1).max(100).default(50)\n  .describe('Maximum number of flows to return'),\ncursor: z.string().optional()\n  .describe('Cursor for pagination'),\n```\n\n⚠️ `.default(50)` is an **APPLIED** default, not merely a described one: a reader of the declared schema — an SDK, codegen, an AI client — is entitled to believe an unparameterised list is capped at 50 rows.\n\n**Never read** — `packages/runtime/src/domains/automation.ts`, the `parts.length === 0 && m === 'GET'` branch:\n\n```\nif (typeof automationService.listFlows === 'function') {\n    const names = await automationService.listFlows();\n    return { handled: true, response: deps.success({ flows: names, total: names.length, hasMore: false }) };\n}\n```\n\n`listFlows()` is called with **no arguments**. Neither `limit`, nor `cursor`, nor the declared `status` / `type` filters reach it, and `hasMore` is the literal `false` — the same hard-coded `false` that #19365 is retiring one door over.\n\n**The zero, with its lit control.** `ListFlowsRequestSchema` has **0** occurrences across `packages/runtime/src` and `packages/rest/src`. The control that makes that a reading rather than a dark query: the sibling `ListRunsRequestSchema`, measured by the same instrument over the same two paths, answers `packages/runtime/src/domains/automation.ts` **5**, `packages/runtime/src/query-param.ts` **3**, `packages/runtime/src/domains/automation-runs-query-validation.test.ts` **6**. ⇒ the instrument does see a list-request schema that IS parsed at this boundary; this one is not parsed anywhere outside tests.\n\n⚠️ **RELAYED and NOT reproduced by this seat**: the review also states the client's `automation.flows.list()` takes no options. My probe for the spellings `flows.list` / `listFlows` / `automation/flows` in `packages/client/src/index.ts` answered 0 — but with a control that lights (`getRoute('automation')` = **18** sites in that file), a zero on three guessed *spellings* is a reading about the spellings, ⛔ not about the surface. Whoever takes this card should find the client's list-flows method by shape rather than trusting either number.\n\n## Why this is a finding rather than a note\n\nThe consequence is the one the parent card names: a caller that writes `?limit=10` is handed **every** flow together with a `hasMore: false` that agrees with it. Nothing in the status, the headers or the body distinguishes that from a request served as asked. Under the card's own taxonomy this is class (b) — a declared contract the implementation does not honour — and the declared side is the *stronger* spelling here, because the bound carries an applied default rather than a bare optional.\n\n⭐ **It is also the census gap itself, which is the part worth recording.** #19365's body says 「⭐ **Three sibling doors carry the identical shape**」 and enumerates three; this door is a fourth, in the same file as one of them, and neither #17667 nor #19365 names it. A census that misses a member in its own file is a fact about the census.\n\n## What this card is NOT asking for\n\n⛔ Not a request to widen PR #19493 or card #19365 — the ruling for that card scoped door ①, correctly, and the review said so. ⛔ Not a re-opening of #17667, which deliberately took one door. ⛔ This card takes no position on whether the answer is to honour the parameters or to retire them; the sibling ruling shape exists (#19365 cites decision batch #126 item 1) and the choice is the maintainer's, not this card's.\n\n## Dedup words\n\n`list door declared limit` · `cursor never read` · `hasMore hard-coded false` · `ListFlowsRequestSchema` · `automation flows pagination declared`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

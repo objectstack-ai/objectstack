@@ -1,0 +1,37 @@
+{
+  "number": 1143,
+  "kind": "pull_request",
+  "title": "feat: add centralized datasource mapping for package/namespace-level routing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T12:09:40Z",
+  "updated_at": "2026-09-07T04:49:37Z",
+  "closed_at": "2026-04-14T12:10:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T12:10:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1143",
+  "body": "Implements centralized datasource routing configuration to eliminate per-object `datasource` field configuration. Enables routing by namespace, package ID, or glob patterns with priority-based resolution.\n\n## Changes\n\n### Schema Definitions\n- **`DatasourceMappingRuleSchema`** in `packages/spec/src/stack.zod.ts`: Defines routing rules supporting namespace, package, objectPattern (glob), priority, and default fallback\n- **`datasourceMapping`** field added to `ObjectStackDefinitionSchema`: Accepts array of routing rules\n- **`defaultDatasource`** field added to `ManifestSchema`: Package-level default datasource configuration\n\n### ObjectQL Engine\n- **4-tier resolution priority** in `getDriver()`:\n  1. Object's explicit `datasource` field\n  2. `datasourceMapping` rules (evaluated by priority)\n  3. Package's `defaultDatasource`\n  4. Global default driver\n- **`resolveDatasourceFromMapping()`**: Evaluates rules with namespace/package/pattern matching\n- **`matchPattern()`**: Glob-style pattern matching (`*`, `?` wildcards)\n- **`setDatasourceMapping()`**: Public API to configure rules\n- **Manifest registry**: Stores package manifests for `defaultDatasource` lookup\n\n### Runtime Integration\n- **AppPlugin**: Automatically calls `ql.setDatasourceMapping()` when stack contains `datasourceMapping`\n\n### Testing & Documentation\n- Comprehensive test suite covering namespace, pattern, priority, default, and override scenarios\n- Complete usage documentation with examples and migration guide\n\n## Example Usage\n\n```typescript\nexport default defineStack({\n  plugins: [\n    new ObjectQLPlugin(),\n    new DriverPlugin(new TursoDriver({ url: 'file:./data/system.db' }), 'turso'),\n    new DriverPlugin(new InMemoryDriver(), 'memory'),\n    new AppPlugin(CrmApp),\n  ],\n  \n  datasourceMapping: [\n    // System objects → Turso (persistent)\n    { objectPattern: 'sys_*', datasource: 'turso' },\n    { namespace: 'auth', datasource: 'turso' },\n    \n    // CRM → Memory (dev/test)\n    { namespace: 'crm', datasource: 'memory' },\n    \n    // Default → Turso\n    { default: true, datasource: 'turso' },\n  ],\n});\n```\n\n## Architecture\n\nInspired by Django's Database Router and Kubernetes StorageClass patterns. Resolution priority ensures explicit object configuration always wins, with centralized mapping providing sensible defaults for packages/namespaces.\n\nPattern matching enables batch configuration: `sys_*` routes all system objects, `temp_*` routes temporary objects, etc.\n\nFully backward compatible—existing explicit `datasource` fields work unchanged."
+}

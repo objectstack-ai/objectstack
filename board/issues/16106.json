@@ -1,0 +1,34 @@
+{
+  "number": 16106,
+  "kind": "issue",
+  "title": "spec/lint: a date-range PRESET name is refused only under ordering operators — the same preset on the same date field passes as a bare / `$eq` / `$in` comparand",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T01:28:29Z",
+  "updated_at": "2026-09-07T05:17:05Z",
+  "closed_at": "2026-09-07T05:07:52Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16106",
+  "body": "Found while surveying which platform rules fire on `objectstack-ai/hotcrm` (its #1621, step 3 of epic #1579). Read-only survey, report-first, unassigned.\n\nMeasured against the **pinned `@objectstack/spec@17.3.0` and `@objectstack/lint@17.3.0`**, hotcrm at `1670557`. Injections proven on disk before reading a verdict; restored by blob hash verified by observation.\n\n## What is already shipped, and works\n\n**#8793** (closed, the ruled C half of **#8690**) refuses a declared preset name as a bare temporal comparand at publish time. Confirmed working, verbatim:\n\n- **Injection**: a dashboard widget filter, `close_date: { $gte: '{12_months_ago}' }` to `close_date: { $gte: 'last_30_days' }`.\n- **Result**: `defineStack` refuses, exit 1, with a precise message — `\"last_30_days\" is a dashboard date-range PRESET name, not a filter value … As a bare \"$gte\" comparand nothing resolves it: a declared datetime/date field refuses the query at the engine (INVALID_FILTER / 400) …`\n\nThe same refusal fires from a report `runtimeFilter`, so it is not dashboard-specific.\n\n## The residue\n\n`filter-preset-comparand` judges only `ORDERING_DOLLAR_OPS = {$gt, $gte, $lt, $lte}`, `ORDERING_INFIX_OPS` and `ORDERING_RULE_OPS`, and the publish-time refusal covers the same set. **Every non-ordering position on the same declared date field passes both gates.** Three injections into the same widget filter, on `close_date` (a declared date column of `crm_opportunity`, the dataset's object):\n\n| authored comparand | defineStack | `objectstack lint` | exit |\n|:--|:--|:--|--:|\n| `close_date: { $gte: 'last_30_days' }` | **refuses** | not reached | 1 |\n| `close_date: 'last_30_days'` | accepts | `passed: true`, no finding | **0** |\n| `close_date: { $eq: 'last_30_days' }` | accepts | `passed: true`, no finding | **0** |\n| `close_date: { $in: ['last_30_days'] }` | accepts | `passed: true`, no finding | **0** |\n\nBaseline for all four rows is identical (`errors: 0, warnings: 17, suggestions: 12`), and the ordering row is the working control that the harness does detect this value.\n\n## Why the residue matters\n\nThe consequence #8690 named is not specific to ordering operators: an unlowered preset string reaches the driver as a literal, compares false against every row, and the surface answers 200 with zero rows and no diagnostic. `close_date == 'last_30_days'` is exactly that shape — arguably the *more* likely authoring slip, since equality is what an author writes when they mean \"in this window\".\n\nTwo readings, and I do not have standing to choose between them:\n\n1. The ruling's scope was \"bare temporal comparand\", and equality/`$in` positions are simply the rest of that scope — extend the publish-time refusal (and `filter-preset-comparand`) to any comparand position on a temporal field.\n2. Ordering positions were chosen deliberately because they are the only ones the console lowers, and the rest is out of scope by design — in which case this card is a note on #8793, not a defect.\n\nRecorded rather than assumed. `filter-preset-comparand`'s own reachability is a consequence either way: on a `defineStack`-authored app the schema refuses the ordering positions first, so the lint rule id never appears in output at all.\n\n## Dedupe\n\n`#8690` and `#8793` read in full; `#8793` is closed/completed and covers the ordering half only. No open card names the equality/`$in`/bare positions."
+}

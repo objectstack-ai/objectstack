@@ -1,0 +1,36 @@
+{
+  "number": 1169,
+  "kind": "pull_request",
+  "title": "feat(service-ai): add package management tools and package-aware metadata",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T03:00:12Z",
+  "updated_at": "2026-09-07T04:49:02Z",
+  "closed_at": "2026-04-17T04:13:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-17T04:13:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1169",
+  "body": "Implements package-aware metadata management to ensure all metadata belongs to a package and code-loaded packages remain read-only while database packages stay mutable.\n\n## Package Management Tools\n\nAdded 5 AI tools for package lifecycle management:\n\n- **`list_packages`** - List installed packages with status/enabled filtering\n- **`get_package`** - Retrieve package manifest and metadata\n- **`create_package`** - Create packages with reverse domain ID validation, auto-derived namespaces, semver checking\n- **`get_active_package`** / **`set_active_package`** - Manage conversation-level package context\n\nTool handlers in `package-tools.ts` implement `IPackageRegistry` and `IConversationService` interfaces for package CRUD and conversation state tracking.\n\n## Metadata Tool Enhancements\n\nExtended `MetadataToolContext` with:\n- `conversationService` - retrieve active package from conversation metadata\n- `packageRegistry` - validate package existence and check read-only status\n- `conversationId` - track conversation context\n\nUpdated `create_object` tool to accept optional `packageId` parameter, falling back to active package from conversation context.\n\n## Usage Example\n\n```typescript\n// AI creates package and sets as active\nawait toolRegistry.execute('create_package', {\n  id: 'com.acme.crm',\n  name: 'CRM Application',\n  version: '1.0.0'\n});\n\n// Subsequent metadata uses active package implicitly\nawait toolRegistry.execute('create_object', {\n  name: 'account',\n  label: 'Account'\n  // packageId automatically resolved from conversation context\n});\n```\n\n## Infrastructure Ready\n\nSchema support already exists in `MetadataRecordSchema`:\n- `packageId` - ownership tracking\n- `managedBy` - lifecycle control ('package' | 'platform' | 'user')\n- `scope` - mutability ('system' | 'platform' | 'user')\n- `source` - origin ('filesystem' | 'database' | 'api' | 'migration')\n\nRead-only enforcement and overlay customization require metadata service integration (documented in `PACKAGE_METADATA_IMPLEMENTATION.md`).\n\n## Validation\n\n- Package IDs: reverse domain notation (`com.acme.crm`)\n- Namespaces: snake_case, auto-derived from package ID\n- Versions: semantic versioning"
+}

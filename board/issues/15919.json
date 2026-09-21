@@ -1,0 +1,36 @@
+{
+  "number": 15919,
+  "kind": "issue",
+  "title": "`api-surface/` records a name declared as BOTH a const and a type under `(type)` only — deleting the value half of any of 132 such exports is invisible to `check:api-surface`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:20:38Z",
+  "updated_at": "2026-09-07T09:51:16Z",
+  "closed_at": "2026-09-07T09:46:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15919",
+  "body": "Found while running a follow-up lap on card 1/6 of #14478 (branch `claude/issue-15676-epoch-ms-and-external-vocabulary-exemptions`, head `5b1b5308e`). Filed rather than fixed: the repair is a change to `packages/spec/scripts/build-api-surface.ts` and to every shard it rewrites, which is nothing to do with that card's diff.\n\n## What was measured\n\n`packages/spec/src/shared/epoch.zod.ts` declares one name twice — a value and a type:\n\n```ts\nexport const EpochMs = z.number().int().describe('Unix timestamp in milliseconds (epoch)');\nexport type EpochMs = z.input<typeof EpochMs>;\n```\n\nAfter `pnpm --filter @objectstack/spec build`, the built declaration bundle carries and exports both (`packages/spec/dist/shared/index.d.ts`):\n\n```\ndeclare const EpochMs: z.ZodNumber;\ntype EpochMs = z.input<typeof EpochMs>;\nexport { ..., EpochMs, ... };\n```\n\nThe checked-in shard records ONE entry, and it names the type:\n\n```\npackages/spec/api-surface/shared.json:15    \"EpochMs (type)\",\n```\n\n`pnpm --filter @objectstack/spec check:generated` is green on that tree (all 15 generated artifacts up to date, `check:api-surface` among them), so this is the artifact the gate considers correct.\n\n## The mechanism\n\n`build-api-surface.ts` maps each symbol returned by `checker.getExportsOfModule()` through `kindOf(flags)`. TypeScript merges a value declaration and a type declaration of the same name into ONE symbol whose flags carry both, and `kindOf` tests in a fixed order:\n\n```ts\nif (flags & ts.SymbolFlags.TypeAlias) return 'type';\nif (flags & ts.SymbolFlags.Variable) return 'const';\n```\n\nTypeAlias is tested first, so a dual-declared name always prints `(type)` and the value half is never enumerated. The shard format is name-keyed and cannot express both: measured across all 17 shards in `packages/spec/api-surface/`, zero names appear twice.\n\n## Population — this is not one export\n\nNames declared as `export const X` AND `export type X` in the same file, counted across `packages/spec/src/**/*.ts` (tests excluded): **132**. Three spot-checked against `shared.json`, all recorded as `(type)` only: `EpochMs`, `HttpMethod` (line 30), `ExpressionDialect` (line 17). The shape is the ordinary `z.enum` idiom (`FieldType`, `LogLevel`, `SpanKind`, `WebSocketMessageType`, …), so it is common rather than exotic.\n\n## Why it matters\n\n`api-surface/` is the breadth half of the ADR-0059 backward-compatibility gate, and the script's own header states its purpose: \"A REMOVED export or a CHANGED factory signature is breaking (bump major).\" For these 132 names the value half sits outside that. Deleting `export const FieldType` while leaving `export type FieldType` in place would leave `\"FieldType (type)\"` byte-identical in the shard, `check:api-surface` green, and every consumer's value-position `import { FieldType }` broken — the exact failure the shard exists to make loud.\n\nThe header's SCOPE block already enumerates what these artifacts deliberately do NOT cover (the type hash does not expand references; value-level narrowing such as an enum losing a member is ungated per ADR-0059 §5). This case is not among them, which is why it reads as a defect rather than a declared boundary.\n\n## Not ablated — what a fixer should confirm first\n\nThe consequence above is derived from the shard format, the recorded entries and `kindOf`'s ordering. I did NOT delete a const, regenerate and observe the shard staying green: that ablation needs a spec build per leg and was outside this lap's budget. Confirm it that way before choosing a repair. What IS measured here: the three recorded entries, the 132-name population, the zero duplicate names across shards, and the source ordering quoted above.\n\n## Repair sketch (for triage, not a decision)\n\nEmitting both kinds for a dual-declared symbol — e.g. `EpochMs (const)` and `EpochMs (type)` as two rows — makes the removal loud, at the cost of a one-time rewrite of every shard that contains one of the 132 names (a large but mechanical `gen:api-surface` diff, which is itself the kind of churn ADR-0059 wants reviewed once). Whether the entry format should carry a combined kind instead is a call for the maintainer.\n\nNo assignee — for triage.\n"
+}

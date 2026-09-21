@@ -1,0 +1,36 @@
+{
+  "number": 16477,
+  "kind": "issue",
+  "title": "[finding] plugin-auth comments still point at `last-admin-ban-guard.ts` — a filename that has not existed since the guard was renamed to `last-admin-guard.ts`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T03:29:28Z",
+  "updated_at": "2026-09-07T11:38:09Z",
+  "closed_at": "2026-09-07T11:13:59Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16477",
+  "body": "Found while verifying the code anchors for the ADR-0132 mirror of cloud ADR-0024 (branch `claude/issue-14506-adr-mirror-identity-access`). ⛔ Not fixed there — that PR touches `docs/adr/**` only.\n\n## The finding\n\nThe break-glass last-administrator guard was renamed. `packages/plugins/plugin-auth/CHANGELOG.md` records the rename in its own words — the entry reads that the registration function is `registerLastAdminGuard` and was previously `last-admin-ban-guard.ts`. On `origin/main` (`5a9138703`) the files present are:\n\n```\npackages/plugins/plugin-auth/src/last-admin-guard.ts\npackages/plugins/plugin-auth/src/last-admin-guard.test.ts\npackages/plugins/plugin-auth/src/last-admin-guard.config-anchor.test.ts\npackages/plugins/plugin-auth/src/last-admin-guard.re-pricing.test.ts\npackages/plugins/plugin-auth/src/last-admin-standing-keys.test.ts\n```\n\nThere is no `last-admin-ban-guard.ts` and no `last-admin-ban-guard.test.ts`. Five comments still send a reader to one of them:\n\n```\ngit grep -n \"last-admin-ban-guard\" -- packages/plugins/plugin-auth/src\n```\n\n- `packages/plugins/plugin-auth/src/invitation-role-cap.ts` — the docblock on `isOrgAdminGrade` names its second consumer as \"the break-glass ban guard (`last-admin-ban-guard.ts`, cloud ADR-0024 D5.2)\"\n- `packages/plugins/plugin-auth/src/objectql-adapter.ts` — \"last-administrator ban guard (ADR-0024 D5.2, `last-admin-ban-guard.ts`)\"\n- `packages/plugins/plugin-auth/src/break-glass-local-credential.test.ts` — two sites\n- `packages/plugins/plugin-auth/src/objectql-adapter.test.ts` — points at `last-admin-ban-guard.test.ts` for \"the 403 arm is pinned in ...\"; that file does not exist either, so the pin it names cannot be found by its name\n\n(The CHANGELOG hits are historical entries and are correct as dated records — ⛔ they are not part of this finding.)\n\n## Why it is worth a card rather than a shrug\n\nThese are exactly the pointers AGENTS.md Prime Directive #13 tells the next author to follow (\"grep the ADRs for the surface you are touching\", \"leave the ADR's id in the code\"). A pointer to a file that does not exist costs the reader a search and then a guess, and the last of the five is the worst shape: it names a *test file* as the place an invariant is pinned, so an author checking whether the 403 arm is covered finds nothing under that name and may conclude it is not.\n\nIt is also the same failure class `scripts/symbol-anchors.mjs` was built to end for `docs/adr/**` — a citation that silently stops resolving — except that these live in source comments, which no corpus gate covers today.\n\n## Suggested fix\n\nMechanical: rewrite the four source/test comments to `last-admin-guard.ts`, and the `objectql-adapter.test.ts` one to whichever of `last-admin-guard.test.ts` / `last-admin-guard.re-pricing.test.ts` actually holds the 403 arm — read the test before repointing it, because \"the name moved\" and \"the assertion moved\" are different questions and only the second one decides the target.\n\nNo behaviour change; a `skip-changeset` candidate on the same rule the ADR PRs use (publishes nothing), though a comment-only diff inside a published package should be judged against `docs/` policy rather than assumed.\n\n## Measurements\n\n- Tree: `origin/main` @ `5a9138703` (non-shallow checkout; `git rev-parse --is-shallow-repository` = `false`).\n- Dedup before filing: one targeted `search_issues` in this session returned five related cards (#14555, #11089, #5941, #6084, #5978) — all **closed**, and none of them is about the stale filename; the non-empty result is itself the proof that search answered in this session.\n"
+}

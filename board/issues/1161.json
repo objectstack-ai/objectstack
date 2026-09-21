@@ -1,0 +1,36 @@
+{
+  "number": 1161,
+  "kind": "pull_request",
+  "title": "Migrate project to Claude Code as primary AI coding assistant",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-16T02:01:58Z",
+  "updated_at": "2026-09-07T04:49:28Z",
+  "closed_at": "2026-04-16T02:05:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-16T02:05:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1161",
+  "body": "Establishes Claude Code as the recommended AI coding assistant for ObjectStack development while maintaining backward compatibility with GitHub Copilot and Cursor.\n\n## Changes\n\n- **CLAUDE.md**: Enhanced as primary instruction file\n  - Updated header to clarify it's the primary (not \"equivalent\") instruction file\n  - Added comprehensive \"Claude Code Best Practices\" section (~50 lines)\n    - Effective prompting guidelines specific to Claude Code\n    - How to leverage multi-file awareness and deep analysis features\n    - Repository-specific workflow tips\n    - Example prompts for common tasks (Data Protocol, Testing, Architecture)\n  - Reordered AI assistant references to list Claude Code first\n\n- **.github/copilot-instructions.md**: Updated for multi-assistant compatibility\n  - Acknowledged Claude Code in skills directory comment\n\n- **.github/prompts/README.md**: Converted to assistant-agnostic\n  - Restructured \"For GitHub Copilot\" → \"For AI Coding Assistants\"\n  - Listed Claude Code as \"Recommended\"\n  - Maintained Copilot and Cursor compatibility\n\n- **.github/prompts/OVERVIEW.md**: Updated Chinese documentation\n  - Converted from Copilot-specific to multi-assistant support\n  - Listed Claude Code as recommended (推荐)\n\n## Example Usage\n\nDevelopers can now leverage Claude Code-specific features:\n\n```markdown\n\"I need to add a new field type 'geolocation' to packages/spec/src/data/field-type.zod.ts.\nFirst, read the existing field types to understand the pattern, then implement following\nthe Zod-first approach with proper TSDoc comments.\"\n```\n\nAll existing GitHub Copilot workflows remain unchanged."
+}

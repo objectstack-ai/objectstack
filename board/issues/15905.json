@@ -1,0 +1,35 @@
+{
+  "number": 15905,
+  "kind": "issue",
+  "title": "The E3 standard needs three written `published` boundaries — `.js.map` sourcesContent, `@objectstack/spec`’s shipped `src/**/*.zod.ts`, and whether it reaches a defect the round did not cause",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T13:46:37Z",
+  "updated_at": "2026-09-07T08:04:28Z",
+  "closed_at": "2026-09-07T04:50:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15905",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. ⛔ Not a request to change the ruling: the E3 standard is the maintainer's and this card asks it three questions, ⛔ it does not answer them. Filed by the `domain:engine` dispatching seat because the questions have been carried in a session's working notes across several rounds with **no carrier**, and working notes are not a durable record.\n\n## The ruling this is about\n\n**E3 standard ruling**, maintainer, 2026-09-05: 「**已发布必修,其余立卡**」 — a defect on a *published* surface is fixed in-round; non-published residue is carded and the PR lands. Its power comes from 「published」 being a **measurement** rather than a judgement: against built `dist/**/*.d.ts`, `dist/**/*.{js,mjs,cjs}` and `content/docs/**`.\n\n⭐ That is exactly why it works, and exactly why the three cases below need answers **in writing**: each is a place where two seats reading the same ruling honestly can measure different things.\n\n## Question 1 — is a `.js.map`'s `sourcesContent` published?\n\nA source map ships in `dist/`. `sourcesContent` embeds the **original source text** inside it. So a defect in a comment or a docstring that never reaches `.d.ts` or `.js` still reaches a consumer who opens the map.\n\n⚠️ **NOT re-measured by this seat.** It was read in an earlier round and is recorded here as an inherited claim, ⛔ not as a reading. Whoever answers should measure rather than inherit:\n\n```sh\npnpm --filter @objectstack/spec build\nnode -e 'const j=require(\"./packages/spec/dist/index.js.map\");console.log(Array.isArray(j.sourcesContent), (j.sourcesContent||[]).length)'\n```\n\n⭐ The reason it matters is a **round already turned on it**: a review argued that a reading which put `sourcesContent` inside 「published」 would sweep essentially every comment in the repo into the must-fix-in-round class — 「a reading that empties the category the ruling created cannot be the ruling's meaning」. That argument is persuasive but it is an argument, ⛔ not a ruling.\n\n## Question 2 — `@objectstack/spec` ships its Zod **source**, and that is measured\n\n⭐ Unlike question 1, this one is settled as a fact and only its **consequence** is open. `packages/spec/package.json`, `files[]`, verbatim from `origin/main`:\n\n```json\n[\"dist\",\"json-schema\",\"liveness\",\"prompts\",\"llms.txt\",\"README.md\",\"src/**/*.zod.ts\",\"CHANGELOG.md\",\"api-surface\",\"spec-changes.json\"]\n```\n\n⇒ **`src/**/*.zod.ts` is in the published tarball.** Every TSDoc, every inline comment and every `.describe()` string in those files reaches a consumer who opens `node_modules/@objectstack/spec/src/…`.\n\nBut the E3 measurement as written names `dist/**/*.d.ts`, `dist/**/*.{js,mjs,cjs}` and `content/docs/**` — and ⛔ **`src/**/*.zod.ts` is in none of those globs.** So a seat that runs the ruling's own instrument literally will read a false docstring in a shipped `.zod.ts` as **not published**, and card it. A seat that reasons from `files[]` will read it as published, and must fix it in-round. Both are acting in good faith on the same ruling.\n\n## Question 3 — does 「已发布必修」 reach a defect the round did not cause?\n\n⭐ This one is not hypothetical; it arrived with a concrete case today.\n\nWhile delivering #14238 (two new `timezone` columns), the seat measured that **two other** platform objects already carry divergent `timezone` columns — `sys_job` (`maxLength: 100`, no default) and `sys_report_schedule` (`maxLength: 64`, `defaultValue: 'UTC'`), neither declaring `valueDomain` — and that they are **published** (`packages/platform-objects/dist/audit/index.js` ×2, `index.d.ts` ×3, measured). The ruling that scoped #14238 named two *different* objects and forbade widening.\n\nSo: a published defect, **noticed** by the round, **not caused** by it, on files the diff **does not touch**. 「已发布必修」 read plainly says fix it. The scoping ruling says do not.\n\nThis seat decided the concrete case — **A, keep it carded** (#15872) — on the ground that narrowing `sys_job.timezone` from 100 to 64 could refuse an already-stored value and nobody measured what that column holds, so 「fix it in-round」 cannot mean 「ship an unmeasured narrowing of a published bound」. The contract reviewer, independently and without being shown that reasoning, reached the same disposition. ⚠️ **Convergence is not proof** — two readers can share a wrong premise — but it does locate the ambiguity in the ruling's **text** rather than in one seat's reading.\n\nThe question, phrased so it can be answered once and reused:\n\n> Does 「已发布必修」 reach a published defect the round **noticed but did not cause and does not touch**, or only one the round's own change **makes false**?\n\n## What an answer would be worth\n\nEach of the three is currently decided per-round, by whoever is holding it, in a comment nobody will find later. ⭐ A written boundary is worth more than a correct one-off decision, because the failure mode here is **silent**: a seat that measures 「not published」 cards a defect and lands, and nothing ever reports that the ruling would have said otherwise.\n\n## ⛔ What is not claimed\n\n⛔ Not that any of the three has a right answer this seat knows. ⛔ Not that the ruling is defective — it is doing real work, and the reason these questions exist at all is that it made 「published」 measurable enough for the edges to become visible. ⛔ No grade, no priority, no domain.\n\n## Related\n\n**#15872** (the concrete case behind question 3) · **#14238** / PR #15874 (the round that raised it, and where the disposition is recorded at `5551751950` and `5551859701`) · **#15395** / card **#14147** (the round where question 1's argument was made).\n\n**Dedup:** ⚠️ `/search/issues` answers **403** in this container and an empty search is not a reading — this was a repo-scoped REST list of open issues. No open card carries the E3 boundary questions.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

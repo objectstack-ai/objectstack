@@ -1,0 +1,35 @@
+{
+  "number": 16416,
+  "kind": "pull_request",
+  "title": "docs(spec): state the template dialect's real placeholder contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T21:24:56Z",
+  "updated_at": "2026-09-07T05:16:40Z",
+  "closed_at": "2026-09-07T05:16:38Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-09-07T05:16:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16416",
+  "body": "Fixes #15947\n\nDocs-only. Rewords one imprecise prose example in `packages/spec`, on the reading in triage comment 5556793638 rather than on the card body.\n\n## What the card claimed, and what is actually there\n\nThe card reported a declared-vs-enforced contradiction: spec declares a `{{var}}` template grammar, the only implementation reads single-brace `{field}`. Re-measured on `main` at `fd75728bc6`, that premise does not hold.\n\n`TemplateExpressionInputSchema` is `typedExpressionStringArm('template')` unioned with a `dialect: 'template'` envelope. It judges the dialect tag and non-emptiness and nothing else — and the same docblock already said so one clause later: *\"No template syntax is judged at parse time.\"* There is no declared accept-set for an implementation to contradict. `packages/spec/src/shared/typed-expression-envelope-dialect.test.ts:64` pins that directly, passing the string `not a template {{{` through as `unjudged`.\n\nSo the entire defect is that the docblock introduced the dialect as \"anything with `{{var}}` interpolation\", which reads as a grammar. It is not one.\n\n## Why the fix is not \"the two spellings are equivalent\"\n\nThe prescription this started from was to say `{{var}}` and `{var}` are equivalent and normalised by the implementation. Measured across this tree that is true of `titleFormat` and false of every other `template`-typed slot — so writing it into a docblock that names notification bodies and prompt templates in the same sentence would have replaced one imprecise claim with a more expensive one.\n\n| render path | accepts |\n|:---|:---|\n| the registered `template` dialect engine — `@objectstack/formula`'s `templateEngine`, registered at `packages/formula/src/registry.ts:44`, `HOLE_RE` at `template-engine.ts:31` | `{{var}}` only |\n| messaging `service-messaging/src/template-renderer.ts:39`, email `plugin-email/src/template-engine.ts:34`, i18n `service-i18n/src/file-i18n-adapter.ts:77` | `{{var}}` only |\n| `titleFormat` — objectui `record-title.ts:173`, objectstack `metadata-protocol/src/protocol.ts:11402` | both; `{{var}}` normalised down to `{var}` first |\n\nThat is also the real reason the in-repo single-brace `titleFormat` authors are fine: they sit on the one render path that takes both. The new prose says exactly that, and no more.\n\n## The diff\n\n- `packages/spec/src/shared/expression.zod.ts` — the `TemplateExpressionInputSchema` docblock (the card's anchor), plus the `template` row of the `## Dialects` table in the module header, which carried the identical claim 260 lines above and publishes into the same reference page. Leaving it would have left the file disagreeing with itself.\n- `packages/spec/src/data/object.zod.ts` — the `titleFormat` `describe()`, the one slot where both spellings really do work.\n- `content/docs/references/**` — regenerated, never hand-edited (`check:generated --fix`; exactly one artifact was proved stale).\n- `.changeset/` — patch, see below.\n\nNot touched: `TemplateExpressionInputSchema`'s judging logic, any accept-set, any export, any of the in-repo authors, `content/docs/releases/`.\n\n## Changeset: patch, not `skip-changeset`\n\n`skip-changeset` is for a diff that publishes nothing from a released package. Both edited strings publish:\n\n- the TSDoc reaches `packages/spec/dist/expression.zod-CJCppEJk.d.ts:247`\n- the `describe()` reaches `packages/spec/dist/index.js` and `dist/index.mjs`\n\n`@objectstack/spec` therefore ships changed bytes, and takes a `patch`. Nothing breaking, so no ADR-0087 marker is owed — `check:adr-0087-registration` and `check:changeset-no-major` are green.\n\n## Verification\n\n- `pnpm --filter @objectstack/spec test` — 482 files, 13102 tests, exit 0.\n- `packages/spec/src/shared/expression-dialect-docs.pin.test.ts` pins the `## Dialects` table against the `ExpressionDialect` enum; its own scope note says rewording a cell is free and adding or dropping a row is not, which is exactly what this diff respects. Run by name alongside `typed-expression-envelope-dialect.test.ts`: 2 files, 39 tests, exit 0 — including the pin's anti-vacuity assertion, which proves the reworded row still parses.\n- `pnpm --filter @objectstack/spec typecheck` — exit 0.\n- `pnpm --filter @objectstack/spec check:generated` — all 15 generated artifacts up to date.\n- The 91 gate families derived by `node scripts/pm/dispatch-gates.mjs --commands` for this change set: 90 measured green. `pnpm check:dual-build-cjs-loads` reports PREREQUISITE NOT MET — it reads built output for packages this worktree has no `dist/` for (hono, account, setup, studio and others), so it needs the repo-wide build and is left to CI. Four others (`check:doc-formula-expressions`, `check:doc-security-posture`, `check:skill-examples`, `check:docs-transcript-drift`) reported the same prerequisite on first run and are green after building the lint and client-react closures.\n- `pnpm lint` (`eslint . --no-inline-config`, whole repo, not narrowed) — exit 0 in 58s at `760ca754d3`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T6HeZvT9wdSJD1ZxJb5Eno)_"
+}

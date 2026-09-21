@@ -2,8 +2,8 @@
   "number": 19230,
   "kind": "issue",
   "title": "check-half-states: the anchor's trim notice says the omitted rows are 「in the workflow run log」, but they are only in the step summary — unreachable from a seat, so trimmed H rows naming a lane go unworked",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-tesla",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-20T02:08:57Z",
-  "updated_at": "2026-09-20T10:31:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T04:03:26Z",
+  "closed_at": "2026-09-21T04:03:26Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19230",
   "body": "Path: none | 仪器:巡查锚裁掉 551 行且把读者指向没有数据的地方 | 席位第一职责(SKILL.md:420)的行读不到\n\nFiled by the `domain:skills` execution seat (`session_01W5y9kRg1YtYaMQYExVLRc2`, seat post #7623) at 2026-09-20T02:08Z, out of the 02:01Z fire's anchor reading. Labels `domain:skills` · `pm:queue` set by the seat (its own lane: `scripts/pm/**` and the patrol that posts the anchor); priority left to triage. Class: a mechanisable item (a tool defect), not a decision.\n\nDedupe words: `issue-body limit omitted rows` · `workflow run log step summary` · `H40_ROW_CAP H17_INDEX_ROW_CAP` · `half-state-patrol anchor trim` · `GITHUB_STEP_SUMMARY report.md`. Dedupe reading at filing: the lane's 36 open cards and the 37 open `finding` cards in objectstack, matched on `omit` / `budget` / `summary` / `run log` / `anchor` / `patrol` — no hit.\n\n## One sentence\n\nThe anchor's body-trim notice says the omitted rows are **in the workflow run log**, but the patrol writes the full report only to `$RUNNER_TEMP/report.md` and the job's **step summary**; the job log carries no row, and a seat has no route to a step summary — so every H row trimmed out of the anchor body is a row no seat can work, while the protocol makes working those rows the seat's first duty.\n\n## What the protocol requires\n\n`.claude/skills/pm-dispatch/SKILL.md` line 420: 「锚上点名本道卡/PR/座位贴的 H 行逐行处置,再做其余判据;锚行未处置 ⛔ 不开新派发。」 The seat reads the anchor, works the rows naming its lane, and only then dispatches.\n\n## What the board shows (read 2026-09-20T02:02Z)\n\nAnchor #9857, body written by run 35482554182 at 2026-09-20T02:01:58Z:\n\n- `… 551 further row(s) omitted to fit GitHub's issue-body limit; the full list is in the workflow run log.`\n- `⚠️ 37 family(ies) had rows omitted by the body trim` — among them `H38` (0/1 shown: a STALE `pm:seat` post), `H43` (0/2: a governed-surface PR that asked neither approver), `H36` (0/11), `H20` (0/2). H38 and H43 name seats and gates; 0 of their rows are visible.\n\nThree readers, none reaches the rows:\n\n| route | result |\n|---|---|\n| job log via MCP (`get_job_logs`, job 106003184111, full content) | the log holds the step scripts and one line `check-half-states exited 0`; the report is redirected to `\"$RUNNER_TEMP/report.md\"` (workflow line 244) and appended to `\"$GITHUB_STEP_SUMMARY\"` (lines 310, 337, 460) — no H row is in the log |\n| job log ZIP via REST, `GET /repos/objectstack-ai/objectstack/actions/jobs/106003184111/logs` | redirect to a blob host the egress proxy denies (`CONNECT tunnel failed, response 403`) — already a recorded fact, `references/platform-readings.md` line 306 |\n| the step summary | no REST route is listed in `references/rest-channel.md` and none is known to the seat |\n\nThe pointer text is emitted by `scripts/pm/check-half-states.mjs` at lines 9918, 18730, 19598 and 19814 (`the full list is in the workflow run log`), and its self-test pins that wording (lines 28980, 29372–29373).\n\n## Why it matters\n\n- A trimmed row is silent: the seat sees a family count, not which card. For `H35`/`H43` (gates) and `H38` (seat posts) the omitted row is an obligation nobody learns about.\n- The render budget is filled tail-first from one flat list (comment at line 9613), so which families lose rows depends on ordering, not on weight.\n\n## Acceptance (for the dev; the shape is theirs to choose, with the evidence above)\n\n- After the change a seat can obtain every row naming its lane from a session, by a route that is reachable here (REST issue read, comment read or a committed file). Candidates: reserve budget for gate and seat-post families before stall families; render per-lane overflow as comments on the anchor; or write the full report somewhere a seat can `GET`.\n- The trim notice names the route that actually holds the rows; the self-test pins the new wording and a case where a trimmed gate row is still reachable.\n- Reproduce before: read the anchor body and count families with 0 shown rows; read the job log and grep for `**H` — zero rows.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

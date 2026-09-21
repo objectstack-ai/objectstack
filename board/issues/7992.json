@@ -1,0 +1,35 @@
+{
+  "number": 7992,
+  "kind": "pull_request",
+  "title": "fix(metadata-core,metadata-fs): hash the serialized form, so `put().version` identifies the bytes actually stored (#7856)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T09:48:39Z",
+  "updated_at": "2026-09-07T04:49:21Z",
+  "closed_at": "2026-08-12T10:39:31Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T10:39:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7992",
+  "body": "Fixes #7856\n\n⚠️ **PR opened by the `domain:metadata` PM seat on the implementing dev's behalf.** The dev pushed `claude/issue-7856-hashspec-serialized-form` but had no GitHub write access in its container (three of four sibling dispatches hit the same thing this shift — branches pushed, no PRs). Body below is assembled from the dev's own changeset; the dev's full report will be appended as a comment when it hands the text over. Flag any gap to me, not to them.\n\nImplements the triage seat's ruling of 2026-08-12 (comment `5263973459`): **option 2 — hash the serialized form — plus the head-index fix and a table-driven pin.** Option 3 (document the incoherence) was rejected there; option 1 (reject non-round-tripping specs at the door) was deferred to its own card, not ridden here.\n\n## The defect\n\n`hashSpec` canonicalised a `Date` to `{}`, because `canonicalize` walked a value's own enumerable keys and a `Date` has none. `JSON.stringify` — what every repository actually writes — turns the same `Date` into an ISO string. So the hash of the in-memory spec and the hash of the bytes on disk were **different hashes for the same item**, and the version handed back to a caller did not identify what had been stored.\n\nMeasured on `main`, one spec carrying one `Date`:\n\n```\ncanonicalize(in-memory) : {\"createdAt\":{},\"label\":\"Home\"}\nJSON.stringify (bytes)  : {\"label\":\"Home\",\"createdAt\":\"2024-01-01T00:00:00.000Z\"}\n```\n\n## The change\n\n`canonicalize` now honours `toJSON` exactly as `JSON.stringify` does — consulted once per position, its result serialised as-is and never re-consulted — which makes a new guarantee true **by construction**:\n\n```\ncanonicalize(x) === canonicalize(JSON.parse(JSON.stringify(x)))\n```\n\n## ⭐ Both repository implementations were wrong, in different places\n\nThis is why the fix is one function rather than two patches:\n\n- **`FileSystemRepository`** broke `put().version === get().hash` — it hashed the spec it was handed, wrote `JSON.stringify` of it, then re-hashed the parse on the way back out.\n- **`InMemoryRepository`** broke the repository contract's **invariant 4** (`item.hash === hashSpec(item.body)`) — it stores `body` already serialised (`clonePlain`) while hashing the in-memory spec, so the item it returned disagreed with its own hash.\n- **`SysMetadataRepository`** inherits the fix through the same function.\n\nDownstream, an incoherent version meant a repository could report an `{op:'update', actor:'fs'}` for a file nothing outside the process had touched: the head index held a hash the disk could never reproduce, so re-reading one's own write looked like somebody else's edit. That surfaces **without any watcher** — a restart rebuilds the index from disk and the version the caller was handed no longer matches it.\n\n## ⭐ Ordinary specs hash exactly as before — this is not a migration\n\nThe PM brief made this a hard criterion: if ordinary specs churn, it is a migration, not a fix. The dev measured it at corpus scale rather than asserting it.\n\n> Verified against this repository's entire checked-in JSON corpus — **1973 files hashed under both the old and the new implementation, 0 hashes changed** — and the `hashSpec({})` regression guard in `metadata-core` is unmoved.\n\nThe new path diverges only at a position carrying a callable `toJSON`; a graph without one is byte-identical through `canonicalize`. Stored versions for ordinary specs keep their meaning. Versions for `toJSON`-carrying specs **do** change — and those are exactly the versions that never identified their stored bytes in the first place.\n\nAlso supported as a consequence: a class instance with a `toJSON` now hashes as whatever it serialises to, rather than as its private fields. One without a `toJSON` still hashes as its own enumerable keys — which is what `JSON.stringify` writes for it.\n\n## The pin\n\nTable-driven, as the card demanded (⛔ not a single hand-picked case), and placed in the **shared repository contract suite** so *every* `MetadataRepository` implementation is held to it — a stronger placement than the brief asked for. Rows: `Date` at a key, `Date` under an array index, a class whose `toJSON` yields a string, an object literal carrying its own `toJSON`, a nested case, and a **plain-JSON control row that proves the fix did not simply change every hash**.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AmES43BMDg4bPrxTdi5q7t)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 1093,
+  "kind": "pull_request",
+  "title": "fix: bundle @libsql/client to resolve Vercel deployment issue",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "size/xs"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-09T03:18:27Z",
+  "updated_at": "2026-09-07T04:49:01Z",
+  "closed_at": "2026-04-09T03:46:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-09T03:46:54Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1093",
+  "body": "Fixes the `@libsql/client` missing dependency error when creating objects through the AI chat interface in Vercel deployments.\n\n## Problem\n\nWhen users attempted to create objects (e.g., `department`, `position`) via the AI chat, the operation failed with:\n\n```\nDatabaseLoader save failed for object/department: RemoteTransport: lazy connect failed: Cannot find package '@libsql/client' imported from /var/task/apps/studio/api/_handler.js\n```\n\n## Root Cause\n\nThe `@libsql/client` package was marked as external in the esbuild bundle configuration and relied on Vercel's `includeFiles` mechanism to package it with the serverless function. This approach proved unreliable in the pnpm monorepo structure, causing runtime resolution failures.\n\n## Solution\n\nChanged the bundling strategy to **bundle `@libsql/client` directly** into the serverless function instead of keeping it external:\n\n1. **Removed `@libsql/client` from EXTERNAL array** in `bundle-api.mjs`\n   - `@libsql/client` is pure JavaScript with no native bindings, making it safe to bundle\n   \n2. **Updated `vercel.json`** to remove `@libsql` from `includeFiles` pattern\n   - No longer needed since the package is bundled\n   \n3. **Updated `build-vercel.sh`** to stop copying `@libsql` packages\n   - Removed file copying logic for `@libsql/*` scope\n\n## Benefits\n\n- ✅ Eliminates runtime dependency resolution issues\n- ✅ Makes the deployment bundle self-contained\n- ✅ Removes reliance on Vercel's `includeFiles` mechanism for this package\n- ✅ Simplifies the deployment process\n\n## Testing\n\nAfter deployment with this fix:\n1. Object creation via AI chat should succeed without errors\n2. Database operations using TursoDriver work correctly\n3. No impact on existing functionality"
+}

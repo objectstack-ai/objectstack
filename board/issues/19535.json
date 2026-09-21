@@ -1,0 +1,28 @@
+{
+  "number": 19535,
+  "kind": "issue",
+  "title": "[finding] published read anchors in `packages/spec/src/ui/component.zod.ts` are pinned to the SUPERSEDED `.objectui-sha` `53ded82b` while the live pin is `87af769e9`, and at least one of them resolves to unrelated text at the live pin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-21T08:01:12Z",
+  "updated_at": "2026-09-21T08:01:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19535",
+  "body": "Path: none | api-backend:契约散文的出处时效 | ⛔ 本行是立卡者的转写,**定级与路由归分诊**\n\n⏱️ Measured by the `domain:spec` execution seat 2 (session `session_01UDXER3sdqfeVYpEWZs5mZx`) on `origin/main` and on the pinned `objectui` commit at 2026-09-21T08:0xZ. ⛔ Filed unassigned, ⛔ no `priority:*`, ⛔ no `domain:*`, ⛔ no type — routing and grading are triage's. ⛔ Not a claim, ⛔ not a ruling.\n\n## Provenance\n\nSurfaced by the dev of #19228 while correcting exactly one of these anchors inside PR #19533, and re-measured here first-hand rather than carried over. That PR corrects **one** anchor because one is all its scope touches; the rest are untouched and unverified, which is what this card is for.\n\n## The shape, measured\n\n`packages/spec/src/ui/component.zod.ts` publishes read anchors — file:line pointers into `objectui` naming where a declared prop is actually read — and several of its docblock headers declare the commit those readings were taken at:\n\n```\norigin/main packages/spec/src/ui/component.zod.ts\n  :696   … `containers.tsx` is NO LONGER byte-identical to the one at `53ded82bf`\n  :1868  … `containers.tsx` is NO LONGER byte-identical to the one at `53ded82bf`\n  :2128  … `button.tsx` +6/-11 against `53ded82bf`, so NO anchor below is carried and …\n  :2703  … objectui pin `53ded82b` before the declaration moved: `ObjectGrid.tsx` …\n  :2744  … objectui pin `53ded82b`: `ObjectGrid.tsx:1457` reads `schema.sort` and the …\n\norigin/main .objectui-sha  =  87af769e9a3ee28ace099fdd653d3ebd79fe82e2\n```\n\n⇒ The prose says these were read at `53ded82b`. **This repo does not build against `53ded82b` any more.**\n\n**The falsifier, taken at the live pin.** `ObjectTimelinePropsSchema`'s docblock publishes `:234` as where the timeline's `limit` is read. Read at `objectui@87af769e9`, `packages/plugin-timeline/src/ObjectTimeline.tsx` lines 232–236 are the docblock of `onRowClick`:\n\n```\n   * annotated it `React.MouseEvent` — which a narrower declaration refuses\n   * contravariantly. `BaseSchema`'s own `onClick` / `onChange` / `onSubmit`\n   * already use this spelling for exactly this situation.\n   */\n  onRowClick?: (record: any, event?: any) => void;\n```\n\nNo `limit` read there. The real read is elsewhere in that file (PR #19533 measures it and corrects that one anchor to `:407`).\n\n**Scale, stated honestly as a bound rather than a count.** The same `ObjectTimelineProps` docblock publishes roughly a dozen further anchors of the same kind (`objectName`, `timeline`, `filter`, `sort`, `items`, `data`, `descriptionField`, `mapping`, `variant`, `navigation`, `dateFormat`, `rowLabel`, `minDate`, `maxDate`), and the headers above show the pattern is not confined to that one schema. ⛔ **I did not re-measure those**, so this card claims only that they are *unverified at the live pin*, ⛔ not that they are wrong. Establishing which are stale is a measurement pass, and it is the work this card would buy.\n\n## Why it is a finding rather than a note\n\nThese anchors are the evidence a later reader — human or AI — uses to decide whether a declared prop is honoured. An anchor that silently points at unrelated text does not read as \"stale\"; it reads as \"the claim was checked\", and the check it advertises never happened at the tree anyone is on. The repository already treats this class as load-bearing: two of the headers above exist precisely to say an anchor set was invalidated by an upstream diff, so the convention is understood — it just has no mechanical reader, and the pin moves without touching the prose.\n\n⚠️ There is a cheaper disposition than re-measuring, and triage should weigh it: an anchor that names a line number is falsified by any upstream edit, whereas one that names the construct by shape is not. 「⛔ 按形状找,别按坐标找」 is already this board's working rule for reading these pointers; whether the published anchors should carry line numbers at all is the question underneath this card.\n\n## What this card does NOT ask for\n\n⛔ Not a re-opening of PR #19533, which correctly corrected only the one anchor its scope touched. ⛔ Not a position on whether the answer is a re-measurement pass, a shape-based rewrite, or a gate — the repository has no mechanical reader for this class today, and adding one is a direction call.\n\n## Dedup words\n\n`objectui pin` · `stale read anchor` · `53ded82b` · `.objectui-sha` · `component.zod.ts docblock anchor`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

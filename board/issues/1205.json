@@ -1,0 +1,35 @@
+{
+  "number": 1205,
+  "kind": "pull_request",
+  "title": "feat: add organization member and invitation management UI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [
+    "Claude",
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-21T14:28:38Z",
+  "updated_at": "2026-09-07T04:49:06Z",
+  "closed_at": "2026-04-21T14:32:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-04-21T14:32:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1205",
+  "body": "Implemented complete organization management UI leveraging better-auth's organization plugin. The backend already provided full CRUD APIs via better-auth—this PR adds the Studio frontend for member and invitation management.\n\n## Changes\n\n### New React Hooks (`apps/studio/src/hooks/useOrganizationMembers.ts`)\n- **`useOrganizationMembers(orgId)`** - Manages member operations\n  - `inviteMember(email, role)` - Send invitations\n  - `removeMember(userId)` - Remove members\n  - `updateMemberRole(userId, newRole)` - Update roles\n  - Auto-reloads after mutations\n  \n- **`useOrganizationInvitations(orgId)`** - Manages invitation lifecycle\n  - Lists pending invitations with status/expiry\n  - `cancelInvitation(id)` - Cancel pending invites\n  - `resendInvitation(id)` - Resend invite emails\n\n### Enhanced Org Detail Page (`apps/studio/src/routes/orgs.$orgId.tsx`)\n- **Members tab** - Lists members with role badges, action menus (remove member, protected owner role)\n- **Invitations tab** - Shows pending invites with expiry dates, cancel action\n- **Invite dialog** - Email input + role selector (owner/admin/member)\n- **Empty states** - Helpful CTAs when no members/invitations\n- Overview card displays member count and pending invitation count\n\n## Example Usage\n\n```typescript\n// Component automatically loads and manages state\nconst { members, inviteMember, removeMember } = useOrganizationMembers(orgId);\n\n// Invite with role selection\nawait inviteMember('user@example.com', 'admin');\n\n// Remove member with confirmation\nawait removeMember(userId);\n```\n\n## Architecture\n\nAll backend logic handled by better-auth's organization plugin—no custom API code needed. Frontend consumes better-auth endpoints via existing ObjectStack client SDK methods (`client.organizations.*`)."
+}

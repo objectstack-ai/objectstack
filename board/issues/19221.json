@@ -2,8 +2,8 @@
   "number": 19221,
   "kind": "issue",
   "title": "[finding] check-widening-tells T2 reads a `z.enum(` token INSIDE a string literal as a closed-set opener — every mandated retirement prescription that names the API to call instead reads as a widening",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:skills",
-    "pm:blocked",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T00:41:48Z",
-  "updated_at": "2026-09-20T22:31:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T04:13:32Z",
+  "closed_at": "2026-09-21T04:13:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19221",
   "body": "Path: none | instrument (`scripts/pm/check-widening-tells.mjs` T2 — an opener token INSIDE a string literal) | Blocked-by: #19384\nBlocked-by: #19384\nRestart-when: PR #19438 reads MERGED by content on `origin/main` ⇒ re-run the card's three legs on that tree; leg A silent ⇒ close as fixed by #19384, else `pm:queue`\n\nFiled by the `domain:spec` **seat 2** execution seat (座位贴 #18549, `session_01JbZnqu8bt6YqfJsr9vaFb3`), from the ② note of the at-tier contract review of PR #19215 (record 5746455074). ⛔ Filed unassigned, ⛔ no `priority:*`, ⛔ no `domain:*`, ⛔ no type — routing and grading are triage's. ⛔ Not a claim. ⛔ Not a ruling.\n\n## The defect\n\n`scripts/pm/check-widening-tells.mjs`'s **T2** matcher reads the token `z.enum(` **inside a string literal** as a closed-set opener. A prescription string that *teaches the author which API to call instead* therefore reads as \"the accept set gains a value\", and `--declaration no` exits 4 on a diff that widens nothing.\n\n## Measured — three legs, one instrument, two controls\n\nSynthetic diff, one file, three added lines, run through the gate itself:\n\n```\n✗ T2 packages/spec/src/probe.ts:3\n    + + 'is a declaration with no enforcement; call `z.enum()` directly instead.',\n✗ T2 packages/spec/src/probe.ts:7\n    + return z.enum(values, {\n```\n\n| leg | added line | want | got |\n|---|---|---|---|\n| **A** — prose fragment whose TEXT mentions the opener in backticks | ``+ 'is a declaration with no enforcement; call `z.enum()` directly instead.',`` | silent | **T2 fires** ⇐ the defect |\n| **B** — dark control: the *same* continuation-fragment shape with no opener token in its text | `+ 'in the enum — the enum accepts the value, so the prescription can never fire.',` | silent | **silent** ✅ |\n| **C** — firing control: a real new opener | `return z.enum(values, {` | T2 | **T2** ✅ |\n\n⇒ the trigger is the **token inside the prose**, not the fragment shape. Leg B is the discriminator: it rules out \"the concatenation-fragment guard is broken\", because that guard is demonstrably still working on the identical shape.\n\n## Where it was hit for real\n\nPR #19215 (`Fixes` #17109), `packages/spec/src/shared/retired-key.ts:329`:\n\n```ts\nthrow new Error(\n  'enumWithRetiredValues: no retired member declared — a retirement wrapper that can never fire '\n    + 'is a declaration with no enforcement; call `z.enum()` directly instead.',\n);\n```\n\n`node scripts/pm/check-widening-tells.mjs --declaration no --diff <pr19215.diff>` → **exit 4**, 2 tells, one of them this line.\n\n⚠️ The sibling tell on the same run — `:349`, `return z.enum(values, {` — is **NOT** part of this card: it is a real opener, and **#18640** settled that shape by maintainer ruling (batch #155 item 3, letter A, 「同意」 2026-09-18T05:13Z): the subset test stays and the remedy is `Clause-②: yes` plus the spec lane's at-tier review, ⛔ no licence card. That is exactly the route PR #19215 took. ⛔ Do not read this card as re-litigating that ruling.\n\n## ⭐ Why this one bites systematically rather than once\n\nThis repo **requires** the text it is firing on. `AGENTS.md` Post-Task Checklist #3 and the `spec-property-retirement` kit make a removal's prescription mandatory, and a good prescription names the API the author should call instead. So the matcher is biased precisely against the diffs this repo mandates — retirements, tombstones and construction-time refusals — and it is biased in the direction that costs a landing, not the one that lets a widening through.\n\n## Remedy shape (the gate's own prescription, quoted)\n\n> if the tell is FALSE, repair it here in the matcher (`scripts/pm/check-widening-tells.mjs`, with a `--self-test` case pinning the shape), or file that repair as its own card when it is out of this PR's scope.\n\nThe three legs above are ready-made `--self-test` battery cases; leg B is the one that keeps a repair from being a blanket \"ignore lines containing quotes\".\n\n## ⚠️ NOT measured\n\n- **Whether the same prose-mention blindness exists on T1.** Only T2 was probed.\n- **How often it has actually cost a landing.** No sweep of past runs was taken. ⛔ Do not read \"it bit once here\" as a frequency.\n- **`check-clause2-carriers.mjs`'s twin matcher**, if it has one. Not probed.\n\n## Dedupe\n\nSearched open **and** closed over `check-widening-tells`: **12 results**, listed rather than summarised, none covering the prose-mention shape.\n\n- `#19099` open — T1 on a member bounded inside a previously-`z.unknown()` bag.\n- `#19156` open — misses a key re-typed INTO a universal acceptor.\n- `#19165` open — `check-changeset-no-major`'s remediation prose, a different script.\n- `#18640` closed `not_planned` — a REAL opener in an appended options object; the maintainer ruling quoted above.\n- `#16822` closed `completed` (**LANDED**, PR #16944, added `isConcatenationFragment`) — T2 on the FIRST fragment of a multi-line string ARGUMENT. Closest sibling, and **leg B is the evidence its guard still works**: the fragment shape alone no longer fires. This card is about the token *in the text*.\n- `#18234`, `#18629`, `#18488`, `#18702`, `#18560`, `#17955`, `#17300` closed — T1-on-`z.union(`, the `z.unknown()` reverse blind spot, `matchingCloser`, file-local declaring factories, the repo's own declaring helpers, `retiredKey()` tombstone lines, and the retirement ledger's generated rows respectively. None is a token read out of a string literal.\n\n⛔ The zero on this shape is a reading, not a void one: the same query returns 12 siblings, so the instrument fires.\n\n## Dedupe words\n\n`check-widening-tells` · T2 · `BARE_STRING_ELEMENT` · opener inside a string literal · prescription prose · `z.enum()` in backticks · false C5\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,35 @@
+{
+  "number": 1166,
+  "kind": "pull_request",
+  "title": "Deploy Studio to /_studio path in Vercel deployments",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-16T08:37:46Z",
+  "updated_at": "2026-09-07T04:49:05Z",
+  "closed_at": "2026-04-16T08:43:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-16T08:43:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1166",
+  "body": "Studio SPA was being served from the root path in Vercel deployments. Now serves from `/_studio` to separate it from API routes and future root-level content.\n\n## Changes\n\n**Build script** (`apps/server/scripts/build-vercel.sh`):\n- Copy studio dist to `public/_studio/` instead of `public/`\n\n**Vercel configuration** (`apps/server/vercel.json`):\n- Add `VERCEL: \"true\"` to build env\n- Update asset cache headers: `/_studio/assets/*` instead of `/assets/*`\n- Add rewrites for `/_studio` and `/_studio/*` to serve Studio SPA\n\n**Vite configuration** (`apps/studio/vite.config.ts`):\n- Set `base: '/_studio/'` when `VERCEL` env var is present\n- Ensures all asset references use correct path prefix\n\n## Result\n\n- Studio accessible at `https://domain.vercel.app/_studio`\n- API routes remain at `https://domain.vercel.app/api/*`\n- Non-Vercel deployments unaffected (use relative paths)"
+}

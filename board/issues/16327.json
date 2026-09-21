@@ -1,0 +1,34 @@
+{
+  "number": 16327,
+  "kind": "pull_request",
+  "title": "docs: the manifest surface no longer describes itself as an open object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T14:27:52Z",
+  "updated_at": "2026-09-07T06:14:50Z",
+  "closed_at": "2026-09-07T06:14:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-09-07T06:14:49Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16327",
+  "body": "Fixes #14721\n\n`ManifestSchema` became a `strictObject` at #14192. Five prose sites still described the surface it replaced. They are not inert: the `packages/spec` and `packages/core` docblocks land in the published declaration files (measured — the new text reaches 14 `spec` and 2 `core` `dist` files), so an author, or an AI writing metadata, reading those declarations was told the manifest tolerates undeclared keys while the runtime now rejects them by name and offers the declared spelling.\n\nProse that contradicts a tightened contract is the \"tolerance hides bulk mistakes\" shape, so the bar here was that each rewritten sentence teaches the **current refusal** — not merely that it stops teaching the old permission.\n\n`Clause-②: no` — no schema, behaviour, export or test expectation changes.\n\n## The five live sites\n\n| # | file | the false claim | what it says now |\n|:--|:--|:--|:--|\n| 1 | `packages/spec/src/stack.zod.ts` | \"NOT `strictObject`: `ManifestSchema` is an open object\" | the posture is **inherited**: the schema is `ManifestSchema.extend(...)`, `.extend()` carries the base's unknown-key handling, so an assembled body refuses undeclared keys too |\n| 2 | `packages/cli/src/commands/compile.ts` | the superset under `manifest` is safe \"because `ManifestSchema` is an open object\" | it is safe because **nothing parses it** — `runAuthoringRules` reads fields off the object and never hands it to a schema |\n| 3 | `packages/core/src/artifact-packages.ts` | \"carries defaults **and Zod strips undeclared keys**\" | the defaults clause is kept (it still holds); the strip clause is retired — the key is now refused at that parse, never dropped from a clone |\n| 4 | `docs/audits/2026-07-...-ledger.md` | \"`api/`, `system/`, `kernel/` and `cloud/` are wire surface by construction\" | only `cloud/` is; the other three read **mixed** in this file's own table 270 lines above |\n| 6 | `content/docs/protocol/kernel/plugin-spec.mdx` | closed list omitted `contributes.kinds[]` | names it, and adds that the closure is inherited by `AssembledPackageBodySchema` |\n\nSite 1 keeps the `#14242` collection-shape rationale — that gate is unchanged and still the reason this declaration exists. What changed is that it is no longer the *only* gate at that seam.\n\n## Measured, not asserted\n\nThe rewrites claim a runtime behaviour, so it was measured against the built `dist`, each with its negative control:\n\n| claim | reading |\n|:--|:--|\n| `AssembledPackageBodySchema` inherits the closed posture | `REFUSED code=unrecognized_keys` — message byte-identical to `ManifestSchema`'s, rename `namesapce` to `namespace` intact |\n| ...and that refusal is about the key, not a broken schema | control: the same body clean, and with `objects: []`, both **ACCEPTED** |\n| `contributes.kinds[]` entries are closed | `REFUSED` at path `contributes.kinds.0`, rename `descriptio` to `description`; clean twin **ACCEPTED** |\n| `engine` / `engines` / `contributes` closed | all `REFUSED` naming the key; clean twins **ACCEPTED** |\n| defaults still move bytes (site 3) | parse adds exactly `defaultDatasource: 'default'`, `scope: 'project'` |\n\nAn earlier probe of `contributes.kinds[]` reported `invalid_type` on a missing required `id` — a masked reading, not a refusal of the unknown key. Re-run with otherwise-valid fixtures so `unrecognized_keys` is what fires.\n\n## Verification\n\nAll at `7a265fbb49`.\n\n- `pnpm --filter @objectstack/spec check:generated` — **15/15 artifacts up to date**, `check:docs` and `check:api-surface` included\n- `typecheck` — `spec`, `core`, `cli` all green\n- tests — `spec` 482 files / 13102 passed · `core` 50 / 1215 · `cli` (`unit` tier) 181 / 2453 (+6 expected fail)\n- `eslint . --no-inline-config` — the **whole** population, 6216 files, 0 errors, 0 warnings (no narrowing claimed; the full run fit)\n- 12 further gates the change set derives: doc-frontmatter, docs-section-name, doc-route-spelling, comment-mask adoption + corpus, closing-keyword-parity, changeset-no-major, empty-changeset, section-landing-index, keyed-text-bounds, affected-docs, drift-comment — all exit 0\n- `check:nul-bytes`, `check:doc-anchors`, `check:docs-single-h1`, `check:doc-authoring`, `check:docs-audit-scope`, `check:corpus-claim-drift` — all exit 0\n\nThe remaining derived families are CI's farm run, not re-derived locally.\n\n## Two sites deliberately NOT edited\n\n- **Site 5** (`manifest.zod.ts`, the `main` describe) — **already discharged.** The describe carries the honest wording the card prescribed. The card's premise does hold (ADR-0025 is 521 lines; `grep -w main` is 0 against 5 substring hits — control lit), but the surviving `(ADR-0025 §3.4 step 1)` citation in the JSDoc points at the pipeline's **build step**, which is exactly where `os plugin build` reads and rewrites the key — the same citation `packages/cli/src/commands/plugin/build.ts:5` uses for the same step. Editing it would churn nine generated reference rows for no correction.\n- **The seventh site** (`ledger.md:1344`) — the same stale sentence, but quoted **as a historical finding**, in a row that says it \"is reported for its owner rather than edited here\". That is the ledger recording a residue correctly. Left alone.\n\n## Notes\n\n- Branched from `4a1a3b0c25`. The four commits `main` gained since touch **none** of the six files here (checked with the detector's control lit), so the readings above are not stale against them.\n- Issue #15963 is editing `stack.zod.ts` concurrently at `:1786-2609`; this PR's only hunk there is at `:1144`, 638 lines clear.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T6HeZvT9wdSJD1ZxJb5Eno)_"
+}

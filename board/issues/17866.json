@@ -2,8 +2,8 @@
   "number": 17866,
   "kind": "issue",
   "title": "CI: test-nightly-tiers.yml carries the same run-level Turbo passthrough defect — both legs, and its whole-package leg has it too",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "baozhoutao",
@@ -13,16 +13,19 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-12T15:36:36Z",
-  "updated_at": "2026-09-13T06:12:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T03:14:19Z",
+  "closed_at": "2026-09-21T03:14:19Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 1,
   "locked": false,

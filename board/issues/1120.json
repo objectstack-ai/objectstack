@@ -1,0 +1,37 @@
+{
+  "number": 1120,
+  "kind": "pull_request",
+  "title": "feat: add Vercel deployment support to app-host example using Hono",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-13T11:18:51Z",
+  "updated_at": "2026-09-07T04:49:04Z",
+  "closed_at": "2026-04-14T05:02:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T05:02:49Z",
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1120",
+  "body": "将 example/app-host 部署到 Vercel，使用 Hono 适配器实现 serverless 函数部署。\n\n## Implementation\n\n- **Serverless entry point**: `api/[[...route]].js` delegates to esbuild-bundled `_handler.js`\n- **Server implementation** (`server/index.ts`): Boots ObjectStack kernel with Hono adapter using `@hono/node-server`'s `getRequestListener()` for Vercel compatibility\n- **Build pipeline** (`scripts/build-vercel.sh`): Turbo build → esbuild bundle → copy native dependencies to local node_modules\n- **Bundle config** (`scripts/bundle-api.mjs`): Self-contained ESM bundle with external native modules (better-sqlite3)\n- **Vercel config**: Custom build command, function settings (1024MB memory, 60s timeout), API rewrites\n\n## Dependencies\n\nAdded:\n- `@hono/node-server` + `hono` - HTTP adapter\n- `@objectstack/hono` - ObjectStack Hono integration\n- `better-sqlite3` - Native dependency (copied to local node_modules for Vercel packaging)\n- `esbuild` - Bundler\n\nConfiguration:\n- `.npmrc`: `node-linker=hoisted` (prevents pnpm symlink issues in Vercel)\n- `.vercelignore`: Excludes source files, keeps only bundled artifacts\n\n## Architecture\n\nFollows the proven `apps/studio` deployment pattern:\n\n```typescript\n// server/index.ts - Singleton kernel persists across warm invocations\nlet _kernel: ObjectKernel | null = null;\nlet _app: Hono | null = null;\n\nasync function ensureKernel() {\n  if (_kernel) return _kernel;\n  const kernel = new ObjectKernel();\n  await kernel.use(new ObjectQLPlugin());\n  await kernel.use(new DriverPlugin(new InMemoryDriver()));\n  await kernel.use(new AuthPlugin({ ... }));\n  await kernel.use(new AppPlugin(CrmApp));\n  await kernel.bootstrap();\n  _kernel = kernel;\n  return kernel;\n}\n\nexport default getRequestListener(async (request, env) => {\n  const app = await ensureApp(); // Creates Hono app with kernel\n  return await app.fetch(new Request(url, { method, headers, body }));\n});\n```\n\n## Deployment\n\n[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/objectstack-ai/framework/tree/main/examples/app-host&project-name=objectstack-app-host&repository-name=objectstack-app-host)\n\nSet `AUTH_SECRET` environment variable (minimum 32 characters).\n\nSee [DEPLOYMENT.md](./examples/app-host/DEPLOYMENT.md) for detailed instructions."
+}

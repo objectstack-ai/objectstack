@@ -1,0 +1,36 @@
+{
+  "number": 1425,
+  "kind": "pull_request",
+  "title": "feat(connector-openapi): OpenAPI 3.x → Connector generator (ADR-0023)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T23:23:13Z",
+  "updated_at": "2026-09-07T04:49:19Z",
+  "closed_at": "2026-06-01T00:00:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T00:00:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1425",
+  "body": "## Summary\n\nImplements the core of [ADR-0023](https://github.com/objectstack-ai/framework/blob/claude/funny-pasteur-cppKR/docs/adr/0023-openapi-to-connector-generator.md): a new open-source package **`@objectstack/connector-openapi`** that turns a declarative **OpenAPI 3.x** document into a `Connector` — one operation → one action — plus a generic handler per action.\n\nIt adds **no new runtime abstraction** and is **self-contained** (depends only on `@objectstack/core` + `@objectstack/spec`, like every sibling connector). Each generated action drives one shared static-auth HTTP transport that mirrors `@objectstack/connector-rest` (build URL from base+path+query, apply static auth, JSON-encode the body, normalise the response to `{ status, ok, body }`). The generator returns the `{ def, handlers }` shape consumed by `engine.registerConnector(def, handlers)` — exactly like the hand-written, REST, and MCP connectors.\n\n## What's in here\n\n- **`createOpenApiConnector`** — flattens paths × methods into actions; action `key` = `operationId` with a deterministic slug fallback and de-duping; `inputSchema` assembled as `{ path, query, header, body }` from `parameters` + `requestBody`; `outputSchema` from the `200`/`2xx`/`default` JSON response. Each handler interpolates path params and forwards `query`/`header`/`body` through the shared transport.\n- **Static auth** (`none`/`api-key`/`basic`/`bearer`) supplied by the caller, reflected in the connector definition.\n- **`include` allowlist** to trim large specs to a usable subset.\n- **`registerOpenApiConnector`** helper mirroring the sibling connectors' registration.\n- Added `@objectstack/connector-openapi` to the changesets `fixed` group + a changeset entry; lockfile refreshed.\n\n## Open-source / enterprise boundary (ADR-0023 §4)\n\nStatic auth only. Managed OAuth2, credential vault, per-tenant lifecycle, and curated catalogs remain enterprise (ADR-0015/0022).\n\n## Testing (all green locally)\n\n- **10/10 unit tests pass** (metadata, key/slug fallback, schema assembly, output schema, auth, allowlist, handler path/query/body dispatch, missing-base-URL error, engine registration).\n- `turbo run build` (esm + cjs + dts), `eslint`, `check-changeset-fixed.mjs`, and `pnpm install --frozen-lockfile` all clean.\n\n## Remaining follow-ups (noted in the ADR)\n\n- `openapi-to-connector` CLI emitting a reviewable `*.connector.json` (needs a multi-entry build; every connector package currently uses the shared single-entry `tsup` config).\n- A worked example under `examples/` (GitHub/Stripe subset).\n- YAML spec input and a `$ref` deref pass.\n\nhttps://claude.ai/code/session_01UW43Uzua3azgNKoLGkkUde"
+}

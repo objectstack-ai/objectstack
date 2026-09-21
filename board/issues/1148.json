@@ -1,0 +1,35 @@
+{
+  "number": 1148,
+  "kind": "pull_request",
+  "title": "debug: add diagnostic logging to troubleshoot Vercel config.plugins issue",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-15T07:48:20Z",
+  "updated_at": "2026-09-07T04:49:03Z",
+  "closed_at": "2026-04-15T08:41:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-15T08:41:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1148",
+  "body": "Server deployment to Vercel fails with `CRITICAL: Required service missing: data` because no plugins are registered during kernel bootstrap. Logs show Phase 1 completes with zero plugins initialized, indicating `config.plugins` is undefined or empty when imported.\n\n## Changes\n\n- **Add config structure diagnostics**: Log config type, keys, plugins type and length before kernel initialization\n- **Add defensive validation**: Throw clear error if plugins array is missing, empty, or not an array\n- **Add ESM interop fallback**: Try `config.default?.plugins` to handle potential default export issues\n- **Add per-plugin logging**: Log each plugin name during registration loop\n\n## Debug Output\n\n```typescript\nconsole.log('[Vercel] Config type:', typeof config);\nconsole.log('[Vercel] Config keys:', Object.keys(config || {}).join(', '));\nconsole.log('[Vercel] Config.plugins type:', typeof config?.plugins);\nconsole.log('[Vercel] Config.plugins length:', Array.isArray(config?.plugins) ? config.plugins.length : 'not an array');\n\nconst plugins = config.plugins || config.default?.plugins;\nif (!plugins || !Array.isArray(plugins) || plugins.length === 0) {\n    throw new Error(`[Vercel] No plugins found in config. Config structure may be incorrect.`);\n}\n```\n\nNext deployment will reveal whether issue is ESM default export interop, esbuild bundling stripping plugins array, or defineStack() not preserving plugins field."
+}

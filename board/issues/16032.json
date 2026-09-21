@@ -1,0 +1,37 @@
+{
+  "number": 16032,
+  "kind": "issue",
+  "title": "[finding] The `/meta/:type/:name/published` door argues in a comment that a RAW tenant \"is right for a READ\" — the argument `organizationIdForMetaRead` exists to refute, and the door the #14907 card recorded as already gating",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T20:37:00Z",
+  "updated_at": "2026-09-07T12:05:39Z",
+  "closed_at": "2026-09-07T12:05:26Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16032",
+  "body": "Found while implementing #14907 (the `getMetaItemLayered` read gate). ⛔ Not a defect in that PR — that PR's callee-side gate makes this door's BEHAVIOUR correct. What is left is the comment, which still argues for the shape the gate removed, and which is why two successive cards recorded this door as already gating. Filed rather than folded in, because correcting it pulls `packages/rest` into a `packages/metadata-protocol` diff and adds a verification surface the in-scope repair does not otherwise owe.\n\n## The site\n\n`packages/rest/src/rest-server.ts`, the `GET /meta/:type/:name/published` handler (route declared around `:7685`, the layered consult around `:7775` on the branch base `f7db8f4fd`). ⚠️ Line numbers on this file drift fast; re-derive with:\n\n```\ngit grep -n 'publishedProtocol.getMetaItemLayered' -- packages/rest/src/rest-server.ts\n```\n\nThe door passes the tenant straight through, unlike its `/layers` sibling twenty lines of grep away, which computes `organizationIdForMetaRead(canonicalMetaUrlType(req.params.type), layeredCtx?.tenantId)`:\n\n```ts\nconst layered = await publishedProtocol.getMetaItemLayered({\n    type,\n    name,\n    ...(publishedCtx?.tenantId ? { organizationId: publishedCtx.tenantId } : {}),\n});\nif (layered?.overlay !== undefined && layered?.overlay !== null) {\n    res.json(layered.overlay);\n    return;\n}\n```\n\n## The comment, which is the actual finding\n\nImmediately above it:\n\n> The raw tenant is right for a READ (the write doors run it through `organizationIdForMetaWrite` instead): `getMetaItemLayered`'s overlay layer is org-scoped-first, THEN env-wide, so this is fail-open in the safe direction — an org-less caller reads exactly what it reads today, and an org-scoped caller still falls back to the env-wide row. Nothing that resolves today stops resolving.\n\nThat is precisely the reasoning `organizationIdForMetaRead`'s own docblock was written to refute, quoted from `packages/metadata-core/src/meta-write-org-scope.ts`:\n\n> ⛔ The tempting shorter fix — pass the active org at every read site — is wrong in a way that only shows on databases with history. [...] A read door that named the org for EVERY type would resolve them again — resurrecting, on the read side, exactly the phantom writes #6190 stopped minting.\n\n\"Nothing that resolves today stops resolving\" is the fail-open direction, and fail-open is the direction that RESURRECTS pre-#6190 phantoms. The comment predates #9454's read-side predicate and was never revisited when it landed.\n\n## Why this matters beyond tidiness\n\nThe #14907 card, and its triage comment, both recorded that this door already gates — the card's self-correction under contract review of PR #14908 explicitly re-confirmed \"the two REST doors ... are confirmed as stated\". Measured on the branch base, one of the two does not. The comment is the reason: it reads as a deliberate, reasoned decision to gate, so an enumeration that greps for the predicate name and then reads the surrounding prose comes away satisfied.\n\n⇒ Two seats in the same series inherited the same wrong reading from this comment. That is the cost, and it is why the fix is not \"delete a stale sentence\" but \"state the direction the predicate actually rules on\".\n\n## The class\n\nThis is the third recorded instance of one shape — a comment arguing for a scope decision that a later callee-side gate falsified:\n\n- #15621 — the `getMetaItems` gate docblock's caller enumeration (six `rest-server.ts` sites, not five).\n- #15620 — the `/references` door's org-scope block, whose bullet-1 harm analysis was neutralised by the gate that falsified its clause.\n- this one — the `/published` door, arguing the raw tenant is correct.\n\n⚠️ Worth reading as a set rather than three tidy-ups: the series now has a callee-side gate on all three `/meta` read verbs, and every caller-side comment reasoning about read scope was written before that was true.\n\n## Suggested remedy\n\nReplace the \"raw tenant is right for a READ\" paragraph with a statement that the callee gates (post-#14907), so this door does not need to and MUST NOT pre-gate on the raw URL segment — `declaresOrgOverride` answers `false` for the URL-only spellings (`translations` / `email_templates`), which is the #10340 measurement. The `#8805` half of the comment above it stays true and should be kept: this door really can produce an org-scoped publish for a tier-A type, and really must serve it back.\n\n⛔ No behaviour change is proposed here. If a future reader concludes the door should compute the predicate itself, note that doing so on `req.params.type` (raw) would be the #10340 defect; the fold is what makes it safe, and the callee already does it.\n\n## Verification notes\n\nMeasured on `origin/main` at `f7db8f4fd` in a dedicated worktree. Control for the zero-hit half: `git grep -c 'organizationIdForMetaRead' -- packages/rest/src/rest-server.ts` fires (six sites), and none of them is inside this handler.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

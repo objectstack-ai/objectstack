@@ -1,0 +1,33 @@
+{
+  "number": 1428,
+  "kind": "pull_request",
+  "title": "docs: plugin distribution design (ADR-0025/0026 + design doc)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T00:50:28Z",
+  "updated_at": "2026-09-07T04:49:30Z",
+  "closed_at": "2026-06-01T01:38:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T01:38:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1428",
+  "body": "## What\n\nDesign docs for distributing **code-bearing** marketplace contributions (plugins with npm deps, drivers, connectors, AI extensions, client UI plugins), alongside the existing pure-element / metadata-only JSON package flow. **Docs only — no code or schema changes.**\n\n- **ADR-0025 — Plugin Package Distribution (server/runtime)**: `.osplugin` artifact, build→sign→publish, permissioned install, trust/isolation tiers.\n- **ADR-0026 — Client-Side UI Plugin Distribution**: `runtime:'ui'` variant reusing the ADR-0025 backbone (field renderers / view types / widgets in the browser).\n- **`docs/design/plugin-distribution.md`** — supply-side companion to the existing `marketplace-publishing.md`: operationalizes the ADRs into layers, a scenario catalog, and workflows.\n\n## Why\n\nPure-element packages compile to JSON and publish/install trivially because nothing executes. Code contributions carry executable code + deps, so distribution must additionally solve **build/bundling, dependency handling, trust/security, and version compatibility**. The repo already has the *authoring* half (`packages/plugins/*`, microkernel `plugin-loader`, `PluginPermissionEnforcer`, QuickJS sandbox, `sys_*` schema); these docs design the missing *distribution* layer on top.\n\n## ADR-0025 key decisions\n\n- `.osplugin` artifact + compiled `objectstack.plugin.json` (adds `engines`/`runtime`/`permissions`/`integrity`).\n- build → sign → publish extending `os package publish`; registry stores browsable metadata **and** the binary blob (`sys_plugin`/`sys_plugin_version`/`sys_plugin_installation`).\n- Permissioned install: resolve → compat → consent → verified download → materialize → register → load.\n- Trust tiers: in-process (T0) / QuickJS sandbox (T1) / out-of-process (T2).\n- Bundled-default packaging (no npm at install time); `manifest-deps` opt-in.\n\n## Scenario-review refinements (§3.10)\n\n1. **Default-deny trust** — T0 reserved for verified publishers; third-party defaults to sandbox/worker, enforced at publish.\n2. **Externalize `@objectstack/*`** as host-provided peer-dep singletons (bundling forks the engine).\n3. **Protocol-first compatibility** over platform semver.\n4. **Permissions compose with object/field-level RLS**.\n5. **Secrets via settings/KV store (ADR-0007)**, never in the artifact.\n6. **Connectors span declarative (OpenAPI/MCP) + code-plugin** sub-paths.\n7. Explicit **three-layer model**: L0 declarative JSON / L1 sandboxed-script JSON / L2 code plugin.\n\n## ADR-0026 key decisions\n\n- UI plugin = `runtime:'ui'` `.osplugin` (browser ESM bundle registering field/view/widget extensions).\n- Two-tier loading: **U0 in-app module** (verified) / **U1 iframe sandbox** (third-party default, postMessage RPC + per-plugin CSP).\n- **Server-authoritative data** — UI plugins read/write only via the client SDK under the user's session, so all access stays RLS-gated server-side.\n\n## Reconciliation with ADR-0019 (important)\n\nADR-0019 makes the **App** the only consumer-facing unit; plugins/drivers/UI/themes are **internal contributions** a consumer never installs directly. These docs (ADR-0025 §3.11, ADR-0026 §3.7) reconcile explicitly:\n\n- **Audience = developers/operators/ISVs.** A plugin reaches a tenant **bundled inside an App** or **operator-provisioned** — not browsed in the consumer Marketplace.\n- **Two catalogs, one backbone**: consumer App Marketplace (`type: app`) vs developer/operator contribution catalog — same signed `sys_*` registry + artifact storage.\n- This pipeline **builds the L2-sandbox + permission-enforcer \"load-bearing wall\"** that ADR-0019 §Out-of-scope named as the prerequisite for any future self-serve code marketplace; it does **not** open that gate.\n\n## Scope\n\nDesign/ADRs + one design doc only. Phasing in each doc's §4. Builds on ADR-0003/0004/0007/0010/0016/0019/0022/0023/0024.\n\nhttps://claude.ai/code/session_01DRww7tXjCVdqXsHtv5gDq6"
+}

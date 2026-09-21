@@ -1,0 +1,35 @@
+{
+  "number": 16434,
+  "kind": "issue",
+  "title": "[finding] driver-sql's live PG + MySQL matrix runs under vitest's default 5000ms — the only live-DB driver in the repo with no `testTimeout`, and it just dequeued an unrelated PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p2",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T00:57:55Z",
+  "updated_at": "2026-09-07T11:43:43Z",
+  "closed_at": "2026-09-07T11:38:59Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16434",
+  "body": "Filed by the `domain:engine` dispatching seat from a merge-queue failure that dequeued a changeset-body-only PR. ⛔ Observation, not a runtime defect in shipped code — no assignee, no `pm:queue`, no `domain:*`, no priority; triage grades it.\n\n## What happened\n\nQueue build [34069423383](https://github.com/objectstack-ai/objectstack/actions/runs/34069423383), job **Temporal Conformance (live PG + MySQL)**:\n\n```\n× §2 a millisecond-precision delta cursor does not SKIP the updated row 5004ms\nFAIL  src/sql-driver-11224-update-stamp-precision.test.ts\n  > #11224 — the UPDATE door stamps at the audit column's precision (live mysql)\n  > §2 a millisecond-precision delta cursor does not SKIP the updated row\n    ↳ Error: Test timed out in 5000ms.\n```\n\nPR #16430 was dequeued at `00:45:57Z` with reason `CI_FAILURE`. That PR changes **one file** — `.changeset/platform-iana-timezone-columns.md`, `+46 / −1` against merge base `0a038cc06` — and **zero** files under `packages/drivers/driver-sql/`. The queue runs the full suite, so it paid for a rebuild of everything behind it on a failure nothing in its own diff could cause.\n\n## The finding — this is a missing budget, not a flaky assertion\n\n⭐ **§2 has nothing to de-race.** It deliberately does no sleeping. The file's own head docblock says so, in the section recording what #11572 traded away when it fixed §3:\n\n> What was traded away is the back-to-back WRITE RATE — §3 no longer fires […] **§1, §1b and §2 still create and update with no sleep between them** (\"No sleep and no backdating\", §1), so the same-millisecond path stays measured where it belongs.\n\nSo the two prior repairs to this file do not apply here: #11572 drove §3's clock instead of racing it, and #13691 moved §3's validity ceiling. Neither touches §2, and neither should — §2's subject *is* the unslept same-millisecond path.\n\n**What §2 actually spends is network time.** With `ROUNDS = 6`, each iteration issues four live round-trips — `driver.create` → `readAudit` → `driver.update` → the cursor comparison, which is deliberately made **by the server** (`knex(MANAGED).where('updated_at', '>=', before.rawCreatedAt).first()`, so the comparison happens in the column's own type rather than in JS). That is **24 live round-trips inside one test**.\n\n**And the test has no budget of its own:**\n\n| probe | reading |\n| --- | --- |\n| explicit per-test timeouts in `sql-driver-11224-update-stamp-precision.test.ts` | **0** |\n| explicit timeouts across 20 sibling `driver-sql` live-cell suites | **0** |\n| `testTimeout` in `packages/drivers/driver-sql/vitest.config.ts` | **absent** ⇒ vitest's default **5000 ms** |\n\n## ⭐ The firing control: six packages in this repo do set one, and the closest analogue sets 30 s\n\n`grep -rn \"testTimeout\" --include=vitest.config.ts` (non-`node_modules`), complete:\n\n| package | `testTimeout` |\n| --- | --- |\n| **`packages/drivers/driver-mongodb`** | **30_000** |\n| `packages/services/service-datasource` | 60_000 |\n| `packages/spec` | 60_000 |\n| `packages/qa/http-conformance` | 30_000 |\n| `packages/plugins/plugin-auth` | 10_000 |\n| `packages/metadata-fs` | 10_000 |\n| **`packages/drivers/driver-sql`** | **— none —** |\n\n⇒ The one driver package whose suite talks to **two** live servers is the only live-database driver in the repo with no budget at all, while its nearest sibling — the other live-DB driver — carries 30 s. `driver-sql`'s config is not silent on hard-won operational facts either: it already carries `globalSetup: ['./src/live-dialect-matrix.globalsetup.ts']` for #9350 (each live file owns a schema on Postgres / a database on MySQL, and MySQL refuses the handshake for a database that does not exist). The timeout simply never got the same treatment.\n\n⚠️ **What this finding does NOT claim.** It does not claim the default is wrong for the in-memory / SQLite cells — they are the majority of this package's tests and 5 s is a reasonable guard there. The gap is specific: the matrix multiplies every live file across cells and the live cells alone are exposed to network and server load inside a budget sized for neither.\n\n## Why it is worth a card rather than a re-run\n\nA re-run is the correct response to *this* instance and it was spent (#16430 re-queued at `00:49:01Z`). The card is about the class: a timeout in the **merge queue** does not merely redden one PR — it dequeues it and rebuilds everything behind it. The 24h ledger recorded 0 other queue failures, so this is the first, which is exactly when the budget question is cheap to answer.\n\n## Shape of the fix, for triage — direction only, ⛔ not a ruling\n\nThe obvious move is a `testTimeout` on `packages/drivers/driver-sql/vitest.config.ts`. Two things a dev should settle rather than assume:\n\n1. **One budget or two?** A single package-wide value raises the ceiling for the fast in-memory cells too, which weakens them as a guard. A per-cell budget (live cells only) keeps the fast cells strict, at the cost of the live matrix carrying it explicitly at each `it`.\n2. **What number, and derived from what?** ⛔ Not copied from `driver-mongodb` by analogy. The honest derivation is the observed live round-trip cost — the same discipline #13691 applied to §3's span ceiling, where a bound was derived from the conclusion it guards rather than picked.\n\n## Re-check\n\n```\ngit show origin/main:packages/drivers/driver-sql/vitest.config.ts | grep -c testTimeout          # expect 0\ngrep -rn \"testTimeout\" --include=vitest.config.ts . | grep -v node_modules                        # the control table above\ngit show origin/main:packages/drivers/driver-sql/src/sql-driver-11224-update-stamp-precision.test.ts | grep -n \"^const ROUNDS\"\n```\n\nReadings taken on `origin/main` `ac76425f0`.\n\nRefs: #16430 (the PR this dequeued) · #11224 (the defect the suite pins) · #11572 (§3 driven, not raced) · #13691 (§3's validity ceiling) · #9350 (the live-matrix `globalSetup`)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1406,
+  "kind": "pull_request",
+  "title": "feat(spec): App as the consumer-facing unit (ADR-0019)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T06:27:05Z",
+  "updated_at": "2026-09-07T04:49:26Z",
+  "closed_at": "2026-05-31T13:16:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T13:16:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1406",
+  "body": "## What\n\nMakes the **App the one consumer-facing unit**: the thing a tenant downloads, opens, and uninstalls is exactly one App. Removes the confusing \"package / suite contains N apps\" model from the consumer surface.\n\n> **Scope note:** This PR was deliberately **narrowed**. Earlier revisions explored a larger scheme (a metadata/code runtime-plane split, a \"consumer App must be pure metadata\" mandate, a capability-by-reference contract, auto-reviewed trust lanes). That was **reverted** — its premises did not hold (consumer apps legitimately carry code-bearing metadata such as L2 sandboxed-JS hooks; auto-review was dropped as a requirement). The larger ideas are recorded in ADR-0019 §\"Out of scope\" as a separate, gated bet. **This PR ships only the cheap, certain, high-value part: the consumer surface.**\n\n## Changes (all additive / non-breaking)\n\n- **`isConsumerInstallable(type)` + `CONSUMER_INSTALLABLE_TYPES`** (`plugin.zod.ts`) — the single source of truth for \"what a consumer can install\" (today: only `type: app`). The `type` enum is unchanged; this is a semantic split layered on top.\n- **`MarketplaceListingSchema.packageType`** constrained to `CONSUMER_INSTALLABLE_TYPES` (default `app`) — a non-App (driver/server/plugin/…) consumer listing **cannot be represented**, so \"consumers see only Apps\" is enforced in the data contract, not a forgettable query filter.\n- **`defineStack` enforces at most one App per package** — a `type: app` package may not define >1 app (the banned \"suite contains apps\" shape throws with a clear fix: fold into one app with multiple tabs, or split into separate packages). Zero apps is allowed; non-`app` types are unconstrained.\n- **Docs** — ADR-0019 (decision = D1–D4), plus `package-registry.zod.ts` header and `marketplace-publishing.md` (§1/§2/§6) realigned to the App model.\n- Tests for all three behaviours; changeset included.\n\nNo runtime / registry / execution changes.\n\n## Decision (ADR-0019)\n\n- **D1** — the App is the only consumer-facing unit (download = open = uninstall).\n- **D2** — only `type: app` is consumer-installable / Marketplace-listed; everything else is an invisible internal contribution (\"frameworks inside the .app bundle\").\n- **D3** — no \"suite contains apps\" aggregator; suites fold into one App, or ship as independent Apps (the iWork split).\n- **D4** — an App owns a *set* of namespaces; uninstall is atomic over that set.\n\n## Verification\n\n- `packages/spec` full suite green locally (6628 passing); `tsc --noEmit` clean.\n\n## Follow-ups (outside this repo, consume the same predicate)\n\n- Console `marketplace` UI / cloud catalog populate `packageType` from the manifest and filter to `type: app`.\n- Fold HotCRM into a single App (`objectstack-ai/hotcrm`).\n\n## Known CI note\n\nThe `Test Core` red is a **pre-existing failure on `main`, unrelated to this PR**: `packages/objectql/src/metadata-validation-sweep.test.ts` uses an outdated `workflow` fixture (missing `id`/`initial`/`states` after the workflow→state-machine migration). Verified by running the test on a clean `origin/main` worktree; this branch does not touch `objectql`.\n\nhttps://claude.ai/code/session_01MiPfN17dQRqaF67dXAe882"
+}

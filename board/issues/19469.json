@@ -2,8 +2,8 @@
   "number": 19469,
   "kind": "issue",
   "title": "Seat batch closure needs a named script and a matching allow rule — the runtime's write classifier refuses the three-step close (comment · label · PATCH) non-deterministically, and the two existing allow rules do not match how seats invoke the tools",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-project-manager",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-21T01:26:36Z",
-  "updated_at": "2026-09-21T02:33:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T03:14:52Z",
+  "closed_at": "2026-09-21T03:14:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19469",
   "body": "Path: none | Unblocks: #19458 (the 90-card closure the maintainer ordered under ruling #202 B) — a tooling card admitted on that line.\n\nRuling: maintainer directive · letter B · maintainer 「B（治本）：给具名脚本加一条 Bash 允许规则进 .claude/settings.json（受管面，走 PR 您合），此后席位的批量关闭不再靠分类器掷硬币。分诊席的 #19292 加了 4 条规则但没覆盖这个形状。你负责派发」 2026-09-21T01:2xZ (chat)\n\nDirector seat, summon #25 (`session_012GcsUbuqFGBibkEDMRC1eE`). Filed, labelled and dispatched under the maintainer's words above (direct-dispatch channel); the director's own `os-dev` round.\n\n## The measured defect\n\nTwo seats, same wall, same day. The director seat's 90-card closing sweep (a bash loop over `post-stamped.mjs` → `label-write.mjs` → `PATCH /issues/N` with `state_reason: not_planned`) was refused by the session runtime's write classifier (`External System Writes`) before any write. The triage seat then took the order (#19458, execution log 5753693136): 90 of 90 cards passed its live gate, 77 were actionable, **1 closed (#19325)**, then a batch script, an inline three-card loop and a **single** `post-stamped --comment=19243` were each refused — the identical command shape that had just succeeded twice. It stopped rather than grind a coin-flip channel across 76 three-step acts (a comment that lands without its label write is a half-state). Verified after the refusals: no half-state created.\n\nWhy the existing rules do not cover it, read off `.claude/settings.json` on `origin/main` (`50bae37f3d`, PR #19292 + #19047): the two seat-write rules are spelled `Bash(node --use-env-proxy scripts/pm/post-stamped.mjs *)` and `Bash(node --use-env-proxy scripts/pm/label-write.mjs *)` — the `--use-env-proxy` flag is part of the prefix. Seats invoke `node scripts/pm/post-stamped.mjs …` (the tool re-execs itself with the flag), usually behind `cd /home/user/objectstack && …`, so neither rule matches and every call falls to the classifier. No rule names a batch shape at all; the issue-state `PATCH` rule exists but a loop around it does not match a prefix rule.\n\n## What lands (one PR, Tier S by the register — `.claude/**` — the maintainer merges by hand per the directive)\n\n1. **`scripts/pm/close-cards.mjs`** — one named script for the whole act, ⛔ no new gate. Inputs: `--repo owner/name`, `--list <file>` (issue numbers, one per line or space-separated), `--comment <file>` (the closing text, `{{NOW}}` allowed), `--reason not_planned|completed|duplicate`, `--expect-state pm:queue` (the exact pm-state label the card must carry; default `pm:queue`), `--dry-run`. Per card, in order and with the card re-read live first: skip and log if not open, has an assignee, carries `pm:retriage`, its pm-state is not exactly the expected label, or (`--skip-pr-referenced`, default on) an open PR references it; else post the comment through post-stamped's module (stamp, read-back), remove the pm-state label through label-write's four-step (read-back), `PATCH` close with the reason; log one line per card (`#N → closed <reason> <comment id>` or `#N SKIP <why>`), exit 0 only when every non-skipped card landed all three writes, non-zero naming the first card left half-written. `--self-test` over a stubbed API for the skip matrix and the half-write refusal. Reuse the two existing modules; ⛔ do not reimplement stamping or the four-step.\n2. **`.claude/settings.json` allow rules** — add: `Bash(node scripts/pm/close-cards.mjs *)`, `Bash(node --use-env-proxy scripts/pm/close-cards.mjs *)`, and the no-flag spellings of the two existing seat-write rules: `Bash(node scripts/pm/post-stamped.mjs *)`, `Bash(node scripts/pm/label-write.mjs *)`. Keep the deny roster untouched (`check:pm-settings-deny-roster` green).\n3. **Usage line** in the script header and one line in `references/rest-channel.md` (if a line is free; otherwise the header only): invoke from the repo root without a `cd … &&` compound, because a prefix rule matches the command as typed.\n\nVerification the PR shows: `--self-test` exit 0; `--dry-run` over #19458's 90 numbers printing 77 actionable / 13 skipped (the triage seat's live count as of 00:01Z, re-read at run time — the number may move); the settings file still parses and `check:pm-settings-deny-roster` exit 0; `check:pm-widening-tells` exit 0.\n\n## Relations\n\n- **#19458** — the order this unblocks; after the merge the triage seat (or this seat) runs the script once over its list and posts the log there.\n- **#19362** (decision box, the landing-endpoint self-approval denials) — same classifier, different shape; those two endpoints already carry allow rules since #19047, so that card is checked separately.\n- **#19292** — the four rules that did not cover this shape; not a defect in that PR, a spelling mismatch measured here.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

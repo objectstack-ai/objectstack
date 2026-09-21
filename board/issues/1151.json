@@ -1,0 +1,36 @@
+{
+  "number": 1151,
+  "kind": "pull_request",
+  "title": "Prioritize /api/v1/discovery over .well-known/objectstack per protocol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-15T09:33:26Z",
+  "updated_at": "2026-09-07T04:49:35Z",
+  "closed_at": "2026-04-15T09:33:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-15T09:33:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1151",
+  "body": "The client was attempting discovery in the wrong order, trying `.well-known/objectstack` first and falling back to `/api/v1/discovery`. The protocol specifies that `/api/v1/discovery` should be the primary endpoint.\n\n## Changes\n\n- **Client discovery logic** (`packages/client/src/index.ts`)\n  - Now probes `/api/v1/discovery` first (primary, protocol-standard)\n  - Falls back to `/.well-known/objectstack` if primary fails\n  - Updated log messages to distinguish \"protocol-standard\" vs \"fallback\"\n\n- **Integration tests** (`packages/client/tests/integration/01-discovery.test.ts`)\n  - Updated TC-DISC-001 description to reflect `/api/v1/discovery` as primary method\n\n## Behavior\n\n**Before:**\n```typescript\n// 1. Try .well-known/objectstack\n// 2. Fallback to /api/v1/discovery\n```\n\n**After:**\n```typescript\n// 1. Try /api/v1/discovery (primary)\n// 2. Fallback to .well-known/objectstack\n```\n\nBoth endpoints remain functional; only the priority order changed to match protocol requirements."
+}

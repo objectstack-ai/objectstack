@@ -1,0 +1,33 @@
+{
+  "number": 16279,
+  "kind": "issue",
+  "title": "No test ever executes the migration DDL `os generate migration` emits — both formats are pinned as TEXT only, so a scaffold that cannot run would read green",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T10:31:46Z",
+  "updated_at": "2026-09-07T11:05:25Z",
+  "closed_at": "2026-09-07T11:05:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16279",
+  "body": "Observed while delivering #15521 (PR #16278). ⛔ Not a live defect: on the tree measured, both emitted formats DO run. This is a coverage gap, filed so it is not re-discovered.\n\n## What is missing\n\n`generateMigrationSql` and `generateMigrationTs` are covered by three pin tests — `generate-builtin-id-column.pin.test.ts`, `generate-field-type-vocabulary.pin.test.ts`, `generate-multiple-json-column.pin.test.ts`. Every one of them asserts the emitted **string**. Nothing anywhere executes the result.\n\nThe two neighbouring tests that sound like they close this do not:\n\n| test | what it actually covers |\n|:--|:--|\n| `test/scaffold-emission-typechecks.test.ts` | `GENERATOR_SCAFFOLD_TARGETS` — the init/object/field scaffolds. It compiles those under the tsconfig they ship with. The migration output is not among them. |\n| `test/generate-scaffold-validates.test.ts` | `[#14087] every `os generate` scaffold passes `os validate`` — metadata scaffolds against the validator. DDL is not metadata and never reaches it. |\n\nSo the failure mode nothing would catch: a generated migration that is syntactically fine as text and refused by the database, or a `db.…` call the emitted TypeScript makes that knex does not have. A text pin stays green through both. The emitted TypeScript is additionally typed `db: any`, so even compiling it would not recover the second half.\n\n## Evidence that the gap is real, and that today's output is fine\n\nDelivering #15521 needed exactly this measurement and had to do it by hand, outside the test suite: the emitted migration was imported and its `up(db)` invoked against a live PostgreSQL 16.13 cluster, and the emitted SQL was executed verbatim, both read back from `information_schema.columns`. Both ran clean. That run lives in the PR's description, not in CI — nothing reproduces it.\n\n## Why it may be worth closing\n\nThe repo already has the ingredients: `packages/cli/src/utils/schema-migrate.integration.test.ts` and its siblings drive real databases, so an \"emit, then execute, then read the catalog back\" case has somewhere to live and a precedent to copy. That would also give the three existing pin tests a foundation — they currently agree with `driver-sql` on **text**, and #15521's whole cost was that matching text and matching catalog rows are two different claims.\n\n## Boundary\n\n⛔ Deliberately not attached to #15521 or its PR — that card is ruled and scoped to two columns' nullability and default text, and this is a suite-shaped question about a different layer. Unassigned and unqueued, for triage.\n\nRefs: #15521 · PR #16278 · `#14087` (the scaffold-validates card)."
+}

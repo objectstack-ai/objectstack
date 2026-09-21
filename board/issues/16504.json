@@ -1,0 +1,34 @@
+{
+  "number": 16504,
+  "kind": "pull_request",
+  "title": "docs(rest): state what the `genericDeclared` docblock's file actually holds",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T05:12:43Z",
+  "updated_at": "2026-09-07T06:15:28Z",
+  "closed_at": "2026-09-07T06:15:26Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": "2026-09-07T06:15:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16504",
+  "body": "Fixes #15615\n\n## What the docblock claimed, and what the file holds\n\n`genericDeclared`'s docblock said reachability of the generic passthrough \"is asserted rather than assumed\". Nothing in the file asserts it: §1 reads only the two doors' `status`, `code`, body equality and the `object` key — never `structuredCodeAnswer`'s arms. The claim described a property the file does not hold.\n\nPer the ruling on the card, this takes **option 1** — correct the claim — and ⛔ not option 2 (making §1 assert the *absence* of an arm), which pins an absence: the shape that goes stale in the other direction.\n\n## The premise was re-derived, not inherited\n\nThe card's premise — *the three sibling pins independently exercise the generic-passthrough limb* — was measured by the at-tier reviewer on PR #15452's head `e141d14adb`, and neither the filing nor the dispatching seat re-ran it. Re-derived here on current `origin/main`.\n\n**Ablation A — delete `resolveErrorResponse`'s generic 4xx `...(object ? { object } : {})` limb.** Baseline 63/63 pass; ablated 7 fail:\n\n| pin | ablated |\n|:--|:--|\n| §1 `DUPLICATE_RECORD` / `RECORD_LOCKED` / `FORBIDDEN` / `handleRouteError` | RED (4 cases) |\n| §2 \"declared status + door-supplied object: both doors answer 404 with `object`\" | RED |\n| §3 \"a sniff-matching message with a DIFFERENT declared code keeps the declared answer on both doors\" | RED |\n| #14541 §4 \"CONVERGED: a 5xx ARM never displaces a status the producer declared in the 4xx band\" | RED |\n\n⇒ **The premise holds.** All three siblings redden independently of §1.\n\n**Ablation B — the card's feared future, simulated.** Insert a bespoke `RECORD_LOCKED` arm into `structuredCodeAnswer` *and* delete the limb. §1's `RECORD_LOCKED` case and §3's sniff case both go **GREEN** — they migrated onto the bespoke path, exactly the silent re-purposing the card describes. §2 and #14541 §4 stay RED.\n\n⇒ a measured refinement the card did not have: §3 keys on `RECORD_LOCKED`, one of §1's own codes, so it migrates *with* §1. Only §2 and #14541 §4 are independent of §1's codes. The new docblock states that limit rather than repeating \"three siblings\" flatly — hedging there would reproduce the defect in a quieter voice. Ablation B also reddens #14541 §5's \"every arm in the SHARED classification has a §1 parity case\", so an arm's *arrival* is caught — but that guard goes green again once its author adds the parity case it asks for, which is why it does not hold this file's §1 to the passthrough.\n\nAblation hygiene: each leg proved the mutation on disk before its colour was read (limb occurrences 13 to 12; blob hash moved), restored with `git checkout HEAD -- PATH` and verified byte-equal to the HEAD blob, with `git status` clean afterwards.\n\n## Scope\n\nComment-only, one file, no behaviour change. The invariant was never at risk — this card is about the claim, not the coverage.\n\n## Verification\n\n- `dispatch-gates.mjs` Reconciliation total: **45/45 green**. The **Artifact rosters** block was run separately (it sits outside that union): 36/39 green, 3 NOT MEASURED and none a finding against this diff — `check-partof-closing-keyword` and `check-single-claim-paths` both print `NOT WIRED` without PR context, and `check:react-declaration-parity` needs an objectui `sdui.manifest.json` this repo does not contain.\n- `check:type-check-debt` first exited 3 (`PREREQUISITE NOT MET` — a tsc OOM; the gate's own text says nothing was measured and it is not a finding). Re-run at `--max-old-space-size=8192`: exit 0, \"5 ledger entr(ies) re-measured ... none above its recorded number.\"\n- `@objectstack/rest`: **187 test files / 3179 tests pass**; `typecheck` green (`check:test-typecheck: OK`), and the edited file is confirmed inside `tsconfig.test.json`'s program via `tsc --listFiles`.\n- Repo-wide `pnpm lint` green — the full union at `ad1c79f7`, not a narrowed run.\n- `turbo ls --affected` names 18 packages; only `@objectstack/rest` changed content. The other 17 are dependents reached by package-level hashing over a comment with no API-surface change — **declared narrowing**, CI runs the farm.\n- No changeset: `packages/rest` publishes `[\"dist\",\"README.md\",\"CHANGELOG.md\"]`, so a test-file comment releases nothing ⇒ `skip-changeset`, route 2 and the workflow's PREFERRED route.\n- Clause ② graded from the delivered diff: **no** — no newly exported symbol, no new key on a published payload, no `packages/spec/src/**` path.\n\n## 验收备注\n\n无范围外发现。本次改动为单文件注释,未触及任何运行时路径。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01YFY46JydE1gMxQG1TqBcMZ)_"
+}

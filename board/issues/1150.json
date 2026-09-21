@@ -1,0 +1,37 @@
+{
+  "number": 1150,
+  "kind": "pull_request",
+  "title": "fix: resolve CI build and test failures",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-15T09:03:11Z",
+  "updated_at": "2026-09-07T04:49:12Z",
+  "closed_at": "2026-04-15T10:04:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-15T10:04:52Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1150",
+  "body": "CI was failing on two fronts: schema build encountering filesystem race conditions, and plugin-hono-server tests unable to run.\n\n## Changes\n\n### Build: Enhanced directory cleanup resilience\n- Improved `packages/spec/scripts/build-schemas.ts` to handle ENOTEMPTY errors in CI\n- Added retry loop with exponential backoff (6 attempts, 200ms base delay)\n- Verify deletion completion before proceeding\n- Graceful degradation on cleanup failure\n\n### Tests: Added missing vitest config\n- Created `packages/plugins/plugin-hono-server/vitest.config.ts`\n- Matches standard vitest configuration used across monorepo packages\n\nBoth issues stemmed from environmental timing sensitivities - the build script assumed synchronous filesystem operations, while the test runner expected explicit configuration."
+}

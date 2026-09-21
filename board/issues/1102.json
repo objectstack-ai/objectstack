@@ -1,0 +1,37 @@
+{
+  "number": 1102,
+  "kind": "pull_request",
+  "title": "[WIP] Investigate singular vs plural usage in code",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "size/xs"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-10T01:48:32Z",
+  "updated_at": "2026-09-07T04:49:00Z",
+  "closed_at": "2026-04-10T03:24:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-10T03:24:08Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1102",
+  "body": "Cloud agent has begun work on **所以按照spec协议，这些到底应该是单数...** and will update this pull request as work progresses.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 所以按照spec协议，这些到底应该是单数还是复数，排查所有相关代码，包括前后端，是否建议统一用单数规范。\n> \n> \n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent)."
+}

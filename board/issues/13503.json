@@ -2,8 +2,8 @@
   "number": 13503,
   "kind": "issue",
   "title": "[finding] copilot/ is the largest branch namespace (678 refs, 2x claude/) and is outside the #12771 reaper scope — unmeasured",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "claude[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -20,11 +19,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-08-30T15:08:50Z",
-  "updated_at": "2026-09-20T09:32:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-21T03:23:30Z",
+  "closed_at": "2026-09-21T03:23:30Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 15,
+  "comments": 16,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/13503",
   "body": "Filed unassigned by the `domain:devx` execution seat (session `session_01Pk26oZ12t5N1hwGW1m1MgC`) while implementing the `claude/*` merged-branch reaper for #12771. Not graded, not routed, severity not judged.\n\n## What was measured (2026-08-30, live API)\n\nThe branch-hygiene work on #12771 is scoped to the `claude/*` prefix, because that is what the finding and the ruling name. Re-deriving the population turned up a larger neighbour that nothing currently covers:\n\n```\nremote heads, total          1084\n  copilot/                    678   <- 2x the claude/ accumulation\n  claude/                     336   (the reaper's entire scope)\n  feat/                        20\n  fix/                         15\n  everything else              35\n```\n\n`copilot/` is the single largest branch namespace in the repository — roughly **63% of all remote heads**, and about **twice** the `claude/` population that #12771 was filed about.\n\n## Why it may not be covered by the answer to #12771\n\nThe reaper being added there matches on the `claude/` prefix only, per the ruling of 2026-08-28. Nothing in that change reads `copilot/` branches, so whatever cleanup it performs leaves this larger namespace exactly as it is.\n\nTwo things are explicitly **not measured** here and should not be assumed:\n\n- ⚠️ **Whether these branches are dead.** This seat classified the `claude/` population by PR state but did **not** run the same classification over `copilot/`. The 678 number is a count of refs, nothing more. It is entirely possible a large share are live, or conversely that GitHub's own `delete_branch_on_merge` (measured **enabled**, with a 0.07% leak rate) already keeps them tidy and the residue is small.\n- ⚠️ **Whether they are agent branches at all.** The prefix suggests GitHub Copilot coding-agent branches, but that was not verified.\n\nSo this is a **scope question**, not an assertion that 678 branches are garbage: if the `claude/` accumulation was worth a card, the namespace twice its size deserves at least a measurement before it is silently excluded.\n\n## Cheap re-check\n\n```\ngit ls-remote --heads origin | sed 's#.*refs/heads/##' | awk -F/ '{print $1}' | sort | uniq -c | sort -rn\n```\n\nTo classify them the same way the `claude/` set was classified, the instrument is PR state — for each branch, `GET /repos/OWNER/REPO/pulls?head=OWNER:BRANCH&state=all`, then read `merged_at`. ⛔ Not `git merge-base --is-ancestor`: this repo squash-merges through a queue that rewrites commits, so a fully merged branch's tip is normally not an ancestor of `main` and that probe under-reports badly.\n\n## Dedup\n\nSearched open issues for the copilot-branch-accumulation family — no match (control term in the same session returned the expected hits, so the empty result is a reading rather than a broken query). The branch-hygiene cards that do exist (#12771 and its two closed predecessors) are all about the `claude/` prefix and the seat-identity 403; none names `copilot/`.\n\nContext: #12771 and its PR carry the full `claude/*` measurement this was derived from.\n---\n\n## 决策箱卡面块(`domain:devx` 派发席补,2026-09-19T00:21Z · ⛔ 不改上方立卡席原文)\n\n**维护者速读**:分支清理这件事你**已经裁过了**(批 #24,字母 A,2026-09-03,评论 `5529423421`),PR 1 也已落地。卡在**第 2 步**:裁定说「手动跑一次 dry-run 出 `copilot/` 的名单」,而那个 workflow 的前缀是**硬编码的 `claude/`**、没有前缀输入 ⇒ **今天按字面执行不了**。而且那次实现是**刻意**没开这个口子的,文件里写着「`copilot/` is on #13503's own release line」。⭐ 这不是一个新决定,是**你那条裁定的第 2 步缺一个入口**。三条走法在下面。**回一个字母即可:A / B / C。**\n\nos-decision-facets\n① 项目长远合理性:A(给 dry-run 加一个 per-dispatch 前缀参数)让「一次性清理另一个命名空间」成为回收器**本来就该有的一个参数**,而定时那条腿仍只扫 `claude/` —— 不扩大常设面,正是裁定自己要保的那条;B 让名单由**没有任何门禁覆盖的代码**产出,而这套护栏存在的理由恰恰是不让这种事发生;C 对一个破坏性 workflow 的常设状态改两次(改了再改回),是这三条里唯一在**删除动作**前后动那个文件的。\n② 实际业务拉动:678 个 `copilot/*` 分支占全仓远程头的约 63%,全部早于 90 天、2026-05-27 之后无活动、全是 `delete_branch_on_merge` 之前的遗留 —— 普查已做完(`5511828156`),数字不是估的。⛔ 但拉动是**一次性**的:人口已冻结,所以没有任何选项该去扩大常设扫描面。\n③ 防 AI 犯错:A 与 C 让名单由**带 base-ref 护栏的那个分类器**产出,也就是裁定点名的那一个;B 产出的名单**没人能验对错**,而它的下一步是删 630 个分支 —— 这正是本板反复指控的「制造性信心」。⭐ 三条里只有 A 让「谁产的名单」这件事在事后还读得出来。\n④ 创业阶段不扩散:A 新增的是**一个输入参数**,⛔ 不是一个新机制、⛔ 不是一条新的常设扫描;B 新增一份没有属主的脚本(永久义务);C 不新增任何东西,但它的代价在 ③。\nPrior rulings read: copilot,largest,branch,namespace,refs,claude,outside,reaper,scope,unmeasured → 69 hits; ADR-0029 D4, ADR-0068 D1, ADR-0068 D2, ADR-0068 D3, ADR-0086 D7, ADR-0095 D1, ADR-0128 D1, ADR-0006 D2, ADR-0006 D3 —— 逐条看过标题(`sys` 保留、`EvalUser`、两扇门、租户隔离 Layer 0、AAD 生产者判别……),**均与分支卫生无关**,按通用词命中;⛔ 无一裁的是本题。真正管本题的既有裁决是**本卡自己的批 #24 字母 A**(`5529423421`),本条⛔ 不推翻它,只问它第 2 步的入口。\n\n**推荐 A**。自检行:只看①选 A;②③④ 是否翻转:否(④ 单棱偏好「什么都不新增」的 C,但 C 的代价落在③,而③在删除动作前是决定性的)。回退项 **C**。置信缺口:⛔ 本席未测给 workflow 加一个 `prefix` 输入会不会动到 `check-merged-branch-reaper-outcome.mjs` 的哪几条自检行 —— 那是接手席位的第一件事,⛔ 不是本条的断言。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

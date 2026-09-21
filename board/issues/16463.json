@@ -1,0 +1,32 @@
+{
+  "number": 16463,
+  "kind": "issue",
+  "title": "`content/docs/ui/translations.mdx` restates the translatable-type set by hand — accurate today, and the same rot shape as #15860",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T02:45:49Z",
+  "updated_at": "2026-09-07T09:10:02Z",
+  "closed_at": "2026-09-07T09:10:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16463",
+  "body": "Observation, filed rather than folded in. Found while executing #15860 (the same set, a different carrier), and deliberately kept out of that PR because #15860's dispatch fenced its scope to one file.\n\n### What\n\n`content/docs/ui/translations.mdx:84-85` restates `METADATA_DOCUMENT_TRANSLATORS`' keys by hand:\n\n> The metadata types resolved per request are **object, view, action, app,\n> dashboard, dataset, and page** — a field's labels are translated as part of\n> its object document […]\n\n⚠️ **This one is CURRENTLY ACCURATE.** All seven are named; nothing on `main` is false here today. That is exactly why it is an observation and not a bug.\n\n### Why it is still worth a card\n\nIt is a hand-written copy of a set whose own declaration carries the rule it violates:\n\n```\n/**\n * Metadata types whose user-facing labels {@link translateMetadataDocument}\n * localizes. Derived from the dispatch table — never restate it.\n */\nexport const TRANSLATABLE_METADATA_TYPES: ReadonlySet<string> = new Set(\n  Object.keys(METADATA_DOCUMENT_TRANSLATORS),\n);\n```\n\nThe repo has now paid for this shape twice on the same set — #14378 (`rest-server.ts`, landed as PR #15863) and #15860 (`meta-plural-i18n.test.ts`) — and in both cases the restatement was accurate on the day it was written and rotted when the table grew. `dataset` is in the sentence above precisely because someone remembered to hand-edit it when `translateDataset` registered (#14253); the next registration has no such guarantee.\n\nThe carrier being user-facing docs is the argument on the other side, and it is a real one: a docs reader cannot be sent to a TS dispatch table the way a code comment's reader can. So the disposition is genuinely open, which is why this is handed back rather than fixed.\n\n### Measurement, on `origin/main` @ `bf45e62cef1`\n\nDispatch table keys, read out of `packages/spec/src/system/i18n-resolver.ts` with the TypeScript AST rather than by eye:\n\n```\ncount=7 [\"view\",\"action\",\"object\",\"app\",\"dashboard\",\"dataset\",\"page\"]\n```\n\n*Positive control for the extractor*: the same extractor, run against a scratch copy with the `dataset:` row deleted, reports `count=6` — so the 7 is a reading that can come out otherwise, not a constant printed back.\n\n*Population scan control*: the scan that found this site fires on both known carriers of the stale six-member form (`packages/rest/src/meta-plural-i18n.test.ts:9` and `packages/spec/src/conversions/registry.ts:3037`) before #15860's PR, and its tight reading moves 14 sites to 13 across that PR — the one row that leaves being the file that PR edits. So a zero here would have been a reading, not a silence.\n\n### Two sites measured and deliberately excluded from this card\n\n| site | why not here |\n| --- | --- |\n| `packages/spec/src/conversions/registry.ts:3039` | Fenced by two prior triages: the recorded rationale for the 17.0.0 `book.translations` retirement, describing the set **as it stood at that removal**. Rewriting it would falsify a historical record. |\n| `packages/spec/src/system/book.zod.ts:63-64` | ⭐ **The schema-side twin of that same rationale, which neither prior triage named** — same stale six-member enumeration, same retirement, same character. Recorded here so it is not re-discovered a fourth time. It falls under the identical fence, so the correct disposition is \"do not touch\"; a card of its own would only be able to say that. |\n\n⇒ So #15860's population reading of \"exactly one live site\" holds for *stale* restatements of this set and was a floor, not a ceiling, for hand-written ones: this file is a second live carrier that happens to be correct.\n\n### ⛔ Not proposed here\n\nThe repo-wide lint gate forbidding restatement. #15860 considered and rejected it, and that argument stands unrelitigated: it would need a permanent hand-written exemption list for `registry.ts` and `book.zod.ts`, i.e. the same defect class one level up.\n\n### Related\n\n#15860 (same set, test-file header) · #14378 (same set, `rest-server.ts`) · #3786 (the derivation) · #14253 (registered `translateDataset`) · #15915 and #16169 (same *shape*, different sets — noted by #15860's triage, not the same population)\n"
+}

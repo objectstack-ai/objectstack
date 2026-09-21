@@ -1,0 +1,39 @@
+{
+  "number": 1160,
+  "kind": "pull_request",
+  "title": "Streamline Studio roadmap to 3-phase plugin infrastructure plan for 2026",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-16T01:46:21Z",
+  "updated_at": "2026-09-07T04:49:07Z",
+  "closed_at": "2026-04-16T09:42:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-16T09:42:42Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1160",
+  "body": "The Studio roadmap contained overly ambitious goals across 8 phases and lacked clarity on what belongs in the core platform versus external plugins. This update establishes Studio as a **plugin infrastructure platform** rather than a monolithic IDE.\n\n## Architectural Clarification\n\n**Core Studio (this repo):**\n- Plugin system, kernel, routing, testing infrastructure\n- One built-in example: Basic Object Inspector plugin\n\n**Official Designers (objectstack-ai/studio - proprietary):**\n- Object Designer, View Designer, Form Designer, Flow Designer, Dashboard Designer, Agent Designer\n\n**Community Plugins:**\n- Third-party developers can build custom designers independently\n\n## Roadmap Changes\n\n- **Consolidated**: 8 phases (29 weeks) → 3 phases (16 weeks)\n- **Phase 1 (Q2)**: Plugin infrastructure (URL router, testing, hot reload, plugin API docs)\n- **Phase 2 (Q3)**: AI integration (Copilot enhancement, Command Palette, Monaco Editor)\n- **Phase 3 (Q4)**: Advanced IDE features (multi-tab, plugin DevTools, version control)\n\n## Key Additions\n\n- **Plugin Ecosystem section**: Documents three-tier model (built-in/official/community)\n- **Architectural Guidelines**: File structure, registration patterns, data access rules\n- **Success Metrics**: Realistic KPIs for test coverage, plugin API stability, external plugin count\n- **\"What We're NOT Building\"**: Clear scope boundaries for core vs. external plugins\n\nThis establishes an open-core business model: infrastructure is open-source, advanced designers are proprietary."
+}

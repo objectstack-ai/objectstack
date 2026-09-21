@@ -1,0 +1,35 @@
+{
+  "number": 1208,
+  "kind": "pull_request",
+  "title": "Remove GlobalSidebar and implement auto-enter environment flow",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [
+    "Claude",
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-21T15:55:52Z",
+  "updated_at": "2026-09-07T04:49:33Z",
+  "closed_at": "2026-04-21T15:58:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-04-21T15:58:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1208",
+  "body": "Removes the redundant GlobalSidebar navigation layer and implements Power Platform-style auto-entry into environments, eliminating the generic home page in favor of pushing users directly into their working context.\n\n## Changes\n\n**Navigation Flow**\n- `/` and `/login` now auto-redirect based on session state:\n  - No active org → `/orgs`\n  - Has org, no environments → `/environments` list\n  - Has org + environments → `/environments/:lastOrFirstEnvId` (respects localStorage cache)\n- Removed `DeveloperOverview` home page\n\n**Sidebar Rendering**\n- `__root.tsx`: Removed `GlobalSidebar` and `isGlobalShellPath()` helper; authenticated layout now renders only `TopBar` + content\n- `environments.$environmentId.tsx`: `AppSidebar` now renders for **all** routes under `/environments/:envId/*` except `/packages`\n- When no package is selected, `AppSidebar` receives `selectedPackage: null` and fetches environment-wide metadata (existing behavior from `client.meta.getItems(type, packageId ? { packageId } : undefined)`)\n\n**Preserved**\n- `global-sidebar.tsx` kept on disk for potential future reuse\n- `/api-console`, `/orgs`, and `/environments` list pages remain sidebar-free\n- TopBar switchers (org/env/package) continue to drive context switching\n\n## Result\n\n| Route | Before | After |\n|---|---|---|\n| `/` | Generic home | Auto-redirect to environment |\n| `/environments/:id` | GlobalSidebar | AppSidebar (env-wide metadata) |\n| `/environments/:id/:pkg` | AppSidebar | AppSidebar (package-filtered) |\n| `/environments/:id/packages` | GlobalSidebar | No sidebar |"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1207,
+  "kind": "pull_request",
+  "title": "Fix login page vertical centering",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [
+    "Claude",
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-21T15:33:43Z",
+  "updated_at": "2026-09-07T04:49:15Z",
+  "closed_at": "2026-04-21T15:34:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-04-21T15:34:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1207",
+  "body": "The login and register pages were not vertically centered because the unauthenticated layout lacked a container with viewport height.\n\n## Changes\n\n- Wrapped unauthenticated route children in `<div className=\"flex min-h-screen w-full\">` in `__root.tsx:160`\n- The login/register pages already use `flex flex-1 items-center justify-center`, which now properly stretches to fill the viewport\n\n```typescript\n// Before: no container\nreturn <>{children}</>;\n\n// After: flex container with full viewport height\nreturn <div className=\"flex min-h-screen w-full\">{children}</div>;\n```\n\nThis matches the pattern used for loading states elsewhere in the root layout."
+}

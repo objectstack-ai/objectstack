@@ -1,0 +1,39 @@
+{
+  "number": 1192,
+  "kind": "pull_request",
+  "title": "feat(objectos): implement ObjectOS system runtime object definitions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-20T11:01:08Z",
+  "updated_at": "2026-09-07T04:49:31Z",
+  "closed_at": "2026-04-20T11:36:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-20T11:36:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1192",
+  "body": "## Summary\n\nImplements the ObjectOS layer - system metadata types as queryable objects following the \"Metadata as Data\" pattern. Establishes dual-table architecture where `sys_metadata` remains the source of truth for package management while type-specific tables enable Studio UI auto-generation.\n\n## Architecture Decisions\n\n**Package Location**: `packages/objectos` (not `packages/plugins/plugin-system`)\n- System objects are core infrastructure, not optional plugins\n- ObjectOS represents OS-level primitives\n\n**Dual-Table Pattern**: Preserves `sys_metadata` alongside queryable objects\n- `sys_metadata`: Package management, version control, checksums, deployment tracking\n- Type-specific tables (`sys_object`, `sys_view`, etc.): Queryable via Object Protocol for Studio UI\n\n## Implementation\n\n### Package Structure\n```\npackages/objectos/\n├── src/\n│   ├── objects/\n│   │   ├── sys-metadata.object.ts     # Generic envelope (20+ fields)\n│   │   ├── sys-object.object.ts       # Object definitions (30+ fields)\n│   │   ├── sys-view.object.ts         # View definitions\n│   │   ├── sys-agent.object.ts        # AI agents\n│   │   ├── sys-tool.object.ts         # AI tools\n│   │   └── sys-flow.object.ts         # Automation flows\n│   ├── registry.ts                     # SystemObjects registry\n│   └── index.ts\n```\n\n### System Objects (6 core definitions)\n- **sys_metadata**: Version control, package ownership, scope management\n- **sys_object**: Queryable object metadata with denormalized fields\n- **sys_view**: View configurations with type filtering\n- **sys_agent**: AI agent definitions with model config\n- **sys_tool**: AI tool registry with parameter schemas\n- **sys_flow**: Automation flows with trigger config\n\nEach object includes:\n- Complete field definitions using Field factory API\n- Appropriate indexes for performance\n- Package management fields (`package_id`, `managed_by`)\n- Audit trail (`created_by`, `created_at`, `updated_by`, `updated_at`)\n- System capabilities (`trackHistory`, `searchable`, `apiEnabled`)\n\n### Usage\n```typescript\nimport { SystemObjects } from '@objectstack/objectos';\n\n// Register during bootstrap\nfor (const [name, definition] of Object.entries(SystemObjects)) {\n  await kernel.metadata.register('object', name, definition, {\n    scope: 'system',\n    isSystem: true,\n    managedBy: 'platform',\n  });\n}\n\n// Query via Object Protocol\nconst objects = await client.data.find('sys_object', {\n  filter: { namespace: 'crm' },\n  sort: 'name',\n});\n\n// Studio auto-generates UI\n<GridView object=\"sys_object\" />\n```\n\n## Benefits\n\n- Unified protocol for data and metadata\n- Auto-generated Studio UI (no custom components per metadata type)\n- Full version history via `sys_metadata_history`\n- Package-aware metadata management\n- Aligns with Salesforce CustomObject, ServiceNow sys_dictionary, Kubernetes CRD patterns\n\n## Next Steps\n\nPhase 1: Update metadata service with dual-table projection logic  \nPhase 2: Studio integration using `/api/v1/data/sys_*` endpoints  \nPhase 3: Test coverage and migration guides\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+}

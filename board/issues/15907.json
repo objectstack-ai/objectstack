@@ -1,0 +1,38 @@
+{
+  "number": 15907,
+  "kind": "issue",
+  "title": "GET /meta/mapping serves raw documents with a top-level targetObject, and nothing on the producer side pins that — the console's saved-mapping selector depends on it silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "finding",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T13:49:09Z",
+  "updated_at": "2026-09-07T04:59:18Z",
+  "closed_at": "2026-09-07T04:34:40Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15907",
+  "body": "Observation-class finding from the objectstack-ai/objectui#10102 measurement round (consumer pin: objectstack-ai/objectui#7738). Not a defect today; it records a cross-repo contract that only one side pins, and that side pins a copy.\n\n## What was measured\n\n`GET /api/v1/meta/mapping`, executed at `132742f10` through `packages/rest`'s `RestServer` route table over a real `ObjectStackProtocolImplementation` on a real `ObjectQL` + sqlite `:memory:` engine (the `import-integration.test.ts` harness), with a `mapping` artifact registered through each of the three producer paths: manifest `mappings:` via `registerApp`, direct `registry.registerItem`, and `MetadataManager.register` installed as the `metadata` service (the registrar the file-based artifact loader uses). Every item is the raw spec document with `targetObject` at the top level, decorated with `_packageId` / `_provenance` / `_diagnostics`, inside the `{ type, items }` envelope; no item carries a nested `metadata` member. `GetMetaItemsResponseSchema` declares `items` as an array of `unknown`, so the spec states nothing about this per-item shape.\n\n## Why it is worth a card\n\nThe console's import wizard selector is feature-detected. `@object-ui/data-objectstack`'s `listImportMappings` filters items by a top-level `targetObject` and degrades every failure to an empty list, so a producer-side change of the item shape — for instance serving the `MetadataManager` publish envelope (`name`, `packageId`, `state`, `metadata`) instead of the document — would fail nowhere: the selector would simply stop appearing, on every deployment, and a released feature would read downstream as a hardcoded client (which is exactly how objectstack-ai/objectui#10102 was raised). The consumer pin in objectui#7738 carries a copied fixture of today's body and by construction cannot notice that change. The producer side has no pin at all: `packages/rest` has no test that lists `/meta/mapping`, and the `import-integration.test.ts` mapping suite reads the artifact through `getMetaItem`, not through the list door.\n\n## Suggested shape (not implemented in the measurement round — out of its scope)\n\nA `packages/rest` pin in the same harness that registers one `mapping` through `registerApp` and asserts `GET /api/v1/meta/mapping` answers items whose `targetObject` is top-level and whose `metadata` member is absent. Whether `GetMetaItemsResponseSchema.items` should be narrowed from `unknown` is a spec decision and is not proposed here.\n\nFiled from the dev seat of session `https://claude.ai/code/session_01ARYe3yQTQCUFm5qPYNgKaJ`; this sentence is the attribution, since footer blocks are stripped on issue creation."
+}

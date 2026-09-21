@@ -1,0 +1,33 @@
+{
+  "number": 16053,
+  "kind": "issue",
+  "title": "[finding] `ioredis-mock@8.13.1` aborts a WATCHed transaction with no competing writer — a per-connection stale watch flag, measured with controls",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T22:24:55Z",
+  "updated_at": "2026-09-07T11:09:31Z",
+  "closed_at": "2026-09-07T11:09:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16053",
+  "body": "Recording + measurement only — no severity asserted, no fix chosen. Found while closing #15983 (pinning `RedisKV`'s WATCH/MULTI limbs). It is a different defect class from that card (fidelity of the double, not coverage of our code), and different again from #15986 (which pins the ioredis 5-vs-6 **version** pair), so it is filed rather than folded into either.\n\n## The reading\n\nOn `ioredis-mock@8.13.1`, a connection that has itself EXECed a write to a key carries a stale dirty flag for that key: the **next** `WATCH` + `EXEC` on the same key from that same connection aborts (`exec()` returns `null`) even though no competing writer exists. A real Redis server would commit there.\n\nMeasured with a standalone script — no vitest, no Proxy, no ObjectStack code in the path — replaying the client-level sequence directly against a bare mock:\n\n```\nARRAY  set#1  (WATCH k, GET k, MULTI/SET k, EXEC)\nNULL   set#2  (same key, same connection, no competing writer)\nARRAY  set#3  (the abort clears the flag)\nARRAY  after an explicit UNWATCH between the two\nARRAY  CONTROL: fresh key on a fresh connection\n```\n\nThe last line is the control, and it fires: the probe reports `ARRAY` where no abort is expected, so the `NULL` readings are a discrimination rather than a constant.\n\nTwo further measurements bounding the shape:\n\n- **The flag is per-connection.** A second connection WATCHing a key the first EXECed on is unaffected (`ARRAY`).\n- **WATCH itself is genuinely implemented.** A competing write from another connection between `WATCH` and `EXEC` does abort, including when the rival rewrites byte-identical content — which is correct: real WATCH tracks writes, not value changes. So this is not a `watch()`-as-no-op double.\n\n## Where it already shows up\n\nInstrumenting the shipped `packages/services/service-cluster-redis/src/redis.contract.test.ts` (recording `Proxy` around `makeClient`, suite otherwise unmodified, 28/28 green under instrumentation): `multi().exec()` is called 10 times and returns `null` for **2** of them — in `set then get round-trips and increments version` and in `cas succeeds on match, fails on mismatch`. Both are second writes to the same key on the same connection. Nothing in the suite creates a competing writer, so those two aborts are entirely this divergence.\n\nConsequence today: `RedisKV.set` retries and converges, so both tests pass and the divergence is invisible. It cost #15983 a corrected premise — that card reasoned the retry limb was executed zero times; it is executed twice, for a reason that does not exist on a real server.\n\n## Scope of the claim\n\n- ⛔ No claim that `RedisKV` is wrong. Its retry loop is what absorbs this.\n- ⛔ No claim about the mechanism inside `ioredis-mock`; only its observable behaviour is measured here. Not checked against the upstream tracker.\n- ⛔ No claim about any version other than the resolved `ioredis-mock@8.13.1` in this workspace, nor about any command other than `WATCH`/`MULTI`/`EXEC`/`SET`/`DEL`.\n- ⛔ Nothing about lock, counter or pub/sub behaviour.\n\n## Why it is worth writing down\n\nIt bounds what this double can certify. Transactional abort semantics are the surface a real server and an in-memory double are most likely to diverge on, and here they measurably do — in the direction of *extra* aborts, which a retry loop hides. Any future assertion of the form \"this transaction committed without a retry\" is unsound against this double, and any test that means to drive an abort must arrange a competing writer on a key the driver's own connection has not EXECed on (which is what #15983's pins now do).\n\n## Dedup\n\nOne targeted MCP `search_issues` query for this shape ⇒ 4 results, none describing it (#15983 and #15986 are the adjacent cards named above; #15467 is the closed parent; #7880 is objectql's `transaction()`, unrelated). The same call returning those known-hitting cards is the positive control that the channel answers, so the zero for this shape is a reading and not a silent empty. Search covered closed issues as well as open.\n"
+}

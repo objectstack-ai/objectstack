@@ -1,0 +1,34 @@
+{
+  "number": 16493,
+  "kind": "pull_request",
+  "title": "docs(runtime,metadata-protocol): correct the published 17.3.0 CHANGELOG's scope-less claim",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T04:26:14Z",
+  "updated_at": "2026-09-07T05:28:58Z",
+  "closed_at": "2026-09-07T05:28:57Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-07T05:28:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16493",
+  "body": "Fixes #16122\n\n## Ruling (quoted verbatim, binding)\n\nDirector seat, decision batch #65, 2026-09-07 (comment 5564448990 on the card), maintainer reply verbatim 「同意」:\n\n> **General rule (same as recorded on #16056):** published release text is never silently rewritten; a factual error gets a dated, referenced correction line appended in place, and the correction also rides the changeset into the next release (route A, already in flight via #14803's PR).\n>\n> **This card.** A docs-only PR appends one line under the `## 17.3.0` entry in both `packages/runtime/CHANGELOG.md` and `packages/metadata-protocol/CHANGELOG.md`: *Correction (date): no package of a compiled artifact is scope-less — `ManifestSchema` defaults `scope` to `project`; the \"scope-less `type: module`\" clause above is withdrawn, see #14803 / #16122.* The original sentence stays. This corrects the repository and GitHub view; the 17.3.0 npm tarball keeps the old text, and the correction line itself is the record of that difference.\n\n## What changed\n\nAppended one sub-bullet to the existing `#14375` entry in both `## 17.3.0` sections (nested alongside the entry's existing **Why** / **Where** / **Additive** sub-bullets, matching the file's own markup):\n\n```\n  - **Correction (2026-09-07):** no package of a compiled artifact is\n    scope-less — `ManifestSchema` defaults `scope` to `project`; the\n    \"scope-less `type: module`\" clause above is withdrawn, see #14803 / #16122.\n```\n\nThe original sentence (`isWritablePackage` reads `engine.manifests` FIRST … a scope-less `type: module` carried by a multi-package artifact lands there too) is untouched — appended-next-to, not rewritten.\n\n## Why the correction holds\n\n- `defineStack` parses every `packages[]` entry through `ManifestSchema` (`packages/spec/src/kernel/manifest.zod.ts:319`), whose `scope` field is `z.enum([...]).default('project')` — verified directly on `origin/main` before writing this text.\n- `#14803`'s actual merge (commit `4b0508e1bd`, PR #16123) already fixed the live source comment (`packages/metadata-protocol/src/protocol.ts:7519-7524`) and shipped a changeset (`.changeset/scope-less-booted-row-attribution.md`) carrying the correct explanation into the next release. This PR only corrects the two already-published `CHANGELOG.md` files that still carry the pre-#14803 false sentence from the 17.3.0 release.\n\n## Changeset\n\nNone added. Precedent: PR #15454 (`fix(spec): correct the offer-set claim in the icon-withdrawal CHANGELOG entry`) is the same shape — a docs-only correction to an already-published package `CHANGELOG.md`, adding no new release content — and was labeled `skip-changeset` per `pr-automation.yml`'s own Check Changeset rule (\"It releases nothing … apply the 'skip-changeset' label\"). Leaving `skip-changeset` application to the PM per this task's standing terms.\n\n## Verification\n\nDocs-only, two files, six lines added. Proportionate verification per the dispatch contract:\n\n- `node scripts/check-nul-bytes.mjs` — exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on the final commit (`14eeffb8ae`) derived **36** commands (29 path-matched + 7 whole-tree-declared) for this diff's two `CHANGELOG.md` paths.\n- All 36 run: **34/36 exit 0**, including `pnpm check:doc-authoring`, `pnpm check:published-files`, `pnpm check:nul-bytes`, and every `docs-audit` / `check-*-census` / `check-*-shape` gate the derivation matched.\n- 2/36 (`pnpm check:dts-closure`, `pnpm check:dual-build-cjs-loads`) exit 3 `PREREQUISITE NOT MET` — both read `dist/` for the full 80-package workspace, which a docs-only two-line CHANGELOG diff does not build locally (same as PR #15454's identical, precedented note on `check:dual-build-cjs-loads`). NOT MEASURED, not a failure.\n- Reconciliation: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran <list>` → `36 derived, 36 run, 0 NOT-MEASURED, 0 UNRUN`.\n\nNo `pnpm test` / `pnpm typecheck` run — no source file touched, no package published.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Vbw3RPgdtqesx4azk9SbW8)_"
+}

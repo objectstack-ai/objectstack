@@ -1,0 +1,35 @@
+{
+  "number": 15910,
+  "kind": "issue",
+  "title": "A liveness probe answering 503 for a configuration fault restarts a pod that cannot be fixed by restarting — #15909 collapses `/health` onto `/ready`, a distinction this runtime already makes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T13:56:33Z",
+  "updated_at": "2026-09-07T10:38:09Z",
+  "closed_at": "2026-09-07T10:37:36Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15910",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:cli` dispatching seat as the deliberate follow-up to **#15366** / PR **#15909**, whose round raised it and correctly refused to widen into it.\n\n## What #15909 changes, and the cost it accepts\n\n#15909 applies #13906 decision 1 option A at the runtime door: a `tenancy` service that is **registered and failed to build** is no longer absorbed into 「no posture」 but re-raised as `AuthzStoreUnavailableError` (503). That closes a real permissive hole — a failed security service reading as 「this check does not apply」.\n\n`resolveRequestScope` reads the posture for **every** request, credentialed or not. So, measured on the delivery: `GET /health` with **no credential** goes **200 → 503** during such an outage.\n\n## ⭐ Why that is worth its own card rather than a shrug\n\n**This runtime already separates liveness from readiness.** `packages/runtime/src/dispatcher-plugin.ts:1052` serves `GET /health`; `:1068` serves `GET /ready`, and `/ready` already distinguishes `running` from `initializing`.\n\n⇒ answering 503 on **both** does not preserve a distinction — **it collapses one the runtime already makes**, and it collapses it onto the one route whose consumer reacts by **restarting the process**.\n\n⚠️ A liveness probe that reads 503 during a **configuration** fault restarts the pod; the tenancy service fails to build again; it restarts again. A restart cannot fix a service that cannot build. ⇒ the failure mode is a **restart loop that hides the real fault**, which is the opposite of what making the fault loud was for.\n\n`/ready`, meanwhile, is exactly the route whose job is 「this deployment is not serving correctly」, and it is already wired to say so.\n\n## The options as the round left them, with this card's refinement\n\n- **A** — leave as shipped: every request 503s during the outage, consistent with the REST door (which has no `/health`). **This is what #15909 ships**, and it is the ruled direction; ⛔ nothing here says it was wrong to ship.\n- **B** — make the posture read **lazy**: resolve it only when a credential is present, since the two refusals it gates are API-key refusals. Anonymous `/health` stays 200.\n- **C** — carve **liveness** out of the identity step explicitly, keep `/ready` answering 503.\n\n⭐ This seat's contribution, ⛔ not a ruling: the measurement above makes **C** the more principled shape than B, and the round could not state it because it had not measured that `/ready` already exists and already reports `initializing`. **B** changes *when* the posture is read for every anonymous request — a broader behavioural surface — to reach an outcome **C** reaches by naming the one route that means 「restart me」.\n\n⚠️ ⛔ Neither is free. C needs a definition of which routes are liveness that does not become a second, drifting route list; B risks a credentialed/anonymous split in when a security-relevant value is resolved, which is its own hazard.\n\n## Published\n\nThe 503 is a wire-visible behaviour of a shipped door. `@objectstack/runtime` publishes; the change lands there.\n\n## ⛔ What is NOT claimed\n\n⛔ Not that #15909 should have solved this — the brief forbade widening and the round was right to refuse. ⛔ Not that A is wrong: during the outage the deployment genuinely is not serving correctly. ⛔ Not that this is urgent: it requires a tenancy service that *fails to build*, which #15909's own sizing notes needs an embedder factory registration or one of the loader's other unbranded rejections, with no p0 evidence of it happening.\n\n## Re-check\n\n```sh\ngit show origin/main:packages/runtime/src/dispatcher-plugin.ts | grep -nE \"'/health'|'/ready'\"\n# and on #15909's head: GET /health with no credential under a registered-and-failed tenancy build\n```\n\n## Related\n\n**#15366** (the card) · PR **#15909** (the delivery, and its adoption comment where A is ruled for that card) · **#13906** decision 1 option A (the ruling being applied) · **#15900** (the same collapsing probe at two other gates) · **#13279** (the store-outage class this net also lets through as 503).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

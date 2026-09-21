@@ -1,0 +1,34 @@
+{
+  "number": 14933,
+  "kind": "issue",
+  "title": "DatasetMeasureSchema.format is silent about date measures — the reachability is now measured, so the ruled one-line documentation can land",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T11:04:42Z",
+  "updated_at": "2026-09-07T07:43:51Z",
+  "closed_at": "2026-09-07T07:30:14Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14933",
+  "body": "Filed by the `domain:ui` execution seat of `objectstack-ai/objectui` (PM session `session_01EMrWaQw3XS5DxTHxp4yRyC`), discharging a follow-up **a maintainer ruling assigned to this seat by name**. ⛔ Not graded, no `domain:*` — routing, `type` and priority are the triage seat's.\n\n## Why this exists — it is owed, not proposed\n\nobjectui#7178 ruled **A** (director seat, [comment 5509025252](https://github.com/objectstack-ai/objectui/issues/7178#issuecomment-5509025252), maintainer verbatim 「7189 A  其他同意」). The ruling closed with a conditional follow-up:\n\n> **The silence must close either way.** The finding's reusable half is that `format` is accepted by the schema and never read on this path. Under A, `format` becomes reachable for date values **if the shared date path accepts a pattern. If it does not**, the implementer states that in the PR and the spec seat adds one sentence to the `format` `describe()` on `DatasetMeasureSchema` (\"applies to numeric measures; date measures render by locale\"), so the remaining gap is documented rather than silent. That sentence is a spec-lane follow-up of one line, **filed by the `domain:ui` seat when the measurement is in hand**, not a rider on this PR.\n\nThe measurement is now in hand (objectui PR #7442). This card is that filing.\n\n## ⭐ The measurement — and it makes the ruling's suggested wording slightly too strong\n\nThe shared date path (`formatDate(value, style, options)`, now `packages/core/src/utils/date-display.ts` in `objectui`) reads `format` as a **named style**, not as a date pattern. Its vocabulary is `'short'` and `'relative'`; every other string falls through to a locale-medium default.\n\n| `measure.format` | reachable? | renders |\n|---|---|---|\n| `'short'` | ✅ **yes** | `Jul 4, '24` — the same word `DateCellRenderer` honours from `field.format` |\n| `'relative'` | ✅ **yes** | `3 days ago` |\n| `'YYYY-MM-DD'` | ❌ no | the locale default (`Jul 4, 2024`) |\n| absent | n/a | the locale default |\n\n⇒ The ruling's contingency **partially** fired. It is not true that \"date measures render by locale\" — two `format` values *are* read. What remains unreadable is the **numeral/date pattern** case. So the ruled sentence should not be pasted verbatim; it would replace one inaccuracy with another.\n\n**Suggested wording** (this is the seat's proposal, not a ruling — the spec lane owns the final text):\n\n> numeral patterns apply to numeric measures; a date measure reads `format` as a display style (`short`, `relative`).\n\n## ⚠️ Two facts about the target that the ruling could not have known\n\n**1. There is no `.describe()` to add a sentence to.** At `packages/spec/src/ui/dataset.zod.ts:191-192` the field is:\n\n```ts\n/** Display format, e.g. \"$0,0.00\", \"0.0%\". */\nformat: z.string().optional(),\n```\n\nA JSDoc comment, no `.describe()` call. So \"adds one sentence to the `format` `describe()`\" means either extending the JSDoc or introducing a `.describe()` where none exists. ⛔ Those are not the same change — the second adds runtime metadata that generators and docs tooling read, and may have its own conventions (and a `strictness-batch14` pin sits over this file). Whoever takes this should decide deliberately and say which they did; the seat is not pre-empting it.\n\n**2. The existing JSDoc is itself part of the silence.** `e.g. \"$0,0.00\", \"0.0%\"` advertises exactly the pattern grammar that a date measure cannot read. An author with a date measure reads that line and writes `'YYYY-MM-DD'`, which is the original defect's path.\n\n## Reachability\n\n`format` on a date-shaped measure is authorable through every `DatasetMeasureSchema` surface. The rendering half is fixed in objectui PR #7442 (a date measure renders as a date rather than a raw 24-character ISO string); this card is only the **declared-vs-enforced** half the ruling required to close. ⛔ Nothing here changes accept/reject behaviour — `format` stays `z.string().optional()` and no measure is refused. It is a documentation change over a published schema.\n\n## Related\n\nobjectui#7178 (the card and ruling A) · objectui PR #7442 (the rendering fix, where the table above was measured) · objectui#7443 (the `DateTimeCellRenderer` / `formatDateTime` reconciliation, filed separately) · objectui#4576 (the precedent: two conventions drifting between a list cell and a dashboard measure)"
+}

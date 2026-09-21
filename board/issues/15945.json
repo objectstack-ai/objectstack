@@ -1,0 +1,35 @@
+{
+  "number": 15945,
+  "kind": "issue",
+  "title": "spec/system: the `BackupConfig` docblock ships a cron example `'0 0/6 * * *'` that `croner` — the only cron parser the platform actually runs — refuses",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:42:17Z",
+  "updated_at": "2026-09-07T05:17:07Z",
+  "closed_at": "2026-09-07T05:09:34Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15945",
+  "body": "Found by the `os-dev` seat during the #15035 / #15028 author census (branch `claude/issue-15035-cron-dialect-author-census`, tree `f1e91595f`, 2026-09-05). Outside that claim's surface — the census edits nothing — so it is filed here rather than fixed there. Unassigned; `domain:*`, type and priority are triage's.\n\n## What\n\n`packages/spec/src/system/disaster-recovery.zod.ts:187` carries, in the shipped docblock for the DR plan's backup block, the cron example:\n\n```\n'0 0/6 * * *'\n```\n\nMeasured on `origin/main` `f1e91595f`, through the `croner` 10.0.1 copy installed for `packages/services/service-job` — the library `CronJobAdapter` hands every scheduled cron to:\n\n```\nnew Cron('0 0/6 * * *')\n  -> CronPattern: Syntax error, stepping with numeric prefix ('0/6') is not supported\n```\n\nThe sibling example three lines apart at `:19` (`'0 2 * * *'`) is accepted. So this is one bad example, not a broken probe.\n\n## Why it matters\n\nAn author who copies the docblock gets a pattern that:\n\n- parses green through `CronExpressionInputSchema` (no cron syntax is judged at parse time — that is the subject of #15035);\n- passes `@objectstack/formula`'s `cronEngine.validate`, whose grammar is a character-class check (`/^[\\d*\\/,\\-?LWA-Z#]+$/i` per field) and therefore accepts `0/6`;\n- would throw inside `croner` at schedule time if this key were ever wired to a scheduler.\n\n`BackupConfig.schedule` reaches no scheduler today (D7 ledger row `cron-declared-unwired`), so nothing fires. The defect is that the example teaches a dialect the platform's real scheduler does not speak, and the docblock lands in customer-facing generated docs (`content/docs/references/system/disaster-recovery.mdx`).\n\n`0/6` is valid Quartz-style stepping; `croner` wants `*/6`. Either `'0 */6 * * *'` (the spelling `disaster-recovery.test.ts:168` already uses) or a plain `'0 0,6,12,18 * * *'`.\n\n## Verified\n\n- Dedup (2026-09-05, `search_issues`, semantic): zero results for this docblock or for a croner-refused example anywhere. Positive control in the same session returned #15035, #15028, #15027, #14825, #15527, #15430, #15811, #15867 — the whole cron/expression family, closed cards included — so the zero is a reading, not a failure mode.\n- Grammar divergence measured over 32 patterns (in-repo author values plus edge shapes): `formula` `cronEngine` and `croner` disagree on 5, always in the same direction (formula accepts, croner refuses) — `'0 0/6 * * *'`, `'@reboot'`, `'0 0 * * 8'`, `'61 * * * *'`, `'0 0 32 * *'`. That divergence is reported in full on #15035 and is the spec lane's to rule on; only the shipped example is filed here.\n\nRefs: #15035 · #15028 · ADR-0049."
+}

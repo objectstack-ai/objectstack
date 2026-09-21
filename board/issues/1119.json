@@ -1,0 +1,36 @@
+{
+  "number": 1119,
+  "kind": "pull_request",
+  "title": "Add objectstack-hooks skill guide for third-party developers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-13T11:18:30Z",
+  "updated_at": "2026-09-07T04:49:02Z",
+  "closed_at": "2026-04-13T11:20:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-13T11:20:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1119",
+  "body": "Created comprehensive documentation for third-party developers writing data lifecycle hooks in ObjectStack.\n\n## Files Added\n\n- **`skills/objectstack-hooks/SKILL.md`** (1,038 lines) — Complete guide covering:\n  - 14 lifecycle events (`beforeInsert`, `afterUpdate`, etc.)\n  - Hook definition schema (properties: `name`, `object`, `events`, `handler`, `priority`, `async`, `condition`, etc.)\n  - `HookContext` API reference (`input`, `result`, `previous`, `session`, `api`, etc.)\n  - 10+ production-ready patterns (validation, enrichment, side effects, audit trails, external APIs)\n  - Registration methods (declarative, programmatic, file-based)\n  - Best practices, error handling, testing, performance optimization\n  - Troubleshooting guide\n\n- **`skills/objectstack-hooks/references/`** — Schema references and documentation index\n\n## Example Usage\n\n```typescript\nimport { Hook, HookContext } from '@objectstack/spec/data';\n\nconst accountHook: Hook = {\n  name: 'account_validation',\n  object: 'account',\n  events: ['beforeInsert', 'beforeUpdate'],\n  handler: async (ctx: HookContext) => {\n    // Set defaults\n    if (!ctx.input.industry) {\n      ctx.input.industry = 'Other';\n    }\n    \n    // Validate\n    if (ctx.input.website && !ctx.input.website.startsWith('http')) {\n      throw new Error('Website must start with http or https');\n    }\n    \n    // Enrich with cross-object data\n    const settings = await ctx.api?.object('settings').findOne({\n      filter: { tenant_id: ctx.session?.tenantId }\n    });\n  },\n  priority: 100,\n  async: false,\n};\n```\n\n## Structure\n\nFollows existing skill conventions (objectstack-data, objectstack-kernel, etc.) with:\n- Metadata frontmatter (name, description, tags)\n- \"When to Use This Skill\" trigger conditions\n- Core concepts and API reference\n- Practical examples from real codebase (app-todo, app-crm)\n- References to canonical schemas in `@objectstack/spec`\n\nComplements existing skills: objectstack-data (objects/fields), objectstack-kernel (plugins/services), objectstack-automation (flows/workflows)."
+}

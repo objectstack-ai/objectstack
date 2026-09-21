@@ -1,0 +1,36 @@
+{
+  "number": 1136,
+  "kind": "pull_request",
+  "title": "refactor(skills): consolidate hooks documentation to eliminate duplication",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T07:38:45Z",
+  "updated_at": "2026-09-07T04:49:32Z",
+  "closed_at": "2026-04-14T07:41:17Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T07:41:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1136",
+  "body": "Hooks documentation was duplicated across `objectstack-schema` (1038 lines) and `objectstack-plugin` (358 lines), causing maintenance burden and potential inconsistencies. This refactors the documentation structure to establish a single source of truth.\n\n## Changes\n\n**Revived `objectstack-hooks` as canonical reference**\n- Removed deprecated status\n- Positioned as authoritative source for all hook documentation\n- Version bump 1.0 → 2.0\n\n**Created reference structure**\n```\nobjectstack-hooks/\n├── SKILL.md                    # Hub with navigation & comparison table\n└── references/\n    ├── data-hooks.md           # Complete data lifecycle hooks docs\n    └── plugin-hooks.md         # Complete plugin/kernel hooks docs\n```\n\n**Replaced duplicates with reference pointers**\n- `objectstack-schema/rules/hooks.md`: 1038 lines → 146 lines (quick ref + pointer)\n- `objectstack-plugin/rules/hooks-events.md`: 358 lines → 164 lines (quick ref + pointer)\n- Reference docs retain quick reference tables and common patterns\n- Clear navigation to full documentation\n\n**Updated cross-references**\n- All SKILL.md files updated to point to `objectstack-hooks`\n- Relative link paths verified\n- Consistent reference notation: `(→ [objectstack-hooks](...)`\n\n## Benefits\n\n- **Single source of truth**: Updates only needed in one location\n- **~1400 lines of duplication eliminated**: Reduced from 3 copies to 1 canonical + 2 lightweight references\n- **Improved discoverability**: Central hub for all hook documentation\n- **Consistent information**: No risk of divergent documentation\n\n## Pattern established\n\nThis approach can be applied to other duplicated content (validation rules, field types, naming conventions) to maintain documentation quality across the skills ecosystem."
+}

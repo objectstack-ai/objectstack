@@ -1,0 +1,36 @@
+{
+  "number": 1558,
+  "kind": "pull_request",
+  "title": "fix(seed): resolve relationship refs by natural key, not {externalId} objects (showcase + crm + compile-time guard)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T06:21:04Z",
+  "updated_at": "2026-09-07T04:49:07Z",
+  "closed_at": "2026-06-03T07:38:47Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T07:38:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1558",
+  "body": "## Problem\n\nSeed datasets wrote `lookup` / `master_detail` references as object literals, e.g. `project: { externalId: 'Website Relaunch' }`. The seed-loader resolves references from the **plain natural-key string** — it skips non-string values (`packages/runtime/src/seed-loader.ts:273`), so the wrapper object was never resolved and got handed straight to the SQL driver.\n\nOn a `:memory:` DB this was masked (always-empty at boot ⇒ INSERTs). Now that `objectstack dev` uses a **persistent SQLite DB**, restarting re-runs seeds as UPDATEs and better-sqlite3 throws:\n\n```\nSQLite3 can only bind numbers, strings, bigints, buffers, and null\n```\n\n— repeated `Update operation failed { object: showcase_task ... project = {externalId:...} }` noise, and those demo rows never update.\n\nThis was **not an isolated showcase typo**: `examples/app-crm` used the same object form throughout, and nothing stopped it — the seed record value type was `unknown`, so both forms compiled, and the failure only ever surfaced on a persistent DB.\n\n## Changes\n\n**1. Fix the example seed data** (`examples/app-showcase`, `examples/app-crm`) — switch every relationship reference from `{ externalId: 'X' }` to the plain natural-key string `'X'`:\n- showcase: `project.account`, `task.project`, `category.parent`, `project_membership.team`/`project`\n- crm: `contact/opportunity/lead/activity` → `account`/`contact`/`opportunity`\n\n**2. Harden the framework so it can't recur** (`@objectstack/spec`, `@objectstack/runtime`):\n- **Compile-time:** `defineDataset` now constrains `lookup`/`master_detail` field values to `string | null` (derived from each field's literal `type`). The object form is now a **type error**; all other fields stay `unknown`.\n- **Runtime:** `SeedLoaderService` now **fails loudly** with an actionable message and drops the value (instead of silently skipping it and letting it reach the driver) when a reference is an object — consistent behavior across all drivers. Covered by a new unit test.\n\n## Verification\n\n- Booted **app-showcase** and **app-crm** dev servers **twice** each against a persistent SQLite DB: **0 \"can only bind\", 0 \"Update operation failed\", 0 invalid-reference, 0 insert/update failures**.\n- All FKs resolve to real record ids, cross-table consistent (e.g. `task.project` == the Website Relaunch id; crm `contact.account` == `opportunity.account` for Acme). All 12 crm opportunities seed; even the **email-keyed** `activity.contact` resolves.\n- Tests: `@objectstack/spec` (6628) ✅, `@objectstack/runtime` (342, incl. new guard test) ✅, `example-showcase` (20) ✅. Typecheck of app-showcase clean.\n\n## Note for reviewers\n\n`examples/app-crm` has **pre-existing** typecheck failures unrelated to this PR (`src/security`, `src/themes`, `src/webhooks` import symbols like `Security` that aren't exported by the current `@objectstack/spec` — API drift). This PR does not touch those; the seed data file (`src/data/index.ts`) typechecks clean.\n\nhttps://claude.ai/code/session_014XvTsiH3dPPqKgU8uaRjXR"
+}

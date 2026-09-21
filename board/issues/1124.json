@@ -1,0 +1,36 @@
+{
+  "number": 1124,
+  "kind": "pull_request",
+  "title": "Add objectstack-i18n skill for internationalization design guidance",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-13T14:36:36Z",
+  "updated_at": "2026-09-07T04:49:03Z",
+  "closed_at": "2026-04-13T14:37:47Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-13T14:37:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1124",
+  "body": "Created comprehensive skill documentation for internationalization (i18n) design in ObjectStack applications.\n\n## Changes\n\n### New Skill: `skills/objectstack-i18n/`\n- **SKILL.md** (696 lines) — Complete i18n design guide covering:\n  - Translation configuration (defaultLocale, supportedLocales, fileOrganization strategies)\n  - Object-first translation bundle structure (`AppTranslationBundle`, `ObjectTranslationNode`)\n  - File organization patterns: bundled, per_locale, per_namespace\n  - Coverage detection and diff analysis for missing/stale translations\n  - AI-powered translation suggestions via `II18nService.suggestTranslations()`\n  - Message interpolation formats (simple `{variable}` vs ICU MessageFormat)\n  - Integration patterns with `II18nService` and `I18nServicePlugin`\n  - Translation workflow best practices and common pitfalls\n\n- **Reference schemas** copied from `packages/spec/src/`:\n  - `system/translation.zod.ts` — Translation bundle schemas\n  - `contracts/i18n-service.ts` — Service interface contract\n  - `ui/i18n.zod.ts` — UI-level i18n schemas\n\n### Updated Custom Instructions\n- Added objectstack-i18n to `.github/copilot-instructions.md`:\n  - Skills directory listing\n  - AI Skills Integration table with usage guidance\n\n## Example Usage\n\n```typescript\n// Translation bundle structure (object-first convention)\nconst zh: AppTranslationBundle = {\n  _meta: { locale: 'zh-CN', direction: 'ltr' },\n  \n  o: {\n    account: {\n      label: '客户',\n      fields: {\n        name: { label: '客户名称', help: '公司或组织的法定名称' },\n        industry: { \n          label: '行业',\n          options: { tech: '科技', finance: '金融' }\n        }\n      },\n      _views: { all_accounts: { label: '全部客户' } }\n    }\n  },\n  \n  messages: { 'common.save': '保存' }\n};\n```\n\nAligns with Salesforce/Dynamics 365 object-first translation conventions where all translatable content for an object is grouped under a single namespace (`o.{object_name}`)."
+}

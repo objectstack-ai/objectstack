@@ -1,0 +1,35 @@
+{
+  "number": 15892,
+  "kind": "issue",
+  "title": "`os create plugin foo.bar` emits `export const foo.barPlugin` — an npm-legal name that renders un-parseable TypeScript",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T13:12:44Z",
+  "updated_at": "2026-09-07T09:23:55Z",
+  "closed_at": "2026-09-07T09:23:20Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15892",
+  "body": "Filed **unassigned and bare** by the `os-dev` seat that landed #15816 (branch `claude/issue-15816-create-validates-project-name`). ⛔ Not graded here — no `domain:*`, no type, no priority. Out of #15816's scope and deliberately not folded into its PR.\n\n## Measured\n\nOn `origin/main` `b398ad258b9`, driving the published entry with `NO_COLOR=1`, streams captured separately, exit code read before any pipe:\n\n```\nnode packages/cli/bin/run.js create plugin foo.bar\n  exit 0 — writes ./plugin-foo.bar/\n  src/index.ts contains:  export const foo.barPlugin: Plugin = {\n```\n\nParsed with TypeScript's own parser (`ts.createSourceFile`, syntactic diagnostics only):\n\n```\nfoo.bar   -> 1 syntactic diagnostic     export const foo.barPlugin: Plugin = {\nmy-app    -> 0 syntactic diagnostics    (same template, control)\n```\n\n## Why this is NOT the defect #15816 fixed, and is not closed by it\n\n#15816 was about names **npm** refuses. `foo.bar` is a perfectly legal npm package name, and `@objectstack/plugin-foo.bar` is publishable. It passes `validateProjectName()` — the charset rule is `^[a-z0-9][a-z0-9._-]*$`, which admits `.` on purpose, because a dot is legal in an npm name.\n\nSo the validation #15816 adds accepts this input, correctly, and the emitted project still does not compile. Verified after that fix: `os create plugin foo.bar` still exits 0 and still writes the broken source.\n\n## The mechanism\n\n`packages/cli/src/commands/create.ts`:\n\n```\nfunction toCamelCase(str: string): string {\n  return str.replace(/-([a-z])/g, (g) => g[1].toUpperCase());\n}\n```\n\nIt only folds `-x` into `X`. Every other character legal in an npm name but illegal in a JS identifier passes through into an identifier position:\n\n- `foo.bar` becomes `foo.barPlugin` (a property access, not an identifier)\n- a leading digit (`1foo`, legal for npm) becomes `1fooPlugin`\n- `_` and `~` shapes are admitted by npm and reach the same position\n\nThe identifier is used twice in `src/index.ts` and twice more in the emitted `README.md`.\n\n## Why it was not fixed alongside #15816\n\nThe correct form is a **design choice**, not a mechanical one, and picking it inside another card's PR would be deciding it silently. At least three self-consistent answers exist:\n\n1. narrow what `os create` accepts further than npm does (reject any name that is not a clean identifier stem);\n2. sanitise the identifier only — keep the npm name as the user typed it, derive a valid identifier from it, the way `sanitizeNamespace()` already derives a namespace;\n3. stop deriving an identifier at all — emit a default export, or a fixed name.\n\nOption 2 is the shape the repo already uses one line away, but it makes the exported symbol no longer match the package name, which is a user-visible naming decision.\n\n⚠️ Whoever takes this should check it against **#15530** (emitted scope, with the maintainer) and #15816's PR, so a third philosophy is not introduced into the same emitted manifest.\n\n## Re-check\n\n```\nnode packages/cli/bin/run.js create plugin foo.bar\nsed -n '1,8p' ./plugin-foo.bar/src/index.ts\ngrep -n \"toCamelCase\" packages/cli/src/commands/create.ts\n```\n\n## Dedup\n\nOne targeted `search_issues` pass (repo-scoped REST is **403** for this seat, `gh` absent, so the REST list route was unavailable). Positive control: the query returned **#15816**, a known-indexed `os create` emission card, so it reached the index. Total hits **1**, that one being #15816 itself. ⛔ Not exhaustive — a single semantic query, not a full-corpus sweep.\n"
+}

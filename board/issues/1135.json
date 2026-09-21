@@ -1,0 +1,36 @@
+{
+  "number": 1135,
+  "kind": "pull_request",
+  "title": "feat(app-host): load all kernel plugins to match studio configuration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/m"
+  ],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T07:28:20Z",
+  "updated_at": "2026-09-07T04:49:23Z",
+  "closed_at": "2026-04-14T07:36:41Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-14T07:36:41Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1135",
+  "body": "app-host was missing several kernel plugins when deployed to Vercel, resulting in incomplete functionality compared to studio. This adds all kernel plugins that studio uses to ensure feature parity in production deployments.\n\n## Changes\n\n- **Added missing plugin dependencies** to `package.json`:\n  - `@objectstack/plugin-audit`, `@objectstack/plugin-security`, `@objectstack/plugin-setup`\n  - `@objectstack/service-ai`, `@objectstack/service-analytics`, `@objectstack/service-automation`, `@objectstack/service-feed`\n\n- **Registered all kernel plugins** in `server/index.ts` matching studio's configuration:\n  - SetupPlugin (navigation service, loads before other plugins)\n  - SecurityPlugin, AuditPlugin (RBAC, permissions, audit logging)\n  - FeedServicePlugin, MetadataPlugin (activity feeds, metadata management)\n  - AIServicePlugin, AutomationServicePlugin, AnalyticsServicePlugin\n\n- **Added broker shim** to bridge HttpDispatcher → ObjectQL engine:\n  - Copied `create-broker-shim.ts` from studio\n  - Attached before `kernel.bootstrap()` with post-bootstrap validation\n  - Required for simplified kernel setup without full message broker\n\n- **Reordered plugin loading** for correct initialization:\n  - Apps load first (provide object schemas)\n  - SetupPlugin loads early (other plugins depend on navigation service)\n  - Auth and service plugins follow\n\n```typescript\n// Before: Only ObjectQLPlugin, DriverPlugin, AuthPlugin, and AppPlugins\nawait kernel.use(new ObjectQLPlugin());\nawait kernel.use(new DriverPlugin(tursoDriver));\nawait kernel.use(new AuthPlugin({ ... }));\nawait kernel.use(new AppPlugin(CrmApp));\n\n// After: Full plugin stack matching studio\nawait kernel.use(new ObjectQLPlugin());\nawait kernel.use(new DriverPlugin(tursoDriver));\nawait kernel.use(new AppPlugin(CrmApp));\nawait kernel.use(new SetupPlugin());\nawait kernel.use(new AuthPlugin({ ... }));\nawait kernel.use(new SecurityPlugin());\nawait kernel.use(new AuditPlugin());\nawait kernel.use(new FeedServicePlugin());\nawait kernel.use(new MetadataPlugin({ watch: false }));\nawait kernel.use(new AIServicePlugin());\nawait kernel.use(new AutomationServicePlugin());\nawait kernel.use(new AnalyticsServicePlugin());\n(kernel as any).broker = createBrokerShim(kernel);\nawait kernel.bootstrap();\n```"
+}

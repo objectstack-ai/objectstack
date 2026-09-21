@@ -1,0 +1,37 @@
+{
+  "number": 1209,
+  "kind": "pull_request",
+  "title": "Add system project infrastructure and project-scoped routing foundation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-22T02:11:36Z",
+  "updated_at": "2026-09-07T04:49:06Z",
+  "closed_at": "2026-04-22T04:06:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-04-22T04:06:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1209",
+  "body": "Implements foundational schema and provisioning for ObjectStack's new architecture with a built-in \"system\" project and project-scoped API routing, following Airtable's workspace/base scoping model.\n\n## Schema Changes\n\n**System Project Support**\n- Added `isSystem` boolean field to `ProjectSchema` and `sys_project` object\n- Regular projects default to `isSystem: false`, system project set to `true`\n- Enables separation of platform infrastructure from user data\n\n**Project-Scoped Routing Configuration**\n- Added `enableProjectScoping` and `projectResolution` fields to `RestApiConfigSchema`\n- Supports three resolution strategies: `'required'`, `'optional'`, `'auto'` (default)\n- Prepares infrastructure for Airtable-style routing: `/api/v1/projects/:projectId/data/...`\n\n## Provisioning Service\n\nImplemented `ProjectProvisioningService.provisionSystemProject()`:\n\n```typescript\nconst service = new ProjectProvisioningService({ controlPlaneDriver });\nconst result = await service.provisionSystemProject();\n\n// Returns system project with well-known UUID\nconsole.log(result.project.id);        // '00000000-0000-0000-0000-000000000001'\nconsole.log(result.project.isSystem);  // true\nconsole.log(result.project.slug);      // 'system'\n```\n\n**Characteristics:**\n- Well-known UUID: `00000000-0000-0000-0000-000000000001`\n- Operates on control plane DB (no separate physical database)\n- Idempotent provisioning - safe to call multiple times\n- Enterprise plan, production type, protected status\n\n## Test Coverage\n\nAdded comprehensive test suite (7 tests, all passing):\n- Regular project provisioning with `isSystem=false`\n- System project creation with well-known UUID\n- Idempotent system project behavior\n- Control plane persistence validation\n- Default project constraints\n\n## Documentation\n\nCreated `docs/design/SYSTEM_ARCHITECTURE_IMPLEMENTATION.md`:\n- Complete architecture overview and benefits\n- Migration path for existing deployments\n- Usage examples and code snippets\n- Phase 2 requirements for runtime implementation\n\n## Architecture Benefits\n\n**System Project Isolation**\n- Clear separation: platform infrastructure vs user data\n- Protected from accidental deletion via `isSystem` flag\n- Enables centralized system package management\n\n**Project-Scoped APIs (Schema Ready)**\n- Multi-tenancy foundation in place\n- Industry-standard routing pattern (Airtable, Salesforce alignment)\n- Backward compatible through 'auto' resolution strategy\n- Future-proofs for per-project quotas, permissions, billing\n\n## Phase 2 (Future Work)\n\nRuntime implementation deferred to next PR:\n- REST server route registration with project context\n- HTTP dispatcher projectId extraction logic\n- Client SDK project-scoped API methods\n- Integration and E2E testing\n\nCurrent implementation (~50% of total changes) provides production-ready schema and provisioning that can be safely deployed without breaking existing functionality."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 16523,
+  "kind": "pull_request",
+  "title": "fix(spec): stop GetMetaItemsRequestSchema.organizationId promising it is always consulted",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T06:58:06Z",
+  "updated_at": "2026-09-07T08:27:06Z",
+  "closed_at": "2026-09-07T08:27:04Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-09-07T08:27:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16523",
+  "body": "Fixes #14772\n\n`Clause-②: no` — no exported symbol, no payload key, no accept-set movement. Confirmed mechanically, not asserted: see *Clause ② confirmation* below.\n\n## What changed\n\nOne `describe()` string, on `GetMetaItemsRequestSchema.organizationId` in `packages/spec/src/api/protocol.zod.ts`, plus the generated reference row it compiles into and the owed changeset. No key added, removed or renamed; no export moved; no runtime behaviour touched.\n\nThe old text opened with an unconditional *\"Selects the org partition in the ADR-0005 overlay read order\"* and closed with *\"Absent = environment-wide read: only env-level overlays apply and no org partition is consulted.\"* Stating only the absent case invites the converse, and a reader completes it as **present ⇒ consulted**. A supplied organization is not consulted on every `getMetaItems` read, so that completion is false.\n\nThe correction qualifies the promise instead of implying its converse — the parameter selects the org partition **when an org partition applies**, and *\"Supplying a value does not by itself guarantee an org partition is consulted; where none applies, and whenever it is absent, the read is environment-wide and only env-level overlays apply.\"*\n\nPer the maintainer cap on the card (comment 5536474187): **no registry clause**, the flag is not named, and no new `packages/spec` key is added. ADR-0131 D6/D7 retires the per-organization partition wholesale, so teaching vocabulary for a mechanism with about one release to live would cost a changeset going in and another coming out. The escape hatch the maintainer offered was not needed: a true, useful sentence exists without naming the mechanism.\n\n## Scope: one row of four, deliberately\n\nThe four sibling sites share a byte-exact opening. Relocated **by symbol**, not by line number:\n\n| schema | line found | card's line | drift |\n|---|---|---|---|\n| `GetMetaItemsRequestSchema` | `:236` | `:236` | none — **fixed here** |\n| `GetMetaItemRequestSchema` | `:271` | `:271` | none — left alone |\n| `GetMetaItemLayeredRequestSchema` | `:441` | `:441` | none — left alone |\n| `GetMetaItemCachedRequestSchema` | `:1815` | `:1815` | none — left alone |\n\nPopulation grepped on the **opening** phrase = 4. The *closing* phrase returns 2, reproducing the near-miss triage recorded. Control: `organizationId` occurs 11 times in the file, matching the card's prediction.\n\nThe other three rows are **not** touched. My reading agrees with the PM's that `:271` and `:441` are now imprecise in the same way, and the downstream trace is in the report on the card — but widening is the maintainer's call under the ADR-0131 clock, and triage wrote the standing instruction for exactly this case: report it, do not act on it. Out of scope here: #14770 remains open, and the ETag question named on the card is untouched.\n\n## Clause ② confirmation (mechanical, two-direction)\n\nBoth gates green on this diff — and both proven able to say otherwise, on the very schema this PR edits, rather than read as a bare green.\n\n| gate | on this diff | under mutation | restored |\n|---|---|---|---|\n| `check:api-surface` | exit 0 | **exit 1** — *\"0 breaking (removed/narrowed), 1 added\"* | exit 0 |\n| `check:authorable-surface` | exit 0 | **exit 1** — names `+ api/GetMetaItemsRequest:ablationProbeKey` | exit 0 |\n\nThe mutation added a public export and a payload key to `GetMetaItemsRequestSchema`; each leg proved the edit reached disk (blob hash vs the HEAD blob) and, for the dist-resolved gate, reached `dist/` via `scripts/ablation-dist-preflight.mjs` (`--absent` on the restore leg). Restore is proven by an empty `git diff HEAD` and the source blob hash returning to HEAD's, not by an exit code.\n\nOne confound found and corrected rather than reported as a pass: `pnpm --filter @objectstack/spec build` **regenerates** `authorable-surface/api.json`, so the first attempt at that gate's red leg was masked by its own baseline moving with the mutation. The un-confounded run mutates the source and runs the gate with no rebuild in between.\n\nIndependently, neither artifact records `describe()` text at all, while `GetMetaItemsRequest` *is* present in `authorable-surface/api.json` — so these greens mean \"the gate looked at this schema and no key moved\", not \"the gate never looked\".\n\n## Verification\n\n- Regenerated with the repo's own tooling only — `check:generated` proved `content/docs/references/**` the single stale artifact and `--fix` regenerated exactly that one. No generated artifact was hand-edited.\n- **Measured regeneration footprint: 3 files** — 1 tracked (`content/docs/references/api/protocol.mdx`, one table row) and **2 gitignored** (`packages/spec/json-schema/api/GetMetaItemsRequest.json`, `packages/spec/json-schema/objectstack.json`). The gitignored half is counted, not omitted. Four further gitignored `packages/spec/dist/api/*` files carry the string as build output.\n- `check:generated` exit 0 afterwards — all 15 artifacts up to date.\n- Derived the gate families mechanically from the change set (`scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`): **89 of 90 ran green**, reconciled with `--ran`. The one unrun is `check:dual-build-cjs-loads`, which refused with `PREREQUISITE NOT MET` (exit 3, explicitly not a pass) because 33 packages have no `dist/`; it needs a whole-repo build and is declared to CI.\n- `@objectstack/spec`: typecheck exit 0; tests **483 files / 13129 passed**.\n- Three gates that first returned exit 3 / a build-prerequisite refusal were re-run after building `@objectstack/lint`, `@objectstack/formula` and `@objectstack/client-react`; all three then genuinely measured and passed. None was recorded as a pass while unmeasured.\n- Every proof is anchored to the literal sha `c383352cb752245899b6ca7e2dc7d233405113ee`. `origin/main` moved under this container mid-run (to `a5eccf9257`); the anchor did not.\n\nDraft on purpose: not flipped ready and not enqueued — that is the PM's call.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T6HeZvT9wdSJD1ZxJb5Eno)_"
+}

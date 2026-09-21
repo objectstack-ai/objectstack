@@ -1,0 +1,36 @@
+{
+  "number": 15416,
+  "kind": "issue",
+  "title": "OBJECT_API_METHOD_NOT_ALLOWED names an operation its own `allowed` array contains — the refusal reports the conjunct that PASSED",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T14:58:25Z",
+  "updated_at": "2026-09-07T07:01:29Z",
+  "closed_at": "2026-09-07T07:01:03Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15416",
+  "body": "Measured in passing while driving `sys_user` write doors for cloud#1989, on a real\nwalled boot of the cloud control plane at framework pin `5b2ad1b41`.\n\n## What was measured\n\n`sys_user` declares `enable.apiMethods: ['get','list','update','bulk']`\n(`packages/platform-objects/src/identity/sys-user.object.ts:907`). Three requests,\neach refused, each naming an operation that its own `allowed` array contains:\n\n```\nPOST /api/v1/data/sys_user/deleteMany   -> 405\n{\"error\":\"API operation 'bulk' is not allowed on object 'sys_user'\",\n \"code\":\"OBJECT_API_METHOD_NOT_ALLOWED\",\"object\":\"sys_user\",\n \"allowed\":[\"get\",\"list\",\"update\",\"bulk\",\"aggregate\",\"history\",\"search\",\"import\",\"export\"]}\n\nPOST /api/v1/data/sys_user/createMany   -> 405   (identical envelope)\nPOST /api/v1/batch                      -> 405   (identical envelope)\n\nPOST /api/v1/data/sys_user/import       -> 405\n{\"error\":\"API operation 'import' is not allowed on object 'sys_user'\", ...\n \"allowed\":[... ,\"import\",\"export\"]}\n```\n\n`bulk` is in the allowed set and the refusal says `bulk` is not allowed. Same for\n`import`. Meanwhile `POST /api/v1/data/sys_user/updateMany` and\n`POST /api/v1/data/sys_user/batch` — which also need `bulk` — are ADMITTED and\nanswer 200. So the refusal is correct in outcome (deleteMany needs bulk AND\ndelete; createMany needs bulk AND create; import needs a create face) but the\nmessage names the wrong conjunct: it reports the conjunct that PASSED.\n\n## Why this is worth a card rather than a shrug\n\nThe `allowed` array is load-bearing as a DISCRIMINATOR, not decoration.\n`apps/cloud/test/unscoped-control-plane-tenant-wall.test.ts` states the rule it\ninherited from cloud#1225: a declaration re-widened to create/update can still\n405 for an unrelated reason, so only the set proves WHICH gate answered. An\nenvelope whose set contradicts its own message cannot serve that purpose — a\nfuture measurement reading it concludes the object still has the verb open when\nthe gate in fact closed a different conjunct, or the reverse.\n\n## Suggested shape\n\nThe refusal should name the conjunct that actually failed (`delete` / `create`),\nor the `allowed` set should be the set the gate evaluated against. Either one\nmakes message and set agree; shipping both as they are makes the envelope\nself-contradicting.\n\nFiled with no assignee by the cloud#1989 measurement seat. Not repaired there:\nthat card is measurement-only and this is a framework-owned surface.\n"
+}

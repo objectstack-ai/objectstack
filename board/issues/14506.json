@@ -1,0 +1,34 @@
+{
+  "number": 14506,
+  "kind": "issue",
+  "title": "ADR (mirror of cloud ADR-0024): Identity & Access Architecture — the open half that `plugin-auth` / `platform-objects/identity` implement, recorded in this repo with Provenance",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:39:02Z",
+  "updated_at": "2026-09-07T07:53:48Z",
+  "closed_at": "2026-09-07T07:01:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14506",
+  "body": "Part of #14496 (maintainer ruling 2026-09-02, 「ok」 to option 2: mirror the open half, do not move files). Filed by the director seat, session `session_01WXyGTWPbbreqXow7Z2pZCk`. `docs/adr/**` is a governed surface: **draft PR, human merge**, no seat flips it ready. Clause-②: no (a record, not a contract change). `domain:*` is triage's.\n\n## What to write\n\nA new local ADR under the next free number in `docs/adr/` (133 records today; 0130 is the highest) that states, **as this repo enforces them**, the decisions of cloud `docs/adr/0024-identity-and-access-architecture.md` (Status: Accepted, founder, 2026-06-25) whose mechanism lives in open code. From the cloud record's own headings, the open half is:\n\n- **D1** per-environment identity, never centralised (`plugin-auth` runs better-auth in the env);\n- **D2** two user populations, two sources of truth;\n- **D4** source-of-truth marking — managed vs env-native (`sys_user` / `sys_account` `managedBy` posture);\n- **D5** identity from the IdP, authorization in the env; **D5.2** the local user-management surface under SSO (split by population — the `sys_user` actions, break-glass password, the last-admin guard that cites \"ADR-0024 D4/D5.2\" today);\n- **D6** SSO + SCIM per production env (the `@better-auth/sso` mechanism and `sys_sso_provider` incl. the opt-in domain verification cited as \"ADR-0024 ②\");\n- **D7** portability / self-host preserved; **D9** env users live in the env, org membership via better-auth.\n\n**Stays in cloud, cited as `cloud ADR-0024`**: D3 cloud-as-IdP hub, D5.1 the cloud OP membership gate, D8 billing, D10 prod/dev metering and population lifecycle, the V1 roadmap and commercial framing.\n\n## Shape (copy `docs/adr/0079-record-display-name.md`)\n\n- A **`## Provenance — read this before citing this file`** section first: this file records, in this repo, decisions taken in `objectstack-ai/cloud` ADR-0024 on 2026-06-25; the cloud record is the original and keeps the commercial half; this file is written from the cloud record and the code that implements it, with the implementing anchors named (`packages/plugins/plugin-auth/src/**`, `packages/platform-objects/src/identity/sys-sso-provider.object.ts`, `sys-user.object.ts`, `last-admin-guard.ts`).\n- Decisions restated in this repo's own words, each with the code anchor that enforces it; ⛔ no new decision, no widening — anything the cloud record did not decide is not decided here.\n- Register the file in `docs/adr/PRIORITIZATION.md` if that index is maintained by hand (check the file's own header); `scripts/adr-anchors/` mapping for the files that will cite it is the re-pointing card's job (#14361), not this one's.\n\n## Follow-ups the accepting seat files (not this card)\n\n- cloud repo: a one-line pointer added to cloud ADR-0024 naming this repo's new number (cloud is a `repo:cloud` seat card; number known only after this lands).\n- #14361 re-points the identity surface's bare `ADR-0024` citations (71 measured on `origin/main` @ `00ff228fe`) to the new local number; ⛔ not done here.\n\n## Re-check\n\n```\ngit -C ../cloud show origin/main:docs/adr/0024-identity-and-access-architecture.md | grep -n \"^### D\"\ngit grep -n -E \"ADR-0024\" origin/main -- packages/plugins/plugin-auth/src packages/platform-objects/src/identity | grep -v -i \"cloud ADR-0024\" | wc -l   # expect ~71 before #14361 lands\n```\n\nRefs: #14496 (the ruling) · #14361 (the re-pointing, blocked on this) · cloud ADR-0024 · ADR-0079 (the Provenance shape) · #14360 / #13816 (live identity work that cites these decisions)."
+}
