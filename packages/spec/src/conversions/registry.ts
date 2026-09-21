@@ -7114,6 +7114,96 @@ const elementFormRemoved: MetadataConversion = {
 };
 
 /**
+ * `translation.<locale>.settings` on a PER-APP bundle — the platform-only
+ * group leaving `stack.translations` with the type split (protocol 18,
+ * #15178, ruling batch #132 item 2 letter ②).
+ *
+ * ⛔ NOT a lossless delete, and this entry says so rather than claiming the
+ * house phrase. `settings` is keyed by `SettingsManifest.namespace`, and only
+ * platform code declares a manifest — so the only namespaces an application
+ * could address were the PLATFORM's own. Both bundles are loaded into ONE
+ * served tree (`AppPlugin.loadTranslations` and each platform plugin's
+ * `kernel:ready` contribution both call `II18nService.loadTranslations`, which
+ * deep-merges), and `resolveSettingsTitle` / the console's `useSettingsLabel`
+ * read that merged tree, so an app-authored entry DID resolve: it overwrote
+ * the platform's own settings copy for the deployment. Dropping it restores
+ * the platform's string, which is the ruled intent — and the semantic entry
+ * `18.translation-per-app-settings-platform-only.ts` is where an author is
+ * told that is what happened, because a notice reading "(removed)" does not
+ * say it.
+ *
+ * ⚠️ The BUNDLE shape only. `TranslationItemSchema` still declares `settings`
+ * (the registered `translation` metadata type is out of this ruling's scope),
+ * so a bare item entry replaying through this seam is left exactly as it is —
+ * the opposite of the `translation-component-submit-label-removed` neighbour,
+ * which retires its key at both doors and therefore walks both shapes. Getting
+ * this backwards would strip a key its own schema still accepts.
+ *
+ * The bundle is told from an item structurally rather than by key spelling:
+ * `locale` is REQUIRED on an item and never present on a bundle entry (the
+ * bundle's keys ARE the locales), and the candidate value must be a dict whose
+ * every key is a declared translation group — which an `objects` record, the
+ * one other dict-of-dicts at that depth, is not.
+ */
+const translationPerAppSettingsRemoved: MetadataConversion = {
+  id: 'translation-per-app-settings-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'stack.translations[].<locale>.settings',
+  summary:
+    "per-app translation group 'settings' removed (#15178 — it is keyed by SettingsManifest.namespace "
+    + 'and only platform code declares a manifest, so an app-authored entry could only overwrite the '
+    + "platform's own settings copy in the one merged served tree; the group stays on the PLATFORM "
+    + 'bundle, PlatformTranslationData)',
+  apply(stack, emit) {
+    /** The top-level groups a translation bundle entry may carry (either face). */
+    const GROUPS = new Set([
+      'objects', 'apps', 'messages', 'globalActions', 'dashboards', 'datasets',
+      'pages', 'flows', 'settings', 'metadataForms', 'settingsCommon',
+    ]);
+    return mapCollection(stack, 'translations', (entry, path) => {
+      // A `translation` ITEM, not a bundle — `settings` is still declared
+      // there. Leave it whole.
+      if ('locale' in entry) return entry;
+      let next = entry;
+      for (const [locale, data] of Object.entries(entry)) {
+        if (!isDict(data) || !isDict(data.settings)) continue;
+        if (!Object.keys(data).every((k) => GROUPS.has(k))) continue;
+        const stripped = stripKeys(data, ['settings'], emit, `${path}.${locale}`);
+        if (stripped === data) continue;
+        next = next === entry ? { ...entry } : next;
+        next[locale] = stripped;
+      }
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      translations: [
+        {
+          'zh-CN': {
+            settings: { mail: { title: '邮件投递', keys: { host: { label: '主机' } } } },
+            // A neighbouring group on the same entry rides through untouched.
+            apps: { crm: { label: '客户关系管理' } },
+          },
+        },
+      ],
+    },
+    after: {
+      translations: [
+        {
+          'zh-CN': {
+            apps: { crm: { label: '客户关系管理' } },
+          },
+        },
+      ],
+    },
+    // One per stripped group: the single `zh-CN` entry.
+    expectedNotices: 1,
+  },
+};
+
+/**
  * `translation.pages.<name>.components.<id>.submitLabel` — the component-copy
  * key retired with its only declarer (protocol 18, #10926, ADR-0049).
  *
@@ -10060,6 +10150,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     pageAssignedProfilesRemoved,
     chartConfigAriaRemoved,
     dashboardWidgetChartConfigStructureRemoved,
+    translationPerAppSettingsRemoved,
   ],
 };
 
