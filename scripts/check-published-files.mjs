@@ -258,8 +258,8 @@ const EXTRA_ENTRIES = {
     //     into node_modules does not rescue it either: Node refuses type
     //     stripping under node_modules by design, so the file cannot load
     //     even when resolution is bypassed entirely.
-    //   - measured when this landed, 191 of the 203 shipped modules carry a
-    //     relative import onto one of 44 src/ modules this glob does NOT
+    //   - measured when this landed, 190 of the 203 shipped modules carry a
+    //     relative import onto one of 42 src/ modules this glob does NOT
     //     ship (src/shared/lazy-schema.ts alone is named by 182), so a route
     //     that reached them still would not load them.
     //
@@ -278,7 +278,7 @@ const EXTRA_ENTRIES = {
     // So what #19009 corrects is the REASON, not the entry, and the two
     // repairs the false reason invites are both wrong:
     //   - do NOT open the exports map to make the old sentence true. It
-    //     would advertise a route that is broken for 191 of 203 files, which
+    //     would advertise a route that is broken for 190 of 203 files, which
     //     is a machine-readable surface that lies (Route & surface ownership
     //     rule 4; Prime Directive #10).
     //   - do NOT drop the entry as unreachable payload. It is reachable
