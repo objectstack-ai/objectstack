@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { ManifestSchema, type ObjectStackManifest } from './manifest.zod';
+import {
+  ManifestSchema,
+  MANIFEST_ID_PATTERN,
+  MANIFEST_ID_EXAMPLES,
+  type ObjectStackManifest,
+} from './manifest.zod';
+import { PackageSchema } from '../marketplace/package.zod';
 
 describe('ManifestSchema', () => {
   describe('Basic Properties', () => {
@@ -543,5 +549,129 @@ describe('dead-container retirement (#11332, ADR-0049 — tombstoned, not delete
     });
     expect(parsed.dependencies).toEqual({ '@objectstack/plugin-auth': '^2.0.0' });
     expect(parsed.navigationContributions).toHaveLength(1);
+  });
+});
+
+// ── `manifest.id` — the reverse-domain rule, declared once ───────────────────
+//
+// `ManifestSchema.id` and `PackageSchema.manifestId` name the same identity:
+// what an author writes, and what the registry stores and addresses the package
+// by. They were two independent declarations — one enforcing the shape, one
+// accepting any string — so a package could scaffold, validate and boot and
+// still be refused at publish. These pins hold the two together and hold the
+// refusal to the shape #4001 asks of it.
+describe('manifest.id — reverse-domain identifier', () => {
+  const legal = (id: string) => ({ id, version: '1.0.0', type: 'app' as const, name: 'X' });
+
+  it('the examples the TSDoc and the refusal show are themselves legal', () => {
+    // The refusal shows these two ids to an author who is already stuck. An
+    // example that fails its own rule teaches exactly the wrong thing, so the
+    // list is held against the pattern rather than trusted.
+    for (const example of MANIFEST_ID_EXAMPLES) {
+      expect(MANIFEST_ID_PATTERN.test(example), `${example} must match the pattern`).toBe(true);
+      expect(ManifestSchema.safeParse(legal(example)).success).toBe(true);
+    }
+  });
+
+  it.each([
+    'com.acme.crm',
+    'com.example.my-app',
+    'org.apache.superset',
+    'app.example.hr',
+    'a.b',
+    'com.example.app2',
+  ])('accepts %s', (id) => {
+    expect(ManifestSchema.safeParse(legal(id)).success).toBe(true);
+  });
+
+  it.each([
+    ['blank', 'a bare word carries no dot'],
+    ['com', 'one segment is not reverse domain'],
+    ['com.', 'a trailing dot leaves an empty segment'],
+    ['.com.app', 'a leading dot leaves an empty segment'],
+    ['com.example.my_app', 'underscores are not admitted'],
+    ['Com.Example.App', 'uppercase is not admitted'],
+    ['com.example.-app', 'a segment must open with a letter'],
+    ['com.example.2app', 'a segment must open with a letter, not a digit'],
+    ['com example.app', 'spaces are not admitted'],
+  ])('refuses %s (%s)', (id) => {
+    expect(ManifestSchema.safeParse(legal(id)).success).toBe(false);
+  });
+
+  it('a namespace is never an id — the two rules contradict on the underscore', () => {
+    // `manifest.namespace` documents "lowercase letters, digits, and
+    // underscores only", so reusing it as the id is wrong by construction.
+    // This is the scaffolder bug that produced `com.example.my_app` (#4902's
+    // neighbour) and it must stay refused.
+    expect(ManifestSchema.safeParse(legal('my_app')).success).toBe(false);
+    expect(ManifestSchema.safeParse({ ...legal('com.example.app'), namespace: 'my_app' }).success).toBe(true);
+  });
+
+  describe('the refusal carries a remedy (#4001)', () => {
+    const refusalFor = (id: string) => {
+      const r = ManifestSchema.safeParse(legal(id));
+      expect(r.success).toBe(false);
+      const issue = r.success ? undefined : r.error.issues.find((i) => i.path[0] === 'id');
+      return issue?.message ?? '';
+    };
+
+    it('names the key and echoes the value', () => {
+      const msg = refusalFor('blank');
+      expect(msg).toContain('manifest.id');
+      expect(msg).toContain("'blank'");
+    });
+
+    it('shows both examples', () => {
+      const msg = refusalFor('blank');
+      for (const example of MANIFEST_ID_EXAMPLES) expect(msg).toContain(example);
+    });
+
+    it('suggests com.example.<value> for a bare word', () => {
+      expect(refusalFor('blank')).toContain("Did you mean 'com.example.blank'?");
+    });
+
+    it('hyphenates a bare word that is namespace-shaped, rather than suggesting an id it would refuse', () => {
+      // `com.example.my_app` is the naive prefix and the schema rejects it.
+      // A suggestion is only offered once it has been checked against the
+      // pattern, so what comes back is the form that actually parses.
+      const msg = refusalFor('my_app');
+      expect(msg).toContain("Did you mean 'com.example.my-app'?");
+      expect(msg).not.toContain('com.example.my_app');
+    });
+
+    it('repairs a dotted value in place instead of prefixing it', () => {
+      expect(refusalFor('com.dogfood.flow_fixture')).toContain("Did you mean 'com.dogfood.flow-fixture'?");
+    });
+
+    it('offers no suggestion when nothing mechanical rescues the value', () => {
+      const msg = refusalFor('Com.Example.App');
+      expect(msg).toContain('manifest.id');
+      expect(msg).not.toContain('Did you mean');
+    });
+
+    it('every suggestion it makes is itself accepted by the schema', () => {
+      for (const input of ['blank', 'my_app', 'com.dogfood.flow_fixture', 'support_desk']) {
+        const suggested = /Did you mean '([^']+)'\?/.exec(refusalFor(input))?.[1];
+        expect(suggested, `${input} should get a suggestion`).toBeTruthy();
+        expect(ManifestSchema.safeParse(legal(suggested as string)).success).toBe(true);
+      }
+    });
+  });
+
+  it('PackageSchema.manifestId enforces the SAME declaration — the two cannot drift', () => {
+    // The point of the shared constant: one verdict, two surfaces. A future
+    // edit to either regex literal would have to break this table to pass.
+    const cases = ['com.acme.crm', 'org.apache.superset', 'blank', 'com.example.my_app', 'Com.App', 'a.b'];
+    // Judged per FIELD, not on whole-object success: the two schemas require
+    // different neighbours, so an overall verdict would be measuring those.
+    const fieldRefused = (schema: typeof ManifestSchema | typeof PackageSchema, key: string, value: unknown) => {
+      const r = schema.safeParse({ [key]: value } as never);
+      return r.success ? false : r.error.issues.some((i) => i.path[0] === key);
+    };
+    for (const id of cases) {
+      const refused = !MANIFEST_ID_PATTERN.test(id);
+      expect(fieldRefused(ManifestSchema, 'id', id), `manifest.id verdict for ${id}`).toBe(refused);
+      expect(fieldRefused(PackageSchema, 'manifestId', id), `manifestId verdict for ${id}`).toBe(refused);
+    }
   });
 });

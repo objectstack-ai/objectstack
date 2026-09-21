@@ -281,10 +281,10 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
     // platform's one topological sorter, not from the artifact gate. A caller
     // matching on `code` alone would miss it — `DevPlugin`'s catch does not.
     const cyclic = {
-      manifest: { id: 'a', name: 'A', version: '1.0.0', type: 'app' },
+      manifest: { id: 'com.example.a', name: 'A', version: '1.0.0', type: 'app' },
       packages: [
-        { manifest: { id: 'a', name: 'A', version: '1.0.0', type: 'app', dependencies: { b: '^1.0.0' } } },
-        { manifest: { id: 'b', name: 'B', version: '1.0.0', type: 'module', dependencies: { a: '^1.0.0' } } },
+        { manifest: { id: 'com.example.a', name: 'A', version: '1.0.0', type: 'app', dependencies: { 'com.example.b': '^1.0.0' } } },
+        { manifest: { id: 'com.example.b', name: 'B', version: '1.0.0', type: 'module', dependencies: { 'com.example.a': '^1.0.0' } } },
       ],
     };
     let caught: (Error & { code?: unknown; status?: unknown }) | undefined;

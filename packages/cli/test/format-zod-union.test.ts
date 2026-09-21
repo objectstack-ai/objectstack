@@ -167,7 +167,7 @@ describe('[#5341] formatZodErrors expands invalid_union branches', () => {
  * says so in its own failure message, where the next reader will be standing.
  */
 const TOOLTIP_ALIAS_STACK = {
-  manifest: { id: 'union_probe', name: 'Union Probe', namespace: 'union_probe', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.union-probe', name: 'Union Probe', namespace: 'union_probe', version: '1.0.0', type: 'app' },
   views: [
     {
       name: 'union_probe_view',

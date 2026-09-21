@@ -11,7 +11,7 @@ import { ArchiveAccountAction } from './modern.action.js';
 
 export const ContractStack = defineStack({
   manifest: {
-    id: 'com.objectstack.downstream_contract',
+    id: 'com.objectstack.downstream-contract',
     namespace: 'dc',
     version: '1.0.0',
     type: 'app',

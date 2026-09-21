@@ -364,6 +364,90 @@ export class ExplainObjectNotFoundError extends Error {
   }
 }
 
+/**
+ * The ADR-0112 code {@link PermissionSetNameConflictError} stamps — see that
+ * class for why this collision is `UNIQUE_VIOLATION` and why the value is a
+ * named constant rather than a class-field literal.
+ */
+export const PERMISSION_SET_NAME_CONFLICT_CODE = 'UNIQUE_VIOLATION';
+
+/** The HTTP status {@link PermissionSetNameConflictError} declares. */
+export const PERMISSION_SET_NAME_CONFLICT_STATUS = 409;
+
+/**
+ * [#19307] The data door's duplicate-name refusal on `sys_permission_set`:
+ * a set with this machine name already exists in the caller's organization, so
+ * the insert is refused.
+ *
+ * ## Why this is a CLASS and not a bare `Error` with `.status = 409`
+ *
+ * It was the bare form until now, and the bare form has no `code`. The flat
+ * `{ error, code }` responder in `packages/rest` puts a thrown `code` on the
+ * wire and invents nothing when the producer declared none, so the refusal
+ * reached the client as prose alone — against ADR-0112's 2026-08-17 amendment
+ * (#9232), under which the flat door carries the closed member too. Measured
+ * before the fix: `409 {"error":"[Security] permission set 'showcase_manager'
+ * already exists","object":"sys_permission_set"}`, with no `code` key at all,
+ * while an unauthenticated write on the same resource answered
+ * `401 UNAUTHENTICATED` — so the absence was this producer's, never the door's.
+ * A dialog that has to branch on the refusal was pushed to string-matching.
+ *
+ * ## Why `UNIQUE_VIOLATION` and not a newly minted code
+ *
+ * It is the wire identity this platform ALREADY answers for this exact
+ * condition on this exact column. `sys_permission_set` declares
+ * `{ fields: ['name'], unique: 'organization' }`, and a collision that reaches
+ * the storage layer comes back as `409 UNIQUE_VIOLATION` — the reading
+ * recorded on that index's own comment (#8554) is `org_yi 409
+ * UNIQUE_VIOLATION`. This middleware refuses the same collision one layer
+ * earlier, so a second spelling here would make ONE condition answer two
+ * envelopes depending only on whether the projection's pre-check or the index
+ * caught it — the drift `@objectstack/rest` and `@objectstack/driver-memory`
+ * already registered the SAME code to avoid ("the wire identity is
+ * deliberately the SAME"). #5240's one-condition-one-wording, on the code axis.
+ *
+ * ⛔ Not `RESOURCE_CONFLICT` (the standard member 409 derives from): that is
+ * what the door would supply for a producer that named no condition, and it
+ * would be the second spelling described above.
+ *
+ * ## Why BOTH `status` and `statusCode`
+ *
+ * The same reason every class above records: the two transports read different
+ * property names (`mapDataError` passes a domain error through on `.status`;
+ * the runtime dispatcher's `errorFromThrown` reads `.status` then falls back to
+ * `.statusCode`), and this throws on the DATA path, which reaches both.
+ *
+ * The message is byte-identical to the bare `Error`'s — the wording was never
+ * the defect, and the flat door's 4xx arm ships it verbatim.
+ *
+ * ## Why the code is a NAMED CONSTANT and not a bare class-field literal
+ *
+ * Same spelling `@objectstack/driver-memory` uses for its own registration of
+ * this code ("via the package's exported `UNIQUE_VIOLATION_CODE` /
+ * `UNIQUE_VIOLATION_STATUS`"), and the reason is mechanical rather than
+ * stylistic: `check:error-code-provenance` recognises `objlit`, `assign` and
+ * `*_CODE` `constdef` stamp sites and is blind to class fields by its own
+ * declared bounds. Written as a class-field literal this package would have
+ * become an unlisted EMITTER of a registered code with every gate in the repo
+ * green — the exact invisibility the ledger header names ("no admission rule
+ * checks WHO emits, so an unlisted emitter is invisible to every gate the repo
+ * has", three hand sweeps, #7504 / #13254 / #13353). The constant puts this
+ * emitter inside the gate's field of view, so the provenance row under
+ * `@objectstack/plugin-security` is enforced and not merely intended.
+ */
+export class PermissionSetNameConflictError extends Error {
+  readonly code = PERMISSION_SET_NAME_CONFLICT_CODE;
+  readonly status = PERMISSION_SET_NAME_CONFLICT_STATUS;
+  readonly statusCode = PERMISSION_SET_NAME_CONFLICT_STATUS;
+  /** The permission-set machine name that was already taken. */
+  readonly setName: string;
+  constructor(setName: string) {
+    super(`[Security] permission set '${setName}' already exists`);
+    this.name = 'PermissionSetNameConflictError';
+    this.setName = setName;
+  }
+}
+
 export function isPermissionDeniedError(e: unknown): e is PermissionDeniedError {
   if (!e || typeof e !== 'object') return false;
   const anyE = e as any;

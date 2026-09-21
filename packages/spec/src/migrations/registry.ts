@@ -9000,10 +9000,10 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — names '
+        + 'against, `.objectui-sha` = `87af769e9a3ee28ace099fdd653d3ebd79fe82e2` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 6409 tracked files, against lit '
-        + 'controls objectstack 10171 and @objectstack/spec 3479 on the same corpus.',
+        + 'the string debounceDelay each occur 0 times across its 8228 tracked files, against lit '
+        + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus.',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
         + 'one of a HotReloadConfig spells debounceDelayMs — concretely '
@@ -9189,9 +9189,9 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694`, re-read from this tree — '
+        + '`.objectui-sha` = `87af769e9a3ee28ace099fdd653d3ebd79fe82e2`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '6409 tracked files, against lit controls timeout 832, RuntimeConfig 236 and resourceLimits '
+        + '8228 tracked files, against lit controls timeout 1075, RuntimeConfig 240 and resourceLimits '
         + '2 on the same corpus; both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. #15939, #15678, '
@@ -9333,9 +9333,9 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — spells '
+        + 'objectui checkout — `.objectui-sha` = `87af769e9a3ee28ace099fdd653d3ebd79fe82e2` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 6409 tracked files, against lit controls `useState` 2304 and `timeout` 702 on '
+        + 'across its 8228 tracked files, against lit controls `useState` 2383 and `timeout` 1075 on '
         + 'the same corpus.',
       acceptanceCriteria:
         'Every HTTP log destination spells `batch.flushIntervalMs`, `retry.initialDelayMs` and '
@@ -9343,6 +9343,50 @@ const step18: MigrationStep = {
         + 'four retired spellings fails to compile and fails to parse with a rename prescription '
         + 'naming the suffixed key and its def; the parsed defaults are 5000 / 1000 / 30000 / 1000 as '
         + 'before; and each published describe names milliseconds.',
+    },
+    // A rename is the one thing this entry deliberately does NOT prescribe
+    // mechanically. An id is an IDENTITY: it is what the registry addresses the
+    // package by (`manifest_id`), what an installed row is keyed on, and what a
+    // dependent declares. Rewriting `com.acme.my_app` to `com.acme.my-app` on the
+    // author's behalf would silently make the artifact a DIFFERENT package from the
+    // one already installed somewhere — so this is a structured TODO the human
+    // answers, not a D2 conversion.
+    {
+      id: 'manifest-id-reverse-domain-required',
+      surface: 'manifest.id — `ObjectStackManifest.id`, i.e. `defineStack({ manifest: { id } })` '
+        + 'and the `id:` key of a package manifest — and its registry face '
+        + '`PackageSchema.manifestId` (`marketplace/package.zod.ts`)',
+      replacement: 'a reverse-domain identifier matching `MANIFEST_ID_PATTERN` '
+        + '(`kernel/manifest.zod.ts`): dot-separated lowercase segments, each opening with a '
+        + 'letter, digits and hyphens allowed inside a segment — `com.acme.crm`, '
+        + '`org.apache.superset`. ⛔ Underscores are not admitted, so `manifest.namespace` is '
+        + 'never a legal id and never a legal last segment of one: `com.acme.my_app` becomes '
+        + '`com.acme.my-app`. A bare word gains a prefix: `blank` becomes `com.example.blank`. '
+        + 'The refusal carries the repaired value it has already checked against the pattern, so '
+        + 'the prescription is in the error text, not only here.',
+      reason:
+        'Two declarations named one identity and drifted. `PackageSchema.manifestId` — what the '
+        + 'registry stores and addresses a package by — has always carried the reverse-domain '
+        + 'regex; `ManifestSchema.id`, the key an author actually writes, was `z.string()` and '
+        + 'accepted anything. So a package scaffolded, validated, built and booted with an id the '
+        + 'publish path would refuse, and the author met the rule for the first time at the one '
+        + 'moment it was most expensive to meet. The two sites now reference ONE exported '
+        + 'constant, which is what makes a future divergence a visible edit rather than a silent '
+        + 'one. Why the rule holds for a package nobody publishes: the TSDoc\'s own words are '
+        + '"unique across the entire ecosystem" — an id names the artifact for the ecosystem it '
+        + 'may one day join, so a private app is named under the same rule as a listed one. '
+        + 'Why it is a D3 semantic TODO and not a D2 conversion: the value IS the identity. A '
+        + 'mechanical rewrite would re-point every install, dependency declaration and stored '
+        + '`manifest_id` row at a package that, to the registry, is a different one — and the '
+        + 'safe choice between "rename the package" and "keep the id and change nothing that '
+        + 'depends on it" is not derivable from the metadata.',
+      acceptanceCriteria:
+        'Every `manifest.id` you author matches the pattern, and `defineStack` / '
+        + '`objectstack validate` report no `manifest.id` finding. Prove the rename side '
+        + 'separately, because the schema cannot: for each id you changed, confirm nothing still '
+        + 'addresses the old value — no installed row, no `dependencies` entry in another '
+        + 'package\'s manifest, and no registry listing. If any does, the correct answer is a '
+        + 'deliberate republish under the new id, not an in-place edit.',
     },
     {
       id: 'memory-persistence-placeholder-refused',
@@ -11525,10 +11569,10 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 6409 tracked '
-        + 'files at that sha, against lit controls window 2710, timeout 832, period 160, '
-        + 'interval 156 and metrics 301 on that same corpus and sha, so no pin bump is owed. '
+        + '`.objectui-sha` = `87af769e9a3ee28ace099fdd653d3ebd79fe82e2`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 8228 tracked '
+        + 'files at that sha, against lit controls window 3464, timeout 1075, period 170, '
+        + 'interval 170 and metrics 324 on that same corpus and sha, so no pin bump is owed. '
         + '#15939, #15679, #14478, ADR-0087.',
       acceptanceCriteria:
         'Every metric definition spells summary.maxAgeSeconds, every error-budget burn rate window '
@@ -11720,11 +11764,11 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 6409 files '
-        + 'tracked at that sha (the 404 Span and 40 SpanSchema hits are objectui\'s own HTML '
+        + 'pinned objectui checkout — `.objectui-sha` = `87af769e9a3ee28ace099fdd653d3ebd79fe82e2` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8228 files '
+        + 'tracked at that sha (the 486 Span and 53 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name), against two lit controls on '
-        + 'that same corpus and sha: 10171 hits for the bare token objectstack, and 3479 for the '
+        + 'that same corpus and sha: 12966 hits for the bare token objectstack, and 4997 for the '
         + 'package specifier @objectstack/spec.',
       acceptanceCriteria:
         'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
@@ -11820,8 +11864,8 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — spells it 0 '
-        + 'times across 6409 tracked files, against lit controls `TTL` 112 and `tenant` 819 on the '
+        + 'objectui checkout — `.objectui-sha` = `87af769e9a3ee28ace099fdd653d3ebd79fe82e2` — spells it 0 '
+        + 'times across 8228 tracked files, against lit controls `TTL` 156 and `tenant` 976 on the '
         + 'same corpus.',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '

@@ -18,6 +18,11 @@
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import type { MetadataEvalCase } from './metadata-eval.js';
 
+// `id` is a reverse-domain package identifier and `namespace` is a snake_case
+// metadata prefix — one project, two identifiers, contradictory rules
+// (`MANIFEST_ID_PATTERN` refuses the underscore a namespace may carry). The
+// corpus is what the generator imitates, so each entry writes both correctly
+// rather than reusing one for the other.
 const manifest = (id: string, namespace: string, name: string) => ({
   id,
   namespace,
@@ -36,7 +41,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
       'Model an invoicing app: an invoice with multiple line items (product, quantity, unit price, amount). The invoice total should sum its line amounts, and line items are entered together with the invoice.',
     note: 'master_detail + inlineEdit + roll-up summary',
     fixture: {
-      manifest: manifest('invoicing', 'invoicing', 'Invoicing'),
+      manifest: manifest('com.example.invoicing', 'invoicing', 'Invoicing'),
       objects: [
         {
           name: 'invoice',
@@ -97,7 +102,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
       'A project management app: a project owns many tasks (title, status, estimate in hours). Tasks are edited inline within the project, and the project shows a task count and total estimate.',
     note: 'master_detail + inlineEdit + count/sum roll-ups',
     fixture: {
-      manifest: manifest('pm', 'pm_app', 'Project Management'),
+      manifest: manifest('com.example.pm', 'pm_app', 'Project Management'),
       objects: [
         {
           name: 'project',
@@ -162,7 +167,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
       'A blog: posts have a title and body. Readers leave comments on a post (author, body). Comments belong to the post but are an activity stream, not something you fill in when writing the post.',
     note: 'association child: master_detail WITHOUT inlineEdit (related list on detail page)',
     fixture: {
-      manifest: manifest('blog', 'blog_app', 'Blog'),
+      manifest: manifest('com.example.blog', 'blog_app', 'Blog'),
       objects: [
         {
           name: 'post',
@@ -201,7 +206,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
       'An expense report app: a report has a title and a submitter. It contains expense lines (category, description, amount, date). The report total sums the line amounts and lines are entered inline.',
     note: 'master_detail + inlineEdit + sum roll-up + select options',
     fixture: {
-      manifest: manifest('expenses', 'expenses', 'Expenses'),
+      manifest: manifest('com.example.expenses', 'expenses', 'Expenses'),
       objects: [
         {
           name: 'expense_report',
@@ -254,7 +259,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
       'A simple CRM: accounts and their contacts. A contact belongs to an account but can exist independently and is not entered inline with the account.',
     note: 'lookup (independent child) — should NOT be master_detail/inlineEdit',
     fixture: {
-      manifest: manifest('crm', 'crm_app', 'CRM'),
+      manifest: manifest('com.example.crm', 'crm_app', 'CRM'),
       objects: [
         {
           name: 'account',

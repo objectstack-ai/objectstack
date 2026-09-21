@@ -526,7 +526,7 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
       const routes = mount(serverWith(klass.faulted()));
       const extra = klass.req ?? {};
       const bucket = klass.ctx === 'loud' ? loud : quiet;
-      bucket.push((await drive(routes, 'POST', `${PKGS}/publish`, { ...extra, body: { manifest: { id: 'x', version: '1.0.0' } } })).status);
+      bucket.push((await drive(routes, 'POST', `${PKGS}/publish`, { ...extra, body: { manifest: { id: 'com.example.x', version: '1.0.0' } } })).status);
     }
     // The ruled class: the outage is the answer, on EVERY route — not one door
     // taught to be loud while its siblings kept the disguise.

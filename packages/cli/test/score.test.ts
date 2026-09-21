@@ -4,7 +4,7 @@ import { scoreMetadata } from '../src/lint/score';
 
 /** A clean, convention-following invoice + line-item model. */
 const GOOD_STACK = {
-  manifest: { id: 'demo', namespace: 'demo_app', version: '1.0.0', name: 'Demo', type: 'app' as const, engines: { protocol: `^${PROTOCOL_MAJOR}` } },
+  manifest: { id: 'com.example.demo', namespace: 'demo_app', version: '1.0.0', name: 'Demo', type: 'app' as const, engines: { protocol: `^${PROTOCOL_MAJOR}` } },
   objects: [
     {
       name: 'invoice',
@@ -31,7 +31,7 @@ const GOOD_STACK = {
 
 /** Schema-invalid (bad namespace) AND riddled with anti-patterns. */
 const BAD_STACK = {
-  manifest: { id: 'bad', namespace: 'X', version: '1.0.0', name: 'Bad', type: 'app' as const }, // namespace fails pattern → schema error
+  manifest: { id: 'com.example.bad', namespace: 'X', version: '1.0.0', name: 'Bad', type: 'app' as const }, // namespace fails pattern → schema error
   objects: [
     {
       name: 'BadName', // not snake_case → lint error

@@ -76,6 +76,33 @@ export function sanitizeNamespace(name: string): string {
 }
 
 /**
+ * Convert an npm package name into the last segment of a reverse-domain
+ * package id.
+ *
+ * `manifest.id` and `manifest.namespace` are derived from the same project name
+ * under CONTRADICTORY rules, which is why this cannot call
+ * {@link sanitizeNamespace}: a namespace is snake_case by rule
+ * (`^[a-z][a-z0-9_]{1,19}$`), an id segment admits hyphens and refuses
+ * underscores (`MANIFEST_ID_PATTERN`, `@objectstack/spec/kernel`). `os init
+ * my-app` sanitizes to the namespace `my_app`, and the id this scaffold used to
+ * interpolate it into — `com.example.my_app` — is refused by the schema the
+ * scaffold must satisfy on its very first `os validate`.
+ *
+ * No length cap: unlike a namespace, an id segment has none.
+ *
+ * Held against the real pattern by `init-manifest-id.test.ts`.
+ */
+export function manifestIdSlug(name: string): string {
+  let s = name.replace(/^@[^/]+\//, '');          // drop npm scope
+  s = s.toLowerCase().replace(/[^a-z0-9]+/g, '-'); // separators → -
+  s = s.replace(/^-+|-+$/g, '');                   // trim hyphens
+  // A segment must OPEN with a letter, so an empty or digit-leading name takes
+  // a literal prefix instead of producing a silently invalid id.
+  if (!/^[a-z]/.test(s)) s = `app-${s}`.replace(/-+$/, '');
+  return s;
+}
+
+/**
  * Native dependencies the scaffold pulls in (transitively) that need their
  * build scripts to run at install time. pnpm 10+ blocks dependency build
  * scripts by default; without this allowlist `better-sqlite3` (used by the
@@ -597,7 +624,7 @@ import * as objects from './src/objects';
 // (onEnable, functions, the collections) belong here as named exports.
 export default defineStack({
   manifest: {
-    id: 'com.example.${namespace}',
+    id: 'com.example.${manifestIdSlug(name)}',
     namespace: '${namespace}',
     version: '0.1.0',
     type: 'app',
@@ -691,7 +718,7 @@ import * as objects from './src/objects';
 // (onEnable, functions, the collections) belong here as named exports.
 export default defineStack({
   manifest: {
-    id: 'com.objectstack.plugin-${name}',
+    id: 'com.objectstack.plugin-${manifestIdSlug(name)}',
     namespace: '${namespace}',
     version: '0.1.0',
     type: 'plugin',
@@ -769,7 +796,7 @@ export default ${toCamelCase(namespace)}Item;
 // (onEnable, functions, the collections) belong here as named exports.
 export default defineStack({
   manifest: {
-    id: 'com.example.${namespace}',
+    id: 'com.example.${manifestIdSlug(name)}',
     namespace: '${namespace}',
     version: '0.1.0',
     type: 'app',

@@ -628,12 +628,12 @@ describe('validateTranslationReferences — apps, dashboards, global actions', (
  * all three placements here is what keeps that true.
  */
 describe('validateTranslationReferences — contributed navigation (#18203)', () => {
-  /** Package `crm_core` owns the app; package `crm_service` contributes into it. */
+  /** Package `com.example.crm-core` owns the app; package `com.example.crm-service` contributes into it. */
   const contributedArtifact = (contributions: unknown[]) => ({
     packages: [
       {
         manifest: {
-          id: 'crm_core',
+          id: 'com.example.crm-core',
           apps: [
             {
               name: 'crm_enterprise',
@@ -645,7 +645,7 @@ describe('validateTranslationReferences — contributed navigation (#18203)', ()
           ],
         },
       },
-      { manifest: { id: 'crm_service', navigationContributions: contributions } },
+      { manifest: { id: 'com.example.crm-service', navigationContributions: contributions } },
     ],
     objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
     apps: [
@@ -777,7 +777,7 @@ describe('validateTranslationReferences — contributed navigation (#18203)', ()
   it('reads contributions off the stack\'s own top-level `manifest` when there is no `packages[]`', () => {
     const findings = validateTranslationReferences({
       manifest: {
-        id: 'crm_service',
+        id: 'com.example.crm-service',
         navigationContributions: [
           { app: 'crm_enterprise', group: 'group_service', items: [{ id: 'nav_case', type: 'object' }] },
         ],
@@ -799,10 +799,10 @@ describe('validateTranslationReferences — contributed navigation (#18203)', ()
    */
   it('accepts the key in the per-package leg, where the app owner declares no contribution itself', () => {
     const artifactPackages = [
-      { manifest: { id: 'crm_core', apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }] } },
+      { manifest: { id: 'com.example.crm-core', apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }] } },
       {
         manifest: {
-          id: 'crm_service',
+          id: 'com.example.crm-service',
           navigationContributions: [
             { app: 'crm_enterprise', group: 'group_service', items: [{ id: 'nav_case', type: 'object' }] },
           ],
@@ -810,7 +810,7 @@ describe('validateTranslationReferences — contributed navigation (#18203)', ()
       },
     ];
     const ownerBody = {
-      id: 'crm_core',
+      id: 'com.example.crm-core',
       apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }],
       translations: localeKeys('nav_case'),
     };
@@ -929,7 +929,7 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
    */
   it('reads an extension declared by a SIBLING package of the same artifact', () => {
     const ownerBody = {
-      id: 'crm_core',
+      id: 'com.example.crm-core',
       objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
       translations: [{ 'zh-CN': { objects: { crm_lead: { fields: { sla_tier: { label: 'SLA 等级' } } } } } }],
     };
@@ -937,7 +937,7 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
       { manifest: ownerBody },
       {
         manifest: {
-          id: 'crm_service',
+          id: 'com.example.crm-service',
           objectExtensions: [{ extend: 'crm_lead', fields: { sla_tier: { type: 'text' } } }],
         },
       },
@@ -1097,7 +1097,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
   };
   /** The contributor package's own assembled body: contributions, translations, no apps. */
   const contributorBody = (bundleApps: Record<string, unknown>) => ({
-    id: 'crm_service',
+    id: 'com.example.crm-service',
     navigationContributions: [contribution],
     translations: [{ 'zh-CN': { apps: bundleApps } }],
   });
@@ -1109,7 +1109,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
   });
   const ownerEntry = {
     manifest: {
-      id: 'crm_core',
+      id: 'com.example.crm-core',
       apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }],
     },
   };
@@ -1126,7 +1126,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
 
   it('accepts it on the single-`defineStack` shape, contributions on the stack\'s own `manifest`', () => {
     const findings = validateTranslationReferences({
-      manifest: { id: 'crm_service', navigationContributions: [contribution] },
+      manifest: { id: 'com.example.crm-service', navigationContributions: [contribution] },
       translations: [{ 'zh-CN': { apps: { crm_enterprise: { navigation: { nav_case: { label: '个案' } } } } } }],
     });
     expect(findings).toEqual([]);
@@ -1185,7 +1185,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
    */
   it('keeps contributed ids per app', () => {
     const body = {
-      id: 'crm_service',
+      id: 'com.example.crm-service',
       navigationContributions: [contribution, { app: 'ops_console', items: [{ id: 'nav_ops', type: 'dashboard' }] }],
       translations: [{ 'zh-CN': { apps: { ops_console: { navigation: { nav_case: { label: '个案' } } } } } }],
     };
@@ -1197,7 +1197,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
 
   it('resolves the app even when no contributed item carries an id, and says so', () => {
     const body = {
-      id: 'crm_service',
+      id: 'com.example.crm-service',
       navigationContributions: [{ app: 'crm_enterprise', items: [{ type: 'object', objectName: 'crm_case' }] }],
       translations: [{ 'zh-CN': { apps: { crm_enterprise: { navigation: { nav_case: { label: '个案' } } } } } }],
     };

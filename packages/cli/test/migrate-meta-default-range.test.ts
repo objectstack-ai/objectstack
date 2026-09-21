@@ -71,7 +71,7 @@ const INSTALLED = String(PROTOCOL_MAJOR);
  */
 const RETIRED_KEY_CONFIG = `
 export default {
-  manifest: { id: 'default_range_repro', name: 'Default Range Repro', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.default-range-repro', name: 'Default Range Repro', version: '1.0.0', type: 'app' },
   objects: [{ name: 'dr_ticket', label: 'Ticket', fields: { title: { type: 'text', label: 'Title' } } }],
   dashboards: [
     { name: 'kpi_a', label: 'KPI A', widgets: [], refreshInterval: 300 },
@@ -86,7 +86,7 @@ export default {
 /** The same shape already canonical — the control every "it fired" line needs. */
 const CANONICAL_CONFIG = `
 export default {
-  manifest: { id: 'default_range_canon', name: 'Default Range Canon', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.default-range-canon', name: 'Default Range Canon', version: '1.0.0', type: 'app' },
   objects: [{ name: 'dr_thing', label: 'Thing', fields: { title: { type: 'text', label: 'Title' } } }],
   dashboards: [{ name: 'kpi_a', label: 'KPI A', widgets: [], refreshIntervalSeconds: 300 }],
 };
