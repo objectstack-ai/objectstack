@@ -244,58 +244,91 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     expect(real.rulesRun).toContain('validateSecurityPosture');
   });
 
-  it("[#8310] position / app still reach no rule — role-word's residue, not an oversight", () => {
-    // The two collections only `security-role-word` judges. They stay ungated
-    // because that rule stays behind WHOLE (next case): gating the types
-    // without the rule would gate them on nothing, and wiring the rule for
-    // the other collections alone is the #7220 split. A future declaration
-    // for either type is a deliberate edit to THIS test.
+  it("[#8310 → #19370] position / app reach the door — role-word's residue, cleared", () => {
+    // ⭐ INVERTED, deliberately, under the #19370 ruling (batch #203 item 3,
+    // letter B — maintainer 「203 同意」). What stood here pinned the residue
+    // itself: "position / app still reach no rule". The ruling REFUSED the
+    // other way out of that state — retiring `allowRuntimeCreate` on the two
+    // types would close Studio's own app designer, a shipped tenant
+    // capability — and ruled the rules real on every door instead
+    // (`docs/NORTH-STAR.md` 〈优先级〉 4 「声明了的…在运行时兑现」; ADR-0010).
+    //
+    // So the premise the old pin rested on is gone, not relaxed: the only rule
+    // that judges these two collections is `security-role-word`, and it now
+    // declares both write types. What this pins in its place is the same shape
+    // read the other way round — each type dispatches to exactly that rule,
+    // and each maps to a stack key. The mapping half is not decoration: the
+    // gate builds NO snapshot for an unmapped type, so a declaration without
+    // one finds the rule and refuses nothing, which is the #4449
+    // wired-onto-nothing shape wearing this pin's clothes.
     for (const type of ['position', 'app']) {
       expect(
-        runtimeAuthoringRulesFor(type),
-        `no rule gates '${type}' — crossing them is role-word's whole-family card, not a drift`,
-      ).toEqual([]);
-      expect(stackKeyForType(type)).toBeNull();
+        runtimeAuthoringRulesFor(type).map((r) => r.name),
+        `'${type}' writes must reach the vocabulary freeze at the door`,
+      ).toEqual(['validateSecurityRoleWord']);
+      expect(runtimeGatedTypes()).toContain(type);
     }
+    expect(stackKeyForType('position')).toBe('positions');
+    expect(stackKeyForType('app')).toBe('apps');
   });
 
-  it('[#8310] `security-role-word` stays behind WHOLE — one rule id, one side of the wall (#7220)', () => {
-    // The explicit call the card demands. The rule judges six collections
-    // (objects, fields, actions, permission sets, positions, apps — plus
-    // books); `positions`/`apps` are neither carried by the snapshot nor
-    // mapped, and BOTH types are runtime-creatable — so wiring the rule for
-    // the declared types alone would build a door that refuses a permission
-    // set named `role_manager` while a position named `sales_role` walks
-    // through. It therefore stays behind whole, as its own CLI-only entry.
+  it('[#8310 → #19370] `security-role-word` crosses WHOLE — one rule id, one side of the wall (#7220)', () => {
+    // ⭐ INVERTED, deliberately, under the #19370 ruling. This case pinned
+    // CLI-only for exactly the reason the ruling removes: the rule judges six
+    // collections (objects, fields, actions, permission sets, positions, apps
+    // — plus books), `positions`/`apps` were unmapped, and BOTH types are
+    // runtime-creatable — so wiring it for the declared types alone would have
+    // built a door refusing a permission set named `role_manager` while a
+    // position named `sales_role` walked through.
+    //
+    // #7220's discipline is unchanged and is what this still measures: ONE
+    // rule id, ONE side of the wall. Only the side moved. The entry now
+    // declares the write type of every one of the six collections, so the
+    // subset door the old pin existed to prevent cannot be reached from here
+    // in either direction — a future NARROWING of `runtimeTypes` fails this
+    // case exactly as a partial widening would have failed its predecessor.
     expect(ROLE_ENTRY, 'the split entry must exist — role-word may not ride the crossed entry').toBeDefined();
-    expect(ROLE_ENTRY.surfaces).toEqual(['cli']);
-    expect(ROLE_ENTRY.runtimeTypes).toBeUndefined();
-    expect(ROLE_ENTRY.surfaceReason).toMatch(/positions\/apps/);
-    // Whole means whole: NO runtime-gated type reaches it.
-    for (const type of runtimeGatedTypes()) {
+    expect(ROLE_ENTRY.surfaces).toEqual(['cli', 'runtime-publish']);
+    expect(ROLE_ENTRY.runtimeTypes).toEqual(['object', 'permission', 'book', 'position', 'app']);
+    // `surfaceReason` is the field for a rule that does NOT cross ("why the
+    // runtime gate does not run it"), so a crossed entry carries none — the
+    // shape every other `CLI_AND_RUNTIME` entry in the registry has. The old
+    // pin asserted its text matched /positions\/apps/; keeping a rewritten
+    // reason would have been a stale answer to a question no longer asked.
+    expect(ROLE_ENTRY.surfaceReason).toBeUndefined();
+    // Whole means whole, from the other side: every collection the rule judges
+    // has its write type at the door. Asserted against the six collections the
+    // rule reads, not against the list above, so a collection added to the
+    // rule without a declaration here is a failure rather than a silence.
+    for (const type of ['object', 'permission', 'book', 'position', 'app']) {
       expect(
         runtimeAuthoringRulesFor(type).map((r) => r.name),
-        `role-word must not run for '${type}' writes — that would be the #7220 split`,
-      ).not.toContain('validateSecurityRoleWord');
+        `role-word must run for '${type}' writes — anything less is the #7220 split`,
+      ).toContain('validateSecurityRoleWord');
+      expect(runtimeGatedTypes()).toContain(type);
     }
-    // The premise that makes the split load-bearing rather than pedantic:
-    // position/app writes are REAL at this door (`allowRuntimeCreate: true`),
-    // so a partial wiring would really have admitted what it refuses elsewhere.
+    // The premise that made the split load-bearing, and that now makes the
+    // crossing load-bearing: position/app writes are REAL at this door
+    // (`allowRuntimeCreate: true`). The ruling declined to retire that —
+    // Studio's app designer is a shipped tenant capability — so the door is
+    // where the vocabulary has to be met.
     for (const type of ['position', 'app']) {
       const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type);
       expect(entry?.allowRuntimeCreate, `'${type}' is runtime-creatable`).toBe(true);
     }
 
-    // The door side, measured on a WIRED type: a permission-set write named
-    // `role_manager` (nothing else about it trips) is NOT refused at the
-    // runtime gate — the vocabulary freeze deliberately does not run there.
+    // The door side, measured on a type that was ALREADY wired for the other
+    // entry: a permission-set write named `role_manager` (nothing else about
+    // it trips) was waved through here before #19370 and is refused now. This
+    // is the refusal-set change the changeset declares, at the real gate.
     const real = runRuntimeAuthoringRules({
       type: 'permission',
       item: { name: 'role_manager', label: 'Manager', objects: {} },
     });
-    expect(real.errors).toEqual([]);
+    expect(real.errors.map((f) => f.rule)).toEqual([SECURITY_ROLE_WORD]);
+    expect(real.errors[0].severity).toBe('error');
     expect(real.rulesRun).toContain('validateSecurityPosture');
-    expect(real.rulesRun).not.toContain('validateSecurityRoleWord');
+    expect(real.rulesRun).toContain('validateSecurityRoleWord');
 
     // The CLI side, unchanged by the split: both entries run on all three
     // commands, and their findings UNION to exactly what the one function
