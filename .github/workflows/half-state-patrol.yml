@@ -8,7 +8,13 @@ name: Half-State Patrol
 # NOT repo-agnostic — when it runs, what it may touch, the board's own anchor,
 # and the one step that writes to this repo's cards.
 #
-# ## Why a workflow, and not "a seat should run it"
+# ## Why a workflow at all — the transport, not the calendar
+#
+# ⚠️ HALF SUPERSEDED (ruling #208 on objectstack#19491, executed by
+# objectstack#19497): this file declares NO schedule. The argument below is kept
+# as the history that put the patrol on a runner, not as a promise that anything
+# fires it. What survives is the transport reason in the next paragraph; what the
+# ruling retired is the calendar.
 #
 # The sweeper carries thirteen predicates over the dispatch protocol's
 # label/assignee/PR invariants, and for most of its life its documented consumer
@@ -17,6 +23,10 @@ name: Half-State Patrol
 # claims (H2) and an unenumerated backlog sat on the board. Not one predicate had
 # fired. A healing mechanism with no scheduled caller heals only in the
 # counterfactual, and an alarm added to a script nobody runs is still silence.
+# That reading bought the schedule in #9844 and was true of its day. Ruling #208
+# re-measured the same instrument and found the standing caller charging more
+# than it healed — see the `on:` block below, which carries the reading and the
+# ⛔ that goes with it.
 #
 # "Some seat should run it" also kept not happening for a MEASURED reason, not a
 # discipline one: in every container class measured at the time, the live sweep
@@ -37,12 +47,13 @@ name: Half-State Patrol
 # `HTTPS_PROXY`, so the sweeper sent the proxy's placeholder token straight to
 # GitHub, earned a 401, and reported that refusal as the container's verdict.
 #
-# ⛔ That does NOT retire this workflow, and the fix deliberately did not touch
-# it. The #9844 reason stands on its own and is not a transport reason: an alarm
-# whose only caller is "a seat should remember" is silence, whoever CAN run it.
-# The on-demand path is restored BESIDE the schedule — a lane that needs the
-# board read right now (the 4x/day body trims its own rows, and says so) can now
-# get it — never instead of the schedule.
+# ⛔ That did NOT retire this workflow either, and the fix deliberately did not
+# touch it: a correction about WHO CAN run the sweep is not a ruling about
+# WHETHER it should run by the clock, and this file stayed exactly as it was.
+# What the correction bought is the path this workflow now runs on ALONE — a lane
+# that needs the board read right now (the body trims its own rows, and says so)
+# gets it from its own container or from a `workflow_dispatch` here. Since ruling
+# #208 that on-demand read is the only read there is.
 #
 # ## What lands where
 #
@@ -52,11 +63,21 @@ name: Half-State Patrol
 # archive this needs. The body is owned end-to-end by the generator, so no run can
 # leave half of it stale.
 #
-# The `Swept` timestamp in that body is the patrol's heartbeat and is deliberately
-# refreshed even when the findings are unchanged: a timestamp that stops advancing
-# is how a reader learns the standing caller died. That is the whole defect class
-# this workflow exists to close, so the run must not "optimize away" the no-op
-# edit that proves it is alive.
+# The `Swept` timestamp in that body is refreshed even when the findings are
+# unchanged, and the run must still not "optimize away" that no-op edit — but
+# read it for what it now is. With no schedule behind it, the stamp dates the
+# last time a seat ASKED for a reconciliation; it is no longer a heartbeat, and a
+# `Swept` that stopped advancing means nobody has dispatched the patrol since,
+# ⛔ not that a standing caller died.
+#
+# ⚠️ KNOWN STALE READING, deliberately not repaired here (objectstack#19497): the
+# generator stamps a cadence deadline beside `Swept` from its own `PATROL_CRON` /
+# `PATROL_CADENCE_HOURS` constants, so the anchor body will keep stamping an
+# "expected every 6h · next by …" deadline computed from the schedule string
+# those constants still hold — a deadline against a schedule this file no longer
+# declares, and nothing on this board fires. The ruling forbids editing the
+# sweeper for it (⛔ not one of its 36,717 lines); the repair is filed as its own
+# finding instead.
 #
 # ## Report-only, and the one thing that is NOT report-only
 #
@@ -119,23 +140,39 @@ name: Half-State Patrol
 # a healthy block.
 
 on:
-  schedule:
-    # Four times a day, six hours apart, at :37 past the hour.
-    #
-    # The minute is offset ON PURPOSE. The triage Routine that heals these same
-    # states fires hourly near the top of the hour, and a patrol landing at the
-    # same minute would keep reading the board mid-heal — reporting half-states
-    # the healer is in the middle of pairing, i.e. manufacturing findings that
-    # clear themselves. :37 puts this sweep in the quiet part of the healer's
-    # cycle in both directions. Four runs/day rather than hourly: H13's own
-    # threshold is 2h and the incident it comes from sat ~26h, so six-hourly
-    # detection is two orders of magnitude better than the status quo (never)
-    # while staying cheap on the core quota this sweep shares with the loop's
-    # hot path.
-    #
-    # The cadence is per-board and stays in the caller: a sibling with a
-    # different healer cycle picks its own minute here, not in the action.
-    - cron: '37 1,7,13,19 * * *'
+  # ⛔ ON DEMAND ONLY — this workflow declares NO schedule, and re-adding one
+  # takes the maintainer's sentence, not a reading of the history above.
+  # Ruling #208 on objectstack#19491, executed by objectstack#19497, maintainer
+  # 「19491 接受你的建议,并立刻派发处理相关任务。」 The triage seat dispatches this
+  # workflow when it wants the board reconciled; nothing fires it by the clock.
+  #
+  # WHAT THE RETIRED SCHEDULE WAS: `37 1,7,13,19 * * *` — four runs a day, six
+  # hours apart, the minute deliberately off the top of the hour so the sweep
+  # never read the board mid-heal while the hourly triage Routine was pairing
+  # states, and four runs rather than hourly because H13's own threshold is 2h.
+  # None of that was what the ruling found wrong.
+  #
+  # WHY IT WENT: the patrol is REPORT-ONLY (see the section above) while the
+  # dispatch charter made its anchor rows a precondition for opening a dispatch.
+  # A row misreading a now-legal state therefore cost every executive seat a
+  # handling step — four times a day, until a dev repaired the row — and the
+  # sweeper was taking eight such repairs a day in the fortnight before the
+  # ruling. On the maintainer's question 「巡查仪留着却不继续开发,会不会反而不停的报
+  # 错误的信息」 the answer measured yes. The ruling stops the clock, ⛔ not the
+  # instrument: the script keeps every one of its 36,717 lines and stays runnable
+  # from here, and the charter's precondition is deleted on the sibling card.
+  #
+  # ⛔ Do not re-add a `schedule:` block on the argument the history above makes
+  # ("an alarm nobody runs is silence"). That argument is answered, not
+  # forgotten: it was weighed against what the standing caller was charging every
+  # seat, and it lost. If a month passes with nobody dispatching this, the ruling
+  # is that the sweeper is deleted whole on its own card — ⛔ never quietly
+  # re-scheduled.
+  #
+  # The cadence was always per-board and stays in the caller: a sibling repo that
+  # wants a scheduled sweep of ITS board declares `schedule:` in its own copy of
+  # this caller and picks its own minute against its own healer — never in the
+  # action, and never by reading a cadence out of this file.
   workflow_dispatch: {}
   # Changes to the patrol itself get exercised before they merge — the same
   # posture as engine-split-metric.yml. On a pull_request run the sweep still
@@ -191,9 +228,10 @@ permissions:
   issues: write
   pull-requests: read
 
-# One patrol at a time. A scheduled run overlapping a manual dispatch would have
-# two runs racing to rewrite the same body, and the loser's findings would vanish
-# with no trace but an edit-history entry.
+# One patrol at a time. Two dispatches in flight at once — the shape that is left
+# now that nothing fires by the clock — would have two runs racing to rewrite the
+# same body, and the loser's findings would vanish with no trace but an
+# edit-history entry.
 concurrency:
   group: half-state-patrol
   cancel-in-progress: false
@@ -223,8 +261,8 @@ jobs:
       # No `pnpm install`: the sweeper imports only `node:` builtins
       # (`process`, `child_process`, `fs`, `url`), global `fetch`, and one
       # repo-local helper — no npm dependency, so installing the workspace here
-      # would buy nothing and would give a scheduled patrol a lockfile it could
-      # fail on.
+      # would buy nothing and would give this patrol a lockfile it could fail
+      # on.
       #
       # `./` — the LOCAL action, deliberately, and this is the one consumer that
       # should not pin a sha. A sibling pins one because it wants a reviewed
@@ -246,7 +284,7 @@ jobs:
           # travels: the cheapest way to adopt the patrol is still to copy this
           # caller, and an unguarded fallback is what would let such a copy
           # rewrite some unrelated card in a sibling with this board's findings,
-          # silently and four times a day. A number is only ever meaningful in
+          # silently, on every run it is given. A number is only ever meaningful
           # the repo it was minted in.
           #
           # TO ROTATE (here): open a new `tracking`-labeled issue, put its
@@ -418,16 +456,17 @@ jobs:
         # `::warning::` carrying the site count. ⛔ NOT the anchor issue — that
         # body is owned end-to-end by `check-half-states.mjs`'s generator, and a
         # second writer is how half of a generated body goes stale.
-        # HOW OFTEN: on this workflow's schedule — four times a day, six hours
-        # apart — plus any `workflow_dispatch`, plus the `pull_request` runs the
-        # paths filter above admits.
+        # HOW OFTEN: once per `workflow_dispatch` — this workflow has carried no
+        # schedule since ruling #208 (objectstack#19497) — plus the
+        # `pull_request` runs the paths filter above admits.
         # WHAT IT COSTS AND WHO PAYS: the census enumerates the whole board once
         # (159 requests on this repo at the time of writing, cursor-paginated —
         # the alternative is one request per distinct number). It is paid by
         # THIS repository's own `secrets.GITHUB_TOKEN` core quota, the same
-        # 5,000/hour this job already draws the live sweep from: ~636
-        # requests/day at four runs, under half a percent of a single hour's
-        # allowance. ⛔ No PAT, no cross-repo credential — the file's own rule.
+        # 5,000/hour this job already draws the live sweep from: ~159 requests
+        # per run, ~3% of a single hour's allowance, and no standing daily draw
+        # at all now that a seat has to ask for each run. ⛔ No PAT, no
+        # cross-repo credential — the file's own rule.
         #
         # ⛔ Gated on the repository NAME, for the reason the closed-card sweep
         # above states: this script is objectstack-only until a sibling has a

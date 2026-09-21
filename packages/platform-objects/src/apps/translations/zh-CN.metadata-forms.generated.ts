@@ -559,7 +559,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "函数体源码——禁止顶层 import"
       },
       "body.capabilities": {
-        label: "功能",
+        label: "能力",
         helpText: "可用的 ctx API（api.read、api.write、crypto.uuid、log 等）"
       },
       "body.timeoutMs": {
@@ -567,8 +567,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "单次调用超时时间（毫秒）"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "内存（MB）",
+        helpText: "单次调用内存上限（MB，最大 256）"
       },
       handler: {
         label: "处理器",
@@ -582,8 +582,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "错误处理"
       },
       timeoutMs: {
-        label: "Timeout Ms",
-        helpText: "Abort the hook after N milliseconds"
+        label: "超时（毫秒）",
+        helpText: "超过 N 毫秒后中止该钩子"
       },
       runAs: {
         label: "运行身份",
@@ -594,16 +594,16 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "可选公式——求值为 false 时跳过该钩子"
       },
       retryPolicy: {
-        label: "Retry Policy",
-        helpText: "Retry on failure — most useful for async hooks"
+        label: "重试策略",
+        helpText: "失败时重试——对异步钩子最有用"
       },
       "retryPolicy.maxRetries": {
-        label: "Max Retries",
-        helpText: "Maximum retry attempts"
+        label: "最大重试次数",
+        helpText: "最多可重试的次数"
       },
       "retryPolicy.backoffMs": {
-        label: "Backoff Ms",
-        helpText: "Delay between retries (ms)"
+        label: "退避（毫秒）",
+        helpText: "两次重试之间的延迟（毫秒）"
       }
     }
   },
@@ -737,7 +737,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userFilters: {
         label: "用户筛选器",
-        helpText: "快速筛选栏：控件样式（下拉 / 标签页 / 开关）+ 暴露的字段或标签页预设"
+        helpText: "快速筛选栏：控件样式（dropdown / tabs / toggle）+ 暴露的字段或标签页预设"
       },
       tabs: {
         label: "标签页",
@@ -1239,24 +1239,24 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "L1 表达式或 L2 沙箱 JS 体"
       },
       "body.language": {
-        label: "Language",
-        helpText: "expression = pure formula; js = sandboxed JavaScript"
+        label: "语言",
+        helpText: "expression = 纯公式；js = 沙箱 JavaScript"
       },
       "body.source": {
-        label: "Source",
-        helpText: "Function body source — no top-level imports"
+        label: "源码",
+        helpText: "函数体源码——禁止顶层 import"
       },
       "body.capabilities": {
-        label: "Capabilities",
-        helpText: "Allowed ctx APIs (api.read, api.write, crypto.uuid, log, …)"
+        label: "能力",
+        helpText: "可用的 ctx API（api.read、api.write、crypto.uuid、log 等）"
       },
       "body.timeoutMs": {
-        label: "Timeout Ms",
-        helpText: "Per-invocation timeout (ms)"
+        label: "超时（毫秒）",
+        helpText: "单次调用超时时间（毫秒）"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "内存（MB）",
+        helpText: "单次调用内存上限（MB，最大 256）"
       },
       params: {
         label: "参数",
@@ -1345,8 +1345,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "CEL 表达式：满足条件时禁用"
       },
       ai: {
-        label: "Ai",
-        helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
+        label: "AI 暴露",
+        helpText: "AI 暴露（需显式开启）：设置 ai.exposed=true 并填写 ai.description（≥40 个字符），此操作即可被代理调用。"
       },
       recordIdParam: {
         label: "记录 ID 参数",

@@ -125,6 +125,37 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // `datasets[].object`. The door controls that prove each one fires live in
   // `runtime-gate.dataset-writes.test.ts`.
   dataset: 'datasets',
+  // [#19143 above, #19370 here] `position` / `app` — the two collections only
+  // `security-role-word` judges. They arrive together with that rule's
+  // crossing, never ahead of it: `DEFAULT_METADATA_TYPE_REGISTRY` declares both
+  // `allowRuntimeCreate: true`, so Studio's app designer, REST `/meta` and an
+  // MCP/AI author all mint them at runtime, and until the rule declared them a
+  // position named `sales_role` walked through the one door a tenant has while
+  // an object of that name was refused. `validateSecurityRoleWord` READS
+  // `stack.positions` and `stack.apps` — it opens on `objects` /
+  // `permissions` and reaches these two further down — so the keys named here
+  // are keys a crossed rule really consults, not the `seed: 'data'` shape.
+  //
+  // ⛔ NOT accompanied by a `RuntimeStackContext` row, and that asymmetry is
+  // the measured answer rather than a half-landing. A collection joins the
+  // CONTEXT because some rule RESOLVES REFERENCES INTO IT (objects, the three
+  // cross-collection security rules' `permissions`/`books`, widget bindings'
+  // `datasets`); the vocabulary freeze resolves nothing — it judges each
+  // identifier and label on its own, so a sibling position tells it nothing
+  // about the written one. Carrying them would be inert twice over: a
+  // sibling's finding is produced byte-identically in both differential passes
+  // and cancels, and a write's own collection already holds exactly one member
+  // — its own item — so `positions[0]` IS this write and name-keying it would
+  // say nothing the index does not (the `pages` reading in
+  // `runtime-gate.derived-name-keys.test.ts`). Eight of the twelve mappings
+  // above name a non-context key for the same reason — counted off this table,
+  // where only `objects`, `permissions`, `books` and `datasets` are context
+  // collections. ⛔ Do not add a context row
+  // "for symmetry": `RuntimeStackContext`'s set is bounded by what the wired
+  // rules RESOLVE (measured, not projected), and every member of it costs the
+  // publish door one indexed `sys_metadata` read per write.
+  position: 'positions',
+  app: 'apps',
 };
 
 /**
@@ -136,10 +167,20 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
  * BOUNDED to what the runtime-wired rules actually read (measured, not
  * projected): the three cross-collection security rules compare
  * objects × permissions × books, `validateWidgetBindings` resolves widget
- * bindings against datasets (#7529), and nothing on the runtime surface reads
- * `positions` / `apps` — so those are NOT carried. Widening the snapshot is a
- * one-key edit here plus a `CONTEXT_STACK_KEYS` entry, made when a rule that
- * reads the collection actually crosses the wall, never in advance.
+ * bindings against datasets (#7529). Widening the snapshot is a one-key edit
+ * here plus a `CONTEXT_STACK_KEYS` entry, made when a rule that RESOLVES
+ * REFERENCES INTO the collection actually crosses the wall, never in advance.
+ *
+ * [#19370] `positions` / `apps` are the measured limit of that sentence, and
+ * the reason it now says RESOLVES rather than reads. `security-role-word`
+ * crossed the wall reading both collections, and they are still not carried:
+ * the rule judges each identifier and label on its own, so the universe it
+ * needs for a position write is the written position, which
+ * {@link TYPE_TO_STACK_KEY} supplies by mapping the type. A context row would
+ * add a sibling whose finding is produced byte-identically in both
+ * differential passes and cancels — inert, at one indexed `sys_metadata` read
+ * per publish for each collection added. The full argument, and the ⛔ that
+ * goes with it, lives on those two rows of the mapping table.
  *
  * [#13977] "Derived from this shape" is now the mechanism and not only the
  * intent: the second half of that edit is DEMANDED by the compiler rather than

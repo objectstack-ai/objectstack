@@ -11,9 +11,12 @@ in this repo (including `.claude/skills/**`) conflicts with this one, **AGENTS.m
 This file carries principles, binding rules and lookup tables — rules only. A rule states
 what to do and what never to do, in one executable sentence; it carries no incident
 narrative, no ruling date or quotation, and no issue-number citation
-(`pnpm check:pm-skill-id-lint`) — a rule's provenance lives in the PR that landed it. Where
-a hook or CI gate enforces a rule mechanically, the rule is stated once here and the
-script's own header is the authority on detail.
+(`pnpm check:pm-skill-id-lint`) — a rule's provenance cites the ADR or ruling record that
+decided it, otherwise the commit sha in this repository's history; a PR number is a
+convenience link, ⛔ never the citation. Runtime strings — refusal prose, prescriptions,
+anything an author is shown — carry no tracker number (`pnpm check:doc-authoring`): the
+lesson goes into the text. Where a hook or CI gate enforces a rule mechanically, the rule is
+stated once here and the script's own header is the authority on detail.
 
 ---
 
@@ -52,12 +55,11 @@ out-of-repo path.
 gate sweep, an ablation — because the working tree is otherwise the only copy of your work.
 
 Type-check coverage and its debt counts are ratcheted in CI
-(`pnpm check:type-check-coverage`, `pnpm check:type-check-debt`; the script headers are
-the authority on detail): every package declares a `typecheck` script or carries a
-measured, shrink-only DEBT/EXEMPT ledger entry; new packages arrive covered; a package
-that graduates deletes its entry in the same PR; when a re-measure forces a count up,
-rewrite the entry's `note` too — a note naming only the old errors reads as "nearly
-graduated" to the next author.
+(`pnpm check:type-check-coverage`, `pnpm check:type-check-debt`): every package
+declares a `typecheck` script or carries a measured, shrink-only DEBT/EXEMPT ledger
+entry; new packages arrive covered; a package that graduates deletes its entry in the
+same PR; when a re-measure forces a count up, rewrite the entry's `note` too — a note
+naming only the old errors reads as "nearly graduated" to the next author.
 
 Three principles the ratchet's invariants encode:
 
@@ -259,7 +261,9 @@ localStorage / auth gotchas.
     `CLAUDE.md` — the file you are reading is one — and a mixed diff is governed whole on a single path hit. The
     register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
     adding a surface is an edit *there*, never here, and `pnpm check:pm-governed-prose` reds per-PR when this
-    paragraph names fewer surfaces than the register — or more. When it reds, name the surface here.
+    paragraph names fewer surfaces than the register — or more. When it reds, name the surface here. A fork PR
+    (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies, queues, arms
+    auto-merge on or approves it; the owning seat adopts the diff onto an internal branch and lands that.
 
     **Authoring stays open to every seat** — drafting, pushing, opening and revising the PR. What is reserved is the
     **landing**: on a PR whose diff touches a governed surface ⛔ never merge, ⛔ never queue, ⛔ never arm
@@ -272,11 +276,11 @@ localStorage / auth gotchas.
     ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
     `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
     current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict, `check-clause2-carriers.mjs --pair N`
-    reads 0 and every check is green — the owning seat then lands it through the queue; the post-merge audit is the
-    compensating control. A PR whose only governed paths are register rows the queue leg regenerates byte-exact clears
-    with zero approvals — an uncertified recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent
-    seat submits an approving review on a governed-surface PR, under any account** — an authorized account is
-    agent-operated too; "CI is green" carries no information about a governance change.
+    reads 0 on its definite rows (⛔ never C5) and every check is green — the owning seat then lands it through the
+    queue; the post-merge audit is the compensating control. A PR whose only governed paths are register rows the queue
+    leg regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or a hand-authored sibling
+    keeps it governed. ⛔ **No agent seat submits an approving review on a governed-surface PR, under any account** —
+    an authorized account is agent-operated too; "CI is green" carries no information about a governance change.
 
     **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
     what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
@@ -446,10 +450,9 @@ a deviation; landed history is not rewritten) and a verbatim maintainer ruling p
 **GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
 Regex literals and script-tag-shaped tokens go in fenced code with the dangerous character
 spelled out, or are described in words (fences do NOT protect them); after writing any
-less-than fragment, read the body back and verify it survived. The two measured mutation
-shapes and their triggers live in pm-dispatch `references/platform-readings.md`. ⛔ A body
-reading short only through the API is probably intact — check the rendered page before
-"repairing" it; a rewrite destroys a correct card.
+less-than fragment, read the body back and verify it survived. ⛔ A body reading short
+only through the API is probably intact — check the rendered page before "repairing" it;
+a rewrite destroys a correct card.
 
 Even inside your own worktree, operate defensively:
 
@@ -745,18 +748,17 @@ Principles the wrapper encodes (its own output is the authority on detail):
   a name, with accepted cases in the shrink-only, hand-edited
   `dual-source-exports.baseline.json`.
 
-**`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against
-an implementation** — the props the spec zod schema declares vs the inputs the objectui
-registry config declares. A prop both sides declare and no renderer reads is, to this
-gate, perfect agreement. Its `spec-only` / `registry-only` / `missing` signals are real;
-just don't read it as proof anything renders. Its right-hand side is the **tracked
-repo-root `sdui.manifest.json`**, written by `node scripts/gen-sdui-manifest-node.mjs`
-beside `scripts/sdui-manifest.record.json` and held honest in the required lint job by
-`scripts/check-sdui-manifest.mjs` (shape, sha256 vs that record, record pin ==
-`.objectui-sha`) — so `lint.yml` runs this gate `--strict` against it on every PR. It
-still **exits 1** with no usable manifest — "could not run" is a failure, not a skip
-(Route & surface ownership §3) — and `check:generated` files it `EXTERNAL_INPUT_REQUIRED`
-because that aggregate hands it none. ⛔ Do not "fix" a red by re-adding a skip.
+**`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against an
+implementation** — the props the spec zod schema declares vs the inputs the objectui
+registry config declares. A prop both sides declare and no renderer reads is, to this gate,
+perfect agreement. Its `spec-only` / `registry-only` / `missing` signals are real; just
+don't read it as proof anything renders. Its right-hand side is the **tracked repo-root
+`sdui.manifest.json`**, written by `node scripts/gen-sdui-manifest-node.mjs` beside
+`scripts/sdui-manifest.record.json` and held honest in the required lint job by
+`scripts/check-sdui-manifest.mjs` — so `lint.yml` runs this gate `--strict` against it on
+every PR. It still **exits 1** with no usable manifest and `check:generated` files it
+`EXTERNAL_INPUT_REQUIRED` because that aggregate hands it none. ⛔ Do not "fix" a red by
+re-adding a skip.
 
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the wrapper reports that each run rather than staying silent.
@@ -796,8 +798,6 @@ working in its domain — browse the directory, never a hand-written list here:
 - `skills/` — the **published** catalog (it ships to customer projects).
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
   `metadata.internal: true`.
-
-⛔ **Both roots are governed surfaces** — `skills/` is Tier H, `.claude/skills/` Tier S (**Prime Directive #14**).
 
 ---
 
