@@ -2,13 +2,14 @@
 '@objectstack/spec': minor
 ---
 
-feat(spec)!: retire the plugin-security scan-result surface — zero consumers after #14919 (#15932)
+feat(spec)!: retire the plugin-security scan-result surface — zero consumers after the scanner retirement (#15932)
 
 **BREAKING** — the plugin-security scan-result family is removed. ADR-0049
 enforce-or-remove; maintainer ruling 2026-09-07 (director seat, decision batch
 #65), adopted verbatim 「同意」.
 
-This is the second half of #14919. That change retired `PluginSecurityScanner`,
+This is the second half of the scanner retirement — issue 14919, a number since
+deleted from the board, landed as PR #15930. That change retired `PluginSecurityScanner`,
 the `@objectstack/core` class that shipped as a security control and returned
 `status: "passed"` for every plugin it was ever handed. The **schemas** it fed
 survived it — and that scanner's type-only import was their only importer of any
@@ -71,13 +72,23 @@ is to audit with a real tool, not to find a replacement key.
 
 ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec`
 is published, so this is breaking for consumers no download, dependent or source
-telemetry was consulted for — exactly as #14919's changeset says of its own three
-exports. That was an input to the ruling, not a reason to soften the removal.
+telemetry was consulted for — exactly as that retirement's own changeset says of its
+three exports. That was an input to the ruling, not a reason to soften the removal.
 
-⛔ **Untouched, and not checked:** the marketplace `'scanning'` status and the
-incident `'malware'` type. The ruling made them conditional on a producer grep of
+⛔ **Untouched, and not checked:** the marketplace `'scanning'` status
+(`marketplace.zod.ts`). The ruling made it conditional on a producer grep of
 `objectstack-ai/cloud`, and that repository was not reachable from the session
-that executed this card.
+that executed this card, so it stays exactly as it is and its absence from this
+diff is not evidence about it.
+
+⚠️ **The two members the ruling paired with it were ALREADY GONE** — measured on
+this tree, not assumed. The incident `'malware'` type was a member of
+`system/IncidentCategory`, and the whole incident-response family was retired by
+#15513 (maintainer ruling 2026-09-05 — two days *before* the 2026-09-07 ruling
+that made it conditional). `marketplace-admin.zod.ts` was deleted outright with
+the cloud subpath (#16526). Both files return zero tree entries here, against a
+lit control where `'scanning'` still returns a live declaration. So the
+conditional question is **one** enum member wide, not three.
 
 `Clause-②: yes (narrowing)` — a published surface is removed: six exports leave
 the built `.d.ts` and three authorable keys stop being writable, so the accept

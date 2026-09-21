@@ -18,7 +18,8 @@ import { PluginQualityMetricsSchema } from './plugin-registry.zod';
 // plus `PluginSecurityManifest.vulnerabilities`, the last authorable referent of
 // the second def and therefore a forced consequence of retiring it.
 //
-// This is the second half of #14919, which retired `PluginSecurityScanner` — the
+// This is the second half of the scanner retirement (issue 14919, a number since
+// deleted from the board; live record PR #15930), which retired `PluginSecurityScanner` — the
 // `@objectstack/core` class that shipped as a security control and returned
 // `status: "passed"` for every plugin it was ever handed. That scanner was the
 // family's ONLY importer of any kind (a type-only import), so its deletion moved
