@@ -78,6 +78,14 @@ receives `hasMore: true` where it previously received `false`; a caller that
 read `false` as "this is the whole history" was always wrong and is now told so.
 `nextCursor` stays absent — nothing mints one.
 
+Read the new `false` with **one qualification**: unfiltered it is exact, but
+under `?status=` it means "no further match inside the window that was scanned"
+rather than "none exists", because the durable history source has no status slot
+and the window is taken before the filter is applied. Pushing the filter down is
+a `RunStore` contract change this card did not scope. The published
+`RunListResult.hasMore` docblock and the response schema's own description both
+carry that qualification, so a consumer meets it where they meet the field.
+
 **How truncation is established, because the obvious signal is wrong.**
 `runs.length === limit` cannot tell a flow holding exactly `limit` runs from one
 holding ten thousand; the two windows are byte-identical. So

@@ -95,7 +95,12 @@ export const entry: SemanticMigration = {
     + '⚠️ `hasMore` also changes, from a constant to an answer: a request whose window is '
     + 'shorter than the matching run set now receives `hasMore: true` where it previously '
     + 'received `false`. A caller that treated `false` as "this is the whole history" was '
-    + 'always wrong and is now told so. `nextCursor` stays absent — nothing mints one — and '
+    + 'always wrong and is now told so. ⚠️ Read the new `false` with one qualification: '
+    + 'unfiltered it is exact, but under `?status=` it means "no further match inside the '
+    + 'window that was scanned" rather than "none exists", because the durable history '
+    + 'source has no status slot and the window is taken before the filter is applied. '
+    + 'Pushing the filter down is a store-contract change this card did not scope. '
+    + '`nextCursor` stays absent — nothing mints one — and '
     + '`limit` behaves exactly as it did, including its `.default(20)`. '
     + 'A deployment whose automation service does not implement `listRunsPage` answers `501` '
     + 'naming the member, and ⛔ never a `200` carrying an invented `hasMore`.',
