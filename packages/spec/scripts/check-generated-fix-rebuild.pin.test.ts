@@ -215,13 +215,14 @@ describe('check:generated --fix rebuilds what it writes from (#19086)', () => {
 
     const code = checkGenerated(['--fix'], SCRIPTS, w.io);
 
-    expect(w.calls[0]).toBe('build');                       // rebuilt BEFORE anything
-    expect(w.calls.indexOf('build')).toBeLessThan(
-      w.calls.indexOf('check:api-surface') === -1 ? Infinity : w.calls.indexOf('check:api-surface'),
-    );
-    expect(readBaseline(w.root)['meta-spelling']).toHaveLength(8);
+    // THE HARM, asserted first so a regression names the deleted exports rather
+    // than the missing call: without the forced build this baseline loses them.
     expect(readBaseline(w.root)['meta-spelling']).toContain('singularToPlural');
     expect(readBaseline(w.root)['meta-spelling']).toContain('unrecognisedMetaTypeRefusal');
+    expect(readBaseline(w.root)['meta-spelling']).toHaveLength(8);
+    // THE MECHANISM: the build ran first, and every gate saw the dist it emitted.
+    expect(w.calls[0]).toBe('build');
+    expect(w.calls.indexOf('build')).toBeLessThan(w.calls.indexOf('check:api-surface'));
     expect(code).toBe(0);
     rmSync(w.root, { recursive: true, force: true });
   });
@@ -251,10 +252,13 @@ describe('check:generated --fix rebuilds what it writes from (#19086)', () => {
 
     const code = checkGenerated(['--fix'], SCRIPTS, w.io);
 
-    expect(w.calls[0]).toBe('build');
-    expect(readBaseline(w.root).root).toHaveLength(full.length);
+    // THE HARM first, for the same reason as B1 above.
     expect(readBaseline(w.root).root).toContain('chunkExport3a');
     expect(readBaseline(w.root).root).toContain('chunkExport17b');
+    expect(readBaseline(w.root).root).toHaveLength(full.length);
+    // THE MECHANISM.
+    expect(w.calls[0]).toBe('build');
+    expect(w.calls.indexOf('build')).toBeLessThan(w.calls.indexOf('check:api-surface'));
     expect(code).toBe(0);
     rmSync(w.root, { recursive: true, force: true });
   });
