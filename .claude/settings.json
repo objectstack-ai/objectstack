@@ -50,6 +50,8 @@
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectui/pulls/* *)",
       "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/ccr/ready_for_review *)",
       "Bash(curl -sS -X PUT https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/ccr/auto_merge *)",
+      "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectui/pulls/*/ccr/ready_for_review *)",
+      "Bash(curl -sS -X PUT https://api.github.com/repos/objectstack-ai/objectui/pulls/*/ccr/auto_merge *)",
       "Bash(node --use-env-proxy scripts/pm/post-stamped.mjs *)",
       "Bash(node --use-env-proxy scripts/pm/label-write.mjs *)",
       "Bash(node scripts/pm/post-stamped.mjs *)",
