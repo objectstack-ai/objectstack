@@ -77,10 +77,16 @@ import { validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validatio
  * window a caller asks for is still the window the service is asked for.
  */
 function makeDispatcher(hasMore = false) {
-    const listRunsPage = vi.fn(async () => ({
-        runs: [{ id: 'run_1', flowName: 'welcome_flow', status: 'completed' }],
-        hasMore,
-    }));
+    // The parameters are DECLARED, not inferred: an argument-less `vi.fn`
+    // types `mock.calls` as the empty tuple, so reading the options argument
+    // off a recorded call is a type error (TS2493) — and the options argument
+    // is precisely what the preservation rows below exist to inspect.
+    const listRunsPage = vi.fn(
+        async (_flowName: string, _options?: Record<string, unknown>) => ({
+            runs: [{ id: 'run_1', flowName: 'welcome_flow', status: 'completed' }],
+            hasMore,
+        }),
+    );
     const services: Record<string, unknown> = { automation: { listRunsPage, handlerReady: true } };
     const resolve = (name: string) => services[name];
     const kernel: any = {
