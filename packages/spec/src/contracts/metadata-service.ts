@@ -684,16 +684,21 @@ export interface IMetadataService {
      * a synthesised name and the register contract's `data.name` check keeps
      * meaning what it means. That is the whole reason this is a second member
      * rather than a widened {@link loadMany} return: an item whose stored body
-     * has no top-level `name` — a customization container, whose identity IS
-     * the target object — has no identity at all in the unkeyed read, and
-     * keying that read by `data.name` drops it.
+     * has no top-level `name` — an aggregated `defineView` container, which has
+     * none BY DESIGN because its identity is the object it targets — has no
+     * identity at all in the unkeyed read, and keying that read by `data.name`
+     * drops it. (⛔ Not the org customization overlay, which is ADR-0005's
+     * `sys_metadata` mechanism and a different thing entirely.)
      *
      * [#15385 batch #123 item 5] Declared alongside {@link loadMany} /
      * {@link loadDiagnosed} — the position {@link loadDiagnosed} was in before
      * #4127 batch 4, and resolved the same way. Implemented by
-     * `MetadataManager` since #14423 and reached by the ObjectQL governance
-     * audit through a local structural type beside its one call site, with the
-     * contract the only thing nobody had written. A verb family lives whole on
+     * `MetadataManager` in #15378 and reached by the ObjectQL governance audit
+     * through a local structural type beside its one call site, with the
+     * contract the only thing nobody had written. ⚠️ #15378 is the LIVE record
+     * for that landing: the card it was filed under — issue 14423, written
+     * here without a leading hash because it no longer resolves — has since
+     * been deleted from the board. A verb family lives whole on
      * the contract: the vocabulary is already published on `MetadataLoader`
      * (which declares the same optional member over its own loader-local
      * options type); what this adds is the member's place HERE. `options` is

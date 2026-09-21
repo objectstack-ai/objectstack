@@ -152,15 +152,35 @@ exactly what the unkeyed `loadMany` would return for the same item, so no
 consumer ever sees a synthesised `name`.
 
 That difference is the point. A stored body with no top-level `name` is legal
-and deliberate — an org customization container's identity is the object it
-targets, not a name of its own — and such an item has **no identity at all** in
-a plural read keyed by `data.name`: it is dropped, silently. Reach for the keyed
-read wherever the set you are assembling is addressed by key.
+and deliberate — an aggregated `defineView` container has none **by design**,
+because its identity is the object it targets — and such an item has **no
+identity at all** in a plural read keyed by `data.name`: it is dropped,
+silently. Reach for the keyed read wherever the set you are assembling is
+addressed by key.
+
+<Callout type="warn">
+Not to be confused with the **org customization overlay**, which is ADR-0005's
+`sys_metadata` mechanism described under "Overlay Management" below — a
+different thing entirely.
+</Callout>
+
+Probe before you call, and treat an absent member as *absent*, never as an empty
+result — this is the same distinction `loadDiagnosed` exists for, one member
+over:
 
 ```typescript
-for (const { name, data } of (await metadataService.loadManyKeyed?.('action')) ?? []) {
-  // `name` is the key the store holds this item under — present even when
-  // `data` carries none of its own.
+const keyedRead = metadataService.loadManyKeyed;
+
+if (typeof keyedRead === 'function') {
+  for (const { name, data } of await keyedRead.call(metadataService, 'action')) {
+    // `name` is the key the store holds this item under — present even when
+    // `data` carries none of its own.
+  }
+} else {
+  // This plane offers no keyed read. ⛔ Do NOT fall through to an empty set:
+  // "no keys available here" and "the store holds nothing" are different
+  // facts. Fall back to the unkeyed plural read, or record that keys could
+  // not be obtained.
 }
 ```
 
