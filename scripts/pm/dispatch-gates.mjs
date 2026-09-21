@@ -9383,9 +9383,22 @@ export function governedReadCensus({ files = null, read = null } = {}) {
  * governed read reds until it is classified here. A row whose `declared` flag
  * changes reds, in both directions: a declaration added is a floor to lower,
  * a declaration deleted is this card's defect coming back.
+ *
+ * ## The fourth row: a gate whose SUBJECT is a published skill
+ *
+ * `scripts/check-skill-top-level-keys.mjs` reconciles the top-level key
+ * enumeration in the published platform skill against the stack schema, so
+ * the governed file is its input, not a fixture; it spells that path in its
+ * module body and is MATCHED for it the same way the two undeclared rows
+ * above are, so `declared` is false for the same reason.
  */
 export const GOVERNED_READ_FLOOR = Object.freeze([
   Object.freeze({ script: 'scripts/check-commit-card-trailers.mjs', file: '.claude/agents/os-dev.md', declared: false }),
+  Object.freeze({
+    script: 'scripts/check-skill-top-level-keys.mjs',
+    file: 'skills/objectstack-platform/SKILL.md',
+    declared: false,
+  }),
   Object.freeze({
     script: 'scripts/pm/check-expected-skips.mjs',
     file: '.claude/skills/pm-dispatch/SKILL.md',
