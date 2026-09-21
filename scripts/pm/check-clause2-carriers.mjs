@@ -647,8 +647,8 @@
  *      and on every pair carrying a record since #18174,
  *      the record's `Served-tier:` line does not read at the declared tier (row
  *      C7) — or, since #18862, two or more LIVE claims by DIFFERENT authors
- *      stand on the card with no `Release:` from the earlier holder between
- *      them and the taking claim is dated after
+ *      stand on the card with no `Release:` for the earlier claim between them
+ *      (its holder's own, or a provenance HANDOVER release naming it) and the taking claim is dated after
  *      `CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT` (row C9; a hand-over dated at or
  *      before it is a note, never the exit). One exit code with several
  *      adverse reasons is the shape this table already had: the ROW says which,
@@ -1710,11 +1710,11 @@ function laterOnThread(candidate, claim) {
  * `Release:` line, read the sibling's way — and if so, which channel does the
  * record print? `null` when it is not one.
  *
- * ONE channel since #18773 A. The `Release:` line names its target by
- * AUTHORSHIP, not by id: whoever writes it has released what they held, so no
- * comment id is required or read. `markerMatches` is the reading, ⛔ never the
- * raw constant (the two decorated live releases the raw test missed are in the
- * section header above).
+ * ONE channel since #18773 A. In the SAME-login arm the `Release:` line names
+ * its target by AUTHORSHIP, not by id (whoever writes it released what they
+ * held); the HANDOVER arm below names it by id AND session id. `markerMatches`
+ * is the reading, ⛔ never the raw constant (the two decorated live releases
+ * the raw test missed are in the section header above).
  *
  * @param {{ body?: string }} row
  * @returns {string|null} the channel, as the sentence the record prints.
@@ -1727,17 +1727,66 @@ function retractionChannel(row) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// The HANDOVER release — a `Release:` by a DIFFERENT login, on the human's word copied
+// with provenance (the claim-handover ruling, shape A, 「同意」). An unreachable claimant
+// (token exhausted, session ended, identity retired) left its claim standing forever and
+// every later `Claim:` C9-red — two finished PRs among them. SKILL.md's 出处三件 line already
+// ruled acting on another's instruction; the reader now reads EXACTLY its three fields, as the two live specimens spell them. ⛔ NO liveness test.
+// ---------------------------------------------------------------------------
+
+/** The three provenance fields, and the SKILL.md 出处三件 line they come from — both kept UNBROKEN, greppable. */
+export const HANDOVER_PROVENANCE_KEYS = Object.freeze(['谁的指令', '原话', '在哪说']);
+export const HANDOVER_PROVENANCE_SOURCE = '代执行他人指令的关闭、摘标、回收认领,评论带出处三件:谁的指令、原话、在哪说。';
+
+/**
+ * Which provenance fields `body` carries with a NON-EMPTY value: key, decoration, parenthetical, colon, then
+ * the line up to the next field — or, when blank, the blockquote below the key (how 原话 is written). Punctuation alone is empty.
+ */
+export function handoverProvenance(body) {
+  const text = String(body ?? '');
+  const hits = HANDOVER_PROVENANCE_KEYS.map((key) => new RegExp(`${key}[*_\`]*[ \\t]*(?:[(（][^()（）\\n]*[)）])?[*_\`]*[ \\t]*[::]`, 'u').exec(text));
+  const starts = hits.filter(Boolean).map((m) => m.index).sort((a, b) => a - b);
+  const blank = (v) => v.replace(/[\s>*_`—–\-·:,,。;;.、]/gu, '') === '';
+  const out = { present: [], missing: [] };
+  hits.forEach((m, k) => {
+    if (!m) return out.missing.push(HANDOVER_PROVENANCE_KEYS[k]);
+    const end = m.index + m[0].length, eol = text.indexOf('\n', end), lineEnd = eol === -1 ? text.length : eol;
+    let value = text.slice(end, Math.min(lineEnd, starts.find((s) => s > m.index) ?? Infinity));
+    const below = blank(value) ? text.slice(lineEnd + 1).split('\n') : [];
+    for (let i = below.findIndex((l) => l.trim() !== ''); i >= 0 && i < below.length && /^\s*>/.test(below[i]); i += 1) value += below[i];
+    return (blank(value) ? out.missing : out.present).push(HANDOVER_PROVENANCE_KEYS[k]);
+  });
+  return out;
+}
+
+/**
+ * Does `release` HAND OVER `claim` — by shape alone: its first `Release:` line (the sibling's one reading, per line)
+ * names the claim's comment id AND session id (its `Session:` line, else its first token; none ⇒ unnameable), and the three fields are present.
+ */
+export function handoverRelease(release, claim) {
+  const line = String(release?.body ?? '').split(/\r?\n/).find((l) => markerMatches(RELEASE_COMMENT_MARKER, l)) ?? null;
+  const id = String(claim?.id ?? '');
+  const session = readSessionId(claim?.body) ?? /(?<![A-Za-z0-9_])session_[A-Za-z0-9]+(?![A-Za-z0-9_])/.exec(String(claim?.body ?? ''))?.[0] ?? null;
+  const namesId = line !== null && /^\d+$/.test(id) && new RegExp(`(?<![0-9])${id}(?![0-9])`).test(line);
+  const namesSession = line !== null && session !== null && new RegExp(`(?<![A-Za-z0-9_])${session}(?![A-Za-z0-9_])`).test(line);
+  const { missing } = handoverProvenance(release?.body);
+  return { accepted: namesId && namesSession && missing.length === 0, line, namesId, namesSession, session, missing };
+}
+
 /** The rule the pool's MEMBERSHIP is judged by, written out once and PRINTED. */
 export const CLAIM_RETRACTION_RULE =
-  'A claim LEAVES the pool when a LATER comment BY THE SAME AUTHOR retracts it, and a retraction is '
-  + 'the protocol `Release:` line — ONE channel, read through the sibling reader\'s ONE reading of the '
-  + 'marker (`markerMatches`: the bare marker first, then the shared stripper per line, a markdown LIST '
-  + 'ITEM refused), needing no id because it retracts its own author\'s older claims. ⛔ Never a prose '
-  + 'line, whatever act opens it (#18773 A: a reader inferring an act from a verb replays the next '
-  + 'spelling — a withdrawal before work is a `Release:` line with 去向 「让先到者」), ⛔ never a DIFFERENT '
-  + 'author\'s line, ⛔ never a line older than the claim it takes back, and ⛔ never an unreadable '
-  + 'author on either side. A retracted claim is listed RETRACTED with the retracting comment id — '
-  + '⛔ never SUPERSEDED, ⛔ never dropped from the listing.';
+  'A claim LEAVES the pool when a LATER comment retracts it, and a retraction is the protocol `Release:` line — '
+  + 'ONE channel, read through the sibling reader\'s ONE reading of the marker (`markerMatches`: the bare marker '
+  + 'first, then the shared stripper per line, a markdown LIST ITEM refused) — in one of TWO arms. SAME login: needs '
+  + 'no id, it retracts its own author\'s older claims. DIFFERENT login, the HANDOVER release: retracts an earlier '
+  + 'claim when, and only when, its `Release:` line names that claim\'s comment id AND its session id and the '
+  + `comment carries SKILL.md's 出处三件 「${HANDOVER_PROVENANCE_SOURCE}」 — 谁的指令 / 原话 / 在哪说, each non-empty; `
+  + 'missing any one ⇒ NOT a retraction, state unchanged; ⛔ NO liveness test (the human\'s word, copied with '
+  + 'provenance, is the permission). ⛔ Never a prose line, whatever act opens it (#18773 A: a reader inferring an '
+  + 'act from a verb replays the next spelling — a withdrawal before work is a `Release:` line with 去向 「让先到者」), '
+  + '⛔ never a bare DIFFERENT-login line, ⛔ never a line older than the claim it takes back, ⛔ never an unreadable '
+  + 'author on either side. A retracted claim is listed RETRACTED with the retracting comment id — ⛔ never SUPERSEDED, ⛔ never dropped.';
 
 /**
  * Every claim comment on this thread that a LATER comment RETRACTED, keyed by
@@ -1753,7 +1802,7 @@ export const CLAIM_RETRACTION_RULE =
  *
  * @param {{ id?: number|string, body?: string, created_at?: string,
  *   user?: { login?: string } }[]|null} commentRows
- * @returns {Map<object, { id: string, author: string, at: string, channel: string }>}
+ * @returns {Map<object, { id: string, author: string, at: string, channel: string, handover: boolean }>}
  */
 export function claimRetractions(commentRows) {
   const rows = Array.isArray(commentRows) ? commentRows : [];
@@ -1775,15 +1824,19 @@ export function claimRetractions(commentRows) {
     if (claim.author === null) continue;
     for (const candidate of indexed) {
       if (candidate.row === claim.row) continue;
-      if (candidate.author === null || candidate.author !== claim.author) continue;
+      if (candidate.author === null) continue;
       if (!laterOnThread(candidate, claim)) continue;
       const channel = retractionChannel(candidate.row);
       if (channel === null) continue;
+      const handover = candidate.author !== claim.author;
+      if (handover && !handoverRelease(candidate.row, claim.row).accepted) continue;
       out.set(claim.row, {
         id: String(candidate.row?.id ?? '(no id)'),
         author: candidate.author,
         at: candidate.row?.created_at ?? '(no readable date)',
-        channel,
+        channel: handover ? 'the protocol `Release:` line by a DIFFERENT login — the HANDOVER release, naming this claim\'s comment id '
+          + 'and session id, with 谁的指令 / 原话 / 在哪说 (SKILL.md\'s 出处三件 line); ⛔ no liveness test' : channel,
+        handover,
       });
       break;
     }
@@ -2052,13 +2105,20 @@ function claimRepeatSentences(groups) {
 //      note and the `claim.handover` field — so the record is complete and
 //      the exit is unmoved. ⛔ Never red on them (ruling ⛔ a).
 //   4. **Not an identity rule.** `claude[bot]` is an author like any other
-//      here; that its claims are dead is the seat's knowledge and the seat's
-//      `Release:` with cause (SKILL.md's dead-claim reclaim), ⛔ not a special
-//      case in the reader. An unattributable row is never counted, the way
-//      `claimRetractions` fails closed on one.
+//      here; that its claims are dead is the seat's knowledge, written as the
+//      HANDOVER release (the retraction section: a cross-login `Release:` with
+//      the claim's id, session id and 出处三件), ⛔ not a special case in the
+//      reader. An unattributable row is never counted, as `claimRetractions`.
 //   5. **Not a NOTE when judged.** The `--pair` path answers
 //      `EXIT_PAIR_ADVERSE` on a judged hand-over. An adverse fact rendered as
 //      0-with-a-message is the silence this file exists against.
+//
+// ## The claim-handover ruling (shape A, 「同意」 2026-09-21) — ONE red left. The old
+// remedy (the HOLDER posts `Release:`, ⛔ never on its behalf) was an act nobody could
+// perform once the holder was unreachable; two finished PRs stood on it. The retraction
+// map above now accepts the handover release, so this row keeps ONE red — a cross-login
+// `Claim:` with NO `Release:` at all for the earlier claim — and lists a REFUSED handover
+// attempt with its reason. ② and ④ are the seat's acts, unread here.
 // ---------------------------------------------------------------------------
 
 /**
@@ -2075,27 +2135,42 @@ const CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_STAMP = Date.parse(CROSS_AUTHOR_CLAIM_ROW
 
 /** The rule this row is judged by, written out once and PRINTED beside it. */
 export const CLAIM_HANDOVER_RULE =
-  'The protocol sanctions ONE way a card changes hands: the HOLDER\'s `Release:` line (会话 / 因 / 去向). '
-  + 'TWO OR MORE LIVE claim comments BY DIFFERENT AUTHORS on one thread with no `Release:` from the '
-  + 'earlier holder between them is therefore a hand-over the protocol never wrote, and it is NAMED here — '
-  + 'every live claim, its author, its date, each point where the author changes, and the repair — '
-  + '⛔ never printed as a SUPERSESSION, which is the word for a transition the protocol designed. '
-  + 'MEMBERSHIP comes first: a RETRACTED claim does not stand, so a holder\'s `Release:` (posted before '
-  + 'or after the taker\'s claim, bare or decorated) leaves one author holding and reads as the protocol '
-  + 'working. EFFECTIVE INSTANT: a hand-over is JUDGED (row C9, exit 4) only when the taking claim is '
-  + `dated strictly after ${CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT}; one dated at or before it, or with no `
-  + 'readable date, is LISTED as informational and moves no exit. ⛔ Two live claims by ONE author are '
-  + 'C8\'s state, not this one. ⛔ An unattributable row is never counted.';
+  'The protocol sanctions TWO ways a card changes hands: the HOLDER\'s own `Release:` line (会话 / 因 / 去向), or — '
+  + 'the holder unreachable (token exhausted, session ended, identity retired) — the taker\'s HANDOVER release: a '
+  + '`Release:` line naming the holder\'s claim comment id AND session id, in a comment carrying SKILL.md\'s 出处三件 '
+  + '(谁的指令 / 原话 / 在哪说, each non-empty) — the human\'s word copied with provenance, ⛔ NO liveness test. TWO OR '
+  + 'MORE LIVE claim comments BY DIFFERENT AUTHORS on one thread with NO `Release:` for the earlier claim between them '
+  + '— neither the holder\'s own nor a handover naming it — is the one claim-jump left, and it is NAMED here — every '
+  + 'live claim, its author, its date, each point where the author changes, and the repair — ⛔ never printed as a '
+  + 'SUPERSESSION, which is the word for a transition the protocol designed. MEMBERSHIP comes first: a RETRACTED claim '
+  + 'does not stand, so either release (before or after the taker\'s claim, bare or decorated) leaves one author '
+  + 'holding; a cross-login `Release:` REFUSED as a handover retracts nothing and is listed in this sentence. EFFECTIVE '
+  + `INSTANT: a hand-over is JUDGED (row C9, exit 4) only when the taking claim is dated strictly after ${CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT}; `
+  + 'one dated at or before it, or with no readable date, is LISTED as informational and moves no exit. ⛔ Two live '
+  + 'claims by ONE author are C8\'s state, not this one. ⛔ An unattributable row is never counted.';
 
-/** The repair, in the seats' own acts — printed with every judged instance of the row. */
+/**
+ * SKILL.md's handover sentence, line for line, byte for byte (the 认领 section's five handover bullets, without the
+ * bullet). The remedy PRINTS it; the byte identity with SKILL.md is the twin rule's, checked at review, ⛔ not a governed read here.
+ */
+export const CLAIM_HANDOVER_SENTENCE_LINES = Object.freeze([
+  '认领人不可达(token 耗尽/会话结束/身份退役)⇒ 接管:一条评论四件齐,⛔ 不判死活。',
+  '① 跨账号 `Release:` 点名被撤认领的 id 与 session ID,带出处三件(谁的指令/原话/在哪说)。',
+  '② assignee 同笔换人(`--unassign 旧 --assign 新`);③ 新 `Claim:`:新 session、续用分支与远程 sha。',
+  '④ 交接记录:旧分支最后已 push 的 sha + 一句状态;读者只验①③形状,缺一件即非撤销。',
+  'C9 只剩一种红:无任何 `Release:` 的跨账号 `Claim:`(真抢卡);线程上每条活认领都要点名。',
+]);
+
+/** The repair, in the taker's own acts — printed with every judged instance of the row. */
 export const CLAIM_HANDOVER_REMEDY =
-  'Repair, by the seats that hold the claims and ⛔ by nobody else: the HOLDER (the earlier live claimant) '
-  + 'posts `Release:` — 会话 / 因 / 去向 naming the taker — which is the one hand-over the protocol '
-  + 'sanctions; the TAKER posts nothing until then: no work under a claim the holder has not released, '
-  + '⛔ never a second `Claim:`, ⛔ never a `Release:` on the holder\'s behalf. A taker that yields '
-  + 'instead posts its OWN `Release:` with 去向 「让先到者」 (a withdrawal before work is a `Release:` '
-  + 'line), which retracts its claim and clears this row the same way. ⛔ No `Clause-②-correction:` '
-  + 'repairs this state: a correction fixes a declaration, and a hand-over is not a declaration.';
+  'Repair, by the TAKER, in ONE comment — SKILL.md\'s handover sentence, verbatim, whose source is the 出处三件 line '
+  + `「${HANDOVER_PROVENANCE_SOURCE}」: 「${CLAIM_HANDOVER_SENTENCE_LINES.join(' ')}」 The reader verifies ① and ③ by shape — `
+  + 'the `Release:` line naming EVERY live claim this row lists (comment id and session id, each), 谁的指令 / 原话 / '
+  + '在哪说 non-empty, and the new `Claim:` with its `Branch:` and `Clause-②:` lines then governs; ② and ④ are the '
+  + 'seat\'s acts. ⛔ Never a bare second `Claim:` under a live one, ⛔ never a `Release:` on the holder\'s behalf '
+  + 'WITHOUT the provenance — that is prose. A taker that yields posts its OWN `Release:` with 去向 「让先到者」 (a '
+  + 'withdrawal before work is a `Release:` line), which retracts its claim and clears this row the same way. ⛔ No '
+  + '`Clause-②-correction:` repairs this state: a correction fixes a declaration, and a hand-over is not a declaration.';
 
 /**
  * The cross-author hand-over state of one thread, or `null` when the live,
@@ -2118,7 +2193,8 @@ export const CLAIM_HANDOVER_REMEDY =
  * @returns {{ holder: object, holderAuthor: string, live: object[], authors: string[],
  *   handovers: { from: object, to: object, fromAuthor: string, toAuthor: string,
  *     at: string, dated: 'after'|'at-or-before'|'unreadable', judged: boolean }[],
- *   judged: boolean, effectiveAt: string }|null}
+ *   refused: { release: object, claim: object, author: string, namesId: boolean, namesSession: boolean, session: string|null, missing: string[] }[],
+ *   judged: boolean, effectiveAt: string }|null} — `refused`: every cross-login `Release:` that TRIED to hand over a LIVE claim and did not.
  */
 export function claimHandovers(commentRows) {
   if (!Array.isArray(commentRows)) return null;
@@ -2150,12 +2226,22 @@ export function claimHandovers(commentRows) {
       judged: dated === 'after',
     });
   }
+  // A cross-login `Release:` that TRIED to hand over a live claim (names its id or session id, or carries a field) and did not — with why; a bare one is not an attempt.
+  const refused = [];
+  for (const claim of ordered) {
+    for (const c of indexed) {
+      if (c.row === claim.row || c.author === null || c.author === claim.author || !laterOnThread(c, claim) || retractionChannel(c.row) === null) continue;
+      const v = handoverRelease(c.row, claim.row), tried = v.namesId || v.namesSession || v.missing.length < HANDOVER_PROVENANCE_KEYS.length;
+      if (!v.accepted && tried) refused.push({ release: c.row, claim: claim.row, author: c.author, ...v });
+    }
+  }
   return {
     holder: ordered[0].row,
     holderAuthor: ordered[0].author,
     live: ordered.map((c) => c.row),
     authors,
     handovers,
+    refused,
     judged: handovers.some((h) => h.judged),
     effectiveAt: CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT,
   };
@@ -2174,10 +2260,12 @@ function claimHandoverSentence(state) {
     : h.dated === 'unreadable'
       ? 'with NO readable date — listed, informational, never judged'
       : `dated at or before the effective instant ${state.effectiveAt} — listed, informational`);
-  return `${state.authors.length} authors hold LIVE claim comments here with no \`Release:\` from the earlier holder `
+  const why = (r) => [!r.namesId && 'the comment id is not on its `Release:` line', !r.namesSession && (r.session === null ? 'the claim carries no session id to name' : 'the session id is not on its `Release:` line'), r.missing.length > 0 && `missing ${r.missing.join(' / ')}`].filter(Boolean).join(', ');
+  return `${state.authors.length} authors hold LIVE claim comments here with no \`Release:\` for the earlier claim `
     + `between them — \`${state.holderAuthor}\`'s ${when(state.holder)} is the claim that stood; `
     + state.handovers.map((h) => `\`${h.toAuthor}\`'s ${when(h.to)} took the card from \`${h.fromAuthor}\` (${datedWord(h)})`).join('; ')
-    + ` — ${state.handovers.length} hand-over(s), ${judgedCount} judged, ${state.handovers.length - judgedCount} informational`;
+    + ` — ${state.handovers.length} hand-over(s), ${judgedCount} judged, ${state.handovers.length - judgedCount} informational`
+    + (state.refused.length === 0 ? '' : `; ${state.refused.length} cross-login \`Release:\` line(s) read and REFUSED as a handover: ${state.refused.map((r) => `${when(r.release)} by \`${r.author}\` for claim ${String(r.claim?.id ?? '(no id)')} — ${why(r)}`).join('; ')}`);
 }
 
 /**
@@ -2322,8 +2410,8 @@ export function claimCarrierSelection(commentRows) {
       return {
         row,
         reason: gone
-          ? `RETRACTED — comment ${gone.id} at ${gone.at}, by the same author (\`${gone.author}\`), `
-            + `takes it back via ${gone.channel}. ⛔ NOT superseded: a withdrawn claim is not a `
+          ? `RETRACTED — comment ${gone.id} at ${gone.at}, by ${gone.handover ? 'a DIFFERENT login' : 'the same author'} `
+            + `(\`${gone.author}\`), takes it back via ${gone.channel}. ⛔ NOT superseded: a withdrawn claim is not a `
             + `candidate for governance at all, whatever its date`
           : `a SUPERSEDED claim — it is not the newest LIVE claim that parses a branch, so it is not `
             + `the governing claim (this one is stamped ${row?.created_at ?? 'with no readable date'}; `
@@ -4740,8 +4828,8 @@ export function c9HandoverNote(pair) {
     `card #${pair?.card} (delivering open PR #${pair?.pr}) — ${claimHandoverSentence(state)}. `
     + `LISTED, ⛔ not judged: every hand-over here is dated at or before the effective instant ${state.effectiveAt} `
     + '(or carries no readable date), and the ruling reads 「earlier pairs are listed as informational, never red」. '
-    + 'The reconciliation is the domain:skills seat\'s, by hand: the holder posts `Release:`, or the taker yields '
-    + 'with its own (去向 「让先到者」). This note moves no exit.'
+    + 'The reconciliation is the domain:skills seat\'s, by hand: the holder posts `Release:`, the taker posts the handover '
+    + 'comment (SKILL.md\'s handover sentence, provenance included), or yields with its own `Release:` (去向 「让先到者」). This note moves no exit.'
   );
 }
 
@@ -8842,7 +8930,7 @@ export async function selfTest() {
   t('⭐ #17852: os-warren\'s backticked `Release:` (5700605769) retracts his own claim (5700342438)', claimRetractions([S2_17852_CLAIM, S2_17852_RELEASE]).get(S2_17852_CLAIM)?.id === '5700605769');
   t('⭐ objectui#7848: claude[bot]\'s bolded **Release:** (5617804323) retracts its own claim (5617516036)', claimRetractions([S2_7848_CLAIM, S2_7848_RELEASE]).get(S2_7848_CLAIM)?.id === '5617804323');
   t('⛔ CONTROL: the raw constant refuses BOTH release bodies — exactly the reading that counted the pairs', RELEASE_COMMENT_MARKER.test(S2_17852_RELEASE.body) === false && RELEASE_COMMENT_MARKER.test(S2_7848_RELEASE.body) === false);
-  t('⛔ CONTROL: a DIFFERENT author\'s decorated release retracts nothing — the author test is untouched by the reading', claimRetractions([S2_17852_CLAIM, { ...S2_17852_RELEASE, user: { login: 'os-litant' } }]).size === 0);
+  t('⛔ CONTROL: a DIFFERENT author\'s decorated release with no id, no session id and no provenance retracts nothing — the same-login arm is untouched by the reading, and a bare cross-login line is not the handover', claimRetractions([S2_17852_CLAIM, { ...S2_17852_RELEASE, user: { login: 'os-litant' } }]).size === 0);
   t('…and the released claim then leaves the pool, so the record says RETRACTED rather than ranking it', says(RTX_RECORD([S2_17852_CLAIM, S2_17852_RELEASE]).selected, 'RETRACTED'));
 
   // ⛔ No line of PROSE retracts, opening or not — the verb reading is the
@@ -8867,6 +8955,23 @@ export async function selfTest() {
   t('⛔ shape (1) CONTROL: the same `Release:` posted BEFORE the claim retracts nothing', RTX_POOL_IDS([RTX_A, RTX_ROW(6000000013, '2026-09-17T10:30:00Z', 'seat-b', 'Release: session X, cause: y, 去向: queue'), RTX_B]) === '6000000012');
   t('shape (2) — a `Release:` from a DIFFERENT author retracts nobody else\'s claim', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z, cause: y, 去向: queue')]) === '6000000012');
   t('⛔ shape (2) CONTROL: the live claimant\'s claim still GOVERNS, it is not merely un-rejected', (() => { const sel = claimCarrierSelection([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z')]); return sel.governing?.createdAt === RTX_B.created_at && sel.rejected.every((r) => !r.reason.startsWith('RETRACTED')); })());
+  // ⭐ The HANDOVER arm (claim-handover ruling, shape A) — both sides, one case per key, ⛔ no liveness test, the two live specimens replayed.
+  const HO_CLAIM = RTX_ROW(6000000021, '2026-09-17T10:00:00Z', 'seat-gone', ['Claim: round 1', 'Session: `session_01GoneGoneGoneGoneGoneGone`', 'Branch: `claude/issue-4242-x`', 'Clause-②: no']);
+  const HO_BODY = ({ release = 'Release: handover of claim 6000000021 (`session_01GoneGoneGoneGoneGoneGone`) · 因: 认领人 token 耗尽 · 去向: 本评论的 `Claim:`', omit = null, blank = null } = {}) =>
+    [release, ...HANDOVER_PROVENANCE_KEYS.filter((k) => k !== omit).map((k) => `**${k}**:${k === blank ? '' : { 谁的指令: '维护者', 原话: '「接管这张卡」', 在哪说: '本席会话聊天,2026-09-21' }[k]}`), 'Claim: handover', 'Session: `session_01TakerTakerTakerTakerTake`', 'Branch: `claude/issue-4242-x`', 'Clause-②: no', 'Handover: old branch last pushed sha `abc1234`; status: tests green, PR body unwritten'].join('\n');
+  const HO_TAKE = (body = HO_BODY()) => RTX_ROW(6000000022, '2026-09-17T12:00:00Z', 'seat-taker', body);
+  const HO_ROWS = [HO_CLAIM, HO_TAKE()];
+  const HO_SPECIMEN_INLINE = '**出处三件** — **谁的指令**:维护者,在本席(`domain:skills` seat 2,`session_017ETYWqMQD4qMtZzAGovWNi`,席位帖 #19287)会话内的三个真实用户轮次。**在哪说**:本席会话聊天,在评论 5754717208(2026-09-21T02:44Z)之后、本条之前的连续三轮。**原话**(逐字,⛔ 未翻译、未润色):\n\n> 这个插队,和我讨论 https://github.com/objectstack-ai/objectstack/issues/19240#issuecomment-5754717208\n\n> 你觉得应该停放吗?\n\n> 同意';
+  const HO_SPECIMEN_LINES = '**出处三件**——\n**谁的指令**:维护者(本仓 maintainer,`domain:spec` 席 2 会话内的真实用户轮次)。\n**在哪说**:本会话聊天内,该席收班简报 `5753560236`(2026-09-20T23:34Z)之后的连续三轮对话。\n**原话**(逐字,⛔ 未翻译、未润色):\n\n> 实际需求是某个 agent 开发了一半没有token了,就是需要新的 agent 重新认领,而且重新认领的时候 是不是不issue 的人员也要跟着改。';
+  t('⭐ HANDOVER: a DIFFERENT login\'s `Release:` naming the claim\'s id AND session id, with 谁的指令 / 原话 / 在哪说 filled, takes the claim out — and the handover\'s own `Claim:` governs, DECLARED', claimRetractions(HO_ROWS).get(HO_CLAIM)?.id === '6000000022' && RTX_POOL_IDS(HO_ROWS) === '6000000022' && cardDeclaration(HO_ROWS).state === 'declared');
+  t('…and the record says a DIFFERENT login and the HANDOVER release, ⛔ not the same author', says(RTX_REASON(claimCarrierSelection(HO_ROWS), 6000000021), 'a DIFFERENT login') && says(RTX_REASON(claimCarrierSelection(HO_ROWS), 6000000021), 'HANDOVER') && claimRetractions(HO_ROWS).get(HO_CLAIM)?.handover === true);
+  t('⛔ missing ANY ONE of the three fields, or a key present with an EMPTY value ⇒ refused, state unchanged — one case per key each way, and the missing key is NAMED', HANDOVER_PROVENANCE_KEYS.every((k) => [HO_BODY({ omit: k }), HO_BODY({ blank: k })].every((b) => claimRetractions([HO_CLAIM, HO_TAKE(b)]).size === 0 && handoverProvenance(b).missing.join() === k)));
+  t('⛔ the id without the session id, the session id without the id, both named in PROSE under a bare `Release:` line, or the three fields with NO `Release:` line at all ⇒ refused — the LINE names, and provenance is not the act', ['Release: handover of claim 6000000021 · 因: x · 去向: y', 'Release: handover of `session_01GoneGoneGoneGoneGoneGone` · 因: x · 去向: y', 'Release: handover · 因: x · 去向: y\nthe retracted claim is 6000000021 (`session_01GoneGoneGoneGoneGoneGone`)', 'Handover: of claim 6000000021 (`session_01GoneGoneGoneGoneGoneGone`)'].every((release) => claimRetractions([HO_CLAIM, HO_TAKE(HO_BODY({ release }))]).size === 0));
+  t('⭐ ⛔ NO liveness test: the earlier claimant commenting AFTER the handover changes nothing — the human\'s word is the permission', claimRetractions([HO_CLAIM, HO_TAKE(), RTX_ROW(6000000023, '2026-09-17T13:00:00Z', 'seat-gone', 'still here, actually — and objecting')]).get(HO_CLAIM)?.id === '6000000022');
+  t('⭐ the two LIVE specimens\' spellings both read — the ruling record\'s inline paragraph and the proposal\'s line-per-field block (bold keys, a parenthetical after 原话, the blockquote as its value) — and a FULLWIDTH colon reads as the ASCII one, the two being indistinguishable on the page', [HO_SPECIMEN_INLINE, HO_SPECIMEN_LINES].every((s) => handoverProvenance(s).missing.length === 0) && claimRetractions([HO_CLAIM, HO_TAKE(HO_BODY().replace(/\*\*:/g, '**:'))]).size === 1, JSON.stringify([HO_SPECIMEN_INLINE, HO_SPECIMEN_LINES].map((s) => handoverProvenance(s).missing)));
+  t('⛔ CONTROLS: a SAME-login `Release:` still needs no id, no session id and no provenance — that arm is untouched; and a claim with NO session id anywhere cannot be handed over — nothing to name, fail closed', claimRetractions([HO_CLAIM, RTX_ROW(6000000024, '2026-09-17T12:00:00Z', 'seat-gone', 'Release: session X · 因: y · 去向: queue')]).get(HO_CLAIM)?.handover === false && claimRetractions([RTX_ROW(6000000021, '2026-09-17T10:00:00Z', 'seat-gone', ['Claim: round 1', 'Branch: `claude/issue-4242-x`']), HO_TAKE()]).size === 0);
+  t('⛔ item ④ (the old branch\'s last pushed sha) is the SEAT\'s act, not the reader\'s gate: the same comment without it still retracts', claimRetractions([HO_CLAIM, HO_TAKE(HO_BODY().split('\n').filter((l) => !l.startsWith('Handover:')).join('\n'))]).get(HO_CLAIM)?.id === '6000000022');
+  t('the printed RULE names both arms, the three keys, the SKILL.md source line and the absent liveness test, so two runs are comparable on it', CLAIM_RETRACTION_RULE.includes('HANDOVER') && HANDOVER_PROVENANCE_KEYS.every((k) => CLAIM_RETRACTION_RULE.includes(k)) && CLAIM_RETRACTION_RULE.includes(HANDOVER_PROVENANCE_SOURCE) && CLAIM_RETRACTION_RULE.includes('NO liveness test'));
   t('shape (3) — a DECORATED `**Release:**` from the claim\'s own author takes it out — the one reading (#18829 A)', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('**Release:** session X, 去向: 让先到者')]) === '6000000011');
   t('…and the backticked spelling with it, and the blockquoted bold', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('`Release:` session X, 去向: 让先到者')]) === '6000000011' && RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('> **Release:** session X')]) === '6000000011');
   t('⛔ shape (3) CONTROL: a markdown LIST ITEM `- Release:` is not a release, so it retracts nothing — the sibling\'s refusal (H20\'s shape) holds on this side too', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('- Release: session X, 去向: queue')]) === '6000000012');
@@ -9042,7 +9147,7 @@ export async function selfTest() {
   const D64_RELEASE = D64(5721120999, '2026-09-17T21:30:00Z', 'Release: session `session_01UanLVj6xvbS6puBCewLr8L` — 去向 `pm:queue`');
   t('⭐ the retraction index SEES a decorated claim — it is retractable by its own author', claimRetractions([D64_BOLD, D64_RELEASE]).has(D64_BOLD));
   t('…and the pool then says every claim on the thread is RETRACTED, ⛔ not that none was written', says(D64_RECORD([D64_BOLD, D64_RELEASE]).selected, 'RETRACTED'));
-  t('⛔ CONTROL: a DIFFERENT author\'s release retracts nothing, decorated or not', claimRetractions([D64_BOLD, { ...D64_RELEASE, user: { login: 'os-other' } }]).size === 0);
+  t('⛔ CONTROL: a DIFFERENT author\'s bare release (no id, no session id, no provenance) retracts nothing, decorated or not', claimRetractions([D64_BOLD, { ...D64_RELEASE, user: { login: 'os-other' } }]).size === 0);
 
   // The refusals are the SIBLING's and are pinned here as still-refused: this
   // file admits no spelling of its own, so a form the sibling names as a NEAR
@@ -9259,7 +9364,7 @@ export async function selfTest() {
   t('…and `--pair` earns a C9 FINDING, which is its exit 4', X62_CODES([X62_HOLDER, X62_TAKER_AFTER]).includes('C9') && EXIT_PAIR_ADVERSE === 4 && EXIT_PAIR_ADVERSE !== EXIT_OK, X62_CODES([X62_HOLDER, X62_TAKER_AFTER]).join());
   t('⛔ …a VERDICT and never a NOTE: no `C9-BEFORE-EFFECTIVE` note rides beside a judged row', !X62_NOTES([X62_HOLDER, X62_TAKER_AFTER]).includes('C9-BEFORE-EFFECTIVE'));
   t('…the ROW names both authors, both comment ids and the instant it judged against', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'seat-holder') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'seat-taker') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), '7200000001') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), '7200000002') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT));
-  t('…and carries the ruling\'s remedy sentence: the HOLDER posts `Release:`, the TAKER posts nothing until then, and a yield is the taker\'s own `Release:` with 去向 「让先到者」', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'the HOLDER (the earlier live claimant) posts `Release:`') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'the TAKER posts nothing until then') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), '让先到者'));
+  t('…and carries the remedy sentence: the TAKER\'s handover comment in ONE stroke, the reader verifying ① and ③ by shape, and a yield as the taker\'s own `Release:` with 去向 「让先到者」', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'Repair, by the TAKER, in ONE comment') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'verifies ① and ③ by shape') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), '让先到者'));
   t('…and says a correction cannot repair it — ⛔ not a widening of C8, in the row\'s own words', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'a hand-over is not a declaration') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'never printed as a SUPERSESSION'));
   t('⛔ C8 is SILENT on that same thread — the new row is the one that speaks, never both for two authors with one claim each', !X62_CODES([X62_HOLDER, X62_TAKER_AFTER]).includes('C8') && claimRepeats([X62_HOLDER, X62_TAKER_AFTER]).length === 0);
   t('⛔ CONTROL: the SELECTOR did not move — the newer still governs and the older is still listed SUPERSEDED in the record; the verdict is the row\'s', claimCarrierSelection([X62_HOLDER, X62_TAKER_AFTER]).pool.map((r) => r.id).join() === '7200000002' && says(X62_FIELD([X62_HOLDER, X62_TAKER_AFTER], 'claim.rejected'), 'a SUPERSEDED claim') && CLAIM_SELECTION_RULE.includes('the GOVERNING claim'));
@@ -9286,8 +9391,23 @@ export async function selfTest() {
   t('…and the holder\'s `Release:` BEFORE the taker\'s claim is the protocol working — a re-claim after a release', claimHandovers([X62_HOLDER, X62_RELEASE(7200000010, '2026-09-19T12:00:00Z', 'seat-holder'), X62_TAKER_AFTER]) === null);
   t('…and a DECORATED `**Release:**` by the holder clears it the same way — the one reading (#18829 A); the raw constant refuses that body', claimHandovers([X62_HOLDER, X62_TAKER_AFTER, X62_RELEASE(7200000010, X62_AFTER2, 'seat-holder', '**Release:** session `session_x` · 去向 `seat-taker`')]) === null && RELEASE_COMMENT_MARKER.test('**Release:** session `session_x` · 去向 `seat-taker`') === false);
   t('…and the TAKER\'s own `Release:` (去向 「让先到者」) clears it too — the #18773 A withdrawal', claimHandovers([X62_HOLDER, X62_TAKER_AFTER, X62_RELEASE(7200000011, X62_AFTER2, 'seat-taker', 'Release: session `session_y`, 因: 先到者在先, 去向: 让先到者')]) === null);
-  t('⛔ CONTROL: a `Release:` by a THIRD author clears nothing — the pair is still judged', claimHandovers([X62_HOLDER, X62_TAKER_AFTER, X62_RELEASE(7200000012, X62_AFTER2, 'seat-third')])?.judged === true);
+  t('⛔ CONTROL: a bare `Release:` by a THIRD author (no id, no session id, no provenance) clears nothing — the pair is still judged', claimHandovers([X62_HOLDER, X62_TAKER_AFTER, X62_RELEASE(7200000012, X62_AFTER2, 'seat-third')])?.judged === true);
   t('⛔ CONTROL: a PROSE withdrawal by the taker (「撤回…」, the claim\'s id named) clears nothing now — the act has one spelling (#18773 A)', claimHandovers([X62_HOLDER, X62_TAKER_AFTER, X62(7200000013, X62_AFTER2, 'seat-taker', '撤回本席的认领 `7200000002` —— 先到者是 seat-holder')])?.judged === true);
+
+  // (f) the HANDOVER comment (claim-handover ruling, shape A): ① the provenance `Release:` and ③ a new `Claim:` in ONE comment; ② and ④ are the seat's, unread.
+  const X62_HOLDER_S = X62(7200000030, X62_BEFORE, 'seat-holder', ['Claim: PM loop round 1', 'Session: `session_01HolderHolderHolderHolder`', 'Branch: `claude/issue-4343-first`', 'Clause-②: no']);
+  const X62_HANDOVER = (omit = null) => X62(7200000031, X62_AFTER2, 'seat-taker', ['Release: handover of claim 7200000030 (`session_01HolderHolderHolderHolder`, `seat-holder`) · 因: 认领人 token 耗尽 · 去向: 本评论的 `Claim:`',
+    ...HANDOVER_PROVENANCE_KEYS.filter((k) => k !== omit).map((k) => `**${k}**:${{ 谁的指令: '维护者', 原话: '「接管」', 在哪说: '本席会话聊天' }[k]}`),
+    'Claim: handover of the card', 'Session: `session_01TakerTakerTakerTakerTake`', 'Branch: `claude/issue-4343-first`', 'Clause-②: no', 'Handover: `claude/issue-4343-first` last pushed sha `0123abc`; status: two tests red, PR unopened']);
+  const X62_HO = X62_HANDOVER();
+  const X62_THIRD_S = X62_CLAIM(7200000033, X62_AFTER2, 'seat-third', 'claude/issue-4343-third');
+  t('⭐ (f) the HANDOVER comment — provenance `Release:` naming the holder\'s id + session id, and a new `Claim:` in the same comment — clears C9: one author left, no row, no note', claimHandovers([X62_HOLDER_S, X62_HO]) === null && !X62_CODES([X62_HOLDER_S, X62_HO]).includes('C9') && X62_NOTES([X62_HOLDER_S, X62_HO]).length === 0);
+  t('…and the handover\'s own `Claim:` is the GOVERNING claim on the `--pair` path — its branch, its declaration — because a comment is not later than itself and cannot retract its own claim', claimCarrierSelection([X62_HOLDER_S, X62_HO]).pool.map((r) => r.id).join() === '7200000031' && (claimCarrierSelection([X62_HOLDER_S, X62_HO]).governing?.branches ?? []).join() === 'claude/issue-4343-first' && cardDeclaration([X62_HOLDER_S, X62_HO]).state === 'declared' && !claimRetractions([X62_HOLDER_S, X62_HO]).has(X62_HO));
+  t('⛔ the same comment missing ANY ONE field ⇒ still C9, JUDGED — state unchanged, and the row NAMES the refused release and the missing key', HANDOVER_PROVENANCE_KEYS.every((k) => claimHandovers([X62_HOLDER_S, X62_HANDOVER(k)])?.judged === true && says(X62_ROW([X62_HOLDER_S, X62_HANDOVER(k)]), 'REFUSED as a handover') && says(X62_ROW([X62_HOLDER_S, X62_HANDOVER(k)]), `missing ${k}`)));
+  t('⛔ the ONE red kept: a cross-login `Claim:` with NO `Release:` at all for the earlier claim is still C9', claimHandovers([X62_HOLDER_S, X62(7200000032, X62_AFTER2, 'seat-taker', ['Claim: jump', 'Branch: `claude/issue-4343-first`', 'Clause-②: no'])])?.judged === true);
+  t('⛔ a handover that names only ONE of two live claims leaves the other standing — every live claim on the thread is named, or the row stays', claimHandovers([X62_HOLDER_S, X62_THIRD_S, X62_HO])?.judged === true && says(X62_ROW([X62_HOLDER_S, X62_THIRD_S, X62_HO]), '7200000033'));
+  t('…the remedy is SKILL.md\'s handover sentence, verbatim — the four items, the 出处三件 source line, 让先到者 for a yield', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), CLAIM_HANDOVER_SENTENCE_LINES.join(' ')) && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), HANDOVER_PROVENANCE_SOURCE) && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), '让先到者'));
+  t('…and each of those lines is one SKILL.md bullet by shape — within the 120-byte line budget, no bullet, no issue id — so the twin can be pasted back byte for byte (the byte identity itself is the twin rule\'s, checked at review: a governed read from this self-test would make this gate a derived family of SKILL.md)', CLAIM_HANDOVER_SENTENCE_LINES.every((l) => Buffer.byteLength(`- ${l}`, 'utf8') <= 120 && !/^[-*] /.test(l) && !/#[0-9]{3,}/.test(l)) && Buffer.byteLength(`- ${HANDOVER_PROVENANCE_SOURCE}`, 'utf8') <= 120);
 
   // (e) same-author and mixed threads — C8 and C9 are disjoint states.
   const X62_A2 = X62_CLAIM(7200000020, X62_AFTER2, 'seat-holder', 'claude/issue-4343-third');
