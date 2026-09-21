@@ -60,7 +60,10 @@
  * adds a schema key, a closed-set member, a published export or a registry
  * entry while its card declares `Clause-②: no`. The tells themselves live in
  * `check-widening-tells.mjs` (imported, with its own self-test); this file
- * supplies the declaration and the diff and joins them.
+ * supplies the declaration and the diff and joins them. ⭐ Since the maintainer
+ * ruling of 2026-09-21 that row is REPORT-ONLY — it prints, with its evidence
+ * and its remedy, and moves no exit code (`pairReportRows`). C6 is untouched
+ * and stays a hard refusal.
  *
  * ## The gate, and the three limbs it is supposed to stand on
  *
@@ -141,6 +144,15 @@
  * PR's ACTUAL diff passes the clause-② enqueue gate before the card may
  * enqueue — the diff is a fact; the card's semantics were a prediction") and
  * pointed at a gate that, until #16448, was a human.
+ *
+ * ⭐ And since 2026-09-21 that gate is a human again, deliberately: the
+ * maintainer ruled C5 REPORT-ONLY. The reading it produces is unchanged and
+ * prints in full; what changed is that it no longer refuses. The distinction
+ * the ruling drew is between the KINDS of question two limbs ask — a limb that
+ * judges 「is this diff widening a contract」 does not hold a hard gate, because
+ * the matcher's own header says it 「cannot tell an array element from a call
+ * argument」 and is 「a tell, never a proof」; a limb that asks 「does a review
+ * of record exist」 (C6) does, and is untouched. See `pairReportRows`.
  *
  * **It relaxes no spelling.** `Clause-②: yes` / `Clause-②: no` are the only two
  * readings that count, and prose is not one of them. #12409 measured where the
@@ -629,6 +641,18 @@
  *      declaration lives and what it reads. ⛔ That is not the
  *      "0-with-a-message" the entry for 4 below bans: that ⛔ forbids
  *      rendering an ADVERSE verdict as 0, and this reading is not one.
+ *      ⭐ Since the maintainer ruling of 2026-09-21 a 0 here can also carry a
+ *      REPORT-ONLY row: row C5 — a widening tell on a diff whose card declares
+ *      `Clause-②: no` — prints in full, with its file:line evidence and its
+ *      remedy, and moves no exit code (`pairReportRows`,
+ *      `C5_REPORT_ONLY_DISPOSITION`). ⛔ Nor is THAT the banned
+ *      "0-with-a-message": the ban is on rendering an adverse VERDICT as 0, and
+ *      the ruling is that this limb issues no verdict — 「a limb that judges
+ *      whether a diff is widening a contract, which the instrument itself says
+ *      it cannot prove, does not hold a hard gate; a limb that asks whether a
+ *      review of record exists does」. The exit-0 line says so in its own words
+ *      rather than going quiet (`greenPairLine`'s `wideningReported` branch),
+ *      so a seat reading only `$?` cannot mistake this 0 for a narrow diff.
  *   2  also the answer when a C3 candidate's event stream or head commit could
  *      not be read, when a `Clause-②: no` pair's changed-file listing could
  *      not be, or when a PR thread could not be — a COMPLETED pair's or a
@@ -638,8 +662,7 @@
  *      stream is not a never-hung gate, an unread diff is not a narrow one and
  *      an unread thread is not a missing record, so all are UNJUDGED rather
  *      than either verdict.
- *   4  they do not — or, since #16448, the declaration reads `no` while the
- *      diff carries a widening tell (row C5) — or, since #17302, the gate was
+ *   4  they do not — or, since #17302, the gate was
  *      cleared on both carriers and no review of record names the head (row
  *      C6) — or, since #18536, the card sits in the spec or skills lane, the
  *      declaration reads `no`, and no review of record names the head (row C6
@@ -816,6 +839,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'pairing, derived from the same relation H8/H31 read': 3,
   'the three read paths: ordered, offline-capable, and named in every refusal': 24,
   'C5: the direction claim checked against the diff (#16448)': 16,
+  '⭐ the 2026-09-21 ruling: C5 REPORTS its tell, C6 still REFUSES': 24,
   'C6: the review of record on this head, and the carrier the rule text names (#17302)': 40,
   'C7: the tier that SERVED the verdict the strip stands on (#17915)': 43,
   '#18174: the `Served-tier:` reading on EVERY pair that has a record, never only beside a gate clear': 28,
@@ -3607,14 +3631,21 @@ export function pairWidening(pair, repo) {
  * the ruling accepted when it took the directional reading, and a false
  * POSITIVE is repaired in the matcher — ⛔ not paid for by the author. This
  * file priced it at "one word in the claim comment" until #16822 measured the
- * price: the exit-0 condition is "no tell, OR the declaration is not `no`", so
- * the only word that clears a false tell is `Clause-②: no` → `yes` — a
+ * price: the exit-0 condition was "no tell, OR the declaration is not `no`", so
+ * the only word that cleared a false tell was `Clause-②: no` → `yes` — a
  * widening recorded in a governance ledger that did not happen, and afterwards
- * indistinguishable from one that did. ⛔ Nothing about this row is relaxed by
- * saying so: the exit stays non-zero and stays a hard block. So this row never
- * asserts that the diff widens -- it asserts that the diff has the SHAPE of one
- * that does, while the claim says it does not, and names the file:line so the
- * author can answer with the file open.
+ * indistinguishable from one that did. So this row never asserts that the diff
+ * widens -- it asserts that the diff has the SHAPE of one that does, while the
+ * claim says it does not, and names the file:line so the author can answer with
+ * the file open.
+ *
+ * ⭐ Since the maintainer ruling of 2026-09-21 this row is REPORT-ONLY: it
+ * prints, with its file:line evidence and its remedy, and it moves no exit
+ * code. {@link C5_REPORT_ONLY_DISPOSITION} carries that sentence into the row's
+ * own text, and {@link pairReportRows} is where the demotion is mechanical. The
+ * paragraph above is left standing rather than deleted because it is the
+ * measurement the ruling answered: the price the row charged is the reason it
+ * no longer charges it.
  */
 export function c5WideningTell(pair, repo) {
   const v = pairWidening(pair, repo);
@@ -3624,8 +3655,71 @@ export function c5WideningTell(pair, repo) {
     `${head} declares \`Clause-②: no\` while its diff carries ${v.rows.length} widening tell(s) -- ` +
     `${REFUSAL_SENTENCE}. ${v.rows.map((r) => `${r.file}:${r.line} (${r.tell})`).join(', ')}. ` +
     'Neither reading is overturned here: the declaration stands as written and the diff stands as ' +
-    `pushed, and they disagree. ${NEVER_WRITES}`
+    `pushed, and they disagree. ${C5_REPORT_ONLY_DISPOSITION} ${NEVER_WRITES}`
   );
+}
+
+// ---------------------------------------------------------------------------
+// C5 is REPORTED, never refused -- the maintainer ruling of 2026-09-21
+// ---------------------------------------------------------------------------
+
+/**
+ * ⭐ **The operative distinction, in the ruling's own terms:**
+ *
+ * > A limb that judges 「is this diff widening a contract」 — which
+ * > `check-widening-tells` itself says it cannot prove (its header: 「a tell,
+ * > never a proof」, 「cannot tell an array element from a call argument」) —
+ * > does not hold a hard gate. A limb that asks 「does a review of record
+ * > exist」 does.
+ *
+ * So C5 reports and C6 refuses, and the difference is the KIND of question,
+ * not the severity of the answer. ⛔ This is not a judgement that the tells
+ * are wrong, and it repairs no matcher: a tell that fires here was read, it
+ * stands as printed, and the at-tier contract review is what rules on it —
+ * which is what a tell is for.
+ *
+ * ⛔ It is also not a licence to report less. The row keeps its file:line
+ * evidence, keeps `REFUSAL_SENTENCE`'s remedy verbatim, and prints on EVERY
+ * exit this path can answer — a report that says less than the refusal did
+ * would be the regression this demotion is not.
+ */
+export const C5_REPORT_ONLY_DISPOSITION =
+  'REPORT-ONLY since the maintainer ruling of 2026-09-21: this row PRINTS, with the file:line ' +
+  'evidence and the remedy above, and it moves NO exit code — a limb that judges whether a diff ' +
+  'widens a contract, which the matcher itself says it cannot prove, does not hold a hard gate, ' +
+  'while a limb that asks whether a review of record exists (C6) does. What a seat does about it ' +
+  'is unchanged: repair a FALSE tell in the matcher (or file that repair as its own card), ' +
+  're-declare `Clause-②: yes` if the diff really widens, and either way the at-tier contract ' +
+  'review is what rules on these tells and its record should say how. ⛔ Report-only is NOT a ' +
+  'clearance and NOT a verdict that the tell is false: nothing here says this diff does not widen.';
+
+/**
+ * The prefix a REPORT-ONLY row prints under, distinct from every other marker
+ * this path uses so a reader can tell the three apart at a glance: `✗` is an
+ * adverse row and moves the exit, `ℹ️` is a note about a pair that is legible,
+ * and this one is a FINDING that was read and reported and does not move the
+ * exit. ⛔ Never `✗` — a marker that reads as a refusal beside an exit of 0 is
+ * the 0-with-a-message this file's exit register forbids, inverted.
+ */
+export const REPORT_ROW_MARKER = '⚑';
+
+/**
+ * The rows `--pair` prints in full and does NOT count toward its exit.
+ *
+ * ⭐ THE DEMOTION IS THIS FUNCTION. C5 used to be pushed into `rows`, the list
+ * whose emptiness is the exit-0 condition; it is built here instead, and
+ * `pairRendering` prints both lists and counts only the first. Keeping it a
+ * list rather than a boolean is deliberate: the next limb the maintainer
+ * demotes moves one line, and a second report-only row cannot arrive as a
+ * second private mechanism.
+ *
+ * ⛔ Nothing else moves. C2, C3, C6, C7, C8, C9 and the UNJUDGED exit-2 path
+ * keep their force to the letter, and `c5WideningTell` keeps its own — the
+ * ruling bit the row's FORCE, never the tell.
+ */
+export function pairReportRows(pair, repo) {
+  const text = c5WideningTell(pair, repo);
+  return text ? [{ code: 'C5', text }] : [];
 }
 
 /**
@@ -6500,11 +6594,27 @@ const PR_BODY_NOT_READ =
  * The exit-0 line for one pair, built apart from `renderPair` so the self-test
  * pins the sentence the run actually prints rather than a copy of it.
  *
+ * ⚠️ `wideningClean` and `wideningReported` are two different facts and the
+ * line must never collapse them. Since the 2026-09-21 demotion a pair can
+ * reach 0 with tells ON the record, and a 0 that went quiet about them would
+ * read as "clean" to exactly the seat the row is written for — the same
+ * silence this whole file exists against. So the reported branch says the
+ * tells are there, says they were not refused here, and says what this 0 does
+ * and does not mean.
+ *
  * @param {{ pr: number, card: number, sibling?: boolean, corrected?: boolean,
- *   record?: boolean, wideningClean?: boolean }} parts
+ *   record?: boolean, wideningClean?: boolean, wideningReported?: boolean }} parts
  * @returns {string}
  */
-export function greenPairLine({ pr, card, sibling = false, corrected = false, record = false, wideningClean = false }) {
+export function greenPairLine({
+  pr,
+  card,
+  sibling = false,
+  corrected = false,
+  record = false,
+  wideningClean = false,
+  wideningReported = false,
+}) {
   return (
     `✓ check-clause2-carriers: PR #${pr} / card #${card} — the clause-② declaration is ` +
     (sibling
@@ -6521,16 +6631,42 @@ export function greenPairLine({ pr, card, sibling = false, corrected = false, re
       : '') +
     (wideningClean
       ? ', and its diff carries no widening tell. ⚠️ A tell is not a proof and its absence is not one either.'
-      : '.') +
+      : wideningReported
+        ? '. ⚠️ Its diff DOES carry widening tell(s), printed in full above with their file:line ' +
+          'evidence: since the maintainer ruling of 2026-09-21 row C5 is REPORT-ONLY and moves no ' +
+          'exit code, so this 0 says the clause-② limbs are LEGIBLE and ⛔ does NOT say the diff is ' +
+          'narrow. The at-tier contract review is what rules on those tells.'
+        : '.') +
     ` ${PR_BODY_NOT_READ}`
   );
 }
 
-function renderPair(pair, repo, pairs = null) {
+/**
+ * ONE pair's whole `--pair` rendering -- every line, in order, with the stream
+ * each goes to and the exit it answers -- computed before a byte is printed.
+ *
+ * ⭐ Split out of `renderPair` (which is now the printer and nothing else) so
+ * the self-test can pin what a run PRINTS beside what it EXITS. That pairing
+ * is the whole content of the 2026-09-21 demotion: "the row still prints" and
+ * "the exit is 0" are two claims, a test that pins only the second passes just
+ * as green over a C5 row that has gone silent, and a report nobody prints is
+ * the silence this file exists against.
+ *
+ * ⛔ The lines are ONE ordered list, not two per-stream lists: stdout and
+ * stderr interleave in a terminal and in a `2>&1` capture, and the order a
+ * reader sees is part of the reading.
+ *
+ * @returns {{ exit: number, lines: { stream: 'out' | 'err', text: string }[] }}
+ */
+export function pairRendering(pair, repo, pairs = null) {
+  const lines = [];
+  const err = (text) => lines.push({ stream: 'err', text });
+  const out = (text) => lines.push({ stream: 'out', text });
+
   const gap = pairUnjudged(pair);
   if (gap) {
-    console.error(`✗ check-clause2-carriers --pair: ${gap}`);
-    return EXIT_INCOMPLETE;
+    err(`✗ check-clause2-carriers --pair: ${gap}`);
+    return { exit: EXIT_INCOMPLETE, lines };
   }
   const rows = pairRows(pair, pairs);
   // ⭐ A NOTE, not a finding: it prints in both branches below and raises no
@@ -6540,51 +6676,72 @@ function renderPair(pair, repo, pairs = null) {
   // its own (#16304).
   const notes = pairNotes(pair, pairs);
   const widening = pairWidening(pair, repo);
-  const wideningRow = c5WideningTell(pair, repo);
-  if (wideningRow) rows.push({ code: 'C5', text: wideningRow });
+  // ⭐ THE DEMOTION, in one line: C5 lands in `reports`, ⛔ never in `rows`.
+  // `rows.length === 0` is the exit-0 condition below, so a row that is not in
+  // that list cannot refuse -- and a row that IS in `reports` is printed on
+  // every exit this path can answer.
+  const reports = pairReportRows(pair, repo);
   const wideningGap = wideningUnjudged(pair, repo);
   // ⭐ The record read this path BUYS for a pair that owes none (#18174), and
   // its gap, kept beside C5's for the same reason: `pairUnjudged` accounts for
   // the reads a SWEEP makes, and these two are the landing check's own.
   const recordGap = locatedRecordUnjudged(pair);
+  // The report rows and the file:line list belong together -- one per line, so
+  // an author can paste them into an editor -- and they print on EVERY exit,
+  // which is what keeps the report from saying less than the refusal did.
+  const printReports = () => {
+    for (const row of reports) err(`${REPORT_ROW_MARKER} ${row.code} — ${row.text}`);
+    for (const line of refusalLines(widening)) err(`    ${line}`);
+  };
   if (rows.length === 0) {
     if (wideningGap || recordGap) {
+      printReports();
       for (const g of [recordGap, wideningGap]) {
-        if (g) console.error(`✗ check-clause2-carriers --pair: ${g}`);
+        if (g) err(`✗ check-clause2-carriers --pair: ${g}`);
       }
-      return EXIT_INCOMPLETE;
+      return { exit: EXIT_INCOMPLETE, lines };
     }
-    for (const note of notes) console.error(`ℹ️  ${note.code} — ${note.text}`);
+    printReports();
+    for (const note of notes) err(`ℹ️  ${note.code} — ${note.text}`);
     // Each note is keyed by its CODE, never by count: the sibling reading and
     // the review-of-record reading are two different facts about the pair, and
     // a second note kind must not put the first one's sentence in its mouth.
     const sibling = notes.some((n) => n.code === 'C2-SIBLING');
     const record = notes.some((n) => n.code === 'C6-RECORD');
     const corrected = notes.some((n) => n.code === 'C2-CORRECTION');
-    console.log(greenPairLine({
+    out(greenPairLine({
       pr: pair.pr,
       card: pair.card,
       sibling,
       corrected,
       record,
       wideningClean: widening.state === 'clean',
+      wideningReported: reports.length > 0,
     }));
-    return EXIT_OK;
+    return { exit: EXIT_OK, lines };
   }
-  for (const row of rows) console.error(`✗ ${row.code} — ${row.text}`);
-  for (const note of notes) console.error(`ℹ️  ${note.code} — ${note.text}`);
-  // The file:line list, one per line, so an author can paste it into an editor.
-  for (const line of refusalLines(widening)) console.error(`    ${line}`);
+  for (const row of rows) err(`✗ ${row.code} — ${row.text}`);
+  printReports();
+  for (const note of notes) err(`ℹ️  ${note.code} — ${note.text}`);
   // An adverse row OUTRANKS a gap -- a tell that WAS read is a fact about this
   // pair whatever else could not be read -- but the gap is still printed, or a
   // reader would take the rows below for the whole reading.
-  if (recordGap) console.error(`⚠️  ${recordGap}`);
-  if (wideningGap) console.error(`⚠️  ${wideningGap}`);
-  console.error(
+  if (recordGap) err(`⚠️  ${recordGap}`);
+  if (wideningGap) err(`⚠️  ${wideningGap}`);
+  err(
     `check-clause2-carriers: PR #${pair.pr} / card #${pair.card} is NOT clause-② legible ` +
       `(exit ${EXIT_PAIR_ADVERSE}). ⛔ This is a verdict about this pair, not about the environment.`,
   );
-  return EXIT_PAIR_ADVERSE;
+  return { exit: EXIT_PAIR_ADVERSE, lines };
+}
+
+function renderPair(pair, repo, pairs = null) {
+  const { exit, lines } = pairRendering(pair, repo, pairs);
+  for (const line of lines) {
+    if (line.stream === 'out') console.log(line.text);
+    else console.error(line.text);
+  }
+  return exit;
 }
 
 function reportTransportFailure(err, { swept }) {
@@ -7514,6 +7671,77 @@ export async function selfTest() {
   t('a sweep pair (files never fetched) that declared `no` reads as owing the listing', needsWideningRead({ cardComments: [CLAIM('Clause-②: no')] }) === true);
   t('the reader roster carries the sixth read, so both readers must implement it', READER_METHODS.includes('readPullFiles'));
   t('…and the offline document serves it from its own `files` bag', typeof pairJsonReader({ pulls: [], files: { 13910: [] } }).readPullFiles === 'function');
+
+  // -- ⭐ the 2026-09-21 ruling: C5 REPORTS its tell, C6 still REFUSES --------
+  //
+  // The maintainer ruled that a limb which judges 「is this diff widening a
+  // contract」 — which the matcher itself says it cannot prove — does not hold
+  // a hard gate, while a limb which asks 「does a review of record exist」
+  // does. C5 was demoted to report-only on that ruling; C6 was explicitly kept.
+  //
+  // ⭐ Pinned on the RENDERING, ⛔ never on `c5WideningTell` alone. "The row
+  // still prints" and "the exit is 0" are TWO claims, and a case that pins only
+  // the second stays green over a row that has gone silent — which is the
+  // regression this demotion would be if it shipped that way. `pairRendering`
+  // is pure for exactly this: every line, its stream, and the exit, together.
+  //
+  // ⭐ Every assertion is bracketed by a CONTROL that fails in the opposite
+  // direction, because the whole family of mistakes here is a green that means
+  // nothing: an exit-0 assertion holds just as well over a checker that stopped
+  // reading diffs, and a "the row prints" assertion holds over one that has
+  // stopped refusing anything at all.
+  battery('⭐ the 2026-09-21 ruling: C5 REPORTS its tell, C6 still REFUSES');
+  const D21 = (o = {}) => ({
+    pr: 13910,
+    card: 13476,
+    draft: false,
+    headSha: '9af92aa3',
+    headCommittedAt: '2026-09-01T08:16:59Z',
+    cardEvents: [],
+    prEvents: [],
+    cardLabels: [],
+    prLabels: [],
+    cardComments: [CLAIM('Clause-②: no')],
+    prComments: [],
+    files: [],
+    ...o,
+  });
+  const render21 = (o) => pairRendering(D21(o), 'objectstack-ai/objectstack');
+  const err21 = (r) => r.lines.filter((l) => l.stream === 'err').map((l) => l.text).join('\n');
+  const out21 = (r) => r.lines.filter((l) => l.stream === 'out').map((l) => l.text).join('\n');
+
+  const C5_ONLY = render21({ files: WIDENS });
+  t('⭐ a C5 tell and NOTHING else reaches EXIT 0 — the ruling, mechanically', C5_ONLY.exit === EXIT_OK, `exit ${C5_ONLY.exit}`);
+  t('…and the row still PRINTS — a demotion that goes silent is the regression, not the fix', says(err21(C5_ONLY), 'C5 —'));
+  t('…naming its file:line evidence in the row text itself', says(err21(C5_ONLY), 'packages/spec/src/kernel/plugin.zod.ts:95'));
+  t('…and printing the evidence list beside it, one tell per line, exactly as the refusal did', says(err21(C5_ONLY), 'T2 packages/spec/src/kernel/plugin.zod.ts:95'));
+  t('…and carrying the remedy verbatim — what a seat DOES about a tell is unchanged', says(err21(C5_ONLY), REFUSAL_SENTENCE));
+  t('…and saying it is report-only, and who rules on the tell instead', says(err21(C5_ONLY), C5_REPORT_ONLY_DISPOSITION));
+  t('⛔ …under the REPORT marker, never `✗` — a refusal marker beside an exit of 0 is 0-with-a-message inverted', says(err21(C5_ONLY), `${REPORT_ROW_MARKER} C5`) && !says(err21(C5_ONLY), '✗ C5'));
+  t('⭐ …and the exit-0 LINE says the diff carries tells — ⛔ this 0 must never read as "narrow"', says(out21(C5_ONLY), 'DOES carry widening tell(s)') && !says(out21(C5_ONLY), 'carries no widening tell'));
+  const CLEAN21 = render21({ files: [] });
+  t('⛔ CONTROL — the same pair with a CLEAN diff prints no C5 row at all', CLEAN21.exit === EXIT_OK && !says(err21(CLEAN21), 'C5'));
+  t('⛔ CONTROL — …and its exit-0 line says CLEAN, so the reported/clean pair of readings is not one word', says(out21(CLEAN21), 'carries no widening tell') && !says(out21(CLEAN21), 'DOES carry widening tell(s)'));
+
+  const C6_ONLY = render21({ cardLabels: ['domain:spec'] });
+  t('⭐ C6 is UNTOUCHED — a spec-lane `no` round with no review of record still REFUSES', C6_ONLY.exit === EXIT_PAIR_ADVERSE, `exit ${C6_ONLY.exit}`);
+  t('…under the refusal marker, and saying the pair is NOT clause-② legible', says(err21(C6_ONLY), '✗ C6 —') && says(err21(C6_ONLY), 'NOT clause-② legible'));
+  const MIXED21 = render21({ cardLabels: ['domain:spec'], files: WIDENS });
+  t('⭐ MIXED — C5 reporting BESIDE C6 refusing exits 4: C5 softened nothing', MIXED21.exit === EXIT_PAIR_ADVERSE, `exit ${MIXED21.exit}`);
+  t('…with BOTH rows visible — a report is not swallowed by a refusal beside it', says(err21(MIXED21), `${REPORT_ROW_MARKER} C5`) && says(err21(MIXED21), '✗ C6 —'));
+  t('…and the C5 row keeps its file:line evidence on the refusing exit too', says(err21(MIXED21), 'T2 packages/spec/src/kernel/plugin.zod.ts:95'));
+  t('⛔ CONTROL — drop C6\'s lane and the SAME diff exits 0: that 4 is C6\'s, ⛔ never C5\'s', render21({ files: WIDENS }).exit === EXIT_OK);
+  t('⛔ CONTROL — drop the tell and keep the lane and it is STILL 4: that 4 was never C5\'s to begin with', render21({ cardLabels: ['domain:spec'], files: [] }).exit === EXIT_PAIR_ADVERSE);
+
+  t('⛔ C2 is untouched — a claim comment carrying no declaration still refuses', render21({ cardComments: [CLAIM('Domain: `domain:engine`')] }).exit === EXIT_PAIR_ADVERSE);
+  t('⛔ the UNJUDGED exit-2 path is untouched — a `no` pair whose listing could not be read is still 2', render21({ files: null }).exit === EXIT_INCOMPLETE);
+  t('⛔ …and prints NO C5 row there: an UNREAD diff is not a tell, and a report is not a place to guess', !says(err21(render21({ files: null })), `${REPORT_ROW_MARKER} C5`));
+  const GAPPED21 = render21({ files: WIDENS, prComments: null });
+  t('⭐ a C5 report survives a gap on ANOTHER read — exit 2, and the evidence prints anyway', GAPPED21.exit === EXIT_INCOMPLETE && says(err21(GAPPED21), `${REPORT_ROW_MARKER} C5`) && says(err21(GAPPED21), 'T2 packages/spec/src/kernel/plugin.zod.ts:95'));
+
+  t('⭐ the demotion is STRUCTURAL — `pairReportRows` carries C5 and `pairRows` never does', pairReportRows(D21({ files: WIDENS }), 'objectstack-ai/objectstack').some((r) => r.code === 'C5') && pairRows(D21({ files: WIDENS })).every((r) => r.code !== 'C5'));
+  t('⛔ …while `c5WideningTell` is unchanged: the ruling bit the row\'s FORCE, ⛔ never the tell', typeof c5WideningTell(D21({ files: WIDENS }), 'objectstack-ai/objectstack') === 'string');
+  t('⛔ …and no new exit code was minted for a report — a report that needed its own number would be a refusal', new Set([EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE]).size === 5);
 
   // -- C6: the review of record on this head (#17302) -------------------------
   //
