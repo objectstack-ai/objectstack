@@ -7125,12 +7125,20 @@ const elementFormRemoved: MetadataConversion = {
  * served tree (`AppPlugin.loadTranslations` and each platform plugin's
  * `kernel:ready` contribution both call `II18nService.loadTranslations`, which
  * deep-merges), and `resolveSettingsTitle` / the console's `useSettingsLabel`
- * read that merged tree, so an app-authored entry DID resolve: it overwrote
- * the platform's own settings copy for the deployment. Dropping it restores
- * the platform's string, which is the ruled intent — and the semantic entry
+ * read that merged tree, so an app-authored entry DID resolve.
+ *
+ * What it did NOT do is override the platform. `AppPlugin` loads the app's
+ * bundles in its own `start()` (kernel Phase 2); `SettingsServicePlugin`
+ * contributes the platform's settings translations from a `kernel:ready` hook
+ * (Phase 3); `deepMerge` gives the LATER source the leaf. So the platform won
+ * every key both bundles defined, and a per-app entry rendered only where the
+ * platform bundle carried no string for that key and locale — a gap filler on
+ * a namespace the application does not own. Dropping it therefore takes those
+ * gaps back to the manifest's own literal (the `?? fallback` every
+ * `resolveSettings*` helper ends in), which is a VISIBLE change and not a
+ * no-op. The semantic entry
  * `18.translation-per-app-settings-platform-only.ts` is where an author is
- * told that is what happened, because a notice reading "(removed)" does not
- * say it.
+ * told that, because a notice reading "(removed)" does not say it.
  *
  * ⚠️ The BUNDLE shape only. `TranslationItemSchema` still declares `settings`
  * (the registered `translation` metadata type is out of this ruling's scope),
@@ -7152,9 +7160,10 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
   surface: 'stack.translations[].<locale>.settings',
   summary:
     "per-app translation group 'settings' removed (#15178 — it is keyed by SettingsManifest.namespace "
-    + 'and only platform code declares a manifest, so an app-authored entry could only overwrite the '
-    + "platform's own settings copy in the one merged served tree; the group stays on the PLATFORM "
-    + 'bundle, PlatformTranslationData)',
+    + 'and only platform code declares a manifest, so an app-authored entry could only fill gaps the '
+    + "platform's own bundle left in the one merged served tree, and was overwritten wherever both "
+    + 'defined the key; those gaps now fall back to the manifest literal, and the group stays on the '
+    + 'PLATFORM bundle, PlatformTranslationData)',
   apply(stack, emit) {
     /** The top-level groups a translation bundle entry may carry (either face). */
     const GROUPS = new Set([

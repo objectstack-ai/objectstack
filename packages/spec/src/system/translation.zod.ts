@@ -578,13 +578,17 @@ const PER_APP_SETTINGS_PLATFORM_ONLY =
   '`settings` is a PLATFORM group, not an application one: it is keyed by '
   + '`SettingsManifest.namespace`, and a manifest is platform code — an application cannot '
   + 'declare one, so the only namespaces this key could address are the platform\'s own. '
-  + 'Authored here it deep-merged into the one served translation tree and silently rewrote '
-  + 'the platform\'s own settings copy for the deployment. Delete the group; platform settings '
-  + 'copy is translated in the platform bundle '
+  + 'Authored here it deep-merged into the one served translation tree, where it rendered only '
+  + 'where the platform bundle carried no string for that key and locale: wherever both defined '
+  + 'the key the platform\'s own `kernel:ready` contribution arrived later and overwrote it. '
+  + 'Delete the group. Platform settings copy is translated in the platform bundle '
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
-  + '`PlatformTranslationData`). For an application\'s own copy use the groups this bundle '
-  + "does declare — 'objects', 'apps', 'pages', 'dashboards', 'datasets', 'flows', "
-  + "'globalActions', 'metadataForms', 'messages'.";
+  + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
+  + 'literal, so correct it there rather than filling the gap from an application. For an '
+  + "application's own copy use the groups this bundle does declare — 'objects', 'apps', "
+  + "'pages', 'dashboards', 'datasets', 'flows', 'globalActions', 'metadataForms', 'messages'. "
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply '
+  + 'them by hand.';
 
 /** The per-app door's guidance: the shared table plus the platform-only `settings`. */
 const APP_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
@@ -1294,10 +1298,16 @@ const appTranslationDataShape = () => ({
  * could ever address are the PLATFORM's own, and what an app authored there
  * deep-merged into the single served tree
  * (`AppPlugin.loadTranslations` → `II18nService.loadTranslations`) that
- * {@link resolveSettingsTitle} and the console's `useSettingsLabel` read —
- * i.e. it silently rewrote the platform's settings copy for that deployment.
- * Platform labels and application labels are separate namespaces (ruling batch
- * #132 item 2 letter ②), so this shape is spread into
+ * {@link resolveSettingsTitle} and the console's `useSettingsLabel` read.
+ *
+ * It was therefore not dropped — but nor did it win. `AppPlugin` loads the
+ * app's bundles in its own `start()` (kernel Phase 2) while
+ * `SettingsServicePlugin` contributes the platform's settings translations from
+ * a `kernel:ready` hook (Phase 3), and `deepMerge` gives the LATER source the
+ * leaf. So a per-app entry rendered only where the platform bundle carried no
+ * string for that key and locale, and was overwritten wherever both defined the
+ * key. Platform labels and application labels are separate namespaces (ruling
+ * batch #132 item 2 letter ②), so this shape is spread into
  * {@link PlatformTranslationDataSchema} and {@link TranslationItemSchema} and
  * NOT into {@link TranslationDataSchema}, whose door refuses it by name.
  *
@@ -1412,14 +1422,19 @@ export type TranslationData = z.input<typeof TranslationDataSchema>;
  * namespaces on the platforms this one resembles, and they are separate here
  * (ruling batch #132 item 2 letter ②, 2026-09-13).
  *
- * What made the merged type actively harmful rather than merely imprecise:
- * both bundles are loaded into ONE served tree
- * (`AppPlugin.loadTranslations` and each platform plugin's `kernel:ready`
- * contribution both call `II18nService.loadTranslations`, which deep-merges),
- * and {@link resolveSettingsTitle} and the console's `useSettingsLabel` read
- * that merged tree. So a per-app `settings` branch did not sit inert — it
- * overwrote the platform's own settings copy for the deployment, addressed by
- * a namespace the application does not own.
+ * What the merged type cost, measured rather than assumed: both bundles are
+ * loaded into ONE served tree (`AppPlugin.loadTranslations` and each platform
+ * plugin's `kernel:ready` contribution both call
+ * `II18nService.loadTranslations`, which deep-merges), and
+ * {@link resolveSettingsTitle} and the console's `useSettingsLabel` read that
+ * merged tree. So a per-app `settings` branch did not sit inert — but it did
+ * not override the platform either. The app's bundles arrive in `AppPlugin`'s
+ * `start()` (kernel Phase 2) and the platform's at `kernel:ready` (Phase 3),
+ * and `deepMerge` gives the later source the leaf, so the platform won every
+ * key both defined. What an application actually had was a GAP FILLER on a
+ * namespace it does not own: it rendered only where the platform bundle
+ * carried no string for that key and locale, silently and with no way to tell
+ * the two cases apart.
  */
 export const PlatformTranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this locale of the platform translation bundle',

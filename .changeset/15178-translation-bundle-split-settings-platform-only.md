@@ -38,12 +38,25 @@ the house phrase. Both bundles load into ONE served tree — `AppPlugin`'s
 `loadTranslations` and every platform plugin's `kernel:ready` contribution both
 call `II18nService.loadTranslations`, which deep-merges — and the
 `resolveSettings*` family and the console's settings labels read that merged
-tree. So an app-authored `settings` branch did resolve: it **overwrote the
-platform's own settings copy** for that deployment, under a namespace the
-application does not own. After the upgrade the affected Settings screens render
-the platform's strings again. If a platform string is wrong, correct it in the
-platform bundle (`@objectstack/service-settings`'s `settingsBuiltinTranslations`)
-rather than re-adding an app-side override.
+tree. So an app-authored `settings` branch did resolve.
+
+**It was a gap filler, not an override.** The app's bundles are loaded in
+`AppPlugin`'s own `start()` (kernel Phase 2); the platform's settings
+translations arrive from `SettingsServicePlugin`'s `kernel:ready` hook (Phase
+3); `deepMerge` gives the **later** source the leaf. So the platform won every
+key both bundles defined, and a per-app entry rendered **only where the platform
+bundle carried no string for that key and locale** — the platform ships `en`,
+`zh-CN`, `ja-JP` and `es-ES`.
+
+**What to expect after upgrading.** Where the platform already carried the
+string, nothing changes on screen — that value was the one being served all
+along. Where your entry was filling a gap, that Settings screen now renders the
+**manifest's own literal, which is English** (the `?? fallback` every
+`resolveSettings*` helper ends in). Those are the screens to re-read. If a
+platform string is wrong or missing for your locale, correct it in the platform
+bundle (`@objectstack/service-settings`'s `settingsBuiltinTranslations`) — do
+not re-add the app-side copy, which the platform overwrites on every boot
+wherever it has its own value.
 
 No deprecation window: the per-app door refuses the key by name from this major,
 and the rejection carries the prescription above.
