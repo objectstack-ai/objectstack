@@ -4,17 +4,19 @@
 '@objectstack/runtime': patch
 ---
 
-feat(spec): one declaration per version grammar — nine carriers of "the version of a package or plugin" now reference three exported constants
+feat(spec): one declaration per version grammar — eight regex carriers of "the version of a package or plugin" now reference three exported constants
 
 Clause-②: yes (widening)
 
-**No accept set moves, and that is the whole point of this change.** Nine sites
-spelled a version regex out as a literal of their own. Three of those spellings
+**No accept set moves, and that is the whole point of this change.** Eight sites
+spelled a version regex out as a literal of their own. Five of those spellings
 were byte-identical to each other, two more were byte-identical to each other,
-and the ninth stood alone — three accept sets written nine times, growing on
-their own: three of the nine were published schema declarations with no parse
+and the eighth stood alone — three accept sets written eight times, growing on
+their own: three of the eight were published schema declarations with no parse
 caller at all, added by authors who copied a neighbour's literal. Each site now
 references the constant carrying the pattern it already enforced, byte for byte.
+A ninth in-repo carrier of the same concept spelled no regex at all:
+`PackageManifestSchema.version` is a bare `z.string()`, and it stays one here.
 
 `@objectstack/spec/kernel` gains three exported patterns:
 
@@ -43,12 +45,15 @@ identifiers), one refuses forms it requires. For ordering or precedence,
 
 **Nothing an author can write changes.** Every regex is byte-identical to the
 literal it replaces — verified per carrier by sha256 over the extracted literal
-— so every verdict on every version string is what it was. `PackageManifestSchema.version`
+— and every existing suite passes unedited. Those two together are the
+neutrality proof, and they are the whole of it. `PackageManifestSchema.version`
 keeps its bare `z.string()`; it is deliberately untouched here. No `.describe()`
-text, refusal message or JSON Schema `pattern` moves, and the generated
-`authorable-surface/`, `declaration-map/`, `json-schema.manifest/` and
-`dropped-refinements` artifacts all come back byte-unchanged. The existing
-suites pass unedited — that is the neutrality proof — and a new pin,
+text, refusal message or JSON Schema `pattern` moves. Regenerating the spec's
+artifacts moved `api-surface/kernel.json` and `export-origins/kernel.json` and
+nothing else, each gaining the three constant names — ⛔ read that as a check
+that nothing unexpected regenerated, never as evidence about the accept set: the
+artifacts that stayed byte-unchanged do not record a `.regex()` pattern in the
+first place. A new pin,
 `src/kernel/version-grammar.test.ts`, records each grammar's verdict on twelve
 witness strings so the next deliberate move to any of them is one visible edit
 to one matrix.

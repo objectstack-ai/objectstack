@@ -2,14 +2,19 @@
 
 /**
  * Version grammars for "the version of a package or plugin" — one declaration
- * per accept set, referenced by every carrier instead of restated at each one.
+ * per accept set, referenced by every carrier that constrains the string
+ * instead of restated at each one.
  *
- * Nine in-repo carriers used to spell one of these three patterns out as a
- * regex literal of their own. Three accept sets written nine times is three
- * accept sets that drift nine ways, and the count was still growing: three of
- * the nine were published schema declarations with no parse caller at all,
- * added by authors who copied a neighbour's literal. Each carrier now
- * references the pattern it already enforced.
+ * Eight in-repo carriers used to spell one of these three patterns out as a
+ * regex literal of their own. Three accept sets written eight times is three
+ * accept sets that drift eight ways, and the count was still growing: three of
+ * the eight were published schema declarations with no parse caller at all,
+ * added by authors who copied a neighbour's literal. Each now references the
+ * pattern it already enforced.
+ *
+ * A ninth in-repo carrier of the same concept spelled no regex at all:
+ * `PackageManifestSchema.version` (`marketplace/package-version.zod.ts`) is a
+ * bare `z.string()`, and it is deliberately left that way here.
  *
  * ⚠️ These three are NOT interchangeable — they are three different accept
  * sets, and the names say which. Referencing the wrong one moves a published

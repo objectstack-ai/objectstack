@@ -10,9 +10,11 @@ import {
 /**
  * The accept-set pin for the three version grammars.
  *
- * Every carrier of "the version of a package or plugin" in this repo now
- * references one of these three constants instead of restating its regex, so
- * this file is the ONE place a verdict on a version string is pinned — move a
+ * Every carrier of "the version of a package or plugin" in this repo that
+ * CONSTRAINS the string now references one of these three constants instead of
+ * restating its regex (`PackageManifestSchema.version` constrains nothing — it
+ * is a bare `z.string()` and references none of them), so this file is the ONE
+ * place a verdict on a version string is pinned — move a
  * cell in the matrix below and you have moved a PUBLISHED accept set on every
  * carrier that references that constant, in one edit, visibly.
  *
@@ -22,10 +24,14 @@ import {
  * set) and one is deliberately narrower. A row that surprises you is the
  * finding, not the bug.
  *
- * The carriers' own suites (`manifest.test.ts`, `plugin.test.ts`,
- * `../marketplace/package-version.test.ts`, and `plugin-loader.test.ts` in
- * `@objectstack/core`) pin the same verdicts through the schemas that reference
- * these constants; this file pins the constants themselves.
+ * The carriers' own suites — `manifest.test.ts` and `plugin.test.ts` here, and
+ * `plugin-loader.test.ts` in `@objectstack/core` — pin the same verdicts through
+ * the schemas that reference these constants; this file pins the constants
+ * themselves.
+ *
+ * ⚠️ `SEMVER_SHAPED_LOWERCASE_VERSION_PATTERN` has NO carrier suite behind it:
+ * there is no `../marketplace/package-version.test.ts` in this tree, so for that
+ * one grammar this file is the only pin there is.
  */
 
 /** One structural difference class per string — not an exhaustive accept set. */

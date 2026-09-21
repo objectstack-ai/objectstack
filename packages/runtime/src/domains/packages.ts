@@ -74,11 +74,13 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 // [#19120] The DECLARED grammar of one manifest key, asked BY REFERENCE at the
 // install door below. `ManifestSchema.shape.version` is the very field schema
 // `PackageInstallRequestSchema` binds through `manifest: ManifestSchema` — not
-// a copy of it. ⛔ A hand-written semver regex here would be the THIRD judgment
-// of this one key on this one surface (the `PATCH /packages/:id` door further
-// down already keeps its own copy), and the version-grammar canon is an open
-// question on its own card: asking the declaration means whatever that canon
-// decides reaches this door with no edit to this file.
+// a copy of it. ⛔ A hand-written semver regex here would be a SECOND grammar
+// for this one key on this one surface: the `PATCH /packages/:id` door further
+// down judges the same key and keeps no copy of its own either — it references
+// `MAJOR_MINOR_PATCH_VERSION_PATTERN`, the same constant `ManifestSchema`'s own
+// `version` field references (`@objectstack/spec` `kernel/version-grammar.ts`).
+// Both doors therefore read ONE declaration, and a change to that declaration
+// reaches both of them with no edit to this file.
 import { ManifestSchema, MAJOR_MINOR_PATCH_VERSION_PATTERN } from '@objectstack/spec/kernel';
 // [#17672] The repo's ONE message for a single-valued query parameter supplied
 // more than once, from the module whose header is the authority on the rule
