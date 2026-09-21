@@ -4441,7 +4441,7 @@ export async function selfTest() {
       'against the eleven measured enqueues of 2026-09-09 — five refused, six passed, that second number being ' +
       'the boundary a label reader cannot cross — and the #18020 references TIER, re-keyed to Tier S by #19133: a ' +
       'governed diff whose governed paths are ALL Tier S — the register\'s `.claude/**` row, asked through ' +
-      '`governedTierFor`, never a prefix repeated here — lands on the skills seat\'s review of record instead of an ' +
+      '`governedTierFor`, never a prefix repeated here — lands on the owning seat\'s review of record instead of an ' +
       'authorized approval, with the record recognisers IMPORTED through a lazy load whose precondition (no ' +
       'top-level await in this file\'s dispatch) is pinned against this file\'s own source, refused on an older ' +
       'head, on a missing or below-tier or partially-stamped `Served-tier:`, on an unsigned record, on no record ' +
