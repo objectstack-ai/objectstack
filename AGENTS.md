@@ -261,7 +261,9 @@ localStorage / auth gotchas.
     `CLAUDE.md` — the file you are reading is one — and a mixed diff is governed whole on a single path hit. The
     register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
     adding a surface is an edit *there*, never here, and `pnpm check:pm-governed-prose` reds per-PR when this
-    paragraph names fewer surfaces than the register — or more. When it reds, name the surface here.
+    paragraph names fewer surfaces than the register — or more. When it reds, name the surface here. A fork PR
+    (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies, queues, arms
+    auto-merge on or approves it; the owning seat adopts the diff onto an internal branch and lands that.
 
     **Authoring stays open to every seat** — drafting, pushing, opening and revising the PR. What is reserved is the
     **landing**: on a PR whose diff touches a governed surface ⛔ never merge, ⛔ never queue, ⛔ never arm
@@ -796,8 +798,6 @@ working in its domain — browse the directory, never a hand-written list here:
 - `skills/` — the **published** catalog (it ships to customer projects).
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
   `metadata.internal: true`.
-
-⛔ **Both roots are governed surfaces** — `skills/` is Tier H, `.claude/skills/` Tier S (**Prime Directive #14**).
 
 ---
 
