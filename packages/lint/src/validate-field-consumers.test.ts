@@ -513,7 +513,9 @@ describe('validateFieldConsumers — an unreadable `reference` carrier is refuse
   it('an OBJECT-valued carrier REFUSES — ⛔ not a silent missing edge', () => {
     const run = () => validateFieldConsumers(stackWith({ reference: { object: 'crm_account' } }));
     expect(run).toThrow(TypeError);
-    expect(run).toThrow(/validate-field-consumers walkObject/);
+    // [#19289] `walkObject` asks `referenceTargetOf`, which reads the carrier
+    // through `referenceCarrierOf` and so names itself in the refusal.
+    expect(run).toThrow(/referenceTargetOf/);
     expect(run).toThrow(/`reference` is an object/);
     expect(run).toThrow(/FieldSchema declares it as an optional STRING/);
   });
@@ -528,5 +530,62 @@ describe('validateFieldConsumers — an unreadable `reference` carrier is refuse
     // answer, reached without a throw.
     const findings = validateFieldConsumers(stackWith(carrier as AnyRec));
     expect(findings.map((f) => f.path)).toContain('objects[0].fields.legal_name');
+  });
+});
+
+/**
+ * [#19289] The `displayField` consumer edge of a `{ type: 'user' }` field lands
+ * on `sys_user` even when no `reference` is written — the fourth defect of the
+ * implicit-target census.
+ *
+ * This walk has NO type gate, so a `user` field reaches it, and the read went
+ * through `referenceCarrierOf` — what the CARRIER says.
+ * `IMPLICIT_REFERENCE_TARGETS` (`packages/spec/src/data/field-value.zod.ts`)
+ * declares a `user` field's target "a CONSTANT OF THE TYPE", with metadata
+ * authored without `reference` "fully specified, not under-specified", so the
+ * carrier answered `undefined` and the edge onto `sys_user.<displayField>` was
+ * never recorded. The field that column DOES display was then reported
+ * consumed by nobody — the same silent under-record #19198 and #19264 repaired
+ * at their own consumers.
+ *
+ * ⛔ Materiality, stated so the pin is not read wider than it is: the edge is
+ * only recordable where `sys_user` is compiled INTO the linted stack, which is
+ * what this fixture arranges. Where it is not, the ledger never declared the
+ * target and the outcome is unchanged.
+ *
+ * The repair is not an arbiter swap at the call — the synthesized
+ * `{ reference: field.reference }` literal threw `type` away before the arbiter
+ * could see it. The field is now passed through whole.
+ */
+describe('[#19289] validateFieldConsumers — a `user` field displays a field on `sys_user`', () => {
+  const stackWithUser = (assignee: AnyRec): AnyRec => ({
+    objects: [
+      { name: 'sys_user', fields: { name: { type: 'text' }, full_name: { type: 'text' } } },
+      {
+        name: 'crm_task',
+        fields: {
+          name: { type: 'text' },
+          assignee: { type: 'user', displayField: 'full_name', ...assignee },
+        },
+      },
+    ],
+    views: [{ name: 'task_list', object: 'crm_task', viewKind: 'list', columns: ['name'] }],
+  });
+
+  /** Paths this rule reports — the displayed field appearing here IS the defect. */
+  const pathsFor = (assignee: AnyRec) => validateFieldConsumers(stackWithUser(assignee)).map((f) => f.path);
+
+  it('THE DEFECT: with no `reference`, `sys_user.full_name` is no longer reported as consumed by nobody', () => {
+    expect(pathsFor({})).not.toContain('objects[0].fields.full_name');
+  });
+
+  it('the two legal spellings of one fully-specified field record the same edge', () => {
+    expect(pathsFor({})).toEqual(pathsFor({ reference: 'sys_user' }));
+  });
+
+  it('control: an UNREADABLE carrier still REFUSES — the implicit target does not swallow it', () => {
+    const run = () => validateFieldConsumers(stackWithUser({ reference: { object: 'sys_user' } }));
+    expect(run).toThrow(TypeError);
+    expect(run).toThrow(/`reference` is an object/);
   });
 });

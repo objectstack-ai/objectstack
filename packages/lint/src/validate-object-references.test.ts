@@ -561,7 +561,9 @@ describe('validateObjectReferences — an unreadable `reference` carrier is refu
   it('an OBJECT-valued FIELD carrier REFUSES — ⛔ not silence, and ⛔ not "unknown object"', () => {
     const run = () => validateObjectReferences(fieldCarrier({ reference: { object: 'crm_account' } }));
     expect(run).toThrow(TypeError);
-    expect(run).toThrow(/validate-object-references field target/);
+    // [#19289] The reader is now `referenceTargetOf` — see the field-target
+    // site for why this rule asks the TARGET question, not the carrier one.
+    expect(run).toThrow(/referenceTargetOf/);
     expect(run).toThrow(/`reference` is an object/);
     expect(run).toThrow(/FieldSchema declares it as an optional STRING/);
   });
@@ -572,7 +574,7 @@ describe('validateObjectReferences — an unreadable `reference` carrier is refu
     // object's name. One contract, so one reader.
     const run = () => validateObjectReferences(paramCarrier({ reference: { object: 'sys_user' } }));
     expect(run).toThrow(TypeError);
-    expect(run).toThrow(/validate-object-references action param target/);
+    expect(run).toThrow(/referenceTargetOf/);  // [#19289] one contract, one arbiter
     expect(run).toThrow(/`reference` is an object/);
   });
 
@@ -592,5 +594,58 @@ describe('validateObjectReferences — an unreadable `reference` carrier is refu
     // and prescribes the key. This rule only judges targets that ARE named.
     expect(validateObjectReferences(fieldCarrier(carrier))).toHaveLength(0);
     expect(validateObjectReferences(paramCarrier(carrier))).toHaveLength(0);
+  });
+});
+
+/**
+ * [#19289] A `{ type: 'user' }` field or action param resolves its target from
+ * the TYPE — the two ALIGNED sites of the implicit-target census.
+ *
+ * `RELATIONSHIP_TARGET_FIELD_TYPES` admits `user` and `ActionParamSchema.type`
+ * is `FieldType`, so this rule DOES ask the target question about a `user`
+ * field — and answered it from the carrier, which for that type is not the
+ * target (`IMPLICIT_REFERENCE_TARGETS`: a CONSTANT OF THE TYPE,
+ * `packages/spec/src/data/field-value.zod.ts`).
+ *
+ * ⚠️ The OUTPUT was already right, for the wrong reason: a spec-complete field
+ * answered `undefined` and `check` returns early on absence, so the rule said
+ * nothing — the same silence the resolved target produces, since `sys_user` is
+ * admitted at rung ③ (`isPlatformProvidedObjectName`). These pins record the
+ * site as JUDGED rather than missed, and hold BOTH halves: the two legal
+ * spellings now reach that silence by the same route, and the rule still
+ * reports a real miss. ⛔ No new finding is introduced for either spelling —
+ * an assertion that one appeared would be a regression, not a fix.
+ */
+describe('[#19289] validateObjectReferences — a `user` target comes from the TYPE', () => {
+  const userField = (extra: Record<string, unknown>) => ({
+    ...baseStack(),
+    objects: [
+      ...baseStack().objects,
+      { name: 'crm_task', fields: { name: { type: 'text' }, assignee: { type: 'user', ...extra } } },
+    ],
+  });
+  const userParam = (extra: Record<string, unknown>) => ({
+    ...baseStack(),
+    actions: [{ name: 'mass_reassign', params: [{ name: 'owner', type: 'user', ...extra }] }],
+  });
+
+  it('a `user` FIELD with no `reference` produces no finding — the target is a constant of the type', () => {
+    expect(validateObjectReferences(userField({}))).toHaveLength(0);
+  });
+
+  it('a `user` field and the same field with `reference: "sys_user"` agree exactly', () => {
+    expect(validateObjectReferences(userField({}))).toEqual(validateObjectReferences(userField({ reference: 'sys_user' })));
+  });
+
+  it('a `user` PARAM with no `reference` produces no finding either', () => {
+    expect(validateObjectReferences(userParam({}))).toHaveLength(0);
+  });
+
+  it('control: the rule still REPORTS a real miss — an explicit carrier naming an unknown object errors', () => {
+    // Without this, "no findings" above reads equally well as a rule that
+    // stopped judging `user` fields altogether.
+    const findings = validateObjectReferences(userField({ reference: 'zzz_nope' }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNKNOWN);
   });
 });
