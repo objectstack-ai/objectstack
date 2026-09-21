@@ -15,7 +15,12 @@
  * AI may draft grants freely; it cannot silently change who can do what.
  */
 
-import type { AccessMatrixParsed, AccessMatrixEntry } from '@objectstack/spec/security';
+import type {
+  AccessMatrixParsed,
+  AccessMatrixEntry,
+  EffectiveObjectPermission,
+} from '@objectstack/spec/security';
+import { objectPermissionGrants } from '@objectstack/spec/security';
 import { recordsOf } from './object-graph.js';
 
 type AnyRec = Record<string, unknown>;
@@ -39,13 +44,25 @@ export function buildAccessMatrix(stack: AnyRec): AccessMatrixParsed {
     const objects = (ps.objects && typeof ps.objects === 'object' ? ps.objects : {}) as AnyRec;
     for (const [objName, rawPerm] of Object.entries(objects)) {
       const p = (rawPerm ?? {}) as AnyRec;
+      // [#18785] The CRUD bits are the SPEC's fold, asked — never restated.
+      // `objectPermissionGrants` is the one definition of "does this effective
+      // object permission grant this verb?", and the enforcement door
+      // (`PermissionEvaluator.checkObjectPermission`) asks the same function.
+      // A matrix restating the fold inline is a second implementation of a
+      // security rule whose whole job is to be reviewable: it would keep
+      // answering the old way for a full release after the door changed, and
+      // the snapshot diff — the artefact a human signs off — would say nothing.
+      // The two super-user columns below are RAW BITS, not folds: they report
+      // what the set declares, which is the context the reviewer reads the CRUD
+      // columns against.
+      const effective = p as EffectiveObjectPermission;
       const entry: AccessMatrixEntry = {
         permissionSet: psName,
         object: objName,
-        create: p.allowCreate === true,
-        read: p.allowRead === true || p.viewAllRecords === true || p.modifyAllRecords === true,
-        edit: p.allowEdit === true || p.modifyAllRecords === true,
-        delete: p.allowDelete === true || p.modifyAllRecords === true,
+        create: objectPermissionGrants(effective, 'allowCreate'),
+        read: objectPermissionGrants(effective, 'allowRead'),
+        edit: objectPermissionGrants(effective, 'allowEdit'),
+        delete: objectPermissionGrants(effective, 'allowDelete'),
         viewAllRecords: p.viewAllRecords === true,
         modifyAllRecords: p.modifyAllRecords === true,
       };
