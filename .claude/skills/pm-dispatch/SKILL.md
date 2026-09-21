@@ -640,6 +640,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 ### 入队与落地
 
 - 细则见 `references/landing-operations.md`,落地窗口查阅。
+- fork PR = 提案,席位永不放行;采纳 diff 内部落地,见 `references/external-contributions.md`。
 - 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。
 - `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。
 - 路径肢 = diff 触及契约面 `packages/spec/src/**`,含 error-code-ledger 与 `*.zod.ts` 契约 schema。
