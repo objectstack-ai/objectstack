@@ -58,9 +58,11 @@
 // one. So the precedent is not a same-string match found elsewhere in the
 // catalog: it is the other rendering of this very schema key.
 //
-// The fifth, `memoryMb`, is an echo on BOTH panels — the twin rule supplies
-// nothing there, and that row says so instead of borrowing evidence it does
-// not have.
+// The fifth, `memoryMb`, was an echo on BOTH panels when this round ran — the
+// twin rule supplied nothing there, and that row says so instead of borrowing
+// evidence it does not have. ⭐ #19403 round 6 then decided the hook side from
+// THIS round's rendering, so the exclusion at the foot of this file is now
+// empty and the invariant covers all thirty pairs.
 //
 // ## The #19430 trap, met and checked AT THE SCHEMA before a word was rendered
 //
@@ -216,7 +218,7 @@ const DECISIONS: readonly Decision[] = [
     en: 'Capabilities',
     verdict: ALL_TRANSLATE,
     reason:
-      'THE AUTHORED TWIN AT THE SAME SCHEMA KEY, byte-identical en: hook.fields.body.capabilities.label is 功能 / 機能 / Capacidades. ⚠️ Recorded rather than improved: zh-CN 功能 and ja-JP 機能 read "feature", while the value is a capability TOKEN from the HookBodyCapability enum, and the catalog\'s other `Capabilities` (object.sections.capabilities.label, the capability CHECKBOXES) is 功能开关 — a third sense. The twin is the landed answer for this exact schema key, and diverging here to improve the word would BE the defect the cross-panel invariant below guards. Rewording it is a hook-family edit, not an action-family one.',
+      'THE AUTHORED TWIN AT THE SAME SCHEMA KEY, byte-identical en: hook.fields.body.capabilities.label. ⚠️ When this round ran the twin read 功能 / 機能 / Capacidades, and this row RECORDED rather than improved it: zh-CN 功能 and ja-JP 機能 read "feature", while the value is a capability TOKEN from the HookBodyCapability enum, and the catalog\'s other `Capabilities` (object.sections.capabilities.label, the capability CHECKBOXES) is 功能开关 — a third sense. The twin is the landed answer for this exact schema key, and diverging HERE to improve the word would BE the defect the cross-panel invariant below guards; rewording it is a hook-family edit, not an action-family one. ⭐ #19403 round 6 is that hook-family edit and moved both sides in one act — 能力 / ケイパビリティ / Capacidades — so this leaf still copies its twin verbatim and the invariant below still holds. See hook-execution-panel-echo-decisions.test.ts for the derivation behind the new word.',
   },
   {
     scope: 'fields',
@@ -719,6 +721,7 @@ describe('#19403 round 5 — the blind spot, FIFTH shape: one schema, two forms,
     const en = enMetadataForms as Record<string, any>;
     const divergent: string[] = [];
     const noTwinEvidence: string[] = [];
+    let compared = 0;
     for (const child of SHARED_BODY_CHILDREN) {
       for (const prop of ['label', 'helpText'] as const) {
         const enAction = en.action?.fields?.[`body.${child}`]?.[prop];
@@ -735,6 +738,7 @@ describe('#19403 round 5 — the blind spot, FIFTH shape: one schema, two forms,
             noTwinEvidence.push(`${child}.${prop}`);
             continue;
           }
+          compared += 1;
           if (actionValue !== hookValue) divergent.push(`${locale} body.${child}.${prop}`);
         }
       }
@@ -744,16 +748,17 @@ describe('#19403 round 5 — the blind spot, FIFTH shape: one schema, two forms,
       'one schema key rendered two ways on the two panels that declare it — make them agree, do not pick a favourite',
     ).toEqual([]);
     // Lit — the invariant above is not vacuous: it really compared leaves.
-    // 5 children x 2 props x 3 locales = 30 pairs, of which the `memoryMb`
-    // pair carries no authored twin in any locale (6 exclusions).
-    expect(noTwinEvidence.length).toBe(6);
-    expect([...new Set(noTwinEvidence)].sort()).toEqual(['memoryMb.helpText', 'memoryMb.label']);
-    // …and that exclusion is exactly the family a later round of this card
-    // still owes. When it lands, this assertion starts covering `memoryMb`
-    // too, and reds if that round renders it differently from this one.
+    // 5 children x 2 props x 3 locales = 30 pairs. ⭐ When this round landed,
+    // SIX of them were excluded because `memoryMb` carried no authored twin in
+    // any locale, and this file said a later round of the card still owed it.
+    // #19403 round 6 paid it: the exclusion set is now EMPTY and every pair is
+    // compared, so a round that renders `memoryMb` differently on the two
+    // panels reds here as well as in its own ledger.
+    expect(noTwinEvidence).toEqual([]);
+    expect(compared, 'the invariant compared 5 children x 2 props x 3 locales').toBe(30);
     const stillEchoingOnHook = SHARED_BODY_CHILDREN.filter((c) =>
       TRANSLATED_LOCALES.some(([, forms]) => forms.hook?.fields?.[`body.${c}`]?.label === en.hook?.fields?.[`body.${c}`]?.label),
     );
-    expect(stillEchoingOnHook).toEqual(['memoryMb']);
+    expect(stillEchoingOnHook).toEqual([]);
   });
 });
