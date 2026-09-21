@@ -5,7 +5,7 @@
 
 **BREAKING for per-app translation bundles** — the translation bundle type splits in two: `settings` is a PLATFORM group and a per-app bundle may no longer declare it (#15178)
 
-Clause-②: no
+Clause-②: yes
 
 `TranslationDataSchema` served two different bundles at once — the per-app one an
 application authors (`stack.translations`, `defineTranslationBundle`) and the

@@ -585,8 +585,12 @@ const PER_APP_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than filling the gap from an application. For an '
-  + "application's own copy use the groups this bundle does declare — 'objects', 'apps', "
-  + "'pages', 'dashboards', 'datasets', 'flows', 'globalActions', 'metadataForms', 'messages'. "
+  + 'application\'s own copy use the ten groups this bundle does declare, in the order it '
+  + "declares them — 'objects', 'apps', 'messages', 'globalActions', 'dashboards', 'datasets', "
+  + "'pages', 'flows', 'metadataForms', 'settingsCommon'. Note the last one: 'settingsCommon' IS "
+  + 'on this face, so the Settings UI shell strings an application may translate (the source '
+  + 'badges, under `settingsCommon.sourceLabels`) are NOT what is being refused here — only the '
+  + "per-namespace manifest copy under 'settings' is. "
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply '
   + 'them by hand.';
 
