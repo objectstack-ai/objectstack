@@ -409,11 +409,141 @@ export function assertScimAdminCoherence(pluginConfig?: Partial<AuthPluginConfig
 }
 
 /**
- * OAuth 2.1 §1.5 transport rule for the MCP OAuth track: authorization/token
- * exchanges and bearer usage require TLS, with loopback exempt (dev). A
- * plain-HTTP non-loopback deployment keeps the API-key track only — the
+ * Four dotted decimal octets, nothing else. Deliberately anchored at both
+ * ends: `10.0.0.5.evil.com` is a HOSTNAME that merely starts with a private
+ * IPv4 string, and a prefix match on it would hand plain-HTTP OAuth to a name
+ * its owner points wherever they like.
+ */
+function parseIpv4Literal(host: string): number[] | null {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return null;
+  const octets = m.slice(1, 5).map(Number);
+  return octets.every((n) => n <= 255) ? octets : null;
+}
+
+/**
+ * Expand an IPv6 literal (already unbracketed) to its eight 16-bit groups, or
+ * `null` when it is not one. Handles `::` elision and a trailing embedded
+ * IPv4 (`::ffff:10.0.0.5`) so the classifier below reads real bits rather
+ * than matching text prefixes.
+ */
+function parseIpv6Literal(host: string): number[] | null {
+  if (!/^[0-9a-f:.]+$/.test(host)) return null;
+  const halves = host.split('::');
+  if (halves.length > 2) return null;
+  const toGroups = (part: string): number[] | null => {
+    if (part === '') return [];
+    const pieces = part.split(':');
+    const out: number[] = [];
+    for (let i = 0; i < pieces.length; i++) {
+      const piece = pieces[i]!;
+      if (piece.includes('.')) {
+        // An embedded IPv4 tail is legal only in the last position.
+        if (i !== pieces.length - 1) return null;
+        const v4 = parseIpv4Literal(piece);
+        if (!v4) return null;
+        out.push((v4[0]! << 8) | v4[1]!, (v4[2]! << 8) | v4[3]!);
+        continue;
+      }
+      if (!/^[0-9a-f]{1,4}$/.test(piece)) return null;
+      out.push(parseInt(piece, 16));
+    }
+    return out;
+  };
+  const head = toGroups(halves[0]!);
+  if (head === null) return null;
+  if (halves.length === 1) return head.length === 8 ? head : null;
+  const tail = toGroups(halves[1]!);
+  if (tail === null) return null;
+  const elided = 8 - head.length - tail.length;
+  if (elided < 1) return null;
+  return [...head, ...new Array<number>(elided).fill(0), ...tail];
+}
+
+/**
+ * Is this host LITERAL a loopback, RFC 1918 private, RFC 4193 unique-local or
+ * link-local address? The ruled allow-list, and nothing wider:
+ *
+ *   IPv4  127.0.0.0/8 (loopback) · 10.0.0.0/8 · 172.16.0.0/12 · 192.168.0.0/16
+ *         169.254.0.0/16 (link-local)
+ *   IPv6  ::1 (loopback) · fc00::/7 (unique-local) · fe80::/10 (link-local)
+ *
+ * Boundaries that decide the verdict, each pinned in
+ * `auth-manager.mcp-oauth.test.ts`: `172.15.x` and `172.32.x` sit OUTSIDE
+ * RFC 1918 and are refused; `fec0::/10` site-local was deprecated by RFC 3879
+ * and is NOT inside `fc00::/7`, so it is refused too; an IPv4-mapped IPv6
+ * form (`::ffff:10.0.0.5`, which WHATWG URL canonicalises to `::ffff:a00:5`)
+ * is refused rather than unwrapped — the conservative side of a rule whose
+ * failure mode is opening plaintext OAuth to the public internet.
+ */
+function isPrivateOrLoopbackHostLiteral(host: string): boolean {
+  const bare = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+
+  const v4 = parseIpv4Literal(bare);
+  if (v4) {
+    const a = v4[0]!;
+    const b = v4[1]!;
+    if (a === 127) return true; // loopback
+    if (a === 10) return true; // RFC 1918
+    if (a === 172 && b >= 16 && b <= 31) return true; // RFC 1918
+    if (a === 192 && b === 168) return true; // RFC 1918
+    if (a === 169 && b === 254) return true; // RFC 3927 link-local
+    return false;
+  }
+
+  const v6 = parseIpv6Literal(bare);
+  if (v6) {
+    if (v6.every((g, i) => (i === 7 ? g === 1 : g === 0))) return true; // ::1
+    const first = v6[0]!;
+    if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7
+    if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10
+    return false;
+  }
+
+  return false;
+}
+
+/**
+ * OAuth 2.1 §1.5 transport rule for the MCP OAuth track, applied at
+ * DEPLOYMENT level with the semantics of Keycloak's `sslRequired=external`:
+ * TLS is required on a PUBLIC host, and plain HTTP is accepted when the
+ * deployment's own canonical origin is a loopback or private / link-local
+ * address. A plain-HTTP PUBLIC deployment keeps the API-key track only — the
  * OAuth surface (protected-resource metadata, bearer acceptance) stays dark,
  * fail-closed, and is logged once at mount time.
+ *
+ * ## Why private hosts are eligible (maintainer ruling 2026-09-21)
+ *
+ * A deployment that already serves its login form and session cookies over
+ * plain HTTP gains nothing from OAuth refusing plain HTTP: the refusal only
+ * removes MCP from that deployment. Intranet installs and a developer's
+ * `os dev` bound to a LAN address are the same case, so there is no separate
+ * development-mode branch and ⛔ no configuration key or environment variable
+ * — a switch would be reachable on a public host, which is exactly the
+ * deployment this rule must keep refusing.
+ *
+ * ## The reading pinned for a non-IP hostname
+ *
+ * This judges the HOST LITERAL of the deployment's own canonical origin. An
+ * intranet hostname (`crm.corp`, `host.docker.internal`) is not an IP
+ * literal, so over plain HTTP it stays REFUSED, and the remedy is to
+ * configure the base URL on the private address the deployment already binds
+ * (`http://192.168.1.10:3000`). The two alternatives were both rejected, on
+ * the record:
+ *
+ * - **Resolving the hostname in DNS** would make a pure, synchronous
+ *   predicate depend on a network round trip on every `isMcpOAuthEnabled()`
+ *   call, and a name whose answer can change (or be rebound) turns the
+ *   transport verdict into something no test can pin.
+ * - **Judging the REQUESTER's peer address**, which is what Keycloak's
+ *   `sslRequired=external` does, cannot decide what this deployment
+ *   ADVERTISES at mount time, and it carries a false-safe we would be
+ *   adopting knowingly: a plain-HTTP reverse proxy on a public address
+ *   forwards every request from a private peer, so every requester looks
+ *   internal and plaintext OAuth is served to the public internet. The same
+ *   false-safe reaches this rule from the other side — a private canonical
+ *   origin that a public plain-HTTP proxy fronts is eligible here — and it is
+ *   documented rather than keyed, exactly as Keycloak documents its own.
  */
 export function isOAuthEligibleBaseUrl(url: string): boolean {
   try {
@@ -421,13 +551,8 @@ export function isOAuthEligibleBaseUrl(url: string): boolean {
     if (u.protocol === 'https:') return true;
     if (u.protocol !== 'http:') return false;
     const host = u.hostname.toLowerCase();
-    return (
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host === '[::1]' ||
-      host === '::1' ||
-      host.endsWith('.localhost')
-    );
+    if (host === 'localhost' || host.endsWith('.localhost')) return true;
+    return isPrivateOrLoopbackHostLiteral(host);
   } catch {
     return false;
   }
@@ -6212,8 +6337,10 @@ export class AuthManager {
   /**
    * Whether the OAuth track for MCP is live on this deployment: the embedded
    * AS must be enabled AND the canonical origin must satisfy the OAuth 2.1
-   * transport rule (TLS, loopback exempt). When this is false the MCP
-   * endpoint is API-key-only and no OAuth metadata is advertised.
+   * transport rule (TLS on a public host; plain HTTP accepted on a loopback
+   * or private / link-local address — {@link isOAuthEligibleBaseUrl}). When
+   * this is false the MCP endpoint is API-key-only and no OAuth metadata is
+   * advertised.
    */
   isMcpOAuthEnabled(): boolean {
     return (

@@ -3125,6 +3125,30 @@ export class AuthPlugin implements Plugin {
       return;
     }
 
+    // ── Plain-HTTP OAuth notice (maintainer ruling 2026-09-21) ────────
+    // The transport rule (`isOAuthEligibleBaseUrl`) accepts plain HTTP when
+    // the deployment's own host is loopback or a private / link-local
+    // address, so an unencrypted authorization server is a SUPPORTED posture
+    // here (intranet installs, a dev bind on a LAN address) rather than an
+    // impossible one. It is never a SILENT posture: one loud line, emitted
+    // once at mount, whenever OAuth is served over plain HTTP — and none at
+    // all under TLS. The ruled wording is kept verbatim as the first clause;
+    // ⛔ no configuration key or environment variable gates either the rule
+    // or this notice.
+    // Read off the PUBLISHED issuer — the authorization-server identity these
+    // documents are about — so the line names the exact URL a client is sent
+    // to rather than a value only this method can see.
+    const authIssuer = this.authManager!.getAuthIssuer();
+    if (/^http:\/\//i.test(authIssuer)) {
+      ctx.logger.warn(
+        'OAuth 未加密:仅限可信内网 — this deployment serves its OAuth authorization server over plain ' +
+          `HTTP (${authIssuer}). Authorization codes, access tokens and bearer headers cross the ` +
+          'network in the clear, so anything that can observe it can replay them. This is accepted only ' +
+          'because the host is loopback or a private / link-local address; put TLS in front of any ' +
+          'deployment reachable from a public network, where the same origin is refused outright.',
+      );
+    }
+
     const { oauthProviderAuthServerMetadata, oauthProviderOpenIdConfigMetadata } = await import(
       '@better-auth/oauth-provider'
     );
@@ -3163,9 +3187,10 @@ export class AuthPlugin implements Plugin {
     // ── MCP protected-resource metadata (RFC 9728, #2698) ──────────────
     // `/api/v1/mcp` is an OAuth 2.1 protected resource; its metadata points
     // clients at THIS deployment's embedded authorization server. Mounted
-    // only when the MCP OAuth track is live (MCP surface on + AS on + TLS
-    // rule satisfied — loopback exempt): when it is off, nothing is
-    // advertised and the endpoint stays API-key-only, fail-closed.
+    // only when the MCP OAuth track is live (MCP surface on + AS on +
+    // transport rule satisfied — TLS, or plain HTTP on a loopback / private
+    // / link-local host): when it is off, nothing is advertised and the
+    // endpoint stays API-key-only, fail-closed.
     const manager = this.authManager!;
     if (readMcpServerEnabledEnv() && typeof manager.isMcpOAuthEnabled === 'function') {
       if (manager.isMcpOAuthEnabled()) {
@@ -3185,8 +3210,10 @@ export class AuthPlugin implements Plugin {
         );
       } else {
         ctx.logger.warn(
-          'MCP server is enabled but the OAuth track is NOT live (base URL fails the OAuth 2.1 TLS rule — ' +
-            'https required, loopback exempt). /api/v1/mcp stays API-key-only; no OAuth metadata is advertised.',
+          'MCP server is enabled but the OAuth track is NOT live (base URL fails the OAuth 2.1 transport ' +
+            'rule — https is required on a PUBLIC host; plain HTTP is accepted only on a loopback or ' +
+            'private / link-local address, and a non-IP hostname is not one). /api/v1/mcp stays ' +
+            'API-key-only; no OAuth metadata is advertised.',
         );
       }
     }
