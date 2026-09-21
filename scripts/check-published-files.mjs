@@ -242,8 +242,50 @@ const EXTRA_ENTRIES = {
     liveness: 'Per-metadata-type liveness ledgers, read by the ADR-0049 enforce-or-remove tooling.',
     prompts: 'Authoring prompts shipped for agents consuming the protocol.',
     'llms.txt': 'Protocol summary for LLM consumers.',
+    // src/**/*.zod.ts -- a READ route, and never an import route (#19009)
+    // ------------------------------------------------------------------
+    //
+    // This entry used to justify itself with "downstream code imports them
+    // directly". That sentence named a route that has never been open, and
+    // both of its halves were measured false against a real packed tarball
+    // before this correction landed:
+    //
+    //   - the exports map declares no ./src/* subpath and no wildcard, so
+    //     every spelling of the deep specifier is refused at RESOLUTION --
+    //     Node answers ERR_PACKAGE_PATH_NOT_EXPORTED under both ESM and CJS,
+    //     esbuild answers "not exported by package", and tsc answers TS2307
+    //     under both bundler and nodenext resolution. A literal file path
+    //     into node_modules does not rescue it either: Node refuses type
+    //     stripping under node_modules by design, so the file cannot load
+    //     even when resolution is bypassed entirely.
+    //   - measured when this landed, 191 of the 203 shipped modules carry a
+    //     relative import onto one of 44 src/ modules this glob does NOT
+    //     ship (src/shared/lazy-schema.ts alone is named by 182), so a route
+    //     that reached them still would not load them.
+    //
+    // What they are actually for is a READ route. The published skills
+    // catalog tells an agent to open these paths inside a consumer's
+    // node_modules and read the schema as the truth, and each skill's
+    // reference index is GENERATED from this very set by the spec package's
+    // own build-skill-references generator. That generator filters its
+    // closure to the *.zod.ts shape for exactly this reason, in its own
+    // words: a pointer to any other src file 404s in a consumer's
+    // node_modules. Which is also why the unshipped-dependency count above
+    // is a property of the glob and not a defect in it -- a reader never
+    // resolves those imports. Measured with the tarball in hand: 170
+    // pointers across 9 published index files, 0 of them outside this glob.
+    //
+    // So what #19009 corrects is the REASON, not the entry, and the two
+    // repairs the false reason invites are both wrong:
+    //   - do NOT open the exports map to make the old sentence true. It
+    //     would advertise a route that is broken for 191 of 203 files, which
+    //     is a machine-readable surface that lies (Route & surface ownership
+    //     rule 4; Prime Directive #10).
+    //   - do NOT drop the entry as unreachable payload. It is reachable
+    //     product -- by read rather than by resolve -- and dropping it makes
+    //     every generated pointer in the shipped catalog 404 at once.
     'src/**/*.zod.ts':
-      'The Zod schemas are themselves the contract (Prime Directive #1); downstream code imports them directly, so these sources are product rather than build input. Narrowed to *.zod.ts so no test or helper rides along.',
+      'The Zod schemas are themselves the contract (Prime Directive #1), and the published skills catalog points agents at these files by PATH, to read inside a consumer node_modules -- never by specifier to import, a route the exports map does not offer. Product rather than build input, read rather than resolved. Narrowed to *.zod.ts so no test or helper rides along, and because the reference generator emits pointers to exactly that set.',
     'api-surface':
       'Export snapshot used by downstream compatibility checks — one file per published entry point since #5837.',
     'spec-changes.json': 'Machine-readable spec change log driving the upgrade guide.',
