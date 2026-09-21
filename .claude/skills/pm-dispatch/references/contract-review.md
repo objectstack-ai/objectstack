@@ -41,7 +41,7 @@
 - 落地前检三条:① 达档条款②复核 PASS 在案,即 PR 或卡上同形复核记录(spec、skills 每轮)。
 - ② 双载体已清,逐对机读 `PM_SWEEP_REPO=仓 node scripts/pm/check-clause2-carriers.mjs --pair N`。
 - 0 = 确定性行全清;4 = 任一不成立,只确定性行红才挡落地;3 = 环境答不了 ⛔ 不作干净。
-- 确定性行 = 复核记录在案、`Served-tier:` 在、双载体一致、认领形;C5 放宽 tell 归复核裁。
+- 确定性行 = 记录在案、`Served-tier:`、双载体一致、认领形;C5 放宽 tell 只报告,归复核裁。
 - ③ PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。
 - 签名 = 失败步 + 首错行,读 base check runs 的 API ⛔ 不凭口述;主干红止血立单不变。
 
