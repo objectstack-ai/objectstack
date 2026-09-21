@@ -10,7 +10,7 @@ import type {
     FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
-import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, ScreenSpec, ScreenFieldSpec } from '@objectstack/spec/contracts';
+import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import {
     validateScreenInputs,
@@ -4566,8 +4566,69 @@ export class AutomationEngine implements IAutomationService {
 
     async listRuns(
         flowName: string,
-        options?: { limit?: number; cursor?: string; status?: ExecutionStatus },
+        options?: { limit?: number; status?: ExecutionStatus },
     ): Promise<ExecutionLogEntry[]> {
+        // [#19365] ONE implementation, two projections — `listRunsPage` is the
+        // whole method and this is its `runs` half. ⛔ Never re-derive the
+        // listing here: a second copy of the merge/filter/sort would be the
+        // fork the route-ownership rule refuses, and it is the half that would
+        // rot, because the page method is the one the REST door calls.
+        return (await this.listRunsPage(flowName, options)).runs;
+    }
+
+    /**
+     * [#19365] The run listing AND whether it was truncated — the member the
+     * REST door builds `hasMore` from.
+     *
+     * ## What "truncated" means at this seam, and why `runs.length === limit` is not it
+     *
+     * Three sources merge below and only ONE of them was ever capped: the
+     * durable HISTORY arm, because `RunStore.listHistory(flowName, limit)`
+     * takes the window as an argument. The durable PAUSED arm (`store.list()`)
+     * and the in-memory ring are read in full and contribute everything they
+     * hold for the flow. So before this change the merged set could be short
+     * for two indistinguishable reasons — the flow really has that many runs,
+     * or the store had more and was asked for exactly `limit`.
+     *
+     * `runs.length === limit` cannot separate them, which is why it is ⛔ not
+     * the signal: a flow with EXACTLY `limit` runs and a flow with ten
+     * thousand produce byte-identical windows, and reporting `hasMore: true`
+     * for the first is as wrong as `false` for the second.
+     *
+     * The signal is an OVER-READ of exactly one row. The history arm is asked
+     * for `limit + 1`; the merged, filtered, sorted set is then compared to
+     * `limit`. If it overflows, a run matched that this window does not carry
+     * and `hasMore` is true; if it does not, the window IS the answer. The
+     * extra row is dropped by the same `.slice(0, limit)` that was always
+     * here, so the wire shape does not change — only the fact reported beside
+     * it. ⛔ `RunStore.listHistory`'s signature is deliberately NOT redesigned:
+     * over-reading is expressible in the `limit` it already takes, so the
+     * truncation signal costs the store contract nothing.
+     *
+     * ## What `hasMore` does NOT mean
+     *
+     * ⛔ Not "the retention cap evicted older runs". A run the deployment's
+     * per-flow retention has discarded does not exist any more; it is not
+     * "more" and no `limit` will bring it back. This answers only about rows
+     * the sources still hold.
+     *
+     * ⛔ Not "there is a next page". This door mints no cursor (the request
+     * half is a retired key). The caller's remedy is a WIDER `limit`, up to
+     * the 100 the wire declares.
+     *
+     * ⚠️ One honest residual, pre-existing and unchanged: under `?status=`,
+     * the history arm's window is still the newest `limit + 1` rows of ANY
+     * status, because `listHistory` has no status slot and the filter is
+     * applied to what comes back. So a status-filtered `hasMore: false` means
+     * "no further match within the scanned window", not "no further match
+     * exists". Pushing the filter down is a store-contract change and is ⛔ not
+     * this card's; the same paragraph below the merge already records it for
+     * the listing itself.
+     */
+    async listRunsPage(
+        flowName: string,
+        options?: { limit?: number; status?: ExecutionStatus },
+    ): Promise<RunListResult> {
         const limit = options?.limit ?? 20;
         const inMem = this.executionLogs.filter(l => l.flowName === flowName);
 
@@ -4640,7 +4701,12 @@ export class AutomationEngine implements IAutomationService {
         let durable: ExecutionLogEntry[] = [];
         if (this.store?.listHistory) {
             try {
-                const rows = await this.store.listHistory(flowName, limit);
+                // [#19365] `limit + 1`, not `limit` — the over-read that makes
+                // `hasMore` answerable at all. Asking for exactly `limit` makes a
+                // saturated window and a complete one identical; one extra row
+                // tells them apart, and `.slice(0, limit)` below drops it again
+                // so nothing on the wire widens.
+                const rows = await this.store.listHistory(flowName, limit + 1);
                 durable = rows.map(r => this.runRecordToLogEntry(r));
             } catch (err) {
                 // #6499 — the datasource driver's text to the structured slot;
@@ -4727,9 +4793,16 @@ export class AutomationEngine implements IAutomationService {
         const merged = status === undefined
             ? [...byId.values()]
             : [...byId.values()].filter(e => e.status === status);
-        return merged
-            .sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
-            .slice(0, limit);
+        const ordered = merged
+            .sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
+        // [#19365] The comparison is against the ORDERED, FILTERED set, not
+        // against what any single source returned: a row can reach `ordered`
+        // from the ring or the paused arm without the history arm knowing, and
+        // a `?status=` filter can drop the over-read row specifically. Reading
+        // the overflow here — after every arm has contributed and after the
+        // filter has run — is what makes the answer true of the response
+        // actually being sent.
+        return { runs: ordered.slice(0, limit), hasMore: ordered.length > limit };
     }
 
     /** Rehydrate a durable {@link RunRecord} into an {@link ExecutionLogEntry}
