@@ -64,17 +64,31 @@ import { describe, it, expect, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
 
-/** An automation slot whose `listRuns` records exactly what it was asked for. */
-function makeDispatcher() {
-    const listRuns = vi.fn(async () => [{ id: 'run_1', flowName: 'welcome_flow', status: 'completed' }]);
-    const services: Record<string, unknown> = { automation: { listRuns, handlerReady: true } };
+/**
+ * An automation slot whose `listRunsPage` records exactly what it was asked
+ * for.
+ *
+ * [#19365] The double serves `listRunsPage` — the page-shaped member the door
+ * now calls — rather than `listRuns`. The recorded OPTIONS object is what
+ * every preservation row below pins, and it is unchanged by that switch except
+ * for the retired `cursor` key: the door still forwards the caller's own
+ * `limit`, ⛔ never a widened one. The over-read that makes `hasMore`
+ * answerable lives in the ENGINE, behind this member, which is exactly why the
+ * window a caller asks for is still the window the service is asked for.
+ */
+function makeDispatcher(hasMore = false) {
+    const listRunsPage = vi.fn(async () => ({
+        runs: [{ id: 'run_1', flowName: 'welcome_flow', status: 'completed' }],
+        hasMore,
+    }));
+    const services: Record<string, unknown> = { automation: { listRunsPage, handlerReady: true } };
     const resolve = (name: string) => services[name];
     const kernel: any = {
         getService: resolve,
         getServiceAsync: async (name: string) => resolve(name),
         context: { getService: resolve },
     };
-    return { dispatcher: new HttpDispatcher(kernel), listRuns };
+    return { dispatcher: new HttpDispatcher(kernel), listRunsPage };
 }
 
 const CTX = () => ({ request: {}, executionContext: { userId: 'user_1' } } as any);
@@ -87,7 +101,7 @@ const CTX = () => ({ request: {}, executionContext: { userId: 'user_1' } } as an
  * `errorResponseBase` — #3918).
  */
 async function refusalFor(query: Record<string, unknown>) {
-    const { dispatcher, listRuns } = makeDispatcher();
+    const { dispatcher, listRunsPage } = makeDispatcher();
     let thrown: unknown;
     let response: unknown;
     try {
@@ -102,7 +116,7 @@ async function refusalFor(query: Record<string, unknown>) {
         typeof (thrown as any)?.status === 'number' ? (thrown as any).status
         : details ? VALIDATION_FAILED_STATUS
         : 500;
-    return { details, status, listRuns, message: (thrown as Error).message };
+    return { details, status, listRunsPage, message: (thrown as Error).message };
 }
 
 describe('#7300 — GET /automation/:name/runs refuses a malformed `limit` instead of listing with NaN', () => {
@@ -114,7 +128,7 @@ describe('#7300 — GET /automation/:name/runs refuses a malformed `limit` inste
         ['repeated parameter', ['1', '2']],
         ['structured', { $gt: 1 }],
     ])('refuses ?limit=%s with 400 VALIDATION_FAILED', async (_label, raw) => {
-        const { details, status, listRuns } = await refusalFor({ limit: raw });
+        const { details, status, listRunsPage } = await refusalFor({ limit: raw });
 
         // ADR-0112: the envelope, not merely the throw — `code` AND `status`.
         expect(details?.code).toBe('VALIDATION_FAILED');
@@ -126,7 +140,7 @@ describe('#7300 — GET /automation/:name/runs refuses a malformed `limit` inste
         ]);
         // The whole point: the service is never reached with a poisoned window,
         // so no caller is handed `[]` as if it were the flow's run history.
-        expect(listRuns).not.toHaveBeenCalled();
+        expect(listRunsPage).not.toHaveBeenCalled();
     });
 
     it('names the offending value in the message, capped so the body cannot be stuffed', async () => {
@@ -137,22 +151,124 @@ describe('#7300 — GET /automation/:name/runs refuses a malformed `limit` inste
     });
 });
 
-describe("#7300 — the same probe on this route's other passed-through parameter", () => {
+describe('#19365 — `cursor` is RETIRED, so this boundary stops reading it', () => {
+    // ⚠️ This block SUPERSEDES #7300's cursor refusal cases rather than
+    // extending them, and the supersession is a deliberate reversal, not a
+    // relaxation that slipped through. #7300 refused `?cursor=a&cursor=b` with
+    // 400 VALIDATION_FAILED because an ARRAY reached a slot the contract typed
+    // `cursor?: string`, and it chose to validate the key rather than decide
+    // it — on the reasoning that a future cursor implementation must not be
+    // the one to discover the type was unenforced. The maintainer ruling of
+    // decision batch #204 item 2 (letter C) decides it: there will be no
+    // cursor implementation on this door. The key is a `retiredKey()`
+    // tombstone on `ListRunsRequestSchema`, the slot is gone from
+    // `IAutomationService.listRuns`, and a refusal here would be validating a
+    // key the contract no longer has.
+    //
+    // Same input, opposite behaviour — the shape #7359 and #8054 already used
+    // on this file's other two parameters.
     it.each([
-        ['repeated parameter', ['n_1', 'n_2']],
+        ['a plain value', 'n_007'],
+        ['the empty spelling #7300 passed through verbatim', ''],
+        ['repeated parameter — the exact input that used to answer 400', ['n_1', 'n_2']],
         ['structured', { $ne: 'n_1' }],
         ['numeric', 7],
-    ])('refuses ?cursor=%s rather than handing a non-string to a `cursor?: string` slot', async (_label, raw) => {
-        const { details, status, listRuns } = await refusalFor({ cursor: raw });
+    ])('?cursor=%s is IGNORED — 200, and no `cursor` reaches the service', async (_label, raw) => {
+        const { dispatcher, listRunsPage } = makeDispatcher();
+        const result = await dispatcher.handleAutomation(
+            'welcome_flow/runs', 'GET', undefined, CTX(), { cursor: raw },
+        );
 
-        expect(details?.code).toBe('VALIDATION_FAILED');
-        expect(status).toBe(400);
-        expect(details?.fields).toEqual([
-            { field: 'cursor', code: 'invalid_type', message: expect.stringContaining('`cursor`') },
-        ]);
-        expect(listRuns).not.toHaveBeenCalled();
+        // Not a 400 any more. This route declares no closed query-parameter
+        // set, so an unrecognised name has never been refused here on its own
+        // account — `cursor` was refused because it was READ, and it no longer
+        // is.
+        expect(result.response?.status).toBe(200);
+        // The half that actually matters: nothing named `cursor` survives into
+        // the options object. A tolerant passthrough would have re-created the
+        // declared-and-ignored parameter this card exists to close.
+        expect(listRunsPage).toHaveBeenCalledTimes(1);
+        const options = listRunsPage.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
+        expect(options).not.toHaveProperty('cursor');
+    });
+
+    it('the retired key is still refused where it IS parsed — the spec schema', async () => {
+        // The boundary ignores it; the tombstone is what makes the removal
+        // audible, and it lives on the schema. Pinned here as well as in
+        // `automation-api.zod.test.ts` so the runtime side records WHERE the
+        // loudness moved to when this handler stopped refusing.
+        const { ListRunsRequestSchema } = await import('@objectstack/spec/api');
+        expect(() => ListRunsRequestSchema.parse({ name: 'welcome_flow', cursor: 'n_007' }))
+            .toThrow(/`cursor`.*removed/s);
     });
 });
+
+describe('#19365 — `hasMore` is RELAYED from the service, never a constant', () => {
+    // The defect this closes, in the source's own words: the door returned
+    // `deps.success({ runs, hasMore: false })` — a literal — beside a list the
+    // engine had already cut with `.slice(0, limit)`. A caller asking for one
+    // row of a thousand was handed one row and told that was all of them, with
+    // a 200 and nothing in the status, headers or body to distinguish it from
+    // a complete answer.
+    //
+    // ⛔ These cases assert the RELAY, not the truncation arithmetic. Whether
+    // `hasMore` is itself correct is the ENGINE's obligation and is pinned
+    // where the over-read happens, in service-automation's own suite — a door
+    // that recomputed it here would be a second implementation of the same
+    // invariant, and the one that rots.
+
+    async function listRunsWith(hasMore: boolean) {
+        const { dispatcher, listRunsPage } = makeDispatcher(hasMore);
+        const result = await dispatcher.handleAutomation(
+            'welcome_flow/runs', 'GET', undefined, CTX(), { limit: '1' },
+        );
+        return { result, listRunsPage };
+    }
+
+    it('relays `hasMore: true` — the case the old literal got WRONG', async () => {
+        const { result } = await listRunsWith(true);
+
+        expect(result.response?.status).toBe(200);
+        // Against the unfixed door this is the failing assertion: it answered
+        // `false` here, always.
+        expect(result.response?.body?.data?.hasMore).toBe(true);
+        expect(result.response?.body?.data?.runs).toHaveLength(1);
+    });
+
+    it('relays `hasMore: false` — the over-block guard', async () => {
+        // The literal was `false`, so a fix that simply hard-coded `true`
+        // would pass the case above and be just as wrong. Both directions have
+        // to come from the service.
+        const { result } = await listRunsWith(false);
+
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.hasMore).toBe(false);
+    });
+
+    it('answers 501 when the service implements no `listRunsPage` — ⛔ never a 200', async () => {
+        // "Absence must be loud." A service that cannot report truncation
+        // leaves this door with nothing honest to put in a REQUIRED response
+        // field, so it says so and names the member. Falling through to the
+        // domain's 404 would have been the silent form — the caller could not
+        // tell "no run listing is mounted here" from "no such flow" — and a
+        // 200 carrying a guessed `hasMore` would re-create the exact defect
+        // this card closed.
+        const services: Record<string, unknown> = { automation: { handlerReady: true } };
+        const resolve = (name: string) => services[name];
+        const kernel: any = {
+            getService: resolve,
+            getServiceAsync: async (name: string) => resolve(name),
+            context: { getService: resolve },
+        };
+        const result = await new HttpDispatcher(kernel)
+            .handleAutomation('welcome_flow/runs', 'GET', undefined, CTX(), undefined);
+
+        expect(result.response?.status).toBe(501);
+        expect(result.response?.body?.error?.message).toContain('listRunsPage');
+        expect(result.response?.body?.data?.hasMore).toBeUndefined();
+    });
+});
+
 
 describe('#7359 — a `?status=` outside the declared set is refused, not silently widened', () => {
     it.each([
@@ -167,7 +283,7 @@ describe('#7359 — a `?status=` outside the declared set is refused, not silent
         // because "no runs are `faild`" and "no runs failed" read identically to
         // a caller who cannot see their own typo. Both are a monitoring surface
         // answering "you have no failures" with confidence.
-        const { details, status, listRuns } = await refusalFor({ status: raw });
+        const { details, status, listRunsPage } = await refusalFor({ status: raw });
 
         expect(details?.code).toBe('VALIDATION_FAILED');
         expect(status).toBe(400);
@@ -177,7 +293,7 @@ describe('#7359 — a `?status=` outside the declared set is refused, not silent
         expect(details?.fields).toEqual([
             { field: 'status', code: 'invalid_option', message: expect.stringContaining('`status`') },
         ]);
-        expect(listRuns).not.toHaveBeenCalled();
+        expect(listRunsPage).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -189,14 +305,14 @@ describe('#7359 — a `?status=` outside the declared set is refused, not silent
         // repeated `?status=failed&status=completed` arrives as an ARRAY, and a
         // filter is not a set on this wire. `String([...])` would have made it
         // the single value `'failed,completed'`, matching nothing.
-        const { details, status, listRuns } = await refusalFor({ status: raw });
+        const { details, status, listRunsPage } = await refusalFor({ status: raw });
 
         expect(details?.code).toBe('VALIDATION_FAILED');
         expect(status).toBe(400);
         expect(details?.fields).toEqual([
             { field: 'status', code: 'invalid_type', message: expect.stringContaining('`status`') },
         ]);
-        expect(listRuns).not.toHaveBeenCalled();
+        expect(listRunsPage).not.toHaveBeenCalled();
     });
 
     it('names the declared members in the message, and caps the echoed value', async () => {
@@ -223,7 +339,7 @@ describe('#8054 — a `?limit=` outside the declared 1..100 range is refused, no
         ['101 (one past the declared cap)', '101', 'max_value'],
         ['1000 (far past the declared cap — the old preserved case, inverted)', '1000', 'max_value'],
     ])('refuses ?limit=%s with 400 VALIDATION_FAILED (%s)', async (_label, raw, expectedCode) => {
-        const { details, status, listRuns } = await refusalFor({ limit: raw });
+        const { details, status, listRunsPage } = await refusalFor({ limit: raw });
 
         // ADR-0112: the envelope, not merely the throw — `code` AND `status`.
         expect(details?.code).toBe('VALIDATION_FAILED');
@@ -236,7 +352,7 @@ describe('#8054 — a `?limit=` outside the declared 1..100 range is refused, no
         // The whole point: the service is never reached with a limit outside
         // its own declared contract, so no caller reads a wrong-but-confident
         // "no runs" and no caller gets an uncapped result set.
-        expect(listRuns).not.toHaveBeenCalled();
+        expect(listRunsPage).not.toHaveBeenCalled();
     });
 
     // The boundary values themselves — `?limit=1` and `?limit=100` — are
@@ -246,19 +362,19 @@ describe('#8054 — a `?limit=` outside the declared 1..100 range is refused, no
 
 describe('#7300 — every value that had a defensible answer keeps it', () => {
     async function listWith(query: Record<string, unknown> | undefined) {
-        const { dispatcher, listRuns } = makeDispatcher();
+        const { dispatcher, listRunsPage } = makeDispatcher();
         const result = await dispatcher.handleAutomation('welcome_flow/runs', 'GET', undefined, CTX(), query);
-        return { result, listRuns };
+        return { result, listRunsPage };
     }
 
     it.each([
         // [label, query, the exact options object `listRuns` must receive]
-        ['?limit=20', { limit: '20' }, { limit: 20, cursor: undefined, status: undefined }],
+        ['?limit=20', { limit: '20' }, { limit: 20, status: undefined }],
         // An ordinary in-range value is the over-block guard for #8054: bounds
         // threading must not start refusing numbers that were always fine.
-        ['?limit=25 (ordinary, mid-range)', { limit: '25' }, { limit: 25, cursor: undefined, status: undefined }],
-        ['?limit=1 (the low boundary)', { limit: '1' }, { limit: 1, cursor: undefined, status: undefined }],
-        ['?limit=100 (the declared high boundary)', { limit: '100' }, { limit: 100, cursor: undefined, status: undefined }],
+        ['?limit=25 (ordinary, mid-range)', { limit: '25' }, { limit: 25, status: undefined }],
+        ['?limit=1 (the low boundary)', { limit: '1' }, { limit: 1, status: undefined }],
+        ['?limit=100 (the declared high boundary)', { limit: '100' }, { limit: 100, status: undefined }],
         // Out-of-RANGE numbers used to be preserved here (`?limit=1000`,
         // `?limit=-5`, `?limit=0`) on the theory that range was the engine's
         // declared business, not this boundary's. #8054 found the one place
@@ -273,30 +389,32 @@ describe('#7300 — every value that had a defensible answer keeps it', () => {
         // `''`, and an in-process (non-string) `0` never reach it. `'0'` as a
         // QUERY-STRING value is different — the string is truthy, so it always
         // reached `Number()` — and is exercised in the `#8054` block instead.
-        ['?limit= (empty)', { limit: '' }, { limit: undefined, cursor: undefined, status: undefined }],
-        ['limit: 0 (in-process number)', { limit: 0 }, { limit: undefined, cursor: undefined, status: undefined }],
-        ['limit: null', { limit: null }, { limit: undefined, cursor: undefined, status: undefined }],
-        ['no parameters at all', {}, { limit: undefined, cursor: undefined, status: undefined }],
-        // A cursor is opaque: every string passes through VERBATIM, including
-        // the empty one, exactly as the raw passthrough did.
-        ['?cursor=n_007', { cursor: 'n_007' }, { limit: undefined, cursor: 'n_007', status: undefined }],
-        ['?cursor= (empty)', { cursor: '' }, { limit: undefined, cursor: '', status: undefined }],
-        ['both together', { limit: '5', cursor: 'n_007' }, { limit: 5, cursor: 'n_007', status: undefined }],
+        ['?limit= (empty)', { limit: '' }, { limit: undefined, status: undefined }],
+        ['limit: 0 (in-process number)', { limit: 0 }, { limit: undefined, status: undefined }],
+        ['limit: null', { limit: null }, { limit: undefined, status: undefined }],
+        ['no parameters at all', {}, { limit: undefined, status: undefined }],
+        // The three `?cursor=` preservation rows that stood here — a verbatim
+        // string, the empty spelling, and `limit` + `cursor` together — are
+        // superseded by the `#19365` block above rather than deleted outright:
+        // the key is retired, so "reaches the service unchanged" is no longer
+        // the behaviour to preserve. What replaced them asserts the opposite
+        // on the same inputs, which is the same supersession shape #7359 and
+        // #8054 used on this route's other parameters.
     ])('%s answers 200 and reaches the service unchanged', async (_label, query, expected) => {
-        const { result, listRuns } = await listWith(query);
+        const { result, listRunsPage } = await listWith(query);
 
         expect(result.response?.status).toBe(200);
-        expect(listRuns).toHaveBeenCalledWith('welcome_flow', expected);
+        expect(listRunsPage).toHaveBeenCalledWith('welcome_flow', expected);
     });
 
     it('passes NO options at all when the transport delivers no query object', async () => {
         // Preserved verbatim from `query ? { … } : undefined`: an absent query
         // means the service applies its own default window (20), which is a
         // different statement from "a window of `undefined`" and stays so.
-        const { result, listRuns } = await listWith(undefined);
+        const { result, listRunsPage } = await listWith(undefined);
 
         expect(result.response?.status).toBe(200);
-        expect(listRuns).toHaveBeenCalledWith('welcome_flow', undefined);
+        expect(listRunsPage).toHaveBeenCalledWith('welcome_flow', undefined);
     });
 
     // ── #7359 ────────────────────────────────────────────────────────────────
@@ -312,10 +430,10 @@ describe('#7300 — every value that had a defensible answer keeps it', () => {
         // HTTP layer. The caller got 200 + every run of the flow — a caller
         // paging for failures read the first `limit` runs of ANY status and
         // concluded those were the failures.
-        const { result, listRuns } = await listWith({ limit: '2', status: 'failed' });
+        const { result, listRunsPage } = await listWith({ limit: '2', status: 'failed' });
 
         expect(result.response?.status).toBe(200);
-        expect(listRuns).toHaveBeenCalledWith('welcome_flow', { limit: 2, cursor: undefined, status: 'failed' });
+        expect(listRunsPage).toHaveBeenCalledWith('welcome_flow', { limit: 2, status: 'failed' });
     });
 
     it.each(ExecutionStatus.options)('forwards every declared ExecutionStatus member — ?status=%s', async (member) => {
@@ -334,10 +452,10 @@ describe('#7300 — every value that had a defensible answer keeps it', () => {
         // (#7359); `automation-api.zod.test.ts` turned the same copy into the
         // same read. ⛔ Iterating `.options` does not reorder it — the enum's
         // own note reserves those positions for readers that index them.
-        const { result, listRuns } = await listWith({ status: member });
+        const { result, listRunsPage } = await listWith({ status: member });
 
         expect(result.response?.status).toBe(200);
-        expect(listRuns).toHaveBeenCalledWith('welcome_flow', { limit: undefined, cursor: undefined, status: member });
+        expect(listRunsPage).toHaveBeenCalledWith('welcome_flow', { limit: undefined, status: member });
     });
 
     it.each([
@@ -350,10 +468,10 @@ describe('#7300 — every value that had a defensible answer keeps it', () => {
         // not become a new 400: unlike `?read=`, which used to serve the wrong
         // HALF of the inbox, `?status=` already served exactly what "no filter"
         // means, so it had a defensible answer to preserve.
-        const { result, listRuns } = await listWith(query);
+        const { result, listRunsPage } = await listWith(query);
 
         expect(result.response?.status).toBe(200);
-        expect(listRuns).toHaveBeenCalledWith('welcome_flow', expect.objectContaining({ status: undefined }));
+        expect(listRunsPage).toHaveBeenCalledWith('welcome_flow', expect.objectContaining({ status: undefined }));
     });
 
     it('still refuses an anonymous caller with 401 before it ever looks at the query', async () => {
@@ -361,12 +479,12 @@ describe('#7300 — every value that had a defensible answer keeps it', () => {
         // must not become a 400 that confirms the route is wired and serveable
         // (#5519's anonymous baseline stands ahead of every parse on this
         // domain).
-        const { dispatcher, listRuns } = makeDispatcher();
+        const { dispatcher, listRunsPage } = makeDispatcher();
         const result = await dispatcher.handleAutomation(
             'welcome_flow/runs', 'GET', undefined, { request: {} } as any, { limit: 'abc' },
         );
 
         expect(result.response?.status).toBe(401);
-        expect(listRuns).not.toHaveBeenCalled();
+        expect(listRunsPage).not.toHaveBeenCalled();
     });
 });

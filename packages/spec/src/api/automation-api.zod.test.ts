@@ -612,11 +612,13 @@ describe('ListRunsRequestSchema', () => {
   });
 
   it('should accept full request', () => {
+    // `cursor` left this fixture when it was retired (#19365) — it is a
+    // `retiredKey()` tombstone now and any value raises. Its own cases are the
+    // block at the end of this describe.
     const result = ListRunsRequestSchema.parse({
       name: 'my_flow',
       status: 'completed',
       limit: 5,
-      cursor: 'page2',
     });
     expect(result.status).toBe('completed');
     expect(result.limit).toBe(5);
@@ -641,6 +643,58 @@ describe('ListRunsRequestSchema', () => {
         `?status=${member} is a declared ExecutionStatus but the request schema refuses it`,
       ).not.toThrow();
     }
+  });
+
+  // ── #19365 ───────────────────────────────────────────────────────────────
+  // `cursor` retires; `limit` explicitly does NOT. Both halves are pinned,
+  // because the card that retired `cursor` arrived claiming `limit` was
+  // equally inert and the measurement said otherwise.
+  describe('`cursor` is retired, and the tombstone is what makes that audible', () => {
+    it('raises the PRESCRIPTION, not a generic unrecognized-key issue', () => {
+      // The negative half. A bare deletion would have been silent on this
+      // non-strict object — Zod strips an unknown key and parses clean — so
+      // the assertion that matters is the TEXT a caller is handed, which is
+      // the only upgrade channel a generated client ever reads. The `s` flag
+      // is house style: the message spans lines.
+      expect(() => ListRunsRequestSchema.parse({ name: 'my_flow', cursor: 'page2' }))
+        .toThrow(/`cursor`.*removed.*Delete the key.*`limit`.*STAYS/s);
+    });
+
+    it('refuses EVERY spelling, including the empty string the boundary used to pass through', () => {
+      // `?cursor=` reached the service verbatim before this retirement (the
+      // runtime pinned it as a preservation row), so the empty string is the
+      // one value a caller is most likely to still be sending.
+      for (const value of ['page2', '', 'n_007']) {
+        expect(
+          () => ListRunsRequestSchema.parse({ name: 'my_flow', cursor: value }),
+          `cursor=${JSON.stringify(value)} parsed instead of raising the tombstone`,
+        ).toThrow(/removed/);
+      }
+    });
+
+    it('leaves no `cursor` behind on a request that omits it', () => {
+      // The positive half for the non-strict strip path: the tombstone must
+      // not materialize a key of its own onto a clean parse.
+      const result = ListRunsRequestSchema.parse({ name: 'my_flow' });
+      expect(result).not.toHaveProperty('cursor');
+    });
+
+    it('⛔ does NOT retire `limit`, and keeps its `.default(20)`', () => {
+      // The over-block guard. #17667 retired `limit` AND `cursor` together on
+      // the sibling `/packages` door because neither was read there; the
+      // ruling for THIS door (decision batch #204 item 2, letter C) says that
+      // does not transfer, because here `limit` is read end to end — the
+      // runtime boundary takes its 1..100 bounds off this very declaration
+      // and the engine spends it as the run store's history window. A sweep
+      // that "finishes the job" by deleting it fails here.
+      const bare = ListRunsRequestSchema.parse({ name: 'my_flow' });
+      expect(bare.limit).toBe(20);
+      expect(() => ListRunsRequestSchema.parse({ name: 'my_flow', limit: 50 })).not.toThrow();
+      expect(ListRunsRequestSchema.parse({ name: 'my_flow', limit: 50 }).limit).toBe(50);
+      // The declared range the boundary reads back off this schema.
+      expect(() => ListRunsRequestSchema.parse({ name: 'my_flow', limit: 0 })).toThrow();
+      expect(() => ListRunsRequestSchema.parse({ name: 'my_flow', limit: 101 })).toThrow();
+    });
   });
 });
 
