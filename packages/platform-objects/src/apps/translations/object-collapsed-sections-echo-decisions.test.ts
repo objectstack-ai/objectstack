@@ -407,14 +407,22 @@ const PANEL_LEAVES = leavesOf(COLLAPSED_SECTIONS);
 const OPEN_LEAVES = leavesOf(OPEN_SECTIONS);
 
 /**
- * ⭐ ROUND 10's DECLARED SCOPE — a shape, never a list of 64 strings. Every leaf
- * of this subtree that still echoes is DEFERRED, not decided; the assertions
- * over it are shrink-only, so the round that empties it leaves this file green.
+ * ⭐⭐ DISCHARGED BY ROUND 10 — and the SHAPE STAYS, because it is the dark
+ * control that made this population visible in the first place.
  *
- * ⚠️ Round 9 re-pointed this from "round 9" to "round 10" and did NOT touch the
- * shape: round 9's family was `report.*`, the last one the card's all-three
- * predicate could see. This subtree is invisible to that predicate and is the
- * larger half of what is left.
+ * Round 8 declared this subtree as a deferral (32 leaves, `ja-JP` + `es-ES`,
+ * `zh-CN` already authored), round 9 repaired the bound over it so that the
+ * round which emptied it would leave this file green, and round 10 emptied it —
+ * every one of the 32 is now a decided row in
+ * `object-lifecycle-panel-echo-decisions.test.ts`.
+ *
+ * ⚠️ TIGHTENED, ⛔ NOT WEAKENED, in the same act: the two-locale bound below now
+ * asserts the EXACT reading (0) beside the shrink-only one, because with the
+ * deferral empty the `inDeferral` skip in the ratchet further down would
+ * otherwise let a NEW lifecycle echo through unnoticed — the hole round 10
+ * created by discharging the deferral, closed by round 10. Both of round 9's
+ * legs (`oldBound` unfalsifiable, `withinRecorded(0)` shrink-only) are kept
+ * exactly as they were.
  */
 const DEFERRED_SUBTREE = 'lifecycle';
 const inDeferral = (leaf: PanelLeaf): boolean => leaf.path === DEFERRED_SUBTREE || leaf.path.startsWith(`${DEFERRED_SUBTREE}.`);
@@ -828,6 +836,11 @@ describe('#19403 round 8 — the provenance table agrees these leaves are now au
           lifecycleRows.length,
           `${locale} records more lifecycle fills than the subtree has leaves`,
         ).toBeLessThanOrEqual(32);
+        // ⭐ ROUND 10 — the exact reading, for the same reason as the bound above:
+        // round 10 authored all 32 in both locales, so `pnpm i18n:extract` dropped
+        // every row. A shrink-only bound of 32 over a true value of 0 can no
+        // longer fail.
+        expect(lifecycleRows, `${locale} records a lifecycle leaf as an unauthored fill again`).toEqual([]);
       }
     });
 
@@ -941,6 +954,15 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     const RECORDED_DEFERRAL = 32;
     const withinRecorded = (n: number): boolean => n <= RECORDED_DEFERRAL;
     expect(withinRecorded(twoLocale.length)).toBe(true);
+    // ⭐⭐ ROUND 10 — the deferral is DISCHARGED, so the exact reading is pinned
+    // beside the shrink-only bound. `<= 32` cannot see a 33rd lifecycle leaf
+    // arriving now that there are none, and the ratchet below SKIPS this subtree,
+    // so without this line a new unauthored lifecycle row would be invisible to
+    // the whole file.
+    expect(
+      twoLocale.map((l) => `${l.path}.${l.prop}`),
+      'a lifecycle leaf echoes again — it is decided in object-lifecycle-panel-echo-decisions.test.ts, do not re-defer it',
+    ).toEqual([]);
     // Dark, leg 1 — IT CAN SAY NO. A 33rd two-locale echo (a field added to a
     // collapsed section tomorrow) breaks the bound. The OLD spelling is run on
     // the same input beside it and still reads true, which is the defect
