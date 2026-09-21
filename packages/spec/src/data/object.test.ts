@@ -2761,14 +2761,34 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
   const publishedFieldsNode = (): Record<string, unknown> => {
     // The generator's own io ladder: the output (post-parse) shape first, the
     // INPUT shape when a `.transform` anywhere under the export makes the
-    // output side unrepresentable. `data/Object` lands on the second arm today
+    // output side unrepresentable. `data/Object` lands on the second rung today
     // — `build-schemas.ts` logs it as `(input shape)` — so a pin that projected
     // only the default direction would throw rather than read the file that
     // actually ships.
+    //
+    // ⛔ The fallback is GUARDED, and the guard is the pin rather than a
+    // nicety: a bare `catch {}` would swallow an output projection that failed
+    // for some unrelated reason, fall through to the input shape and stay
+    // GREEN while the same failure turned the build RED — a pin passing on the
+    // one failure mode it exists to watch. `build-schemas.ts` spells the same
+    // test as `isKnownUnsupported`, over a `KNOWN_UNSUPPORTED_PATTERNS` list
+    // that is module-local to a script which RUNS the whole generator on
+    // import, so it cannot be imported here; the one pattern that list carries
+    // is spelled out below, and anything else is re-thrown.
+    //
+    // ⚠️ The generator has a THIRD rung — the union-branch-dropping projection
+    // — which this pin deliberately does not model: `data/Object` does not
+    // reach it, and modelling an unused rung would mean asserting against a
+    // projection this export never publishes through. If it ever did need that
+    // rung, the re-throw below turns this pin RED rather than silently reading
+    // a different projection than the one that ships.
+    const KNOWN_UNSUPPORTED = 'cannot be represented in JSON Schema';
     let published: { properties: Record<string, Record<string, unknown>> };
     try {
       published = projectPublishedJsonSchema(ObjectSchema) as typeof published;
-    } catch {
+    } catch (outputError) {
+      const message = outputError instanceof Error ? outputError.message : String(outputError);
+      if (!message.includes(KNOWN_UNSUPPORTED)) throw outputError;
       published = projectPublishedJsonSchema(ObjectSchema, { io: 'input' }) as typeof published;
     }
     return published.properties.fields;

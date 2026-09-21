@@ -1971,7 +1971,7 @@ const ObjectSchemaBase = strictObject(
         }),
       FieldSchema,
     )
-      // [objectstack#17852, #19346] The three JS-prototype names are refused by
+      // [#17852, #19346] The three JS-prototype names are refused by
       // TWO mechanisms, because zod reaches them at two different depths:
       //
       //   - `__proto__` reaches NO schema at all — zod's record parser skips it
