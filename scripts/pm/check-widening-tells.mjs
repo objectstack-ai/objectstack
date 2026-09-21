@@ -3154,9 +3154,9 @@ const NON_SET_CALLEE_NAMES = Object.freeze(['Set', 'default']);
  * `packages/spec/src` at `57ceb9d6d2` (= `origin/main` at this branch's merge
  * base; `git diff 57ceb9d6d2 HEAD -- packages/spec/src` is empty, so the
  * reading is taken in the head worktree over those same bytes), 1,014 non-test
- * files, every line `memberTellKind` calls T2 on the contract source surface
- * fed back through `closedSetMembership` with its own 60 PRECEDING LINES as the
- * hunk — 6,553 lines. THIS reader answers: 1,354 `declared`, 27 `refused`
+ * files scanned and 441 of them carrying one, every line `memberTellKind` calls
+ * T2 on the contract source surface fed back through `closedSetMembership` with
+ * its own 60 PRECEDING LINES as the hunk — 6,553 lines. THIS reader answers: 1,354 `declared`, 27 `refused`
  * (`new Set(` 20, `.default(` 7, `Object.freeze(` ZERO) and 5,172 `unread`.
  * Inside that `unread`: 1,791 in a `{`, 1,484 with no frame shown at all, 865
  * where the walk reported it stopped reading, 590 in a `[` this reader cannot
@@ -3166,9 +3166,10 @@ const NON_SET_CALLEE_NAMES = Object.freeze(['Set', 'default']);
  * ⭐ THE LIT CONTROL that makes it a reading and not a re-type: the round-3
  * blob of this file, run over the SAME bytes with the SAME window, answers
  * 1,354 / 92 / 5,107 with `Object.freeze` 65 — reproducing the quoted number
- * exactly. So the 65 that moved are the freeze sites this round made
- * TRANSPARENT, they moved `refused` → `unread` (the `[` bucket, 525 → 590) and
- * nowhere else, and the shift is the reader's rather than the harness's. ⛔ The
+ * exactly. So the 65 that moved are the freeze sites the PREVIOUS round made
+ * TRANSPARENT — this round changes no verdict at all — they moved `refused` →
+ * `unread` (the `[` bucket, 525 → 590) and nowhere else, and the shift is the
+ * reader's rather than the harness's. ⛔ The
  * `(` and `{` counts did not move at all, which is the other half of the same
  * evidence.
  *
