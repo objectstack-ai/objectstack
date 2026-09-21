@@ -277,7 +277,7 @@ function makeStubEngine() {
         async syncObjectSchema() { return true; },
         registry: {
             registerItem: () => {}, registerObject: () => {},
-            // [#19474] The live resolution universe the runtime publish gate
+            // [#19542] The live resolution universe the runtime publish gate
             // reads. It answered `[]` for every type, which was harmless while
             // no rule judged the types this file writes — since the report door
             // opened, `bodyFor('report')` binds `orders_ds` and

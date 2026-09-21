@@ -467,7 +467,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // carries, against the live object universe — the same parse `os build`
     // runs, now at the door Studio/REST/MCP authors actually use.
     //
-    // [#19474] `action` and `hook` join under the ADR-0049 ruling 「declared ⇒
+    // [#19542] `action` and `hook` join under the ADR-0049 ruling 「declared ⇒
     // honoured; not honourable ⇒ retired」. Both types declare
     // `allowRuntimeCreate: true`, so Studio, REST `/meta` and an MCP/AI author
     // may mint one — and both already had their `TYPE_TO_STACK_KEY` row, inert
@@ -749,7 +749,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-preset-comparands.ts',
-    // [#19474] `report` joins under the ADR-0049 ruling. `reports` is already
+    // [#19542] `report` joins under the ADR-0049 ruling. `reports` is already
     // one of this rule's declared scan surfaces (`{ key: 'reports', kind:
     // 'report' }`), walked by `walkAuthoredFilters` into `reports[i]…` paths,
     // so the written report is the subject; the type declares
@@ -783,7 +783,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // opens them at the gate. Making that call here would widen the gate's
     // dispatch surface on this rule's authority, which is P2's decision.
     //
-    // [#19474] `report` is that edit, taken on the ADR-0049 ruling's authority
+    // [#19542] `report` is that edit, taken on the ADR-0049 ruling's authority
     // rather than this rule's, and taken for ONE type only. It crosses TOGETHER
     // with `validatePresetComparands` above and for #7220's reason: both judge
     // the SAME authored filter literal on the SAME `{ key: 'reports' }`
@@ -901,7 +901,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // crossing, at the door's own snapshot shape: 11 datasets
     // (platform-objects 5, showcase 4, crm 1, todo 1) — 0 findings, with a lit
     // synthetic probe refused.
-    // [#19474] `report` joins under the ADR-0049 ruling, and the same
+    // [#19542] `report` joins under the ADR-0049 ruling, and the same
     // granularity mechanism keeps it NARROW: this entry says which WRITES
     // dispatch the suite, the suite's own per-member `runtimeTypes` says which
     // MEMBERS judge that snapshot. A `report` write reaches exactly
@@ -1391,7 +1391,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/lint-liveness-properties.ts',
-    // [#19474] Group C of the ADR-0049 ruling — `email_template` and `mapping`,
+    // [#19542] Group C of the ADR-0049 ruling — `email_template` and `mapping`,
     // the two types whose only named candidate is this rule. Both declare
     // `allowRuntimeCreate: true` and had no `runtimeTypes` row anywhere, so the
     // only door a Studio/REST/MCP author has ran no authoring rule at all on

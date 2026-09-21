@@ -380,7 +380,7 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // every page-door binding as unresolvable. Its page-typed sibling above
   // takes the default for the same reason.
   { name: 'validatePageVisualizationBindings', run: validatePageVisualizationBindings },
-  // [#19474] `runtimeTypes` gains `report` under the ADR-0049 ruling, and ONLY
+  // [#19542] `runtimeTypes` gains `report` under the ADR-0049 ruling, and ONLY
   // `report`. On a report write this member is the subject-reader: it opens
   // with `recordsOf(stack.reports)` and resolves that report's own `dataset` /
   // `rows` / `columns` / `values` and its chart's axes against `stack.datasets`
@@ -460,7 +460,7 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateTranslatableSections', run: validateTranslatableSections },
   { name: 'validateFlowTemplatePaths', run: validateFlowTemplatePaths },
   { name: 'validateAiSurfaceAffinity', run: validateAiSurfaceAffinity },
-  // [#19474] NO `runtimeTypes`, i.e. the frozen `flow` default — and `skill` is
+  // [#19542] NO `runtimeTypes`, i.e. the frozen `flow` default — and `skill` is
   // HELD OUT of the ADR-0049 wiring deliberately, on a measurement, not
   // forgotten. This member is the measurement's named bridge for the type and
   // it does read the written skill as its subject (`recordsOf(stack.skills)`,

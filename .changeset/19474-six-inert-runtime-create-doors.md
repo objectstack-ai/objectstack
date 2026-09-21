@@ -2,7 +2,7 @@
 "@objectstack/lint": minor
 ---
 
-**BREAKING for runtime metadata writes** — five metadata write doors that dispatched NOTHING now dispatch the rules already written for them, and three of the five judge what walks through. `action`, `hook`, `report`, `email_template` and `mapping` each declared `allowRuntimeCreate: true` and reached ZERO author-time rules at the runtime publish gate; `action`, `hook` and `report` publishes that used to succeed can now be refused, while `email_template` and `mapping` are wired to a ledger-driven rule that warns on nothing today (#19474)
+**BREAKING for runtime metadata writes** — five metadata write doors that dispatched NOTHING now dispatch the rules already written for them, and three of the five judge what walks through. `action`, `hook`, `report`, `email_template` and `mapping` each declared `allowRuntimeCreate: true` and reached ZERO author-time rules at the runtime publish gate; `action`, `hook` and `report` publishes that used to succeed can now be refused, while `email_template` and `mapping` are wired to a ledger-driven rule that warns on nothing today (#19542)
 
 Clause-②: no (narrowing)
 

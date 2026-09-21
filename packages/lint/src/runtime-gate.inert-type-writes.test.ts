@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #19474 — the six write doors that dispatched NOTHING, under the ADR-0049
+ * #19542 — the six write doors that dispatched NOTHING, under the ADR-0049
  * ruling 「declared ⇒ honoured; not honourable ⇒ retired」. FIVE are wired
  * here; `skill` is held out on a measurement and has its own block, whose
  * pins hold it absent rather than describing it.
@@ -128,7 +128,7 @@ const dump = (r: { errors: readonly unknown[]; advisories: readonly unknown[] })
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('#19474 — the five wired doors are declared, mapped and reachable', () => {
+describe('#19542 — the five wired doors are declared, mapped and reachable', () => {
   it.each([...GROUP_A, ...GROUP_C])('`%s` dispatches at least one rule and maps to a stack key', (type) => {
     // Three halves, because any one of them alone is the "looks wired,
     // enforces nothing" state: the type is gated, some rule runs for it, and
@@ -169,7 +169,7 @@ describe('#19474 — the five wired doors are declared, mapped and reachable', (
 
 // ─── Group A · `action` ──────────────────────────────────────────────────────
 
-describe('#19474 — the `action` door (validateStackExpressions)', () => {
+describe('#19542 — the `action` door (validateStackExpressions)', () => {
   const action = (over: Record<string, unknown> = {}) => ({
     name: 'acme_close',
     label: 'Close',
@@ -255,7 +255,7 @@ describe('#19474 — the `action` door (validateStackExpressions)', () => {
 
 // ─── Group A · `hook` ────────────────────────────────────────────────────────
 
-describe('#19474 — the `hook` door (validateStackExpressions)', () => {
+describe('#19542 — the `hook` door (validateStackExpressions)', () => {
   const hook = (over: Record<string, unknown> = {}) => ({
     name: 'acme_stamp',
     object: 'acme_invoice',
@@ -327,7 +327,7 @@ describe('#19474 — the `hook` door (validateStackExpressions)', () => {
 
 // ─── Group A · `report` ──────────────────────────────────────────────────────
 
-describe('#19474 — the `report` door (three rules, one document)', () => {
+describe('#19542 — the `report` door (three rules, one document)', () => {
   const report = (over: Record<string, unknown> = {}) => ({
     name: 'acme_report',
     label: 'Invoice Report',
@@ -461,7 +461,7 @@ describe('#19474 — the `report` door (three rules, one document)', () => {
 
 // ─── Group A · `skill` — HELD OUT, and this is the pin that holds it ────────
 
-describe('#19474 — `skill` is held out of this landing, on a measurement', () => {
+describe('#19542 — `skill` is held out of this landing, on a measurement', () => {
   /**
    * The card crossed `skill` in an earlier revision and the at-tier contract
    * review returned FAIL on it. The ground was not that the limitation was
@@ -574,7 +574,7 @@ describe('#19474 — `skill` is held out of this landing, on a measurement', () 
 
 // ─── Group C · `email_template` and `mapping` ────────────────────────────────
 
-describe('#19474 — group C: wired, dispatched, and silent by ledger (email_template · mapping)', () => {
+describe('#19542 — group C: wired, dispatched, and silent by ledger (email_template · mapping)', () => {
   /**
    * ⚠️ Read the size of this group's proof before trusting it.
    *
@@ -680,7 +680,7 @@ describe('#19474 — group C: wired, dispatched, and silent by ledger (email_tem
 
 // ─── The fences ──────────────────────────────────────────────────────────────
 
-describe('#19474 — DARK: what the five crossings did NOT widen', () => {
+describe('#19542 — DARK: what the five crossings did NOT widen', () => {
   it('`action` and `hook` writes do NOT dispatch the reference-integrity suite', () => {
     // The one crossing that would turn `runtime-lazy-deps.test.ts` tier 1
     // («typescript / sucrase load NEVER») from a standing fact into a red: the

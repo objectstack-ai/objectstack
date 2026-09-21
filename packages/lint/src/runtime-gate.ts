@@ -125,7 +125,7 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // `datasets[].object`. The door controls that prove each one fires live in
   // `runtime-gate.dataset-writes.test.ts`.
   dataset: 'datasets',
-  // [#19474] The three rows the ADR-0049 ruling 「declared ⇒ honoured; not
+  // [#19542] The three rows the ADR-0049 ruling 「declared ⇒ honoured; not
   // honourable ⇒ retired」 needs for its groups A and C. `action` and `hook`
   // above were already here and INERT — the gate filters by `runtimeTypes`
   // before it consults this table, so a row with no declaring rule dispatches
@@ -192,14 +192,23 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // `runtime-gate.derived-name-keys.test.ts`). Eleven of the fifteen mappings
   // above name a non-context key for the same reason — counted off this table,
   // where only `objects`, `permissions`, `books` and `datasets` are context
-  // collections. (This sentence read «eight of the twelve» when #19370 wrote
-  // it, which was true of the table it was written against; #19474's three
-  // rows landed in the same merge, so the count is restated against the merged
-  // table rather than left describing a table nobody has. It was briefly
-  // restated as «twelve of the sixteen», counted while #19474 still carried a
-  // fourth row for `skill` — that row was withdrawn and the count with it. The
-  // reasoning the sentence carries is unchanged throughout, and the figure is
-  // arithmetic over the rows above: ⛔ recount them rather than adjusting it.)
+  // collections. (This sentence read «eight of the twelve» when the card that
+  // added the two rows above wrote it — #19370, which NO LONGER RESOLVES: it
+  // and its PR were filed by an account since banned, so both answer 404 while
+  // their work is landed and unaffected. The live record is the merge commit
+  // `a227afa415f596269ed36aae0a0631c84270ccc9`, which carries that card's whole
+  // diff and is where its reasoning can still be read. ⛔ Do not re-point this
+  // number at a rebuild: unlike its sibling below, #19370 has none, and
+  // guessing an upstream is how a dangling reference becomes a wrong one.
+  //
+  // «eight of the twelve» was true of the table it was written against;
+  // #19542's three rows landed in the same merge, so the count is restated
+  // against the merged table rather than left describing a table nobody has.
+  // It was briefly restated as «twelve of the sixteen», counted while #19542
+  // still carried a fourth row for `skill` — that row was withdrawn and the
+  // count with it. The reasoning the sentence carries is unchanged throughout,
+  // and the figure is arithmetic over the rows above: ⛔ recount them rather
+  // than adjusting it.)
   // ⛔ Do not add a context row
   // "for symmetry": `RuntimeStackContext`'s set is bounded by what the wired
   // rules RESOLVE (measured, not projected), and every member of it costs the

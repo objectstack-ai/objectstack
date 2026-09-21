@@ -44,7 +44,7 @@ import {
 
 function makeProtocol() {
     const registry = new SchemaRegistry({ multiTenant: false });
-    // [#19474] The live resolution universe this harness hands the runtime
+    // [#19542] The live resolution universe this harness hands the runtime
     // publish gate. `find` is mocked to `[]` and nothing is ever read back, so
     // without this seed the universe is permanently EMPTY — and since the
     // report door opened, a `report` fixture must bind a dataset (ReportSchema
@@ -56,7 +56,7 @@ function makeProtocol() {
     //
     // ⛔ This is a TENANT the fixtures are judged against, not a relaxation:
     // a report binding a dataset nobody declares is still refused, which is the
-    // #19474 door working. The dimension and measure names are exactly what the
+    // #19542 door working. The dimension and measure names are exactly what the
     // `report` fixture's `rows` / `values` select.
     registry.registerItem('dataset', {
         name: 'sweep_account_metrics',
@@ -94,7 +94,7 @@ const FIXTURES: Record<string, Fixture> = {
             // (`security-owd-unset` refuses absence), so a "valid" object
             // fixture must author its posture.
             sharingModel: 'private',
-            // [#19474] `stage` joins `amount` so the dataset seeded into this
+            // [#19542] `stage` joins `amount` so the dataset seeded into this
             // harness's live universe is COHERENT with the object this tenant
             // declares — its one dimension is over a field `sweep_account` really
             // has. The `report` fixture groups by that dimension.

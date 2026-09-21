@@ -155,7 +155,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       expect(entry, `${name} left AUTHORING_RULES — re-point this fence or retire it`).toBeDefined();
       expect(entry!.tier, `${name} changed tier — this fence pins the ADVISORY six; a severity `
         + `change needs its own PR and re-opens the crossing question for the rule`).toBe('advisory');
-      // [#19474] The fence is about the OBJECT door, and until this card every
+      // [#19542] The fence is about the OBJECT door, and until this card every
       // fenced rule happened to be off the runtime surface ENTIRELY, so "is
       // there a substantive `surfaceReason`?" was a faithful proxy for it.
       // `lintLivenessProperties` crossed for `email_template` / `mapping` and

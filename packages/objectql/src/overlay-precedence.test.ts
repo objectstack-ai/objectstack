@@ -75,7 +75,7 @@ const validReport = {
 
 function makeProtocol(opts: { environmentId?: string } = {}) {
     const registry = new SchemaRegistry({ multiTenant: false });
-    // [#19474] The live resolution universe the runtime publish gate reads
+    // [#19542] The live resolution universe the runtime publish gate reads
     // (`engine.registry.listItems`). `find` is mocked to `[]` below and nothing
     // is read back, so without this seed the universe is permanently EMPTY —
     // and since the report door opened, `validReport` binds a dataset that has
