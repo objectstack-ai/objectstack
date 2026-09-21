@@ -24,7 +24,7 @@
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
 - 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
 - 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>5000 行(含生成物)照规则层。
-- Tier S(`.claude/**` 全树)者:席内达档复核过落地前检三条即转正式入队。
+- 受管路径全在 `.claude/**` 者 Tier S:席内达档复核过落地前检三条即转正式入队。
 - Tier H(其余受管面)者:四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后认领席落地。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 再读 `mergeable_state`:`dirty` ⇒ 先 merge `origin/main` 再挂;生成物在面上按 A 的固定序。

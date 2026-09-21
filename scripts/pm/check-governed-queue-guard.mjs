@@ -4439,8 +4439,9 @@ export async function selfTest() {
       'fail-closed on an unreadable label set and on a group naming no pull request, enumerated per commit so a ' +
       'bare PR cannot carry a gated sibling through, silent and read-free on the pull_request leg, and replayed ' +
       'against the eleven measured enqueues of 2026-09-09 — five refused, six passed, that second number being ' +
-      'the boundary a label reader cannot cross — and the #18020 references TIER: a governed diff whose governed ' +
-      'paths all lie under the one ruled prefix lands on the skills seat\'s review of record instead of an ' +
+      'the boundary a label reader cannot cross — and the #18020 references TIER, re-keyed to Tier S by #19133: a ' +
+      'governed diff whose governed paths are ALL Tier S — the register\'s `.claude/**` row, asked through ' +
+      '`governedTierFor`, never a prefix repeated here — lands on the skills seat\'s review of record instead of an ' +
       'authorized approval, with the record recognisers IMPORTED through a lazy load whose precondition (no ' +
       'top-level await in this file\'s dispatch) is pinned against this file\'s own source, refused on an older ' +
       'head, on a missing or below-tier or partially-stamped `Served-tier:`, on an unsigned record, on no record ' +
