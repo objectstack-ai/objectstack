@@ -25304,11 +25304,19 @@ function selfTest() {
   // reach. The ceiling is derived now, so these cases hold the RENDERING
   // against the constant rather than against a remembered word — write the
   // ceiling by hand again and they red, whichever half was edited.
-  const ladderRenderings = [plainLines, mandLines, catalogLines, tierLines(fableOf(['packages/spec/src/api/error-code-ledger.zod.ts'])).join('\n')];
-  t('the ladder prints a ceiling DERIVED from the contract-review constant, so the two cannot drift apart', plainLines.includes(`ceiling ${tierWordOf(CONTRACT_REVIEW_TIER)}`), plainLines.split('\n').find((l) => l.includes('ceiling')) ?? 'no ladder line was rendered at all');
-  t("…in the ladder's own vocabulary — the constant's FAMILY word, never the raw model id", TIER_CEILING === tierWordOf(CONTRACT_REVIEW_TIER) && !plainLines.includes(CONTRACT_REVIEW_TIER));
+  // The provenance ROWS (`  - <path> ⇢ '<glob>' — <why>`) are excluded from the
+  // retired-word guard below, and deliberately: several of them quote a
+  // maintainer ruling verbatim, and a record of what was ruled AT THE TIME
+  // stays true however the tier moves afterwards. What the guard covers is the
+  // rules — the ladder, the exits, the clause-② note, the suspicion line.
+  const liveRuleText = (rendered) => rendered.split('\n').filter((l) => !/^\s+- /.test(l)).join('\n');
+  const ladderRenderings = [plainLines, mandLines, catalogLines, tierLines(fableOf(['packages/spec/src/api/error-code-ledger.zod.ts'])).join('\n')].map(liveRuleText);
+  const ladderLine = plainLines.split('\n').find((l) => l.includes('The tier stays')) ?? '';
+  t('the ladder prints a ceiling DERIVED from the contract-review constant, so the two cannot drift apart', ladderLine.includes(`ceiling ${tierWordOf(CONTRACT_REVIEW_TIER)})`), ladderLine || 'no ladder line was rendered at all');
+  t("…in the ladder's own vocabulary — the constant's FAMILY word, so a parseable id NEVER reaches the ladder verbatim", /^claude-[a-z]+-/.test(CONTRACT_REVIEW_TIER) && TIER_CEILING === tierWordOf(CONTRACT_REVIEW_TIER) && !ladderLine.includes(CONTRACT_REVIEW_TIER), ladderLine);
   t('tierWordOf reads the family out of an id, and hands an unreadable one back VERBATIM rather than guessing a word', tierWordOf('claude-example-9-9') === 'example' && tierWordOf('an-unfamiliar-shape') === 'an-unfamiliar-shape' && tierWordOf(null) === '');
-  t(`⛔ no RETIRED tier word survives in any rendering — ladder, exits and suspicion line all read the constant (dirty: ${ladderRenderings.map((l, i) => RETIRED_TIER_WORDS.filter((w) => l.toLowerCase().includes(w)).map((w) => `${i}/${w}`).join(' ')).filter(Boolean).join(' ') || 'none'})`, ladderRenderings.every((l) => RETIRED_TIER_WORDS.every((w) => !l.toLowerCase().includes(w))));
+  t(`⛔ no RETIRED tier word survives in any live RULE — ladder, exits, clause-② note and suspicion line all read the constant (dirty: ${ladderRenderings.map((l, i) => RETIRED_TIER_WORDS.filter((w) => l.toLowerCase().includes(w)).map((w) => `${i}/${w}`).join(' ')).filter(Boolean).join(' ') || 'none'})`, ladderRenderings.every((l) => RETIRED_TIER_WORDS.every((w) => !l.toLowerCase().includes(w))));
+  t('…and the guard is not reading an empty string — every rendering it clears still carries its own rule text', ladderRenderings.every((l) => l.includes('Model tier')) && ladderRenderings.some((l) => l.includes('Exits,')));
   t('the retired-spelling guard is not vacuous — it names at least one word, and none of them is a tier still in the ladder', RETIRED_TIER_WORDS.length > 0 && !RETIRED_TIER_WORDS.includes(TIER_FLOOR) && !RETIRED_TIER_WORDS.includes(TIER_DEFAULT) && !RETIRED_TIER_WORDS.includes(TIER_CEILING));
   // The constant's docblock promises the model id is spelled as a VALUE on its
   // own line and NOWHERE else across these two roots. That promise carried no
