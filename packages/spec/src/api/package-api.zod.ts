@@ -199,7 +199,7 @@ export type InstalledPackageAtEitherStageParsed = z.infer<typeof InstalledPackag
 const PACKAGES_LIST_PAGINATION_REMOVED =
   '`limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 '
   + '(ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the '
-  + 'serving door filters on `status` / `type` and then returns every remaining row, so '
+  + 'serving door filters on `status` / `type` / `enabled` and then returns every remaining row, so '
   + 'no page was ever withheld and no continuation token was ever minted. `limit` also '
   + 'declared `.default(50)`, so a reader of the published schema was entitled to believe '
   + 'an unparameterised list is capped at 50 rows; it has never been capped at all, and '
@@ -207,7 +207,7 @@ const PACKAGES_LIST_PAGINATION_REMOVED =
   + 'stamped onto anything. Delete the key. This route is NOT paginated — it answers the '
   + 'whole installed set, which is a bounded table of tens of rows, and `hasMore` on the '
   + 'response is a constant `false` that is now true by construction. Filter with '
-  + '`status` and `type` instead of asking for a window. A first-class package cursor, if '
+  + '`status`, `type` and `enabled` instead of asking for a window. A first-class package cursor, if '
   + 'one is ever designed, will be a response-minted opaque token, not this key.';
 
 /**
@@ -221,14 +221,11 @@ const PACKAGES_LIST_PAGINATION_REMOVED =
  * was executed and undeclared, `limit` / `cursor` were declared and never
  * executed.
  *
- * ⚠️ ONE key is not there yet, and it is recorded rather than glossed:
- * **`enabled` is still declared here and still unread by that door.** The same
- * ruling closes it (item 2 — one filter line, the shape `status` already has)
- * in the runtime, which is a different file and a different PR, so the
- * symmetry above is TRUE of `status` / `type` / `limit` / `cursor` and PENDING
- * for `enabled`. ⛔ Do not read this docblock as saying the divergence is
- * fully closed, and ⛔ do not close it by deleting `enabled` — the ruling
- * chose to implement that one, not to retire it.
+ * ⭐ The `enabled` leg is closed too, so the symmetry above holds for every
+ * key without exception: item 2 of the same ruling made that door read
+ * `enabled` (`readEnabledFilter`, the filter line beside the `status` one).
+ * ⛔ Do not "close" it the other way by deleting `enabled` — the ruling
+ * chose to implement that key, not to retire it, and the door reads it.
  *
  * ⛔ Never add a key here that the door does not read. A declared-and-ignored
  * query parameter fails undetectably: the caller is answered `200` with the
