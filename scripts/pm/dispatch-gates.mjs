@@ -27103,7 +27103,7 @@ function selfTest() {
   t('⛔ nor is prose that merely carries the word, which is both live over-matches',
     !isTypeCheckInvocation('echo "::error::Compiled test files found. A tsc-built package is"')
       && !isTypeCheckInvocation('console.log(`::error::type-check lane ${id} concluded ${result}.`);'));
-  const laneWf = tailWf.replace('run: pnpm lint', "run: pnpm exec turbo run typecheck --filter='./packages/*'")
+  const laneWf = tailWf.replace('run: pnpm check:engine-double-contract', "run: pnpm exec turbo run typecheck --filter='./packages/*'")
     .replace('run: pnpm check:console-pin', 'run: pnpm --filter @objectstack/spec exec tsc --noEmit');
   const laneFix = typeCheckLaneSteps([{ file: 'fixture.yml', text: laneWf }]);
   t('a lane in an unconditional job is a row, and one in a CONDITIONAL job is KEPT and marked',
@@ -27290,7 +27290,7 @@ function selfTest() {
     // output meets the blocks in the order this line promised them.
     t('and spells them in the order they are PRINTED below, as one phrase', (outsideLine ?? '').includes(
       'The 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
-        + ' the unreachable listing and the always-runs tail below are each OUTSIDE it, each with its own count.',
+        + ' the unreachable listing, the type-check lanes and the always-runs tail below are each OUTSIDE it, each with its own count.',
     ));
     // The THREE counts are the lengths of the arrays that RENDER those blocks,
     // so the enumeration cannot name a block the run did not print: at zero rows
@@ -28367,7 +28367,7 @@ function selfTest() {
     }
     t('and spells them in PRINT order, as the one phrase the human lane spells', ranAllBlocks.includes(
       'the 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
-        + ' the unreachable listing, the 4 path-scheduled CI job(s) and the always-runs tail are each outside the derived total',
+        + ' the unreachable listing, the 4 path-scheduled CI job(s), the type-check lanes and the always-runs tail are each outside the derived total',
     ));
     // The NEGATIVE: at zero rows those three blocks are not printed by the run
     // this sentence points at, so naming them would send a reader to headings
@@ -28380,7 +28380,7 @@ function selfTest() {
         && !ranNoBlocks.toLowerCase().includes('pending-changeset')
         && !ranNoBlocks.toLowerCase().includes('path-scheduled'),
     );
-    t('...while still naming the two that print unconditionally', ranNoBlocks.includes('the unreachable listing and the always-runs tail'));
+    t('...while still naming the three that print unconditionally', ranNoBlocks.includes('the unreachable listing, the type-check lanes and the always-runs tail'));
 
     // ── Lane 2: the `--commands` / `--json` stderr accounting ───────────────
     //
@@ -28457,7 +28457,7 @@ function selfTest() {
         && !commandsNoBlocks.toLowerCase().includes('pending-changeset')
         && !commandsNoBlocks.toLowerCase().includes('path-scheduled'),
     );
-    t('...while still naming the two that print unconditionally', commandsNoBlocks.includes('the unreachable listing and the always-runs tail'));
+    t('...while still naming the three that print unconditionally', commandsNoBlocks.includes('the unreachable listing, the type-check lanes and the always-runs tail'));
     // ⛔ And the stream stays a STREAM: the accounting is stderr-only, so a
     // consumer redirecting stdout gets commands with no prose in front of them.
     // That is the property the whole mode exists for, and a disclaimer that
