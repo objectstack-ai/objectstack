@@ -120,7 +120,11 @@ describe('#19514 §1 — the $ dialect refuses what the table declares refused',
       'created.$gt',
     );
     expect(issue.message).toContain('PRESET');
-    expect(issue.message).not.toContain('INVALID_FILTER');
+    // ⚠️ NOT asserted by the absence of `INVALID_FILTER`: the preset refusal
+    // names that code too, in its own prose about the engine. What separates
+    // the two refusals is the comparand door's own wording.
+    expect(issue.message).not.toContain('EMPTY STRING');
+    expect(issue.message).not.toContain('not a string');
   });
 
   it.each([

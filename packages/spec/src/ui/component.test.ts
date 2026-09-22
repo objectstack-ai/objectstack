@@ -3186,11 +3186,30 @@ describe('#7751 — object-* block props schemas', () => {
     // ObjectGrid.tsx reads it and lowers it to `$filter` when `filter` is
     // absent (the routed finding on #7751 verified the read point). Only the
     // plural `filters` has zero read points.
+    //
+    // [#19514] The VALUE this pin carries moved, and the pin's subject did not.
+    // The key is still honoured and still parses; what changed is that it now
+    // carries `filter`'s own declaration — the same value in the same role,
+    // read through the same lowering sink — instead of `z.unknown()`. The AST
+    // tuple array this pin used to spell was one of the five shapes that sink
+    // refuses, so the old fixture was pinning a receipt for a filter that never
+    // ran. Its refusal is pinned below, and in full at
+    // `component-object-grid-default-filters.pin.test.ts`.
+    const rules = [{ field: 'status', operator: 'equals', value: 'open' }];
     const parsed = ComponentPropsMap['object-grid'].parse({
+      objectName: 'showcase_task',
+      defaultFilters: rules,
+    });
+    expect(parsed.defaultFilters).toEqual(rules);
+  });
+
+  it('`defaultFilters` refuses the AST tuple array the `z.unknown()` door used to receipt (#19514)', () => {
+    const r = ComponentPropsMap['object-grid'].safeParse({
       objectName: 'showcase_task',
       defaultFilters: [['status', '=', 'open']],
     });
-    expect(parsed.defaultFilters).toEqual([['status', '=', 'open']]);
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.some((i) => String(i.path[0]) === 'defaultFilters')).toBe(true);
   });
 
   // #11805 — the grid's legacy single-sort fallback, retired by maintainer
