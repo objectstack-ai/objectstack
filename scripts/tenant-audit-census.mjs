@@ -542,14 +542,26 @@ function opensClassScope(node) {
 
 /**
  * Where a CALLABLE'S OWN NAME is declared -- a RECORDING predicate, ⛔ not a
- * lookup one: the lexical scopes, plus the class.
+ * lookup one: the lexical scopes, plus every container whose members are NOT
+ * lexical names -- the class, and the object literal.
  *
  * A method's name belongs to its class body, a function declaration's and a
  * `const fn = () => …`'s to the block or file that declares it -- so this is
- * {@link opensScope} with the class added, and not either one alone. ⛔ Not the
- * same predicate as {@link opensClassScope}: a method named `getEngine` is
- * class-scoped, while a `function getEngine()` two lines above the class is not,
- * and a chain that saw only classes would lose the second one.
+ * {@link opensScope} with those containers added, and not either one alone.
+ * ⛔ Not the same predicate as {@link opensClassScope}: a method named
+ * `getEngine` is class-scoped, while a `function getEngine()` two lines above
+ * the class is not, and a chain that saw only classes would lose the second one.
+ *
+ * ⭐ The object literal is on this list for the same reason the class is, and
+ * omitting it cost the same site. `ts.isMethodDeclaration` is true for
+ * `const o = { getEngine() {…} }` as well as for a class method, and an object
+ * literal opens no lexical scope -- so such a method was recorded at the
+ * enclosing BLOCK, and a bare `getEngine()` written in that block resolved to
+ * it, which the language never does (the compiler reports `TS2304` for a name
+ * declared only that way). ⇒ A member name is recorded under ITS CONTAINER, and
+ * no lookup chain walks a container: {@link calleeScopeChain} reaches the class
+ * for `this.m()` and nothing for the rest, so an object-literal method stays
+ * reachable through the file-wide FLOOR exactly as it was before.
  *
  * ⭐ That reasoning answers WHERE A NAME IS DECLARED, and it is the whole
  * question only while a declaration is being recorded. A CALL SITE asks a
@@ -557,10 +569,12 @@ function opensClassScope(node) {
  * there is keyed on how the call is WRITTEN. ⛔ Reading a bare `getEngine()`
  * through this union is how a method came to shadow a file-level function that
  * the language would never let it shadow. {@link calleeScopeChain} is the
- * lookup-side predicate; the two are deliberately not the same function.
+ * lookup-side predicate; the two are deliberately not the same function --
+ * and BOTH halves are needed, because a chain that excludes a container cannot
+ * help when the member was recorded outside that container in the first place.
  */
 function opensCallableScope(node) {
-  return opensScope(node) || opensClassScope(node);
+  return opensScope(node) || opensClassScope(node) || ts.isObjectLiteralExpression(node);
 }
 
 /**
@@ -572,13 +586,17 @@ function opensCallableScope(node) {
  * resolves differently:
  *
  *   • `f()`      -- a BARE IDENTIFIER is a lexical name and nothing else. A
- *                    method lives on the prototype, ⛔ never in lexical scope,
- *                    so the enclosing class body is not on this chain: a
+ *                    method lives on its prototype or its object, ⛔ never in
+ *                    lexical scope, so no member container is on this chain: a
  *                    `class C { getEngine() {…} }` does not shadow a
  *                    `function getEngine()` for a call written `getEngine()`
  *                    inside `C`. Reading it through the class subtracted a real
  *                    engine write under the DEFENDED `platform-type` arm, which
- *                    prints nothing and is counted nowhere.
+ *                    prints nothing and is counted nowhere. ⚠️ Excluding the
+ *                    container here is only half of that property: it also
+ *                    depends on {@link opensCallableScope} RECORDING every
+ *                    member name under its container, which is why an object
+ *                    literal is on that predicate.
  *   • `this.m()` -- a method name, which belongs to the enclosing class exactly
  *                    as a property does, and to no lexical scope.
  *   • `x.m()`    -- a member of whatever `x` is, and this module has no index of
@@ -2565,6 +2583,32 @@ export function selfTest() {
       + `  w() { this.x.getEngine().${WRITE}; }\n}\n`, ['IProbeEngine']),
     'engine/IProbeEngine');
 
+  // ── ⭐⭐ A MEMBER NAME IS NOT A LEXICAL ONE ON THE RECORDING SIDE EITHER ───
+  // Keeping the class body off a bare call's chain is only half of "a bare
+  // `f()` is never shadowed by a method". A name is reachable through whatever
+  // scope it was RECORDED at, so a member name recorded at a LEXICAL scope is
+  // found by a bare call however careful the chain is. `ts.isMethodDeclaration`
+  // is true of an OBJECT LITERAL's method too, and an object literal opens no
+  // lexical scope -- so one was recorded at the enclosing BLOCK, and a bare
+  // `getEngine()` in that block resolved to the object's method. The compiler
+  // never does that: declared ONLY that way, the name is `TS2304: Cannot find
+  // name`. Quiet direction again -- a real engine write subtracted under
+  // `platform-type`, an arm that DEFENDS the subtraction and so prints nothing
+  // and is counted nowhere. ⛔ Pinned in BOTH declaration orders: the floor
+  // decides the order the lexical tier does not reach, and the two disagree
+  // there, so one order alone can pass on the floor's answer by luck.
+  const objectLiteralMethod = 'export function w() {\n'
+    + '  const o = { getEngine(): Map<string, number> { return new Map(); } };\n'
+    + '  void o;\n'
+    + `  getEngine().${WRITE};\n}\n`;
+  const fileLevelGetEngine = 'function getEngine(): IProbeEngine { return null as never; }\n';
+  t('⭐⭐ a BARE call is not shadowed by an OBJECT LITERAL method of the same name in the same block',
+    verdictsIn(fileLevelGetEngine + objectLiteralMethod, ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐⭐ …and in the other declaration order, where the file-wide floor would have answered the method',
+    verdictsIn(objectLiteralMethod + fileLevelGetEngine, ['IProbeEngine']),
+    'engine/IProbeEngine');
+
   // The same conflation decided two OTHER questions, and both are verdicts the
   // artefacts carry: WHICH object a site writes, and whether it is elevated.
   /** Every write call's object-name verdict, in source order. */
@@ -2640,8 +2684,10 @@ export function selfTest() {
     + 'callables, each in both declaration orders, while a `this.<prop>` no enclosing class declares and '
     + 'a method called from outside its class both still resolve file-wide -- and the callable map read '
     + 'by how the CALL is written rather than by where the name was declared: a bare `f()` resolves '
-    + 'lexically and is never shadowed by a same-named method of the enclosing class, in both '
-    + 'declaration orders, while `this.m()` does read that class and `x.m()` reads neither).',
+    + 'lexically and is never shadowed by a same-named method -- neither one on the enclosing class, '
+    + 'which the lookup chain excludes, nor one on an OBJECT LITERAL in the same block, which is kept '
+    + 'off that chain by being recorded under the literal -- in both declaration orders each, while '
+    + '`this.m()` does read that class and `x.m()` reads neither).',
   );
   return 0;
 }
