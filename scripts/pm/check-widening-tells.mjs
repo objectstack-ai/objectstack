@@ -161,8 +161,8 @@
  * contract this is.
  *
  * **It writes nothing and hangs no label.** Same call `check-clause2-carriers`
- * and `check-half-states` make: a checker that hung `needs:contract-review`
- * would be issuing the review verdict, which is 自查放行. ⛔ No new label and no
+ * and `check-half-states` make: a checker that hung a review-gate label would
+ * be issuing the review verdict, which is 自查放行. ⛔ No new label and no
  * new claim-line syntax exist because of this file — #16448 forbids both, and
  * the reader it uses is the sibling's existing `Clause-②:` reader.
  *
