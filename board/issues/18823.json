@@ -14,13 +14,11 @@
     "domain:cli",
     "priority:p1"
   ],
-  "assignees": [
-    "os-support-ai"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T23:05:26Z",
-  "updated_at": "2026-09-20T16:58:44Z",
+  "updated_at": "2026-09-22T00:47:16Z",
   "closed_at": "2026-09-20T16:35:09Z",
   "closed_by": {
     "login": "os-project-manager",

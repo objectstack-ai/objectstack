@@ -1,0 +1,28 @@
+{
+  "number": 19626,
+  "kind": "issue",
+  "title": "finding(docs): the i18n \"Must name\" table still states the PRE-FIX orphan rule — row 1 is false on the per-package leg, six more rows are now understated",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T02:09:45Z",
+  "updated_at": "2026-09-22T02:09:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19626",
+  "body": "**Class (b) candidate — a published page contradicts an already-shipped contract.** ⛔ Awaiting first triage; this seat does not grade or route it.\n\n## What is wrong\n\n`content/docs/protocol/kernel/i18n-standard.mdx`, the **\"Must name\"** table at `:1013-1040`, describes what `translation-target-unknown` accepts. Its first row is **actively false** on the per-package leg of `os build`:\n\n| Key | Must name |\n|:---|:---|\n| `objects.{object}` | **an object this stack defines, or a platform object** |\n\nOn the per-package leg, *\"this stack defines\"* excludes an object a **sibling package of the same artifact** declares — and that object resolves. ⇒ the row states the **pre-fix** rule and reads as \"a sibling package's object is an orphan\".\n\n⚠️ **This is not a regression of any one PR.** The row was already stale before the change that surfaced it: **#19064** (PR #19347) widened the object rung to read `packages[].manifest.*`, and **#18441** added the `objectExtensions` target rung. PR #19347's own acceptance notes flagged it and it was not carried.\n\n## Why it is bigger than one row now\n\n**PR #19625** (card #19349) widens the same table's understatement across **six more rungs**: `_views`, `_sections`, `_actions`, `apps.{app}` / `.navigation.{id}`, `dashboards.*` and `globalActions.{action}` now also resolve against a sibling package's declaration.\n\n⚠️ Those six rows are **vague rather than actively contradicting** (*\"a view's `name`\"*, *\"an app's `name`\"*) — ⛔ do not grade them the same as row 1. A taker should fix the table as **one unit** rather than chasing whichever PR last touched it.\n\n**Also already absent from the table pre-PR**, so the gap predates all of this: `_tabs`, `_validations`, every `flows.*` row, and #18442's contributed-app level.\n\n## A second carrier, ⛔ deliberately not touched\n\n`skills/objectstack-i18n/SKILL.md:196-203` states the reject condition by **existence** (*\"A key naming an object, field, view, tab, action, param, section, validation rule, app, nav item, dashboard, widget or flow screen that does not exist\"*). ⭐ That page is **correct and getting more correct** — pre-fix the rule reported keys naming things that DO exist, contradicting it; post-fix the implementation moves toward it. It is also **broader** than the docs table (it lists tab, validation rule and flow screen, which the table omits).\n\n⛔ Recorded as positive alignment, ⛔ not as drift. ⚠️ And `skills/**` is a **governed Tier H** surface, so any PR editing it needs a maintainer-authorized approval to land — a taker must size that in rather than discover it.\n\n## Understated but not false, ⛔ no stop condition\n\n`content/docs/deployment/validating-metadata.mdx:625` says the per-package walk is *\"handed the artifact's own `packages[]` as resolution context so a sibling package's OBJECT still resolves\"*. The mechanism is unchanged and correct; after PR #19625 six more collections resolve through it, so \"object\" is an **incomplete instance list**, not a false statement.\n\n## ⚠️ Serialization the taker must check first\n\n**PR #19600 currently touches `content/docs/protocol/kernel/i18n-standard.mdx`** and is open, awaiting a maintainer authorization (it is governed Tier H). ⇒ ⛔ re-take the open-PR file census before claiming this card; a fix landing into that file while #19600 holds it is a serial collision.\n\n## How this was found, ⛔ and why the drift check did not find it\n\nThe repo's Docs Drift Check listed **nothing** on PR #19625 and said so in its own words: *\"not a clean bill of health\"*. It also declares the blind spot that hides this exact defect: *\"a page that states a rule by its **inputs** shares no identifier with the **emitter** that implements the rule, so an emitter-only diff cannot list it — not on this run and not on any run.\"*\n\nFound instead by a **by-shape sweep** over `content/docs/**` (405 pages) and `skills/**` (44 files): shapes `this stack defines` (2), `does not define` (4), `sibling package` (4), `per-package` (14), `orphan` (40), `packages[]` (13), plus the rule id (2). **LIT CONTROL:** `translation bundle` returns 27 hits, so the instrument reads this prose and the narrow counts are readings.\n\n## Dedupe terms\n\n`translation-target-unknown` · i18n-standard Must name table · sibling package resolution · `artifactProvidedRecords` · per-package leg orphan\n\n⛔ Filed without a duplicate search, per the standing rule that the filer attaches terms and the triage seat runs the check.\n\nFiled by `domain:spec` execution seat 2, session `session_01UDXER3sdqfeVYpEWZs5mZx`, 2026-09-22T02:1xZ, out of PR #19625's out-of-scope findings. Row 1 verified first-hand on `origin/main` before filing.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -16,13 +16,11 @@
     "priority:p1",
     "repo:objectstack"
   ],
-  "assignees": [
-    "os-support-ai"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T06:34:37Z",
-  "updated_at": "2026-09-18T13:49:24Z",
+  "updated_at": "2026-09-22T00:46:34Z",
   "closed_at": "2026-09-18T10:34:20Z",
   "closed_by": {
     "login": "os-support-ai",

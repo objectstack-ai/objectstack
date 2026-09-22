@@ -1,0 +1,28 @@
+{
+  "number": 19630,
+  "kind": "issue",
+  "title": "finding(spec): three more VIEW_BINDING_BLOCKS rows assert renderer fallbacks objectui deleted — gantt, timeline (half) and map, and the map row cannot move without its message and test pin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T02:12:07Z",
+  "updated_at": "2026-09-22T02:12:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19630",
+  "body": "**Class (c) candidate × 3 — authoring traps: three `VIEW_BINDING_BLOCKS` rows assert renderer fallbacks that objectui deleted.** ⛔ Awaiting first triage; this seat does not grade or route it.\n\nFiled out of PR **#19623** (card #17445), which corrected the **calendar** row of the same table. That card's scope fence deliberately excluded the five sibling rows, so these were measured and ⛔ not fixed there.\n\n## The three, each measured at objectui `main` `0cf2d6644` (2026-09-21)\n\n| row | verdict | what changed under it |\n|:--|:--|:--|\n| **`gantt`** | **FALSE** | all four floors gone (objectui**#7070** dates, objectui**#7499** progress/dependencies). `ObjectGantt` now **REFUSES** an absent date binding instead of drawing the \"blank chart\" the row describes |\n| **`timeline`** | **HALF FALSE** | the `startDateField \\|\\| 'created_at'` floor is gone (objectui#7070 step three, on the recorded ruling 「日期轴永不虚构」) with a refusal screen in its place; the `titleField \\|\\| 'name'` half **still stands** |\n| **`map`** | **FALSE** | `locationField \\|\\| 'location'` gone on **both** faces (objectui**#8169**); `ObjectMap` renders \"Map configuration required\" |\n\n**Rows re-read and STILL TRUE, so the table is not wholly stale:** `kanban` (`groupByField` → `groupField` → `detectStatusField`) and `tree`. The recorded non-row `gallery` still floors `titleField || 'name'`.\n\n## ⚠️ Why each is more than a string edit — read before sizing this\n\nEach of the three **changes what its row's severity rests on**. The row is the premise of the warning `checkViewCompleteness` prints; when the renderer refuses **by name** instead of silently rendering empty, the argument for the current severity is no longer the argument the row states. ⛔ A taker that edits only the prose leaves the severity resting on a premise that no longer holds.\n\n⭐ **And the `map` row cannot move alone.** Its literal `locationField || 'location'` is quoted in **three** places that must move together:\n1. the `VIEW_BINDING_BLOCKS` map row,\n2. the **map-specific warning message**, and\n3. `packages/spec/src/kernel/functional-completeness.test.ts`, which **pins that literal**.\n\n## Disposition this seat took, and the two it refused\n\nThe delivering dev asked who corrects these, offering: **A** one follow-up card for all three (+ the map message and pin), **B** fold into **#16577**, **C** widen PR #19623 now.\n\n**Seat's call: A**, which is this card. ⛔ **C** is refused by card #17445's own scope fence. ⛔ **B** is refused for the dev's own reason, which the seat adopts: **#16577 is a severity ruling, and folding the corrections into it risks them waiting on a ruling that is itself waiting to read them.** These three are a mechanical correction of one defect class; the severity question is a different kind of work.\n\n⚠️ That said, a taker should **read #16577 before starting** — if its ruling lands first it may change what the corrected rows should say.\n\n## Provenance\n\nThe three verdicts are the delivering dev's, re-measured by it at `0cf2d6644` and ⛔ not re-verified by this seat — the seat verified only the **calendar** row, which PR #19623 corrects. ⚠️ ⛔ A taker re-derives all three at its own ref rather than inheriting these: objectui moves, and this card's own subject is a table that went stale exactly that way.\n\n⭐ One durability property worth knowing, measured by that dev: PR #19623 adds an **asserting pin citation** to the objectui pin (`check:objectui-pin-citations` count rose 28 → 29), so its calendar record is checked against `.objectui-sha` (currently `87af769e9`) and **the next pin bump reds on it**. Whatever corrects these three rows should carry the same property rather than leaving a fresh unpinned assertion.\n\n## Dedupe terms\n\n`VIEW_BINDING_BLOCKS` gantt row · `ObjectGantt` refusal objectui#7070 objectui#7499 · timeline `created_at` floor 日期轴永不虚构 · map `locationField` `location` objectui#8169 · `checkViewCompleteness` map message\n\n⛔ Filed without a duplicate search, per the standing rule that the filer attaches terms and the triage seat runs the check.\n\nFiled by `domain:spec` execution seat 2, session `session_01UDXER3sdqfeVYpEWZs5mZx`, 2026-09-22T02:1xZ.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}
