@@ -78,33 +78,46 @@ an object-valued field traverses today and keeps traversing.
 ### `@objectstack/plugin-security` gains `canWriteObject`
 
 The WRITE admission — the sibling of the existing `canReadObject`, running the
-middleware's own arms in the middleware's own order: system bypass, no resolved
-permission sets, unresolvable posture, the ADR-0066 D3 `requiredPermissions`
-capability AND-gate for both principals, the CRUD grant, the ADR-0090 D10
-delegator check, and — when the caller's payload is supplied — the field-level
-security WRITE gate over it (`getFieldPermissions`, folded through the D3
-field-capability contract, intersected with the delegator's mask under D10, then
-the forbidden-write detection). It exists for doors that must ask "could this
-caller perform this write" without running the engine middleware — the write
-preview is the first — and an equivalence suite pins its answer EQUAL to the
-registered middleware's, case for case AND payload for payload, so the two
-cannot drift.
+middleware's own arms in the middleware's own order: system bypass; then, before
+anything resolves, the ADR-0103 engine-owned write guard and the ADR-0090 D12
+delegated-administration gate, each called as the middleware's own primitive;
+then no resolved permission sets, unresolvable posture, the ADR-0066 D3
+`requiredPermissions` capability AND-gate for both principals, the CRUD grant,
+the ADR-0090 D10 delegator check, and — when the caller's payload is supplied —
+the field-level security WRITE gate over it (`getFieldPermissions`, folded
+through the D3 field-capability contract, intersected with the delegator's mask
+under D10, then the forbidden-write detection). It exists for doors that must ask
+"could this caller perform this write" without running the engine middleware —
+the write preview is the first — and an equivalence suite pins its answer EQUAL
+to the registered middleware's, case for case AND payload for payload, so the
+two cannot drift.
 
-⭐ What it answers, POSITIVELY: the OBJECT-level and the FIELD-level halves of
-the write decision — the object arms over the object, the payload arm over the
-keys the payload names — each pinned EQUAL to the registered middleware's.
+⭐ What it answers, POSITIVELY — by naming what it RUNS, never a category of the
+write decision: the ADR-0103 engine-owned affordance gate, the ADR-0090 D12
+delegated-admin gate, the fail-closed postures, the ADR-0066 D3 capability
+AND-gate for both principals, the `allowCreate`/`allowEdit` CRUD grant, the D10
+delegator's independent grant, and the step 2.5 FLS write gate over the keys the
+payload names — each pinned EQUAL to the registered middleware's, arm for arm.
+It says nothing about any refusal not in that list.
 
 ⛔ `true` never means the write will succeed, and ⛔ what follows is not an
-enumeration of the distance to success: the middleware refuses before `next()`
-for reasons this method is never asked. Nearest to hand are the row-level and
+enumeration of the distance to success: the middleware refuses both before and
+after `next()` for reasons this method is never asked. Nearest to hand are the
+remaining pre-resolution gates that run beside the two named above — the
+package-managed and system-row write gates, which judge a row's PROVENANCE; the
+curated-capability-name and audience-anchor binding refusals, which judge a
+payload VALUE; and the ADR-0056 public-form grant, which no caller can present
+to this method and which has no extracted primitive to call; the row-level and
 post-image refusals — the `using` pre-image, the ADR-0055 controlled-by-parent
 master edit, the RLS `check` post-image and the Layer 0 tenant post-image, none
 of which this method can judge because it is asked about no ROW; the
 payload-VALUE refusals the same caller passes by simply not sending the value —
 the masked echo and the `owner_id` forge, which therefore widen the caller class
 by nothing; the anti-filter-oracle guard on the caller's own predicate, which
-this method is handed none of; and, outside the middleware entirely,
-`readonlyWhen`, the static `readonly` strip and the validation rules themselves.
+this method is handed none of; the post-`next()` assertion that the insert
+`check` seam really ran, which judges an executed write; and, outside the
+middleware entirely, `readonlyWhen`, the static `readonly` strip and the
+validation rules themselves.
 
 ### Scope
 

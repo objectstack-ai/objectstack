@@ -5107,9 +5107,9 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [#18682] Whether `context` may CREATE or UPDATE `object` at all — the
-   * object-level WRITE admission, and the exact sibling of
-   * {@link canReadObject}.
+   * [#18682] Whether `context` may CREATE or UPDATE `object` under the nine
+   * arms enumerated below — the WRITE admission the preview asks for, and the
+   * exact sibling of {@link canReadObject}.
    *
    * ## Why it exists
    *
@@ -5120,41 +5120,59 @@ export class SecurityPlugin implements Plugin {
    * an inference channel bounded to callers the write path would admit — a
    * bound the real path gets for free, because the middleware's write gate
    * refuses long before any rule is evaluated. The preview has no such gate, so
-   * it asks this. What this method restores is the OBJECT-level and the
-   * FIELD-level halves of that bound, ⛔ never the whole of the write decision
-   * — the closing paragraph names what stays ahead of it.
+   * it asks this. What this method restores is the nine arms enumerated below
+   * and nothing beyond them — the closing paragraph names the refusals that
+   * stay ahead of it.
    *
    * ## The arms, in the middleware's own order — ⛔ the CRUD grant is not the gate
    *
    * A probe that checked only `isSystem`, a principal and the CRUD grant admits
-   * two classes the write path refuses: a caller holding `allowCreate` but not a
-   * D3 `requiredPermissions` capability, and an `onBehalfOf` context naming a
-   * delegator that does not exist. Both were measured reaching the preview while
-   * `insert()` refused them. So the arms are the middleware's, in its order:
+   * classes the write path refuses: a caller holding `allowCreate` but not a D3
+   * `requiredPermissions` capability; an `onBehalfOf` context naming a delegator
+   * that does not exist; and — earlier than either, before anything resolves —
+   * a caller asking about an object whose writes a platform service owns, or
+   * about an RBAC link table on the strength of a plain CRUD grant. All were
+   * measured reaching the preview while `insert()` refused them. So the arms
+   * are the middleware's, in its order:
    *
    *   1. `isSystem` → admit (the total bypass);
-   *   2. no permission sets resolved → admit (the middleware guards its whole
+   *   2. ADR-0103 `assertEngineOwnedWriteAllowed` over the registered schema —
+   *      the middleware's own primitive, ⛔ never a second reading of
+   *      `resolveCrudAffordances`: a user-context write to an `engine-owned` /
+   *      `append-only` object whose `userActions` do not open the verb DENIES,
+   *      ahead of the fall-open below and of every resolution;
+   *   3. ADR-0090 D12 `delegatedAdminGate.assert` — the same gate object the
+   *      middleware calls, handed the members its `assert` reads (`object`,
+   *      `operation`, `context`, the rows of `data`). A plain-CRUD holder on an
+   *      RBAC link table DENIES; a tenant admin passes to the arms below;
+   *   4. no permission sets resolved → admit (the middleware guards its whole
    *      CRUD gate with `if (permissionSets.length > 0)`);
-   *   3. `secMeta.unresolved` → DENY (#3545);
-   *   4. ADR-0066 D3/⑤ `requiredPermissions` capability AND-gate for the WRITE
+   *   5. `secMeta.unresolved` → DENY (#3545);
+   *   6. ADR-0066 D3/⑤ `requiredPermissions` capability AND-gate for the WRITE
    *      CRUD class, checked BEFORE the grant, for the caller AND (D10) the
    *      delegator;
-   *   5. the `allowCreate` / `allowEdit` CRUD grant for the operation asked;
-   *   6. ADR-0090 D10 — the delegator must independently hold the same grant;
+   *   7. the `allowCreate` / `allowEdit` CRUD grant for the operation asked;
+   *   8. ADR-0090 D10 — the delegator must independently hold the same grant;
    *      a dangling delegator denies.
    *
-   * ## …and the seventh, which needs the PAYLOAD
+   * Arms 2 and 3 refuse a CALLER CLASS: the same caller cannot reach the write
+   * by omitting a value or by naming a different row, so a preview that
+   * answered them would hand the elevated read to someone who cannot write the
+   * object at all, for that verb, under any payload. Arms 6 and 8 were added on
+   * that same ground one gate later.
    *
-   * The object-level six are not the whole write decision either. The
-   * middleware refuses payload-dependent writes before `next()`, and the first
-   * of them is the field-level-security write gate (step 2.5): a caller holding
-   * the object's CRUD grant but not `editable` on a field the payload names is
-   * refused `PERMISSION_DENIED` there. A probe carrying no payload cannot ask
-   * it — so an editor of the child object who is FLS-locked out of the lookup
-   * column was refused by `insert()` and answered by the preview, the same
-   * divergence arms 4 and 6 close one gate earlier.
+   * ## …and the ninth, which needs the PAYLOAD
    *
-   *   7. step 2.5's own primitives over `data`, in the middleware's order —
+   * The eight above are not the whole write decision either. The middleware
+   * also refuses payload-dependent writes, and the first of them is the
+   * field-level-security write gate (step 2.5): a caller holding the object's
+   * CRUD grant but not `editable` on a field the payload names is refused
+   * `PERMISSION_DENIED` there. A probe carrying no payload cannot ask it — so
+   * an editor of the child object who is FLS-locked out of the lookup column
+   * was refused by `insert()` and answered by the preview, the same divergence
+   * arms 6 and 8 close one gate earlier.
+   *
+   *   9. step 2.5's own primitives over `data`, in the middleware's order —
    *      `getFieldPermissions` folded through `foldFieldRequiredPermissions`
    *      (ADR-0066 D3), intersected under D10 with the delegator's mask via
    *      `intersectFieldMasks`, then `detectForbiddenWrites`. Skipped when no
@@ -5173,23 +5191,53 @@ export class SecurityPlugin implements Plugin {
    * Fails CLOSED: a throw anywhere denies, and callers must treat a throw as a
    * denial too.
    *
-   * ⭐ What it answers, POSITIVELY: the OBJECT-level and the FIELD-level halves
-   * of the write decision — arms 1-6 over the object, arm 7 over the keys the
-   * payload names — each pinned EQUAL to the registered middleware's.
+   * ⭐ What it answers, POSITIVELY — stated by NAMING WHAT IT RUNS, ⛔ never by
+   * naming a category of the write decision: a `true` here means this caller
+   * passed the ADR-0103 engine-owned affordance gate and the ADR-0090 D12
+   * delegated-admin gate (arms 2 and 3, the middleware's own primitives, at the
+   * middleware's own point in its order), the fail-closed postures (#3545's
+   * unresolvable posture and the D10 dangling delegator), the ADR-0066 D3
+   * capability AND-gate for both principals, the `allowCreate`/`allowEdit` CRUD
+   * grant, the D10 delegator's independent grant, and the step 2.5 FLS write
+   * gate over the keys THIS payload names. Each of those is pinned EQUAL to the
+   * registered middleware's, arm for arm. It means nothing about any refusal
+   * not in that list.
    *
    * ⛔ `true` never means "this write will succeed", and ⛔ what follows is not
-   * an enumeration of the distance to success: the middleware refuses before
-   * `next()` for reasons this method is never asked. Nearest to hand are the
-   * row-level and post-image refusals — the step 2.7 `using` pre-image, the
-   * ADR-0055 controlled-by-parent master edit (2.8), the RLS `check`
-   * post-image (3.6) and the Layer 0 tenant post-image (3.7), none of which
-   * this method can judge because it is asked about no ROW; the payload-VALUE
-   * refusals the same caller passes by simply not sending the value — the
-   * masked echo (2.5a) and the `owner_id` forge (3.5), which therefore widen
-   * the caller class by nothing; the anti-filter-oracle guard on the caller's
-   * own predicate (2.9), which this method is handed none of; and, outside the
-   * middleware entirely, `readonlyWhen`, the static `readonly` strip and the
-   * validation rules themselves. Nothing here may be used to widen.
+   * an enumeration of the distance to success: the middleware refuses both
+   * before and after `next()` for reasons this method is never asked. The
+   * families nearest to hand, named so the arms above are not read as the whole
+   * write decision:
+   *
+   *  - **The remaining PRE-RESOLUTION gates, which run beside arms 2 and 3 and
+   *    are not asked here.** Two judge a row's PROVENANCE, which a preview
+   *    holds no row to carry: the ADR-0086/0094 package-managed write gate and
+   *    the ADR-0066 system-row write gate. Two judge a payload VALUE: the
+   *    ADR-0066 D1 curated-capability-name refusal and the ADR-0090 D5/D9
+   *    audience-anchor binding guard. And the ADR-0056 `publicFormGrant` scope,
+   *    which admits create plus read-back on exactly the granted object and
+   *    refuses everything else pre-resolution — not asked because no caller can
+   *    present the grant here (it is constructed only by the public form-submit
+   *    route, whose context goes to the real write, and the key is not in the
+   *    inbound `ENTRY_EXECUTION_CONTEXT_FIELDS` set) and because it has no
+   *    extracted primitive, so an arm would be a SECOND SPELLING of its scope —
+   *    the drift this method exists to avoid.
+   *  - **Row-level and post-image refusals — the preview names no stored row.**
+   *    The step 2.7 `using` pre-image, the ADR-0055 controlled-by-parent master
+   *    edit (2.8), the RLS `check` post-image (3.6) and the Layer 0 tenant
+   *    post-image (3.7), none of which this method can judge because it is
+   *    asked about no ROW.
+   *  - **Payload-VALUE refusals the same caller passes by not sending the
+   *    value** — the masked echo (2.5a) and the `owner_id` forge (3.5), which
+   *    therefore widen the caller class by nothing.
+   *  - **The caller's own PREDICATE** — the anti-filter-oracle guard (2.9),
+   *    which this method is handed none of.
+   *  - **After `next()`** — the #16608 fail-closed assertion that the insert
+   *    `check` seam really ran, which judges an executed write.
+   *  - **Outside the middleware entirely** — `readonlyWhen`, the static
+   *    `readonly` strip and the validation rules themselves.
+   *
+   * Nothing here may be used to widen.
    */
   async canWriteObject(
     object: string,
@@ -5203,16 +5251,56 @@ export class SecurityPlugin implements Plugin {
     if (context?.isSystem) return true;
 
     try {
+      // 2-3. The middleware's two PRE-RESOLUTION caller-class refusals, called
+      //      as the middleware calls them and at the same point in its order:
+      //      after the `isSystem` bypass, BEFORE the principal-less fall-open
+      //      (arm 4) and before any permission set resolves. Both answer about
+      //      the CALLER and the OBJECT, so a caller they refuse cannot reach
+      //      the write by omitting a value or naming a different row — which
+      //      is exactly the class this method exists to keep out of the
+      //      preview.
+      try {
+        // 2. [ADR-0103] Engine-owned write affordance. ⛔ Not a re-derivation:
+        //    this is the middleware's own primitive over the same registered
+        //    schema, so the `userActions` members that reopen a verb pass here
+        //    for the one reason they pass there.
+        assertEngineOwnedWriteAllowed(
+          typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(objectName) : undefined,
+          operation,
+          context,
+        );
+        // 3. [ADR-0090 D12] Delegated administration on the RBAC link tables.
+        //    The middleware hands its whole `opCtx`; `assert` reads exactly
+        //    `object`, `operation`, `context` and the ROWS of `data` (plus, for
+        //    a delegate's update/delete, a single scalar id off
+        //    `options.where.id` / `where.id` / `id`). A preview names no stored
+        //    row, so it supplies the four it has and NOTHING else — which
+        //    leaves the gate's delegate branch refusing an id-less mutation it
+        //    cannot boundary-check. That is NARROWER than the write path for a
+        //    scope-holding delegate, never wider, and narrower is the safe
+        //    direction for a gate whose whole job is to withhold.
+        if (this.delegatedAdminGate) {
+          await this.delegatedAdminGate.assert({ object: objectName, operation, context, data });
+        }
+      } catch (e) {
+        // A refusal from either gate IS the admission answer — the write path's
+        // own denial, not a failure to resolve one. Anything else is a
+        // subsystem failure and belongs to the outer catch, which logs it and
+        // still denies.
+        if (e instanceof PermissionDeniedError) return false;
+        throw e;
+      }
+
       const permissionSets = await this.resolvePermissionSetsForContext(context);
-      // 2. No sets resolved → no permission-set restriction applies.
+      // 4. No sets resolved → no permission-set restriction applies.
       if (permissionSets.length === 0) return true;
 
       const { isPrivate, unresolved, requiredPermissions, fieldRequiredPermissions } =
         await this.getObjectSecurityMeta(objectName);
-      // 3. [#3545] Posture unresolvable → deny.
+      // 5. [#3545] Posture unresolvable → deny.
       if (unresolved) return false;
 
-      // [ADR-0090 D10] Resolve the delegator ONCE — arms 4 and 6 both need it,
+      // [ADR-0090 D10] Resolve the delegator ONCE — arms 6 and 8 both need it,
       // and a dangling link denies before either runs.
       let delegatorSets: PermissionSet[] | null = null;
       if (context?.onBehalfOf?.userId) {
@@ -5223,7 +5311,7 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
-      // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
+      // 6. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
       //    principals.
       const required = requiredCapsForOperation(requiredPermissions, operation);
       if (required.length > 0) {
@@ -5235,12 +5323,12 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
-      // 5. The object-level CRUD grant for the operation asked.
+      // 7. The object-level CRUD grant for the operation asked.
       if (!this.permissionEvaluator.checkObjectPermission(operation, objectName, permissionSets, { isPrivate })) {
         return false;
       }
 
-      // 6. [ADR-0090 D10] The delegator must independently grant the same write.
+      // 8. [ADR-0090 D10] The delegator must independently grant the same write.
       if (
         delegatorSets &&
         delegatorSets.length > 0 &&
@@ -5249,11 +5337,11 @@ export class SecurityPlugin implements Plugin {
         return false;
       }
 
-      // 7. The field-level-security WRITE gate — the middleware's step 2.5,
+      // 9. The field-level-security WRITE gate — the middleware's step 2.5,
       //    over the payload the caller supplied. Same primitives, same order,
       //    same guards: the middleware runs this only for an `insert`/`update`
       //    carrying `opCtx.data` with permission sets resolved, and both of the
-      //    latter already hold here (arm 2 returned for the empty resolution).
+      //    latter already hold here (arm 4 returned for the empty resolution).
       //    ⛔ Not a re-derivation — a second spelling of "which fields may this
       //    caller write" is the drift this whole method exists to avoid.
       if (data) {
