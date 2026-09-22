@@ -769,10 +769,7 @@ export function readTreeLeg({ repoRoot, mode, marker, sourceMarker = null }) {
   const treeMarker = treeReadingMarker({ marker, sourceMarker });
   const status = readTreeStatus(repoRoot);
   const files = status.gitReadable ? markerPresence(repoRoot, status.entries, treeMarker) : [];
-  return {
-    treeMarker,
-    verdict: treeVerdict({ mode, gitReadable: status.gitReadable, gitError: status.gitError, files, sourceMarker }),
-  };
+  return treeVerdict({ mode, gitReadable: status.gitReadable, gitError: status.gitError, files, sourceMarker });
 }
 
 function fail(msg) {
@@ -839,7 +836,7 @@ function run(argv) {
   if (sourceMarker !== null) {
     console.log(`  tree reading probes the SOURCE spelling ${JSON.stringify(sourceMarker)} (--source-marker)`);
   }
-  const { verdict: tv } = readTreeLeg({ repoRoot: REPO_ROOT, mode, marker, sourceMarker });
+  const tv = readTreeLeg({ repoRoot: REPO_ROOT, mode, marker, sourceMarker });
   const say = (s) => (tv.ok ? console.log(s) : console.error(s));
   say(`${tv.ok ? (tv.paths.length > 0 ? '⚠' : '✓') : '✗'} tree: ${tv.msg}`);
   for (const p of tv.paths.slice(0, 20)) say(`  dirty  ${p}`);
@@ -1064,7 +1061,7 @@ function selfTest() {
 
     // Through `readTreeLeg`, not around it: the wiring under test is the one
     // `run()` uses, and a battery that rebuilds it inline covers a copy.
-    const legFor = (mode) => readTreeLeg({ repoRoot: repo, mode, marker: mode === 'present' ? MARK : GUARD }).verdict;
+    const legFor = (mode) => readTreeLeg({ repoRoot: repo, mode, marker: mode === 'present' ? MARK : GUARD });
 
     // 1. plant ablation, mutate leg: the source gains the marker and the
     //    "build" writes the marker into the committed baseline as well.
@@ -1174,7 +1171,7 @@ function selfTest() {
     // cover the helper a third time and still leave `run()`'s wiring untested:
     // measured, that change left this battery green under an ablation that
     // severed exactly that wiring.
-    const readWith = (marker, sourceMarker = null) => readTreeLeg({ repoRoot: split, mode: 'absent', marker, sourceMarker }).verdict;
+    const readWith = (marker, sourceMarker = null) => readTreeLeg({ repoRoot: split, mode: 'absent', marker, sourceMarker });
 
     // 1. DELETE ablation, mutate leg: the label entry leaves the source.
     writeFileSync(srcPath, 'export const form = { rows: [{}] };\n');
