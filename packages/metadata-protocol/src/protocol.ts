@@ -12700,8 +12700,7 @@ export class ObjectStackProtocolImplementation implements
     ): BatchDataLoopOutcome {
         if (outcome.results.length >= records.length) return outcome;
 
-        const causeIndex = outcome.results.findIndex(r => !r.success);
-        const cause = causeIndex >= 0 ? outcome.results[causeIndex]?.errors?.[0]?.message : undefined;
+        const cause = this.locateBatchCause(outcome.results);
 
         const results = outcome.results.slice();
         for (let index = results.length; index < records.length; index++) {
@@ -12712,7 +12711,7 @@ export class ObjectStackProtocolImplementation implements
                 index,
                 errors: [{
                     code: 'NOT_ATTEMPTED' as const,
-                    message: `record ${causeIndex} failed — ${cause ?? 'unknown error'}; the batch stopped there. `
+                    message: (cause ? `${cause.clause}; the batch stopped there. ` : 'the batch stopped before this record. ')
                         + 'Set options.continueOnError to process the remaining records.',
                 }],
             });
@@ -12721,6 +12720,51 @@ export class ObjectStackProtocolImplementation implements
         // Every padded row is a non-success, so this stays a PARTITION of
         // `results` rather than a second tally free to drift from it.
         return { results, succeeded: outcome.succeeded, failed: results.length - outcome.succeeded };
+    }
+
+    /**
+     * The row that ENDED the run, plus the clause both builders interpolate.
+     *
+     * ⛔ NOT `findIndex(r => !r.success)`. `success` is the envelope's
+     * *outcome* bit, and its false arm is open by construction: it means "this
+     * row is not a success", which since #19412 also covers a row that MATCHED
+     * and was deliberately NOT removed — an outcome, not a fault, carrying no
+     * `errors[]` entry. Locating the cause with it named that survivor and then
+     * called the real error, sitting in the same array, "unknown" (#19452).
+     *
+     * The discriminator is the row's `errors[]` entry, which is the ONE per-row
+     * value whose declared meaning is a fault:
+     * `BatchOperationResultSchema.errors` is documented as *"Array of errors if
+     * operation failed"*, and the ADR-0087 v17 migration entry publishes
+     * `row.errors?.[0]?.message` / `.code` to consumers as exactly that read.
+     * It cannot widen the way the boolean did: every entry must carry an
+     * `ApiError.code` drawn from the closed `StandardErrorCode ∪
+     * ERROR_CODE_LEDGER` vocabulary, so an unregistered code fails
+     * `BatchOperationResultSchema.parse` — giving a non-fault ending an
+     * `errors[]` entry is a ledger widening in `packages/spec`, which is
+     * precisely the step both survivor sites declined to take. `message` is
+     * REQUIRED on `ApiErrorSchema`, so a located cause always has one and the
+     * 「unknown error」 fallback is gone rather than merely unreached.
+     *
+     * Scanned from the END because a run ends AT the row it stops on: every
+     * stop is a `break` in a loop's `catch`, immediately after that row was
+     * pushed. A fault that does NOT stop the run (the `Unknown operation:` arm
+     * records one and keeps going) must not be able to shadow the row that did.
+     *
+     * When no row recorded a fault at all the batch still ended for a reason —
+     * `runAtomicBatch` aborts on `outcome.failed > 0`, which a lone survivor
+     * satisfies — so the non-success row is named as what it is, ⛔ never as a
+     * failure and ⛔ never as an 「unknown error」.
+     */
+    private locateBatchCause(
+        rows: ReadonlyArray<BatchDataRowResult>,
+    ): { index: number; clause: string } | undefined {
+        for (let index = rows.length - 1; index >= 0; index--) {
+            const fault = rows[index]?.errors?.[0];
+            if (fault) return { index, clause: `record ${index} failed — ${fault.message}` };
+        }
+        const stalled = rows.findIndex(r => !r.success);
+        return stalled >= 0 ? { index: stalled, clause: `record ${stalled} did not succeed` } : undefined;
     }
 
     /** The ordinary (committed) batch response — every row reports what it did. */
@@ -12771,21 +12815,25 @@ export class ObjectStackProtocolImplementation implements
         outcome: BatchDataLoopOutcome,
     ): BatchUpdateResponse {
         const attempted = outcome.results;
-        const causeIndex = attempted.findIndex(r => !r.success);
-        const cause = causeIndex >= 0 ? attempted[causeIndex]?.errors?.[0]?.message : undefined;
+        // [#19452] Same locator as the stopped-batch arm, for the same reason:
+        // `!success` stopped meaning "this row failed" when #19412 widened it.
+        // Both this builder's interpolations of the causal index read it, so
+        // neither the ROLLED_BACK message nor the NOT_ATTEMPTED one can name a
+        // row that merely survived — the two could not be fixed apart.
+        const cause = this.locateBatchCause(attempted);
 
         const results: BatchDataRowResult[] = records.map((record, index) => {
             const attempt = attempted[index];
             if (!attempt) {
                 return {
                     id: record.id, success: false, index,
-                    errors: [{ code: 'NOT_ATTEMPTED' as const, message: `atomic batch aborted by record ${causeIndex}` }],
+                    errors: [{ code: 'NOT_ATTEMPTED' as const, message: cause ? `atomic batch aborted by record ${cause.index}` : 'atomic batch aborted' }],
                 };
             }
             if (attempt.success) {
                 return {
                     id: attempt.id ?? record.id, success: false, index,
-                    errors: [{ code: 'ROLLED_BACK' as const, message: `record ${causeIndex} failed — ${cause ?? 'unknown error'}` }],
+                    errors: [{ code: 'ROLLED_BACK' as const, message: cause ? cause.clause : 'the atomic batch rolled back' }],
                 };
             }
             return { id: attempt.id ?? record.id, success: false, index, errors: attempt.errors };
