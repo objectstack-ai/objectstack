@@ -305,7 +305,7 @@ import { runImport } from './import-runner.js';
 // [#16581] The public picker's authoring-dialect → parser-grammar lowering.
 import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
-// [#17058, #17551] The `POST …/analytics/dataset/query` door parse — the half of the
+// [#17551] The `POST …/analytics/dataset/query` door parse — the half of the
 // analytics family this route never had. See the module header for the
 // measurement that decides its shape.
 import { datasetSelectionRefusal } from './analytics-selection-door.js';
@@ -11131,7 +11131,7 @@ export class RestServer {
                         });
                     }
 
-                    // [#17058] …and every OTHER member of `selection` had no
+                    // [PR #17548] …and every OTHER member of `selection` had no
                     // door at all, so a malformed one travelled into
                     // `dataset-executor` and was answered by whatever the face
                     // behind it happened to do with it — while the sibling
@@ -11146,7 +11146,7 @@ export class RestServer {
                     // schema: `selection` is a `DatasetSelection`, which
                     // carries no `cube` and has four members of its own, so
                     // `AnalyticsQueryRequestSchema` would 400 every real
-                    // dashboard widget. #17058 could only door the seven
+                    // dashboard widget. PR #17548 could only door the seven
                     // members whose declarations coincided; the four that were
                     // left — `runtimeFilter`, `dateGranularity`, `compareTo`,
                     // `totals` — are what this closes. {@link datasetSelectionRefusal}

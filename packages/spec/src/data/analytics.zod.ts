@@ -498,7 +498,7 @@ function describeRefusedDateRange(input: unknown): string {
  * (`@objectstack/core`) — `AnalyticsService.query`, `queryDataset` and the
  * dataset executor behind it reached IN PROCESS, and a driver's cube face
  * called directly. ⚠️ Every REST analytics route is a SCHEMA-origin door,
- * `POST /analytics/dataset/query` included: PR #17548 (card #17058) landed a
+ * `POST /analytics/dataset/query` included: PR #17548 landed a
  * door there that parsed the selection's shared members — `timeDimensions`
  * among them — and #17551 widened it to the WHOLE selection, against
  * `DatasetSelectionSchema` (`api/analytics.zod.ts`, which takes those members

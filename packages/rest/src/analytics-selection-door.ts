@@ -5,7 +5,12 @@
  *
  * ## The gap, and the two rounds that closed it
  *
- * [#17058] `/analytics/query` and `/analytics/sql` Zod-parse their body at the
+ * ⚠️ The first round is cited by its PULL REQUEST throughout this file. The card
+ * it closed is no longer on this board — `check:issue-citations` classes that
+ * number `allocated-but-absent`, and deleted-vs-transferred is NOT MEASURED —
+ * so PR #17548 is the live record, and its own body names the card it closed.
+ *
+ * [PR #17548] `/analytics/query` and `/analytics/sql` Zod-parse their body at the
  * entry (`runtime/src/domains/analytics.ts` → `assertAnalyticsQueryBody`) and
  * lift a malformed member to a 400 before the service is reached. The dataset
  * route checked only that `selection.measures` was a non-empty array, so every
@@ -13,7 +18,7 @@
  * whatever the face behind it happened to do with it. That is the same door,
  * one family, two postures — the inconsistency a client cannot predict.
  *
- * #17058's own answer was PARTIAL and said so: `DatasetSelection` had no Zod
+ * That PR's own answer was PARTIAL and said so: `DatasetSelection` had no Zod
  * schema anywhere in the repo, so this module parsed a PROJECTION — the seven
  * members whose declarations coincide with `AnalyticsQuery`'s — and
  * deliberately projected the four dataset-only members (`runtimeFilter`,
