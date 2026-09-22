@@ -155,7 +155,7 @@ export const PluginStartupResultSchema = lazySchema(() => z.object({
    * already slated for removal. So the L1 alias ends here, audibly.
    */
   startTime: retiredKey(
-    '`PluginStartupResult.startTime` was removed in @objectstack/spec 18 (ADR-0049) — '
+    '`PluginStartupResult.startTime` was removed in @objectstack/spec 17 (ADR-0049) — '
     + 'it never held an instant: the kernel filled it with the SAME elapsed milliseconds as '
     + '`durationMs`, so a reader who took the name at its word and computed '
     + '`Date.now() - startTime` got an age near the epoch instead of a wait. Delete the key '
@@ -171,7 +171,7 @@ export const PluginStartupResultSchema = lazySchema(() => z.object({
 
   /** Tombstone for the `plugin` → `pluginName` re-declaration (#16059). */
   plugin: retiredKey(
-    '`PluginStartupResult.plugin` was removed in @objectstack/spec 18 (ADR-0049) — '
+    '`PluginStartupResult.plugin` was removed in @objectstack/spec 17 (ADR-0049) — '
     + 'the kernel has never put a plugin OBJECT in this result, so the nested '
     + '`{ name, version }` shape described a value nothing ever built. Replace the key '
     + 'with `pluginName` and carry the plugin name string.',
@@ -179,7 +179,7 @@ export const PluginStartupResultSchema = lazySchema(() => z.object({
 
   /** Tombstone for the health member, retired with `HealthStatus` itself (#16059). */
   health: retiredKey(
-    '`PluginStartupResult.health` was removed in @objectstack/spec 18 (ADR-0049) — '
+    '`PluginStartupResult.health` was removed in @objectstack/spec 17 (ADR-0049) — '
     + 'it carried a `HealthStatus`, and that vocabulary is retired with the startup '
     + 'orchestrator that declared it: no probe system ever ran a health check at '
     + 'startup, so nothing ever filled the key. Delete the key; a plugin that reports '

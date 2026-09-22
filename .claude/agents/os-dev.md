@@ -117,7 +117,6 @@ model: opus
 - 缺一种该文件没有的 double 时,覆写文件里已有的 double 优于 pin 新的:不动台账。
 - 匹配到零个脚本的 `pnpm --filter` 运行以 0 退出:什么都没跑,读上去却是通过。
 - objectui 把 typecheck 拼作 `type-check`(连字符);核对输出里确实回显了脚本名。
-- 退出码先重定向再捕获,⛔ 永不隔着管道下结论(见本地验证范围节)。
 - 浏览器验证:Chromium 已预装,`PLAYWRIGHT_BROWSERS_PATH` 指向 `/opt/pw-browsers`。
 - launch 传 `executablePath: '/opt/pw-browsers/chromium'`;⛔ 永不跑 `playwright install`。
 - `cdn.playwright.dev` 的 403 不是没有浏览器的证据:下载被拦不证明产物缺席,先找产物。
@@ -295,9 +294,10 @@ model: opus
 - 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行。
 - ⛔ 不把不买内容的密度修复当筹行拒掉;删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling。
 - 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
-- 发布面动了要 changeset;`skip-changeset` 唯一判据是没动:已发布 = 各包 `files[]` 实际发运内容。
+- 发布面动了要 changeset;`skip-changeset` 判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
+- PR 改到已有的 `.changeset/*.md`:⛔ 永不打 `skip-changeset`,门禁红着是对的,确认走 PR 文字。
 - objectstack:标签是真实机制,打标签是你的默认步骤,PR 一开出就打;派发词可收窄或禁写。
 - 范围 = 派发词点名的标签 + 上文判据下的 `skip-changeset`;禁写或交集为空 ⇒ 零写并报告。
 - `needs:contract-review` 归席位,⛔ 不挂不摘不等;报 PR 上有无与 `--pair PR-NUMBER` 退出码作读数。

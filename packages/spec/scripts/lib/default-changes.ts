@@ -141,6 +141,79 @@ const AUTONUMBER_FORMAT_DEFAULT_REASON =
   + 'consumer reading `FieldParsed.autonumberFormat` still sees `undefined` when the '
   + 'author omitted it, and asks `resolveAutonumberFormat` what that means.';
 
+/**
+ * Shared by the THREE platform-side `enableOnInstall` rows below. One edit to
+ * `PackageInstallRequestSchema` and one to `InstallPackageRequestSchema` move
+ * three published defaults, because the second schema is re-exported through
+ * `src/api/protocol.zod.ts` and therefore publishes under TWO def keys
+ * (`kernel/InstallPackageRequest` and `api/InstallPackageRequest`, byte-identical
+ * but for the `$id`) — the `CreateImportJobRequest` / `ImportRequest` shape
+ * above. The ratchet names keys, not schemas, so dropping any row leaves that
+ * def's default unauthorised and the gate red.
+ */
+const ENABLE_ON_INSTALL_PRESERVE_REASON =
+  'The declared default was WRONG about the shipped runtime, and this row corrects the '
+  + 'declaration rather than the behaviour — the `api/ImportRequest:runAutomations` shape, '
+  + 'spec follows runtime. `POST /api/v1/packages` was ruled onto three states in maintainer '
+  + 'batch #157 item 5 letter C — 「缺省 = 保持，有旗 = 设置」 — and implements them in '
+  + '`packages/runtime/src/domains/packages.ts`: `enableOnInstall: true` calls `enablePackage`, '
+  + '`false` calls `disablePackage`, and an ABSENT key makes NO lifecycle call at all, so the '
+  + "row keeps whatever state it already had. A FRESH id has no state to keep and lands enabled "
+  + "— that is the registry's own new-row value, not a default this schema applies. The schema "
+  + 'said something else, in both machine-readable and human-readable form: `.default(true)` '
+  + "shipped in `@objectstack/spec`'s JSON Schema for all three defs, and the `describe` prose "
+  + 'rendered into the published reference tables. '
+  + 'NO deployed server behaviour moves here: nothing parses an install body through these '
+  + 'schemas on the serving path — the door reads the raw body, and `PackageApiContracts` is a '
+  + 'declarative catalog entry rather than a parse — so a request that omitted the key '
+  + "preserved the row's state before this change and preserves it after. "
+  + 'The consumer who WAS affected, and who is the reason this is a correction rather than a '
+  + 'cosmetic edit, lives outside this repo: a client or SDK that validates its request through '
+  + 'the published schema materialised `enableOnInstall: true` from the declared default and '
+  + 'SENT it explicitly. Under letter C an explicit `true` is a FORCE-ENABLE, so that caller '
+  + 'silently re-enables a package an operator deliberately disabled — on every upgrade — while '
+  + 'a non-validating caller sending the identical body preserves the disable. Identical request '
+  + 'bodies, opposite behaviour, decided by whether the caller validated before sending. '
+  + 'To keep an unconditional enable on every install, WRITE it — `enableOnInstall: true` — '
+  + 'which is the only spelling the door has ever read as "enable". To get "leave this '
+  + "package's lifecycle state where it is\", omit the key, which is now what the published "
+  + 'schema says absence means. `enableOnInstall: false` is unchanged in every respect. '
+  + 'Reading a materialised `PackageInstallRequestParsed.enableOnInstall` (or the '
+  + '`InstallPackageRequestParsed` copy) now yields `boolean | undefined` where it yielded '
+  + '`boolean`; `undefined` is the third state, and it is the one the door acts on. '
+  + 'No `semantic` migration entry accompanies this: these are REQUEST bodies, not stored '
+  + 'metadata — no `sys_metadata` document carries the key, so `os migrate meta` has nothing to '
+  + 'rewrite, the same reading as the two request-schema rows above. Maintainer ruling batch '
+  + '#210 item 4 letter A, 2026-09-22, which explicitly refused the other direction (runtime '
+  + 'back to default-on) because it re-enables a disabled package on re-install.';
+
+const MARKETPLACE_ENABLE_ON_INSTALL_REASON =
+  'The 缺省 cell moved on all three `enableOnInstall` declarations together, and this is the '
+  + 'third — the one that is NOT the platform install door\'s key. This request names a '
+  + 'marketplace LISTING and its door is the control plane\'s '
+  + '`POST /api/v1/marketplace/install`, which resolves the artefact and validates the licence '
+  + 'before mapping what it holds into a platform install; so this key is what a caller asks '
+  + 'the MARKETPLACE to request on its behalf, one translation upstream of the door key. It is '
+  + 'held to the same three states by the consistency pin in '
+  + '`src/api/package-install-one-authority.test.ts`, whose matrix is one row per state across '
+  + 'all three declarations: `true` asks the channel to enable, `false` asks it not to, and '
+  + 'ABSENT asks it to leave the package\'s lifecycle state alone (a fresh install lands '
+  + 'enabled). Keeping `.default(true)` here alone would have re-materialised, for the '
+  + 'marketplace channel, exactly the value the platform door stopped applying — and done it '
+  + 'inside a control-plane contract no PR in this repo can see the other end of, which is the '
+  + 'worst place for a caller-invented value to live. '
+  + 'Nothing in this repo changes behaviour: a runtime mounts `/api/v1/marketplace/*` only as a '
+  + 'read-only proxy to the configured control plane (`MarketplaceProxyPlugin`), so no install '
+  + 'body is parsed through this schema here at all. The consumer affected is the control-plane '
+  + 'caller who validates through the published schema: to keep asking the channel for an '
+  + 'unconditional enable, write `enableOnInstall: true`; to leave the package\'s state alone, '
+  + 'omit the key; `false` is unchanged. Reading '
+  + '`MarketplaceInstallRequestParsed.enableOnInstall` now yields `boolean | undefined` where it '
+  + 'yielded `boolean`. ⛔ This is a matrix that moved, NOT a fold — the two requests remain '
+  + 'separately owned on separate release cadences, and the pin still asserts that neither can '
+  + 'be sent where the other is expected. Maintainer ruling batch #210 item 4 letter A, '
+  + '2026-09-22.';
+
 export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly DeclaredDefaultChange[]>> = {
   17: [
     {
@@ -396,6 +469,34 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'are still input-mode, and the same-category control `system/CacheConfig` is untouched. A '
         + '`required` that lists defaulted keys is this repo\'s existing output-mode convention, not '
         + 'a new one.',
+    },
+    {
+      key: 'api/PackageInstallRequest:enableOnInstall',
+      from: 'true',
+      to: '(none)',
+      reason: ENABLE_ON_INSTALL_PRESERVE_REASON,
+    },
+    {
+      // `InstallPackageRequestSchema` (`src/kernel/package-registry.zod.ts`) is
+      // re-exported through `src/api/protocol.zod.ts`, so ONE declaration
+      // publishes under two def keys. Both rows are required; dropping either
+      // leaves that def's default unauthorised and the gate red.
+      key: 'kernel/InstallPackageRequest:enableOnInstall',
+      from: 'true',
+      to: '(none)',
+      reason: ENABLE_ON_INSTALL_PRESERVE_REASON,
+    },
+    {
+      key: 'api/InstallPackageRequest:enableOnInstall',
+      from: 'true',
+      to: '(none)',
+      reason: ENABLE_ON_INSTALL_PRESERVE_REASON,
+    },
+    {
+      key: 'marketplace/MarketplaceInstallRequest:enableOnInstall',
+      from: 'true',
+      to: '(none)',
+      reason: MARKETPLACE_ENABLE_ON_INSTALL_REASON,
     },
     {
       key: 'system/TracingConfig:sampling',

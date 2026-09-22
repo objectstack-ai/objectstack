@@ -2321,8 +2321,8 @@ function selfTest() {
     // moved.
     //
     // ⭐ It was a hand MANIFEST, and the manifest is what broke (#16421). That
-    // gate gained one import — `pm/check-clause2-carriers.mjs`, the fleet's one
-    // clause-② declaration reader, whose own closure is nine modules deep — and
+    // gate gained one import — the fleet's one clause-② declaration reader, then
+    // living inside ten thousand lines of sweep with a nine-module closure — and
     // the author updated the gate's OWN I1/I2 staging site in the same edit and
     // not this one. CI went red HERE, on a gate about objectui changesets, with
     // an error naming neither the new import nor this list. Both sites now DERIVE
@@ -2346,7 +2346,7 @@ function selfTest() {
     for (const rel of gateDeps) gw(rel, readFileSync(join(__dirname, '..', rel), 'utf8'));
     check(
       '#6494 the staged gate carries its whole first-party closure — DERIVED, not a hand manifest',
-      gateDeps.includes('scripts/pm/check-clause2-carriers.mjs') && gateDeps.length >= 2,
+      gateDeps.includes('scripts/pm/clause2-line.mjs') && gateDeps.length >= 2,
       `${gateDeps.length} dependenc(ies): ${gateDeps.join(', ')}`,
     );
     gg('add', '-A');
