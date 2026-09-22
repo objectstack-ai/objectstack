@@ -242,6 +242,11 @@ export * from './aggregate-field-type-compatibility';
 // from field metadata so renderers never guess it from the value's magnitude.
 export * from './percent-scale';
 
+// What an ABSENT `scale` means, per field type — the one resolver every face
+// reads instead of spelling its own fallback, so a percent field that declares
+// no width cannot render two magnitudes on two faces.
+export * from './field-scale';
+
 // The NUMERIC column family's physical representation (#16318) — the single
 // per-field-type table `SqlDriver.createColumn` and both `os generate
 // migration` formats read, so one declaration cannot produce three different
