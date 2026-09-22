@@ -1,0 +1,32 @@
+{
+  "number": 19641,
+  "kind": "issue",
+  "title": "Fleet GitHub writes act as `objectstack-fleet[bot]` behind one fleet-wide write gate: App installation-token minter, write-pace lease + batch gap, an issue-create door, and a with-fleet wrapper",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T03:24:21Z",
+  "updated_at": "2026-09-22T07:26:04Z",
+  "closed_at": "2026-09-22T07:26:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19641",
+  "body": "## Why\n\nTwo seat accounts were restricted by the platform on 2026-09-21. The measured shape, read from the platform's own headers:\n\n- the token the seats wrote with was **user-to-server** — `GET /user` answered a login, `X-OAuth-Scopes` empty, `X-RateLimit-Limit: 15000`, an expiry header present — so every write was booked against a person;\n- `X-RateLimit-Remaining` stayed at 15000/15000 the whole time: quota was not the trigger. The trigger was **rate shape**: 17 issues created in 29 s (a 1.2 s gap, each process sleeping its own), after which the account was restricted for the window 08:16–08:52 UTC, and every later push by it got no `github-actions` check-suite while sibling PRs dispatched normally;\n- the platform names \"rapid content creation\" and \"bursts\" as secondary-limit triggers and asks for ≥ 1.5 s between content-creating writes.\n\nTwo conclusions, and this card is both of them made mechanical:\n\n1. **Writes must leave the personal identity** — a server-to-server installation token of the `ObjectStack Fleet` App, whose actor is `objectstack-fleet[bot]` with nobody behind it.\n2. **The gate must be enforced across processes** — the fleet's subagents each run in their own worktree, so a per-process pause is not a gate. `scripts/pm/write-pace.mjs` already paces per process (mkdir lock, 3 s gap, 40/hour, stop markers); it needs a fleet-wide lease and a batch mode.\n\n## Deliverables\n\n- `scripts/pm/fleet-token.mjs` — mints the installation token with an RS256 JWT built on node `crypto` (no dependency): `iat = now − 60`, `exp = now + 600`, `iss = OS_FLEET_APP_ID`; `POST /app/installations/{id}/access_tokens`; cache at mode 0600, refreshed 5 min early, minting serialised through the write lease and re-checked after the wait; `--export` / `--print` / `--status` / `--refresh`; PEM, PEM-with-literal-`\\n` and base64 forms of `OS_FLEET_PRIVATE_KEY` detected; every log line, status line, error and stack redacted (`--self-test` feeds a known token and key through every path and greps them all); an importable `getFleetToken()`.\n- `scripts/pm/write-pace.mjs` — rule ④ (the lease: one write in flight fleet-wide, FIFO tickets, dead-holder reaping, a bounded wait that refuses loudly) and rule ⑤ (batch mode: N ≥ 5 raises the gap to 30 s for the next N writes, announced with the count and the estimate, fleet-wide through the shared log); `--run` for shell callers, `--announce-batch N`; the self-test measures the lease and the batch gap on REAL child processes by their timestamps.\n- `scripts/pm/issue-create.mjs` — the one door a new card leaves through: prose from files never argv, one POST behind both halves of the throttle, read-back, exit-code ladder.\n- `scripts/pm/with-fleet.sh` + `scripts/pm/fleet-git-credential.sh` — mint → export (`GITHUB_TOKEN`/`GH_TOKEN`, so the 15 existing `process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN` call sites change by zero lines) → git identity (committer = bot by its user id; author = bot, or a real login via `OS_FLEET_GIT_AUTHOR_LOGIN`) → git credential through `GIT_CONFIG_*` env pairs (nothing on disk, `git remote -v` unchanged) → run the command behind the gate.\n- `AGENTS.md` — the rule: every GitHub write leaves through `scripts/pm/`, as the fleet identity, behind the gate; never a bare `curl` / `fetch` / `gh api -X POST|PATCH|PUT|DELETE` write.\n\n## Deviations from the brief, stated rather than hidden\n\n- The gate extends `write-pace.mjs` instead of adding a second lock beside `os-verify-lock.sh`: that script's primitive is `flock`, which macOS does not ship (it runs unlocked there by ruling), and write-pace's mkdir lock is the landed cross-process primitive on the write path. The ticket-queue shape of `os-verify-lock.sh` is mirrored, not its primitive.\n- A 403/429 is rule ③ (a 30-minute stop marker, or the `retry-after` when longer), not an exponential-backoff retry: the 2/4/8/16 s convention is for a dropped transport, and a secondary-limit refusal retried after 16 s inside one process is the per-process pacing that produced the burst.\n- The token cache lives beside the throttle's log (`~/.cache/objectstack-pm/`), not in a per-session scratchpad: N sessions minting N tokens at once is the concurrency the lock exists to prevent.\n- The bot's noreply address uses the bot USER id (`332303061`), not the App id; the minter resolves it.\n\n## Online acceptance (needs the injected `OS_FLEET_*` — in the report)"
+}

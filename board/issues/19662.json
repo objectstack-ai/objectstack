@@ -1,0 +1,30 @@
+{
+  "number": 19662,
+  "kind": "issue",
+  "title": "[tombstone for the unreachable #16649] register the fourteen remaining `door: 'none'` error codes, and widen the dispatcher-vocabulary face refusal to every published package — COMPLETED, shipped in @objectstack/spec 17.4.0",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T05:29:35Z",
+  "updated_at": "2026-09-22T05:30:40Z",
+  "closed_at": "2026-09-22T05:30:40Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19662",
+  "body": "> **Tombstone, filed after data loss.** This stands in for **#16649**, which answers HTTP **404** and is not recoverable through the API. Filed by the PM seat `domain:spec#4` (`session_01AmH9bKvGoLjiY86Q4Z3og2`, GitHub `os-steve`, seat post #18917) on the maintainer's instruction, verbatim: 「**16649 可能是因为封号丢了，你能补吗**」.\n>\n> ⛔ **This is NOT a task and nothing here is owed.** The work #16649 carried is **finished and published**. Rebuilt from a fresh measurement of `origin/main`, ⛔ never from the lost issue's text — which is exactly how #18048 was rebuilt after #18021 was lost the same way.\n\n## Why this is a tombstone and not a refiling\n\n⚠️ The obvious act — refile it as an open card — would be **wrong**, and the measurement says so before any judgement is applied. Every one of the **50** citations of `#16649` in the tree describes it in the past tense, as work that landed. Verified in the tree rather than from those citations:\n\n| claim | how it was checked | result |\n|:--|:--|:--|\n| the `'boot-refusal'` verdict was retired | `git grep -c \"'boot-refusal'\"` on `packages/runtime/src/dispatcher-error-vocabulary.ts` | **1** occurrence, and it is the tombstone docblock itself: «`'boot-refusal'` was HERE, and is retired» |\n| the fourteen codes were registered | `packages/spec/src/api/error-code-ledger.test.ts:283` | a **live test**, «accepts the #16649 batch — the fourteen remaining door:none codes», with the batch enumerated and `toHaveLength(14)` |\n| it shipped | `packages/spec/CHANGELOG.md:2405` | the entry sits under the **`17.4.0`** section, and `packages/spec/package.json` is at `17.4.0` ⇒ published to npm |\n| the release notes carry it | `content/docs/releases/v17/17-4.mdx:439` | «Every error code that ships in `dist` is registered in `ERROR_CODE_LEDGER` (`abae16a`, `613bfbd`, #16449, #16649)» |\n\n⇒ re-opening it as a queue item would put finished, shipped work back on the board. What was destroyed is the **record**, not the deliverable.\n\n## What #16649 did, reconstructed from the surviving evidence\n\nTwo halves, both under the **#16404** door-or-no-door rule (the ledger is the published face, door or no door), continuing the class **#16449** had discharged nine of:\n\n**First half — register the fourteen remaining `door: 'none'` codes that ship in `dist`**, each under its stamping package (from the pinned test batch):\n\n| code | stamping package |\n|:--|:--|\n| `INVALID_ARTIFACT_PACKAGES` · `INVALID_ARTIFACT_PACKAGE_ENTRY` · `DUPLICATE_ARTIFACT_PACKAGE` · `NO_SUCH_RUN` · `PLAN_CHANGED` · `PREFLIGHT_FAILED` · `NOT_COMPENSABLE` · `SERVICE_NOT_REGISTERED` · `PLUGIN_CONTRACT_VIOLATION` | `@objectstack/core` |\n| `MIXED_ARTIFACT_COLLECTION_SHAPE` | `@objectstack/runtime` |\n| `DUPLICATE_ARTIFACT_OBJECT_NAME` | `@objectstack/objectql` |\n| `MEMORY_MULTI_TENANT_UNSUPPORTED` | `@objectstack/driver-memory` |\n| `MONGODB_MULTI_TENANT_UNSUPPORTED` | `@objectstack/driver-mongodb` |\n| `WALLED_MEMBERSHIP_POLICY_UNDECLARED` | `@objectstack/organizations` |\n\nRegistration widened the face only — none of them reaches an HTTP door on this tree, so no wire body changed.\n\n**Second half — widen `check-dispatcher-error-vocabulary`'s face refusal** from `packages/spec/src/**` to **every published package's `src/`**, which is what made the `'boot-refusal'` verdict unwritable and retired it: the verdict had come to mean only «a registration this tree still owes», and once the class was closed mechanically there was nothing left for it to name.\n\n**Carriers:** commits `abae16a` and `613bfbd`; `packages/spec/CHANGELOG.md` under `17.4.0`.\n\n## What IS still broken, and where it is already tracked\n\n⛔ Not fixed here and ⛔ not filed again: **50 citations in the tree now point at a 404**, and some sit in prose that ships — `packages/spec/src/api/error-code-ledger.zod.ts` (published: `packages/spec` ships `src/**/*.zod.ts`), `content/docs/references/api/error-code-ledger.mdx`, and `content/docs/releases/v17/17-4.mdx`. A consumer who greps the tarball and follows the number lands on nothing.\n\nThat is the dangling-citation class, already carried by **#19587** («a banned account leaves 60 dangling issue citations»). ⛔ Rewriting those citations is **not** a remedy this card proposes: `content/docs/releases/` is RELEASE-OWNED under AGENTS.md's Documentation Guardrails, and what shipped in the `17.4.0` tarball cannot be edited at all. What a tombstone CAN do is give the number somewhere to land, which is this card's whole purpose.\n\n⚠️ **Not measured:** whether the other numbers on #19587's list are likewise completed-and-shipped rather than lost work. This card measured exactly one. ⇒ ⛔ do not generalise from it; the same check (does the tree describe it in the past tense, and does a released CHANGELOG section carry it) is one grep per number and is the thing to run before assuming any of them needs refiling.\n\n## Dedup words\n\n`#16649`, `tombstone`, `boot-refusal`, `ERROR_CODE_LEDGER`, `door: 'none'`, `#16404`, `#16449`, `17.4.0`, `banned account`, `dangling citation`\n\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -2,7 +2,7 @@
   "number": 19624,
   "kind": "pull_request",
   "title": "feat(spec): the protocol declares what an ABSENT `scale` means per field type — `percent` means 0",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T02:02:58Z",
-  "updated_at": "2026-09-22T02:30:37Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-22T03:06:28Z",
+  "closed_at": "2026-09-22T03:06:27Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-09-22T03:06:27Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19624",

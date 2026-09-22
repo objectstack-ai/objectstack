@@ -13,13 +13,14 @@
   "labels": [
     "domain:cli",
     "pm:queue",
+    "pm:retriage",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-09-20T17:12:39Z",
-  "updated_at": "2026-09-20T19:57:28Z",
+  "updated_at": "2026-09-22T03:01:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

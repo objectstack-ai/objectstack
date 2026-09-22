@@ -1,0 +1,33 @@
+{
+  "number": 19680,
+  "kind": "issue",
+  "title": "pm(tooling): the contract-review tier is fable — revert #19573's opus constant and retired-word list; a temporary lack of authorization never changes the skills",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T06:43:13Z",
+  "updated_at": "2026-09-22T08:23:49Z",
+  "closed_at": "2026-09-22T08:23:12Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19680",
+  "body": "立卡门类别 ③ — a maintainer direct-dispatch task, filed by the `domain:skills` seat 1 (`session_01Wnstp2kTth7sGXfr8fXypc`, seat post #7623) on the maintainer's explicit instruction. ⛔ Filed and claimed in one act by the same seat (维护者直派插队卡, SKILL.md:476).\n\n**Source, three parts (谁的指令 / 原话 / 在哪说):** the maintainer · verbatim, three sentences on 2026-09-22 in this seat's chat, in order: 「复核档应该就是 fable 啊」 · 「某个agent临时没有fable给的特殊授权,不应该改变skills」 · 「fable 撤回卡 你来创建」 · recorded on seat post #7623 (comment 5771798588; the third sentence is the filing instruction).\n\n**Filing-door note, so the audit reads it here:** `references/filing-gate.md`:33 has a User-type write identity file no new card. This card is filed under the maintainer's explicit instruction quoted above, through the 维护者直派通道 (SKILL.md:233–:234 — 「当面指挥的 PM 会话直接路由,只对明示指挥的卡成立;直派的审计评论逐字引用授权指令」). This paragraph is that audit comment.\n\n**Dedupe:** the seat's token cannot reach `/search` (HTTP 403 through the proxy); the 31 open `domain:skills` cards and the lane's 16-row queue were read on this date — none touches the tier ladder. The closed twin is #19544 (its PR #19573 is what this card reverses). No open twin.\n\n## The defect\n\nOn 2026-09-21 two review dispatches died on their first request with HTTP 429 「You've reached your Fable limit」; the `domain:spec` seat asked, the maintainer answered 「fable 没有了」, and #19544 / PR #19573 (`77df0f6`) moved `CONTRACT_REVIEW_TIER` from `claude-fable-5-1` to `claude-opus-5`, added `RETIRED_TIER_WORDS = ['fable']` with a retired-spelling guard, and reworded `references/contract-review.md:60`. The maintainer's word today: that was one agent's **temporary lack of authorization**, ⛔ not a retirement of the model, and it must not have changed the skills. The contract-review tier is fable.\n\n## What lands — `scripts/pm/dispatch-gates.mjs` only (not governed; the seat lands it through the queue)\n\n1. `CONTRACT_REVIEW_TIER = 'claude-fable-5-1'`; `TIER_CEILING` derives to the fable word again — ladder floor sonnet · default opus · ceiling fable, as it read before PR #19573.\n2. `RETIRED_TIER_WORDS = Object.freeze([])` — no tier word is retired. The retired-spelling guard stays; its non-vacuity pin (around :25479–:25481, 「names at least one word」) is re-pinned to hold on an EMPTY list: the control becomes 「a word that IS in the ladder can never appear in the list」, proved on a mutated copy rather than on the live list.\n3. The docblock beside the constants carries the maintainer's principle, quoting the three sentences with their date: a tier word is retired only by the maintainer's explicit ruling that names a retirement; a 429 or a missing authorization on one session is ⛔ not a retirement; a seat not served at the tier renders the review through an isolated at-tier subagent (`model: fable`) or waits outside the queue — ⛔ never by changing a constant. (`references/contract-review.md`'s 降档保险丝 section is deleted by #19061 step ② per the maintainer's 「不留」 on this date, and SKILL.md:516 makes this file the single source of tier values — so this docblock is the principle's home.)\n4. Every self-test pin PR #19573 added that asserts the opus value, the non-empty retired list, or 「the contract-review tier sits at the default-tier constant」 is inverted or retired with its reason named; the ladder render, exits, clause-② note and suspicion line read the constant, so they follow.\n5. ⛔ Not touched: `.claude/**` (step ② of #19061 owns the reference text); `scripts/check-commit-card-trailers.mjs:848` (already lists the fable id); any workflow.\n\n## Acceptance\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --tier .claude/skills/pm-dispatch/SKILL.md` prints the fable id as MANDATORY, derived not recalled; `--tier scripts/pm/**` still prints 「no path-derived mandate」 with the ladder 「floor sonnet · default opus · ceiling fable」.\n- `RETIRED_TIER_WORDS.length === 0` and the guard's control is proved non-vacuous on a mutated copy; `pnpm check:pm-dispatch-gates` exit 0; the `--commands` derivation and `--ran` reconciliation at the final head; `check-governed-merges.mjs --pr N` NOT governed; `skip-changeset` (`scripts/pm/**` publishes nothing).\n- The lane's `## Contract review` record for the PR is rendered in-seat at fable (this seat's served tier), `--pair` 0, every check green ⇒ ready + auto-merge through the CCR route.\n\nDedupe words: `CONTRACT_REVIEW_TIER` · `RETIRED_TIER_WORDS` · fable · 复核档 · #19573 · 降档保险丝 · 临缺授权 ≠ 退役\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

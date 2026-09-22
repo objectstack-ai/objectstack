@@ -1,0 +1,28 @@
+{
+  "number": 19646,
+  "kind": "issue",
+  "title": "[finding] the seat-vacancy threshold is 一天 in SKILL.md:286 and 3 小时 by maintainer ruling, and a multi-seat lane has no seat-SELECTION procedure at all — the four 开轮互斥 readings all presume the seat number is already known",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T03:41:44Z",
+  "updated_at": "2026-09-22T03:41:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19646",
+  "body": "⛔ Filed unassigned, ⛔ no `priority:*`, ⛔ no `domain:*`, ⛔ no type — routing and grading are triage's. Routing suggestion: **`domain:skills`**. ⛔ Not a claim. ⛔ Not a ruling — it **records** one and asks what text should carry it.\n\nFiled by the `domain:spec` execution **seat 1** (`session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017), 2026-09-22T03:3xZ. Companion to **#19645**, which is the *instrument* half; this is the *text* half. ⛔ Deliberately not folded: different file, different remedy, and #19645 needs no maintainer decision while this one does.\n\n## ① A maintainer ruling now contradicts the written threshold\n\n`.claude/skills/pm-dispatch/SKILL.md:286`, verbatim:\n\n> 无心跳,活性惰性判定:超过一天无自有产出即可降级回收。\n\nThe maintainer, in session, 2026-09-22 — quoted verbatim, ⛔ not translated, ⛔ not paraphrased:\n\n> 座位帖更新不及时，你要看一下实际哪个座位已经3个小时没更新了，就是没人了。\n\n⇒ **一天** (written) vs **3 小时** (ruled) — a ~8× divergence on the one number that decides whether a seat may be taken.\n\nUnder `SKILL.md`'s own 「两条细则冲突 ⇒ 按更严的一条行动并立卡;⛔ 不当场改文本了结」 this seat **acted on the ruling** (维护者裁决 outranks all written detail) and filed here rather than editing the line on the spot. ⚠️ But the text is what the **next** seat reads: a seat that reads `:286` alone will sit idle for 24h beside a lane the maintainer considers vacant after 3h. ⇒ the divergence has to be resolved in the text, ⛔ not left as a ruling only this session's transcript remembers.\n\n⚠️ **The two numbers may not even be the same quantity** — `:286` reads as a *reclamation* threshold (when may a successor take over), the ruling as a *vacancy* threshold (when is nobody there). They could legitimately coexist as two numbers with two names. ⛔ This seat does not choose; that is the question.\n\n## ② A multi-seat lane has no seat-SELECTION procedure\n\n`:210-211` establish that a lane may run several seats (`· seat N`, one post each) and that mutual exclusion is **per seat number** (「同席认领互斥,他席认领不触发自退」). The four 开轮互斥 readings at `:77-84` are all filtered 「同席号」.\n\n⇒ every one of them presumes **the seat number is already known**. Nothing defines how an incoming session summoned as `/pm-dispatch <domain>@<repo>` — with no seat number in the arguments — picks one out of five.\n\n**Measured cost of the gap, this session:** this seat surveyed five `domain:spec` posts, judged seat 4 vacant at 10h17m from its post timestamp, and was ~one write from seating into a seat whose occupant was mid-R21 and had written 4 minutes earlier. The recovery was ad-hoc (see #19645), ⛔ not a procedure. Had it completed, two sessions would have been dispatching under one seat number, and the per-seat-number exclusion that `:211` relies on would have been silently void for both.\n\n## What a remedy would have to buy, ⛔ and what it costs\n\nA seat-selection step would need roughly: survey every `pm:seat` post in the lane → read each one's **actual** last write by session id (#19645's instrument) → pick the stalest past threshold → and ⭐ prefer a seat that left a **收班简报**, since a brief is an explicit release and needs no inference at all. ⚠️ In this session the one seat with a brief (seat 1) was also unambiguously safe to take, while the seat that *looked* safest by timestamp was occupied — so \"brief first\" may be most of the remedy.\n\n⚠️ **This card carries a real cost and cannot be waved through.** `SKILL.md` is under `scripts/pm/check-skill-line-ratchet.mjs` — 行数只降不升 — so any added line must be paid for with deletions, or by a maintainer ruling raising the cap quoted in the PR body. And `SKILL.md` is 协议语义面 ⇒ 强制条款① puts any such PR at the contract-review tier. ⇒ ⛔ the cheapest honest outcome may be **no new text at all**: ① could be a one-word edit to `:286`, and ② might be discharged entirely by #19645's tool plus the existing 「简报即最新事件 ⇒ 立即坐席」 at `:86`.\n\n## Dedup — queries run by this filer, with hit counts\n\n| query | hits | verdict |\n|:--|--:|:--|\n| open `domain:skills`, all titles read | 31 | no seat-selection or threshold card |\n| open `finding` (bare), all titles read | 22 | none |\n| `grep -n \"活性\\|心跳\\|降级回收\\|惰性\" SKILL.md` | 6 lines | `:286` / `:287` are the only threshold carriers |\n| `grep -n \"车道可分席\\|席号\\|同席认领互斥\" SKILL.md` | 3 lines | `:210` / `:211`, neither defines selection |\n\n⛔ `search/issues` ⛔ not used — **403** for session-bound tokens here. Both listings are enumerations read to exhaustion (`totalCount` 31 and 22, matching returned counts).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

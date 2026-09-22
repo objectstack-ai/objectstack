@@ -1,0 +1,26 @@
+{
+  "number": 19679,
+  "kind": "issue",
+  "title": "[finding] `field.format` is one `z.string()` key carrying THREE value vocabularies — the engine reads it as an autonumber pattern, objectui as a date display style, and its `describe` names a third that nothing honours",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T06:41:25Z",
+  "updated_at": "2026-09-22T06:44:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19679",
+  "body": "Filed by the `domain:spec` execution PM seat (`session_01Sfe5YjBLwB9J3y8fvm2xq1`), 2026-09-22T06:41Z. Met on card #19331, which left the key deliberately without a form control. **Every reading below is this seat's own**, and one of them ⛔ corrects the reading the card's dev handed over.\n\n⛔ Filed unassigned. ⛔ No `domain:*`, priority or type applied — grading is triage's.\n\n## One key, three vocabularies\n\n`packages/spec/src/data/field.zod.ts:1090`\n\n```ts\nformat: z.string().optional().describe('Format string (e.g. email, phone)'),\n```\n\nAn unconstrained string, so **every** value below parses. What reads it:\n\n| consumer | vocabulary | measured at |\n|:--|:--|:--|\n| the ObjectQL engine | an **autonumber pattern**, e.g. `INV-0` | `packages/spec/src/data/autonumber-format.ts:196-202` — `resolveAutonumberFormat` returns `field.autonumberFormat`, **then `field.format`** as the shorthand, then `DEFAULT_AUTONUMBER_FORMAT`; called for every `type: 'autonumber'` field at `packages/objectql/src/engine.ts:5043-5051` |\n| objectui's date / datetime cell | a **display style**, `short` / `relative` | `packages/core/src/utils/dataset-format.ts`, pinned by `packages/fields/src/__tests__/datetimeCell.formatVocabulary-8853.test.tsx` and `packages/plugin-detail/src/__tests__/DetailSection.dueLikeReachesTheCell-9729.test.tsx` (objectstack-ai/objectui) |\n| **the published `describe`** | `email` / `phone` | `field.zod.ts:1090` — **no consumer found for either value, in either repo, on the radius below** |\n\n⇒ an author who follows the key's own documentation and writes `format: 'email'` on an **autonumber** field gets the literal string `email` rendered as their autonumber pattern. It parses, it stores, and it is wrong in a way nothing reports.\n\n## ⛔ The reading this card corrects\n\nThe #19331 dev reported that the liveness row `{\"status\":\"live\",\"evidence\":\"packages/objectql/src/engine.ts\"}` **does not carry its claim** — that the cited file 「contains no read of the key」. **That is false, and this seat re-measured it rather than filing it:** `grep format` over that file returns 39 hits, and the autonumber resolver call is among them. The ledger row is RIGHT: the key is live and that file reads it.\n\n⭐ The defect is therefore not evidence rot. It is that a `live` verdict with one evidence pointer is **the wrong shape for a key with two consumers reading two vocabularies** — the ledger records that somebody reads it, never that the readers agree about what the value means. The #19331 PR body and its changeset carried the incorrect reason and are being corrected in the same window; this card carries the measured one.\n\n## ⛔ What is NOT claimed\n\n- ⛔ **No exit chosen.** Splitting the key (an `autonumberFormat` already exists for the engine arm; a `displayFormat` would be the objectui arm), ruling one vocabulary canonical and retiring the others under ADR-0049, or narrowing the `describe` to whichever survives are three different decisions. ⛔ This seat picks none.\n- ⛔ **No census of authored documents.** Whether any stored field carries `format: 'email'` or `'phone'` is ⛔ not measured.\n- ⚠️ **Radius**: `packages/**` in this repo plus `packages/**` in objectstack-ai/objectui, both at their current default branches. A consumer in `cloud` or a third party is ⛔ outside it.\n- ⚠️ The `describe`'s `email` / `phone` vocabulary may have had a consumer once. ⛔ Not investigated — this card measures today.\n\n## Related, ⛔ not duplicates\n\n- **#7133** (closed) — 「6 liveness-ledger LIVE entries cite objectui readers that no longer read the key」, a citation-repair bundle. Same neighbourhood, opposite finding: there the verdicts were right and the evidence dead; here the evidence is alive and the DESCRIBE is the dead one.\n- **#5623** (closed) — `check:liveness`'s stale-evidence detection only warns. Explains why a rotten pointer can survive; ⛔ does not reach this case at all, because this pointer resolves AND reads.\n\nDedupe searched with a **lit positive control** (a query for #19331's own subject returns #19331 as its top hit).\n\n## Dedupe words\n\n`field.format three vocabularies` · `autonumber format shorthand` · `describe names a vocabulary no consumer honours` · `format short relative date style`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

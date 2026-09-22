@@ -1,0 +1,34 @@
+{
+  "number": 19676,
+  "kind": "pull_request",
+  "title": "docs(spec): record that ADR-0087 entry prose is scanned as source twice",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T06:34:39Z",
+  "updated_at": "2026-09-22T07:43:50Z",
+  "closed_at": "2026-09-22T07:43:49Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-09-22T07:43:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19676",
+  "body": "Fixes #15130\n\nClause-②: no\n\nOne file, one section: a fourth bullet under the authoring-rules heading of\n`packages/spec/src/migrations/entries/README.md`, plus the `patch` changeset the\nmeasurement below says is owed. Prose only — no behaviour change, no mechanical check,\nno entry edited.\n\n## The rule that landed, and why the broad wording\n\n> **Entry prose is scanned as source, twice over — never spell a shape a live textual\n> ratchet matches.**\n\nThe narrow wording the incident suggests — \"quote a retired call site without its\nparentheses\" — would make counter-examples of entries that are green today. What an\nauthor actually controls is not spelling a shape *some* ratchet matches; the parenthesis\nis the instance, and the bullet carries a warning saying so, so that an existing entry\nspelling a parenthesised call is not read as a violation.\n\nThe heading moved from \"Three rules that are not style\" to \"Four\". Nothing in the repo\nreferences that heading or its anchor (`git grep`, one hit: the heading itself).\n\n## What I re-derived before writing it down, and what did not match\n\n**The mechanism — confirmed, live, end to end.** Not transcribed. Two untracked stand-in\n`.ts` files were placed under `packages/spec/src/migrations/`, one standing for an entry\nfile and one for the generated registry region it is concatenated into, each carrying one\nparenthesised call spelling of an enumerated method inside a **string literal**:\n\n| leg | `packages/client` census | verdict |\n|---|---|---|\n| baseline, clean tree | 20/20 pass, 28 classified sites | exit 0 |\n| both stand-ins present | **\"expected 30 to be 28\"**, 4 tests red | exit 1 |\n| stand-ins removed | 20/20 pass, 28 classified sites | exit 0 |\n\nTwo files, one spelling each, `+2` — the doubling, measured. The failure text named both\nfiles by path and flagged each as \"inside the ' literal\". Restoration was proven by\nobserving state (`git status --porcelain` and `git diff HEAD` both empty), not by an exit\ncode. No tracked file was touched in any leg.\n\nReading the scanner confirms why: `sitesInSource` calls `maskComments` (comments only —\nliterals deliberately intact), walks the whole workspace from the repo root over\n`.ts/.tsx/.js/.mjs/.cjs`, and matches on the method name followed by an opening\nparenthesis. `NON_ENTRY_FILES` in the generator excludes `README.md`, so this edit cannot\nreach generation.\n\n**The precedent trap — confirmed in substance, with one correction to the card.** The\ncensus enumerates four methods only (`analytics.query`, `analytics.meta`,\n`analytics.explain`, `automation.trigger`). Neither `meta.deleteItem` nor `data.delete`\nis among them, which is why the two precedent entries are green — and the clean-tree run\nreports \"no counted site sits inside a string, template or regex literal\", so today no\nentry's prose is counted at all.\n\n⚠️ **Correction:** the card and the claim both say the two entries spell\n`client.meta.deleteItem(...)`. Only `18.client-meta-reset-result-reset` does.\n`17.client-delete-result-success` spells `client.data.delete()` and\n`client.project(id).data.delete()` — a different method, still parenthesised, still\nunenumerated. The reasoning survives intact; the method name does not. The landed wording\ndoes not depend on which method it is, which is the point of the broad rule.\n\n## Changeset — measured, and it contradicts the expected shape\n\n`skip-changeset` is **not** applicable here and no label is owed on that ground.\n`packages/spec`'s `files[]` carries a bare `README.md`, which matches at **every** depth,\nso this file ships. Measured rather than reasoned, with `npm pack --dry-run --json` in\n`packages/spec`:\n\n- target: `src/migrations/entries/README.md` — **present** in the 277-file tarball\n- positive controls: `llms.txt` present, `src/ai/agent.zod.ts` and two more `*.zod.ts`\n  present — the instrument reports hits when hits exist\n\nA published surface moved, so the diff takes a `patch` changeset\n(`.changeset/15130-entry-prose-scanned-as-source.md`). Clause-② is `no`, no arm, nothing\nbreaking.\n\n## Acceptance notes\n\n- **Not filed, noted only:** the two precedent entries were left untouched, as dispatched.\n  They are green and their meaning is right; the new bullet is written so that they stay\n  correct rather than becoming violations.\n- **Not filed, noted only:** the census's failure text already names the string-literal\n  trap and points at the offending file and line. An author who trips this rule today gets\n  a much better diagnostic than the original incident did — the rule shortens the\n  diagnosis, it is no longer the only thing standing between an author and a confusing red.\n- ⛔ No mechanical check was added, by the card's own judgement: it would couple\n  `packages/spec` to another package's test suite.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01UDXER3sdqfeVYpEWZs5mZx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UDXER3sdqfeVYpEWZs5mZx)_"
+}

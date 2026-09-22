@@ -1,0 +1,35 @@
+{
+  "number": 18055,
+  "kind": "issue",
+  "title": "finding(pm-gate): `check-governed-merges.mjs` throws `ReferenceError: rearm is not defined` while BUILDING its own \"sweep INCOMPLETE\" banner — the crash deletes exactly the warning that says the list must not read as clean",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-13T15:56:35Z",
+  "updated_at": "2026-09-14T02:34:55Z",
+  "closed_at": "2026-09-14T02:34:27Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18055",
+  "body": "Found by the triage seat, `session_01PAMZt3owWHe7CMyTzrDkwF` (`os-steve`), 2026-09-13T16:0xZ, while running the governed-merge audit that the round-report contract requires (「审计清单实跑 `node scripts/pm/check-governed-merges.mjs --since <上轮>`,⛔ 不凭记忆汇总」). ⛔ Nothing repaired. Measured on `origin/main` tip `226970bbea94b97e0d74de98dfa189a0d35faa9d`, local checkout identical at that path.\n\n## The defect\n\n`scripts/pm/check-governed-merges.mjs:3087` reads `rearm.hint` inside `main()`. **There is no `rearm` binding in that scope.** Every `rearm` in the file is local to something else — `proxyRearmPlan()`'s return objects (`:2273`–`:2281`) and the `const rearm` inside `rearmProxyOrNull()` (`:2822`).\n\n```\nnode scripts/pm/check-governed-merges.mjs --since 2026-09-13T13:00:00Z\n  → ReferenceError: rearm is not defined\n        at main (.../check-governed-merges.mjs:3087:31)\n```\n\n**Trigger**: `attributionFailed === true`. The expression is `attributionFailed && rearm.hint`, so when attribution succeeds the `&&` short-circuits and `rearm.hint` is never evaluated. ⇒ the crash fires **only on the attribution-failure path** — which is a routine path, not an exotic one.\n\n## ⭐ Why this is worse than a crash: it destroys the one thing it was written to protect\n\nThe reference sits inside the **argument expression** of the `console.error(...)` that prints the `sweep INCOMPLETE` banner:\n\n```js\nconsole.error(\n  `\\n⚠️  sweep INCOMPLETE — ${why.join('; ')}. The list above is printed, but it must not read as\\n` +\n    `    clean (#4690): ...` +\n    (attributionFailed && rearm.hint      // ← throws HERE, while building the argument\n      ? ... : ''),\n);\nreturn EXIT_INCOMPLETE;\n```\n\nAn argument expression that throws means the call never happens. ⇒ **the entire banner is lost, and `return EXIT_INCOMPLETE` is never reached.**\n\n### Measured, with controls that fire\n\nOne run, `--since 2026-09-13T13:00:00Z`, stdout and stderr captured to separate files by redirect — ⛔ never through a pipe:\n\n| string | stdout | stderr | role |\n|:--|--:|--:|:--|\n| `attribution unavailable` | **1** | 0 | ⭐ **POSITIVE CONTROL** — proves `attributionFailed` was true, i.e. the crashing branch was genuinely taken |\n| `merged_by names an ACCOUNT` | **1** | 0 | **POSITIVE CONTROL** — the note printed immediately before the banner |\n| `PR #` (governed rows) | **11** | 0 | the findings list printed in full |\n| **`sweep INCOMPLETE`** | **0** | **0** | ⛔ **the banner never reached the reader on either stream** |\n| `sweep INCOMPLETE` in the source | — | — | **1** ⇒ the pattern does match the source text, so the 0/0 above is an absence, ⛔ not a bad pattern |\n\n⇒ the reader is handed **11 governed PR rows, a complete-looking tail note, and no INCOMPLETE warning** — while the banner's own suppressed text reads: *\"The list above is printed, but it must not read as clean (#4690)\"*.\n\n### ⚠️ And the exit code lies in the ordinary invocation\n\n| invocation | observed |\n|:--|:--|\n| `node … \\| tail -30` | **`EXIT=0`** — that is `tail`'s status, ⛔ not node's |\n| `node … > out 2> err; echo $?` | **`REAL_EXIT=1`** |\n\n⇒ a seat piping this into `tail`/`head` (the natural way to read a long audit) sees rows, no warning, and a zero exit. ⭐ This is the repo's own standing discipline biting on a PM tool: 「All exit codes captured by redirect-then-capture, never through a pipe」 — and here the tool's own contract-level warning is what the pipe swallows.\n\n⭐ Same family as objectui#3535's lesson (「a body-only reader is not a sweep; it is a **sweep-shaped no-op that reports clean**」) and as this file's own `#4690` citation. The audit is the last defence for governed-surface merges; ⛔ a report-only audit whose INCOMPLETE path crashes is strictly worse than one that does not run, because it produces output that looks finished.\n\n## Blast radius\n\n- **Report-only**, so ⛔ nothing merges differently because of it. The loss is in the **round report**: 「governed 合并审计清单」 is supposed to be an early warning to the maintainer, and on the attribution-failure path the seat either reports a crash or — if piped — silently reports rows with no incompleteness flag.\n- ⚠️ **Frequency ⛔ NOT measured.** Attribution failed on **both** runs in this session, including after the proxy re-exec (`ℹ️ re-exec with --use-env-proxy …` then the same crash). How often the failure path is hit in other environments is unknown, and this card ⛔ does not assert it.\n- ⛔ I did **not** measure whether the same expression exists in objectui's ported copy.\n\n## Plausible repair (⛔ the filer's reading, not a prescription)\n\n`proxyRearmPlan(...)`'s result is what `rearm.hint` / `rearm.reason` want; `main()` simply never binds it. The hint branch also needs a self-test that FIRES — ⭐ the existing battery has three `rearm` assertions (`:3951`–`:3954`) and **all three exercise `proxyRearmPlan` directly**, so none of them reaches line 3087. ⇒ whatever replaces it wants a case that drives `main()` down the `attributionFailed` path, or the same class of bug returns invisibly.\n\n## Dedupe keywords\n\n`check-governed-merges` · `rearm is not defined` · `sweep INCOMPLETE` · `attributionFailed` · `governed merge audit crash`\n\n⛔ Not graded beyond the lane label — skills-lane findings are that seat's to triage. ⛔ Not claimed.\n\n<sub>分诊席位 · `session_01PAMZt3owWHe7CMyTzrDkwF` · R+220 · 2026-09-13T16:0xZ · 本评论来自分诊座位</sub>"
+}

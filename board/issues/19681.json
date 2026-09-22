@@ -1,0 +1,29 @@
+{
+  "number": 19681,
+  "kind": "issue",
+  "title": "Two of the four `measured` counters in `dropped-refinements.baseline.json` have NO reader anywhere — they can hold any number and every gate stays green, on a ledger whose whole purpose is to end a silence",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T07:25:37Z",
+  "updated_at": "2026-09-22T07:25:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19681",
+  "body": "**Class (b)** — declared, not enforced, with the declaring text quoted and a live instance from today. ⛔ Graded by triage, not by this seat.\n\nDedupe words: `dropped-refinements`, `measured header`, `refinementSitesThatDidProject`, `unread counter`, `declared not enforced`.\n\n## The claim\n\n`packages/spec/dropped-refinements.baseline.json` carries a `measured` block of four numbers presented as a measurement of the tree. **Two of them are read by nothing.** They can hold any value — wrong by one, wrong by a hundred, or left at a figure from months ago — and every gate in the repository stays green.\n\n## Measured on `origin/main` at 2026-09-22T07:2xZ\n\n`git grep <field> origin/main -- ':!*dropped-refinements.baseline.json'`, one probe per field, same shape, same corpus:\n\n| field | readers outside the ledger | role |\n|:--|--:|:--|\n| `publishedSchemasWithDroppedRefinements` | **2** — `packages/spec/scripts/dropped-refinements.test.ts:369`, `:370` | **lit control** |\n| `droppedRefinementSites` | **2** — same file, `:369`, `:371` | **lit control** |\n| `refinementSitesThatDidProject` | **0** | the subject |\n| `refinementSitesWithNoJsonFormToCompare` | **0** | the subject |\n| `refinementSitesZZZQ` | 0 | **dark control** |\n\nTwo fields of the same block, in the same file, found by the same instrument, have two readers each. So the two zeros are a real absence and ⛔ not a grep that missed.\n\nThe one pin, `dropped-refinements.test.ts:370-371`, asserts exactly two things: that `publishedSchemasWithDroppedRefinements` equals `entries.length`, and that `droppedRefinementSites` equals the site total derived from the body. It never looks at the other two. The loader (`readDroppedRefinementsBaseline`) validates `entries` and does not read `measured` at all.\n\n## The declared contract it fails\n\nThe ledger's own `description`, quoted from the file:\n\n> **Hand-edited on purpose and with no `gen:` script**: a generator would let a new gap be admitted by running a command instead of by a decision, **which is the silence this ledger exists to end**.\n\nand:\n\n> Adding, removing or moving a site fails `packages/spec/scripts/build-schemas.ts` until the line moves with it, and the failure prints the corrected entry in full.\n\nThat guarantee is real — but it covers `entries` / `sites`. The `measured` block is presented beside it as part of the same record, under a key that says *measured*, and half of it is unguarded. ⚠️ A file whose stated purpose is to end a silence is carrying one.\n\n## ⭐ It is not hypothetical — it happened today\n\nWhile merging `origin/main` into PR #19373 (card #17518, 128 commits of base movement), the hand-resolved ledger was left with `refinementSitesThatDidProject: 357` while the build measured **366** on the merged tree. **Nothing in the repository would have caught that.** `check:generated`, `build`, the pin and the full spec suite were all green over it. It was corrected only because the build *prints* the number and a human read it off the log by eye.\n\nThe same merge moved `droppedRefinementSites` from 561 to 565 — and that one **is** pinned, so it could not have drifted. The asymmetry is the whole finding: two counters in one block, one class checked, the other not.\n\n## Shape of a fix — suggestions, ⛔ not a ruling\n\nThe cheapest repair is to extend the existing pin rather than add a gate: `dropped-refinements.test.ts` already derives totals from the body, and the build already computes all four. Either\n\n- assert the remaining two against what the build computes, the way the first two are asserted against `entries`; or\n- if the two are genuinely not derivable from the body alone (they describe refinements that are **not** in this ledger — those that projected, and those with no JSON form), then say so **in the file** and move them out of a block named `measured`, so no future reader treats an unchecked number as a reading.\n\n⛔ Neither of these is a call this seat makes — the second one in particular touches what the ledger claims about itself.\n\n## Provenance\n\nRaised by the merge round on PR #19373 as an out-of-scope finding, then **re-verified first-hand by this seat** with the lit and dark controls above before filing — the round's reader analysis is confirmed in every cell. Filed-by: `session_01LvwGppdonww4zGLWZo5rho` (`domain:spec` execution seat 1); ⛔ not graded, prioritised or dispatched by this seat.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}
