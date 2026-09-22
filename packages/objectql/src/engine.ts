@@ -6947,11 +6947,12 @@ export class ObjectQL implements IObjectQLEngine {
       }
       if (ids.size === 0) continue;
       try {
-        const related = await this.find(target, {
+        const query: EngineQueryOptions = {
           where: { id: { $in: [...ids] } },
           fields: [...new Set(['id', ...namedFields])],
-          context,
-        } as any) as Array<Record<string, unknown>>;
+          context: context as EngineQueryOptions['context'],
+        };
+        const related = await this.find(target, query) as Array<Record<string, unknown>>;
         const byId = new Map<string, Record<string, unknown>>();
         for (const row of Array.isArray(related) ? related : []) {
           if (row?.id != null) byId.set(String(row.id), row);
