@@ -103,9 +103,8 @@ package's `dist` is registered here whether or not an HTTP door can ever
 answer with it — a thrown value's `code` is what a consumer's
 `catch (e) { switch (e.code) }` pins, and once shipped it cannot be renamed
 without breaking that consumer. Registering a code widens this face and is
-therefore a Clause-② change (`needs:contract-review`), door or no door; a
-code present in `dist` and absent here is a protocol gap, not a tier
-question.
+therefore a Clause-② change, door or no door; a code present in `dist` and
+absent here is a protocol gap, not a tier question.
 
 ONE shape, no second list: a `door: 'none'` code is a row like any other —
 the string under the package that stamps it, and a comment that states its
