@@ -192,26 +192,6 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
       message: /needs a two-element \[min, max\] array/,
     },
     {
-      // FLIPPED with the #5322 ruling (2026-08-04): this entry was `{$or: []}`
-      // pinning the "requires a non-empty array" refusal. The empty array is
-      // now the OR identity — FALSE, zero rows, asserted in the #5322 block
-      // below — so the refusal that survives at the same guard site is the
-      // non-array spelling, same envelope.
-      name: 'an $or that is not an array',
-      runtimeFilter: { $or: 'won' },
-      message: /"\$or" requires an array of filter objects/,
-    },
-    {
-      name: 'an $or branch that is not a filter object',
-      runtimeFilter: { $or: [{ stage: 'won' }, 'nope'] },
-      message: /branches must be filter objects/,
-    },
-    {
-      name: 'a $not of a non-object',
-      runtimeFilter: { $not: 5 },
-      message: /"\$not" requires a filter object/,
-    },
-    {
       name: 'an unsupported top-level operator',
       runtimeFilter: { $nor: [{ stage: 'won' }] },
       message: /Unsupported top-level filter operator "\$nor"/,
@@ -227,6 +207,85 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
       expect(String(res.body.message)).toMatch(c.message);
     });
   }
+});
+
+/**
+ * [#17551] Three spellings that used to reach the normalizer now stop one layer
+ * earlier — at the route's schema door — and the block above no longer claims
+ * them.
+ *
+ * ⚠️ This is a CODE change on a live wire surface, so it is recorded with the
+ * measurement that justifies it rather than as a test edit. Since #17551 the
+ * dataset route parses its whole `selection` against `DatasetSelectionSchema`,
+ * whose `runtimeFilter` IS the canonical `FilterConditionSchema` — the same
+ * declaration the SIBLING route's `where` carries. Measured on both schemas,
+ * spelling for spelling:
+ *
+ * | `runtimeFilter` / `where` | `/analytics/query` | `/analytics/dataset/query` |
+ * |:---|:---|:---|
+ * | `{ $or: 'won' }`                   | refused at the schema | refused at the schema |
+ * | `{ $or: [{…}, 'nope'] }`           | refused at the schema | refused at the schema |
+ * | `{ $not: 5 }`                      | refused at the schema | refused at the schema |
+ * | `{ stage: {} }`                    | passes the schema     | passes the schema     |
+ * | `{ amount: { $between: [10] } }`   | passes the schema     | passes the schema     |
+ * | `{ $nor: [{…}] }`                  | passes the schema     | passes the schema     |
+ * | `{ $or: [] }`                      | passes the schema     | passes the schema     |
+ *
+ * ⇒ the two routes now answer this field IDENTICALLY, which is the whole reason
+ * the door exists ("one family, two postures" was the defect). The three rows
+ * that changed changed because the dataset route used to be the LOOSER of the
+ * two, not because anything narrowed past `FilterCondition`.
+ *
+ * ⛔ Nothing here weakens #5352's subject: the seam it exists for — a real
+ * `AnalyticsService`, a real `normalizeAnalyticsFilterTree` refusal, and this
+ * route's catch reading the envelope rather than a message list — is still
+ * driven by every case left in the block above, `$sortOf` included.
+ */
+describe('[#17551] the structurally-malformed filter spellings are refused at the door', () => {
+  const AT_THE_DOOR: Array<{ name: string; runtimeFilter: unknown }> = [
+    { name: 'an $or that is not an array', runtimeFilter: { $or: 'won' } },
+    { name: 'an $or branch that is not a filter object', runtimeFilter: { $or: [{ stage: 'won' }, 'nope'] } },
+    { name: 'a $not of a non-object', runtimeFilter: { $not: 5 } },
+  ];
+
+  for (const c of AT_THE_DOOR) {
+    it(`${c.name} → 400 VALIDATION_FAILED, located on the member`, async () => {
+      const route = buildRoute(async () => realAnalytics());
+      const res = await post(route, { dataset, selection: { ...selection, runtimeFilter: c.runtimeFilter } });
+
+      expect(res.statusCode).toBe(400);
+      // Still the caller's mistake, still a 400 — #5352's own invariant.
+      expect(res.statusCode).not.toBe(500);
+      expect(res.body.code).not.toBe('ANALYTICS_QUERY_FAILED');
+      expect(res.body.code).toBe('VALIDATION_FAILED');
+      // …and it says WHICH member, which the deeper refusal never did.
+      const fields: Array<{ field: string }> = res.body.details.fields;
+      expect(fields.map((f) => f.field).some((f) => f.startsWith('selection.runtimeFilter'))).toBe(true);
+    });
+  }
+
+  it('CONTROL — the sibling route\'s own schema refuses the same three, so this is one posture', async () => {
+    const { AnalyticsQueryRequestSchema } = await import('@objectstack/spec/api');
+    for (const c of AT_THE_DOOR) {
+      const parsed = (AnalyticsQueryRequestSchema as any).safeParse({
+        cube: 'opportunity',
+        measures: ['revenue'],
+        where: c.runtimeFilter,
+      });
+      expect(parsed.success, `${c.name} must be refused by the sibling schema too`).toBe(false);
+    }
+  });
+
+  it('CONTROL — the four spellings the schema PASSES still cross the seam', async () => {
+    const { AnalyticsQueryRequestSchema } = await import('@objectstack/spec/api');
+    const passes = [{ stage: {} }, { amount: { $between: [10] } }, { $nor: [{ stage: 'won' }] }, { $or: [] }];
+    for (const where of passes) {
+      const parsed = (AnalyticsQueryRequestSchema as any).safeParse({
+        cube: 'opportunity', measures: ['revenue'], where,
+      });
+      expect(parsed.success, `${JSON.stringify(where)} must still pass the schema`).toBe(true);
+    }
+  });
 });
 
 describe('[#5322] empty combinators are boolean identities at the REST face — evaluated, not refused', () => {
