@@ -2873,9 +2873,10 @@ export function jobFilteredSteps(entries, paths) {
  *   - `run` followed by `typecheck` or `type-check` — the task or script name,
  *     whoever runs it (`turbo run typecheck`, `pnpm --filter X run typecheck`).
  *
- * ⛔ `check:type-check-coverage` and `check:type-check-debt` match NEITHER: they
- * are gate families the matched block already names, and this predicate exists
- * because a reader mistook one of them for a lane.
+ * ⛔ The MISSES are silent, every one — `pnpm typecheck`, `pnpm -r typecheck`
+ * and `node --run typecheck` carry no `run` token; `tsc --build`, `tsc -b`,
+ * `vue-tsc` and `tsgo` are not this vocabulary. So the producer SIZES its walk,
+ * and the live control pins the required aggregate's lanes BY NAME.
  */
 export function isTypeCheckInvocation(command) {
   if (typeof command !== 'string') return false;
@@ -2895,23 +2896,22 @@ export function isTypeCheckInvocation(command) {
  * A dev derived this tool's families for a PR, ran all 82 green, and shipped a
  * red on the required `TypeScript Type Check` context: `packages/spec`'s own
  * `typecheck` exited 2 on two TS7016 errors one added import line introduced.
- * The lanes behind it are CI JOBS running `tsc --noEmit` and `turbo run
- * typecheck`, and they were in NO bucket this tool had.
  *
- * ⭐ And the absence did not read as one. The derivation DOES emit
- * `check:type-check-coverage` and `check:type-check-debt` for a
- * TypeScript-touching path — measured on that PR's paths, 70 commands of which
- * exactly 2 match a `typecheck` grep, both of them those gates. Neither can
- * fail the way that PR failed: they ratchet a LEDGER, and what went red is a
- * per-package tsc program. So a reader greps for the one word they would grep
- * for, FINDS something, and concludes the surface is accounted for — worse
- * than a silence, which is noticeable.
+ * ⛔ What was missing was NOT the steps. Measured: all four rows this walk
+ * returns were already rows of the always-runs tail — same workflow, job, step
+ * and command, 4 of its 33. Missing was a NAME for them and any disclosure at
+ * all on `--commands`, where a dispatch order is built. ⭐ And that absence did
+ * not read as one: the derivation DOES emit `check:type-check-coverage` and
+ * `check:type-check-debt` for a TypeScript-touching path — on that PR's paths,
+ * 2 of 70 commands matched a `typecheck` grep, both of them those LEDGER gates.
+ * So a reader greps the one word they would grep, finds something, and stops.
  *
  * Claimed for a row: this step's `run:` invokes a type-check program, read off
- * the argv. ⛔ NOT claimed: anything about the step's INTENT — `alwaysRunLines`
- * refuses that classification for its own rows and the reason carries
- * unchanged. ⛔ NOT runnable and ⛔ never in `--commands`: every row is CI's
- * own shell over CI's whole-workspace filters.
+ * the argv of the SPLICED command text (`joinLineContinuations`, the reading
+ * `jobFilteredSteps` takes — an unspliced split drops a continued invocation
+ * silently). ⛔ NOT claimed: the step's INTENT — `alwaysRunLines` refuses that
+ * classification and the reason carries unchanged. ⛔ NOT runnable and ⛔ never
+ * in `--commands`: every row is CI's own shell over its whole-workspace filters.
  *
  * A job or step carrying an `if:` is KEPT and MARKED, never excluded: the two
  * blocks above drop a conditional because each claims CI definitely runs the
@@ -2920,7 +2920,7 @@ export function isTypeCheckInvocation(command) {
  */
 export function typeCheckLaneSteps(entries) {
   const rows = [];
-  const counts = { prWorkflows: 0, nonPullRequestWorkflows: 0, conditional: 0 };
+  const counts = { prWorkflows: 0, nonPullRequestWorkflows: 0, steps: 0, runLines: 0, conditional: 0 };
   for (const { file, text } of entries) {
     if (!declaresPullRequestTrigger(text)) {
       counts.nonPullRequestWorkflows += 1;
@@ -2929,10 +2929,14 @@ export function typeCheckLaneSteps(entries) {
     counts.prWorkflows += 1;
     for (const job of extractJobBlocks(text)) {
       for (const step of extractStepBlocks(job.text)) {
-        const commands = runCommandTexts(step.text)
-          .flatMap((c) => c.split('\n'))
+        const lines = runCommandTexts(step.text)
+          .flatMap((c) => joinLineContinuations(c).split('\n'))
           .map((l) => l.trim())
-          .filter((l) => isTypeCheckInvocation(l));
+          .filter((l) => l !== '');
+        if (lines.length === 0) continue;
+        counts.steps += 1;
+        counts.runLines += lines.length;
+        const commands = lines.filter((l) => isTypeCheckInvocation(l));
         if (commands.length === 0) continue;
         const conditional = Boolean(job.if) || Boolean(step.if);
         if (conditional) counts.conditional += 1;
@@ -11965,35 +11969,32 @@ export function jobFilteredStepLines(rows, counts) {
 }
 
 /**
- * The type-check lanes, rendered — printed on EVERY run, like the unreachable
- * listing and the two step blocks around it and for the same reason: it is not
- * about the card's paths, and the family list provably does not cover it
- * (#19172). Rows carry the JOB NAME, which is what CI, branch protection and a
- * red check call it — this reader has just been handed a red context name.
- *
- * ⭐ Absence renders LOUD instead of vanishing: a tree whose pull-request
- * workflows yield no lane is a recogniser that has rotted, not a farm with
- * nothing left to disclose — the refusal `alwaysRunLines` makes at zero.
+ * The type-check lanes, rendered — printed on EVERY run, like the two step
+ * blocks around it and for the same reason: it is not about the card's paths,
+ * and the family list provably does not cover it (#19172). Rows carry the JOB
+ * NAME, which is what CI and a red check call it. ⭐ Absence renders LOUD
+ * instead of vanishing — a tree whose pull-request workflows yield no lane is a
+ * recogniser that has rotted, not a farm with nothing left to disclose.
  */
 export function typeCheckLaneLines(rows, counts) {
-  const { prWorkflows = 0 } = counts ?? {};
+  const { prWorkflows = 0, steps = 0, runLines = 0 } = counts ?? {};
+  const walked = `${steps} command-carrying step(s) / ${runLines} spliced \`run:\` line(s) across ${prWorkflows} pull-request workflow(s)`;
   if (rows.length === 0) {
     return [
       'Type-check lanes — ⊘ NOT MEASURED, and THE SOURCE OF TRUTH CAME BACK EMPTY.',
-      `  ${prWorkflows} pull-request workflow(s) were read and not one step in them invokes a TypeScript type-check program.`,
+      `  Walked ${walked}, and not one line in them invokes a TypeScript type-check program.`,
       '  ⛔ Read that as a BROKEN READ, never as a tree without type checking: this block names what CI runs, so a reading of zero',
       '    is a statement about this walk. It is printed rather than dropped because a missing block looks exactly like a covered surface.',
     ];
   }
   const lines = [
     `Type-check lanes — ${rows.length} CI step(s) run a TypeScript type-check PROGRAM and ⊘ NOT ONE of them is measured by anything above.`,
-    '  ⛔ NOT the `check:type-check-coverage` / `check:type-check-debt` families the matched block may carry: those ratchet a LEDGER and',
-    '    a lane goes red on a per-package `tsc` program instead. Finding those two in a grep for `typecheck` is the false reassurance',
-    '    this block exists to break — an absence a reader could notice would have cost less. A row marked conditional MAY be skipped.',
-    '  ⛔ NOT runnable as spelled: every row is CI\'s own shell over CI\'s whole-workspace filters, so it sits OUTSIDE the runnable total',
-    '    and running every command on stdout does ⛔ NOT cover it.',
-    '  ⇒ What a card owes instead: `pnpm --filter <pkg> run typecheck` for every package whose TypeScript this diff changes what a program',
-    '    can SEE — one added import or one new root-level declaration is enough, and that package need not be one your paths matched.',
+    `  Walked ${walked} to find them: the DENOMINATOR, so a recogniser that stops spelling a lane shows as a dip rather than as silence.`,
+    '  ⛔ NOT the `check:type-check-coverage` / `check:type-check-debt` families the matched block may carry: those ratchet a LEDGER and a',
+    '    lane reds on a per-package `tsc` program instead — finding those two in a grep for `typecheck` is the false reassurance this block',
+    '    exists to break. NOT runnable as spelled either: CI\'s own shell over CI\'s whole-workspace filters, OUTSIDE the runnable total, and',
+    '    a row marked conditional MAY be skipped. ⇒ What a card owes instead: `pnpm --filter <pkg> run typecheck` for every package whose',
+    '    TypeScript this diff changes what a program can SEE — one added import or one new root-level declaration is enough.',
   ];
   for (const row of rows) {
     lines.push(`  - [${row.workflow} · ${row.job}] ${row.step}${row.conditional ? '   (conditional — CI may skip it)' : ''}`);
@@ -13541,10 +13542,9 @@ export function outsideBlockNames({
     // that renders it, like the three above, so the name cannot outlive the
     // heading.
     ...(jobFilteredJobs > 0 ? [`the ${jobFilteredJobs} path-scheduled CI job(s)`] : []),
-    // UNCONDITIONAL, like the unreachable listing and the tail below it and for
-    // the same reason: its block prints on every run, at zero rows as loudly as
-    // at four (#19172). ⛔ So it carries no count — a name sized off a row array
-    // goes missing on exactly the run whose walk came back empty.
+    // UNCONDITIONAL, like the unreachable listing and the tail below it: its
+    // block prints on every run, at zero rows as loudly as at four (#19172). ⛔
+    // So no count — a name sized off a row array goes missing on the empty walk.
     'the type-check lanes',
     'the always-runs tail',
   ];
@@ -14581,10 +14581,8 @@ export function derivationJson({ paths, size = null, matchedRows, kindGroups, pe
     // not contain.
     jobFilteredSteps: { jobs: jobFiltered.rows, counts: jobFiltered.counts },
     // IN this document and ⛔ NOT in `commands` (#19172), on the disposition of
-    // the key above it: these are CI's own type-check programs, not families,
-    // and the two family names that DO carry the word ratchet a ledger.
-    // `counts` travels beside the rows so a consumer reading an empty `lanes`
-    // can tell an empty WALK from a tree with no lane in it.
+    // the key above it: these are CI's own type-check programs, not families.
+    // `counts` is the walk's DENOMINATOR — an empty `lanes` is not a bare tree.
     typeCheckLanes: { lanes: typeCheckLanes.rows, counts: typeCheckLanes.counts },
     counts,
   };
@@ -14710,25 +14708,23 @@ function machineReadableOutput(mode, { paths, size = null, matchedRows, kindGrou
     }
     console.error('      ⇒ Run without --commands/--json to see each step printed as CI spells it.');
   }
-  // ⭐ The SEVENTH thing stdout deliberately omits (#19172), and the one a
-  // reader is likeliest to believe is already covered: two families in the list
-  // above carry the very word they would grep for, and neither is a lane. It is
-  // stated at BOTH zero and non-zero — an omitted heading reads as a clearance.
+  // ⭐ The SEVENTH thing stdout deliberately omits (#19172) — and the lane this
+  // card was filed on, because `--commands` disclosed it in no form at all. It
+  // is stated at BOTH zero and non-zero: an omitted heading reads as a clearance.
   if (typeCheckLanes.rows.length) {
     console.error(
       `  + ${typeCheckLanes.rows.length} CI step(s) run a TYPE-CHECK PROGRAM and are ${mode === 'json' ? 'under typeCheckLanes, not in commands' : 'NOT above'} —` +
-        " CI's own shell over CI's whole-workspace filters, so there is no local invocation to hand you.",
+        " CI's own shell over CI's whole-workspace filters, so there is no local invocation to hand you." +
+        ` Walked ${typeCheckLanes.counts?.steps ?? 0} step(s) / ${typeCheckLanes.counts?.runLines ?? 0} run: line(s) to find them.`,
     );
     for (const row of typeCheckLanes.rows) {
-      console.error(`      ⊘ NOT MEASURED — [${row.workflow} · ${row.job}] ${row.commands[0]}${row.conditional ? '   (conditional)' : ''}`);
+      const more = row.commands.length > 1 ? `   (+${row.commands.length - 1} more lane line(s) in this step)` : '';
+      console.error(`      ⊘ NOT MEASURED — [${row.workflow} · ${row.job}] ${row.commands[0]}${more}${row.conditional ? '   (conditional)' : ''}`);
     }
-    console.error(
-      '      ⛔ pnpm check:type-check-coverage and pnpm check:type-check-debt are NOT these, whichever list they are in: they' +
-        ' ratchet a ledger. What this card owes is `pnpm --filter <pkg> run typecheck` per package whose TypeScript it touches.',
-    );
+    console.error('      ⛔ pnpm check:type-check-coverage and pnpm check:type-check-debt are NOT these, whichever list they are in:'
+      + ' they ratchet a ledger. What this card owes is `pnpm --filter <pkg> run typecheck` per package whose TypeScript it touches.');
   } else {
-    console.error(`  + ⊘ TYPE-CHECK LANES: the walk over ${typeCheckLanes.counts?.prWorkflows ?? 0} pull-request workflow(s) found NONE — read`
-      + ' that as a broken read, never as a tree without type checking. Run without --commands/--json for the reading.');
+    console.error(`  + ⊘ TYPE-CHECK LANES: ${typeCheckLanes.counts?.steps ?? 0} step(s) walked across ${typeCheckLanes.counts?.prWorkflows ?? 0} pull-request workflow(s), NONE found — read that as a broken read, never as a tree without type checking.`);
   }
   // The FOURTH thing stdout deliberately omits (#14880), on stderr for exactly
   // the reason the three above are: the block is prose, and prose in the stream
@@ -14899,10 +14895,6 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
   // printed beside, and the whole point of this block is that it states what
   // the family list does not cover (#16285).
   const jobFiltered = jobFilteredSteps(workflowEntries, paths);
-  // Read from those SAME entries for the reason the line above states: a second
-  // read could name lanes from a revision the families were never derived
-  // against, and this block's whole claim is about the family list (#19172).
-  const typeCheckLanes = typeCheckLaneSteps(workflowEntries);
 
   if (mode === 'ran') {
     // Built from the SAME four expressions the other renderings read, in this
@@ -14941,6 +14933,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
     })) console.log(line);
     return recon.ok ? 0 : 1;
   }
+
+  // The SAME entries, for the reason the `jobFiltered` line states — and BELOW
+  // the `--ran` return, which renders no block of it (#19172).
+  const typeCheckLanes = typeCheckLaneSteps(workflowEntries);
 
   if (mode !== 'human') {
     machineReadableOutput(mode, {
@@ -15262,11 +15258,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
     for (const line of jobFilteredOut) console.log(line);
   }
 
-  // The type-check lanes (#19172), printed on EVERY run and directly above the
-  // tail, because the tail is where these steps otherwise dissolve: unnamed,
-  // unclassified by contract, one row among thirty-three. The heading is the
-  // repair — two families in the matched block carry the word a reader greps
-  // for, and this is the block that says what those two are not.
+  // The type-check lanes (#19172), directly above the tail because the tail is
+  // where these steps otherwise dissolve: one row among thirty-three, unnamed
+  // and unclassified by contract. The heading IS the repair — the rows were
+  // never missing, the name was.
   console.log('');
   for (const line of typeCheckLaneLines(typeCheckLanes.rows, typeCheckLanes.counts)) console.log(line);
 
@@ -27092,8 +27087,7 @@ function selfTest() {
     outsideBlockCounts(familyReconciliation({ jobFilteredRows: [{}, {}] })).jobFilteredJobs === 2,
   );
 
-  // ── The type-check lanes (#19172): the negatives are the live over-matches a
-  // SUBSTRING reading produces here, so a matcher that readmits one reds. ─────
+  // ── Type-check lanes (#19172): the negatives are the live over-matches a SUBSTRING reading produces here ──
   t('a `tsc --noEmit` or `-p <config>` invocation is a lane',
     isTypeCheckInvocation('pnpm --filter @objectstack/spec exec tsc --noEmit') && isTypeCheckInvocation('npx tsc -p tsconfig.test.json'));
   t('a `run typecheck` task is a lane whoever runs it',
@@ -27120,11 +27114,15 @@ function selfTest() {
       && typeCheckLaneLines([], { prWorkflows: 7 }).some((l) => l.includes('7 pull-request workflow(s)')));
   t('the closing enumeration names the block UNCONDITIONALLY, so an empty walk cannot hide it',
     outsideBlockNames({}).includes('the type-check lanes'));
-  // ⭐ THE POSITIVE CONTROL, live: the lanes behind the required aggregate are found, and no ledger family is among them.
+  // ⭐ THE POSITIVE CONTROL, live, pinned BY NAME and ⛔ never by row count: a
+  // count stays green while three of four lanes vanish. `Type Check · debt
+  // ledger` is deliberately absent — its only `run:` IS the ledger family.
   const liveLanes = typeCheckLaneSteps(liveWorkflows);
-  t('LIVE: the per-package tsc lanes are named, and no ledger family is mistaken for one',
-    liveLanes.rows.length > 0 && liveLanes.rows.every((r) => r.commands.every((c) => !c.includes('check:type-check'))),
-    liveLanes.rows.map((r) => `${r.workflow} · ${r.job}`).join(' · '));
+  const liveLaneJobs = liveLanes.rows.map((r) => r.job);
+  t('LIVE: every lane behind the required aggregate is found BY NAME, and no ledger family is mistaken for one',
+    ['Type Check · source gates', 'Type Check · workspace', 'Type Check · consumer gates'].every((j) => liveLaneJobs.includes(j))
+      && liveLanes.rows.every((r) => r.commands.every((c) => !c.includes('check:type-check'))),
+    `${liveLaneJobs.join(' · ')} - walked ${liveLanes.counts.steps} step(s) / ${liveLanes.counts.runLines} run line(s)`);
 
   // ── The seam between this tool and its caller (#13462) ────────────────────
   //
@@ -27280,6 +27278,7 @@ function selfTest() {
       'the 1 declared WIDE-population famil(ies)',
       'the 3 pending-changeset famil(ies)',
       'the unreachable listing',
+      'the type-check lanes',
       'the always-runs tail',
     ]) {
       t(`and it names "${name}" — every block printed below it, not a subset`, namesOutside(outsideLine, [name]));
@@ -27304,7 +27303,7 @@ function selfTest() {
     // pending family the sentence pointed below at a heading that is not there
     // (#16795). It is conditional on its own count now, like the two above it.
     t('nor the pending-changeset block, whose heading is absent at zero too', !(noBlocksLine ?? '').toLowerCase().includes('pending-changeset'));
-    t('...while still naming the two blocks that print unconditionally', namesOutside(noBlocksLine, ['the unreachable listing', 'the always-runs tail']));
+    t('...while still naming the three blocks that print unconditionally', namesOutside(noBlocksLine, ['the unreachable listing', 'the type-check lanes', 'the always-runs tail']));
     // ...and the CONTROL for that pair: a run with pending families and nothing
     // else names the third block and neither of the other two, so the case
     // above cannot be passing because the name went away for good.
@@ -27325,6 +27324,7 @@ function selfTest() {
       'the 1 declared WIDE-population famil(ies)',
       'the 1 pending-changeset famil(ies)',
       'the unreachable listing',
+      'the type-check lanes',
       'the always-runs tail',
     ])));
     // ...and the SHORT-harvest warning is conditional, on the rule the ⛔
