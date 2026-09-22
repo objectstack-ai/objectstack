@@ -334,6 +334,41 @@
  * UNSTAMPED. The status line's verbatim count is what makes the second one
  * visible in the same breath.
  *
+ * ## The remedy for a quoted stamp names the route that WORKS (#19319)
+ *
+ * The rule above is kept; the card that re-measured it was right about the half
+ * that was broken. A seat pasted a `git log` line into a fenced block, declared
+ * the stamp inside the fence exactly as the contract spells a declaration, and
+ * was refused MIXED with the remedy 「Declare it with `{{WAS:<those same
+ * digits>}}`」 — the declaration already standing at the position the refusal
+ * was complaining about, character for character. Three reproductions; the way
+ * out was discoverable only by disbelieving the text.
+ *
+ * ⛔ The refusal is NOT the defect, and the two arms that would soften it are
+ * both refused here:
+ *
+ *   TEACH THE FENCE   read a `{{WAS:…}}` inside a quotation as a declaration.
+ *                     That is a THIRD semantic for a quoted span — text for
+ *                     substitution, declaration for the contract — and the rule
+ *                     above is worth what it is because it has exactly one.
+ *   EXEMPT THE FENCE  drop quoted content from the bare scan. That is the one
+ *                     direction this file may not take, for the reason the
+ *                     MIXED and MASKING rows above already give.
+ *
+ * ⭐ And neither arm serves the body that was filed. A pasted `git log` line
+ * carries its stamp BARE, so no arm reaches it; wrapping that stamp in
+ * `{{WAS:…}}` to satisfy one would print the token inside the fence and publish
+ * a quotation the quoted command never emitted. The route that body has is the
+ * one the seat found by hand: the reading moves OUT of the quotation and is
+ * declared in the prose beside it, where a declaration is a declaration.
+ *
+ * So the remedy is a TAIL chosen by where the stamp stands, never a clause
+ * appended to a prescription the same sentence then takes back — and where the
+ * author HAS already written the declaration inside the quotation, it says what
+ * stands there is a PICTURE of one. A refusal prescribing a refused remedy is a
+ * tool arguing with itself; a refusal prescribing what is already on the page is
+ * that same tool telling the author to change nothing.
+ *
  * ## A quoted token is not a stamp — the carve-out's PARTNER check (#19091)
  *
  * The rule above is right and this file said so, and it landed without its
@@ -1345,7 +1380,7 @@ function quotedSpanRemedy(raw, spans, stamp, closed = null) {
     if (insideQuotedSpan(spans, m.index)) declarations.push([m.index, m.index + m[0].length]);
   }
   const declared = hits.every((at) => declarations.some(([from, to]) => at >= from && at < to));
-  return (
+  const remedy =
     (declared
       ? `⚠️ The \`{{WAS:${stamp}}}\` you already wrote round it is inside that quotation too. Every `
       : '⚠️ Every ') +
@@ -1357,8 +1392,8 @@ function quotedSpanRemedy(raw, spans, stamp, closed = null) {
     'The route that works is the same declaration OUTSIDE the quotation' +
     (closed ? `, once the value is one the quoted route takes at all: ${closed}` : ` — \`{{WAS:${stamp}}}\` in the prose beside it`) +
     '; or, if the quotation is an EXAMPLE, quote the placeholder form (`YYYY-MM-DDThh:mmZ`) instead of ' +
-    'digits. Quoting changes what is rendered, never what was typed onto the board.'
-  );
+    'digits. Quoting changes what is rendered, never what was typed onto the board.';
+  return { text: remedy, declared };
 }
 
 /**
@@ -1458,7 +1493,7 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
     refusals.push({
       kind: 'positional',
       detail: quoted
-        ? `${opener}Write \`${STAMP_TOKEN}\` there. ${quoted}`
+        ? `${opener}Write \`${STAMP_TOKEN}\` there. ${quoted.text}`
         : closed
           ? `${opener}Write \`${STAMP_TOKEN}\` there. The quoted route is NOT open to this one: ${closed}.`
           : `${opener}Write \`${STAMP_TOKEN}\` there. A stamp that is genuinely a reading of something ` +
@@ -1497,16 +1532,16 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
       seen.add(stamp);
       const closed = quotedRouteClosed(stamp, nowMs);
       const quoted = quotedSpanRemedy(raw, spans, stamp, closed);
-      const opener = quoted
-        ? `this body uses \`${STAMP_TOKEN}\` and also carries the stamp \`${stamp}\`. The clock this act ` +
-          'read and a time it did not stand on one board, and a quotation does not take the second out ' +
-          'of the contract. '
+      const opener = quoted?.declared
+        ? `this body uses \`${STAMP_TOKEN}\` and also carries the stamp \`${stamp}\`, declared only inside ` +
+          'a quotation. The clock this act read and a time it did not stand on one board, and a quotation ' +
+          'does not take the second out of the contract. '
         : `this body uses \`${STAMP_TOKEN}\` and also carries the bare stamp \`${stamp}\`. One of the ` +
           'two clocks was read by this act and the other was typed; a reader cannot tell which. ';
       refusals.push({
         kind: 'mixed',
         detail: quoted
-          ? `${opener}${quoted}`
+          ? `${opener}${quoted.text}`
           : closed
             ? `${opener}Make it \`${STAMP_TOKEN}\` if it is this act's own. The quoted route is NOT open to ` +
               `it: ${closed}.`
@@ -3038,7 +3073,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the token contract: the two spellings, and nothing else': 9,
   'the refusals: every route that must not reach the board': 20,
   'the opener scan: every `{{` is a token this tool renders, or the body is refused': 35,
-  'the quoting spelling: Markdown code is a quotation, and a quotation is rendered as written': 52,
+  'the quoting spelling: Markdown code is a quotation, and a quotation is rendered as written': 60,
   'the stamp verdict: a quoted token is not a stamp, and the carve-out has a partner check': 63,
   'the calendar rule: a stamp shaped like an instant the calendar does not have': 34,
   'the direction check: a stamp no act can have read': 22,
@@ -3050,7 +3085,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the size refusal: a 422 the platform answered is not a route that never existed': 53,
-  'the two positions: a declaration renders as bare digits, and the patrol reads digits': 17,
+  'the two positions: a declaration renders as bare digits, and the patrol reads digits': 24,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 20,
 });
@@ -3263,6 +3298,24 @@ export function selfTest() {
   t('⭐ the remedy SAYS the stamp sits inside a quotation, rather than prescribing a route that cannot work there', QUOTED_REMEDY.includes('sits inside a QUOTED SPAN'));
   t('…and names the placeholder as the way to quote an example', QUOTED_REMEDY.includes('YYYY-MM-DDThh:mmZ'));
   t('⛔ …and a stamp with even ONE unquoted occurrence gets the ordinary remedy, with no such clause', stampRefusals('Verdict {{NOW}}.\n\nread 2026-09-08T14:00Z and `2026-09-08T14:00Z`.\n', NOW_MS)[0].detail.includes('QUOTED SPAN') === false);
+
+  // ⭐ THE FILED REPRO, and the half of it that was a defect. The refusal is
+  // RIGHT — a declaration inside a fence is text there, so the digits stand on
+  // the board like any others — and the remedy was wrong: it prescribed, digit
+  // for digit, the declaration already written at the position it complained
+  // about, then took it back in a trailing clause. One route, and it is the one
+  // that posts.
+  const FENCED_DECLARATION = 'Record {{NOW}}.\n\n```\nabc1234  {{WAS:2026-09-08T14:00Z}}\n```\n';
+  const FENCED_BARE = 'Record {{NOW}}.\n\n```\nabc1234  2026-09-08T14:00Z\n```\n';
+  const fencedRemedy = stampRefusals(FENCED_DECLARATION, NOW_MS)[0]?.detail ?? '';
+  t('⭐ THE FILED REPRO: a `{{WAS:…}}` DECLARED inside a fence, beside the token, is still refused', kinds(FENCED_DECLARATION, NOW_MS).join() === 'mixed');
+  t('⭐ …and the remedy no longer prescribes the declaration that is ALREADY there — the circle the card measured', fencedRemedy.includes('Declare it with `{{WAS:2026-09-08T14:00Z}}`') === false);
+  t('⭐ …it names what stands in the fence: a PICTURE of a declaration, so re-typing it changes nothing', fencedRemedy.includes('you already wrote round it is inside that quotation too') && fencedRemedy.includes('PICTURE of a declaration'));
+  t('⭐ …and prescribes the route that works — the same declaration OUTSIDE the quotation', fencedRemedy.includes('OUTSIDE the quotation'));
+  t('⭐ …which is measured, not asserted: the body that takes that route POSTS', stampRefusals('Record {{NOW}}, of {{WAS:2026-09-08T14:00Z}}.\n\n```\nabc1234\n```\n', NOW_MS).length === 0);
+  t('⛔ THE CONTROL: a truly BARE stamp in the same fence is refused identically — no widening was bought', kinds(FENCED_BARE, NOW_MS).join() === 'mixed');
+  t('⛔ …and the two are told APART in the text: nothing was written there to call a picture of one', stampRefusals(FENCED_BARE, NOW_MS)[0].detail.includes('you already wrote') === false);
+  t('⛔ …and a declared stamp is no longer called BARE, which was the reader disagreeing with the board', fencedRemedy.includes('carries the bare stamp') === false && stampRefusals(FENCED_BARE, NOW_MS)[0].detail.includes('carries the bare stamp'));
 
   const UNMATCHED = 'Write `{{NOW}} there.';
   t('⛔ an unmatched backtick opens NO span — the run needs a closer of the same length on the line', renderBody(UNMATCHED, NOW_MS).body === 'Write `2026-09-10T06:37Z there.');
@@ -4032,6 +4085,17 @@ export function selfTest() {
     t('…with ONE row, not two — the declared walk declines a position the bare scan already took', stampRefusals(TYPED_OPENING, NOW_MS).length === 1);
     t('…and its remedy no longer offers the quoted route AT the position, but in the body', stampRefusals(TYPED_OPENING, NOW_MS)[0].detail.includes('into the BODY') && stampRefusals(TYPED_OPENING, NOW_MS)[0].detail.includes(`{{WAS:${READING}}}`));
     t('⛔ a value the shape or direction rules already refused is not ALSO filed here — one typo, one refusal', kinds('read {{WAS:2099-01-01T00:00Z}}', NOW_MS).join() === 'quoted-in-the-future' && kinds('read {{WAS:2026-13-45T99:99Z}}', NOW_MS).join() === 'quoted-no-such-instant');
+    const TYPO_ELSEWHERE = `${DECLARED_OPENING}\n\nthe form is {{WAS:yesterday}}.`;
+    const TWO_SUBS = `Seat post.\n\n<sub>read {{WAS:${READING}}}</sub>\n\n<sub>read {{WAS:${READING}}}</sub>`;
+    const TWO_SUBS_BARE = `Seat post.\n\n<sub>read ${READING}</sub>\n\n<sub>read ${READING}</sub>`;
+    const OWN_SECONDS = `Round opened {{WAS:${new Date(NOW_MS).toISOString().slice(0, 19)}Z}}.`;
+    t('⭐ the quoted-value gate is per VALUE: a typo elsewhere no longer hides the row at a position', kinds(TYPO_ELSEWHERE, NOW_MS).join() === 'quoted-not-a-stamp,positional-declared');
+    t('⛔ …while the refused value itself is still not filed twice — one typo, one refusal, unchanged', kinds('{{WAS:2026-13-45T99:99Z ruling}}', NOW_MS).join() === 'quoted-not-a-stamp');
+    t('⭐ two subscript lines carrying the SAME declared stamp are TWO rows — a set collapsed them into one', stampRefusals(TWO_SUBS, NOW_MS).length === 2);
+    t('⛔ …and the bare control is unchanged: the declared walk still declines a position the bare scan took', kinds(TWO_SUBS_BARE, NOW_MS).join() === 'positional,positional');
+    t('⭐ a declaration of THIS act\'s clock at the SECONDS grain is accepted, like the minute one beside it', writeRefuses(OWN_SECONDS) === false && writeRefuses(OWN_MINUTE) === false);
+    t('⭐ …and the patrol files nothing on it either, which is the parity that decides it', patrolFiles(OWN_SECONDS) === false && agree(OWN_SECONDS) === true);
+    t('⛔ …and the skip is MINUTE CONTAINMENT, not a tolerance: the minute BEFORE is still refused', kinds(`Round opened {{WAS:${stampNow(NOW_MS - 60000)}}}.`, NOW_MS).join() === 'positional-declared');
     t('structural: the walk runs over the body `substituteTokens` will SEND, and the reader is the patrol\'s own', /h56StampedReadings\(substituteTokens\(raw, now, spans\)\.body\)/u.test(stampSource) && new RegExp('function\\s+h56StampedReadings\\b').test(stampSource) === false);
   }
 
