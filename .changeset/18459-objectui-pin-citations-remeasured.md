@@ -36,13 +36,21 @@ repaired by refreshing numbers:**
   cast the record quoted, while its `object-calendar` twin still does.
 
 A fourth is a count rather than an anchor: the `plugin-tree` registry shell's
-`ElementDataSourceGate` control reading moved from 7 hits per control to 3,
-with the discriminating ZERO unchanged. A carried count would have been wrong
-with no line number moving at all.
+`ElementDataSourceGate` control reading. It was re-taken at BOTH ends of the hop
+by ONE method — occurrences of that identifier in each control's own
+`src/index.tsx` — and nothing moved: 3 each for `plugin-map`, `plugin-gantt`,
+`plugin-grid` and `plugin-calendar`, 0 for `plugin-tree`, at
+`87af769e9` and at `53ded82bf` alike, so the ZERO that discriminates is the
+whole reading. The `7 each` the record used to carry is reproducible at neither
+pin by that method, nor by a whole-package count (7 / 5 / 11 / 5). ⛔ A count is
+a reading only with its METHOD beside it — without one, re-stating the carried
+number is exactly what survives a re-measure.
 
-`renderer.tsx:1215` is the one anchor in the whole set whose NUMBER did not
-move across the hop, which is exactly why a number is never the reading on its
-own.
+`plugin-timeline/src/renderer.tsx:1215` is at the same number with the same
+content at both pins — and it is not alone there:
+`plugin-timeline/src/index.tsx:333` (`limit: 'limit',`), an anchor of that same
+record, is too, read by the same method at both pins. Which is exactly why a
+number that did not move is no more a reading on its own than one that did.
 
 Three further records in the same blocks cited an objectui sha WITHOUT naming
 `.objectui-sha`, so they sat outside the gate's population entirely — neither

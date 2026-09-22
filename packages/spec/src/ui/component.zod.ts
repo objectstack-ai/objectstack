@@ -3954,7 +3954,8 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * VALUE posture for `tree`: {@link TreeConfigSchema}, this repo's own block —
  * #15469 closed it against unknown keys on exactly this measurement
  * (`getTreeConfig` reads precisely those four keys from the block; the
- * undeclared read set was EMPTY), re-measured here at `53ded82b` and unchanged.
+ * undeclared read set was EMPTY), re-measured at `87af769e9`; unchanged since
+ * `53ded82b`.
  */
 export const ObjectTreePropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-tree`',
@@ -4101,10 +4102,14 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `variant` (`:706`) and `navigation` (`:650-653` → `:785` → `:840-841`).
  * Four more are read by the presentational renderer off the schema this
  * component spreads into it (`effectiveSchema`, `:769-788`): `dateFormat`
- * (`renderer.tsx:1215`, every variant — ⭐ the one anchor in this record whose
- * NUMBER did not move on the hop, which is why the number alone is never the
- * reading) and the gantt trio `rowLabel`
- * (`renderer.tsx:1505`), `minDate` / `maxDate` (`renderer.tsx:1442-1457`).
+ * (`plugin-timeline/src/renderer.tsx:1215`, every variant — its number is the
+ * same at both pins, as `plugin-timeline/src/index.tsx:333`'s also is, which is
+ * why the number alone is never the reading) and the gantt trio `rowLabel`
+ * (`plugin-timeline/src/renderer.tsx:1505`), `minDate` / `maxDate`
+ * (`plugin-timeline/src/renderer.tsx:1442-1457`). ⚠️ All three name their
+ * package because objectui has a second `renderer.tsx` (in `plugin-chatbot`):
+ * a suffix that matches two files names neither, and the gate drops it from
+ * the population rather than guessing.
  *
  * Measured and deliberately NOT declared, each with its reason:
  *  - the flat field spellings and `scale`
@@ -4135,8 +4140,13 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  *    `groupByField`, `colorField`, `metaFields` (`:520`, through an `as any`
  *    cast, which is why a `timelineConfig?.x` sweep alone under-counts) and
  *    `scale`. `limit` is not among them, and NO spread of a node's own
- *    `timeline` block exists anywhere in objectui (0 hits; lit control, same
- *    shape, the view-block spreads `...mergedTimeline` /
+ *    `timeline` block exists anywhere in objectui (0 hits on the NODE face —
+ *    method: `git grep '\.\.\.(schema\.timeline'` at this pin returns four
+ *    lines and every one is on the VIEW face, where `schema` is the view
+ *    document: the block spread at `plugin-list/src/ListView.tsx:3066` and the
+ *    three member-conditional ones at `:3114-3116`. ⛔ Without that scope
+ *    written beside it the count is not 0. Lit control, same shape: the
+ *    view-block spreads `...mergedTimeline` /
  *    `...(viewOptions.timeline || {})`, which do fire). The
  *    `ElementDataSourceGate` mapping is `limit: 'limit'`
  *    (`plugin-timeline/src/index.tsx:333`) — FLAT, so it never touches the
@@ -4168,16 +4178,19 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * reference, for the reason the ruling gives.
  *
  * ⚠️ `variant: 'gantt'` is declared because the registration declares it
- * (`index.tsx:361-362`) and the renderer reads it — but the OBJECT-BOUND
- * composed path REFUSES it loudly (objectui#6655, `ObjectTimeline.tsx:706-708`:
+ * (`plugin-timeline/src/index.tsx:361-362`) and the renderer reads it — but the
+ * OBJECT-BOUND composed path REFUSES it loudly (objectui#6655,
+ * `ObjectTimeline.tsx:706-708`:
  * `:706` gates on `!hasAuthoredItems && schema.variant === 'gantt'` and `:708`
  * renders `timeline-unsupported-variant`. ⚠️ The `:518` this clause carried is
- * that gate at the RETIRED `53ded82bf` and a comment line at this pin — the one
- * number in this record the 2026-09-22 re-read did not reach, because it sat on
- * a line the conversion never touched), so on this block it is usable only
- * together with authored `items`. Declared-and-refused-with-a-diagnostic is not
- * the accepted-and-dropped class this section exists to close: the author is
- * told, in the renderer, by name.
+ * that gate at the RETIRED `53ded82bf` and a comment line at this pin. It sat on
+ * a line the 2026-09-22 conversion never touched — and so did eight other
+ * anchors of this record, so the untouched line is not what singles it out.
+ * RE-READING all nine at this pin does: the other eight say here what this
+ * record claims they say, and this one alone did not), so on this block it is
+ * usable only together with authored `items`.
+ * Declared-and-refused-with-a-diagnostic is not the accepted-and-dropped class
+ * this section exists to close: the author is told, in the renderer, by name.
  */
 export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-timeline`',
