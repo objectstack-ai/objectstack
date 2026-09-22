@@ -360,7 +360,15 @@ export const RECENSUS_17242 = {
    * sweep ran on the objectstack tree `boundAgainstSha`, whose `packages/spec`
    * subtree is byte-identical to `measuredOn`'s -- the only file differing
    * between the two commits is this gate -- so the declined population it read
-   * is the same 467 rows recorded above. */
+   * is the same 467 rows recorded above.
+   *
+   * ⭐ That byte-identity is also what lets the self-test's reality pin read
+   * `.objectui-sha` at `measuredOn` rather than here. It matters because the two
+   * anchors have different LIFETIMES, not different contents: `measuredOn` is a
+   * commit this branch was cut from, `boundAgainstSha` is a commit ON it, and a
+   * squash merge leaves only the first resolvable. The pin block in `selfTest()`
+   * states the consequence and takes both; the equivalence is held there too, so
+   * this sentence is checked rather than trusted whenever both still resolve. */
   boundAgainstSha: 'cdd68cf15ed863468ce6eecdd5c0824b760ea22a',
   objectuiPinSha: '87af769e9a3ee28ace099fdd653d3ebd79fe82e2',
   objectuiMainSha: '0cf2d6644bdb96a9a6784ef801ee6a60a5306bd8',
@@ -728,31 +736,65 @@ function listUnresolvable(root = process.cwd()) {
 function assert(cond, msg) { if (!cond) { console.error(`❌ check-spec-docblock-symbol-anchors --self-test: ${msg}`); process.exit(1); } }
 
 /**
- * The trimmed contents of `path` at `commit`, or `null` when this clone cannot
- * answer -- git missing, not a repository, or the commit simply not present
- * (a shallow clone, or a squash merge that left the object unreachable).
+ * The contents of `path` at `commit`, WITH THE CAUSE when there are none.
  *
- * ⛔ Callers must read `null` as NOT MEASURED, never as agreement. It is spelled
- * as a return rather than a throw because the one caller is a FROZEN pin whose
- * anchor legitimately stops resolving once the branch carrying it is squashed.
+ * ⛔ A single `null` was the previous shape and it is what made this readable as
+ * one cause. `git show <commit>:<path>` answers the same non-zero exit FOUR ways
+ * -- git missing, cwd not a repository, the commit absent, and the path absent at
+ * a commit that is perfectly present -- so a caller handed one `null` can name a
+ * cause only by guessing, and the caller here named the anchor's absence out loud
+ * on a run where the anchor resolved fine. The four are separated here, before
+ * the read, by two cheap probes:
  *
- * Spawned with `gitFreeEnv()` per the rule in `scripts/git-env.mjs`: this is a
- * local read that must resolve against the repository its `cwd` names, and an
- * inherited `GIT_DIR` would point it at a different one.
+ *   'no-repo'        `git rev-parse --git-dir` fails: git is missing, or this
+ *                    directory is not a repository. Nothing about any commit can
+ *                    be established from here.
+ *   'commit-absent'  the repository answers and `git cat-file -e <commit>^{commit}`
+ *                    does not resolve: a shallow clone, or a squash merge that left
+ *                    the object unreachable. ⭐ THE ONLY cause that is a legitimate
+ *                    NOT MEASURED for a frozen anchor.
+ *   'path-absent'    the commit IS an object here and `path` is not readable at it.
+ *                    A hard failure, ⛔ never a skip: this is the state a renamed or
+ *                    mistyped pin file produces, and reporting it as an unreachable
+ *                    anchor switches the caller's guard off while telling the reader
+ *                    to expect the skip.
+ *   'ok'             `text` is the trimmed contents.
+ *
+ * ⛔ Callers must read every status but `'ok'` as NOT MEASURED, never as agreement,
+ * and must name the status they were HANDED rather than whichever cause reads best.
+ * It is spelled as a return rather than a throw because a FROZEN anchor legitimately
+ * stops resolving once the branch carrying it is squashed -- but only that one does.
+ *
+ * Spawned with `gitFreeEnv()` per the rule in `scripts/git-env.mjs`: these are
+ * local reads that must resolve against the repository their `cwd` names, and an
+ * inherited `GIT_DIR` would point them at a different one.
  *
  * @param {string} commit
  * @param {string} path
- * @returns {string | null}
+ * @returns {{ status: 'ok' | 'no-repo' | 'commit-absent' | 'path-absent', text: string | null }}
  */
 function readTextAtCommit(commit, path) {
+  const gitAnswers = (args) => {
+    try {
+      execFileSync('git', args, { env: gitFreeEnv(), stdio: ['ignore', 'ignore', 'ignore'] });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!gitAnswers(['rev-parse', '--git-dir'])) return { status: 'no-repo', text: null };
+  if (!gitAnswers(['cat-file', '-e', `${commit}^{commit}`])) return { status: 'commit-absent', text: null };
   try {
-    return execFileSync('git', ['show', `${commit}:${path}`], {
-      encoding: 'utf8',
-      env: gitFreeEnv(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
+    return {
+      status: 'ok',
+      text: execFileSync('git', ['show', `${commit}:${path}`], {
+        encoding: 'utf8',
+        env: gitFreeEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim(),
+    };
   } catch {
-    return null;
+    return { status: 'path-absent', text: null };
   }
 }
 
@@ -771,19 +813,23 @@ function readTextAtCommit(commit, path) {
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 // ⛔ Three of these cases are registered PER `CENSUS_RESIDUAL` row (the
-// exactness loop below runs three `check()`s over each row), so 21 of the 120
+// exactness loop below runs three `check()`s over each row), so 21 of the 124
 // are the 7 day-one rows, and REPAIRING a citation and deleting its row
 // legitimately lowers this floor by 3 — that is the ONLY reason it may be
 // lowered. Any other drop is cases that STOPPED RUNNING; find what stopped
 // registering instead of moving the number.
 //
 // ⛔ A SECOND per-row loop registers seven cases per enumerated
-// `bindingInNeitherRepoRows` row — 35 of the 120 — and it is NOT a second
+// `bindingInNeitherRepoRows` row — 35 of the 124 — and it is NOT a second
 // lowering reason. Those rows are a reading frozen at the shas the record
 // names, so they are never repaired and never deleted; a drop there is the
 // enumeration being edited away from the cell it is supposed to hold.
+//
+// ⛔ The number is READ OFF A PROBE, never derived from a diff: run the self-test
+// with this entry raised to something unreachable and take the count its own floor
+// message prints. 120 -> 124 was read that way.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-spec-docblock-symbol-anchors self-test': 120,
+  'check-spec-docblock-symbol-anchors self-test': 124,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1027,7 +1073,12 @@ export function selfTest() {
   //    ⛔ What an internal pin CANNOT catch is a sentence ABOUT A TREE that
   //    nothing reading that tree holds — which is what the via sentence was. So
   //    where a pin against reality is both cheap and FROZEN, it is taken: the
-  //    objectui-pin case below is that one, and it is the only one here.
+  //    objectui-pin cases below are those, and they are the only ones here.
+  //    ⚠️ "Cheap and FROZEN" does not by itself pick an anchor, and the previous
+  //    spelling read that as if it did. Two of this record's shas are frozen; only
+  //    one of them is still an object on main after the squash, and a pin read at
+  //    the other holds nothing for the whole post-merge life of the record. The
+  //    pin block below states which is which and why, and takes both.
   check(
     RECENSUS_17242.trackedTargetLineCitations + RECENSUS_17242.declinedCitations
       === RECENSUS_17242.commentProseLineCitations,
@@ -1076,36 +1127,89 @@ export function selfTest() {
     `the three tense cells must exhaust the declined population (${RECENSUS_17242.declinedCitations})`,
   );
   // ⛔ A moving ref is not an anchor: every tree this split was taken against
-  // must be a full sha, so a later reader can check it out.
-  for (const field of ['boundAgainstSha', 'objectuiPinSha', 'objectuiMainSha']) {
+  // must be a full sha, so a later reader can check it out. `measuredOn` is in
+  // this list because the reality pin below READS AT IT — an anchor a case
+  // depends on is one the format rule has to cover.
+  for (const field of ['measuredOn', 'boundAgainstSha', 'objectuiPinSha', 'objectuiMainSha']) {
     check(/^[0-9a-f]{40}$/.test(RECENSUS_17242[field]),
       `\`${field}\` must be a full 40-character sha — a branch name, a short sha or a ref is not an anchor, `
         + `got \`${RECENSUS_17242[field]}\``);
   }
-  // ⭐ THE ONE REALITY PIN this battery takes, and it is takeable because it is
-  // FROZEN: this repo records the objectui commit it builds against in its own
-  // pin file, so reading that file AT `boundAgainstSha` says which sibling tree
-  // the sweep was standing on. It must be `objectuiPinSha`.
-  // ⛔ Read AT the sha, never from the working tree: the live pin moves, and a
-  // live read would turn a frozen historical record into a ratchet that reds on
-  // every unrelated objectui bump.
-  // ⚠️ CONDITIONAL, and it says so out loud when it cannot be taken:
-  // `boundAgainstSha` is a commit on the branch that landed this record, so a
-  // squash merge drops it from main's history and the object stops resolving.
-  // Hard-failing there would turn a frozen record into a permanent red on main,
-  // so an unreachable anchor is REPORTED as not taken — ⛔ never asserted away
-  // in silence, which is the failure this file exists about.
-  const pinnedObjectuiSha = readTextAtCommit(RECENSUS_17242.boundAgainstSha, OBJECTUI_PIN_FILE);
-  if (pinnedObjectuiSha === null) {
-    console.log(
-      `   ⚠️ reality pin NOT TAKEN: \`${RECENSUS_17242.boundAgainstSha}\` is not an object in this clone, so the `
-        + 'objectui pin could not be read at it (expected on main once this branch is squashed).',
-    );
+  // ⭐ THE REALITY PINS this battery takes, and there are TWO because the record
+  // carries two anchors that fail in opposite ways.
+  //
+  // The mechanism is one: this repo records the objectui commit it builds against
+  // in its own pin file, so reading that file AT a tree the sweep stood on says
+  // which sibling tree it was standing on. It must be `objectuiPinSha`.
+  // ⛔ Read AT a sha, never from the working tree: the live pin moves, and a live
+  // read would turn a frozen historical record into a ratchet that reds on every
+  // unrelated objectui bump.
+  //
+  // ⚠️ WHICH sha decides whether the pin survives the merge, and the previous
+  // spelling took the one that does not. `boundAgainstSha` is a commit on the
+  // BRANCH carrying this record: a squash drops it from main's history, the read
+  // stops resolving, and from then on `objectuiPinSha` is held by nothing but its
+  // 40-hex format above. Measured, with a deliberately WRONG `objectuiPinSha` as
+  // the lit control: it reds in a clone that fetched this branch, and passes in a
+  // depth-1 clone of head and in a clone whose objects are main's.
+  //
+  // `measuredOn` is the other anchor the record already carries and it is an
+  // ANCESTOR OF MAIN, so under `lint.yml`'s `fetch-depth: 0` checkout it resolves
+  // on every run, before and after the squash. The pin file is byte-identical at
+  // the two commits — the only file differing between them is this gate, which is
+  // the record's own claim at `boundAgainstSha` — so reading at `measuredOn` reads
+  // the same pin, and the equivalence case below holds that claim whenever both
+  // anchors resolve rather than leaving it as prose.
+  //
+  // ⇒ `measuredOn` is the PRIMARY pin and is expected to be taken on main forever;
+  // `boundAgainstSha` is a SECOND, conditional one that lapses after the squash.
+  //
+  // ⛔ NOT TAKEN names exactly ONE cause — the commit is not an object in this
+  // clone. Every other way the read can fail is a hard red, because a pin file
+  // that was renamed or mistyped otherwise switches the guard off while the notice
+  // tells the reader to expect the skip. That conflation is what the previous
+  // spelling shipped: it printed "is not an object in this clone" on a run where
+  // `git cat-file -t` answered `commit` for the very same sha.
+  const realityPins = [
+    ['primary', 'measuredOn', RECENSUS_17242.measuredOn],
+    ['second', 'boundAgainstSha', RECENSUS_17242.boundAgainstSha],
+  ].map(([role, field, commit]) => ({ role, field, commit, read: readTextAtCommit(commit, OBJECTUI_PIN_FILE) }));
+  for (const { role, field, commit, read } of realityPins) {
+    if (read.status === 'commit-absent') {
+      console.log(
+        `   ⚠️ ${role} reality pin NOT TAKEN: \`${commit}\` (\`${field}\`) is not an object in this clone, so `
+          + `\`${OBJECTUI_PIN_FILE}\` could not be read at it. A shallow clone reaches neither anchor; `
+          + `\`boundAgainstSha\` is additionally unreachable on main once this branch is squashed.`,
+      );
+    }
+    // ⛔ Everything that is not the one legitimate skip is a hard red, and the
+    // message names the status it was HANDED rather than picking a cause — which
+    // is the whole of what went wrong here. ⚠️ Measured: `no-repo` is not
+    // reachable through `--self-test`, because the live-corpus sweep above asks
+    // `git ls-files` and throws first; it is discriminated anyway so this caller
+    // never has to infer it, and the message describes both without asserting
+    // either.
+    check(read.status === 'ok' || read.status === 'commit-absent',
+      `the ${role} reality pin was NOT taken, and not for the one reason that is a legitimate skip: the read of `
+        + `\`${OBJECTUI_PIN_FILE}\` at \`${commit}\` (\`${field}\`) answered \`${read.status}\`. \`path-absent\` `
+        + 'means the anchor RESOLVED and the pin file is not readable at it — a renamed or mistyped pin path lands '
+        + 'here, and reporting that as an unreachable anchor is how this pin gets switched off while its own notice '
+        + 'tells the reader to expect the skip. `no-repo` means this directory is not a git repository at all. '
+        + '⛔ Either way the pin is NOT MEASURED, and NOT MEASURED is not a pass.');
+    check(read.status !== 'ok' || read.text === RECENSUS_17242.objectuiPinSha,
+      `\`objectuiPinSha\` (${RECENSUS_17242.objectuiPinSha}) must be the objectui commit this repo was pinned to at `
+        + `\`${field}\` — the pin file reads \`${read.text}\` there, so the binding sweep and this repo were standing `
+        + 'on different sibling trees');
   }
-  check(pinnedObjectuiSha === null || pinnedObjectuiSha === RECENSUS_17242.objectuiPinSha,
-    `\`objectuiPinSha\` (${RECENSUS_17242.objectuiPinSha}) must be the objectui commit this repo was pinned to at `
-      + `\`boundAgainstSha\` — the pin file reads \`${pinnedObjectuiSha}\` there, so the binding sweep and this repo `
-      + 'were standing on different sibling trees');
+  // ⭐ The record's "the only file differing between the two commits is this gate"
+  // is what makes the primary anchor a substitute for the second, and the loop
+  // above already holds it: BOTH anchors must read `objectuiPinSha`, so the pin
+  // file cannot differ between them without one of the two cases reddening.
+  // ⛔ A further case comparing the two reads TO EACH OTHER was written here and
+  // removed: it can only be reached once both have been asserted equal to the same
+  // string, so it can never fail. That is a phantom check — a case that evaluates,
+  // registers against the floor, and discriminates nothing — and this file is the
+  // wrong place to keep one.
   // The DECLARED sensitivity must be a variant of the SAME reading: it sweeps
   // the same rows, so it exhausts the same population, and loosening the
   // predicate can only move rows INTO a repo, never out of one.
@@ -1184,6 +1288,16 @@ export function selfTest() {
   check(tokenUnder(shortestArmFirst, qualified) === tokenUnder(RECENSUS_17242.bindingTokenPattern, qualified),
     'a shortest-arm-first alternation must return the SAME token — ordering is not what prevents truncation, and '
       + 'this record must not claim it is');
+  // ⚠️ The record's docblock states a THIRD leg — "removing the lookahead while
+  // keeping longest-first also truncates nothing; only removing BOTH truncates" —
+  // and ⛔ deliberately does not claim the battery pins it (`it is the lookahead
+  // the self-test pins`). A case for it was written here and removed: every
+  // mutation that would light it is caught first by the two guard cases above (the
+  // pattern must end in the tail guard; the re-order substitution must apply), so
+  // the leg's truth is ENTAILED by cases that already ran and a case for it could
+  // not fail. The sentence is a recorded measurement, not an unheld claim about
+  // this battery — so it stays prose, and the battery stays honest about what it
+  // pins.
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   const floorMessages = [];
