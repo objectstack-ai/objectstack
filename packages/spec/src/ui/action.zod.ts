@@ -1314,10 +1314,17 @@ const actionObject = () => strictObject({
   // reads back: `executeDeclarativeUpdateAction` keys `undoData` off
   // `Object.keys(data)`, `data` being that merged bag — NOT `patch` alone.
   // Naming `patch` alone here is what let a consumer build a half-restore and
-  // report it as a full undo. Without `operation` nothing declares a write
-  // set, so the capture is inferred from a handler's side effects — the
-  // un-anchored case this flag started in.
-  undoable: z.boolean().optional().describe("Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the one declared operation and the declared form of that action: what the undo captures is the prior value of EVERY field the action writes — the merged write bag, `patch` UNDER the collected `params`, not `patch` alone. An action with no `operation` declares no write set, so nothing anchors the capture there."),
+  // report it as a full undo.
+  // A SECOND shape is fulfilled, by a different runtime: `type: 'api'`, which
+  // the pinned console snapshots — its two readers gate the undo envelope on
+  // `action.undoable` alone and never read `action.operation`, and they are the
+  // whole recorded evidence for this key's `live` liveness verdict. That is why
+  // the published `ReassignLeadAction` example (api + undoable, no `operation`)
+  // is legal. Those two are the closed fulfillable set; everything else —
+  // `script` / `url` and the dormant `flow` / `modal` / `form` without
+  // `operation: 'update'` — has no reader at all and is refused below rather
+  // than silently accepted.
+  undoable: z.boolean().optional().describe("Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the one declared operation and the declared form of that action: what the undo captures is the prior value of EVERY field the action writes — the merged write bag, `patch` UNDER the collected `params`, not `patch` alone. An action with no `operation` declares no write set here, but `type: 'api'` is fulfilled by the console, which builds the undo envelope from `undoable` alone. Those two shapes — `operation: 'update'` and `type: 'api'` — are the whole fulfillable set; `undoable` on any other action is refused, because nothing would anchor the capture."),
 
   /**
    * Result Dialog — describe how to render the API response on success.
