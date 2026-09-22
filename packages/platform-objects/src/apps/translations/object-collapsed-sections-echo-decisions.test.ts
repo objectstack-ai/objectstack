@@ -878,14 +878,23 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     expect(FORM_SECTIONS.length).toBe(4);
     expect(COLLAPSED_SECTIONS).toEqual(['capabilities', 'advanced']);
     expect(OPEN_SECTIONS).toEqual(['basics', 'fields']);
-    // 55 leaves: 9 this round decided, 2 already authored, 32 deferred, and 12
-    // that arrived with #19331. That card gave the object form's five declared
-    // top-level scalars an `advanced` row each — `ownership`, `sharingModel`,
-    // `managedBy`, `editMode`, `fileAccessDelegate`, a label and a help text
-    // apiece — and the same card authored all thirty of their translated leaves,
-    // so the ratchet below still reads zero. The population is DERIVED from the
-    // form, so the arrival needed no edit here; this count is the measured fact
-    // that moved with it, and it is what makes a SIXTEENTH row noticeable.
+    // 55 leaves — the 45 that predate #19331, plus 10 that arrived with it.
+    // ⚠️ The `9 this round decides / 2 already authored / 32 deferred`
+    // decomposition this line used to carry accounts for 43 of those 45, not
+    // all of them. That two-leaf shortfall is OLDER than #19331 and is left
+    // standing here rather than absorbed into it: this file's whole job is to be
+    // the measured record, so a later round re-deriving provenance from this
+    // comment must not read two leaves as having arrived with a card that did
+    // not bring them. It is not explained here.
+    // #19331's own contribution is exact and is all it may claim: that card gave
+    // the object form's five declared top-level scalars an `advanced` row each —
+    // `ownership`, `sharingModel`, `managedBy`, `editMode`, `fileAccessDelegate`
+    // — a label and a help text apiece. That is the +10 the `advanced` count
+    // below reads (36 → 46) and the +10 this total reads, and the same card
+    // authored all thirty of their translated leaves (10 × 3 locales), so the
+    // ratchet further down still reads zero. The population is DERIVED from the
+    // form, so the arrival needed no edit here; these counts are the measured
+    // facts that moved with it.
     expect(PANEL_LEAVES.length).toBe(55);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(9);
