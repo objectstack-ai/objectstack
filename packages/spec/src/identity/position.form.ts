@@ -23,6 +23,11 @@ export const positionForm = defineForm({
         { field: 'name', required: true, helpText: 'snake_case' },
         { field: 'label', required: true },
         { field: 'description', colSpan: 2 },
+        // #19331 — `delegatable` is declared by PositionSchema and was offered by
+        // no control, so the only door to an ADR-0091 D3 self-service delegation
+        // was the Source tab's free-text JSON. A boolean node takes the boolean
+        // control; the copy states the gate the runtime actually applies.
+        { field: 'delegatable', type: 'boolean', colSpan: 1, helpText: 'Holders may delegate this position themselves, time-boxed and with a reason (ADR-0091 D3). Default false — delegation is admin-only.' },
       ],
     },
   ],
