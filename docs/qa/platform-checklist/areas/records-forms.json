@@ -4173,7 +4173,7 @@
         {
           "revision": 1,
           "date": "2026-09-22",
-          "change": "initial — ADR-0136 D2.4 acceptance for predicate relationship traversal; the capability's three ruled outcomes (passes / refuses / faults loudly on an unreadable parent)",
+          "change": "initial — acceptance for predicate relationship traversal under ADR-0137 D2 (a field-rule predicate that faults refuses the submit and names the field and the rule); the capability's three ruled outcomes (passes / refuses / faults loudly on an unreadable parent)",
           "ref": "claude/issue-18682-predicate-relationship-traversal"
         }
       ]

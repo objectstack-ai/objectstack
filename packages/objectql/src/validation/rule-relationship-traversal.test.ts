@@ -41,11 +41,19 @@ const opportunity = {
   ],
 };
 
+/** A readable, resolved parent row. */
+const row = (r: Record<string, unknown>) => ({ object: 'crm_account', row: r });
+/** The engine could not make the parent readable for this caller. */
+const unavailable = (
+  reason: 'no-reference' | 'unreadable' | 'field-unreadable' | 'unresolved',
+  unreadableFields?: string[],
+) => ({ object: 'crm_account', unavailable: reason, unreadableFields });
+
 const evaluate = (
   data: Record<string, unknown>,
-  related?: Record<string, Record<string, unknown> | null>,
+  related?: Record<string, unknown>,
 ): void => {
-  evaluateValidationRules(opportunity as any, data, 'insert', { related });
+  evaluateValidationRules(opportunity as any, data, 'insert', { related: related as never });
 };
 
 describe('#18682 — collectPredicateRelationships: what the engine must preload', () => {
@@ -88,30 +96,30 @@ describe('#18682 — collectPredicateRelationships: what the engine must preload
   });
 });
 
-describe('#18682 — the three acceptance outcomes (ADR-0136 D2.4)', () => {
+describe('#18682 — the three acceptance outcomes (ADR-0137 D2)', () => {
   // ── PASSES when the parent field matches ──────────────────────────────────
   it('ACCEPTS the write when the parent field does not trip the rule', () => {
     expect(() =>
-      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: { id: 'acc_1', type: 'direct' } }),
+      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: row({ id: 'acc_1', type: 'direct' }) }),
     ).not.toThrow();
   });
 
   it('ACCEPTS when the parent matches but the local half does not', () => {
     expect(() =>
-      evaluate({ name: 'A', amount: 10, account: 'acc_1' }, { account: { id: 'acc_1', type: 'partner' } }),
+      evaluate({ name: 'A', amount: 10, account: 'acc_1' }, { account: row({ id: 'acc_1', type: 'partner' }) }),
     ).not.toThrow();
   });
 
   // ── REFUSES the write when it does not ────────────────────────────────────
   it('REFUSES the write when the parent field trips the rule', () => {
     expect(() =>
-      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: { id: 'acc_1', type: 'partner' } }),
+      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: row({ id: 'acc_1', type: 'partner' }) }),
     ).toThrow(ValidationError);
   });
 
   it('the refusal carries the authored message, not a fault', () => {
     try {
-      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: { id: 'acc_1', type: 'partner' } });
+      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: row({ id: 'acc_1', type: 'partner' }) });
       throw new Error('expected a ValidationError');
     } catch (e) {
       const err = e as ValidationError;
@@ -131,7 +139,7 @@ describe('#18682 — the three acceptance outcomes (ADR-0136 D2.4)', () => {
   // never silently false either.
   it('FAULTS LOUDLY and rejects when the related row is unreadable (null)', () => {
     expect(() =>
-      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: null }),
+      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: unavailable('unreadable') }),
     ).toThrow(ValidationError);
   });
 
@@ -141,7 +149,7 @@ describe('#18682 — the three acceptance outcomes (ADR-0136 D2.4)', () => {
 
   it('the fault is reported AS a fault, naming the unevaluable rule', () => {
     try {
-      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: null });
+      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: unavailable('unreadable') });
       throw new Error('expected a ValidationError');
     } catch (e) {
       const err = e as ValidationError;
@@ -158,7 +166,7 @@ describe('#18682 — the three acceptance outcomes (ADR-0136 D2.4)', () => {
     expect(() =>
       evaluate(
         { name: 'A', amount: 50000, account: 'acc_1' },
-        { account: null },
+        { account: unavailable('unreadable') },
       ),
     ).toThrow(ValidationError);
   });
@@ -170,7 +178,7 @@ describe('#18682 — hydration is per-rule and never reaches the write payload',
   // the driver in place of the foreign key.
   it('does NOT mutate the record it was handed', () => {
     const data = { name: 'A', amount: 10, account: 'acc_1' };
-    evaluate(data, { account: { id: 'acc_1', type: 'partner' } });
+    evaluate(data, { account: row({ id: 'acc_1', type: 'partner' }) });
     expect(data.account).toBe('acc_1');
   });
 
@@ -190,7 +198,7 @@ describe('#18682 — hydration is per-rule and never reaches the write payload',
     };
     try {
       evaluateValidationRules(schema as any, { name: 'A', amount: 10, account: 'acc_1' }, 'insert',
-        { related: { account: { id: 'acc_1', type: 'partner' } } });
+        { related: { account: row({ id: 'acc_1', type: 'partner' }) } });
       throw new Error('expected a ValidationError');
     } catch (e) {
       const detail = JSON.stringify((e as unknown as { errors?: unknown }).errors ?? (e as Error).message);
@@ -211,7 +219,107 @@ describe('#18682 — hydration is per-rule and never reaches the write payload',
     };
     expect(() =>
       evaluateValidationRules(schema as any, { name: 'A', amount: 10, account: 'acc_1' }, 'insert',
-        { related: { account: { id: 'acc_1', type: 'partner' } } }),
+        { related: { account: row({ id: 'acc_1', type: 'partner' }) } }),
+    ).not.toThrow();
+  });
+});
+
+describe('#18682 — the engine refuses the unserviceable shape, not only lint', () => {
+  // ⭐ The defect this closes: the mixed shape was REJECTED before the
+  // capability (the traversal faulted) and would have been ACCEPTED after it,
+  // with the bare arm silently `false` — option B's harm, on every path that
+  // authors metadata without running lint (Studio, `sys_metadata`, an agent).
+  // ADR-0124: an author-side direction is never the whole answer.
+  const mixed = {
+    fields: opportunity.fields,
+    validations: [{
+      name: 'mixed', type: 'script', severity: 'error', message: 'should never be reached',
+      condition: "record.account.type == 'partner' && record.account == 'acc_1'",
+    }],
+  };
+
+  it('REFUSES a rule that reads a reference field both ways, even with a readable parent', () => {
+    try {
+      evaluateValidationRules(mixed as any, { name: 'A', account: 'acc_1' }, 'insert',
+        { related: { account: row({ id: 'acc_1', type: 'partner' }) } as never });
+      throw new Error('expected a ValidationError');
+    } catch (e) {
+      const detail = JSON.stringify((e as unknown as { errors?: unknown }).errors ?? (e as Error).message);
+      expect(detail).toContain('could not be evaluated');
+      expect(detail).toContain('record.account.id');
+      // ⛔ and never the rule's own message — the rule produced NO verdict.
+      expect(detail).not.toContain('should never be reached');
+    }
+  });
+
+  it('REFUSES a read deeper than one hop in the engine too', () => {
+    const deep = {
+      fields: opportunity.fields,
+      validations: [{ name: 'deep', type: 'script', severity: 'error', message: 'no',
+        condition: "record.account.owner.email == 'x@y.z'" }],
+    };
+    expect(() => evaluateValidationRules(deep as any, { name: 'A', account: 'acc_1' }, 'insert', {}))
+      .toThrow(ValidationError);
+  });
+});
+
+describe('#18682 — the refusal names the RELATED object, not the referencing one', () => {
+  // ADR-0137 D2: a faulting field-rule predicate names the field and the rule.
+  // The generic undeclared-key prescription said the field "this object does not
+  // declare", which on a traversal is false in every clause — the field IS
+  // declared, on the related object — and sent the author to the wrong file.
+  const cases: Array<[string, ReturnType<typeof unavailable>, string[]]> = [
+    ['unreadable object', unavailable('unreadable'), ["may not read", "'crm_account'"]],
+    ['unreadable field', unavailable('field-unreadable', ['type']), ["may not read", "'type'"]],
+    ['no reference stored', unavailable('no-reference'), ['no related record']],
+    ['related row gone', unavailable('unresolved'), ['could not be read']],
+  ];
+
+  for (const [name, binding, expected] of cases) {
+    it(`names the related object and field — ${name}`, () => {
+      try {
+        evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: binding });
+        throw new Error('expected a ValidationError');
+      } catch (e) {
+        const detail = JSON.stringify((e as unknown as { errors?: unknown }).errors ?? (e as Error).message);
+        for (const needle of expected) expect(detail).toContain(needle);
+        // ⛔ never the prescription that names the REFERENCING object.
+        expect(detail).not.toContain('which this object does not declare');
+        expect(detail).toContain('partner_cap');
+      }
+    });
+  }
+});
+
+describe('#18682 — the permission verdict does not depend on the CEL operator', () => {
+  // `has()` returns `false` on an absent key, and `.?` yields a default — so an
+  // author who reaches for a null-safe spelling would have turned "the caller
+  // may not read this" into an ordinary `false` and the rule would stop firing.
+  // The engine decides readability BEFORE evaluation, so every spelling refuses.
+  const guarded = (condition: string) => ({
+    fields: opportunity.fields,
+    validations: [{ name: 'guarded', type: 'script', severity: 'error', message: 'fired', condition }],
+  });
+
+  it.each([
+    ['plain member access', "record.account.type == 'partner'"],
+    ['has() guard', "has(record.account.type) && record.account.type == 'partner'"],
+    ['optional selection', "record.account.?type.orValue('') == 'partner'"],
+  ])('refuses an unreadable parent — %s', (_name, condition) => {
+    expect(() =>
+      evaluateValidationRules(guarded(condition) as any, { name: 'A', account: 'acc_1' }, 'insert',
+        { related: { account: unavailable('field-unreadable', ['type']) } as never }),
+    ).toThrow(ValidationError);
+  });
+});
+
+describe('#18682 — a readable but EMPTY related column evaluates, it does not refuse', () => {
+  // #6457's trap, one root over and on a fail-CLOSED seam: a driver that does
+  // not echo an all-null column must not make a valid write fail. The engine
+  // materialises readable declared fields to `null`, so the predicate evaluates.
+  it('accepts when the parent field is materialised null and the rule does not trip', () => {
+    expect(() =>
+      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: row({ id: 'acc_1', type: null }) }),
     ).not.toThrow();
   });
 });

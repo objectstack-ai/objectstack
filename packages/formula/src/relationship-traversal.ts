@@ -82,14 +82,45 @@ function isRootId(node: unknown, root: string): boolean {
   return op === 'id' && args === root;
 }
 
-/** `{ op: '.', args: [receiver, 'name'] }` — a member access, or `null`. */
+/**
+ * A member access on `node`, whatever spelling it was written in, or `null`.
+ *
+ * ⭐ All four spellings are recognised on purpose, because they are
+ * interchangeable ways to read the same related column and a check that saw
+ * only the plain one would be trivially side-stepped. That matters most for the
+ * OPTIONAL forms: `has(...)`, `.?` and `[?]` read a missing key as an ordinary
+ * `false`/default, so an author reaching for a null-safe spelling would have
+ * turned "the acting user may not read this column" into a quiet non-firing
+ * rule. The engine decides readability before evaluation precisely so the
+ * verdict cannot depend on which operator was written — and this function is
+ * what makes the analysis see every operator in the first place.
+ *
+ *  - `a.b`      → `{ op: '.',   args: [receiver, 'b'] }`
+ *  - `a.?b`     → `{ op: '.?',  args: [receiver, 'b'] }`
+ *  - `a['b']`   → `{ op: '[]',  args: [receiver, { op: 'value', args: 'b' }] }`
+ *  - `a[?'b']`  → `{ op: '[?]', args: [receiver, { op: 'value', args: 'b' }] }`
+ *
+ * An index whose key is not a literal string (`a[someVar]`) names no field this
+ * analysis can resolve, so it is not a member access here.
+ */
+const MEMBER_OPS = new Set(['.', '.?']);
+const INDEX_OPS = new Set(['[]', '[?]']);
+
 function asMember(node: unknown): { receiver: unknown; name: string } | null {
   if (!node || typeof node !== 'object') return null;
   const { op, args } = node as { op?: unknown; args?: unknown };
-  if (op !== '.' || !Array.isArray(args) || args.length < 2) return null;
-  const name = args[1];
-  if (typeof name !== 'string') return null;
-  return { receiver: args[0], name };
+  if (typeof op !== 'string' || !Array.isArray(args) || args.length < 2) return null;
+  if (MEMBER_OPS.has(op)) {
+    const name = args[1];
+    return typeof name === 'string' ? { receiver: args[0], name } : null;
+  }
+  if (INDEX_OPS.has(op)) {
+    const key = args[1] as { op?: unknown; args?: unknown } | undefined;
+    if (key && typeof key === 'object' && key.op === 'value' && typeof key.args === 'string') {
+      return { receiver: args[0], name: key.args };
+    }
+  }
+  return null;
 }
 
 /**

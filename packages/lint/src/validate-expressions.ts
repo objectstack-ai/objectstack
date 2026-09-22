@@ -1115,6 +1115,15 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
      * all.
      */
     fieldRuleVerdictIssued?: boolean,
+    /**
+     * [#18682] Opt this ONE site in to the relationship-traversal conflict
+     * checks. True only where the traversal is actually SERVED — object
+     * validation rules, which ObjectQL's `checkPredicate` hydrates. Everywhere
+     * else the checks' prescription ("write `record.<fk>.id`") is false,
+     * because nothing hydrates there and the repaired expression would fault;
+     * on the fail-open seams that means the rule stops enforcing entirely.
+     */
+    traversalHydration?: boolean,
   ): void => {
     if (raw == null) return;
     const fields = objectName ? fieldIndex.get(objectName) : undefined;
@@ -1122,7 +1131,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // `record`-scoped sites, so it is harmless to pass for flattened ones too.
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
-      objectName ? { objectName, fields, fieldTypes, scope } : { scope });
+      objectName ? { objectName, fields, fieldTypes, scope, traversalHydration } : { scope });
     for (const e of res.errors) {
       if (fieldRuleVerdictIssued && isBareReferenceToAny(e.message, FIELD_RULE_NOWHERE_BOUND_ROOTS)) continue;
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
@@ -1518,8 +1527,14 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // The declared predicate key is `condition` (see `rulePredicates`).
       // Validation predicates are `record`-scoped — no field flattening — so
       // bare refs are flagged (#1928).
-      check(where, rule.condition, objectName, 'record');
+      // [#18682] The two sites where a relationship traversal is SERVED: these
+      // are the `script` / `cross_field` conditions ObjectQL's `checkPredicate`
+      // hydrates. `traversalHydration` is passed here and NOWHERE else.
+      check(where, rule.condition, objectName, 'record', undefined, true);
       // `conditional` rules carry a nested `when` predicate (record-scoped).
+      // ⚠️ `when` is evaluated by `checkConditional` WITHOUT hydration today, so
+      // it is opted OUT: a traversal there faults, and the conflict checks'
+      // prescription would not repair it.
       check(`${where} when`, (rule as AnyRec).when, objectName, 'record');
       // #4763 — null-guard gate over every predicate the rule carries, nested
       // `then`/`otherwise` branches included.

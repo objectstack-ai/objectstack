@@ -210,7 +210,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import type { RelatedRecordBinding } from './validation/rule-validator.js';
+import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { collectPredicateRelationships, evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
@@ -3936,6 +3936,31 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#18682] "Which fields of this object may this caller READ?" — supplied by
+   * the security plugin, never derived here.
+   *
+   * A predicate that reads one hop through a reference field must distinguish a
+   * related column the caller MAY read but which is empty (evaluate it as
+   * `null`) from one the caller may NOT read (refuse the write). A driver
+   * returns both as the same missing key, so the answer cannot come from the
+   * rows — it has to come from schema + context, which is what
+   * `ISecurityService.getReadableFields` answers.
+   *
+   * The engine declares the seam and `@objectstack/plugin-security` fills it,
+   * the same handover {@link registerHeldFileResolver} makes to storage. Left
+   * unwired (an embedding with no security plugin) every declared field is
+   * readable by construction, which is exactly the behaviour such a composition
+   * has today.
+   */
+  private _readableFieldsResolver?: (object: string, context: unknown) => Promise<string[] | undefined>;
+
+  /** Wire the readable-fields question (#18682). Last registration wins. */
+  registerReadableFieldsResolver(fn: (object: string, context: unknown) => Promise<string[] | undefined>): void {
+    this._readableFieldsResolver = fn;
+    this.logger.debug('Registered readable-fields resolver for predicate relationship traversal');
+  }
+
+  /**
    * [#11968] The engine-seam write epoch — the invalidation substrate of the
    * ruled authorization caching design (#11633 §2.1, §3).
    *
@@ -6930,52 +6955,103 @@ export class ObjectQL implements IObjectQLEngine {
     if (wanted.size === 0) return unbound;
 
     const fields = (schema?.fields ?? {}) as Record<string, unknown>;
-    // fk field -> (id -> related row)
-    const resolved = new Map<string, Map<string, Record<string, unknown>>>();
+    type Resolved = {
+      object: string;
+      byId: Map<string, Record<string, unknown>>;
+      /** Set when NO row of this field is usable, whatever the id. */
+      blocked?: { reason: 'unreadable' | 'field-unreadable'; unreadableFields?: string[] };
+    };
+    const resolved = new Map<string, Resolved>();
 
     for (const [fk, namedFields] of wanted) {
       const target = referenceTargetOf(fields[fk]);
       if (!target) continue;
+      const named = [...namedFields];
+
+      // ── Readability is decided HERE, from schema + context, never from the
+      // rows. `getReadableFields` is explicitly "immune to an all-null column
+      // (which a driver may omit from every row) and to an empty result set",
+      // which is exactly the ambiguity that must not reach the predicate: a
+      // column the caller MAY read but which is empty has to evaluate as
+      // `null`, while a column the caller may NOT read has to refuse. Both
+      // arrive from a driver as the same missing key, so the answer cannot be
+      // derived from the data (#6457, one root over and fail-CLOSED).
+      let readable: string[] | undefined;
+      if (this._readableFieldsResolver) {
+        try {
+          readable = await this._readableFieldsResolver(target, context);
+        } catch {
+          // No answer is not a denial; fall through to the read, which is
+          // itself gated by the security middleware and refuses if it must.
+          readable = undefined;
+        }
+      }
+      if (readable) {
+        const denied = named.filter((n) => !readable!.includes(n));
+        if (denied.length > 0) {
+          resolved.set(fk, { object: target, byId: new Map(), blocked: { reason: 'field-unreadable', unreadableFields: denied } });
+          continue;
+        }
+      }
+
       const ids = new Set<string>();
       for (const row of rows) {
         const value = row?.[fk];
-        // A multi-value reference cannot be one hop: `record.<fk>.<field>` on a
-        // list has no single related record to read, so it is left unbound and
-        // the predicate faults rather than picking an element.
+        // A multi-value reference cannot be ONE hop: `record.fk.field` on a list
+        // names no single related record, so it is never hydrated.
         if (value == null || Array.isArray(value) || typeof value === 'object') continue;
         ids.add(String(value));
       }
-      if (ids.size === 0) continue;
+      if (ids.size === 0) { resolved.set(fk, { object: target, byId: new Map() }); continue; }
       try {
         const query: EngineQueryOptions = {
           where: { id: { $in: [...ids] } },
-          fields: [...new Set(['id', ...namedFields])],
+          fields: [...new Set(['id', ...named])],
           context: context as EngineQueryOptions['context'],
         };
         const related = await this.find(target, query) as Array<Record<string, unknown>>;
         const byId = new Map<string, Record<string, unknown>>();
+        // Materialise the NAMED fields to `null` — but only the ones this caller
+        // may actually read. With a readable set in hand that is exact; without
+        // one (no security plugin in this composition) every declared field is
+        // readable by construction, which is the pre-plugin behaviour.
+        const fillable = readable ? named.filter((n) => readable!.includes(n)) : named;
         for (const row of Array.isArray(related) ? related : []) {
-          if (row?.id != null) byId.set(String(row.id), row);
+          if (row?.id == null) continue;
+          const copy: Record<string, unknown> = { ...row };
+          for (const name of fillable) if (!(name in copy)) copy[name] = null;
+          byId.set(String(row.id), copy);
         }
-        resolved.set(fk, byId);
+        resolved.set(fk, { object: target, byId });
       } catch (err) {
-        // Left unbound on purpose — see the docblock. Logged at `warn` because
-        // the write is still REJECTED downstream, loudly, in the caller's own
-        // response: nothing is silently lost here.
-        this.logger?.warn?.('predicate relationship lookup failed — the related field stays unbound and the rule will reject the write', {
+        // A refusal from the security layer is a real answer: this caller may
+        // not read the related object. Recorded as such so the predicate refuses
+        // with a sentence naming it, rather than faulting on a missing key.
+        this.logger?.warn?.('predicate relationship read refused or failed — the rule will reject the write', {
           object: target, field: fk, error: err,
         });
+        resolved.set(fk, { object: target, byId: new Map(), blocked: { reason: 'unreadable' } });
       }
     }
     if (resolved.size === 0) return unbound;
 
     return (row) => {
       if (!row) return undefined;
-      const binding: Record<string, Record<string, unknown> | null> = {};
-      for (const [fk, byId] of resolved) {
+      const binding: Record<string, RelatedFieldBinding> = {};
+      for (const [fk, entry] of resolved) {
+        if (entry.blocked) {
+          binding[fk] = { object: entry.object, unavailable: entry.blocked.reason, unreadableFields: entry.blocked.unreadableFields };
+          continue;
+        }
         const value = row[fk];
-        if (value == null || Array.isArray(value) || typeof value === 'object') { binding[fk] = null; continue; }
-        binding[fk] = byId.get(String(value)) ?? null;
+        if (value == null || Array.isArray(value) || typeof value === 'object') {
+          binding[fk] = { object: entry.object, unavailable: 'no-reference' };
+          continue;
+        }
+        const found = entry.byId.get(String(value));
+        binding[fk] = found
+          ? { object: entry.object, row: found }
+          : { object: entry.object, unavailable: 'unresolved' };
       }
       return binding;
     };
@@ -10663,6 +10739,24 @@ export class ObjectQL implements IObjectQLEngine {
     const currentUser = this.buildEvalUser(options?.context);
     const skipStateMachine = shouldSkipStateMachine(options?.context);
 
+    // [#18682] The preview owes the SAME relationship resolution the real write
+    // does. Without it a rule that reads one hop through a reference field
+    // reports `valid: false` (unevaluable) against a row `insert()` happily
+    // accepts — the false alarm this operation was created to prevent, and the
+    // import dry run rides on it.
+    //
+    // Resolved once for the whole set, like every other posture input above,
+    // and under the CALLER's context so the preview's permission answer is the
+    // caller's own. ⚠️ Named limit, not widened here: an `update`-mode preview
+    // carries no prior row (nothing is read), so a traversing rule whose FK the
+    // PATCH does not itself carry has no id to resolve and still refuses. The
+    // real update path reads the prior row and does resolve it; closing the
+    // preview's half needs a read this operation's "nothing is executed"
+    // contract does not make.
+    const previewRelatedForRow = await this.resolvePredicateRelated(
+      schemaForValidation, rows, options?.context,
+    );
+
     const results: NonNullable<ValidateDataResponse['results']> = rows.map((row) => {
       const warnings: ValidateDataIssue[] = [];
       // Warn-first admissions are the posture signal the caller came for, so
@@ -10691,6 +10785,7 @@ export class ObjectQL implements IObjectQLEngine {
         });
         evaluateValidationRules(schemaForValidation as any, row, mode, {
           logger: this.logger, currentUser, skipStateMachine, messages,
+          related: previewRelatedForRow(row),
         });
       } catch (e) {
         if (e instanceof ValidationError) {
