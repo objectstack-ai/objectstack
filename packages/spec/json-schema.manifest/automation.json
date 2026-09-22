@@ -39,6 +39,7 @@
     "automation/Flow",
     "automation/FlowEdge",
     "automation/FlowFunctionEffect",
+    "automation/FlowFunctionLoweredDeclaration",
     "automation/FlowNode",
     "automation/FlowNodeAction",
     "automation/FlowRegion",

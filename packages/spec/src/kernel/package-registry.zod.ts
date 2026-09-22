@@ -303,19 +303,41 @@ export const InstallPackageRequestSchema = lazySchema(() => z.object({
    * the third state from the published surface while the door still honours
    * it.
    *
-   * ## ⚠️ This contract's own implementation does not read the key
+   * ## ⭐ This contract's own implementation HONOURS the key — on the registry row
    *
    * This schema types the in-process protocol primitive
-   * `ObjectStackProtocol.installPackage` (`src/api/protocol.zod.ts`), whose
-   * implementation reads `request.manifest` and `request.settings` and nothing
-   * else (`packages/metadata-protocol/src/protocol.ts`). The HTTP door does
-   * NOT forward the key down this seam either: it calls
-   * `installPackage({ manifest, settings })` and performs the enable/disable
-   * flip itself afterwards, because the durable half must follow the ROW that
-   * door returned rather than the request's intent. So an `enableOnInstall`
-   * spelled on THIS request reaches no code that acts on it — which is why the
-   * `.describe()` says so on the published reference page rather than
-   * repeating the authority's promise a layer that cannot keep it.
+   * `ObjectStackProtocol.installPackage` (`src/api/protocol.zod.ts`), and that
+   * implementation (`packages/metadata-protocol/src/protocol.ts`) applies the
+   * same rule the HTTP door applies — 「缺省 = 保持，有旗 = 设置」 — through the
+   * same registry verbs `PATCH /packages/:id/enable` and
+   * `PATCH /packages/:id/disable` use:
+   *
+   * - `true` ⇒ `enablePackage` — clears a disable, including a boot-seeded one;
+   * - `false` ⇒ `disablePackage` — the row and its `status` both move;
+   * - ABSENT ⇒ no lifecycle call at all; the row the registry returned stands.
+   *
+   * `=== true` / `=== false`, never a truthiness test and never a `??` default:
+   * the THREE states are the contract, and a non-boolean value is read as
+   * ABSENT rather than coerced. The declaration below resolves nothing on an
+   * absent key — it is `optional()`, and ⛔ never `.default(true)`, precisely
+   * so that the third state survives the parse — and nothing parses an install
+   * request through this schema on that path anyway, so an absent key arrives
+   * intact and is read as absent.
+   *
+   * ⚠️ What this seam does NOT write, stated so the scope is not over-read: the
+   * runtime's DURABLE disabled-package file. That record is keyed by
+   * ENVIRONMENT (`setPackageDisabled(environmentId, id, disabled)`,
+   * `packages/runtime/src/package-state-store.ts`) and an
+   * `InstallPackageRequest` carries no environment, so the key cannot even be
+   * formed here; that module also lives in `@objectstack/runtime`, which
+   * depends on the protocol package and not the other way round. It is also why
+   * the HTTP door still calls `installPackage({ manifest, settings })` and
+   * performs its own enable/disable flip afterwards rather than forwarding the
+   * key down this seam: the durable half must follow the ROW that door returned
+   * rather than the request's intent. So an `enableOnInstall` spelled on THIS
+   * request moves the registry row — what every in-process reader serves from —
+   * for the life of the process; a caller that needs the choice to survive a
+   * restart goes through `POST /api/v1/packages`.
    *
    * ## ⛔ Why the reference is documentary and not `…Schema.shape.…`
    *
@@ -332,7 +354,7 @@ export const InstallPackageRequestSchema = lazySchema(() => z.object({
    * mechanical half of the reference, and it is the half that can fail.
    */
   enableOnInstall: z.boolean().optional()
-    .describe('Whether to enable immediately after install — restates the install-door request key, whose one authority is api/PackageInstallRequest (`true` enables, `false` disables, ABSENT keeps the row\'s current lifecycle state); this protocol primitive does not read it'),
+    .describe('Whether to enable immediately after install — restates the install-door request key, whose one authority is api/PackageInstallRequest; this protocol primitive honours it on the registry row: `true` enables, `false` disables, and ABSENT keeps the row\'s current lifecycle state (a fresh install lands enabled)'),
   /**
    * Current platform version for compatibility checking.
    * When provided, the system compares this against the package's
