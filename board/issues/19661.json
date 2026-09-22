@@ -2,7 +2,7 @@
   "number": 19661,
   "kind": "pull_request",
   "title": "fix(spec): the published `effae80` changelog entry states one `undoable` capture set",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T05:20:07Z",
-  "updated_at": "2026-09-22T14:12:55Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-22T14:34:08Z",
+  "closed_at": "2026-09-22T14:34:06Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-09-22T14:34:06Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19661",

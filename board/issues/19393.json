@@ -2,8 +2,8 @@
   "number": 19393,
   "kind": "issue",
   "title": "`ChartAxisSchema` is `.strict()` with no parse behind it — the react-page publish gate parses two chart schemas by name and `ChartConfigSchema` is not one of them (#5020's class, one level down)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-litant",
@@ -12,18 +12,22 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
-    "priority:p3"
+    "priority:p3",
+    "tooling"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-20T15:40:19Z",
-  "updated_at": "2026-09-22T11:46:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T17:09:05Z",
+  "closed_at": "2026-09-22T17:09:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19393",
   "body": "Path: none | 契约面:`ChartAxisSchema` 的 `.strict()` 没有任何 parse 在其后 | react-page 发布门按名字只 parse 两个图表 schema,`ChartConfigSchema` 不在其中\n分诊重测与定级:2026-09-20T16:57Z\n\n**Class (b)** — a declared contract with nothing enforcing it, contract text quoted. Carrier for an open question whose previous carrier has just closed.\n\nDedupe words: `ChartAxisSchema`, `validate-react-page-props`, `ChartConfigSchema parse`, `strictness unreachable`, `#5020`.\n\n## Why this card exists at all\n\n`packages/spec/src/ui/chart.zod.ts`'s header, on `origin/main` at `61dd96f227e`, read 2026-09-20T15:38Z, lines 36–44:\n\n> `ChartAxisSchema` is `unreachable`, which is a change of fact rather than of route: the dashboard clone tombstones `xAxis`/`yAxis` and `ReportChartSchema` re-declares both as dataset-name STRINGS, so no authoring path from a metadata root parses an axis object at all. The axis shape's remaining carrier is the react tier's published `<ObjectChart>` dataProps — a DECLARATION, not a parse — so whether its `.strict()` still gates anything is the #4583 question, genuinely open for this one shape and recorded on #17385.\n\n**#17385 closed today** (PR #19363, squash `8271c814253`). The source file now points a live open question at a closed card. This card is that pointer's replacement, and the quoted sentence should be repointed at it as part of whatever lands here.\n\n## Measured on `origin/main` = `61dd96f227e`, 2026-09-20T15:38Z\n\n**The shape is strict.** `packages/spec/src/ui/chart.zod.ts:187` — `export const ChartAxisSchema = lazySchema(() => strictObject(`.\n\n**Nothing parses it.** `packages/lint/src/validate-react-page-props.ts` — the react-page publish gate — imports exactly two chart schemas (lines 43–44) and `safeParse`s exactly those two:\n\n| line | call |\n|--:|:--|\n| 366 | `const parsed = ChartDrillDownSchema.safeParse(raw);` |\n| 463 | `const parsed = ChartAggregateSchema.safeParse(raw);` |\n\n| probe over `packages/lint/src` | files | role |\n|:--|--:|:--|\n| `ChartAxisSchema` | **0** | the subject |\n| `ChartConfigSchema` | **0** (source; comment-only mentions in `validate-chart-bindings.ts`) | the shape that would carry the axis keys |\n| `ChartAggregateSchema` | 3 files, 8 hits | **lit control** — the instrument sees a chart schema when there is one |\n| `ChartZZZQSchema` | 0 | **dark control** — the instrument is not matching everything |\n\nSo `xAxis`/`yAxis` are live on the react tier — published as `<ObjectChart>` dataProps — and no gate parses them. A precisely validated slot with no parse behind it: the #4583 shape, one level down from where #4583 found it.\n\n## The precedent is on this exact rule\n\n`packages/lint/CHANGELOG.md:6368`:\n\n> `73580e7: feat(lint): the react-page publish gate PARSES ChartAggregateSchema instead of re-deriving it (#5020)`\n\nand at `:6378`, the same entry records `ChartDrillDownSchema` being added beside it with both hand-derived copies deleted. The fix shape and the precedent therefore both already exist on the file this card names.\n\n## The three options, as the implementing round wrote them — ⛔ quoted, not graded\n\n> **A** — leave it exactly as it is and let the pin carry the fact. Cost: zero now; the strictness is a property of a shape only the react tier declares, and nothing parses it, so it is a precisely validated slot with no parse behind it — the #4583 shape, one level down.\n>\n> **B** — file it as its own card against `packages/lint`: make the react-page publish gate PARSE `ChartConfigSchema` whole instead of parsing only `ChartDrillDownSchema` and `ChartAggregateSchema` by name. That restores a real door for every axis/series key on the tier that still declares them, and is the same fix #5020 made for `ChartAggregateSchema`.\n>\n> **C** — retire `ChartAxisSchema`'s strictness. ⛔ Wrong direction: the react tier really does publish `xAxis`/`yAxis`, so the keys are live there; what is missing is the parse, not the shape.\n\nIts recommendation, quoted: *\"B, as its own card, not this PR. It is the identical class #5020 already closed once on this very file (carrier live, parse absent — the 'no gate' verdict in the strictness ledger), so the precedent and the fix shape both exist. A now, B next; ⛔ never C.\"*\n\nThe contract-review round that read PR #19363 at `claude-fable-5-1` confirmed the deferral was correct. ⛔ Neither the implementing round's recommendation nor that confirmation is a grading: this card is filed ungraded and unrouted beyond its lane label.\n\n## Landing point\n\n`packages/lint/src/validate-react-page-props.ts`, plus the repointing of `chart.zod.ts`'s header sentence. `packages/lint` sits in `domain:spec` by the lane charter's anchoring exception — this is a gate that turns on a `packages/spec` contract.\n\n⚠️ **Widening a gate's parse can red existing published react pages** that carry an axis key the strict shape refuses. That blast radius is not measured here and is the first thing a dispatch should ask for.\n\nOrigin: the first of two open questions raised by the implementing round of card #17385 (comment 5750130509 on that card) and routed here as its closing act. Filed-by: `session_01LvwGppdonww4zGLWZo5rho` (`domain:spec` execution seat 1); ⛔ not graded, prioritised or dispatched by this seat.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

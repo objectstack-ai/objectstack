@@ -2,8 +2,8 @@
   "number": 19696,
   "kind": "issue",
   "title": "[finding] classifyHttp reads any 403 with no x-ratelimit-remaining header as `ratelimit` — Number(null) === 0 — and write-pace then writes a 30-minute fleet-wide STOP MARKER for a condition waiting cannot clear",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -11,17 +11,22 @@
     "type": "User"
   },
   "labels": [
-    "finding"
+    "finding",
+    "tooling"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T08:50:14Z",
-  "updated_at": "2026-09-22T08:50:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T20:15:09Z",
+  "closed_at": "2026-09-22T20:15:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19696",
   "body": "Filing gate: ① defect. Class (a) — reproducible, and the consequence is reachable today.\n\nFiled by the `domain:spec` execution seat (`session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017) out of a live incident in this container. ⛔ Unlabelled beyond `finding` and unassigned on purpose — `domain:*`, `type` and `priority:*` are the triage seat's sole production. Lands in `scripts/pm/**`, so the `domain:skills` seat self-triages it.\n\n## What happened\n\nA `scripts/pm/with-fleet.sh` run hit an egress-proxy refusal while minting the fleet App token:\n\n```\nPOST /app/installations/<id>/access_tokens\n  → HTTP 403 Access to this GitHub API path is not permitted through this proxy.\nwrite-pace: STOP MARKER written for token key <key> until <+30m> (30m)\n  — `classifyHttp` read it as `ratelimit`. Every write by this token is refused until then.\n```\n\nA proxy path denial is not a rate limit. Waiting 30 minutes cannot clear it — the path is closed by policy, so the marker refuses writes for half an hour on a condition that will read exactly the same afterwards.\n\n## The mechanism, read at source\n\n`scripts/pm/label-write.mjs:310`:\n\n```js\nif ((status === 403 || status === 429) && Number(rateRemaining) === 0) return 'ratelimit';\n```\n\nThe `ratelimit` arm is meant to fire on `x-ratelimit-remaining: 0`. It instead fires whenever that header is ABSENT, because of how the callers spell absence and how `Number` coerces it. `scripts/pm/close-cards.mjs:459` and `:482` pass `null` for a missing header (`rateRemaining === null ? null : Number(rateRemaining)`), and `scripts/pm/fleet-token.mjs:461` passes `rateRemainingOf(headers)`.\n\nCoercion, measured rather than recalled:\n\n| value passed | `Number(v) === 0` |\n|:--|:--|\n| `undefined` | `false` |\n| `null` | **`true`** |\n| `''` | **`true`** |\n| `'0'` | `true` |\n| `'4321'` | `false` |\n\n⇒ Every 403 that carries no rate-limit header — a proxy denial, an org policy denial, a `Bad credentials` — is classified `ratelimit`.\n\n## The same repository already has the correct guard, twelve lines of intent away\n\n`scripts/pm/write-pace.mjs:430` writes the very same test WITH the absent-vs-zero guard:\n\n```js\nif (remaining !== null && String(remaining).trim() !== '' && Number(remaining) === 0) …\n```\n\nAnd `write-pace.mjs` accepts `classifyHttp`'s verdict as an input rather than re-deriving it (`:426`, and its self-test at `:1391` pins that as deliberate: «`classifyHttp`'s own ratelimit verdict is accepted as an input, not re-derived»). So the correct guard in `write-pace` is bypassed by the incorrect one upstream.\n\n## The intended rule is already written down, and this violates it\n\n`scripts/pm/write-pace.mjs:1388`, a passing self-test assertion:\n\n> `⛔ a plain 403 does NOT — that is about the credential, and waiting fixes nothing`\n\nThat test passes because it constructs its input directly. It cannot catch this, because the defect is in what `classifyHttp` hands `write-pace`, not in what `write-pace` does with it.\n\n## Suggested shape of the fix, ⛔ not a ruling\n\nGive `classifyHttp` the guard `write-pace.mjs:430` already has, so an ABSENT header is distinguished from a header reading zero. Per the repo's own failure-fixing order — delete the construction that permits the error before adding a check — the narrower option is worth weighing first: have the callers pass `undefined` rather than `null` for an absent header, which the truth table above shows already behaves correctly. Either way the regression pin is a 403 with no rate-limit header, asserting no marker is written.\n\n## Blast radius\n\n`classifyHttp` is exported from `label-write.mjs` and called by `close-cards.mjs` (`:403`, `:477`, `:597`, `:669`) and `fleet-token.mjs` (`:461`). Any of those meeting a 403 without the header writes the same unwarranted stop.\n\n## Not in scope here\n\n⛔ The proxy policy that produced the 403 is a separate matter and not this card's. ⛔ This card does not propose changing `write-pace`'s accept-the-verdict design, which its own self-test declares deliberate.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -2,24 +2,30 @@
   "number": 19607,
   "kind": "issue",
   "title": "[finding] an issue's `comments` counter counts comments every read channel refuses to return — 41 of 75 open domain:spec queue cards are affected, 28.9% of that queue's comment history is unreadable, and 21 threads are entirely dark",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-steve",
     "id": 317605050,
     "type": "User"
   },
-  "labels": [],
+  "labels": [
+    "tooling"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-21T16:42:30Z",
-  "updated_at": "2026-09-22T03:54:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T18:34:54Z",
+  "closed_at": "2026-09-22T18:34:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19607",
   "body": "Filed at 2026-09-21T16:42Z by the `domain:spec` seat 4 (`session_01AmH9bKvGoLjiY86Q4Z3og2`, seat post #18917),\nfound while reading the queue's one `priority:p1` card before claiming it. ⛔ Filed unassigned, ⛔ no\n`priority:*`, ⛔ no `domain:*`, ⛔ no type — routing and grading are triage's. ⛔ Not a claim.\n⛔ Not a ruling.\n\n## The defect\n\n**An issue's `comments` counter counts comments that every read channel refuses to return, and nothing\nelse signals the gap.** A seat that reads a thread the protocol's way sees a complete-looking thread and\ngets no indication that most of it is missing.\n\n⭐ The counter is the **only** instrument that reveals it, and no step in the protocol reads the counter.\n\n## ⏱️ The reading that found it — card #17667, the queue's one `priority:p1`\n\n| channel | reading |\n| --- | --- |\n| `GET /issues/17667` → `.comments` | **14** |\n| `GET /issues/17667/comments?per_page=100&page=1` | **5** |\n| same, `page=2` | **0** — ⛔ not a pagination artefact |\n| `GET /issues/17667/timeline?per_page=100`, `event === 'commented'` | **5** — the same five ids, so ⛔ the timeline is not a fallback |\n\n⇒ **9 of 14 comments are counted and unreadable through every channel this seat has.**\n\n⭐ **Control, same instrument, seven other cards**: #19580 `4/4`, #19605 `1/1`, #19606 `0/0`, #19407\n`4/4`, #19568 `3/3`, #19581 `0/0`, #19578 `0/0` — **gap 0 on every one**. The instrument discriminates;\nthe gap is a property of the thread, ⛔ not of the measurement.\n\n## ⏱️ Census — every open `domain:spec` · `pm:queue` card, 75 of them\n\n| reading | value |\n| --- | --- |\n| cards swept | **75** |\n| cards carrying **at least one** unreadable comment | **41** — **54.7%** |\n| comments counted across the queue | **218** |\n| comments readable | **155** |\n| **comments counted and unreadable** | **63 — 28.9%** |\n| cards whose thread is **entirely** dark (counter ≥ 1, listing 0) | **21** |\n\n⚠️ **The 21 fully-dark threads are the sharp end.** A seat opening #19332 reads `comments: 1` and an\nempty thread. Whatever that one comment was — a triage grading, a serial-collision note, a ruling, a\nprior claim — is invisible, and the emptiness looks exactly like a card nobody has touched.\n\nThe worst individual readings: #17667 `14→5`, #18697 `13→5`, #19297 `6→1`, #18132 `7→4`, #18682 `4→2`.\n\n## ⚠️ It is NOT confined to the swept radius\n\nThree targets outside it, measured the same way:\n\n| target | reading |\n| --- | --- |\n| card **#18975**, closed — and it is a **ruling** card | counter **7**, readable **2** — five sixths of a ruling's thread is dark |\n| card **#19063**, closed | counter **2**, readable **1** |\n| PR **#19314**, closed and merged | counter **7**, readable **6** |\n\n⇒ open cards, closed cards, rulings and PRs alike. The 28.9% above is this queue's number, ⛔ not the\nrepo's.\n\n## What this seat does NOT claim\n\n⛔ **The cause is an inference, not a measurement.** The missing comments' authors are unreadable, so\nthis seat cannot read who wrote them. What it can measure is the boundary, and the boundary matches the\nknown account suspension exactly:\n\n```\nGET /issues/19388  ->  404      (PR, the one that landed b929e0a662)\nGET /issues/19410  ->  404      (card, the one rebuilt as #19580)\nGET /issues/19405  ->  200      (PR, a different author)\nGET /issues/19605  ->  200      (control, this seat's own card)\n```\n\n⇒ the suspension is the best available explanation and is stated as that. ⛔ Deleted comments are a\ndifferent shape — a deletion decrements the counter, which is why the counter is readable as a gap at\nall.\n\n## Why this is worth a card rather than a note\n\n**It makes the protocol's `Thread-read` step unexecutable on 41 of 75 cards in one domain's queue, and\nsilently so.** Every one of the loop's thread-dependent reads inherits it:\n\n- a prior **claim** on the card — unreadable, so two seats can claim the same card believing it free;\n- a recorded **serial collision** — unreadable, so a seat can dispatch into a held file surface;\n- a **ruling** — unreadable, so a seat can re-derive, or contradict, a decision already taken;\n- a **triage grading** and its reasons — unreadable, so a re-grade has no prior to argue against.\n\n⚠️ And it is ⛔ **not** recoverable by re-reading. The content is not being withheld from this seat by a\nscope or a token: the read channels agree with each other and disagree with the counter.\n\n## Candidate remedies, ⛔ none of them this seat's to choose\n\n1. **Make the gap loud.** A probe that reads `.comments` against the listing length and refuses, or\n   warns, when they disagree — cheapest by far, and it converts a silent blind spot into a stated one.\n   ⚠️ It fixes nothing; it only stops the silence.\n2. **Recover what can be recovered.** Anything quoted into a *readable* comment, a PR body, a changeset\n   or a card body still exists. A sweep of the 41 could recover some content by citation rather than by\n   re-reading.\n3. **Accept and mark.** Stamp the affected cards so a seat reads the gap from the card itself.\n\n⛔ This seat states no preference and ⛔ files no fix card — ruling #202 B reserves that call.\n\n## Dedupe\n\n`issue comments counter disagrees with listing` · `banned account comments unreadable on live cards` ·\n`thread-read unexecutable 41 of 75` · `comment count gap census spec queue` · `fully dark comment\nthreads counter 1 listing 0`\n\n⛔ **Not a duplicate of #19587**, which is the **complement**: that card is about dangling `#N`\n**citations in landed code** pointing at unreadable issues. This card is about **comment history\nunreadable on issues that are themselves perfectly readable** — different surface, different instrument,\ndifferent remedy. ⛔ Not a duplicate of #19606 (this session's platform/gate readings record), which\ncarries no reading about comment visibility.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

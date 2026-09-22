@@ -2,24 +2,30 @@
   "number": 19670,
   "kind": "issue",
   "title": "Reads never observe the quota headers, so the one signal that could stop the fleet BEFORE its first refusal is discarded on exactly the requests most likely to carry it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "tooling"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T06:02:30Z",
-  "updated_at": "2026-09-22T06:02:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T20:00:48Z",
+  "closed_at": "2026-09-22T20:00:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19670",
   "body": "## The defect\n\n`write-pace.mjs`'s `stopSignalFrom` is deliberately status-independent. Its own header says why, and the sentence is the whole point of this card:\n\n> ⛔ Status-independent on purpose: `x-ratelimit-remaining: 0` arrives on the 200 that spends the last unit of quota, which is the one answer that lets a seat stop BEFORE the first refusal rather than after it.\n\nThat capability is never reached from a read. In all six write transports under `scripts/pm/`, `noteResponse` sits behind an `if (paced)` guard, and `paced` is `isWriteMethod(method)`. So the throttle observes the quota only on the requests that spend budget, and never on the requests that are twenty times more numerous.\n\n| transport | `noteResponse` calls | all guarded by `paced` |\n|:--|:--|:--|\n| `label-write.mjs` · `close-cards.mjs` · `post-stamped.mjs` · `sweep-closed-cards.mjs` · `sweep-stale-finding.mjs` · `issue-create.mjs` | 1–2 each | yes, every one |\n\nThe design intent and the wiring contradict each other, and the contradiction is invisible: every ordinary run stays green, because the gate simply never learns what the reads saw.\n\n## What it costs, concretely\n\nReads and writes draw on ONE core bucket per installation. Measured on the fleet's own token, 2026-09-22:\n\n| bucket | limit | window |\n|:--|:--|:--|\n| core (reads and writes together) | 15000 | hour |\n| graphql | 10000 | hour |\n| search | 30 | minute |\n\nThe triage seat is by far the heaviest reader: its patrol walks `per_page=100` listings to exhaustion across several label and state combinations, and its card-finding goes through the search bucket, which is 30 per minute and independent of core. So the sequence that this defect makes possible is: triage reads the core bucket down to nothing, the gate learns nothing from any of those responses, and the next seat's WRITE is the request that discovers the exhaustion, as a 403.\n\nIt also means a read that answers 403 or 429 with a `Retry-After` writes no stop marker, so the back-off the platform asked for binds nobody.\n\n## Why this is sharper now\n\nThe maintainer has decided NOT to split the triage seat onto its own App for the time being, so every seat keeps drawing on this one installation's core bucket. Splitting would have given triage's reads their own bucket as a side effect; without it, the read path's silence is the only thing standing between a heavy sweep and somebody else's refused write.\n\n## The fix\n\nReads must stay **ungated**: no lease, no gap sleep, no hourly budget. That is correct and must not change. What changes is that a read **observes**: call `noteResponse` on read responses too, so the headers it saw reach the throttle. The read's own behaviour is untouched.\n\n**The one hazard to get right.** `noteResponse` currently ends by calling `releaseWriteLease(file)`. That call is already a no-op for a process holding no lease, so a read cannot release someone else's turn — but a read issued by a process that IS mid-write (a read-back between a write and its release, for instance) must not end that process's turn early. Either split the observation from the release, or prove by test that no read can reach it while a write of the same process holds the lease. ⛔ Do not wire reads in without settling this; a lease released one request early is a second writer in flight, which is the property rule ④ exists for.\n\n## Acceptance\n\n- Every transport calls `noteResponse` on reads as well as writes; the write-only guard remains on `paceWrite` alone.\n- A read that sees `x-ratelimit-remaining: 0`, a 403 naming the secondary limit, a 429, or a `Retry-After` writes the stop marker, and the next WRITE by that identity is refused against it.\n- A read still takes no lease, sleeps no gap and spends no hourly budget: pinned, not assumed.\n- The lease hazard above is pinned in `write-pace.mjs --self-test`.\n- The header's read-observation contract is stated where `isWriteMethod` is explained, so the next reader does not restore the symmetry by \"tidying up\".\n\n⛔ Out of scope: pacing reads, a new CI gate, and the triage App split (declined for now)."

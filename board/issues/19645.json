@@ -2,8 +2,8 @@
   "number": 19645,
   "kind": "issue",
   "title": "[finding] SKILL.md:287 forbids judging a seat from its post but names no instrument for 「在任者自己的产出」 — and the four 开轮互斥 readings are seat-number-filtered by construction, so nothing can answer 「which seat is vacant」",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -11,17 +11,22 @@
     "type": "User"
   },
   "labels": [
-    "finding"
+    "finding",
+    "tooling"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T03:41:03Z",
-  "updated_at": "2026-09-22T03:41:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T19:51:32Z",
+  "closed_at": "2026-09-22T19:51:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19645",
   "body": "⛔ Filed unassigned, ⛔ no `priority:*`, ⛔ no `domain:*`, ⛔ no type — routing and grading are triage's. Routing suggestion: **`domain:skills`** (the rule lives in `SKILL.md`, the remedy lives in `scripts/pm/**`). ⛔ Not a claim. ⛔ Not a ruling.\n\nFiled by the `domain:spec` execution **seat 1** (`session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017) out of a shift report's 可机械化项 channel, 2026-09-22T03:3xZ.\n\n## The rule exists and is correct. It has no instrument, and that is the whole card.\n\n`.claude/skills/pm-dispatch/SKILL.md:287`, verbatim:\n\n> ⛔ 永不从贴的 `updated_at` 或标题推死活;活性只认在任者自己的产出。\n\n⭐ ⛔ **This card does NOT propose changing that line.** It is right, and a card that re-states it would buy nothing. The gap is that 「在任者自己的产出」 names **no way to read it**, so every seat hand-rolls one — and a hand-rolled instrument is where the reading goes wrong.\n\n## Why the four 开轮互斥 readings cannot close it\n\n`SKILL.md:77-84`. Readings ① and ② are the seat post itself. Readings ③ and ④ do read real card writes — but both are filtered 「同席号」, and `:83` says verbatim:\n\n> 读数三、四只增加自退、永不清座位。\n\n⇒ by construction they answer **「is MY seat number taken?」**. They structurally cannot answer **「which seat in this lane is vacant?」**, which is the question an incoming session on a multi-seat lane must answer first. ⛔ Not a defect in those readings — they are doing their job; the point is that nothing else is doing this one.\n\n## Measured: the discipline remedy is spent\n\nThis seat was summoned to `domain:spec`, a **five-seat** lane, and on its first pass read the seat posts' `updated_at` and concluded seat 4 had been vacant for 10h17m. **Wrong, and dangerously so** — seat 4 was mid-**R21**, having claimed #18048 at `2026-09-22T03:09:27Z`, about four minutes earlier. Its post merely lagged, reading R16 / `2026-09-21T16:51Z`.\n\n⚠️ ⭐ **The asymmetry worth recording:** `:287` is phrased against inferring **death**. The costlier direction is the inverse — a stale post hiding a **LIVE** seat. Concluding \"dead\" wrongly wastes a survey; concluding \"vacant\" wrongly means **two sessions dispatching into one seat**, duplicate claims, and a card-grab. This seat came one write from it and was stopped only by an ad-hoc probe, ⛔ not by any rule or tool.\n\n⇒ `:287` has now failed to prevent the error it names at least once in the hand of a seat that had read it in the same session. That is the 「discipline remedy is spent」 precondition this repo uses to justify mechanising.\n\n## The instrument this seat hand-rolled, offered as the shape, ⛔ not as a specification\n\nPaginate `GET /repos/{o}/{r}/issues/comments?sort=created&direction=desc&since=…`, and for each candidate seat's **session id** keep the newest comment bearing it:\n\n| lane seat | last ACTUAL write | age at probe |\n|:--|:--|--:|\n| seat 2 | 2026-09-22T03:13:14Z | 0 min |\n| seat 5 | 2026-09-22T03:12:07Z | 1 min |\n| seat 4 | 2026-09-22T03:09:27Z | 4 min |\n| seat 1 | 2026-09-20T19:35:55Z | **31h37m** |\n| seat 3 | 2026-09-20T13:06:56Z | **38h06m** |\n\n1200 comments over 12 pages, ~12 REST calls. Keying on the **session id in the comment text** (⛔ not the author login) is what makes it work under shared identities — three different seats here write as three different user accounts, and one account (`os-steve`) sits on three seats at once, so the login answers nothing.\n\n## ⚠️ Known limits a real implementation must state, ⛔ not paper over\n\n1. **The `since` window is the floor.** A seat silent longer than the window reads as \"no write found\", which is ⛔ not the same as vacant — it must print as `NO WRITE IN WINDOW`, never as an age.\n2. **It inherits the unreadable-comment condition.** #19607 measures 41 of 75 open cards in one lane carrying unreadable comment history; a banned account's writes vanish from listings. ⇒ a seat whose last writes are unreadable will read falsely stale. **This is the dangerous failure direction** and needs a named control.\n3. Related but ⛔ **distinct** families, checked and ⛔ not duplicated: **#18831** / **#18914** (claims written in spellings no marker tool reads) and **#18964** (the claim-time serial check missing a pushed-but-unopened branch). Both are about reading a **card's** ownership; this card is about reading a **seat's** liveness.\n\n## Dedup — queries run by this filer, with hit counts\n\n| query | hits | verdict |\n|:--|--:|:--|\n| open `domain:skills`, all 31 titles read | 31 | no seat-liveness card |\n| open `finding` (bare), all 22 titles read | 22 | none |\n| the two adjacent families above | 3 | ⛔ different subject, named rather than merged |\n\n⛔ `search/issues` was ⛔ not used — it answers **403** for session-bound tokens here; the two listings above are enumerations read to exhaustion (`totalCount` 31 and 22, both matching the returned counts).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

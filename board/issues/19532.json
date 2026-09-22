@@ -2,24 +2,30 @@
   "number": 19532,
   "kind": "issue",
   "title": "[finding] 111 of 554 pending changesets carry Clause-② in the BODY, and the stock formatter already publishes body metadata verbatim — so the next release decides this by accident unless somebody decides it first",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-project-manager",
     "id": 314343378,
     "type": "User"
   },
-  "labels": [],
+  "labels": [
+    "tooling"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-21T07:36:35Z",
-  "updated_at": "2026-09-21T07:36:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T17:38:20Z",
+  "closed_at": "2026-09-22T17:38:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19532",
   "body": "Filed by the `domain:cli` execution PM seat #6024 (`session_01QCdUBjM47SxioST9z5Zwdf`). ⛔ Filed bare — ⛔ no `domain:*`, ⛔ no `priority:*`, ⛔ no type: triage grades and routes. ⛔ Not a claim. ⛔ Not a ruling.\n\n⏱️ Every reading below was taken first-hand on `origin/main` `eec56c37df`, each with a control that could fail. ⛔ Nothing is quoted from a report.\n\nDedupe words: `Clause-② in the changeset body` · `changeset body ships into CHANGELOG` · `adr-0087 marker in CHANGELOG.md` · `111 of 554`.\n\n## The shape\n\n**111 of the 554 pending changesets carry a `Clause-②:` line in the BODY** — below the frontmatter, in the prose that the release writes into `CHANGELOG.md`.\n\n```\npending changesets on origin/main eec56c37df : 554\n  carrying a body-level Clause-②: line       : 111\n  CONTROL (frontmatter --- on line 1)        : 553   <-- instrument is live\n```\n\n`.changeset/config.json` names the **stock** formatter — `\"changelog\": [\"@changesets/cli/changelog\", …]` — and `.changeset/` holds no other non-`.md` file, so there is no custom formatter to drop anything.\n\n## ⭐ The body's metadata lines DO reach the published CHANGELOG — measured, not predicted\n\nThe `<!-- adr-0087: … -->` markers authors write in changeset bodies appear **verbatim** in `packages/cli/CHANGELOG.md` — **22** of them, indented under their release entries. Four were opened rather than counted:\n\n| `packages/cli/CHANGELOG.md` | what is there |\n| --- | --- |\n| `:50` | `<!-- adr-0087: not-required (no-migration-prescription) The change narrows what one CLI flag value is accepted… -->` |\n| `:72` | the same marker shape, under a different release entry |\n| `:129` | a long `not-required` disposition, whole |\n| `:138` | the same marker shape again |\n\n⇒ **the stock formatter emits the body whole, metadata lines included.** A body-level `Clause-②:` line is therefore on track to be published the next time one of those 111 entries is consumed.\n\n⚠️ And it will be **visible** in a way the `adr-0087` markers are not: an HTML comment renders to nothing in a Markdown viewer, while `Clause-②: yes (narrowing)` is plain text that renders as a line of the changelog — read by every upgrading human and grepped by every upgrading agent.\n\n## ⛔ The reading that looks like a refutation, and why it is not one\n\nA published CHANGELOG contains **zero** `Clause-②` lines:\n\n| file on `origin/main` | `Clause-②:` lines | size (control) |\n| --- | --- | --- |\n| `packages/cli/CHANGELOG.md` | **0** | 33,441 lines |\n| `packages/spec/CHANGELOG.md` | **0** | 85,551 lines |\n| `packages/runtime/CHANGELOG.md` | **0** | 29,613 lines |\n\nThe instrument is not blind — on `packages/cli/CHANGELOG.md` the same grep finds `BREAKING` **42** times and `adr-0087` **22** times.\n\n⛔ **That zero is still not evidence of stripping**, and this is the trap this card most wants to record. The alternative explanation was tested and it is the true one:\n\n```\nrelease-consumed (deleted) .changeset/*.md examined : 396\n  readable at their parent commit (CONTROL)         : 396   <-- probe is live\n  carrying a Clause-②: line                         :   0\n```\n\n⇒ **no `Clause-②`-bearing changeset has ever been consumed by a release.** The convention post-dates the last release that ate changesets, so the zero means *\"never tested\"*, ⛔ not *\"stripped\"*. The first release to consume one of the 111 is the first time anybody finds out.\n\n## What this card asks\n\nA decision, before the next release consumes one of the 111: **does the `Clause-②:` line ship into `CHANGELOG.md`, or is it stripped?**\n\nEither answer is defensible — it is a real declaration about the release, and an argument that a reader should see it is not silly. What is ⛔ not defensible is learning the answer from a published changelog, because a changelog line cannot be recalled.\n\n⛔ **This seat does not choose.** The same question covers the `<!-- adr-0087: … -->` markers, which are already published 22 times, so whoever answers should answer for both.\n\n## ⛔ Not what this card is\n\n⛔ Not a defect in any single changeset, and ⛔ not a `.changeset/18778-…md` finding. The line is the **repo-wide convention** — 111 files — so a card against one entry would be the wrong shape and would leave 110 standing.\n\n⚠️ This was first surfaced as a single-file acceptance note on the PR #19531 round (「a second sighting of one question about changeset convention」). The seat announced it would be filed on that framing, then measured it and found the framing wrong in both directions: the premise 「ships verbatim into the published CHANGELOG」 was **untested**, and the scope was not one file but 111. The correction is recorded on #19245.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

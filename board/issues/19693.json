@@ -2,24 +2,30 @@
   "number": 19693,
   "kind": "issue",
   "title": "A cloud container cannot reach the Actions API at all, and `fleet-token.mjs` reports that blocked route as a platform refusal — the one environment the fallback was built for is the one where its error reads as a permissions problem",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "tooling"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T08:25:26Z",
-  "updated_at": "2026-09-22T08:25:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T20:14:06Z",
+  "closed_at": "2026-09-22T20:14:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19693",
   "body": "## What happened\n\n`fleet-token.mjs` resolves its three inputs from the environment first and, for whatever the environment lacks, from the board repository's Actions variables. That fallback was verified on a maintainer workstation. It was never verified inside a fleet cloud container, which is the environment it exists for.\n\nA PM seat running in one reported this, from a container whose credential is perfectly good:\n\n```\nnode scripts/pm/fleet-token.mjs --print\n✗ GET /repos/objectstack-ai/objectstack/actions/variables/OS_FLEET_APP_ID\n  → HTTP 403 Access to this GitHub Actions path is not permitted through this proxy.\nexit 3 (PREREQUISITE)\n```\n\n`through this proxy` is the egress proxy's own wording, not the platform's. The container reaches `/repos/{o}/{r}/issues/…` with the same credential; it is the `/repos/*/actions/*` path class that is refused. The seat read the source, reached the right conclusion unaided, and correctly declined to work around the proxy — but only after spending a round on it, because the message it was handed describes a credential or permission problem and the cause is network policy.\n\nIndependently confirmed: Claude Code's cloud egress proxy special-cases github.com at the host level, and an environment's own network-access allowlist does not override it (anthropics/claude-code#86828, closed as not planned). So this is not a transient condition and not something a repository setting can lift.\n\n## Why this is a defect worth fixing rather than a note in a header\n\nThe three shapes below are indistinguishable in today's output, and they call for three different actions:\n\n| cause | what the user must do |\n|:--|:--|\n| the token cannot read the variable | fix the credential or the variable's visibility |\n| the variable does not exist | `gh variable set …` |\n| **this environment cannot reach the Actions API at all** | **stop using this route; inject the three environment variables** |\n\nOnly the third is common in the fleet, and it is the one the message does not name. A tool that hands a seat the wrong remedy costs a round every time a new container meets it, and every fleet container will meet it.\n\nThere is a second, smaller mis-signal behind it: a 403 carrying no `x-ratelimit-remaining` header is classified `ratelimit` by `classifyHttp`, because `Number(null) === 0`. The exit code that results is right by accident (3, prerequisite) but the reasoning is not, and a future reader of that path will be misled.\n\n## The fix\n\n1. **Recognise the shape.** When a variables read answers 403 and the body or status line carries the proxy's own marker (the `through this proxy` wording, or any 403 on the `/repos/*/actions/` prefix that is not accompanied by a GitHub error body), report it as *this environment cannot reach the Actions API*, and prescribe the remedy that applies: set `OS_FLEET_APP_ID`, `OS_FLEET_INSTALLATION_ID` and `OS_FLEET_PRIVATE_KEY` in the environment, and `OS_FLEET_INPUTS_FROM_GITHUB=0` to close the route so the next failure names the missing variable instead.\n2. **Say where the inputs may live**, in that same message: the environment (primary), or the board repository's Actions variables (fallback, unavailable in environments whose egress proxy refuses the path class).\n3. **Do not widen `classifyHttp`.** Its `ratelimit` arm reading a header-less 403 as exhausted is a separate finding; this card must not paper over it by adding a branch that happens to mask it. Pin the distinction instead.\n\n## Acceptance\n\n- A 403 of the proxy's shape produces a message naming the environment-variable remedy and `OS_FLEET_INPUTS_FROM_GITHUB=0`, with the exit code unchanged at 3.\n- A genuine GitHub 403 (a real error body, no proxy marker) still reports as a platform refusal and does NOT suggest the environment-variable remedy — both directions pinned in `--self-test`, because a recogniser that fires on everything is the same defect facing the other way.\n- The self-test drives both through a fake platform; ⛔ no network.\n- The header states that the variables route is unavailable behind an egress proxy that refuses the `/repos/*/actions/` class, and names the environment as the route that always works.\n- ⛔ Out of scope: `classifyHttp`'s header-less-403 arm, and any attempt to work around the proxy."

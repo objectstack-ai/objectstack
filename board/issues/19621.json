@@ -2,8 +2,8 @@
   "number": 19621,
   "kind": "issue",
   "title": "finding(spec): `PER_APP_SETTINGS_PLATFORM_ONLY` is a second hand-maintained copy of the ten per-app group names — same construct, same file, as the one that shipped nine of ten",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-warren",
@@ -17,11 +17,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-21T18:57:39Z",
-  "updated_at": "2026-09-21T19:24:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T18:23:07Z",
+  "closed_at": "2026-09-22T18:23:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19621",
   "body": "**Class: the drift-prone construct that the (D) ruling on #15178 removed from one site and deliberately did NOT widen to.** ⛔ Awaiting first triage; this seat does not grade or route it.\n\n## What is there\n\n`packages/spec/src/system/translation.zod.ts:577` — `PER_APP_SETTINGS_PLATFORM_ONLY`, a module-level `const` string, carries a **hand-typed enumeration of the ten per-app translation group names**:\n\n> `For an application's own copy use the ten groups this bundle does declare, in the order it declares them — 'objects', 'apps', 'messages', 'globalActions', 'dashboards', 'datasets', 'pages', 'flows', 'metadataForms', 'settingsCommon'. Note the last one: 'settingsCommon' IS on this face …`\n\nIt is **correct today**, verified at head `8dcd6a42ae`. That is the point: so was its sibling, until it wasn't.\n\n## Why it is worth a card rather than a shrug\n\nThis is the **same construct class**, in the **same file**, as the one that produced card #15178's round-3 fail basis: a hand-maintained copy of a schema's key set living inside a string, with nothing tying it to the schema. That sibling shipped **nine of ten** through a full at-tier contract review of the surrounding change. The seat's ruling on #15178 was the written remedy ordering — 「失效修法按序取:先删容许出错的构造,再让正确形态成唯一拼写,最后才加检查」 — and the fix applied there was **(D): derive the names from `Object.keys(TranslationDataSchema.shape)`**, ⛔ not a corrected literal and ⛔ not a test pin.\n\n⚠️ **Sharper than the sibling was:** this string also uses **positional** wording — *\"Note the last one\"* — which goes false the day an eleventh group is appended, even if someone remembers to add the name. The derived version on #15178 deliberately replaced that phrasing with *\"Note `settingsCommon` among them\"* for exactly this reason.\n\n**Who prints it:** it is the `guidance` string the per-app door hands an author who writes `settings` (or the alias `setting`) into an application bundle — `:600-601`, `APP_TRANSLATION_KEY_GUIDANCE`, consumed by `strictObject`. So it is read by a human or an AI at the moment of refusal, which is the moment a wrong list does the most damage.\n\n## Why it was NOT fixed in PR #19600, and why it is not a one-liner\n\nThe seat instructed the dev not to widen, and the dev complied and reported the gap rather than hiding it. It is genuinely a design step, not a rename:\n\n- The const is declared at `:577`, **before** `appTranslationDataShape` at `:697`.\n- It is consumed at `:600-601` as `guidance` **at schema-build time**, so the names cannot simply be read from the shape at that point.\n- ⇒ deriving it needs a **deferral** — a thunk, or a lazily-built message — and `translation.zod.ts`'s own comments warn against forcing the lazy schema at module load. The #15178 fix avoided that by using a **getter** on a migration entry, which is a different position in the graph and does not transfer unchanged.\n\n## Not in this card, on purpose\n\n- The two **published prose copies** of the same list — `content/docs/protocol/kernel/i18n-standard.mdx:398-401` and `skills/objectstack-i18n/SKILL.md:170-173` — ⛔ **cannot** be derived at all; they are static MDX/Markdown. Both are correct at head. If anything is owed there it is a gate, not a derivation, and that is a different question.\n- `scripts/check-i18n-walk-parity.mjs`'s `RECORDED_DECLARED` is a **deliberate recorded sample** the gate re-measures on every production run, so it is ⛔ not drift-prone in the same way.\n\n## Provenance and radius\n\nRead first-hand at head `8dcd6a42ae323931b02e12208bf229da921b9eb3` on branch `claude/issue-15178-translation-bundle-split`, 2026-09-21T18:5xZ. Raised by the `os-dev` on PR #19600, which recommended its own card; the seat verified the coordinates, the ordering (`:577` before `:697`) and the build-time consumption (`:600-601`) rather than taking them.\n\n⛔ NOT measured: whether any other file in `packages/spec` carries a third hand-maintained copy of this same key set — the dev's ordered-run sweep at head reports the remaining runs in this file (`:1402`, `:1447`) are `aliases:` source→target maps rather than vocabulary, and the seat did not re-derive that sweep for this card.\n\n## Dedupe terms\n\n`PER_APP_SETTINGS_PLATFORM_ONLY` · hand-maintained key enumeration · `appTranslationDataShape` · `Object.keys` derivation · translation group guidance string\n\n⛔ Filed without a duplicate search, per the standing rule that the filer attaches terms and the triage seat runs the check.\n\nFiled by `domain:spec` execution seat 2, session `session_01UDXER3sdqfeVYpEWZs5mZx`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -2,24 +2,30 @@
   "number": 19692,
   "kind": "issue",
   "title": "AGENTS.md §4 promises the pinned sibling is protected, but `Console Pin Gate` only BUILDS it — a break that reds objectui's tests is invisible to every gate in both repos",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-warren",
     "id": 318460043,
     "type": "User"
   },
-  "labels": [],
+  "labels": [
+    "tooling"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T08:16:23Z",
-  "updated_at": "2026-09-22T08:16:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T20:12:56Z",
+  "closed_at": "2026-09-22T20:12:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19692",
   "body": "Filed by `domain:spec` execution seat 2, session `session_01UDXER3sdqfeVYpEWZs5mZx`, 2026-09-22T08:1xZ. ⛔ Unlabelled and unrouted on purpose — an execution seat files, triage grades and routes.\n\nSurfaced by the second at-tier review of PR #19657, which found a real sibling break that no gate caught. ⛔ Re-derived first-hand here, ⛔ not taken on the reviewer's word.\n\n## The rule, and what it promises\n\n`AGENTS.md:1098-1105`, Post-Task Checklist §4:\n\n> **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`, so a removal or rename the pinned sibling still imports **turns `main` red for every PR in the repo the moment it merges** — 「retire the surface」 and 「leave the sibling untouched」 cannot both hold.\n\nThe rule is right. **Its stated mechanism is narrower than its text claims**, and the gap is load-bearing because the rule leans on the gate for its teeth.\n\n## What the gate actually does — read from the workflow, not from the rule\n\n`.github/workflows/ci.yml`, the `Console Pin Gate` job, has exactly three substantive steps:\n\n| step | command |\n|:--|:--|\n| Build the Console SPA at the pinned objectui SHA | `bash scripts/build-console.sh` |\n| Assert a real Console dist is in place | an inline dist check |\n| Verify the Console dist stamp matches the pin | `pnpm check:console-sha` |\n\nAnd `scripts/build-console.sh` invokes **no** test runner and **no** typecheck: `grep -nE \"test|vitest|typecheck|tsc\"` over it returns a single hit, inside a comment at `:265`, about probe derivation. **Lit control for that grep**: the same instrument fires on the workflow file itself, which does contain `run:` lines.\n\n⇒ the gate **builds** the sibling and **stamps** it. It ⛔ never runs objectui's suite and ⛔ never typechecks it.\n\n## The consequence, measured on a live case\n\nPR #19657 retires `Connector.connectionTimeoutMs` and wraps both carriers in a `z.preprocess` pipe (the ADR-0087 residue stage). At `objectui@87af769e9a3ee28ace099fdd653d3ebd79fe82e2` — the current `.objectui-sha` — `packages/app-shell/src/views/metadata-admin/clientValidation.optOuts.test.ts:468` asserts `checks(DeclarativeConnectorEntrySchema) > 0`, reading `_zod.def.checks`.\n\n| tree | reading |\n|:--|--:|\n| against objectstack `main` | **1** |\n| against PR #19657's head | **0** — a pipe def has no `checks` array |\n\nOne assertion reds. The SPA still **builds**, so the gate is green-or-skipped either way. ⇒ **a genuine break in the pinned sibling passed every gate in both repos and was caught only by a human-tier contract review, on its second round.** Tracked on the sibling side as objectui#10211.\n\n⚠️ It was `skipped` at that head in fact — but that is not the finding. **A green run would not have caught it either**, and that is the finding.\n\n## Why the rule's text and the gate's reach diverge\n\nThe rule was written for **removals and renames of an exported surface**: the sibling `import`s a name, the name is gone, the build fails. For that class the mechanism is exact. This break is a different class — the export still exists, still imports, still behaves, and only its **internal representation** changed. Nothing fails to build; a structural assertion stops being true.\n\n⇒ the rule's pre-merge prescription — 「does the pinned sibling **import** what you are removing? `git grep` it」 — also cannot see this class, because nothing was removed to grep for.\n\n## Options, ⛔ none of them decided here\n\n1. **Widen the gate** — run the pinned sibling's test suite, or the subset that touches spec schemas. ⚠️ Cost is real and must be measured before it is proposed: a full sibling suite in every objectstack PR is a large standing bill, and the job already carries a 45-minute timeout.\n2. **Narrow the rule's text** to what the gate can actually enforce, and say plainly that representation changes are not covered — pairing it with a named manual step at the same place.\n3. **Move the pin's own discipline**: treat a sibling assertion that reads a dependency's internal def shape as a defect in the sibling (objectui#10211 takes that view for this instance), so the class stops existing rather than being gated for.\n\n⭐ **These are not equivalent and the choice is not an execution seat's.** (1) buys coverage with standing cost, (2) buys honesty with no coverage, (3) buys both but only where the sibling cooperates. A maintainer or the skills lane should pick.\n\n## ⚠️ Reach of this reading\n\nOne gate was read, because one break exposed it. ⛔ **Not measured**: whether other cross-repo gates in this repo carry the same build-but-do-not-test shape, and whether objectui's own CI has a reciprocal gap facing objectstack. Whoever takes this should census both before choosing an option.\n\n## Duplicate-search words\n\n`Console Pin Gate`, `objectui-sha`, `build-console.sh`, `AGENTS.md Post-Task Checklist`, `pinned sibling`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

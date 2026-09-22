@@ -1,0 +1,31 @@
+{
+  "number": 19739,
+  "kind": "issue",
+  "title": "protocol(pm): cloud seats write as `objectstack-fleet[bot]` — export `OS_FLEET_SESSION` at 开轮 and name the relay in the channel text",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:blocked",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T16:27:29Z",
+  "updated_at": "2026-09-22T16:27:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19739",
+  "body": "③ 直派任务 — maintainer direct dispatch, filed by the director seat (summon #27, `session_0129ZpnaBcYZZ51rCvQiXg6C`). `domain:skills` · `tooling` (the PM loop's own protocol). Takes the lane's pick order first as a 直派插队卡, ⛔ but only after the serial constraint below clears.\nBlocked-by: #19061\nUnlock-action: re-check #19061 when label pm:dispatched absent\n\n**Provenance (who / verbatim / where):** the maintainer, chat with the director seat, 2026-09-22 — 「我首先要解决的问题是车队怎么用 github app 的身份跑」, 「方案 1」, 「车队不只是在这两个仓库,objectstack-ai 组织下的所有仓库都可能会用」, 「你现在就派发处理」 (card #19701). The relay is live: PR #19725 (`70dccce0`) and PR #19726 (`16d090ed`, the maintainer's hand) on `main`; live probe #2 on #19701 landed comment 5780080277 as `objectstack-fleet[bot]` (Bot) through `post-stamped` with `OS_FLEET_TRANSPORT=auto`. What is missing is the seats: the four write tools select `dispatch` only when the process carries `OS_FLEET_SESSION=session_…`, and no protocol line tells a seat to export it — so today every seat still writes as its own user.\n\n## Readings (director seat, 2026-09-22T16:2xZ)\n\n- `scripts/pm/fleet-write/dispatch.mjs` `selectTransport`: `auto` → `dispatch` iff `CCR_AGENT_PROXY_ENABLED=1` ∧ well-formed `OS_FLEET_SESSION` ∧ relay live on `main` (cached GET); any condition failing ⇒ `direct` with one printed line. `with-fleet.sh --via auto` asks the same selector.\n- Probe #2 timings: dispatch → run created 5 s; job 17 s (checkout 11 s); comment written 22 s after the dispatch; tool wall time 31 s. Ceilings `OS_FLEET_DISPATCH_START_MS` 90 s / `OS_FLEET_DISPATCH_TIMEOUT_MS` 5 min hold with margin — ⛔ not tuned by this card.\n- `git grep -n OS_FLEET` on `main`: `AGENTS.md` :417–418 (the tooling paragraph names `fleet-token.mjs` and the three mint variables, not the relay); nothing under `.claude/**`.\n- Serial constraint: #19061 step ③ (claim 5778141422, skills seat 1) declares `SKILL.md` :76, `dispatch-runbook.md` :161, `lanes/director.md` among its riders; #19716 (SKILL.md split) is queued on the same unlock. This card's `SKILL.md` line is one line and survives the split as relocation; the taker orders it against #19716 by the lane's own in-flight read.\n\n## Ruled shape — ⛔ not open for re-design\n\n1. **One protocol line, at the write side of 开轮** (`SKILL.md` 〈座位贴协议〉 or wherever the seat's first write is spelled; the taker measures the home and says why): a cloud seat exports `OS_FLEET_SESSION=<its own session_… id>` on every write invocation (`post-stamped`, `label-write`, `issue-create`, `close-cards`, `with-fleet.sh`), so `auto` takes the relay and the write lands as `objectstack-fleet[bot]`; a local checkout exports nothing and stays `direct`. The attribution inside the text stays the session id, as today.\n2. **`.claude/agents/os-dev.md`**: the same export for the dev's own writes (report comments, `pr_create`); `git push` is not a REST write and is unchanged.\n3. **`references/rest-channel.md` 〈通道边界〉**: one paragraph — the App identity is reached through the `fleet-write` relay (dispatch with the session token, execution on the runner with a per-run App token narrowed to the target repo and `issues` / `pull-requests` write); the closed op list lives in `scripts/pm/fleet-write/ops.mjs`; reads stay direct; the two failure exits (4 relay run failed, 6 UNCONFIRMED — read, ⛔ never retried).\n4. **`references/platform-readings.md` 〈API 配额〉**: the relay's first live readings above, and that `write-pace` counts a dispatch as the write (40/h unchanged).\n5. **`AGENTS.md` :417 tooling paragraph** (Tier H, the maintainer's merge): one clause naming `scripts/pm/fleet-write/` beside `fleet-token.mjs` — only if the taker judges the paragraph false without it; otherwise ⛔ untouched.\n6. ⛔ No new gate, hook, ratchet or roster; line budgets paid in-file (`check:pm-skill-ratchet`, `check:skill-line-ratchet` green on the head); `Clause-②: no`; Tier S (`.claude/**`) at `CONTRACT_REVIEW_TIER`, landed by the skills seat through the queue after its in-seat at-tier `## Contract review`; `skip-changeset`; one PR, `Fixes` this card (item 5, if taken, is a sibling PR on `AGENTS.md`).\n\n## Dedupe\n`OS_FLEET_SESSION export 开轮` · `objectstack-fleet[bot] seat writes protocol` · `fleet-write relay channel text` · `rest-channel App identity relay` · `platform-readings relay latency`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

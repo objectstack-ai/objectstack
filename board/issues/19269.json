@@ -2,8 +2,8 @@
   "number": 19269,
   "kind": "issue",
   "title": "[finding] `packages/spec/liveness/README.md:548` 把作者告警规则指到 `packages/cli/src/utils/lint-liveness-properties.ts` —— 那条路径不存在,模块早已搬到 `packages/lint/src/`,而账本门禁只校验条目的 evidence 路径、不看 README 散文指针",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -13,18 +13,19 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-support-ai"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T08:13:40Z",
-  "updated_at": "2026-09-22T05:37:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T14:55:34Z",
+  "closed_at": "2026-09-22T14:32:48Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

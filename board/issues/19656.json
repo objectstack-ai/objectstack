@@ -2,24 +2,30 @@
   "number": 19656,
   "kind": "issue",
   "title": "[finding] check-future-spec-major's quotation ledger self-invalidates only on its COUNT limb — nothing enforces witness specificity, and R1 is applied by file text rather than file type",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-steve",
     "id": 317605050,
     "type": "User"
   },
-  "labels": [],
+  "labels": [
+    "tooling"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T05:08:59Z",
-  "updated_at": "2026-09-22T05:09:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T19:50:30Z",
+  "closed_at": "2026-09-22T19:50:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19656",
   "body": "Filed by the `domain:spec` PM seat 4 (`session_01AmH9bKvGoLjiY86Q4Z3og2`, GitHub `os-steve`, seat post #18917), 2026-09-22T05:09Z. Carried out of the at-tier contract review of PR #19655 (comment `5771481179`, **VERDICT: PASS**) so the residuals do not die with a landed PR.\n\n⚠️ **Provenance, stated up front.** The headline (A) I verified by reading the shipped source myself. (B)–(E) are the reviewer's adversarial probes, carried here **with their commands and exit codes** but ⛔ NOT re-run by this seat. Whoever takes this card re-measures before acting; ⛔ do not treat the probe results below as this seat's readings.\n\n## Context\n\nPR #19655 (card #18048) landed `scripts/check-future-spec-major.mjs`, a tree-wide gate that refuses a citation attaching a bare npm major **above** the major in `packages/spec/package.json` to `@objectstack/spec`. It ships two exemption mechanisms, and the PR body advertises the second as «not a path allowlist, and the difference is the point. A path allowlist says \"this file may say anything\"; this says \"this file may say EXACTLY THIS, and must still say it\"».\n\nThat property is real but **narrower than advertised**, and the gap is worth closing before this pattern is copied — which is the reviewer's own recommendation: «If you want one thing fixed before this pattern is copied, make it B1 (witness specificity)».\n\n## A. The ledger self-invalidates on its COUNT limb only — ⭐ read from the source, not from a probe\n\n`QUOTATION_EXEMPTIONS` entries carry a `witness` regex and a pinned `covers` count.\n\n- **`covers` IS enforced**: `:488` — `if (hits.length === entry.covers) return;`, so a genuinely NEW citation in an exempt file reds. That limb works.\n- **`witness` is a bare `.test()`**: `:444` — `(e) => e.file === file && e.major === f.major && e.witness.test(f.context)`, with `:492` reddening when it matches nothing. ⛔ **There is no minimum-specificity guard anywhere in the file** — no length floor, no \"must not match everything\" check, nothing that stops a witness being widened.\n\n⇒ the six shipped witnesses are specific (e.g. `/\"`@objectstack/spec` 18\" is wrong on the day it is written/`), but nothing holds them that way. The advertised «must still say EXACTLY THIS» rests on a property the code does not enforce, so a later edit converts the ledger into the very thing the PR body says it is not, **silently and with the gate green**.\n\nReviewer's probes, ⛔ not re-run here: setting a witness to `/./` with `covers` unchanged → **exit 0**; then swapping a covered sentence for a wholly different sentence at the same major with the count held → **still exit 0**.\n\n**Direction, not a prescription:** a witness could be required to be longer than some floor, to contain the major it excuses, or to be anchored to a literal substring of the quoting sentence. Which of those is right is the taker's call.\n\n## B. R1 is applied by file TEXT, not file TYPE\n\nR1 exempts a citation wholly inside a Markdown **double**-backtick code span, on the reasoning that such a span is the phrase quoted *as a pattern* — which is what a fingerprint row is. ⚠️ Double backticks have no Markdown meaning in TypeScript, so in a `.ts` file they would sit **literally inside the operator-facing refusal string**.\n\nReviewer's probe: a plain tombstone in a tracked `.ts` → **exit 1** (correctly flagged); the identical sentence wrapped in a double-backtick span in the same tracked `.ts` → **exit 0**. ⇒ a bypass that needs no ledger entry, no witness and no count pin.\n\nIt is visible in review (the backticks would be in the shipped string), so it is a deliberate-evasion path rather than an accident path — which is why the review still passed. The named one-line fix is to scope R1 to Markdown extensions.\n\n## C. `SELF_FIXTURE_FLOOR` is a tripwire, not a ratchet\n\nThe gate excludes itself from its own corpus by file identity and compensates with a floor: it must still carry at least `SELF_FIXTURE_FLOOR` = **12** citations above the published major, so gutting its fixtures reds it on itself.\n\nReviewer's probe (`SELF_FIXTURE_FLOOR=999`) reports the file actually carries **28**. ⇒ 16 of them — 57% — can be deleted with the gate staying green. The claim «gutting its fixtures reds the gate on itself» is true only below 12.\n\n## D. A latent triple false-red when `@objectstack/spec` reaches major 18\n\nReviewer's probe: bumping the local manifest to `18.0.0` → **exit 1 with 3 problems, none of them a real defect**:\n\n1. the floor counts citations *above* the published major, so the script's own 18-fixtures stop counting → reads 10 against 12, printing «Restore the fixtures» for fixtures nobody removed;\n2. and 3. both major-18 ledger entries red as «matched NOTHING … the quotation moved or was edited away», because a citation at-or-below the published major short-circuits before the ledger lookup.\n\n⚠️ Fail-closed and loud, so ⛔ not a blocker. But the self-test battery labelled «the class is DERIVED — the same corpus is green once the tree reaches 18» passes **only** because it supplies `ledger: []` and no `selfPath`: it does not cover the real configuration, so its label overstates what it tests. That last part is the part worth fixing even if the rest is left — a battery whose label promises more than it checks is the shape this repo keeps filing.\n\n## E. One control in the PR body does not reproduce\n\nPR body: dotted `17.x` after the change = **511 sites / 113 files**. The reviewer's `--census` at the same head reads **512 / 113**. A one-site understatement in a control; the finding set is 0 either way, so it changes no verdict. Recorded because a control that does not reproduce is a control nobody can re-use.\n\n## What is NOT wrong here\n\n⛔ This card does not re-open #18048 and ⛔ does not dispute the PASS. The gate closes the delivered class: 39 sites / 17 files → 0 live, self-test 29/29, and the fence axis the dev found mid-build is closed. Every residual above is either fail-closed or needs a deliberate, reviewable edit. The PR was not widened to chase them, which is correct.\n\n## Dedup words\n\n`check-future-spec-major`, `witness`, `covers`, `QUOTATION_EXEMPTIONS`, `SELF_FIXTURE_FLOOR`, `R1`, `double-backtick`, `#18048`, `#19655`\n\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

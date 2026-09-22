@@ -2,24 +2,30 @@
   "number": 19687,
   "kind": "issue",
   "title": "The merge_group leg of `lint.yml` caught nothing in 98 laps while the governance guard's caught 5 in 100: measure a longer window before deciding whether that leg earns its place",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "tooling"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T07:46:46Z",
-  "updated_at": "2026-09-22T07:46:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T20:11:55Z",
+  "closed_at": "2026-09-22T20:11:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19687",
   "body": "## The reading that raises the question\n\nMeasured 2026-09-22 over the trailing window the API returns (about 21 hours, which at this repository's pace is roughly one day of work):\n\n| leg | sample | failures |\n|:--|:--|:--|\n| `lint.yml` on `pull_request` | 100 | **12** across 8 distinct branches |\n| `lint.yml` on `merge_group` | 98 | **0** |\n| `governed-surface-guard.yml` on `merge_group` | 100 | **5** |\n\nThe PR leg plainly earns its place: it stops roughly one PR in eight, and the repository merged 633 pull requests in the trailing seven days. The queue leg of the SAME workflow stopped nothing in 98 laps, at about 28 minutes a lap.\n\n⛔ And the third row is why this card asks for a measurement rather than proposing a removal. The queue leg is not dead weight in general — the governance guard's queue leg refused five merge groups in the same window, one of them objectstack-ai/objectstack#19642, correctly, for a Tier H diff carrying no authorized approval. Whatever is concluded here is about `lint.yml`'s leg and nothing else.\n\n## What the leg is for, and what would make it earn its keep\n\nMulti-agent discipline §10 states the reason: a clean merge is not a working merge, and the queue rebuilds a pull request as merged onto the current `main` so the required workflows run on that rebuilt generation. The failure it exists to catch is JOINT breakage — two changes each fine alone and wrong together. A PR-leg failure cannot catch that by construction, because the PR leg never sees the other change.\n\nSo 0 in 98 says one of two things and the sample cannot tell them apart:\n\n1. joint breakage of the kind `lint.yml` would see genuinely does not occur at this repository's shape — most of its gates read a file and judge it, and two PRs touching different files do not interact; or\n2. it does occur and 98 laps is too small a sample to have caught one.\n\nReading (1) is plausible and would make the leg a 28-minute-per-lap insurance premium against a risk the workflow's own gates mostly cannot express. Reading (2) is equally consistent with the data. ⛔ Neither may be asserted from this sample.\n\n## What this card asks for\n\n1. **Measure over a window long enough to distinguish them.** Walk `lint.yml`'s `merge_group` runs back as far as the API allows, and report: total laps, failures, and for every failure the job and step that failed plus whether the same failure had already appeared on that PR's own leg (a queue failure that the PR leg had ALSO flagged is not a joint-breakage catch, it is a re-run of a known red).\n2. **Classify the gates.** Of the steps in `Lint & Repo Gates`, how many can even express a joint failure — that is, how many read state outside the diff (a baseline, a manifest, a cross-package count, an aggregate roster) rather than judging a file against itself? That count is the leg's theoretical catch surface, and it is derivable from the scripts without waiting for a failure.\n3. **Then decide, and the decision is the maintainer's**: the required-context set is branch protection, a repository setting no file in this repo can assert.\n\n## Acceptance\n\n- The measured window, the lap count and every failure classified as joint-breakage or re-run-of-a-known-red, written into the card.\n- The count from (2), with the method that produced it.\n- A recommendation that names which reading the data supports, and says so plainly if the data supports neither.\n- ⛔ No branch-protection change is made by whoever works this card. It produces the reading the decision needs.\n- ⛔ Out of scope: the job's 28-minute serial shape, which is objectstack-ai/objectstack#19686 and is worth doing whichever way this one lands."
