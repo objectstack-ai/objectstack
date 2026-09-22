@@ -1640,8 +1640,12 @@ export class SysMetadataRepository implements MetadataRepository {
     const detail = intent === 'runtime-only'
       ? `'${type}' has neither allowOrgOverride nor allowRuntimeCreate in the registry. `
       : `'${type}' is not allowOrgOverride in the registry. `;
+    // ⛔ No `[${code}]` opener: the token below IS the `code` this throw
+    // declares three lines down, so a bracketed restatement duplicates onto the
+    // prose axis a fact the envelope already carries — and, spelled by
+    // interpolation, it is invisible to every grep for a literal tag.
     const err: any = new Error(
-      `[${code}] ${detail}` +
+      `${detail}` +
       `Overlay-allowed: ${Array.from(new Set(allowed)).join(', ') || '(none)'}. ` +
       `Set OS_METADATA_WRITABLE to enable additional types at runtime.`,
     );

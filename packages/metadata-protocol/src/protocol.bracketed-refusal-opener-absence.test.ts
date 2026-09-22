@@ -55,10 +55,32 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PRODUCERS = ['protocol.ts', 'sys-metadata-repository.ts'] as const;
 
 /**
- * A string literal whose FIRST characters are a bracketed lowercase tag —
- * the shape `withoutDeclaredCodePrefix` cannot strip.
+ * A string literal whose FIRST characters are a bracketed tag — the shape
+ * `withoutDeclaredCodePrefix` cannot strip, in all three spellings it was
+ * found in.
+ *
+ * ⚠️ The INTERPOLATED arm is not thoroughness for its own sake. One site wrote
+ * its opener as `[${code}]` from the same variable it assigned to `err.code` a
+ * few lines down — the most redundant member of the whole family, and the one
+ * every grep for a literal tag walked straight past. A detector that reads only
+ * literals would let exactly that shape back in.
  */
-const TAGGED_OPENER = /(`|')\[[a-z][a-z0-9_]*\]/;
+const TAGGED_OPENER = /(`|')\[(?:([A-Za-z][A-Za-z0-9_]*)\]|\$\{)/;
+
+/**
+ * The bracketed openers that are NOT this family, by name.
+ *
+ * Both are LOGGER subsystem prefixes on log lines — they say which component is
+ * speaking into a shared stream, a fact no envelope carries because a log line
+ * has no envelope. Neither restates a declared `code`, and neither is addressed
+ * to a caller.
+ *
+ * ⚠️ Declared by name rather than by a "looks like a log" heuristic: a new
+ * vocabulary should red this pin and be argued, which is the ratchet. Adding a
+ * refusal tag here instead of removing it is ⛔ the one edit this list must
+ * never absorb.
+ */
+const NON_REFUSAL_PREFIXES = new Set(['Protocol', 'SysMetadataRepository']);
 
 function scan(file: string): { openers: string[]; refusals: number } {
   const lines = readFileSync(join(HERE, file), 'utf8').split('\n');
@@ -73,6 +95,7 @@ function scan(file: string): { openers: string[]; refusals: number } {
     const m = TAGGED_OPENER.exec(line);
     // The bracket must open the literal, not merely appear inside it.
     if (!m || line[m.index + 1] !== '[') continue;
+    if (m[2] !== undefined && NON_REFUSAL_PREFIXES.has(m[2])) continue;
     openers.push(`${file}:${i + 1}  ${trimmed.slice(0, 100)}`);
   }
   return { openers, refusals };
