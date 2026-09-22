@@ -24,6 +24,30 @@
  *    its door is the control plane's, not this platform's install door — so
  *    what is pinned here is the difference that carries that reading, not the
  *    sameness.
+ *
+ * ## ⭐ [#19273] THE 缺省 CELL FLIPPED — and this is the registered reason
+ *
+ * When this file was written, every 缺省 (absent) reading below was `true`,
+ * because all three declarations spelled `z.boolean().default(true)`. They now
+ * spell `z.boolean().optional()` and the 缺省 readings are `undefined`.
+ *
+ * ⛔ That is a FLIP, not a repair, and it was expected on the day this pin
+ * landed — {@link FLIP_TRIGGER} is the phrase this file registered in advance
+ * so the next reader meets the reason instead of a silently edited
+ * expectation. The trigger fired: the install door was ruled onto
+ * 「缺省 = 保持，有旗 = 设置」 (maintainer batch #157 item 5 letter C) and stopped
+ * making any lifecycle call on an absent key, which left the declarations
+ * claiming a default the runtime deliberately no longer applies. The
+ * declarations followed in maintainer batch #210 item 4 letter A.
+ *
+ * ⭐ What did NOT move, and is re-read below precisely because of that: the
+ * `true` and `false` arms. A fix that makes absence visible by making the key
+ * mean nothing would be worse than the defect it closes, so both booleans are
+ * asserted after the flip rather than assumed to have survived it.
+ *
+ * ⛔ Only the 缺省 cell moved. The string and `null` cells still refuse, and
+ * the authority/copy agreement is still judged cell by cell — the flip is one
+ * row of the matrix, never a relaxation of the matrix.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -40,22 +64,52 @@ const MANIFEST = {
 } as const;
 
 /**
+ * ⭐ THE FLIP-TRIGGER, registered in this file rather than patched away.
+ *
+ * The phrase the install door was ruled onto. While the declarations spelled
+ * `.default(true)`, every assertion here read the 缺省 cell as `true` — and
+ * that reading was known to be living on borrowed time, because this phrase
+ * says absence is a state the door ACTS ON (by making no lifecycle call at
+ * all), and a `.default()` resolves absence at parse time so the state cannot
+ * survive to the published surface.
+ *
+ * So: a 缺省 reading of `undefined` below is this trigger having fired. It is
+ * spelled once, here, and quoted into the cell name so a test run prints it.
+ * ⛔ Reading a red on the 缺省 cell as "the pin needs updating" and writing the
+ * new value in silently is the failure this const exists to prevent.
+ */
+const FLIP_TRIGGER = '缺省 = 保持，有旗 = 设置';
+
+/**
  * The matrix. Each cell is a body the two contracts must answer identically —
- * absent (the default), both booleans, and the non-boolean spelling the door
- * itself treats as absent (recorded on `PackageInstallBodySchema`'s residual).
+ * absent (a state of its own, {@link FLIP_TRIGGER}), both booleans, and the
+ * non-boolean spelling the door itself treats as absent (recorded on
+ * `PackageInstallBodySchema`'s residual).
  */
 const MATRIX: ReadonlyArray<{ name: string; enableOnInstall?: unknown }> = [
-  { name: 'absent — the declared default applies' },
+  { name: `absent — a state of its own, 「${FLIP_TRIGGER}」: no default resolves it` },
   { name: 'false — install present, not active', enableOnInstall: false },
-  { name: 'true — the default, spelled', enableOnInstall: true },
+  { name: 'true — the enable request, spelled', enableOnInstall: true },
   { name: "'false' — a string, refused by the declaration", enableOnInstall: 'false' },
   { name: 'null — refused by the declaration', enableOnInstall: null },
 ];
 
 describe('#18605 — `enableOnInstall` has ONE authority', () => {
   describe('the authority: `PackageInstallRequestSchema`', () => {
-    it('defaults to `true` — the value the install door installs enabled on', () => {
+    it(`leaves an absent key \`undefined\` — 「${FLIP_TRIGGER}」, so the door still sees the absence`, () => {
       const parsed = PackageInstallRequestSchema.parse({ manifest: MANIFEST });
+      expect(parsed.enableOnInstall).toBeUndefined();
+      // ⛔ Not merely "not `true`": the key must be ABSENT-shaped after the
+      // parse, because the door's three-way read is `=== true` / `=== false` /
+      // neither. Any other resolved value would be a fourth state.
+      expect('enableOnInstall' in parsed).toBe(false);
+    });
+
+    it('carries `true` through — ⭐ re-read after the flip, not assumed to have survived it', () => {
+      // The control in the other direction: making absence visible by making
+      // the key mean nothing would be worse than the defect. This arm and the
+      // `false` one below are what say the key still means something.
+      const parsed = PackageInstallRequestSchema.parse({ manifest: MANIFEST, enableOnInstall: true });
       expect(parsed.enableOnInstall).toBe(true);
     });
 
@@ -92,11 +146,21 @@ describe('#18605 — `enableOnInstall` has ONE authority', () => {
       });
     }
 
-    it('declares the key with the same type and default, not merely the same name', () => {
+    it('declares the key with the same type and the same OPTIONALITY, not merely the same name', () => {
+      // ⭐ [#19273] This assertion used to read `typeof copyOnly === 'boolean'`,
+      // which only held while a `.default(true)` was resolving the absence.
+      // The flip-trigger removed that default from both declarations, so what
+      // is pinned now is that neither one invents a value — and the boolean
+      // half of the type is held by the spelled cells in the matrix above.
       const authorityOnly = PackageInstallRequestSchema.parse({ manifest: MANIFEST }).enableOnInstall;
       const copyOnly = InstallPackageRequestSchema.parse({ manifest: MANIFEST }).enableOnInstall;
-      expect(typeof copyOnly).toBe('boolean');
+      expect(copyOnly).toBeUndefined();
       expect(copyOnly).toBe(authorityOnly);
+
+      // And the copy still carries a spelled value through, both ways — the
+      // same control the authority gets above.
+      expect(InstallPackageRequestSchema.parse({ manifest: MANIFEST, enableOnInstall: true }).enableOnInstall).toBe(true);
+      expect(InstallPackageRequestSchema.parse({ manifest: MANIFEST, enableOnInstall: false }).enableOnInstall).toBe(false);
     });
   });
 
@@ -116,9 +180,18 @@ describe('#18605 — `enableOnInstall` has ONE authority', () => {
       expect(PackageInstallRequestSchema.safeParse({ listingId: 'com.acme.crm' }).success).toBe(false);
     });
 
-    it('declares `enableOnInstall` in its own right, defaulting to `true`', () => {
+    it('declares `enableOnInstall` in its own right, and leaves an absent one `undefined` too', () => {
+      // ⭐ [#19273] The 缺省 cell moved here as well, so the matrix reads as one
+      // row per state across all three declarations. ⛔ Not a fold: what this
+      // request means by 「enable」 is still one translation upstream of the
+      // install door, which is what the two assertions above pin.
       const parsed = MarketplaceInstallRequestSchema.parse({ listingId: 'com.acme.crm' });
-      expect(parsed.enableOnInstall).toBe(true);
+      expect(parsed.enableOnInstall).toBeUndefined();
+
+      // Re-read in the other direction here too — the key still means
+      // something on this request after the flip.
+      expect(MarketplaceInstallRequestSchema.parse({ listingId: 'com.acme.crm', enableOnInstall: true }).enableOnInstall).toBe(true);
+      expect(MarketplaceInstallRequestSchema.parse({ listingId: 'com.acme.crm', enableOnInstall: false }).enableOnInstall).toBe(false);
     });
   });
 });
