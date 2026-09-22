@@ -369,16 +369,33 @@ export const RECENSUS_17242 = {
   objectuiPinAndMainAgreeRowwise: true,
   /* ── The split, under the predicate the header states ──────────────────────
    * ⭐ The split #17242 filed as NOT MEASURED. Continuations carry no path of
-   * their own and are attributed by the header's antecedent walk; 188 of the
-   * 467 rows are bound that way and the other 279 carry their own path. */
+   * their own and are attributed by the header's antecedent walk: 188 of the
+   * 191 continuations inherit a token that way, 3 inherit none and bind
+   * nowhere, and the other 276 carry their own path. */
   namingAnExistingObjectuiFile: 409,
   namingAnExistingFileHere: 53,
   bindingInNeitherRepo: 5,
+  /* ⛔ The same 467 rows split by HOW each one got the token it was bound by --
+   * the sentence above, carried as data because a via-split stated in prose and
+   * held by nothing is the defect this whole record exists to stop. The two
+   * `antecedent` cells ARE the continuations, so they must sum to the
+   * `continuation` shape count, and all three must exhaust the declined
+   * population. The rows that inherit NO token are the three `via: 'antecedent'`
+   * entries enumerated below -- which is what ties this cell to a list a reader
+   * can check rather than to a number nobody can open. */
+  bindingVia: Object.freeze({ ownPath: 276, antecedentInherited: 188, antecedentNoToken: 3 }),
   /* The token grammar the antecedent walk keeps the LAST match of. Carried as
-   * data so the predicate is copyable rather than paraphrased; the alternation
-   * is longest-first on purpose, because a shorter arm matching first truncates
-   * every four-letter extension to its three-letter prefix and silently
-   * re-points the token at a file that does not exist. */
+   * data so the predicate is copyable rather than paraphrased.
+   *
+   * ⭐ What keeps a `tsx` citation from being eaten as `ts` -- which would
+   * silently re-point the token at a file that does not exist -- is the
+   * TRAILING NEGATIVE LOOKAHEAD, ⛔ NOT the longest-first alternation: a `ts`
+   * arm FAILS that lookahead when the next character is `x`, and the engine
+   * backtracks into the `tsx` arm. Measured on this pattern, both ways round: a
+   * shortest-arm-first alternation returns the IDENTICAL token, and removing
+   * the lookahead while keeping longest-first also truncates nothing -- only
+   * removing BOTH truncates. ⇒ the ordering is a redundant second guard, and it
+   * is the lookahead the self-test pins. */
   bindingTokenPattern: String.raw`(?:[A-Za-z0-9_.@-]+\/)*[A-Za-z0-9_.-]+\.(?:tsx|ts|mts|cts|jsx|js|mjs|cjs)(?![A-Za-z0-9_])`,
   /* How many rows resolve in BOTH trees and are decided by the objectui-first
    * tie-break alone. Every one of them is a bare basename. */
@@ -390,11 +407,15 @@ export const RECENSUS_17242 = {
   bindingUnderDirectoryLenientVariant: Object.freeze({ objectui: 410, here: 53, neither: 4 }),
   /* ⛔ THE ENUMERATION, because a cell nobody can list is a cell nobody can
    * check. `line` is a COORDINATE into `boundAgainstSha`, ⛔ not an anchor: a
-   * row's identity is its document plus its citation TEXT, which is what the
-   * self-test holds it by, and the number is here only so a reader can open the
-   * tree at the named sha and land on it. `tense` was read BY HAND, one row at
-   * a time -- the classifier that produced the three tense totals above exists
-   * nowhere and cannot be asked. */
+   * row's identity is its document plus its citation TEXT, and the number is
+   * here only so a reader can open the tree at the named sha and land on it.
+   * ⚠️ What the self-test does with that identity, stated as what it DOES: it
+   * requires every row to CARRY both, and it refuses two rows that share them.
+   * It does ⛔ NOT key a live lookup off them the way `CENSUS_RESIDUAL`'s triage
+   * does -- this reading is frozen at the shas above, so there is no live
+   * finding for a row to be matched against. `tense` was read BY HAND, one row
+   * at a time -- the classifier that produced the three tense totals above
+   * exists nowhere and cannot be asked. */
   bindingInNeitherRepoRows: Object.freeze([
     {
       doc: 'packages/spec/src/ai/agent.zod.ts',
@@ -465,6 +486,35 @@ export const RECENSUS_17242 = {
  * catch.
  */
 export const NEITHER_ROW_TENSES = Object.freeze(['record', 'dated-measurement', 'live']);
+
+/**
+ * The CLOSED `via` vocabulary an enumerated `bindingInNeitherRepoRows` row may
+ * carry, and the counterpart of the tense vocabulary above. Closed for the same
+ * reason: `bindingVia.antecedentNoToken` is held by COUNTING the rows typed
+ * `antecedent`, so a row typed `antecedent-walk` would leave that count short
+ * while reading, to a human, exactly like the rows it meant to join.
+ */
+export const NEITHER_ROW_VIAS = Object.freeze(['own-path', 'antecedent']);
+
+/**
+ * The trailing guard of `RECENSUS_17242.bindingTokenPattern`, carried as its
+ * own constant so the self-test can pin its PRESENCE rather than restate the
+ * mechanism in a message.
+ *
+ * ⭐ This is the part that does the work the record's comment describes: with
+ * it, a shorter extension arm cannot match a longer extension's prefix, because
+ * the character after that prefix is one this guard refuses. Without it, the
+ * alternation's ORDER becomes load-bearing -- a far weaker guarantee, since
+ * re-ordering an alternation reads as tidying.
+ */
+export const BINDING_TOKEN_TAIL_GUARD = String.raw`(?![A-Za-z0-9_])`;
+
+/**
+ * The repo-root file in which this repository records the sibling objectui
+ * commit it is pinned to. Named once, as data, so the self-test's frozen
+ * reality pin reads it at a sha rather than restating the path in prose.
+ */
+export const OBJECTUI_PIN_FILE = '.objectui-sha';
 
 /**
  * ⚠️ THE DAY-ONE RESIDUAL -- the findings the census enumerated, pinned.
@@ -677,6 +727,35 @@ function listUnresolvable(root = process.cwd()) {
 
 function assert(cond, msg) { if (!cond) { console.error(`❌ check-spec-docblock-symbol-anchors --self-test: ${msg}`); process.exit(1); } }
 
+/**
+ * The trimmed contents of `path` at `commit`, or `null` when this clone cannot
+ * answer -- git missing, not a repository, or the commit simply not present
+ * (a shallow clone, or a squash merge that left the object unreachable).
+ *
+ * ⛔ Callers must read `null` as NOT MEASURED, never as agreement. It is spelled
+ * as a return rather than a throw because the one caller is a FROZEN pin whose
+ * anchor legitimately stops resolving once the branch carrying it is squashed.
+ *
+ * Spawned with `gitFreeEnv()` per the rule in `scripts/git-env.mjs`: this is a
+ * local read that must resolve against the repository its `cwd` names, and an
+ * inherited `GIT_DIR` would point it at a different one.
+ *
+ * @param {string} commit
+ * @param {string} path
+ * @returns {string | null}
+ */
+function readTextAtCommit(commit, path) {
+  try {
+    return execFileSync('git', ['show', `${commit}:${path}`], {
+      encoding: 'utf8',
+      env: gitFreeEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
 // A module-level `assert()` that exits on the first failure used to be this
@@ -692,19 +771,19 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-spec-docblock
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 // ⛔ Three of these cases are registered PER `CENSUS_RESIDUAL` row (the
-// exactness loop below runs three `check()`s over each row), so 21 of the 102
+// exactness loop below runs three `check()`s over each row), so 21 of the 120
 // are the 7 day-one rows, and REPAIRING a citation and deleting its row
 // legitimately lowers this floor by 3 — that is the ONLY reason it may be
 // lowered. Any other drop is cases that STOPPED RUNNING; find what stopped
 // registering instead of moving the number.
 //
-// ⛔ A SECOND per-row loop registers five cases per enumerated
-// `bindingInNeitherRepoRows` row — 25 of the 102 — and it is NOT a second
+// ⛔ A SECOND per-row loop registers seven cases per enumerated
+// `bindingInNeitherRepoRows` row — 35 of the 120 — and it is NOT a second
 // lowering reason. Those rows are a reading frozen at the shas the record
 // names, so they are never repaired and never deleted; a drop there is the
 // enumeration being edited away from the cell it is supposed to hold.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-spec-docblock-symbol-anchors self-test': 102,
+  'check-spec-docblock-symbol-anchors self-test': 120,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -933,15 +1012,22 @@ export function selfTest() {
   );
 
   // 8. ⭐ THE RE-CENSUS, held exactly as case 7 holds the census above. Two
-  //    records thirty lines apart in one file, one pinned five ways and the
-  //    other pinned by nothing, is how a record and the code it describes drift
-  //    apart in silence — which is the defect class this whole corpus exists
-  //    for. ⚠️ These pins are INTERNAL to the record and deliberately so: the
-  //    reading is frozen at the shas it names, so holding a cell against the
-  //    LIVE tree would turn a historical record into a ratchet that reds on
-  //    every unrelated spec docblock edit. What they close is the other drift —
-  //    a cell edited one at a time until the record says something no reading
-  //    ever said.
+  //    records thirty lines apart in one file, one held by case 7's arithmetic
+  //    and the other held by nothing, is how a record and the code it describes
+  //    drift apart in silence — which is the defect class this whole corpus
+  //    exists for. (⛔ Deliberately not "pinned N ways": a count of the pins
+  //    above is itself an unheld number, and it was wrong in this comment's
+  //    first spelling.)
+  //    ⚠️ These pins are INTERNAL to the record, with ONE stated exception
+  //    below, and that is deliberate: the reading is frozen at the shas it
+  //    names, so holding a cell against the LIVE tree would turn a historical
+  //    record into a ratchet that reds on every unrelated spec docblock edit.
+  //    What they close is the other drift — a cell edited one at a time until
+  //    the record says something no reading ever said.
+  //    ⛔ What an internal pin CANNOT catch is a sentence about a tree that
+  //    nothing reading that tree holds — which is what shipped here twice. So
+  //    where a pin against reality is both cheap and FROZEN, it is taken: the
+  //    objectui-pin case below is that one.
   check(
     RECENSUS_17242.trackedTargetLineCitations + RECENSUS_17242.declinedCitations
       === RECENSUS_17242.commentProseLineCitations,
@@ -964,6 +1050,25 @@ export function selfTest() {
       + `${RECENSUS_17242.namingAnExistingFileHere} / ${RECENSUS_17242.bindingInNeitherRepo}) must exhaust the `
       + `declined population (${RECENSUS_17242.declinedCitations})`,
   );
+  // ⭐ ...and so must the VIA split, which is the other arithmetic the record's
+  // sentence makes. A row carrying no path of its own IS a continuation, so the
+  // two antecedent cells must be exactly the `continuation` shape count — and
+  // once they are, `ownPath` is forced to the other two shapes. Shipping that
+  // split as prose with nothing holding it is how a wrong total (`279`) stood
+  // twenty lines from the `declinedByShape` that contradicted it.
+  const via = RECENSUS_17242.bindingVia;
+  check(
+    via.ownPath + via.antecedentInherited + via.antecedentNoToken === RECENSUS_17242.declinedCitations,
+    `the via cells (${via.ownPath} own-path / ${via.antecedentInherited} inherited / ${via.antecedentNoToken} `
+      + `inheriting none) must exhaust the declined population (${RECENSUS_17242.declinedCitations})`,
+  );
+  check(
+    via.antecedentInherited + via.antecedentNoToken === RECENSUS_17242.declinedByShape.continuation,
+    `the two antecedent cells (${via.antecedentInherited} + ${via.antecedentNoToken}) must be exactly the `
+      + `continuations (${RECENSUS_17242.declinedByShape.continuation}) — a row with no path of its own is a `
+      + 'continuation by definition, so any other total means the via split and the shape split were read over '
+      + 'different rows',
+  );
   // ...and so must the tense split, which is measured over the same rows.
   check(
     RECENSUS_17242.liveTenseCitations + RECENSUS_17242.historicalRecordCitations
@@ -977,6 +1082,30 @@ export function selfTest() {
       `\`${field}\` must be a full 40-character sha — a branch name, a short sha or a ref is not an anchor, `
         + `got \`${RECENSUS_17242[field]}\``);
   }
+  // ⭐ THE ONE REALITY PIN this battery takes, and it is takeable because it is
+  // FROZEN: this repo records the objectui commit it builds against in its own
+  // pin file, so reading that file AT `boundAgainstSha` says which sibling tree
+  // the sweep was standing on. It must be `objectuiPinSha`.
+  // ⛔ Read AT the sha, never from the working tree: the live pin moves, and a
+  // live read would turn a frozen historical record into a ratchet that reds on
+  // every unrelated objectui bump.
+  // ⚠️ CONDITIONAL, and it says so out loud when it cannot be taken:
+  // `boundAgainstSha` is a commit on the branch that landed this record, so a
+  // squash merge drops it from main's history and the object stops resolving.
+  // Hard-failing there would turn a frozen record into a permanent red on main,
+  // so an unreachable anchor is REPORTED as not taken — ⛔ never asserted away
+  // in silence, which is the failure this file exists about.
+  const pinnedObjectuiSha = readTextAtCommit(RECENSUS_17242.boundAgainstSha, OBJECTUI_PIN_FILE);
+  if (pinnedObjectuiSha === null) {
+    console.log(
+      `   ⚠️ reality pin NOT TAKEN: \`${RECENSUS_17242.boundAgainstSha}\` is not an object in this clone, so the `
+        + 'objectui pin could not be read at it (expected on main once this branch is squashed).',
+    );
+  }
+  check(pinnedObjectuiSha === null || pinnedObjectuiSha === RECENSUS_17242.objectuiPinSha,
+    `\`objectuiPinSha\` (${RECENSUS_17242.objectuiPinSha}) must be the objectui commit this repo was pinned to at `
+      + `\`boundAgainstSha\` — the pin file reads \`${pinnedObjectuiSha}\` there, so the binding sweep and this repo `
+      + 'were standing on different sibling trees');
   // The DECLARED sensitivity must be a variant of the SAME reading: it sweeps
   // the same rows, so it exhausts the same population, and loosening the
   // predicate can only move rows INTO a repo, never out of one.
@@ -996,6 +1125,19 @@ export function selfTest() {
   check(RECENSUS_17242.bindingInNeitherRepoRows.length === RECENSUS_17242.bindingInNeitherRepo,
     `the enumerated unbound rows (${RECENSUS_17242.bindingInNeitherRepoRows.length}) must equal the cell `
       + `(${RECENSUS_17242.bindingInNeitherRepo}) — a cell that outruns its list is a number without evidence`);
+  // ⭐ ...and the via cell that HAS a list is held against that list.
+  // `antecedentNoToken` is the only via cell small enough to enumerate, so it is
+  // the one that can be checked against rows rather than against arithmetic.
+  const inheritedNothing = RECENSUS_17242.bindingInNeitherRepoRows.filter((row) => row.via === 'antecedent');
+  check(inheritedNothing.length === via.antecedentNoToken,
+    `the enumerated rows the antecedent walk gave NO token (${inheritedNothing.length}) must equal `
+      + `\`bindingVia.antecedentNoToken\` (${via.antecedentNoToken}) — that cell IS these rows, not a second count`);
+  // A row's identity is its document plus its citation text, so two rows may not
+  // share the pair: a duplicate is one row counted twice in a cell whose whole
+  // point is that a reader can check it off one row at a time.
+  const rowIdentities = RECENSUS_17242.bindingInNeitherRepoRows.map((row) => JSON.stringify([row.doc, row.raw]));
+  check(new Set(rowIdentities).size === rowIdentities.length,
+    `two enumerated rows share a document AND a citation text, which is a row's identity here: ${rowIdentities.join(', ')}`);
   for (const row of RECENSUS_17242.bindingInNeitherRepoRows) {
     check(row.doc.startsWith(`${SPEC_SRC_DIR}/`),
       `an enumerated unbound row may only name a file in this corpus, got \`${row.doc}\``);
@@ -1011,13 +1153,37 @@ export function selfTest() {
     check(typeof row.why === 'string' && row.why.length > 20,
       `the enumerated row for \`${row.raw}\` must say WHY no tree binds it — an unexplained row is the sentence `
         + 'nobody could reconcile, one indirection further down');
+    check(NEITHER_ROW_VIAS.includes(row.via),
+      `the enumerated row for \`${row.raw}\` must carry a via from the closed vocabulary `
+        + `(${NEITHER_ROW_VIAS.join(' / ')}), got \`${row.via}\``);
+    check(row.via === 'antecedent' ? row.token === null : typeof row.token === 'string' && row.token.length > 0,
+      `the enumerated row for \`${row.raw}\` must agree with its own via — an \`antecedent\` row is one the walk gave `
+        + 'NO token and so carries `token: null`, an `own-path` row carries the token it was read as. A row claiming '
+        + 'one and holding the other is how `bindingVia.antecedentNoToken` gets counted off the wrong rows');
   }
   // ...and the predicate itself is carried as a usable pattern, not a paraphrase.
-  check(new RegExp(RECENSUS_17242.bindingTokenPattern).test('plugin-grid/src/ObjectGrid.tsx'),
+  const tokenUnder = (pattern, text) => new RegExp(pattern).exec(text)?.[0] ?? null;
+  const qualified = 'plugin-grid/src/ObjectGrid.tsx';
+  check(new RegExp(RECENSUS_17242.bindingTokenPattern).test(qualified),
     'the recorded token grammar must match a directory-qualified sibling-repo citation');
-  check(RECENSUS_17242.bindingTokenPattern.indexOf('tsx') < RECENSUS_17242.bindingTokenPattern.indexOf('|ts|'),
-    'the recorded token grammar must keep its extension alternation LONGEST-FIRST — a shorter arm matching first '
-      + 'truncates every four-letter extension and re-points the token at a file that does not exist');
+  // ⭐ The guard that stops a longer extension being eaten as its own prefix is
+  // the TRAILING LOOKAHEAD, pinned here by PRESENCE and by BEHAVIOUR. ⛔ The
+  // order of the alternation is not that guard, and the third case measures it:
+  // a check whose message says otherwise describes a mechanism this pattern
+  // does not have, which is the same unheld-sentence defect one layer down.
+  check(RECENSUS_17242.bindingTokenPattern.endsWith(BINDING_TOKEN_TAIL_GUARD),
+    `the recorded token grammar must END in \`${BINDING_TOKEN_TAIL_GUARD}\` — that guard is what makes a shorter `
+      + 'extension arm FAIL on a longer extension, and without it the alternation order becomes load-bearing');
+  check(tokenUnder(RECENSUS_17242.bindingTokenPattern, qualified) === qualified,
+    'the recorded token grammar must keep the WHOLE extension — a token truncated to its two-letter prefix points at '
+      + `a file that does not exist, got \`${tokenUnder(RECENSUS_17242.bindingTokenPattern, qualified)}\``);
+  const shortestArmFirst = RECENSUS_17242.bindingTokenPattern.replace('tsx|ts|', 'ts|tsx|');
+  check(shortestArmFirst !== RECENSUS_17242.bindingTokenPattern,
+    'the order-independence case must actually RE-ORDER the alternation — if that substitution stops applying, the '
+      + 'case below compares a pattern with itself and holds nothing');
+  check(tokenUnder(shortestArmFirst, qualified) === tokenUnder(RECENSUS_17242.bindingTokenPattern, qualified),
+    'a shortest-arm-first alternation must return the SAME token — ordering is not what prevents truncation, and '
+      + 'this record must not claim it is');
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   const floorMessages = [];
