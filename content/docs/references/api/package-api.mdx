@@ -64,7 +64,7 @@ Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -257,7 +257,7 @@ Installed package with runtime lifecycle state
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -320,7 +320,7 @@ Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -402,8 +402,8 @@ List installed packages request
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional | Filter by package status |
 | **enabled** | `boolean` | optional | Filter by enabled state |
 | **type** | `string` | optional | Filter by the installed manifest's `type` — exact match, unmatched values select nothing |
-| **limit** | `never` | optional | [REMOVED] `limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the serving door filters on `status` / `type` and then returns every remaining row, so no page was ever withheld and no continuation token was ever minted. `limit` also declared `.default(50)`, so a reader of the published schema was entitled to believe an unparameterised list is capped at 50 rows; it has never been capped at all, and nothing parses a query string through this schema, so that default has never been stamped onto anything. Delete the key. This route is NOT paginated — it answers the whole installed set, which is a bounded table of tens of rows, and `hasMore` on the response is a constant `false` that is now true by construction. Filter with `status` and `type` instead of asking for a window. A first-class package cursor, if one is ever designed, will be a response-minted opaque token, not this key. |
-| **cursor** | `never` | optional | [REMOVED] `limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the serving door filters on `status` / `type` and then returns every remaining row, so no page was ever withheld and no continuation token was ever minted. `limit` also declared `.default(50)`, so a reader of the published schema was entitled to believe an unparameterised list is capped at 50 rows; it has never been capped at all, and nothing parses a query string through this schema, so that default has never been stamped onto anything. Delete the key. This route is NOT paginated — it answers the whole installed set, which is a bounded table of tens of rows, and `hasMore` on the response is a constant `false` that is now true by construction. Filter with `status` and `type` instead of asking for a window. A first-class package cursor, if one is ever designed, will be a response-minted opaque token, not this key. |
+| **limit** | `never` | optional | [REMOVED] `limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the serving door filters on `status` / `type` / `enabled` and then returns every remaining row, so no page was ever withheld and no continuation token was ever minted. `limit` also declared `.default(50)`, so a reader of the published schema was entitled to believe an unparameterised list is capped at 50 rows; it has never been capped at all, and nothing parses a query string through this schema, so that default has never been stamped onto anything. Delete the key. This route is NOT paginated — it answers the whole installed set, which is a bounded table of tens of rows, and `hasMore` on the response is a constant `false` that is now true by construction. Filter with `status`, `type` and `enabled` instead of asking for a window. A first-class package cursor, if one is ever designed, will be a response-minted opaque token, not this key. |
+| **cursor** | `never` | optional | [REMOVED] `limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the serving door filters on `status` / `type` / `enabled` and then returns every remaining row, so no page was ever withheld and no continuation token was ever minted. `limit` also declared `.default(50)`, so a reader of the published schema was entitled to believe an unparameterised list is capped at 50 rows; it has never been capped at all, and nothing parses a query string through this schema, so that default has never been stamped onto anything. Delete the key. This route is NOT paginated — it answers the whole installed set, which is a bounded table of tens of rows, and `hasMore` on the response is a constant `false` that is now true by construction. Filter with `status`, `type` and `enabled` instead of asking for a window. A first-class package cursor, if one is ever designed, will be a response-minted opaque token, not this key. |
 
 
 ---
@@ -504,7 +504,7 @@ Install package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -548,7 +548,7 @@ Install package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -667,7 +667,7 @@ Install package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -800,7 +800,7 @@ Upgrade package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -895,7 +895,7 @@ Resolve dependencies request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
