@@ -216,13 +216,31 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
 }
 
 /**
- * The layout-specific config block each view type is inert without. The
- * renderer falls back to LITERAL field names, so a view without its block
- * renders — but empty — on any object that does not happen to declare those
- * exact fields. Degrades rather than fully dies: WARNING, not error
- * (ADR-0078 §1).
+ * The layout-specific config block each view type is inert without. What a
+ * view WITHOUT its block actually does is per type — a fallback to LITERAL
+ * field names that renders empty on any object not happening to declare
+ * them, a binding inferred from the object, or a refusal screen — so every
+ * row below states its own measured outcome and names the reading it came
+ * from. ⛔ Do not generalise one row to the next, and ⛔ do not restate a row
+ * as fact without re-reading the renderer: objectui is deleting these floors
+ * one view type at a time, so a row is only as true as its last measurement.
  *
- * Every entry names its measured renderer fallback. The verify-then-enforce
+ * Either way the author asked for a surface that does not render, while
+ * authoring reports success: WARNING, not error (ADR-0078 §1). ⚠️ The
+ * rubric's other half — refuse what renders NOTHING — was put to [#16577]
+ * for the `type: 'calendar'` route and is SETTLED, not pending: ruled B
+ * (director seat, comment `5634033966`; the card closed `completed` on
+ * 2026-09-11), the route STAYS warning-class and is carried at `warning` by
+ * the table below. The ruling turns on BOTH doors being loud — loud at
+ * `os validate` (this warning) and loud at render (objectui#7029 deleted the
+ * `'start_date'` / `'end_date'` floors; `ObjectCalendar.getCalendarConfig`
+ * returns `null` and the named refusal screen is reachable) — which is
+ * exactly what the `calendar` row below now measures. So this table moves no
+ * severity because the severity is already RULED, and the corrected row is
+ * the evidence that ruling rests on. ⛔ Reopening it takes a new ruling,
+ * not a re-read; a row going stale is a reason to re-measure the ROW.
+ *
+ * Every entry names its measured renderer binding. The verify-then-enforce
  * gate this table sits behind (the audit's Tier-A had named only the first
  * three) was discharged for `timeline` / `map` / `tree` by two measurements
  * on record: the per-type props builder of objectui's ListView adapter
@@ -230,10 +248,34 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  * console 17.2.0), and a both-direction ablation on `os validate` — deleting
  * a `timeline` block left `warnings: []` with `valid: true`, deleting the
  * sibling `gantt` block warned as designed. The gate was working; the table
- * was short.
+ * was short. ⚠️ That reading is dated — console 17.2.0 — and is no longer
+ * current for every row; see the re-measurement note under the table.
  *
  * - `kanban`   → `groupBy = groupByField || groupField || <inferred>`
- * - `calendar` → `startDateField || 'start_date'`, `endDateField || 'end_date'`
+ * - `calendar` → NO fallback, and no silence: the view is bound to nothing
+ *   and the renderer says so on screen. Measured on objectui `main` at
+ *   `0cf2d6644` (2026-09-21), both halves of the path a `type: 'calendar'`
+ *   list view takes. ① `ListView.tsx`'s `case 'calendar'` restates only the
+ *   bindings the view DECLARED — the `startDateField || 'start_date'` and
+ *   `endDateField || 'end_date'` floors this row used to name were deleted
+ *   by objectui#7029, whose own comment records that they were "field names
+ *   no view had written and most objects do not carry". ② `ObjectCalendar`'s
+ *   `getCalendarConfig` returns `null` with neither a `calendar` block nor a
+ *   flat `startDateField`, and the `if (!calendarConfig)` arm renders the
+ *   "Calendar configuration required" refusal screen, which names
+ *   `startDateField` as the key to declare (objectui#8170 corrected that
+ *   screen's second clause: `titleField` is NOT required). ⚠️ That literal
+ *   is the text RENDERED at the pin: objectui#10101 landed AFTER the pin and
+ *   moved it into a `tt('calendar.configRequired', …)` default, so on
+ *   objectui's head a non-English locale renders other words for the same
+ *   screen. Harmless for the console this repo ships — and the pin citation
+ *   below is what reds when the pin moves past it. So the loss is
+ *   total rather than partial — every record, on every object — and the
+ *   author is told at render time as well as here. Both reads are identical
+ *   at the pin this repo builds against (`.objectui-sha` = `87af769e9`), so
+ *   this describes the console this repo SHIPS and not only objectui's head.
+ *   This repo already records the same deletion one door over: the #13817
+ *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → `startDateField || 'start_date'`, `endDateField || 'end_date'`,
  *   `progressField || 'progress'`, `dependenciesField || 'dependencies'` —
  *   fails CLOSED (`null` unless both dates resolve): a blank chart
@@ -254,6 +296,30 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   `TreeConfigSchema` key is optional, so `tree: {}` satisfies THIS table and
  *   still renders flat — the parent pointer has its own rule,
  *   {@link VIEW_TREE_WITHOUT_PARENT_FIELD}, below.
+ *
+ * ⚠️ RE-MEASUREMENT [#17445], objectui `main` at `0cf2d6644` (2026-09-21).
+ * The `calendar` row above is the one that card corrected. The same reading
+ * found three siblings still naming floors objectui has since deleted, and
+ * they are RECORDED here rather than corrected, because that correction is a
+ * separate finding to rule on and not a rider (the card scoped itself to
+ * `calendar`, and each of the three changes what its row's severity rests
+ * on):
+ *
+ * - `gantt` — all four floors gone (objectui#7070 for the dates, #7499 for
+ *   `progressField` / `dependenciesField`); `ObjectGantt` REFUSES an absent
+ *   date binding rather than drawing the blank chart this row describes.
+ * - `timeline` — `startDateField || 'created_at'` gone (objectui#7070 step
+ *   ③, on the ruling 日期轴永不虚构), with a refusal screen in its place;
+ *   the `titleField || 'name'` half of the row still stands.
+ * - `map` — `locationField || 'location'` gone on BOTH faces (objectui#8169):
+ *   `ObjectMap` renders "Map configuration required" instead of an empty map.
+ *   ⛔ That literal is also quoted in this rule's `map`-specific message
+ *   below and pinned by `functional-completeness.test.ts`, so correcting the
+ *   row means correcting the message and the pin together.
+ *
+ * `kanban` and `tree` were re-read at the same ref and still say what they
+ * say. ⛔ Until the three above are corrected, do not cite them — or the
+ * warning text they feed — as a current measurement.
  *
  * `gallery` is measured too (`titleField || 'name'`) and is deliberately NOT
  * here: `GalleryConfigSchema` requires no key, so "has a `gallery` block"
@@ -295,6 +361,51 @@ const VIEW_BINDING_FIX: Readonly<Record<string, string>> = {
   map: "map: { locationField: '<location_field>' } — or { latitudeField: '<number_field>', longitudeField: '<number_field>' }",
   tree: "tree: { parentField: '<self_lookup_field>', labelField: '<text_field>' }",
 };
+
+/**
+ * The body of the `view/layout-without-binding` warning for a type whose
+ * measured outcome is NOT the generic literal-fallback sentence
+ * ({@link unboundBlockMessage}). A type with no entry here gets the generic
+ * body, so this map is the exception list, not a second copy of the table.
+ *
+ * ⛔ An entry is written from a reading of the renderer, never from the row
+ * above it — the two carriers went out of sync once already, which is what
+ * this map exists to make cheap to fix: {@link VIEW_BINDING_BLOCKS}'s
+ * `calendar` row and this rule's message BOTH asserted a
+ * `startDateField || 'start_date'` fallback that objectui#7029 had deleted,
+ * and correcting one without the other would have left the author reading the
+ * stale half.
+ *
+ * ⚠️ What the correction must PRESERVE is the prescription. The old sentence
+ * was wrong about the mechanism and still right about the remedy, and the
+ * remedy is the whole value of a warning an author meets at authoring time:
+ * it says which key to declare, not merely that something is missing.
+ */
+const VIEW_BINDING_MESSAGE: Readonly<Record<string, string>> = {
+  calendar:
+    'A `calendar` view with no `calendar` block declares no date axis, and the renderer does '
+    + 'not invent one: objectui\'s `ListView.tsx` calendar branch forwards only the bindings the '
+    + 'view DECLARED, so `getCalendarConfig` (objectui `ObjectCalendar.tsx`) resolves `null` and '
+    + 'the view renders its "Calendar configuration required" refusal screen instead of records '
+    + '— it parses and publishes clean, then shows no event on any object, not just on one that '
+    + 'happens to lack a field. Declare `calendar.startDateField`, the block\'s one required key; '
+    + 'the event title resolves through the ADR-0079 record display-name chain when `titleField` '
+    + 'is omitted.',
+};
+
+/**
+ * The generic body — a view type whose renderer still floors the binding at a
+ * literal field name. It is what the five types with no
+ * {@link VIEW_BINDING_MESSAGE} entry receive, and the re-measurement note on
+ * {@link VIEW_BINDING_BLOCKS} says which of those five it is still true of
+ * (`kanban`, `tree`) and which three inherit it pending their own correction.
+ * ⛔ So it is the DEFAULT, never a universal: a type that stops flooring gets
+ * an entry above, not a reworded sentence here.
+ */
+const unboundBlockMessage = (type: string, block: string): string =>
+  `A \`${type}\` view with no \`${block}\` block is bound to nothing: the renderer falls `
+  + 'back to literal default field names, which works only if the object happens to declare '
+  + 'them — on any other object the view renders empty while authoring reports success.';
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 
@@ -514,10 +625,7 @@ export function checkViewCompleteness(view: unknown, boundObject?: unknown): Com
       rule: VIEW_LAYOUT_WITHOUT_BINDING,
       severity: 'warning',
       path: block,
-      message:
-        `A \`${type}\` view with no \`${block}\` block is bound to nothing: the renderer falls `
-        + 'back to literal default field names, which works only if the object happens to declare '
-        + 'them — on any other object the view renders empty while authoring reports success.',
+      message: VIEW_BINDING_MESSAGE[type] ?? unboundBlockMessage(type, block),
       fix: VIEW_BINDING_FIX[type],
     });
   } else if (type === 'map' && isRec(view.map) && !hasMapCoordinateBinding(view.map)) {
