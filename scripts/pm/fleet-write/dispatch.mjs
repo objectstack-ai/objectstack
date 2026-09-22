@@ -537,7 +537,7 @@ export async function selfTest() {
     {
       const { WIRED_WRITE_TOOLS } = await import('../write-pace.mjs');
       const own = readReal(SELF_PATH, 'utf8');
-      t('write-pace lists this file among the wired write tools', WIRED_WRITE_TOOLS.includes('fleet-write/dispatch.mjs'));
+      t('write-pace lists this file among the wired write tools', WIRED_WRITE_TOOLS.includes('scripts/pm/fleet-write/dispatch.mjs'));
       t('this file calls both halves, guarded by the write-verb predicate', own.includes('paceWrite(') && own.includes('noteResponse(') && own.includes('isWriteMethod('));
       const records = readReal(paceFile, 'utf8');
       t('the dispatches above were paced; the run-list and run reads were not', [records.includes('fleet-write dispatch POST'), records.includes('fleet-write dispatch GET')], [true, false]);

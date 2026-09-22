@@ -931,7 +931,7 @@ export async function selfTest() {
     {
       const { WIRED_WRITE_TOOLS } = await import('./write-pace.mjs');
       const own = readFileSync(SELF_PATH, 'utf8');
-      t('write-pace lists this file among the wired write tools', WIRED_WRITE_TOOLS.includes('fleet-token.mjs'));
+      t('write-pace lists this file among the wired write tools', WIRED_WRITE_TOOLS.includes('scripts/pm/fleet-token.mjs'));
       t('this file calls both halves around its POST', own.includes('paceWrite(') && own.includes('noteResponse(') && own.includes('isWriteMethod('));
       const records = readFileSync(paceFile, 'utf8');
       t('the mints above were recorded by the throttle under the App key, ⛔ not under any token', records.includes('fleet-token POST') && !records.includes(TOKEN));

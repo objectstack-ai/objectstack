@@ -396,9 +396,9 @@ fi
 # requests, so wrapping it in a second gate would only hold the lease over its
 # head. Identity only for those; the roster is read from write-pace, not copied.
 if ((READ == 0)) && [[ "${1##*/}" == node && "${2:-}" == *scripts/pm/*.mjs ]]; then
-  tool="${2##*/}"
+  tool="scripts/pm/${2##*scripts/pm/}"
   if node --input-type=module -e "const m = await import(process.argv[1]); process.exit(m.WIRED_WRITE_TOOLS.includes(process.argv[2]) ? 0 : 1)" -- "file://$HERE/write-pace.mjs" "$tool" 2> /dev/null; then
-    log "$tool gates itself (write-pace roster) — identity only, no second gate around it."
+    log "${tool##*/} gates itself (write-pace roster) — identity only, no second gate around it."
     READ=1
   fi
 fi
