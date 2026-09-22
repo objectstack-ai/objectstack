@@ -3645,7 +3645,7 @@ describe('the three #18305 object blocks — key sets derived from the renderers
     // array-shorthand head that used to open it is GONE, and the docblock at
     // :168-176 records that an authored array now reaches this renderer only
     // through the React props channel), staticData / objectName (the shared
-    // ladder's rungs 2 and 3, record-source.ts :296 and :302), filter (:814
+    // ladder's rungs 2 and 3, record-source.ts :296 and :303), filter (:814
     // and :895 — the inline and the object fetch), sort (:815 and :896), map
     // (:382), mapStyle (:377), navigation (:1042), enableClustering (:1058).
     expect(keysOf('object-map')).toEqual([
@@ -3762,10 +3762,12 @@ describe('the three #18305 object blocks — key sets derived from the renderers
     // the `?? schema.titleField` rung from `getTreeConfig` (now :235-248),
     // and the docblock above it (:197-210) records why — it read the
     // FLATTENED NODE, never the block, and the key is declared on neither
-    // face. The key stays in THIS set because the set is the flat-spelling
-    // refusal prescription, not a read-point list; the prescription's own
-    // sentence about that fallback is stale and is reported rather than
-    // rewritten here, being author-facing runtime text.
+    // face. The key stays in THIS set, and the prescription that names it
+    // stays TRUE, on the OTHER half of the sentence: `ListView`'s flatten
+    // still resolves `treeCfg.titleField` into `labelField` before emitting
+    // (`ListView.tsx:3271` at this pin), so an authored `titleField` is still
+    // only ever the block's `labelField`. What died is the renderer's own
+    // fallback, not the flatten's.
     expect(setFor('object-tree', 'OBJECT_TREE_FLAT_CONFIG_KEYS'))
       .toEqual([...Object.keys(TreeConfigSchema.shape), 'titleField'].sort());
   });
