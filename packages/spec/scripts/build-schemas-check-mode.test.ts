@@ -48,6 +48,7 @@
 // last describe block below drives exactly that.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { z } from 'zod';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -4526,6 +4527,286 @@ describe('build-schemas.ts — a nested retirement row is judged, not ignored (#
       expect(output).not.toContain(CHECK_B3);
       expect(output).not.toContain(CHECK_B2);
       expect(status).toBe(0);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #18865 — proof 4's message leg, defended by a fixture instead of by a zero.
+//
+// `delivers()` in build-schemas.ts is a CONJUNCTION, and check (c) counts a
+// refusal it cannot read as "no evidence" rather than as proof:
+//
+//     issue !== undefined && issue.message.includes(prescription)
+//
+// The left half — "the door refused this write" — is what the `ui/ViewItem`
+// fixture above defends: a discriminated union the probe's one-key document
+// cannot drive to any arm's door raises no `unrecognized_keys` issue at all, so
+// `issue` is `undefined`. That fixture ASSERTS the probe raises no such issue,
+// which means `&&` short-circuits in it and the right half is never evaluated —
+// delete the `message.includes` conjunct and its verdict does not move, nor does
+// any other case in this file. Measured before this block was written: the leg
+// was defended by a zero.
+//
+// The right half is the only thing that separates a def which parses through the
+// declaration's own error map from a strict CLONE built to the same declaration
+// that does not — `Strict.strip()`, `z.object(Strict.shape)`, an `.extend()`
+// that re-posts the shape without the map. Shape identity cannot tell them apart
+// (that is the narrowing `computeGuidanceRoutes`'s docblock records), and the
+// clone refuses the key with zod's own bare "Unrecognized key", carrying none of
+// the prescription its declaration owes.
+//
+// ⚠️ The failure direction is "reads as compliant": with that conjunct gone the
+// silent clone reads as `prescribed` and its deletion is WAIVED — the one
+// direction this gate must not err in. So the pin below is the LIT case, and the
+// tree's real door is the DARK one beside it; a gate that lost the leg turns the
+// first red and leaves the second green.
+//
+// ── Why a FIFTH box ──────────────────────────────────────────────────────────
+// The subject is a def built WITHOUT its declaration's error map, and the tree
+// holds no such def any more (#18578 closed the last silent twin, which is what
+// turned the `ui/ViewItem` pair into this file's DARK leg). So the fixture makes
+// one, by substituting `strictObject` in this box's OWN copy of `src/` — exactly
+// as the #4659 and #17969 boxes substitute `RETIRED_KEYS_BY_MAJOR`, and for the
+// same reason: the shared sandbox SYMLINKS `src/`, so writing a fixture there
+// would write the repo's own source (and `@objectstack/spec`'s `files[]` carries
+// `src/**/*.zod.ts`, so it would ship). The gate under test is still the copied
+// `scripts/build-schemas.ts`, byte for byte, and no test-only seam is added to
+// it — what differs is the fixture's spec source, which is data exactly as the
+// fabricated `refs/remotes/origin/main` is.
+
+/** The anchor this fixture substitutes — `strictObject`'s own declaration. */
+const STRICT_OBJECT_ANCHOR =
+  /export function strictObject<T extends z\.ZodRawShape>\(options: StrictObjectOptions, shape: T\) \{\n[\s\S]*?\n\}\n/;
+
+describe('build-schemas.ts — proof 4 reads the REFUSAL TEXT: a strict clone without the declaration\'s error map proves nothing (#18865)', () => {
+  let box: string;
+  let boxScript: string;
+  let boxSurfaceDir: string;
+  let boxStrictObject: string;
+  let pristineStrictObject: string;
+  let canonicalBoxSurface: string;
+
+  /** Same hermetic invocation as the sandbox's `git` — this box is a fixture
+   *  repository too, and inherits nothing from the machine either (#9068). */
+  const boxGit = (...args: string[]): string => gitIn(box, ...args);
+
+  const runBox = (args: string[] = []): { status: number; output: string } => {
+    const r = spawnSync(TSX, [boxScript, ...args], {
+      cwd: box,
+      encoding: 'utf8',
+      timeout: SPAWN_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // The gate reads `zodByDefKey` for the probe, so it must hold the real
+      // instances rather than `lazySchema`'s Proxy — `check:authorable-surface`
+      // exports this and so does `gen:schema`.
+      env: { ...HERMETIC_ENV, ...EAGER_SCHEMAS_ENV },
+    });
+    return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+
+  /**
+   * Rebuild `strictObject` in this box's own `src/` so every closed shape is a
+   * strict clone of its declaration that does NOT carry the declaration's error
+   * map: the declaration is still registered (proof 4's first half still finds
+   * the promise), the door is still closed (the probe still gets an
+   * `unrecognized_keys` issue naming the key), and the refusal carries zod's
+   * bare text instead of the prescription.
+   */
+  const dropErrorMaps = (): void => {
+    const rendered =
+      `export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptions, shape: T) {\n` +
+      `  strictObjectError(options, shape);\n` +
+      `  return z.object(shape).strict();\n` +
+      `}\n`;
+    expect(
+      STRICT_OBJECT_ANCHOR.test(pristineStrictObject),
+      '`strictObject` is no longer one function declaration in src/shared/strict-object.ts — this ' +
+        'fixture substitutes it textually and can no longer find it',
+    ).toBe(true);
+    fs.writeFileSync(boxStrictObject, pristineStrictObject.replace(STRICT_OBJECT_ANCHOR, rendered));
+  };
+
+  /** Put this box's `src/` back to the tree's own bytes — the DARK leg's state. */
+  const keepErrorMaps = (): void => {
+    fs.writeFileSync(boxStrictObject, pristineStrictObject);
+  };
+
+  beforeAll(() => {
+    // ── Fixture validity, loud ───────────────────────────────────────────────
+    // Every half below can rot on its own, and each one rots this pin into a
+    // green that asserts nothing about the leg.
+    expect(
+      pristineSurface,
+      `${DELETED_SERVER_TWIN} is a real baseline line now — check (c) only ever sees a key the ` +
+        `build STOPPED emitting, so this fixture needs a key the baseline does not carry`,
+    ).not.toContain(DELETED_SERVER_TWIN);
+    expect(
+      pristine,
+      `${SERVER_TWIN_DEF} is no longer emitted — check (c) would route this deletion to the ` +
+        `vanished-def proof instead; re-pick the def`,
+    ).toContain(SERVER_TWIN_DEF);
+    expect(
+      Object.keys(RateLimitConfigSchema.shape),
+      `'${TWIN_LEAF}' is DECLARED on the shape again — it would never reach the unrecognized-key ` +
+        `path, so nothing here models a guidance route`,
+    ).not.toContain(TWIN_LEAF);
+
+    // The DARK leg's tree fact: the real def parses through the declaration's own
+    // error map, so its refusal CARRIES the prescription.
+    const delivered = ServerRateLimitConfigSchema.safeParse({ ...TWIN_VALID, [TWIN_LEAF]: 'ip' });
+    expect(
+      delivered.success,
+      `${SERVER_TWIN_DEF} now ACCEPTS '${TWIN_LEAF}' — its door re-opened and the DARK leg below ` +
+        `would stop being a delivery at all`,
+    ).toBe(false);
+    expect(
+      delivered.success ? '' : delivered.error.issues.map((i) => i.message).join('\n'),
+      `${SERVER_TWIN_DEF} rejects '${TWIN_LEAF}' with no prescription — the \`guidance\` entry that ` +
+        `is this block's whole subject has gone`,
+    ).toContain(PRESCRIPTION_BULLET);
+
+    // The LIT leg's tree fact, taken in process on the very construction the
+    // fixture substitutes: a strict clone built from the same shape refuses the
+    // key — so the probe DOES get its `unrecognized_keys` issue and `&&` does not
+    // short-circuit — and the refusal carries no prescription. This is what makes
+    // the case below a pin on the MESSAGE half rather than a second copy of the
+    // `ui/ViewItem` pin on the issue-is-undefined half.
+    const clone = z.object(RateLimitConfigSchema.shape).strict();
+    const silent = clone.safeParse({ ...TWIN_VALID, [TWIN_LEAF]: 'ip' });
+    expect(
+      silent.success,
+      `a strict clone of ${SHARED_TWIN_DEF}'s shape now ACCEPTS '${TWIN_LEAF}' — the fixture would ` +
+        `model an OPEN door, which is the issue-is-undefined half, not this one`,
+    ).toBe(false);
+    expect(
+      silent.success ? [] : silent.error.issues.map((i) => i.code),
+      `a strict clone without the error map no longer answers with an unrecognized-key issue — ` +
+        `\`delivers()\` would short-circuit on its LEFT half and this block would pin nothing`,
+    ).toContain('unrecognized_keys');
+    expect(
+      silent.success ? '' : silent.error.issues.map((i) => i.message).join('\n'),
+      `zod's own unrecognized-key message now carries the prescription bullet — a clone without the ` +
+        `declaration's error map has stopped being silent and this fixture models nothing`,
+    ).not.toContain(PRESCRIPTION_BULLET);
+
+    box = fixtureTree('build-schemas-proof4-message-leg-');
+    fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
+    fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
+    for (const entry of ['node_modules', 'package.json']) {
+      fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
+    }
+    mountCommittedLedgers(box);
+    writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
+    boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
+    writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    // The #4666 default ratchet runs on every invocation, so every box needs its
+    // committed record too — otherwise a fixture fails on a missing artifact
+    // instead of on the row it is actually testing.
+    writeDefaultsShards(path.join(box, AUTHORABLE_DEFAULTS_DIR_NAME), pristineDefaults);
+    boxScript = path.join(box, 'scripts', 'build-schemas.ts');
+    boxStrictObject = path.join(box, 'src', 'shared', 'strict-object.ts');
+    pristineStrictObject = fs.readFileSync(boxStrictObject, 'utf8');
+
+    initFixtureRepo(box);
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
+    boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
+    fs.writeFileSync(
+      path.join(box, 'authorable-surface.base.json'),
+      JSON.stringify(
+        { description: surfaceBaseDescription, baseRev: boxGit('rev-parse', 'HEAD'), keys: pristineSurface },
+        null,
+        2,
+      ) + '\n',
+    );
+    boxGit('add', 'authorable-surface.base.json');
+    boxGit('commit', '-q', '-m', 'baseline anchor');
+    // The BASE carries one extra line; the worktree is put back to the live set
+    // so check (a) stays silent and check (c) sees exactly one deleted key. Same
+    // shape as `seedBase` above, kept local because this box owns its own repo.
+    writeSurfaceShards(boxSurfaceDir, [...pristineSurface, DELETED_SERVER_TWIN].sort());
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('commit', '-q', '-m', 'base variant: one extra authorable line');
+    boxGit('update-ref', 'refs/remotes/origin/main', boxGit('rev-parse', 'HEAD'));
+    canonicalBoxSurface = writeSurfaceShards(boxSurfaceDir, pristineSurface);
+  });
+
+  afterAll(() => {
+    if (box) fs.rmSync(sandboxRoot(box), { recursive: true, force: true });
+  });
+
+  it(
+    'LIT — a strict clone that does not carry its declaration\'s error map is NOT proof: the deletion is refused',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The whole of #18865 in one run. The declaration still NAMES `keyBy`, the
+      // door is still closed, the probe still gets its `unrecognized_keys` issue
+      // — and the refusal carries zod's bare text, not the prescription. Only
+      // `issue.message.includes(prescription)` can see the difference, so this
+      // case is red for exactly that conjunct and for nothing else.
+      dropErrorMaps();
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('authorable baseline line(s) were deleted without proof (#4650)');
+      expect(output).toMatch(
+        new RegExp(
+          `${DELETED_SERVER_TWIN.replace(/[/$]/g, '\\$&')} — def .*; a \`strictObject\` declaration ` +
+            `NAMES '${TWIN_LEAF}', but writing it`,
+        ),
+      );
+      // ⭐ The waiver is the failure direction, named. A gate that lost the
+      // message leg prints THIS instead, exits 0, and reads as compliant.
+      expect(output).not.toContain('carries the prescription its `strictObject` declaration owes');
+      expect(output).not.toMatch(
+        new RegExp(
+          `${DELETED_SERVER_TWIN.replace(/[/$]/g, '\\$&')} — def .*is REFUSED as an unrecognized key`,
+        ),
+      );
+      // …and it is not being refused by some OTHER proof either: the def is
+      // root-reachable and its baseline entry was never `[RETIRED]`, so without
+      // these legs the case would pass on a gate that had simply stopped emitting
+      // proof 4 at all.
+      expect(output).not.toMatch(
+        new RegExp(`${DELETED_SERVER_TWIN.replace(/[/$]/g, '\\$&')} — def not reachable from the`),
+      );
+      expect(output).not.toMatch(
+        new RegExp(
+          `${DELETED_SERVER_TWIN.replace(/[/$]/g, '\\$&')} — def .*was LIVE \\(never tombstoned\\)\\.`,
+        ),
+      );
+
+      // A check reports; it does not write (#4711) — this file's founding
+      // assertion, and the one a fixture that mutates `src/` most needs.
+      expect(shardBytes(boxSurfaceDir)).toBe(canonicalBoxSurface);
+    },
+  );
+
+  it(
+    'DARK — the tree\'s own door, same key, same box: the refusal carries the prescription and the deletion IS waived',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Without this leg the case above passes on a gate that waives nothing —
+      // "refuse everything" and "read the message" are indistinguishable from one
+      // red run. The ONLY difference between the two cases is whether this box's
+      // `strictObject` hands the built shape its declaration's error map.
+      keepErrorMaps();
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).toContain('carry their own proof (#4650)');
+      expect(output).toMatch(
+        new RegExp(
+          `${DELETED_SERVER_TWIN.replace(/[/$]/g, '\\$&')} — def .*; writing '${TWIN_LEAF}' on it is ` +
+            `REFUSED as an unrecognized key`,
+        ),
+      );
+      expect(output).toContain('carries the prescription its `strictObject` declaration owes');
+      expect(output).not.toContain('authorable baseline line(s) were deleted without proof (#4650)');
+      expect(status).toBe(0);
+
+      expect(shardBytes(boxSurfaceDir)).toBe(canonicalBoxSurface);
     },
   );
 });
