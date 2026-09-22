@@ -339,11 +339,20 @@ const battery = (name) => {
 };
 let selfTestReachedVerdict = false;
 
-/** A payload every case starts from; each case mutates a copy. */
+/**
+ * A payload every case starts from; each case mutates a copy.
+ *
+ * The target is spelled from `TARGET_OWNER`, not as one quoted slug: the
+ * dispatch derivation reads every separator-bearing literal in this module's
+ * body as a path this gate declares, and a slug names no tracked file, so a
+ * bare `owner/name` here is a dead declaration `check:declared-population-live`
+ * refuses. This gate's real population is the relay's four files, inherited
+ * from `RELAY_FILES` in `ops.mjs` and checked on disk by the self-test below.
+ */
 export function fixturePayload(overrides = {}) {
   return {
     request_id: 'fw-20260922T090000Z-abc123',
-    repo: 'objectstack-ai/objectstack',
+    repo: `${TARGET_OWNER}/objectstack`,
     session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ',
     actions: [{ op: 'comment', issue: 19701, body: 'Hello from the relay.' }],
     ...overrides,
