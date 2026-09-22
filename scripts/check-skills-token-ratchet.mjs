@@ -306,7 +306,14 @@ export const CEILINGS = new Map([
   // trigger user to narrow it, so one with no organization predicate reads and
   // writes across every tenant. +150 tokens, of which the row's 25 tokens of
   // headroom absorb 25; the CEILING moves 125.
-  ['skills/objectstack-automation/SKILL.md', 12768],
+  // 12768 -> 5762: RE-LOCK at the landed count after the #19715 split (decision
+  // batch #213 item 1, maintainer 「1 2 4 同意」): the Flow Example, the whole State
+  // Machines & Approvals block and the Time-relative triggers section moved
+  // VERBATIM into `references/examples-flows.md` and
+  // `references/state-machines-and-approvals.md` (rows below), one pointer line
+  // each left in place. The moved text is priced in its own rows, so the split
+  // banks the entry's shrink instead of leaving 7,006 tokens of headroom behind.
+  ['skills/objectstack-automation/SKILL.md', 5762],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -317,7 +324,14 @@ export const CEILINGS = new Map([
   // split (#14296 item 1 = A, condition (b)). The raise recorded above is spent
   // and its headroom leaves with it; the moved text is priced in its own row
   // below, so the package total is unchanged by the re-lock itself.
-  ['skills/objectstack-data/SKILL.md', 10009],
+  // 10009 -> 6128: RE-LOCK at the landed count after the #19715 split (decision
+  // batch #213 item 1, maintainer 「1 2 4 同意」): Field Groups, the Quick-Start
+  // Template, Lifecycle Hooks, Metadata Protection, the whole Seed Data &
+  // Fixtures block and Linting & Generation Quality moved VERBATIM into
+  // `references/examples-objects.md`, `references/seeds.md` and
+  // `references/lint-rules.md` (rows below); the frontmatter `description`
+  // shrank to 689 characters (card item 3). One pointer line per moved block.
+  ['skills/objectstack-data/SKILL.md', 6128],
   ['skills/objectstack-formula/SKILL.md', 6002], //     -53 (was 6055)
   ['skills/objectstack-i18n/SKILL.md', 6338], //        -11 (was 6349)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
@@ -328,7 +342,14 @@ export const CEILINGS = new Map([
   // fix; no defensive coding, no shape tolerance, no hand-written predicate
   // re-implementing a platform rule, and no landing of the half that fits.
   // Nothing in this file said any of it. +280 tokens, 1 absorbed, ceiling +279.
-  ['skills/objectstack-platform/SKILL.md', 12984],
+  // 12984 -> 5833: RE-LOCK at the landed count after the #19715 split (decision
+  // batch #213 item 1, maintainer 「1 2 4 同意」): Part 2 (plugin development) and
+  // Part 3 (the operations tail) moved VERBATIM into
+  // `references/plugin-development.md` and `references/operations.md`, and six
+  // Part 1 example / composition sections into `references/bootstrap.md` (rows
+  // below). One pointer line per moved block; the entry keeps its rules and
+  // decision tables at 487 lines.
+  ['skills/objectstack-platform/SKILL.md', 5833],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -389,7 +410,11 @@ export const CEILINGS = new Map([
   // Independently reproducible without running this script:
   //   ceil($(wc -c < skills/objectstack-ui/SKILL.md) / 4) == ceil(15424 / 4)
   ['skills/objectstack-ui/SKILL.md', 3856],
-  ['skills/objectstack-upgrade/SKILL.md', 8333], //      -2 (was 8335)
+  // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
+  // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
+  // template and the v17-canonical shapes block moved VERBATIM into
+  // `references/examples-upgrade.md` (row below), one pointer line each.
+  ['skills/objectstack-upgrade/SKILL.md', 6193],
 
   // ── the #12392 extension: the rest of the AUTHORED bundle ────────────────
   // Every row below is an INITIAL measurement, taken on
@@ -407,17 +432,30 @@ export const CEILINGS = new Map([
   // SKILL.md ceilings, which is the single fact that made #12392 a defect
   // rather than an observation.
   ['skills/objectstack-data/evals/README.md', 143],
-  ['skills/objectstack-data/references/data-hooks.md', 12611],
+  // 12611 -> 10066: RE-LOCK at the landed count (#19715, card item 4). The file
+  // gained a 5-line table of contents (+182 tokens, anchors to its own
+  // headings); the row carried 2,727 tokens of headroom left by an earlier
+  // shrink that nobody re-locked, so the TOC needed no raise. Pinned AT the
+  // measurement — zero headroom, the ratchet's steady state.
+  ['skills/objectstack-data/references/data-hooks.md', 10066],
   ['skills/objectstack-data/rules/datasources.md', 911],
   // -552 (was 3584): re-locked at the landed count (#16374) after PR #16187
   // (the two `tree` rows) and PR #16369 (the ASCII decision tree deleted)
   // both merged. Lowering to the landed count is the ratchet's ordinary
   // direction — a seat's re-lock, not a maintainer ruling.
-  ['skills/objectstack-data/rules/field-types.md', 3032],
+  // 3032 -> 3158 (#19715, card item 4): a 5-line table of contents at the top,
+  // anchors to the file's existing headings, nothing else changed. +126 tokens,
+  // zero headroom to absorb any of it, ceiling +126. Maintainer ruling
+  // 2026-09-22 on decision batch #213 (item 1 carries the TOCs: 「四个超长 SKILL.md 按 500 行切,整段示例与 platform 的运维尾段下沉 references/,零删内容;同卡顺手:data 的 description 压到约 700 字符、长参考文件加目录」),
+  // verbatim and untranslated: 「1 2 4 同意」.
+  ['skills/objectstack-data/rules/field-types.md', 3158],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
-  ['skills/objectstack-data/rules/relationships.md', 3778],
+  // 3778 -> 3676: RE-LOCK at the landed count (#19715, card item 4). A 5-line
+  // table of contents (+154 tokens) landed inside the row's 256 tokens of
+  // headroom, so no raise; pinned AT the measurement — zero headroom.
+  ['skills/objectstack-data/rules/relationships.md', 3676],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
@@ -437,7 +475,10 @@ export const CEILINGS = new Map([
   // score, a duplicate guess — warns and never errors, and an override flag
   // added to soften a block is evidence the block should have been a warning.
   // +85 tokens, no headroom to absorb any of it, ceiling +85.
-  ['skills/objectstack-data/rules/validation.md', 3109],
+  // 3109 -> 2756: RE-LOCK at the landed count (#19715, card item 4). A 5-line
+  // table of contents (+155 tokens) landed inside the row's 508 tokens of
+  // headroom, so no raise; pinned AT the measurement — zero headroom.
+  ['skills/objectstack-data/rules/validation.md', 2756],
 
   // objectstack-platform
   ['skills/objectstack-platform/references/plugin-hooks.md', 2628],
@@ -467,10 +508,25 @@ export const CEILINGS = new Map([
   // added nothing but five titles and five pointers,
   // so the package nets -58 (33,957 -> 33,899).
   ['skills/objectstack-ui/rules/actions.md', 2108],
-  ['skills/objectstack-ui/rules/dashboards.md', 6090],
-  ['skills/objectstack-ui/rules/list-views.md', 3011],
+  // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
+  // anchors to the file's existing headings, nothing else changed. +162 tokens,
+  // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
+  // 2026-09-22 on decision batch #213 item 1, verbatim and untranslated:
+  // 「1 2 4 同意」.
+  ['skills/objectstack-ui/rules/dashboards.md', 6252],
+  // 3011 -> 3141 (#19715, card item 4): a 5-line table of contents at the top,
+  // anchors to the file's existing headings, nothing else changed. +132 tokens,
+  // of which the row's 2 tokens of headroom absorb 2; the CEILING moves 130.
+  // Maintainer ruling 2026-09-22 on decision batch #213 item 1, verbatim and
+  // untranslated: 「1 2 4 同意」.
+  ['skills/objectstack-ui/rules/list-views.md', 3141],
   ['skills/objectstack-ui/rules/navigation.md', 2273],
-  ['skills/objectstack-ui/rules/pages.md', 5501],
+  // 5501 -> 5692 (#19715, card item 4): a 5-line table of contents at the top,
+  // anchors to the file's existing headings, nothing else changed. +191 tokens,
+  // zero headroom to absorb any of it, ceiling +191. Maintainer ruling
+  // 2026-09-22 on decision batch #213 item 1, verbatim and untranslated:
+  // 「1 2 4 同意」.
+  ['skills/objectstack-ui/rules/pages.md', 5692],
 
   // ── 2026-09-22 evals fixtures — decision batch #213 item 2, PR #19721 ────
   // Every published skill gained `evals/*.json` in the objectui fixture shape.
@@ -500,6 +556,25 @@ export const CEILINGS = new Map([
   ['skills/objectstack-upgrade/evals/protocol-major-upgrade.json', 1033],
 
   // the remaining skills' eval notes
+
+  // ── 2026-09-22 the #19715 split — decision batch #213 item 1 ─────────────
+  // The maintainer ruled the four over-500-line published SKILL.md files split
+  // into routing + rules, every moved paragraph and code block landing
+  // VERBATIM under that skill's `references/` with a one-line pointer left in
+  // place; verbatim and untranslated: 「1 2 4 同意」 on item 1 「四个超长 SKILL.md 按 500 行切,整段示例与 platform 的运维尾段下沉 references/,零删内容;同卡顺手:data 的 description 压到约 700 字符、长参考文件加目录」.
+  // Each row below is a NEW FILE holding text that moved out of its SKILL.md
+  // (whose row is RE-LOCKED above), pinned AT its landed count — no headroom,
+  // because a split that arrives with budget is a raise wearing a new path.
+  // The package deltas are the pointer lines and the four new file titles only.
+  ['skills/objectstack-automation/references/examples-flows.md', 1436],
+  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5569],
+  ['skills/objectstack-data/references/examples-objects.md', 1779],
+  ['skills/objectstack-data/references/lint-rules.md', 970],
+  ['skills/objectstack-data/references/seeds.md', 1299],
+  ['skills/objectstack-platform/references/bootstrap.md', 1351],
+  ['skills/objectstack-platform/references/operations.md', 3125],
+  ['skills/objectstack-platform/references/plugin-development.md', 3137],
+  ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
 ]);
 
 /**

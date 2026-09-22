@@ -1,20 +1,16 @@
 ---
 name: objectstack-data
 description: >
-  Design ObjectStack data schemas — objects, fields, field conditional
-  rules, relationships, validations, indexes, lifecycle hooks, permissions,
-  row-level security, data `lifecycle` retention/TTL/rotation, metadata
-  `protection` locks, and external / federated datasources
-  (`defineDatasource`) — and the seeds (`defineSeed()`) that load fixtures
-  and reference data alongside them. Use when the user is creating or
-  modifying `*.object.ts` files or `src/data/*.ts` seed modules, picking
-  field types, modelling relationships, writing `beforeInsert`/`afterUpdate`
-  hooks, configuring per-object access control, pointing an object at an
-  existing external database, or authoring bootstrap / demo data. Use for `visibleWhen` / `readonlyWhen` / `requiredWhen` rules that
-  belong on fields. Do not use for querying data (see objectstack-query) or for
-  plugin / kernel hooks (see objectstack-platform). CEL expressions in
-  formulas / validations / sharing rules / dynamic seed values: load
-  objectstack-formula alongside.
+  Design ObjectStack data schemas — objects, fields, relationships,
+  validations, indexes, hooks, security, seeds and datasources. Use when the
+  user is creating or modifying `*.object.ts` files or `src/data/*.ts` seed
+  modules, picking field types, modelling relationships, writing
+  `beforeInsert`/`afterUpdate` hooks, configuring per-object access control,
+  pointing an object at an existing external database, or authoring bootstrap
+  / demo data. Use for `visibleWhen` / `readonlyWhen` / `requiredWhen` rules
+  that belong on fields. Do not use for querying data (see objectstack-query)
+  or for plugin / kernel hooks (see objectstack-platform). CEL expressions:
+  load objectstack-formula alongside.
 license: Apache-2.0
 compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
@@ -93,7 +89,7 @@ the publish door rejects it before that:
 | `displayNameField` | — | **Deprecated** alias for `nameField` (still honored as a fallback) |
 | `titleFormat` | — | **Deprecated, not removed (ADR-0079)** — render-only: the server can't return or query it. Use `nameField` (it wins); for a composite title, designate a `returnType: 'text'` formula field as `nameField` |
 | `enable` | — | Capability flags (trackHistory, searchable, apiEnabled, etc.) |
-| `fieldGroups` | — | Ordered list of logical field groups for forms/detail pages (see [Field Groups](#field-groups-mvp)) |
+| `fieldGroups` | — | Ordered list of logical field groups for forms/detail pages (see [Field Groups](./references/examples-objects.md#field-groups-mvp)) |
 | `lifecycle` | `record` semantics (permanent) | Data retention/rotation/archival contract. **Required for append-only, high-write-rate objects** — a `telemetry`/`transient`/`event`/`audit` class must declare a bounding policy or parsing fails (see [Data Lifecycle & Retention](./rules/lifecycle.md)) |
 
 ### Object Capabilities (`enable`)
@@ -181,53 +177,7 @@ per-project convention for this — the mirror field is the answer.
 
 ---
 
-## Field Groups (MVP)
-
-Organize fields into logical groups (e.g., "Contact Information", "Billing",
-"System") for forms, detail pages, and editors.
-
-- Declare groups on `ObjectSchema.fieldGroups` — **array order is the display order**.
-- Assign each field to a group via `Field.group`, which references an
-  `ObjectFieldGroup.key`. In-group display order equals the traversal order
-  of `fields`.
-- Group keys must be `snake_case`; group labels are human-readable.
-- Optional per-group: `icon`, `description`, and `collapse`
-  (`'none'` always open · `'expanded'` collapsible, starts open ·
-  `'collapsed'` collapsible, starts closed — replaces the deprecated
-  `defaultExpanded` flag, ADR-0085). Groups render identically on forms,
-  modals, and detail pages; for a bespoke single-page layout assign a
-  custom Page instead.
-
-<!-- os:check -->
-```typescript
-import { ObjectSchema } from '@objectstack/spec/data';
-
-export default ObjectSchema.create({
-  name: 'account',
-  label: 'Account',
-  sharingModel: 'private',
-
-  fieldGroups: [
-    { key: 'contact_info', label: 'Contact Information', icon: 'user' },
-    { key: 'billing',      label: 'Billing', collapse: 'collapsed' },
-    { key: 'system',       label: 'System' },
-  ],
-
-  fields: {
-    name:       { type: 'text',  required: true, group: 'contact_info' },
-    email:      { type: 'email',                  group: 'contact_info' },
-    phone:      { type: 'phone',                  group: 'contact_info' },
-    vat_id:     { type: 'text',                   group: 'billing' },
-    billing_address: { type: 'address',           group: 'billing' },
-    created_at: { type: 'datetime', readonly: true, group: 'system' },
-    created_by: { type: 'lookup', reference: 'user', readonly: true, group: 'system' },
-  },
-});
-```
-
-**Supported migrations at this layer:** add / rename / delete / reorder groups
-(edit the `fieldGroups` array), assign a field to a group (edit `Field.group`).
-Explicit per-field in-group ordering is deferred to a future iteration.
+→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Field Groups (MVP).
 
 ---
 
@@ -297,66 +247,7 @@ export const Invoice = ObjectSchema.create({
 
 ---
 
-## Quick-Start Template
-
-<!-- os:check -->
-```typescript
-import { ObjectSchema } from '@objectstack/spec/data';
-
-export default ObjectSchema.create({
-  name: 'support_case',
-  label: 'Support Case',
-  pluralLabel: 'Support Cases',
-  description: 'A customer-reported issue tracked to resolution.',
-  icon: 'life-buoy',
-  sharingModel: 'private',                 // required in practice — see above
-  highlightFields: ['subject', 'status', 'priority'],
-  enable: {
-    trackHistory: true,
-    feeds: true,
-    activities: true,
-  },
-  fields: {
-    subject:     { type: 'text', required: true, maxLength: 255 },
-    description: { type: 'richtext' },
-    status:      { type: 'select', required: true, options: [
-      { label: 'New',       value: 'new', default: true },
-      { label: 'Open',      value: 'open' },
-      { label: 'Escalated', value: 'escalated', color: '#e74c3c' },
-      { label: 'Resolved',  value: 'resolved',  color: '#2ecc71' },
-      { label: 'Closed',    value: 'closed' },
-    ]},
-    priority:    { type: 'select', options: [
-      { label: 'Low',    value: 'low' },
-      { label: 'Medium', value: 'medium', default: true },
-      { label: 'High',   value: 'high',   color: '#e67e22' },
-      { label: 'Urgent', value: 'urgent',  color: '#e74c3c' },
-    ]},
-    account:     { type: 'lookup', reference: 'account', required: true },
-    contact:     { type: 'lookup', reference: 'contact' },
-    assigned_to: { type: 'lookup', reference: 'user' },
-    due_date:    { type: 'datetime' },
-  },
-  validations: [
-    {
-      name: 'status_flow',
-      type: 'state_machine',
-      field: 'status',
-      transitions: {
-        new:       ['open'],
-        open:      ['escalated', 'resolved'],
-        escalated: ['open', 'resolved'],
-        resolved:  ['open', 'closed'],
-        closed:    [],
-      },
-      message: 'Invalid status transition.',
-    },
-  ],
-});
-```
-
-Declared `indexes` are a separate decision — see
-[Index Strategy](./rules/indexing.md).
+→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Quick-Start Template.
 
 ---
 
@@ -496,33 +387,7 @@ indexes: [
 See [rules/indexing.md](./rules/indexing.md) for composite indexes, unique scope,
 and how to build partial / gin / gist indexes at the database layer.
 
-### Lifecycle Hooks
-
-Implement business logic at data operation lifecycle points:
-
-<!-- os:check -->
-```typescript
-import { defineHook, HookContext } from '@objectstack/spec/data';
-
-export default defineHook({
-  name: 'account_defaults',
-  object: 'account',
-  events: ['beforeInsert'],
-  handler: async (ctx: HookContext) => {
-    if (!ctx.input.industry) {
-      ctx.input.industry = 'Other';
-    }
-    ctx.input.created_at = new Date().toISOString();
-  },
-});
-```
-
-The `handler` above is the inline (in-process) form. The **preferred**,
-metadata-native form is a sandboxed `body` — `{ language: 'js', source, capabilities }`
-run in an isolated VM, the shape that AI/Studio-authored hooks and every build
-artifact carry. See [references/data-hooks.md](./references/data-hooks.md) for all 8
-lifecycle events, both registration forms, the **sandboxed `body` ctx + capability
-contract**, and the canonical patterns.
+→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Lifecycle Hooks (the hooks reference itself is [references/data-hooks.md](./references/data-hooks.md)).
 
 ---
 
@@ -562,265 +427,15 @@ it, and `defineStack` errors unless the grant declares
 
 ---
 
-## Metadata Protection (`protection`)
-
-Package authors can lock shipped metadata against Studio edits / overlays / deletes.
-
-The `protection` block is **declared on the source schema** (`*.object.ts`,
-`*.app.ts`, `*.view.ts`, …) and stripped at load time — it never appears in
-the runtime envelope. The runtime instead populates `_lock`, `_lockReason`,
-`_lockDocsUrl`, `_lockSource`, and `_packageId`, which REST returns to Studio
-and the lock banner reads.
-
-### Schema
-
-```ts
-protection?: {
-  /** Lock level — controls what Studio can do to this item. */
-  lock: 'none' | 'no-overlay' | 'no-delete' | 'full';
-  /** REQUIRED — reason shown in the Studio lock banner (1–500 chars). */
-  reason: string;
-  /** Optional doc URL — renders as a "View docs" link in the banner. */
-  docsUrl?: string;
-}
-```
-
-The block is `.strict()`: `reason` is **required** (min 1 / max 500 chars) and
-unknown keys are rejected.
-
-| `lock` | Edit (overlay) | Delete | Typical use |
-|:---|:---:|:---:|:---|
-| `none` (default) | ✅ | ✅ | Normal authored metadata |
-| `no-overlay` | ❌ | ✅ | Schema is platform-defined but tenant can drop it (e.g. `sys_role`) |
-| `no-delete` | ✅ | ❌ | Tenant may customize fields but the object itself must exist |
-| `full` | ❌ | ❌ | Core admin UI / platform identity (e.g. `sys_user`, `app/setup`) |
-
-### Example
-
-<!-- os:check -->
-```typescript
-// src/objects/sys-user.object.ts
-import { ObjectSchema } from '@objectstack/spec/data';
-
-export const SysUserObject = ObjectSchema.create({
-  name: 'sys_user',
-  label: 'User',
-  sharingModel: 'public_read',
-  protection: {
-    lock: 'full',
-    reason: 'Core identity object',
-    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
-  },
-  fields: { username: { type: 'text', required: true } },
-});
-```
-
-The same block works on non-object metadata (apps, views, dashboards, flows,
-agents, tools, skills, reports, email-templates). Enforcement: `PUT`/`DELETE` on
-`/api/v1/meta/:type/:name` return `403 item_locked`, and an artifact lock
-overrides a package lock. Default to **no** `protection` block for
-tenant-authored metadata.
+→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Metadata Protection (`protection`).
 
 ---
 
-## Seed Data & Fixtures (`defineSeed()`)
-
-Object definition and seed data live together — a `*.object.ts` usually
-pairs with a `*.seed.ts` (fixtures, reference rows, bootstrap data).
-`defineSeed()` is type-safe: TypeScript checks every record's field keys
-against the object definition.
-
-> The factory is `defineSeed` — **not** `defineDataset`, which is the
-> unrelated ADR-0021 analytics semantic layer (`@objectstack/spec/ui`).
-
-> ⛔ `sys_organization` is platform-bootstrapped — never a seed target; the
-> deployment posture decides how many exist (`rules/security.md`
-> § Multi-tenancy).
-
-### Quick start
-
-```typescript
-// src/data/index.ts
-import { defineSeed } from '@objectstack/spec/data';
-import { Status } from '../objects/status.object';
-import { Category } from '../objects/category.object';
-
-// Reference data — every environment
-export const statusSeed = defineSeed(Status, {
-  externalId: 'code',
-  mode: 'upsert',
-  records: [
-    { code: 'active',   label: 'Active',   color: '#2ecc71' },
-    { code: 'inactive', label: 'Inactive', color: '#95a5a6' },
-  ],
-});
-
-// Demo data — dev/test only
-export const categorySeed = defineSeed(Category, {
-  externalId: 'slug',
-  mode: 'upsert',
-  env: ['dev', 'test'],
-  records: [
-    { slug: 'electronics', name: 'Electronics' },
-  ],
-});
-
-export const SeedData = [statusSeed, categorySeed];   // parents first
-```
-
-### `Seed` fields
-
-| Field | Default | Purpose |
-|:------|:--------|:--------|
-| `object` | derived | Auto-set from `objectDef.name` — never write manually |
-| `externalId` | `'name'` | Stable business key used for upsert / update lookup |
-| `mode` | `'upsert'` | Import strategy (see below) |
-| `env` | `['prod','dev','test']` | Environments where the seed loads |
-| `records` | — | `Partial<Record<keyof object.fields, unknown>>[]` |
-
-Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
-
-### Import modes
-
-| Mode | Behavior | Use for |
-|:-----|:---------|:--------|
-| `upsert` (default) | Update by `externalId`, insert if missing. Idempotent. | Reference data, bootstrap rows |
-| `insert` | Insert all; fail on duplicate `externalId`. | Append-only / audit tables |
-| `update` | Update only existing rows; never create. | Patching existing config |
-| `ignore` | Insert; silently skip duplicates. | Additive bootstrap |
-| `replace` ⚠️ | Delete everything, then insert. **Data loss.** | Cache / lookup tables only — never user data |
-
-### `externalId` selection
-
-Pick a stable natural key. **Never use `id`** — UUIDs differ across
-environments.
-
-| Scenario | Key |
-|:---------|:----|
-| Named entities (country, currency) | `'code'` / `'slug'` |
-| Users / contacts | `'email'` |
-| Externally sourced | `'external_id'` |
-| Generic | `'name'` (default) |
-
-### Relationship references
-
-For `lookup` fields, supply the **natural key** of the target record (not
-its UUID). The seed runner resolves at load time. Order seeds so parents
-appear before children in the exported array:
-
-> If a lookup value matches no natural key, the loader falls back to
-> resolving it as the target's `id` — so a reference to an existing record
-> by internal id resolves instead of dangling to null. Natural keys remain
-> the portable default; rely on the id fallback only for records you didn't
-> seed (e.g. a system user).
-
-```typescript
-const contacts = defineSeed(Contact, {
-  externalId: 'email',
-  records: [{
-    email: 'john@acme.example.com',
-    first_name: 'John',
-    account: 'Acme Corporation',   // natural key of an Account record
-  }],
-});
-```
-
-### Dynamic values (CEL)
-
-Any field value may be a CEL expression evaluated at install time against
-a single per-load pinned `now`. This is the **only** correct way to author
-time-based or identity-derived seed values — `new Date()` ships the package
-author's clock to every customer and breaks build determinism.
-
-```typescript
-import { defineSeed } from '@objectstack/spec/data';
-import { cel } from '@objectstack/spec';
-
-defineSeed(Opportunity, {
-  records: [{
-    name:            'Acme Q3 Renewal',
-    close_date:      cel`daysFromNow(45)`,
-    created_at:      cel`now()`,
-    owner_id:        cel`os.user.id`,   // installer
-    organization_id: cel`os.org.id`,
-  }],
-});
-```
-
-Stdlib in seed context: `now()`, `today()`, `daysFromNow(n)`, `daysAgo(n)`,
-`isBlank(v)`, `coalesce(v, fallback)`. Scope: `os.user`, `os.org`, `os.env`.
-See **objectstack-formula** for the full contract.
-
-**Determinism gate:** two consecutive `os build` runs with no source
-changes must produce byte-identical `dist/objectstack.json`. CEL + pinned
-`now` is what guarantees that — using `Date.now()` will fail CI.
-
-### Seed best practices
-
-| Practice | Why |
-|:---------|:----|
-| Always use `defineSeed()`, never `SeedSchema.parse()` | Lose compile-time field checking otherwise |
-| Prefer natural keys (`code` / `email` / `slug`) | Portable across environments |
-| Default to `upsert` | Idempotent re-runs |
-| Scope demo data with `env: ['dev','test']` | Keep noise out of prod |
-| Order seeds parent → child in the exported array | References resolve at load time |
-| Use `replace` only on cache/lookup tables, with comments | Data-loss footgun |
+→ Seed Data & Fixtures (`defineSeed()`) moved verbatim to [references/seeds.md](./references/seeds.md) (Quick start · `Seed` fields · Import modes · `externalId` selection · Relationship references · Dynamic values (CEL) · Seed best practices).
 
 ---
 
-## Linting & Generation Quality
-
-`os lint` checks the data model against the conventions in this skill —
-not just naming/labels but the relationship/master-detail/roll-up patterns. Run
-it after authoring or generating metadata. Severities: `error` (structural,
-fails the command), `warning` (likely-wrong choice), `suggestion` (nudge).
-
-Data-model rules (in addition to naming/label/i18n):
-
-| Rule | Severity | Catches |
-|---|---|---|
-| `relationship/missing-reference` | error | lookup/master_detail without a `reference` target |
-| `relationship/master-detail-required` | warning | a `master_detail` that isn't `required` (a detail can't exist without its master) |
-| `relationship/delete-behavior` | suggestion | `master_detail` without an explicit `deleteBehavior` |
-| `relationship/line-items-inline-edit` | suggestion | a `*_line`/`*_item` master_detail child without `inlineEdit` |
-| `relationship/line-item-should-be-master-detail` | suggestion | a line-item-shaped child using `lookup` instead of `master_detail` |
-| `relationship/association-inline-edit` | warning | an association (comment/audit/activity) marked `inlineEdit` (clutters the parent form — use a detail-page related list) |
-| `rollup/missing-summary` | suggestion | a parent of numeric master_detail children with no roll-up `summary` |
-| `field/select-missing-options` | warning | a `select`/`multiselect`/`radio` with no `options` (or options source) |
-| `object/missing-name-field` | suggestion | an object with no `nameField` (ADR-0079's canonical title pointer) and no name-like field (`name`/`title`/`subject`/`label`/`full_name`/`display_name`/`code`) |
-| `security-owd-unset` | error | an object published with no authored `sharingModel` (422 lint envelope; absence is not a decision) |
-| `security-owd-alias` | error | a legacy OWD spelling instead of the canonical four (ADR-0090 D4) |
-| `security-external-wider-than-internal` | error | `externalSharingModel` wider than `sharingModel` (ADR-0090 D11) |
-| `security-master-detail-ungranted` | warning | a `master_detail` child whose master carries no matching grant |
-
-> **`code` counts for R9, but is NOT a title-derivation key.** R9's name-like
-> list above is the *looser* of two "name-like" sets, and the difference is
-> deliberate. R9 asks **"will records be anonymous?"** — is there any readable
-> face at all — and a `code` clears that bar. ADR-0079's title derivation
-> (`resolveDisplayField`) asks the narrower **"what IS the title?"**, and its
-> name-ish set is `name`/`title`/`subject`/`label`/`full_name`/`display_name`
-> **without `code`** — an identifier is not a title. So an object whose only
-> name-ish field is `code` is R9-clean, yet its title is derived by the
-> lower-priority "first title-eligible field by declaration order" tier rather
-> than by name. Nothing user-visible turns on this (R9 is `suggestion`, and the
-> `Record #<id>` floor guarantees a title regardless), but do not read the R9
-> list as the derivation contract — set `nameField` explicitly when the title
-> matters.
-
-These same rules are the **rubric for AI-generated metadata** — a generation is
-"good" exactly when it is schema-valid and lint-clean:
-
-- `os lint --score` — print a 0–100 metadata-quality score (+ letter
-  grade and severity breakdown) for the current project. Schema errors and lint
-  errors weigh most; suggestions barely move it.
-- `os lint --eval` — run the generation eval over a bundled golden
-  corpus (invoice+lines, project+tasks, blog+comments, expense+lines,
-  account+contacts) offline; each case must clear the pass bar (`--eval-min`,
-  default 75). Deterministic, no API key.
-
-When generating object metadata, target a lint-clean model: master_detail (with
-`required` + `deleteBehavior` + `inlineEdit` for line items), roll-up summaries
-on parents, `select` options, and a name/title field per object.
+→ Linting & Generation Quality moved verbatim to [references/lint-rules.md](./references/lint-rules.md).
 
 ---
 
