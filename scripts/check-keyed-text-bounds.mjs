@@ -156,6 +156,44 @@
  * index must go). Those two are not folded in here, and the `platform-objects`
  * pin's `#11701` describe stays exactly where it is for that reason.
  *
+ * ## The authoring shape: `ObjectSchema.create` is the one authorised spelling
+ *
+ * A `*.object.ts` declaration written as a plain annotated object literal --
+ * `const x: Data.ServiceObject = { ... }` -- is REFUSED BY NAME, telling the
+ * author to use `ObjectSchema.create`. It is the one shape this file will not
+ * be taught, and the refusal says so, because the factory validates the
+ * declaration against `ObjectSchema` at the moment the file is evaluated while
+ * a typed literal defers every check to a build the author may never run.
+ *
+ * ⚠️ The enforcement half is not a preference: the literal shape is invisible
+ * to the parser above, which finds declarations by `CREATE_CALL` and nothing
+ * else. One backstop already existed -- a file yielding ZERO declarations and
+ * zero refusals is refused -- but it is conditioned on `objects.length === 0`,
+ * so a file holding a factory declaration AND a literal one was read as
+ * complete and the literal one was judged by nothing at all. Measured on a
+ * two-file control tree: a literal `ctrl_hidden` keying a UNIQUE index on an
+ * unbounded `text` column -- the exact defect this gate exists to catch -- was
+ * swept, parsed as 1 object, and reported clean.
+ *
+ * What it looks for, stated because a source scan sees only the spellings it
+ * knows. A declaration is an object literal bound by a `const`/`let`/`var` or
+ * default-exported, whose initializer is NOT `ObjectSchema.create(`, carrying
+ * at least one of:
+ *
+ *   A. a type annotation naming `ServiceObject` (bare or namespaced) -- at any
+ *      indentation, since the annotation is unambiguous wherever it stands;
+ *   B. a `satisfies (<ns>.)?ServiceObject` after the literal -- likewise;
+ *   C. it IS the default export of the file -- top level;
+ *   D. the literal declares both a string-literal `name:` and a `fields:`, the
+ *      same two keys the factory parser itself requires -- top level ONLY. The
+ *      structural signal is what catches a literal carrying no annotation; it
+ *      is held to column 0 so a helper literal built inside a function body,
+ *      then handed to the factory, is not accused of being a declaration.
+ *
+ * ⛔ Do not "fix" a red here by teaching the parser the literal shape. The
+ * conversion is mechanical and is the remedy the refusal prints: wrap the
+ * literal in `ObjectSchema.create( ... )`.
+ *
  * ## What a red means
  *
  * A keyed text-family field arrived without a `maxLength`. Do not silence it:
@@ -194,6 +232,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the detector FIRES': 15,
   'the detector STAYS SILENT': 8,
   'refusals: the shapes it will not guess at': 11,
+  'the authoring shape: the factory is the one authorised declaration': 12,
   'the allowlist mechanism, driven on synthetic objects': 10,
   'the vacuity floors': 5,
   'provenance: the record must stay reproducible, and visibly so': 7,
@@ -203,7 +242,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -631,10 +670,127 @@ function walkObjectFiles(root) {
 
 const CREATE_CALL = /ObjectSchema\s*\.\s*create\s*\(/g;
 
+// ── The authoring shape (ruling batch #122 item 1, #17418) ────────────────
+//
+// The factory is the one authorised spelling; a plain annotated literal is
+// refused BY NAME rather than taught. The header is the authority on why and
+// on the four signals below.
+
+/** The declaration's own binder, at any indentation. `\n`-anchored, comments already masked. */
+const BINDING_HEAD = /^([ \t]*)(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm;
+
+/** A top-level `export default`. */
+const DEFAULT_EXPORT_HEAD = /^[ \t]*export\s+default\s+/gm;
+
+/** `ServiceObject`, bare or namespaced (`Data.ServiceObject`, `Spec . ServiceObject`). */
+const SERVICE_OBJECT_TYPE = /(?:^|[^\w$.])(?:[A-Za-z_$][\w$]*\s*\.\s*)?ServiceObject(?![\w$])/;
+
+/** The good shape, anchored at the start of an initializer. */
+const CREATE_INITIALIZER = /^ObjectSchema\s*\.\s*create\s*\(/;
+
+/**
+ * The offset of the initializer's `=` for a declarator whose name ends at
+ * `from`, or -1 when the declarator carries no initializer. Depth-aware, so a
+ * generic argument's `=` or an annotation spanning lines cannot end the scan
+ * early; a depth-0 `;` does.
+ */
+function initializerAssign(struct, from) {
+  let depth = 0;
+  for (let i = from; i < struct.length; i += 1) {
+    const c = struct[i];
+    if (c === '(' || c === '[' || c === '{') depth += 1;
+    else if (c === ')' || c === ']' || c === '}') { if (depth === 0) return -1; depth -= 1; }
+    else if (depth > 0) continue;
+    else if (c === ';') return -1;
+    else if (c === '=' && struct[i + 1] !== '=' && !'=!<>+-*/%&|^'.includes(struct[i - 1])) return i;
+  }
+  return -1;
+}
+
+/** First non-whitespace offset at or after `from`. */
+function skipSpace(struct, from) {
+  let i = from;
+  while (i < struct.length && /\s/.test(struct[i])) i += 1;
+  return i;
+}
+
+/**
+ * Object-literal declarations written in a shape the factory parser cannot
+ * read. Pure, and exported so `--self-test` drives it directly.
+ *
+ * @returns {Array<{ at: number, name: string, signal: string }>}
+ */
+export function literalShapeDeclarations(struct, masked) {
+  const found = [];
+  const seen = new Set();
+
+  /** Judge one candidate initializer. */
+  const consider = (open, name, annotation, topLevel, isDefault) => {
+    if (struct[open] !== '{') return;
+    if (seen.has(open)) return;
+    const close = matchBracket(struct, open);
+    if (close < 0) return;
+
+    const signals = [];
+    if (SERVICE_OBJECT_TYPE.test(annotation)) signals.push('a `ServiceObject` type annotation');
+    // Read off `struct`, not `masked`: literal CONTENT is blanked there, so the
+    // words `satisfies ServiceObject` sitting inside a string cannot fire this.
+    const after = struct.slice(close + 1, close + 80);
+    if (/^\s*satisfies\b/.test(after) && SERVICE_OBJECT_TYPE.test(after)) {
+      signals.push('a `satisfies ServiceObject` assertion');
+    }
+    if (isDefault) signals.push("the file's default export");
+    if (topLevel) {
+      const entries = objectEntries(struct, masked, open, close);
+      const nameEntry = entries.find((e) => e.key === 'name');
+      const hasName = nameEntry !== undefined
+        && stringValue(struct, masked, nameEntry.start, nameEntry.end) !== null;
+      if (hasName && entries.some((e) => e.key === 'fields')) {
+        signals.push('a literal `name:` beside a `fields:`, the two keys the factory parser requires');
+      }
+    }
+    if (signals.length === 0) return;
+    seen.add(open);
+    found.push({ at: open, name, signal: signals.join(', and ') });
+  };
+
+  BINDING_HEAD.lastIndex = 0;
+  let m;
+  while ((m = BINDING_HEAD.exec(struct)) !== null) {
+    const nameEnd = m.index + m[0].length;
+    const eq = initializerAssign(struct, nameEnd);
+    if (eq < 0) continue;
+    const init = skipSpace(struct, eq + 1);
+    if (CREATE_INITIALIZER.test(struct.slice(init, init + 40))) continue;
+    consider(init, `\`${m[2]}\``, struct.slice(nameEnd, eq), m[1].length === 0, false);
+  }
+
+  DEFAULT_EXPORT_HEAD.lastIndex = 0;
+  while ((m = DEFAULT_EXPORT_HEAD.exec(struct)) !== null) {
+    const init = skipSpace(struct, m.index + m[0].length);
+    if (CREATE_INITIALIZER.test(struct.slice(init, init + 40))) continue;
+    consider(init, 'the default export', '', true, true);
+  }
+
+  return found.sort((a, b) => a.at - b.at);
+}
+
+/** The refusal text for one literal-shaped declaration. */
+function literalShapeMessage(name, signal) {
+  return `${name} is declared as a plain object literal — use \`ObjectSchema.create({ ... })\`.\n`
+    + `    Recognised as a declaration by ${signal}.\n`
+    + '    `ObjectSchema.create` is the one authorised shape for a `.object.ts` declaration: it parses\n'
+    + '    the declaration against ObjectSchema when the file is evaluated, so an error surfaces where\n'
+    + '    it was written. A typed literal defers every check to a build the author may never run — and\n'
+    + '    this gate cannot read it at all, so every keyed text column in it goes unjudged.\n'
+    + '    The conversion is mechanical: wrap the literal in `ObjectSchema.create( ... )`.\n'
+    + '    ⛔ Do not teach this scan the literal shape instead — the shape is refused, not unknown.';
+}
+
 /**
  * Parse every object declaration in one file.
  *
- * @returns {{ objects: Array, refusals: Array }}
+ * @returns {{ objects: Array, refusals: Array, shapeViolations: Array }}
  */
 function parseObjectFile(absPath, relPath, source, textFamily) {
   const { masked, struct } = project(source);
@@ -642,6 +798,15 @@ function parseObjectFile(absPath, relPath, source, textFamily) {
   const refusals = [];
   const objects = [];
   const refuse = (offset, message) => refusals.push({ file: relPath, line: lineAt(starts, offset), message });
+
+  // The authoring-shape scan runs INDEPENDENTLY of the factory parse below,
+  // deliberately: conditioning it on "the file yielded no declarations" is the
+  // hole that let a mixed file hide a literal declaration behind a factory one.
+  const shapeViolations = literalShapeDeclarations(struct, masked).map((d) => ({
+    file: relPath,
+    line: lineAt(starts, d.at),
+    message: literalShapeMessage(d.name, d.signal),
+  }));
 
   CREATE_CALL.lastIndex = 0;
   let call;
@@ -789,7 +954,11 @@ function parseObjectFile(absPath, relPath, source, textFamily) {
     objects.push({ name, file: relPath, fields, indexes, keyedTextColumns, unclassifiedUnkeyed });
   }
 
-  if (objects.length === 0 && refusals.length === 0) {
+  // The backstop for a file nothing read. It steps aside when the authoring-shape
+  // scan already named the reason, so a literal-shaped file gets ONE finding that
+  // prescribes the factory rather than a second one inviting the scan to be
+  // extended — which is the opposite of what is ruled.
+  if (objects.length === 0 && refusals.length === 0 && shapeViolations.length === 0) {
     refusals.push({
       file: relPath,
       line: 1,
@@ -799,7 +968,7 @@ function parseObjectFile(absPath, relPath, source, textFamily) {
         + '    is the failure this gate exists to prevent.',
     });
   }
-  return { objects, refusals };
+  return { objects, refusals, shapeViolations };
 }
 
 /**
@@ -868,6 +1037,7 @@ export function sweep(root) {
   const files = walkObjectFiles(root);
   const objects = [];
   const refusals = [];
+  const shapeViolations = [];
   const relFiles = [];
   for (const abs of files) {
     const rel = relative(root, abs).split(sep).join('/');
@@ -875,6 +1045,7 @@ export function sweep(root) {
     const parsed = parseObjectFile(abs, rel, readFileSync(abs, 'utf8'), textFamily);
     objects.push(...parsed.objects);
     refusals.push(...parsed.refusals);
+    shapeViolations.push(...parsed.shapeViolations);
   }
   const unhinted = unhintedFiles(relFiles);
 
@@ -886,7 +1057,7 @@ export function sweep(root) {
     keyedTextColumns: objects.reduce((n, o) => n + o.keyedTextColumns.length, 0),
   };
 
-  return { family: emitter.family, files, relFiles, unhinted, objects, refusals, counts };
+  return { family: emitter.family, files, relFiles, unhinted, objects, refusals, shapeViolations, counts };
 }
 
 /**
@@ -1029,6 +1200,23 @@ function main() {
     );
   }
 
+  if (result.shapeViolations.length > 0) {
+    console.error(
+      `check:keyed-text-bounds: ${result.shapeViolations.length} object declaration(s) not written with `
+      + '`ObjectSchema.create`\n',
+    );
+    for (const v of result.shapeViolations) console.error(`  ${v.file}:${v.line}\n    ${v.message}`);
+    console.error(
+      '\n`ObjectSchema.create({ ... })` is the one authorised shape for a `*.object.ts` declaration.\n'
+      + 'The factory parses the declaration against ObjectSchema at evaluation time, so an error surfaces\n'
+      + 'where it was written; a typed literal defers every check to a build the author may never run, and\n'
+      + 'this gate cannot read it at all — a literal declaration sitting beside a factory one was swept,\n'
+      + 'counted as read, and judged by nothing.\n'
+      + '⛔ The remedy is the conversion, never a wider parser: wrap the literal in `ObjectSchema.create( ... )`.',
+    );
+    return 2;
+  }
+
   if (result.refusals.length > 0) {
     console.error(`check:keyed-text-bounds: ${result.refusals.length} declaration(s) this scan cannot classify\n`);
     for (const r of result.refusals) console.error(`  ${r.file}:${r.line}\n    ${r.message}`);
@@ -1087,7 +1275,9 @@ function main() {
     + `columns judged, ${result.counts.keyedTextColumns - ALLOWLIST.length} bounded. `
     + `Family read off the emitter: ${result.family.join(', ')}. `
     + `Allowlist: ${pending} pending, ${unboundable} unboundable, all rows still real. `
-    + `${unclassified} unclassified field(s), none of them keyed.`,
+    + `${unclassified} unclassified field(s), none of them keyed. `
+    + `Authoring shape: 0 literal-shaped declarations across all ${result.counts.files} files — every `
+    + 'declaration is `ObjectSchema.create`.',
   );
   console.log(provenanceLine(result.counts));
   return 0;
@@ -1121,6 +1311,10 @@ function list() {
   const unclassified = result.objects.flatMap((o) => o.unclassifiedUnkeyed.map((u) => ({ ...u, file: o.file })));
   console.log(`\nunclassified fields (none keyed, or the run would have refused): ${unclassified.length}`);
   for (const u of unclassified) console.log(`    ${u.column}  ${u.why}   ${u.file}`);
+  if (result.shapeViolations.length > 0) {
+    console.log(`\nauthoring-shape violations (not \`ObjectSchema.create\`): ${result.shapeViolations.length}`);
+    for (const v of result.shapeViolations) console.log(`    ${v.file}:${v.line}  ${v.message}`);
+  }
   if (result.refusals.length > 0) {
     console.log(`\nrefusals: ${result.refusals.length}`);
     for (const r of result.refusals) console.log(`    ${r.file}:${r.line}  ${r.message}`);
@@ -1359,6 +1553,121 @@ export function selfTest() {
     const undeclaredKeyedColumn = oneObject(`{ name: 'o', fields: { c: Field.text({ maxLength: 5 }) }, indexes: [{ fields: ['ghost'] }] }`);
     t('an index keying a column the object does not declare refuses',
       undeclaredKeyedColumn.refusals.length === 1 && /does not declare/.test(undeclaredKeyedColumn.refusals[0].message));
+
+    // ── the authoring shape: the factory is the one authorised declaration ─
+    //
+    // ⚠️ The regression this battery exists for is case "MIXED" below. The
+    // whole-file case was already refused before the rule landed (by the
+    // zero-declarations backstop), so a self-test built only out of whole-file
+    // fixtures would pass identically with the detector deleted.
+    battery('the authoring shape: the factory is the one authorised declaration');
+    const shapesOf = (r) => r.shapeViolations ?? [];
+    const literalFile = (body) => `import * as Data from '@objectstack/spec/data';\n\n${body}\n`;
+
+    const emittedShape = run({
+      'packages/p/src/a.object.ts': literalFile(
+        "const myAppItem: Data.ServiceObject = {\n  name: 'my_app_item',\n  fields: { c: { type: 'text' } },\n};\n\nexport default myAppItem;",
+      ),
+    });
+    t('the `os init` emitted shape — `const x: Data.ServiceObject = { ... }` — is a finding',
+      shapesOf(emittedShape).length === 1, JSON.stringify(shapesOf(emittedShape)));
+    t('...and the finding NAMES `ObjectSchema.create`, which is what the ruling requires',
+      shapesOf(emittedShape).length === 1 && shapesOf(emittedShape)[0].message.includes('ObjectSchema.create'),
+      JSON.stringify(shapesOf(emittedShape).map((v) => v.message)));
+    t('...and it is the ONLY finding — the zero-declarations backstop steps aside rather than '
+      + 'adding a second one that invites the scan to be widened',
+      shapesOf(emittedShape).length === 1 && emittedShape.refusals.length === 0,
+      JSON.stringify(emittedShape.refusals));
+
+    const bareAnnotation = run({
+      'packages/p/src/a.object.ts': "const o: ServiceObject = {\n  name: 'o',\n};\n",
+    });
+    t('a BARE `ServiceObject` annotation (no namespace) is a finding too',
+      shapesOf(bareAnnotation).length === 1, JSON.stringify(shapesOf(bareAnnotation)));
+
+    const satisfiesShape = run({
+      'packages/p/src/a.object.ts': "const o = {\n  name: 'o',\n} satisfies Data.ServiceObject;\n",
+    });
+    t('a `satisfies Data.ServiceObject` assertion is a finding', shapesOf(satisfiesShape).length === 1,
+      JSON.stringify(shapesOf(satisfiesShape)));
+
+    const defaultLiteral = run({
+      'packages/p/src/a.object.ts': "export default {\n  label: 'O',\n};\n",
+    });
+    t("a bare object literal as the file's DEFAULT EXPORT is a finding",
+      shapesOf(defaultLiteral).length === 1, JSON.stringify(shapesOf(defaultLiteral)));
+
+    const structural = run({
+      'packages/p/src/a.object.ts': "export const o = {\n  name: 'o',\n  fields: { c: { type: 'text' } },\n};\n",
+    });
+    t('an UNANNOTATED top-level literal declaring `name:` and `fields:` is a finding — the '
+      + 'structural signal, which does not depend on knowing the type spelling',
+      shapesOf(structural).length === 1, JSON.stringify(shapesOf(structural)));
+
+    // ── MIXED: the hole the rule was written to close ─────────────────────
+    const mixed = run({
+      'packages/p/src/a.object.ts':
+        "import { ObjectSchema, Field } from '@objectstack/spec/data';\n"
+        + "import type * as Data from '@objectstack/spec/data';\n\n"
+        + "export const shown = ObjectSchema.create({ name: 'shown', fields: { t: Field.text({ maxLength: 5 }) }, indexes: [{ fields: ['t'] }] });\n\n"
+        + "const hidden: Data.ServiceObject = {\n  name: 'hidden',\n  fields: { slug: { type: 'text' } },\n  indexes: [{ fields: ['slug'], unique: true }],\n};\n\nexport default hidden;\n",
+    });
+    t('MIXED — a literal declaration sitting BESIDE a factory one is named. Before this rule the '
+      + 'file parsed as 1 object, the backstop never fired, and `hidden.slug` — an unbounded text '
+      + 'column keyed by a UNIQUE index — was reported clean',
+      shapesOf(mixed).length === 1 && /hidden/.test(shapesOf(mixed)[0].message),
+      JSON.stringify(shapesOf(mixed)));
+    t('MIXED — the factory declaration in that same file is STILL parsed, so the rule costs no '
+      + 'coverage and no count',
+      mixed.objects.length === 1 && mixed.objects[0].name === 'shown' && mixed.refusals.length === 0,
+      JSON.stringify({ objects: mixed.objects.map((o) => o.name), refusals: mixed.refusals }));
+
+    // ── and the shapes that must stay silent ──────────────────────────────
+    const factoryOnly = oneObject(`{ name: 'o', fields: { c: Field.text({ maxLength: 5 }) }, indexes: [{ fields: ['c'] }] }`);
+    t('an ordinary factory file has ZERO authoring-shape findings — the control that must stay green',
+      shapesOf(factoryOnly).length === 0, JSON.stringify(shapesOf(factoryOnly)));
+    t('...and the factory\'s OWN nested literals (`fields:`, `indexes[]`) are never accused',
+      shapesOf(factoryOnly).length === 0 && factoryOnly.objects.length === 1);
+
+    const defaultFactory = run({
+      'packages/p/src/a.object.ts':
+        "import { ObjectSchema } from '@objectstack/spec/data';\n\nexport default ObjectSchema.create({ name: 'o', fields: {}, indexes: [] });\n",
+    });
+    t('`export default ObjectSchema.create({...})` is the GOOD shape, not a finding',
+      shapesOf(defaultFactory).length === 0 && defaultFactory.objects.length === 1,
+      JSON.stringify(shapesOf(defaultFactory)));
+
+    const helperLiteral = run({
+      'packages/p/src/a.object.ts':
+        "import { ObjectSchema } from '@objectstack/spec/data';\n\n"
+        + "const COMMON = { label: 'Shared', description: 'x' };\n\n"
+        + "export const o = ObjectSchema.create({ name: 'o', fields: {}, indexes: [] });\n",
+    });
+    t('a top-level HELPER literal carrying neither annotation nor `name:`+`fields:` is not accused',
+      shapesOf(helperLiteral).length === 0, JSON.stringify(shapesOf(helperLiteral)));
+
+    const insideFunction = run({
+      'packages/p/src/a.object.ts':
+        "import { ObjectSchema } from '@objectstack/spec/data';\n\n"
+        + 'function build(n) {\n'
+        + "  const base = { name: n, fields: { c: { type: 'text' } } };\n"
+        + '  return ObjectSchema.create(base);\n'
+        + '}\n\n'
+        + "export const o = ObjectSchema.create({ name: 'o', fields: {}, indexes: [] });\n",
+    });
+    t('an INDENTED literal built inside a function and handed to the factory is not accused — the '
+      + 'structural signal is held to column 0 on purpose',
+      shapesOf(insideFunction).length === 0, JSON.stringify(shapesOf(insideFunction)));
+
+    const maskedMentions = run({
+      'packages/p/src/a.object.ts':
+        "import { ObjectSchema } from '@objectstack/spec/data';\n\n"
+        + '// const legacy: Data.ServiceObject = { name: 1 };\n'
+        + "export const o = ObjectSchema.create({ name: 'o', fields: {}, indexes: [], description: 'satisfies ServiceObject, and Data.ServiceObject too' });\n",
+    });
+    t('`ServiceObject` inside a COMMENT or a STRING does not fire — the mask is load-bearing here too',
+      shapesOf(maskedMentions).length === 0 && maskedMentions.objects.length === 1,
+      JSON.stringify(shapesOf(maskedMentions)));
 
     // ── the allowlist mechanism, driven on synthetic objects ──────────────
     // ALLOWLIST is empty against the real tree, so the excusing branch is never
