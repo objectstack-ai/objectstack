@@ -4050,8 +4050,14 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
- * registry shell `plugin-timeline/src/index.tsx` — all read at the
- * `.objectui-sha` pin `53ded82b` this repo builds against).
+ * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
+ * repo builds against (`.objectui-sha` = `87af769e9`), re-READ there
+ * 2026-09-22.
+ *
+ * ⛔ This record used to be MIXED, and the historical spelling is what let it
+ * be: its `limit` clause was re-read at this pin on 2026-09-21 while every
+ * other anchor beside it was still a `53ded82bf` reading, in the same file,
+ * with nothing to tell the two apart. Every anchor below is now at this pin.)
  *
  * #17987 executes the objectui#8652 maintainer ruling (verbatim `B`). The
  * ruling's carrier is `navigation`, declared below beside its `object-kanban`
@@ -4063,39 +4069,43 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * directions: nothing accepted a real key and nothing refused a typo.
  *
  * Read points per key, in `ObjectTimeline.tsx` unless named otherwise:
- * `objectName` (`:172`, `:194-204`, `:215-247`, `:314`, `:459-464` — the
- * fetch, the object-def load and the pull-to-refresh gate), `timeline` (`:179`,
+ * `objectName` (`:256` the fetch gate, `:325-328` the object-def load through
+ * `useSettledSchema`, `:346` / `:404` / `:420` inside the fetch effect,
+ * `:647` the pull-to-refresh gate, `:502` the entry composition and `:652`
+ * the navigation binding), `timeline` (`:262`,
  * the canonical nested config every field resolution prefers), `filter`
- * (`:210`, `:232` — verbatim to `$filter`), `sort` (`:211`, `:233` — through
+ * (`:341`, `:405` — verbatim to `$filter`), `sort` (`:342`, `:406` — through
  * the shared `convertSortToQueryParams` sink, as `object-calendar`'s does),
- * `limit` (⭐ re-READ at the CURRENT pin `87af769e9` on 2026-09-21T06:30Z,
- * #19228 — the other anchors in this list are still the `53ded82b` readings
- * the header names: `:407`, the fetch's one top-level `$top`, through
+ * `limit` (`:407`, the fetch's one top-level `$top`, through
  * `resolveRowLimit(schema.limit, DEFAULT_TIMELINE_LIMIT)` with the default
  * `100` at `:29` and the refused-cap diagnostic at `:279`. ⚠️ It is this FLAT
  * key that is read — this node's own nested `timeline.limit` is not, on any
  * route. What reaches this flat key is a VIEW document's `timeline.limit`,
- * flattened onto the generated node by `ObjectView.tsx:1725`; see the
- * `timeline` door below), `items` (`:170`, `:247`, `:299`,
- * `:480` — the authored pass-through that short-circuits the object query),
- * `data` (`:171`, `:247`, `:254`, `:256` — the pre-fetched record source,
+ * flattened onto the generated node by `plugin-view/src/ObjectView.tsx:1725`
+ * (`...(viewOptions.timeline || {})`, spelled with its package because objectui
+ * carries a second `ObjectView.tsx` in `app-shell`); see the
+ * `timeline` door below), `items` (`:254`, `:420`, `:487`,
+ * `:668` — the authored pass-through that short-circuits the object query),
+ * `data` (`:255`, `:420`, `:442`, `:444` — the pre-fetched record source,
  * read off REACT PROPS rather than `schema`; the door's own docblock carries
  * how an authored key reaches that channel and why a `schema.*` sweep alone
  * publishes a false refusal),
- * `descriptionField` (`:290`), `mapping` (`:263`, `:288`, `:290`, `:291`),
- * `variant` (`:518`) and `navigation` (`:462-466` → `:597` → `:652`).
+ * `descriptionField` (`:478`), `mapping` (`:451`, `:476`, `:478`, `:479`),
+ * `variant` (`:706`) and `navigation` (`:650-653` → `:785` → `:840-841`).
  * Four more are read by the presentational renderer off the schema this
- * component spreads into it (`effectiveSchema`, `:581-602`): `dateFormat`
- * (`renderer.tsx:1215`, every variant) and the gantt trio `rowLabel`
- * (`renderer.tsx:1499`), `minDate` / `maxDate` (`renderer.tsx:1436-1451`).
+ * component spreads into it (`effectiveSchema`, `:769-788`): `dateFormat`
+ * (`renderer.tsx:1215`, every variant — ⭐ the one anchor in this record whose
+ * NUMBER did not move on the hop, which is why the number alone is never the
+ * reading) and the gantt trio `rowLabel`
+ * (`renderer.tsx:1505`), `minDate` / `maxDate` (`renderer.tsx:1442-1457`).
  *
  * Measured and deliberately NOT declared, each with its reason:
  *  - the flat field spellings and `scale`
  *    ({@link OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE}) — the runtime handoff
  *    `ListView` emits, not a second authoring spelling;
  *  - `bind` — the objectui data-scope key the section header above rules out
- *    for every block in this family (`:188` here);
- *  - `className` (`:584`) — a node-level key on `PageComponentSchema`, not a
+ *    for every block in this family (`:283` here);
+ *  - `className` (`:772`) — a node-level key on `PageComponentSchema`, not a
  *    per-block prop;
  *  - `onItemClick` / `onRowClick` — host callbacks JSON cannot carry.
  *
@@ -4195,13 +4205,14 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * `schema.<key>` OR `props.<key>`, and a measurement that greps only the
    * first publishes a refusal for a key the renderer honours.
    *
-   * Read points at the `.objectui-sha` pin `53ded82b`, all in
-   * `ObjectTimeline.tsx`: `:171` seeds the loading state off it, `:247`
-   * SKIPS the object query when it is present, `:254` tracks it, and `:256`
+   * Read points at the pin this repo builds against (`.objectui-sha` =
+   * `87af769e9`, re-READ 2026-09-22), all in
+   * `ObjectTimeline.tsx`: `:255` seeds the loading state off it, `:420`
+   * SKIPS the object query when it is present, `:442` tracks it, and `:444`
    * is the row source itself — `(props as any).data || boundData ||
    * fetchedData`, so it wins over both the data-scope binding and the fetch.
    * Unlike `items` one line down, these rows are RECORDS: they go through the
-   * same `timeline` field bindings a fetched row takes (`:300`, `:367`).
+   * same `timeline` field bindings a fetched row takes (`:555-556`, `:570`).
    */
   data: z.array(z.unknown()).optional()
     .describe("Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written"),
@@ -4416,7 +4427,8 @@ export const ComponentPropsMap = {
   // type union's open string arm, and with no row here the #5068 gate skipped
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
-  // points at the `.objectui-sha` pin `53ded82b`; the schema's own header
+  // points at the pin this repo builds against (`.objectui-sha` =
+  // `87af769e9`), re-READ there 2026-09-22; the schema's own header
   // carries the per-key citations and what it deliberately does NOT declare.
   'object-timeline': ObjectTimelinePropsSchema,
 } as const;
