@@ -118,10 +118,17 @@ describe('checkFieldCompleteness — the verified inert shapes go red', () => {
 });
 
 describe('checkViewCompleteness — layout bindings', () => {
-  // Six of the view `type` members carry a binding block. The renderer's
-  // fallback for every one is a literal field name (measured in objectui's
-  // ListView adapter — see the table's docblock), so the missing block is the
-  // same defect on all six, not a lesser one on the last three.
+  // Six of the view `type` members carry a binding block, and the missing
+  // block is the same defect on all six: the surface the author asked for is
+  // not the one that renders, while authoring reports success.
+  //
+  // ⛔ What it is NOT is one shared mechanism. This comment used to say the
+  // renderer's fallback for every one is a literal field name; objectui has
+  // been deleting those floors one view type at a time, and for `calendar`
+  // the renderer now REFUSES by name instead (#17445). The rule fires on all
+  // six either way — that is what this pin holds — and the per-type
+  // mechanism belongs to the table's docblock, which states each row's own
+  // measurement and which of them have gone stale.
   it.each(['kanban', 'calendar', 'gantt', 'timeline', 'map', 'tree'])('flags a %s view missing its block as a WARNING', (type) => {
     const f = only(checkViewCompleteness({ type }) as never);
     expect(f.rule).toBe(VIEW_LAYOUT_WITHOUT_BINDING);
@@ -149,6 +156,46 @@ describe('checkViewCompleteness — layout bindings', () => {
       map: { latitudeField: 'lat', longitudeField: 'lng' },
     })).toEqual([]);
     expect(checkViewCompleteness({ type: 'tree', tree: { parentField: 'parent' } })).toEqual([]);
+  });
+
+  it('the calendar body describes the REFUSAL, not a deleted literal fallback (#17445)', () => {
+    // Re-measured on objectui `main` at `0cf2d6644` (2026-09-21), both halves
+    // of the path: `ListView.tsx`'s `case 'calendar'` restates only declared
+    // bindings — objectui#7029 deleted the `startDateField || 'start_date'` /
+    // `endDateField || 'end_date'` floors — and `ObjectCalendar`'s
+    // `getCalendarConfig` resolves `null`, so the component renders its
+    // "Calendar configuration required" refusal screen. The body asserted
+    // those floors as the reason for the warning, which is what this pin
+    // stops from coming back.
+    const f = only(checkViewCompleteness({ type: 'calendar' }) as never);
+    expect(f.message).not.toContain('falls back to literal default field names');
+    expect(f.message).toContain('Calendar configuration required');
+    expect(f.message).toContain('ObjectCalendar.tsx');
+    // ⛔ The half the correction had to PRESERVE: a warning an author meets at
+    // authoring time earns its place by naming the key to declare, not by
+    // reporting that something is missing.
+    expect(f.message).toContain('calendar.startDateField');
+    expect(f.fix).toContain('startDateField');
+    // Severity is deliberately untouched here. Whether a renderer that
+    // refuses BY NAME still deserves WARNING under ADR-0078 §1 is #16577's
+    // question; correcting false prose does not answer it.
+    expect(f.severity).toBe('warning');
+  });
+
+  it('the five types with no per-type body keep the generic one — an override, not a rewrite', () => {
+    // ⚠️ An honest pin: it records WHICH body each type receives, NOT that
+    // the body is true of each. The table's re-measurement note says `gantt`,
+    // `timeline` and `map` inherit this sentence pending corrections of their
+    // own; `kanban` and `tree` were re-read at the same ref and still floor a
+    // literal. Correcting one of the three means adding an entry beside
+    // `calendar`'s and moving that type out of this list — a deliberate edit,
+    // which is the point.
+    for (const type of ['kanban', 'gantt', 'timeline', 'map', 'tree']) {
+      const f = only(checkViewCompleteness({ type }) as never);
+      expect(f.rule).toBe(VIEW_LAYOUT_WITHOUT_BINDING);
+      expect(f.message).toContain('falls back to literal default field names');
+      expect(f.message).toContain(`A \`${type}\` view with no \`${type}\` block`);
+    }
   });
 
   it('names the schema-required keys in the timeline prescription', () => {
