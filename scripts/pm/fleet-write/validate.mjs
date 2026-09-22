@@ -46,7 +46,8 @@
  *      environment variable absent or not JSON). Nothing was judged.
  */
 
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
@@ -65,6 +66,7 @@ import {
   PERMISSIONS,
   REFUSED_PATH_FAMILIES,
   RELAY_EVENT_TYPE,
+  RELAY_FILES,
   REQUEST_ID_SHAPE,
   SESSION_SHAPE,
   TARGET_OWNER,
@@ -323,7 +325,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the fields: request_id shape and cap, the one organization, the session id': 8,
   'the actions: count, the closed op list, closed keys per op, typed values': 22,
   'the platform ceilings: ten top-level properties and under 64KB, pinned with their source': 6,
-  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 8,
+  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 9,
   'the normalised payload: only judged keys travel': 3,
   'the CLI: a file, the environment, GitHub outputs, and the exit ladder': 10,
 });
@@ -469,6 +471,8 @@ export async function selfTest() {
     t('pr_create forces draft: true whatever the action said', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r')[0].body.draft, true);
     t('labels_remove is one directed DELETE per name, URL-encoded, idempotent on 404', OPS.labels_remove.requests({ op: 'labels_remove', issue: 1, labels: ['a b', 'c'] }, 'o/r').map((r) => [r.verb, r.path, r.idempotent404]), [['DELETE', '/repos/o/r/issues/1/labels/a%20b', true], ['DELETE', '/repos/o/r/issues/1/labels/c', true]]);
     t('every op names a permission the token is narrowed to', OP_NAMES.every((op) => OPS[op].permission in PERMISSIONS));
+    const repoRoot = resolve(SELF_PATH, '../../../..');
+    t('the relay files the table declares are on disk, repo-relative, and this file is one of them', [RELAY_FILES.filter((f) => !existsSync(resolve(repoRoot, f))), RELAY_FILES.includes('scripts/pm/fleet-write/validate.mjs')], [[], true]);
   }
 
   // ── the normalised payload ────────────────────────────────────────────────

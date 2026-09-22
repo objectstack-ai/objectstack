@@ -714,7 +714,7 @@ export async function main(argv) {
   const rearmed = rearmThroughProxy(argv);
   if (rearmed !== null) return rearmed;
   const result = await sendFleetWrite(packed.payload, { token });
-  if (!result.ok && (result.state === 'no-run' || result.state === 'timeout')) console.error(unconfirmedText(result, 'fleet-write/dispatch'));
+  if (!result.ok && (result.state === 'no-run' || result.state === 'timeout')) console.error(unconfirmedText(result, 'scripts/pm/fleet-write/dispatch.mjs'));
   if (opts.json) console.log(JSON.stringify({ request_id: packed.payload.request_id, state: result.state, ok: result.ok, run: result.run, dispatched_at: new Date(result.dispatchedAt).toISOString() }));
   return result.ok ? EXIT_OK : exitForResult(result);
 }

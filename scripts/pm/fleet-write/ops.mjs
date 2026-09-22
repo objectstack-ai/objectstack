@@ -58,6 +58,19 @@
  * reject with a 422 is refused locally with the reason.
  */
 
+/**
+ * The relay's four files, repo-relative — the population a card touching any
+ * of them implicates (the dispatch derivation reads these literals as path
+ * leads, so a bare `fleet-write/…` spelling would name nothing from the repo
+ * root). `validate.mjs --self-test` checks each one is on disk.
+ */
+export const RELAY_FILES = Object.freeze([
+  'scripts/pm/fleet-write/ops.mjs',
+  'scripts/pm/fleet-write/validate.mjs',
+  'scripts/pm/fleet-write/execute.mjs',
+  'scripts/pm/fleet-write/dispatch.mjs',
+]);
+
 /** The board repository every relay lands on; `payload.repo` names the TARGET. */
 export const RELAY_REPO = 'objectstack-ai/objectstack';
 
