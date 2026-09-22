@@ -34,6 +34,11 @@ export const fieldForm = defineForm({
       fields: [
         { field: 'defaultValue', helpText: 'Default value for new records' },
         { field: 'placeholder', helpText: 'Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help' },
+        // #19331 — nineteen scalars FieldSchema declares had no control on this
+        // form, so the per-field editor sent an author to the Source tab's
+        // free-text JSON for every one of them. The row beside `placeholder` is
+        // the key that row's own help text already names.
+        { field: 'inlineHelpText', helpText: 'Always-visible help shown below the input, unlike `placeholder`, which disappears once a value is entered.' },
         // Text field options
         // #11949 — `minLength` converges on the same bounded-string types as
         // `maxLength` below (BOUNDED_STRING_FIELD_TYPES; maintainer ruling
@@ -72,6 +77,17 @@ export const fieldForm = defineForm({
         { field: 'max', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Maximum value' },
         { field: 'precision', visibleWhen: "data.type == 'currency' || data.type == 'number'", helpText: 'Decimal places (e.g., 2 for $10.50)' },
         { field: 'scale', visibleWhen: "data.type == 'number'", helpText: 'Number of decimal digits' },
+        // Every `visibleWhen` below is a MEANINGFULNESS gate, not a parse gate:
+        // `FieldSchema` accepts each key on any type, and each is mirrored from
+        // the key's own contract text and from the same row in the object
+        // designer's quick-add grid (`object.form.ts`), so the two surfaces
+        // cannot disagree about when a knob applies.
+        { field: 'step', visibleWhen: "data.type == 'slider'", helpText: 'Step increment for the slider (default 1). Renderer-only: the write path does not reject a value off the step grid.' },
+        { field: 'maxSize', visibleWhen: "data.type in ['image','file','avatar','video','audio']", helpText: 'Maximum permitted file size in BYTES (positive integer). Enforced server-side on write against the stored file size — a file with no recorded size cannot fail it.' },
+        { field: 'dimensions', visibleWhen: "data.type == 'vector'", helpText: 'Vector dimensionality — an integer from 1 to 10000 (e.g. 1536 for OpenAI embeddings).' },
+        { field: 'language', visibleWhen: "data.type == 'code'", helpText: 'Editor language for syntax highlighting (e.g. javascript, python, sql).' },
+        { field: 'autonumberFormat', visibleWhen: "data.type == 'autonumber'", helpText: 'Literal text plus a {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens in the business time zone, and {field_name} interpolation. The counter resets per rendered prefix. Omitted on an autonumber field it defaults to {0000}.' },
+        { field: 'referenceVia', visibleWhen: "data.type == 'text'", helpText: 'Makes this text field the id half of a polymorphic pointer: names the SIBLING field on the same object that holds the target object name, per row (ADR-0052 §5). snake_case; text fields only, and mutually exclusive with `reference`.' },
         // Select field options
         {
           field: 'options',
@@ -162,6 +178,16 @@ export const fieldForm = defineForm({
         // knob the runtime does not deliver is what Prime Directive #10
         // forbids.
         { field: 'relatedListFilter', widget: 'filter-condition', visibleWhen: "data.type in ['lookup','master_detail']", helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set" },
+        // The record-picker knobs. All four are read by the lookup renderer and
+        // none had a control, so the picker could only be configured from the
+        // Source tab.
+        { field: 'displayField', visibleWhen: "data.type in ['lookup','master_detail']", helpText: "Field shown as each candidate's label in the picker. Omitted, the referenced object's own title field is used." },
+        { field: 'descriptionField', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Secondary field shown under the label in the quick-select popover.' },
+        { field: 'allowCreate', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Let the user create a record from the typed text when the picker finds no match. Best for objects whose only required field is the display field.' },
+        { field: 'lookupPageSize', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Rows per page in the record-picker dialog — a positive integer; default 10.' },
+        { field: 'relatedListTitle', visibleWhen: "data.type in ['lookup','master_detail']", helpText: "Title for this relationship's related list on the parent's detail page." },
+        { field: 'inlineTitle', visibleWhen: "data.type == 'master_detail'", helpText: 'Title for the inline master-detail grid on the parent record.' },
+        { field: 'inlineAmountField', visibleWhen: "data.type == 'master_detail'", helpText: 'Numeric child field summed for the inline grid total.' },
       ],
     },
     {
@@ -172,6 +198,15 @@ export const fieldForm = defineForm({
       collapsed: true,
       fields: [
         { field: 'expression', widget: 'textarea', helpText: 'CEL expression to calculate this field (makes it read-only)' },
+        // The four members are what FieldSchema declares — an explicit list, not
+        // the derived enum, so this row cannot pick up a member the formula
+        // return type does not have.
+        { field: 'returnType', type: 'select', visibleWhen: "data.type == 'formula'", helpText: 'Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression.', options: [
+          { label: 'Text', value: 'text' },
+          { label: 'Number', value: 'number' },
+          { label: 'Boolean', value: 'boolean' },
+          { label: 'Date', value: 'date' },
+        ] },
         {
           field: 'summaryOperations',
           type: 'composite',
@@ -221,6 +256,10 @@ export const fieldForm = defineForm({
         // Partial masking (#8993): a preset name or a {keepHead, keepTail} JSON
         // object; the runtime FieldMasker enforces it on read AND export.
         { field: 'maskingRule', colSpan: 2, helpText: "Partial masking: preset ('phone', 'id_card', 'bank_account', 'email', 'name') or {\"keepHead\": n, \"keepTail\": m}. Masked for callers not holding this field's requiredPermissions" },
+        { field: 'internal', colSpan: 1, helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched." },
+        { field: 'trackHistory', colSpan: 1, helpText: "Render this field's value changes as entries on the record activity timeline (ADR-0052 §5b). Opt-in per field." },
+        { field: 'widget', colSpan: 2, helpText: 'Form widget override — names a registered field component, looked up as `field:` plus this name, to render the field instead of the type default. An unregistered name degrades to the type renderer.' },
+        { field: 'ackPlaintextMasking', label: 'Acknowledge plaintext at rest', colSpan: 2, visibleWhen: "data.type == 'password'", helpText: "Affirm that this generic password field's plaintext-at-rest, masked-on-read contract is intended, silencing the author-time warning (ADR-0100). No effect on any other type." },
       ],
     },
   ],
