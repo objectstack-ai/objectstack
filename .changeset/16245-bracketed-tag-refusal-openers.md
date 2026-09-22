@@ -3,7 +3,7 @@
 '@objectstack/spec': minor
 ---
 
-Refusal messages no longer open with a bracketed tag restating the `code` the same throw declares — `error` carries the human sentence, `code` carries the machine token, and the token is no longer duplicated onto the prose axis.
+`ObjectStackProtocolImplementation` and `SysMetadataRepository` no longer open their refusal messages with a bracketed tag restating the `code` the same throw declares — `error` carries the human sentence, `code` carries the machine token, and the token is no longer duplicated onto the prose axis.
 
 Clause-②: yes
 
