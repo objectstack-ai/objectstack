@@ -1716,7 +1716,9 @@ describe('validateTranslationReferences — collection rungs a SIBLING package o
           {
             name: 'order_detail',
             object: 'crm_order',
-            regions: { main: [{ type: 'record:details', properties: { sections: [{ name: 'billing' }] } }] },
+            regions: [
+              { components: [{ type: 'record:details', properties: { sections: [{ name: 'billing' }] } }] },
+            ],
           },
         ],
       };

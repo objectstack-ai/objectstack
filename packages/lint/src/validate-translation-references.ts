@@ -834,9 +834,24 @@ function objectExtensionsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
 }
 
 /**
- * Every object RECORD an entry of `packages[]` declares — what THIS ARTIFACT
- * provides, beyond the collections the stack in hand carries at its top level
- * (#19064).
+ * Every RECORD of one metadata collection that an entry of `packages[]`
+ * declares — what THIS ARTIFACT provides, beyond the collection the stack in
+ * hand carries at its top level (#19064 for `objects`, #19349 for the rest).
+ *
+ * ## Which collections may be asked for, and why that is mechanical
+ *
+ * Exactly the keys whose `COMPOSE_KEY_DISPOSITIONS` disposition is one of
+ * `ASSEMBLED_PACKAGE_BODY_DISPOSITIONS` (`concat`, `objects`, `functions`) —
+ * that membership IS what puts a key inside an ADR-0130 D4 entry's assembled
+ * body, so it is the same proof {@link objectExtensionsByTarget} rests on one
+ * collection over rather than a fresh assumption per rung. `objects` carries
+ * disposition `objects`; `views`, `pages`, `actions`, `apps`, `dashboards` and
+ * `flows` each carry `concat`.
+ *
+ * ⛔ There is no `stack.manifest.<collection>` form to read beside this one:
+ * all of them are STACK collections, not manifest keys — the asymmetry
+ * {@link contributedNavItemsByApp} is the counter-example to, since
+ * `navigationContributions` IS a manifest key and so has both carriers.
  *
  * ## Why this rung needs the reach at all
  *
@@ -881,12 +896,12 @@ function objectExtensionsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
  * asymmetry {@link objectExtensionsByTarget} records one collection over, and
  * the reason the single-`defineStack` shape is untouched by this fold.
  */
-function artifactProvidedObjects(stack: AnyRec): AnyRec[] {
+function artifactProvidedRecords(stack: AnyRec, collection: string): AnyRec[] {
   const provided: AnyRec[] = [];
   for (const entry of recordsOf(stack.packages)) {
     const body = entry.manifest;
     if (!isRec(body)) continue;
-    provided.push(...recordsOf(body.objects));
+    provided.push(...recordsOf(body[collection]));
   }
   return provided;
 }
@@ -981,7 +996,7 @@ function buildUniverse(stack: AnyRec): Universe {
   // definition here — re-deriving that precedence to feed it would be a second
   // opinion on it. The NAME is addressable either way, which is all this
   // universe answers — the same decision the extension fold below takes.
-  for (const obj of artifactProvidedObjects(stack)) {
+  for (const obj of artifactProvidedRecords(stack, 'objects')) {
     collectObjectRecord(obj, { ownDeclaration: false });
   }
 
@@ -1031,19 +1046,41 @@ function buildUniverse(stack: AnyRec): Universe {
   }
 
   // ── Stack-level views: `_views` names + form-section names ──
-  for (const view of recordsOf(stack.views)) {
+  //
+  // …and the same collection as an entry of `packages[]` declares it (#19349).
+  // ⛔ There is no name-only fold to weigh here: `views` has no bundle rung of
+  // its own — a view record contributes FACTS under `objects.<name>` (`_views`,
+  // and a form container's named `_sections`) — so the record is the only thing
+  // carrying both the fact and the object it binds to.
+  //
+  // Folded through the SAME collector as the declaration loop, and no
+  // precedence rule is needed: every fact a view contributes is a Set add, so
+  // where the stack in hand and a sibling declare the same view name the two
+  // adds are one add. (The two VALUE-carrying maps — fields and actions — are
+  // where precedence has to be decided, and they are decided where they live.)
+  for (const view of [...recordsOf(stack.views), ...artifactProvidedRecords(stack, 'views')]) {
     collectViewRecord(view, factsFor);
   }
 
   // ── Pages: `record:details` sections are the other `_sections` anchor, and
   //    `interfaceConfig.userFilters.tabs` is the ONE `_tabs` anchor ──
-  const pages = recordsOf(stack.pages);
-  for (let pi = 0; pi < pages.length; pi++) {
+  //
+  // …and, for the same reason and on the same carrier (#19349), the pages an
+  // entry of `packages[]` declares. Like `views` this rung has no bundle key of
+  // its own — a page contributes `_tabs` and `_sections` FACTS under the object
+  // it binds to — so the record is again the only thing there is to fold, and
+  // both anchors are Set adds that need no precedence rule.
+  const collectPageRecord = (page: AnyRec) => {
     // Read off the page ROOT, before the component walk and independent of it:
     // `interfaceConfig` is not a component, and unlike `regions` it is authored
     // on source-authored pages too (see `collectPageTabs`).
-    collectPageTabs(pages[pi], factsFor);
-    for (const walked of walkPageComponents(pages[pi], `pages[${pi}]`)) {
+    collectPageTabs(page, factsFor);
+    // ⚠️ The walk's `path` label is spelled `''`, not an index: this loop reads
+    // only `objectName` and the component's own `properties.sections`, so no
+    // finding can carry it — and an index into a list that now spans two
+    // sources would be a coordinate into nothing. `page-envelope-audit` calls
+    // the walk the same way, for the same reason.
+    for (const walked of walkPageComponents(page, '')) {
       if (!walked.objectName) continue;
       const props = isRec(walked.component.properties) ? walked.component.properties : undefined;
       if (!props) continue;
@@ -1052,21 +1089,48 @@ function buildUniverse(stack: AnyRec): Universe {
         if (sectionName) factsFor(walked.objectName).sections.add(sectionName);
       }
     }
-  }
+  };
+  for (const page of recordsOf(stack.pages)) collectPageRecord(page);
+  for (const page of artifactProvidedRecords(stack, 'pages')) collectPageRecord(page);
 
   // ── Actions: object-bound ones join their object; the rest are global ──
+  //
+  // …from the stack in hand and from the artifact's other entries (#19349).
+  //
+  // ⛔ A name-only fold is wrong here for a reason peculiar to this rung: the
+  // stored RECORD is itself read downstream — `checkActionParams` judges
+  // `params.<name>` off it — so folding a bare name would resolve the action
+  // key and then report every one of its param keys as an orphan.
+  //
+  // ⚠️ And the OWNER is read from the record too, which is what keeps the
+  // widening honest: an action a sibling binds to an object joins that object's
+  // `_actions`, never `globalActions`. Registering a bound action globally
+  // would make legal a key the resolver never reads — the mirror image of the
+  // orphan this rule reports, and a false negative rather than a false positive.
   const globalActions = new Map<string, AnyRec>();
   const actionOwners = new Map<string, string>();
-  for (const action of recordsOf(stack.actions)) {
+  // `ownDeclaration` carries #19064's decision one collection over: where both
+  // the stack in hand and a sibling declare the same action name, the record
+  // this leg is JUDGING keeps the slot, because `checkActionParams` is the only
+  // consumer of the stored definition and picking the other layer would be a
+  // second opinion on the registry's precedence.
+  const collectActionRecord = (action: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
     const actionName = strName(action.name);
-    if (!actionName) continue;
+    if (!actionName) return;
     const owner = strName(action.objectName) ?? strName(action.object);
     if (owner) {
-      factsFor(owner).actions.set(actionName, action);
+      const facts = factsFor(owner);
+      if (!ownDeclaration && facts.actions.has(actionName)) return;
+      facts.actions.set(actionName, action);
       actionOwners.set(actionName, owner);
     } else {
+      if (!ownDeclaration && globalActions.has(actionName)) return;
       globalActions.set(actionName, action);
     }
+  };
+  for (const action of recordsOf(stack.actions)) collectActionRecord(action, { ownDeclaration: true });
+  for (const action of artifactProvidedRecords(stack, 'actions')) {
+    collectActionRecord(action, { ownDeclaration: false });
   }
   for (const [objectName, facts] of objects) {
     for (const actionName of facts.actions.keys()) {
@@ -1088,9 +1152,9 @@ function buildUniverse(stack: AnyRec): Universe {
       if (item.children) walkNav(item.children, into);
     }
   };
-  for (const app of recordsOf(stack.apps)) {
+  const collectAppRecord = (app: AnyRec) => {
     const appName = strName(app.name);
-    if (!appName) continue;
+    if (!appName) return;
     const navIds = apps.get(appName) ?? new Set<string>();
     walkNav(app.navigation, navIds);
     for (const area of recordsOf(app.areas)) {
@@ -1103,7 +1167,28 @@ function buildUniverse(stack: AnyRec): Universe {
     // does. This is the population the runtime serves, not the authored array.
     for (const items of contributedNav.get(appName) ?? []) walkNav(items, navIds);
     apps.set(appName, navIds);
-  }
+  };
+  for (const app of recordsOf(stack.apps)) collectAppRecord(app);
+  // [#19349] …and the apps an entry of `packages[]` declares.
+  //
+  // ⚠️ This is the half #18442 did NOT cover, and the distinction is the whole
+  // point: that change reads `navigationContributions`, so an app became
+  // addressable only where THIS package contributes into it. A sibling's
+  // `apps[]` DECLARATION was invisible either way, which broke both halves —
+  // with no contribution the app NAME was the orphan, and with one the name
+  // resolved while the owner's own navigation ids were orphans.
+  //
+  // ⛔ Names alone would close only the first half and would then report every
+  // id under a resolved app as an orphan, so the RECORD is folded and walked by
+  // the same `walkNav`. Nav ids accumulate into one Set per app — the merge the
+  // declaration loop already performs for two same-named entries — because at
+  // runtime `apps` is a `concat` collection and every entry's items arrive.
+  //
+  // ⚠️ Order is load-bearing: this runs BEFORE the contributed-only pass below,
+  // so an app a sibling declares is a DECLARED app here and never acquires the
+  // `contributedOnly` diagnosis, whose remedy would send the author to a
+  // package sitting in the same artifact.
+  for (const app of artifactProvidedRecords(stack, 'apps')) collectAppRecord(app);
 
   // [#18442] …and every app this stack CONTRIBUTES into but does not declare.
   //
@@ -1142,10 +1227,21 @@ function buildUniverse(stack: AnyRec): Universe {
   }
 
   // ── Dashboards: widget ids + header action urls ──
+  //
+  // …from the stack in hand and from the artifact's other entries (#19349).
+  // ⛔ Names alone would resolve `dashboards.<name>` and then judge its widget
+  // ids and header `actionUrl`s against an EMPTY set — the trap #19064 recorded
+  // one collection over, moved one rung down — so the RECORD is folded and the
+  // sub-rung derived from it exactly as for a declaration in hand.
   const dashboards = new Map<string, { widgets: Set<string>; actions: Set<string> }>();
-  for (const dash of recordsOf(stack.dashboards)) {
+  // `ownDeclaration`: where both declare the same dashboard name, the record
+  // this leg is JUDGING keeps the slot (#19064's decision). ⛔ Not a union of
+  // the two id sets — that would make a sibling's widget ids addressable under
+  // a dashboard this package defines, which is a false negative.
+  const collectDashboardRecord = (dash: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
     const dashName = strName(dash.name);
-    if (!dashName) continue;
+    if (!dashName) return;
+    if (!ownDeclaration && dashboards.has(dashName)) return;
     const widgets = new Set<string>();
     for (const widget of recordsOf(dash.widgets)) {
       const id = strName(widget.id) ?? strName(widget.name);
@@ -1161,6 +1257,10 @@ function buildUniverse(stack: AnyRec): Universe {
       if (key) actions.add(key);
     }
     dashboards.set(dashName, { widgets, actions });
+  };
+  for (const dash of recordsOf(stack.dashboards)) collectDashboardRecord(dash, { ownDeclaration: true });
+  for (const dash of artifactProvidedRecords(stack, 'dashboards')) {
+    collectDashboardRecord(dash, { ownDeclaration: false });
   }
 
   // ── Flows: screen node ids + the field names each screen declares ──
@@ -1173,10 +1273,20 @@ function buildUniverse(stack: AnyRec): Universe {
   // every nested screen out of the universe and report each of its keys as an
   // orphan — a false positive that now FAILS the run, which is exactly the
   // over-stating ADR-0072 D1 forbids, at the cost the gating severity sets.
+  //
+  // …from the stack in hand and from the artifact's other entries (#19349).
+  // ⛔ Names alone would resolve `flows.<name>` and then report every screen
+  // node id — and every `config.fields[].name` under one — as an orphan, the
+  // same trap the dashboard rung records. And the record is what carries the
+  // `otherNodes` reading too, which is a DIAGNOSIS rather than a resolution: a
+  // name-only fold would lose the "declares it as a `<type>` node, not a
+  // `screen`" message and fall back to the vaguer one.
   const flows = new Map<string, FlowFacts>();
-  for (const flow of recordsOf(stack.flows)) {
+  // `ownDeclaration`: the declaration this leg is JUDGING keeps the slot.
+  const collectFlowRecord = (flow: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
     const flowName = strName(flow.name);
-    if (!flowName) continue;
+    if (!flowName) return;
+    if (!ownDeclaration && flows.has(flowName)) return;
     const screens = new Map<string, ScreenFacts>();
     const otherNodes = new Map<string, string>();
     for (const { node } of walkFlowNodes(flow, '')) {
@@ -1196,6 +1306,10 @@ function buildUniverse(stack: AnyRec): Universe {
       screens.set(nodeId, { fields, objectName: strName(config?.objectName) });
     }
     flows.set(flowName, { screens, otherNodes });
+  };
+  for (const flow of recordsOf(stack.flows)) collectFlowRecord(flow, { ownDeclaration: true });
+  for (const flow of artifactProvidedRecords(stack, 'flows')) {
+    collectFlowRecord(flow, { ownDeclaration: false });
   }
 
   return { objects, extended, apps, contributedOnlyApps, dashboards, flows, globalActions, actionOwners };
