@@ -1,0 +1,55 @@
+{
+  "skill_name": "objectstack-formula",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add a `full_name` formula on `contact` built from salutation, first name and last name, and a `margin_pct` formula on `deal` = (revenue - cost) / cost * 100.",
+      "expected_output": "Two `type: 'formula'` fields whose `expression` is CEL via the `F` tag. The text formula coalesces every nullable operand — `F`coalesce(record.salutation, '') + ' ' + coalesce(record.first_name, '') + ' ' + coalesce(record.last_name, '')`` — because `null + 'foo'` throws. The numeric one guards the divisor: `F`coalesce(record.cost, 0) > 0 ? ((coalesce(record.revenue, 0) - record.cost) * 100) / record.cost : 0.0``. Field references are bare `record.<field>`, never brace-wrapped.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["F`", "coalesce(", "record."],
+        "must_not_contain": ["{record.", "CONCAT("]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Translate this Salesforce validation rule into ObjectStack: AND(ISBLANK(po_number), amount > 10000, NOT(ISPICKVAL(status, 'draft'))).",
+      "expected_output": "Applies the mechanical legacy → CEL table: `P`isBlank(record.po_number) && record.amount > 10000 && record.status != 'draft'``, noting that a `script` validation is inverted (it FAILS when the expression is true, so keep the failing condition) and that `record.amount > 10000` on a declared-nullable field needs an explicit `record.amount != null &&` guard or the publish gate rejects it. Uses `'draft'` single quotes and bare `record.` references.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["isBlank(", "&&", "record.", "P`"],
+        "must_not_contain": ["{record.", "ISBLANK(record."]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "Run an automation only when a support case has just become `escalated` — on single updates and on bulk updates alike.",
+      "expected_output": "Writes the transition once as `P`previous.status != 'escalated' && record.status == 'escalated'``: `record` is the record's post-write state (true on every update of an already-escalated case), so only a `previous` comparison says \"just became\"; `previous` is bound per matched row on `before*` and `after*` update events, bulk included. Not usable on insert events (unbound `previous` aborts the write). There is no `ISCHANGED()` function.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["previous.status", "record.status", "!="],
+        "must_not_contain": ["ISCHANGED(", "{previous."]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Demo opportunities should close 45 days after the package is installed, and a formula should show how many days remain until close.",
+      "expected_output": "Seed value as a CEL envelope, `close_date: cel`daysFromNow(45)``, never `new Date()` / `Date.now()` (the determinism gate: two `os build` runs must be byte-identical). Days remaining is `daysBetween(today(), record.close_date)` — never `record.close_date - today()` (a duration stored as `{}`) and never `today() + 45` (date arithmetic faults).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["cel`", "daysFromNow(", "daysBetween("],
+        "must_not_contain": ["new Date(", "today() + "]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "Hide `discount_reason` unless a discount amount was entered, and reject any `end_date` earlier than `start_date`.",
+      "expected_output": "`visibleWhen: P`record.discount != null`` (or `!isBlank(record.discount)`) on the field — `has(record.discount)` is not a null check: every declared field exists, so it is always true. The date rule is a `script` validation whose predicate dominates the comparison with explicit null tests: `record.start_date != null && record.end_date != null && record.end_date < record.start_date`; a `has()` guard does not satisfy the publish-time gate. Canonical property names only — never `conditionalRequired`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["visibleWhen", "!= null", "record.end_date"],
+        "must_not_contain": ["conditionalRequired:", "{record."]
+      }
+    }
+  ]
+}
