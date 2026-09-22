@@ -1080,7 +1080,7 @@ function selfTest() {
 
     const readWith = (marker, sourceMarker = null) => {
       const st = readTreeStatus(split);
-      const files = st.gitReadable ? markerPresence(split, st.entries, sourceMarker ?? marker) : [];
+      const files = st.gitReadable ? markerPresence(split, st.entries, treeReadingMarker({ marker, sourceMarker })) : [];
       return treeVerdict({ mode: 'absent', gitReadable: st.gitReadable, gitError: st.gitError, files, sourceMarker });
     };
 
