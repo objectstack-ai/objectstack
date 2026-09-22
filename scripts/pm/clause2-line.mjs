@@ -18,14 +18,25 @@
  * about review.
  *
  * So the reader moved out from under the sweep. `check-changeset-no-major.mjs`
- * and `check-adr-0087-registration.mjs` run in `lint.yml`, `pr-automation.yml`,
- * `cut-rc.yml` and `release.yml`; before this extraction each pulled in
- * `pm/check-clause2-carriers.mjs` — ten thousand lines and a nine-module closure
- * of sweep machinery — to reach forty lines of line reading. Their closure is
- * now this file, which imports NOTHING: no node builtin, no first-party module.
- * That is load-bearing twice over — `check-changeset-no-major.mjs` states that
- * it still runs before `pnpm install`, and both gates stage their own
- * first-party closure into a throwaway repo for their I1/I2 fixtures.
+ * and `check-adr-0087-registration.mjs` run in `lint.yml` and
+ * `pr-automation.yml` on every PR, and in `cut-rc.yml` on a dispatched cut.
+ * `release.yml` names them in PROSE only (`:358`, `:590` — why a major cannot
+ * reach that lane), runs neither, and therefore never loads this module. Before
+ * this extraction each gate pulled in `pm/check-clause2-carriers.mjs` — ten
+ * thousand lines and a nine-module closure of sweep machinery — to reach forty
+ * lines of line reading. Their closure is now this file, which imports NOTHING:
+ * no node builtin, no first-party module. That is load-bearing twice over —
+ * `check-changeset-no-major.mjs` states that it still runs before
+ * `pnpm install`, and both gates stage their own first-party closure into a
+ * throwaway repo for their I1/I2 fixtures.
+ *
+ * ⚠️ This file is STEP ① of that ruling and nothing else of it has landed yet:
+ * the `needs:contract-review` label, `check-clause2-carriers.mjs --pair`, the
+ * double-carrier discipline and the independence pair are retired BY THE RULING
+ * and still RUN in this tree — the label exists, `--pair` still judges its C4 /
+ * C6 / C7 rows, and `check-governed-merges.mjs` still prescribes `--pair N` at
+ * 0 — until step ② (the rule text) and step ③ (the label) land. ⛔ Read the
+ * paragraph above as what was DECIDED, never as what this tree already does.
  *
  * ## ⛔ One reader, and this is it
  *
