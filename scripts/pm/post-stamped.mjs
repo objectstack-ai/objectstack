@@ -1295,27 +1295,69 @@ function quotedRouteClosed(stamp, nowMs) {
 }
 
 /**
- * The clause a remedy appends when EVERY occurrence of the offending stamp sits
- * inside a quoted span — empty when at least one of them does not.
+ * Whether a declared reading names an instant inside the MINUTE this act's own
+ * clock spells — the bytes `{{NOW}}` would have written at that position, at
+ * either grain.
  *
- * Without it the two remedies prescribe a route that cannot work there: inside
- * a quotation neither spelling is substituted, so a seat that follows the text
- * literally gets the token printed where it wanted a time and reads the same
- * refusal again. A refusal text prescribing a refused remedy is a tool arguing
- * with itself — the rule the `{{WAS:…}}` direction check already states, taken
- * one step further now that a quotation can hold a stamp.
+ * ⛔ An equality against the rendered minute is not this question: a seconds
+ * grain of the same minute is the same reading, spelled narrower, and the
+ * read-side patrol — which widens a stamp to its own grain before it measures
+ * anything — files nothing on it. Refusing it would be this tool refusing what
+ * the patrol calls clean, which is the one disagreement between them that may
+ * never open. ⛔ And it is the MINUTE, never `H56_STAMP_TOLERANCE_MIN`: that
+ * number is a backward gap on the read side, and spending it here would buy
+ * back the typed stamp this file exists to make unspellable.
  */
-function quotedSpanClause(raw, spans, stamp) {
+function readingIsThisMinute(stamp, nowMs) {
+  const span = stampSpan(String(stamp ?? '').trim());
+  if (span === null) return false;
+  const minute = Math.floor(nowMs / 60000) * 60000;
+  return span.from >= minute && span.from < minute + 60000;
+}
+
+/**
+ * The WHOLE remedy tail for an offending stamp whose every occurrence sits
+ * inside a quoted span — null when at least one of them does not, and the
+ * caller then writes its ordinary remedy.
+ *
+ * ⛔ A tail, never a clause appended to the ordinary one. Inside a quotation
+ * neither spelling is substituted, so a text that prescribes `{{WAS:…}}` THERE
+ * and then takes it back in a trailing warning has prescribed a route that
+ * cannot work and argued with itself in one breath — which is how a seat that
+ * had ALREADY written the declaration inside the quotation read its own remedy
+ * back, character for character, and disbelieved the refusal. So the route the
+ * remedy names is the one that works: the same declaration, OUTSIDE the
+ * quotation.
+ *
+ * ⛔ And it is not an exemption. The refusal still fires; only the sentence
+ * telling the author what to do about it changes, which is the half that was
+ * wrong.
+ */
+function quotedSpanRemedy(raw, spans, stamp, closed = null) {
   const text = String(raw ?? '');
   const hits = [];
   for (let at = text.indexOf(stamp); at !== -1; at = text.indexOf(stamp, at + 1)) hits.push(at);
-  if (hits.length === 0 || !hits.every((at) => insideQuotedSpan(spans, at))) return '';
+  if (hits.length === 0 || !hits.every((at) => insideQuotedSpan(spans, at))) return null;
+  const declarations = [];
+  const re = globalOf(QUOTED_TOKEN_RE);
+  let m;
+  while ((m = re.exec(text))) {
+    if (insideQuotedSpan(spans, m.index)) declarations.push([m.index, m.index + m[0].length]);
+  }
+  const declared = hits.every((at) => declarations.some(([from, to]) => at >= from && at < to));
   return (
-    ' ⚠️ Every occurrence of this stamp sits inside a QUOTED SPAN, where this tool renders text and ' +
-    'substitutes nothing — so writing either spelling there prints the token itself, not a time. Move ' +
-    'the stamp out of the quotation to declare it, or, if the quotation is an EXAMPLE, quote the ' +
-    'placeholder form (`YYYY-MM-DDThh:mmZ`) instead of digits: quoting changes what is rendered, never ' +
-    'what was typed onto the board.'
+    (declared
+      ? `⚠️ The \`{{WAS:${stamp}}}\` you already wrote round it is inside that quotation too. Every `
+      : '⚠️ Every ') +
+    'occurrence of this stamp sits inside a QUOTED SPAN, where this tool renders text and substitutes ' +
+    'nothing' +
+    (declared
+      ? ' — so what stands there is a PICTURE of a declaration, not one, and re-typing it changes nothing. '
+      : ' — so writing either spelling there prints the token itself, not a time. ') +
+    'The route that works is the same declaration OUTSIDE the quotation' +
+    (closed ? `, once the value is one the quoted route takes at all: ${closed}` : ` — \`{{WAS:${stamp}}}\` in the prose beside it`) +
+    '; or, if the quotation is an EXAMPLE, quote the placeholder form (`YYYY-MM-DDThh:mmZ`) instead of ' +
+    'digits. Quoting changes what is rendered, never what was typed onto the board.'
   );
 }
 
@@ -1333,8 +1375,18 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
   const refusals = [];
   const now = stampNow(nowMs);
 
+  const refusedValues = new Set();
+  // ⛔ The payload AND every stamp inside it. The declared walk below reads the
+  // RENDERED body, where a payload the shape rule refused stands as its own text,
+  // so what it has to decline is the DIGITS a reader would see at that position —
+  // the payload's whole spelling never reaches one.
+  const noteRefusedValue = (value) => {
+    refusedValues.add(String(value).trim());
+    for (const inside of protocolStamps(value)) refusedValues.add(inside);
+  };
   for (const value of quotedStampValues(raw, spans)) {
     if (protocolStamps(value).length !== 1 || protocolStamps(value)[0] !== value.trim()) {
+      noteRefusedValue(value);
       refusals.push({
         kind: 'quoted-not-a-stamp',
         detail:
@@ -1346,6 +1398,7 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
     }
     const calendar = stampRealInstant(value);
     if (!calendar.real) {
+      noteRefusedValue(value);
       refusals.push({
         kind: 'quoted-no-such-instant',
         detail:
@@ -1362,6 +1415,7 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
       continue;
     }
     if (!stampIsFuture(value, nowMs)) continue;
+    noteRefusedValue(value);
     refusals.push({
       kind: 'quoted-in-the-future',
       detail:
@@ -1374,28 +1428,42 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
     });
   }
 
-  // Everything above judges what a DECLARATION may SAY. The count is taken
-  // here so the positional rule below declines to file a second row about a
-  // value that already has one — one typo, one refusal.
-  const quotedValueProblems = refusals.length;
-
+  // Everything above judges what a DECLARATION may SAY, and the VALUES it
+  // refused are kept so the declared walk below declines a second row about a
+  // value that already has one — one typo, one refusal. ⛔ Per value, never
+  // body-wide: a count would let one mistyped declaration anywhere suppress the
+  // row for a real declared reading at a position, so the caller repairs the
+  // typo and is refused a second time by a rule that was silent the first.
   const positional = h56StampedReadings(masked);
-  const positionsTaken = new Set();
+  // ⛔ A MULTISET, not a set. Its credits exist only so the declared walk
+  // declines a position the bare scan already took; keyed on position-name plus
+  // stamp, a set also collapses two subscript lines carrying the SAME stamp into
+  // one row, and the second line then reaches the board unnamed.
+  const positionsTaken = new Map();
+  const takeCredit = (key) => {
+    const left = positionsTaken.get(key) ?? 0;
+    if (left === 0) return false;
+    positionsTaken.set(key, left - 1);
+    return true;
+  };
   for (const hit of positional) {
-    positionsTaken.add(`${hit.where} :: ${hit.stamp}`);
+    const key = `${hit.where} :: ${hit.stamp}`;
+    positionsTaken.set(key, (positionsTaken.get(key) ?? 0) + 1);
     const opener =
       `${hit.where} carries the bare stamp \`${hit.stamp}\`. That position belongs to the writing ` +
       'act, so a stamp typed there is the act\'s own time written from memory — the defect this tool ' +
       'exists to make unspellable. ';
     const closed = quotedRouteClosed(hit.stamp, nowMs);
+    const quoted = quotedSpanRemedy(raw, spans, hit.stamp, closed);
     refusals.push({
       kind: 'positional',
-      detail:
-        (closed
+      detail: quoted
+        ? `${opener}Write \`${STAMP_TOKEN}\` there. ${quoted}`
+        : closed
           ? `${opener}Write \`${STAMP_TOKEN}\` there. The quoted route is NOT open to this one: ${closed}.`
           : `${opener}Write \`${STAMP_TOKEN}\` there. A stamp that is genuinely a reading of something ` +
             'else does not belong at that position at all: move it into the BODY and declare it there ' +
-            `with \`{{WAS:${hit.stamp}}}\`.`) + quotedSpanClause(raw, spans, hit.stamp),
+            `with \`{{WAS:${hit.stamp}}}\`.`,
     });
   }
 
@@ -1405,24 +1473,21 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
   // reads as this act's own clock. The reader is H56's, run over the body
   // `substituteTokens` will actually send — never a second idea of what a
   // position is. The header section names the two shapes left alone, and why.
-  if (quotedValueProblems === 0) {
-    for (const hit of h56StampedReadings(substituteTokens(raw, now, spans).body)) {
-      const key = `${hit.where} :: ${hit.stamp}`;
-      if (hit.stamp === now || positionsTaken.has(key)) continue;
-      positionsTaken.add(key);
-      refusals.push({
-        kind: 'positional-declared',
-        detail:
-          `${hit.where} carries the declared reading \`{{WAS:${hit.stamp}}}\`, which renders THERE as ` +
-          `the bare stamp \`${hit.stamp}\` — the quoted route writes the payload and nothing else, so ` +
-          'the declaration is spent and no reader of the board can recover it. That position belongs to ' +
-          'the writing act, so the read-side patrol reads those digits as this act\'s own clock and files ' +
-          `them against the instant the platform stored this artefact. Write \`${STAMP_TOKEN}\` there, ` +
-          'and move the quoted reading into the BODY, where a stamp is prose: the declaration is spent ' +
-          'wherever it sits, and only these two positions turn what is left of it into a claim about ' +
-          'this act\'s own clock.',
-      });
-    }
+  for (const hit of h56StampedReadings(substituteTokens(raw, now, spans).body)) {
+    if (refusedValues.has(hit.stamp) || readingIsThisMinute(hit.stamp, nowMs)) continue;
+    if (takeCredit(`${hit.where} :: ${hit.stamp}`)) continue;
+    refusals.push({
+      kind: 'positional-declared',
+      detail:
+        `${hit.where} carries the declared reading \`{{WAS:${hit.stamp}}}\`, which renders THERE as ` +
+        `the bare stamp \`${hit.stamp}\` — the quoted route writes the payload and nothing else, so ` +
+        'the declaration is spent and no reader of the board can recover it. That position belongs to ' +
+        'the writing act, so the read-side patrol reads those digits as this act\'s own clock and files ' +
+        `them against the instant the platform stored this artefact. Write \`${STAMP_TOKEN}\` there, ` +
+        'and move the quoted reading into the BODY, where a stamp is prose: the declaration is spent ' +
+        'wherever it sits, and only these two positions turn what is left of it into a claim about ' +
+        'this act\'s own clock.',
+    });
   }
 
   if (raw.includes(STAMP_TOKEN)) {
@@ -1430,19 +1495,24 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
     for (const stamp of protocolStamps(masked)) {
       if (seen.has(stamp)) continue;
       seen.add(stamp);
-      const opener =
-        `this body uses \`${STAMP_TOKEN}\` and also carries the bare stamp \`${stamp}\`. One of the ` +
-        'two clocks was read by this act and the other was typed; a reader cannot tell which. ';
       const closed = quotedRouteClosed(stamp, nowMs);
+      const quoted = quotedSpanRemedy(raw, spans, stamp, closed);
+      const opener = quoted
+        ? `this body uses \`${STAMP_TOKEN}\` and also carries the stamp \`${stamp}\`. The clock this act ` +
+          'read and a time it did not stand on one board, and a quotation does not take the second out ' +
+          'of the contract. '
+        : `this body uses \`${STAMP_TOKEN}\` and also carries the bare stamp \`${stamp}\`. One of the ` +
+          'two clocks was read by this act and the other was typed; a reader cannot tell which. ';
       refusals.push({
         kind: 'mixed',
-        detail:
-          (closed
+        detail: quoted
+          ? `${opener}${quoted}`
+          : closed
             ? `${opener}Make it \`${STAMP_TOKEN}\` if it is this act's own. The quoted route is NOT open to ` +
               `it: ${closed}.`
             : `${opener}Declare ` +
               `it with \`{{WAS:${stamp}}}\` if it is a quoted reading, or make it \`${STAMP_TOKEN}\` if it ` +
-              'is this act\'s own.') + quotedSpanClause(raw, spans, stamp),
+              'is this act\'s own.',
       });
     }
   }
