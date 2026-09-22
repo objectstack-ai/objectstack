@@ -39,12 +39,18 @@
  *
  * `check-half-states.mjs`'s H56 reads two POSITIONS as belonging to the writing
  * act: the artefact's OPENING line, and a subscript reading-time line. This
- * tool imports that same reader, so the write side refuses exactly what the
- * read-side patrol would file:
+ * tool imports that same reader and runs it over the body AS IT WILL BE
+ * POSTED, so a stamp the read-side patrol could file at either position is
+ * refused before the write instead of filed on a board hours later:
  *
  *   POSITIONAL  a bare stamp sits in one of those two positions. That is the
  *               act's own stamp typed by hand, which is the whole defect. Write
- *               `{{NOW}}`, or `{{WAS:…}}` if it really is a quoted reading.
+ *               `{{NOW}}` there; a stamp that really is a reading of something
+ *               ELSE does not belong at that position at all — declare it with
+ *               `{{WAS:…}}` in the body.
+ *   DECLARED    a `{{WAS:…}}` renders AT one of those two positions. The
+ *               declaration is spent at render time, so what lands there is bare
+ *               digits the patrol reads as this act's clock. Section below.
  *   MIXED       the body uses `{{NOW}}` AND carries a bare stamp somewhere
  *               else. The author knows the token and typed a time anyway; that
  *               typed one is the estimate. This is the case the filing card
@@ -61,6 +67,52 @@
  * alone leaves the estimated stamp fully spellable — a seat that never types
  * `{{NOW}}` is never refused — so mixed alone would not have caught the
  * recorded failure, whose comments carried no token at all.
+ *
+ * ## A declared reading is not a spelling for those two positions (#18995)
+ *
+ * The parity sentence above is falsifiable, and it was false. The positional
+ * walk read `maskQuotedStamps`'d text, where a declaration is blanked, so a
+ * `{{WAS:…}}` on the OPENING line passed the write side — and the refusal text
+ * above offered it there by name. `substituteTokens` then renders a declaration
+ * as its payload and nothing else, so the declaration is SPENT at render time
+ * and the board carries bare digits at a position the patrol reads as the
+ * writing act's own clock. Measured twice, on live artefacts written by
+ * following this file's own prescription: an opening line declaring a card's
+ * close time, filed 19 minutes out; a subscript line declaring a CI-log
+ * reading, filed 23 minutes out, six such rows in one sweep.
+ *
+ * So the positional judgement runs over the body `substituteTokens` will
+ * actually send, and a stamp standing at one of those positions that is not
+ * this act's own clock is refused whichever spelling put it there. What that
+ * buys, exactly:
+ *
+ *   BOTH SPELLINGS  a typed stamp and a declared one land as the same bytes at
+ *                   those positions, so they get the same answer. The REMEDIES
+ *                   differ: a typed stamp becomes `{{NOW}}`; a real reading
+ *                   MOVES into the body and is declared there.
+ *   H56'S HOLDOUT   a position carrying more than one stamp once rendered is
+ *                   read by nobody — the patrol holds it out rather than
+ *                   guessing, and so does this. `{{NOW}}` beside a declared
+ *                   reading on one line is that shape, and it stays accepted.
+ *   THE ACT'S OWN   a declaration whose value IS this act's clock minute renders
+ *                   the bytes `{{NOW}}` would have, so it is accepted: refusing
+ *                   it would refuse a body the patrol reads as perfectly
+ *                   stamped, and the parity claim would be false the other way.
+ *
+ * ⛔ It does not widen the BARE scan, which stays value-free: a typed stamp that
+ * happens to equal this act's minute is still typed, and the positional refusal
+ * keeps it. The two rules meet at the position and part at the spelling.
+ *
+ * ⛔ And a declaration the value rules already refused is NOT also filed here.
+ * One typo, one refusal — the rule this file states for the calendar and the
+ * direction checks, spent on the same coin: a payload that is not a stamp
+ * declared nothing, so there is no reading standing in the wrong place.
+ *
+ * ⛔ The rejected route, recorded because it is the one that reads well: render
+ * a marker H56 recognises. That is a THIRD spelling both halves must learn, on
+ * a board the marker is visible on, bought to keep a reading in the one
+ * position where no reader can tell it from the act's own clock. The position
+ * is the defect; a marker would make it survivable instead of removing it.
  *
  * ## ⛔ Never pipe this tool, then `&&` the write that follows
  *
@@ -760,6 +812,7 @@ import {
   ISSUE_BODY_LIMIT,
   PROXY_FLAG,
   claimSeatNumber,
+  h56EstimatedStamp,
   h56StampedReadings,
   markerMatches,
   protocolStamps,
@@ -1326,8 +1379,15 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
     });
   }
 
+  // Everything above judges what a DECLARATION may SAY. The count is taken
+  // here so the positional rule below declines to file a second row about a
+  // value that already has one — one typo, one refusal.
+  const quotedValueProblems = refusals.length;
+
   const positional = h56StampedReadings(masked);
+  const positionsTaken = new Set();
   for (const hit of positional) {
+    positionsTaken.add(`${hit.where} :: ${hit.stamp}`);
     const opener =
       `${hit.where} carries the bare stamp \`${hit.stamp}\`. That position belongs to the writing ` +
       'act, so a stamp typed there is the act\'s own time written from memory — the defect this tool ' +
@@ -1338,9 +1398,39 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
       detail:
         (closed
           ? `${opener}Write \`${STAMP_TOKEN}\` there. The quoted route is NOT open to this one: ${closed}.`
-          : `${opener}Write \`${STAMP_TOKEN}\` there, or \`{{WAS:${hit.stamp}}}\` if it ` +
-            'is genuinely a reading of something else.') + quotedSpanClause(raw, spans, hit.stamp),
+          : `${opener}Write \`${STAMP_TOKEN}\` there. A stamp that is genuinely a reading of something ` +
+            'else does not belong at that position at all: move it into the BODY and declare it there ' +
+            `with \`{{WAS:${hit.stamp}}}\`.`) + quotedSpanClause(raw, spans, hit.stamp),
     });
+  }
+
+  // ⛔ The other half of the same position, and the reason this judges the
+  // RENDERED body: a declaration is spent at render time, so a `{{WAS:…}}`
+  // standing at one of these two positions lands as bare digits the patrol
+  // reads as this act's own clock. The reader is H56's, run over the body
+  // `substituteTokens` will actually send — never a second idea of what a
+  // position is. A stamp EQUAL to this act's clock is the bytes `{{NOW}}`
+  // would have written, so it is not this refusal's business, and a position
+  // the render leaves carrying more than one stamp is nobody's — H56 holds
+  // that line out rather than guess, and so does this.
+  if (quotedValueProblems === 0) {
+    for (const hit of h56StampedReadings(substituteTokens(raw, now, spans).body)) {
+      const key = `${hit.where} :: ${hit.stamp}`;
+      if (hit.stamp === now || positionsTaken.has(key)) continue;
+      positionsTaken.add(key);
+      refusals.push({
+        kind: 'positional-declared',
+        detail:
+          `${hit.where} carries the declared reading \`{{WAS:${hit.stamp}}}\`, which renders THERE as ` +
+          `the bare stamp \`${hit.stamp}\` — the quoted route writes the payload and nothing else, so ` +
+          'the declaration is spent and no reader of the board can recover it. That position belongs to ' +
+          'the writing act, so the read-side patrol reads those digits as this act\'s own clock and files ' +
+          `them against the instant the platform stored this artefact. Write \`${STAMP_TOKEN}\` there, ` +
+          'and move the quoted reading into the BODY, where a stamp is prose: the declaration is spent ' +
+          'wherever it sits, and only these two positions turn what is left of it into a claim about ' +
+          'this act\'s own clock.',
+      });
+    }
   }
 
   if (raw.includes(STAMP_TOKEN)) {
@@ -2968,11 +3058,12 @@ export function selfTest() {
   t('⭐ MIXED — the token plus a bare stamp elsewhere is refused', kinds('Claim: {{NOW}}\n\nThe board was read at 2026-09-08T14:00Z.').includes('mixed'));
   t('…and the mixed refusal says a reader cannot tell the two clocks apart', stampRefusals('Claim: {{NOW}}\n\nread 2026-09-08T14:00Z').find((r) => r.kind === 'mixed').detail.includes('a reader cannot tell which'));
   t('⛔ a bare stamp in PROSE with no token is NOT refused — quoting a ruling is a reading of something else', stampRefusals('Title\n\nThe 2026-09-08T14:00Z ruling stands.').length === 0);
-  t('a DECLARED quoted stamp is accepted even in the opening position', stampRefusals('The {{WAS:2026-09-08T14:00Z}} ruling stands.').length === 0);
+  t('⭐ a DECLARED quoted stamp in the OPENING position is refused — it renders there as bare digits', kinds('The {{WAS:2026-09-08T14:00Z}} ruling stands.', NOW_MS).join() === 'positional-declared');
+  t('…and the SAME declaration one line down is accepted, because no position claims it', stampRefusals('A ruling.\n\nThe {{WAS:2026-09-08T14:00Z}} ruling stands.', NOW_MS).length === 0);
   t('…and beside a token, which is the whole point of the declaration', stampRefusals('Verdict {{NOW}} — on the board read {{WAS:2026-09-08T14:00Z}}.').length === 0);
   t('⛔ the quoted route is not a free-text escape: a non-stamp value is refused', kinds('{{WAS:yesterday}}').includes('quoted-not-a-stamp'));
   t('⛔ …nor a smuggling route: a stamp with prose glued on is refused', kinds('{{WAS:2026-09-08T14:00Z ruling}}').includes('quoted-not-a-stamp'));
-  t('surrounding whitespace inside the declaration is tolerated', stampRefusals('{{WAS: 2026-09-08T14:00Z }}').length === 0);
+  t('surrounding whitespace inside the declaration is tolerated', stampRefusals('Note.\n\nread {{WAS: 2026-09-08T14:00Z }}', NOW_MS).length === 0);
   t('a mistyped token is refused rather than posted literally', renderBody('Claim: {{now}} — dispatched.', NOW_MS).kind === 'unknown-token');
   t('…and the refusal names the survivor so the typo is findable', renderBody('Claim: {{now}}', NOW_MS).error.includes('{{now}}'));
   t('…and says why the quiet direction is the dangerous one', renderBody('Claim: {{now}}', NOW_MS).error.includes('leave the artefact unstamped'));
@@ -3022,7 +3113,7 @@ export function selfTest() {
   t('⭐ THE CONTROL: one valid `{{NOW}}` and one valid quoted stamp still render', renderBody(SCAN_CONTROL, NOW_MS).ok === true);
   t('…with the scan finding nothing to refuse', unrecognisedOpeners(SCAN_CONTROL).length === 0);
   t('…and the rendered body carrying no opener at all', renderBody(SCAN_CONTROL, NOW_MS).body.includes('{{') === false);
-  t('⛔ NO accepted form narrowed: whitespace inside the declaration still clears the scan', unrecognisedOpeners('read {{WAS: 2026-09-08T14:00Z }}').length === 0 && renderBody('read {{WAS: 2026-09-08T14:00Z }}', NOW_MS).ok === true);
+  t('⛔ NO accepted form narrowed: whitespace inside the declaration still clears the scan', unrecognisedOpeners('read {{WAS: 2026-09-08T14:00Z }}').length === 0 && renderBody('Note.\n\nread {{WAS: 2026-09-08T14:00Z }}', NOW_MS).ok === true);
   t('⛔ …and the seconds grain still clears it', unrecognisedOpeners('read {{WAS:2026-09-08T14:00:30Z}}').length === 0);
   t('⛔ …and a bare stamp in prose is no opener\'s business', unrecognisedOpeners('The 2026-09-08T14:00Z ruling stands.').length === 0);
   t('⛔ the scan opens NO escape hatch: the entity spelling is not an opener, so it is prose', unrecognisedOpeners('the token &#123;&#123;NOW&#125;&#125;').length === 0);
@@ -3283,12 +3374,12 @@ export function selfTest() {
   t('\u26d4 \u2026and NOT also filed as a direction problem, though 2027 is ahead of this clock', kinds('read {{WAS:2027-02-29T00:00Z}}', NOW_MS).join() === 'quoted-no-such-instant');
   t('hour 24 rolls into the next day and is refused as the date it is not', stampRealInstant('2026-09-10T24:00Z').rolledTo === '2026-09-11T00:00Z');
 
-  t('\u2b50 THE CONTROL: a real instant at the MINUTE grain still renders verbatim', renderBody('read {{WAS:2026-09-08T14:00Z}}', NOW_MS).body === 'read 2026-09-08T14:00Z');
-  t('\u2b50 \u2026and a real instant at the SECONDS grain, which this tool takes too \u2014 NOT narrowed', renderBody('read {{WAS:2026-09-08T14:00:30Z}}', NOW_MS).body === 'read 2026-09-08T14:00:30Z');
+  t('\u2b50 THE CONTROL: a real instant at the MINUTE grain still renders verbatim', renderBody('Note.\n\nread {{WAS:2026-09-08T14:00Z}}', NOW_MS).body === 'Note.\n\nread 2026-09-08T14:00Z');
+  t('\u2b50 \u2026and a real instant at the SECONDS grain, which this tool takes too \u2014 NOT narrowed', renderBody('Note.\n\nread {{WAS:2026-09-08T14:00:30Z}}', NOW_MS).body === 'Note.\n\nread 2026-09-08T14:00:30Z');
   t('\u2026both judged real by the round trip itself', stampRealInstant('2026-09-08T14:00Z').real === true && stampRealInstant('2026-09-08T14:00:30Z').real === true);
   t('\u2b50 a real LEAP DAY is an instant the calendar has: 2028-02-29 is not a calendar problem', stampRealInstant('2028-02-29T00:00Z').real === true && kinds('read {{WAS:2028-02-29T00:00Z}}', NOW_MS).includes('quoted-no-such-instant') === false);
   t('\u2026it is refused by the DIRECTION rule alone, because 2028 is ahead of this clock', kinds('read {{WAS:2028-02-29T00:00Z}}', NOW_MS).join() === 'quoted-in-the-future');
-  t('\u2026and a leap day already PAST clears every rule', stampRefusals('read {{WAS:2024-02-29T00:00Z}}', NOW_MS).length === 0);
+  t('\u2026and a leap day already PAST clears every rule', stampRefusals('Note.\n\nread {{WAS:2024-02-29T00:00Z}}', NOW_MS).length === 0);
   t('\u2b50 the act\'s OWN minute is still accepted \u2014 the boundary rule is untouched', stampRefusals('read {{WAS:2026-09-10T06:37Z}}', NOW_MS).length === 0);
   t('\u26d4 whitespace inside the declaration is no escape: the value is trimmed before it is judged', kinds('read {{WAS: 2026-13-45T99:99Z }}', NOW_MS).includes('quoted-no-such-instant'));
   t('\u26d4 a payload that fails the SHAPE is not also filed as a calendar problem', kinds('{{WAS:2026-13-45T99:99Z ruling}}', NOW_MS).join() === 'quoted-not-a-stamp');
