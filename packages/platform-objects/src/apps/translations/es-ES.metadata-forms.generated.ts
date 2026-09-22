@@ -109,8 +109,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Valor predeterminado para registros nuevos (literal JSON)"
       },
       "fields.placeholder": {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+        label: "Marcador de posición",
+        helpText: "Texto de ayuda que se muestra dentro del campo vacío; desaparece al introducir un valor"
       },
       "fields.maxLength": {
         label: "Longitud máxima",
@@ -121,12 +121,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Mínimo de caracteres"
       },
       "fields.valueDomain": {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+        label: "Dominio de valores",
+        helpText: "Estándar al que debe pertenecer el valor escrito; se rechaza una escritura con un valor que no pertenezca"
       },
       "fields.rows": {
-        label: "Rows",
-        helpText: "Inline editor height (text rows)"
+        label: "Filas",
+        helpText: "Altura del editor en línea (filas de texto)"
       },
       "fields.min": {
         label: "Mínimo",
@@ -165,44 +165,44 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Nombre del objeto de destino. En un campo tree es opcional y, si se indica, debe ser este mismo objeto (un árbol es una jerarquía dentro de su propio objeto — para enlazar con otro objeto, usa un lookup)"
       },
       "fields.lookupFilters": {
-        label: "Lookup Filters",
-        helpText: "Filter rules applied to the picker ({field, operator, value})"
+        label: "Filtros de lookup",
+        helpText: "Reglas de filtro aplicadas al selector ({field, operator, value})"
       },
       "fields.deleteBehavior": {
-        label: "Delete Behavior",
-        helpText: "What happens when the referenced record is deleted"
+        label: "Comportamiento al eliminar",
+        helpText: "Qué ocurre cuando se elimina el registro referenciado"
       },
       "fields.multiple": {
         label: "Selección múltiple",
         helpText: "Permitir seleccionar varios registros"
       },
       "fields.expression": {
-        label: "Expression",
-        helpText: "CEL formula expression"
+        label: "Expresión",
+        helpText: "Expresión de fórmula CEL"
       },
       "fields.returnType": {
         label: "Tipo de retorno",
         helpText: "Tipo de resultado para fórmulas"
       },
       "fields.summaryOperations": {
-        label: "Summary Operations",
-        helpText: "Roll-up: which child object, which field, which aggregation"
+        label: "Operaciones de resumen",
+        helpText: "Roll-up: qué objeto hijo, qué campo y qué agregación"
       },
       "fields.summaryOperations.object": {
-        label: "Object",
-        helpText: "Source child object name"
+        label: "Objeto",
+        helpText: "Nombre del objeto hijo de origen"
       },
       "fields.summaryOperations.field": {
-        label: "Field",
-        helpText: "Field on the child object to aggregate (ignored for count)"
+        label: "Campo",
+        helpText: "Campo del objeto hijo que se agrega (se ignora para count)"
       },
       "fields.summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "Función",
+        helpText: "Función de agregación"
       },
       "fields.autonumberFormat": {
-        label: "Autonumber Format",
-        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
+        label: "Formato de autonumeración",
+        helpText: "p. ej. \"INV-{0000}\"; admite tokens de fecha {YYYY}/{MM}/{DD} e interpolación de {field_name}"
       },
       "fields.language": {
         label: "Idioma",
@@ -213,113 +213,113 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Resume este campo en la cronología de actividad del registro"
       },
       "fields.visibleWhen": {
-        label: "Visible When",
-        helpText: "CEL predicate — field is shown only when TRUE"
+        label: "Condición de visibilidad",
+        helpText: "Predicado CEL: el campo solo se muestra cuando es TRUE"
       },
       "fields.readonlyWhen": {
-        label: "Readonly When",
-        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
+        label: "Condición de solo lectura",
+        helpText: "Predicado CEL: el campo es de solo lectura cuando es TRUE (aplicado en el servidor)"
       },
       "fields.requiredWhen": {
-        label: "Required When",
-        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
+        label: "Condición de obligatoriedad",
+        helpText: "Predicado CEL: el campo es obligatorio cuando es TRUE (aplicado en el servidor)"
       },
       enable: {
-        label: "Enable",
-        helpText: "Enable/disable system features"
+        label: "Habilitar",
+        helpText: "Activa/desactiva funciones del sistema"
       },
       "enable.trackHistory": {
-        label: "Track History"
+        label: "Seguimiento de historial"
       },
       "enable.searchable": {
-        label: "Searchable"
+        label: "Buscable"
       },
       "enable.apiEnabled": {
-        label: "Api Enabled"
+        label: "API habilitada"
       },
       "enable.files": {
-        label: "Files"
+        label: "Archivos"
       },
       "enable.feeds": {
-        label: "Feeds"
+        label: "Publicaciones"
       },
       "enable.activities": {
-        label: "Activities"
+        label: "Actividades"
       },
       "enable.clone": {
-        label: "Clone"
+        label: "Clonación"
       },
       validations: {
-        label: "Validations",
-        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+        label: "Validaciones",
+        helpText: "Reglas de validación a nivel de objeto — un array de objetos de regla, p. ej. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. Las tablas de transición de máquinas de estado también se declaran aquí (ADR-0020)"
       },
       datasource: {
         label: "Fuente de datos",
         helpText: "ID de fuente de datos de destino (valor predeterminado: \"default\")"
       },
       lifecycle: {
-        label: "Lifecycle",
-        helpText: "Data lifecycle contract (ADR-0057): how long rows live and how space is reclaimed. Leave empty for permanent record semantics. Non-record classes require at least one bounding policy (retention, TTL, or rotation)."
+        label: "Ciclo de vida de los datos",
+        helpText: "Contrato de ciclo de vida de los datos (ADR-0057): cuánto viven las filas y cómo se recupera el espacio. Déjalo en blanco para una semántica record permanente. Las clases distintas de record requieren al menos una política acotante (retención, TTL o rotación)."
       },
       "lifecycle.class": {
-        label: "Class",
-        helpText: "Persistence contract for the rows of this object"
+        label: "Clase de ciclo de vida",
+        helpText: "Contrato de persistencia de las filas de este objeto"
       },
       "lifecycle.retention": {
-        label: "Retention",
-        helpText: "Age-based retention window"
+        label: "Retención",
+        helpText: "Ventana de retención basada en la antigüedad de las filas"
       },
       "lifecycle.retention.maxAge": {
-        label: "Max Age",
-        helpText: "Rows older than this (by created_at) are reaped. Duration literal: h/d/w/y, e.g. \"30d\""
+        label: "Antigüedad máxima",
+        helpText: "Las filas más antiguas que este valor (según created_at) se eliminan. Literal de duración: h/d/w/y, p. ej. \"30d\""
       },
       "lifecycle.ttl": {
-        label: "Ttl",
-        helpText: "Per-row TTL expiry"
+        label: "Caducidad por TTL",
+        helpText: "Caducidad por TTL de cada fila"
       },
       "lifecycle.ttl.field": {
-        label: "Field",
-        helpText: "Timestamp field the TTL is measured from (e.g. expires_at)"
+        label: "Campo de marca temporal",
+        helpText: "Campo de marca temporal desde el que se mide el TTL (p. ej. expires_at)"
       },
       "lifecycle.ttl.expireAfter": {
-        label: "Expire After",
-        helpText: "Rows expire this long after the field, e.g. \"1d\""
+        label: "Plazo de caducidad",
+        helpText: "Las filas caducan este tiempo después del campo, p. ej. \"1d\""
       },
       "lifecycle.storage": {
-        label: "Storage",
-        helpText: "Physical rotation for high-frequency telemetry (SQLite: O(1) shard DROP)"
+        label: "Almacenamiento",
+        helpText: "Rotación física para telemetría de alta frecuencia (SQLite: DROP de fragmento en O(1))"
       },
       "lifecycle.storage.strategy": {
-        label: "Strategy",
-        helpText: "Storage strategy"
+        label: "Estrategia",
+        helpText: "Estrategia de almacenamiento"
       },
       "lifecycle.storage.shards": {
-        label: "Shards",
-        helpText: "Shards retained; total window = shards × unit"
+        label: "Número de fragmentos",
+        helpText: "Número de fragmentos que se conservan; ventana total = fragmentos × unidad"
       },
       "lifecycle.storage.unit": {
-        label: "Unit",
-        helpText: "Time width of one shard"
+        label: "Unidad de fragmento",
+        helpText: "Amplitud temporal de un fragmento"
       },
       "lifecycle.archive": {
-        label: "Archive",
-        helpText: "Cold-store hand-off (audit class). Rows are never hot-deleted before the archive copy succeeded."
+        label: "Archivado",
+        helpText: "Traspaso al almacenamiento en frío (clase audit). Las filas nunca se eliminan en caliente antes de que la copia de archivado haya finalizado correctamente."
       },
       "lifecycle.archive.after": {
-        label: "After",
-        helpText: "Archive rows older than this — must equal retention.maxAge"
+        label: "Antigüedad de archivado",
+        helpText: "Archiva las filas más antiguas que este valor — debe coincidir con retention.maxAge"
       },
       "lifecycle.archive.to": {
-        label: "To",
-        helpText: "Target datasource name for cold storage"
+        label: "Fuente de datos de archivado",
+        helpText: "Nombre de la fuente de datos de destino para el almacenamiento en frío"
       },
       "lifecycle.archive.keep": {
-        label: "Keep",
-        helpText: "How long the archive keeps rows (empty = forever), e.g. \"7y\""
+        label: "Retención en archivado",
+        helpText: "Cuánto tiempo conserva las filas el archivado (en blanco = para siempre), p. ej. \"7y\""
       },
       "lifecycle.reclaim": {
-        label: "Reclaim",
-        helpText: "Reclaim driver space after sweeps (default on for non-record classes)"
+        label: "Recuperación de espacio",
+        helpText: "Recupera el espacio del driver después de los barridos (activado de forma predeterminada en las clases distintas de record)"
       }
     }
   },
@@ -381,8 +381,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Valor predeterminado para registros nuevos"
       },
       placeholder: {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
+        label: "Marcador de posición",
+        helpText: "Texto de ayuda que se muestra dentro del campo vacío (desaparece al introducir un valor); usa inlineHelpText para ayuda siempre visible"
       },
       minLength: {
         label: "Longitud mínima",
@@ -393,12 +393,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Longitud máxima de caracteres"
       },
       valueDomain: {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
+        label: "Dominio de valores",
+        helpText: "Estándar al que debe pertenecer el valor escrito: iana_time_zone, iso_4217_currency o iso_3166_alpha2; se rechaza una escritura con un valor que no pertenezca"
       },
       rows: {
-        label: "Rows",
-        helpText: "Inline editor height in text rows"
+        label: "Filas",
+        helpText: "Altura del editor en línea, en filas de texto"
       },
       min: {
         label: "Mínimo",
@@ -447,8 +447,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Qué ocurre cuando se elimina el registro referenciado"
       },
       relatedListFilter: {
-        label: "Related List Filter",
-        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
+        label: "Filtro de lista relacionada",
+        helpText: "Filtro predeterminado para la lista relacionada de esta relación en la página de detalle del registro padre: combinado con AND con la coincidencia del registro padre, y el distintivo de la pestaña cuenta el mismo conjunto"
       },
       expression: {
         label: "Expresión",
@@ -459,24 +459,24 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Configuración de resumen roll-up (para relaciones padre-hijo)"
       },
       "summaryOperations.object": {
-        label: "Object",
-        helpText: "Child object to aggregate"
+        label: "Objeto",
+        helpText: "Objeto hijo que se agrega"
       },
       "summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "Función",
+        helpText: "Función de agregación"
       },
       "summaryOperations.field": {
-        label: "Field",
-        helpText: "Child field to aggregate (ignored for count)"
+        label: "Campo",
+        helpText: "Campo del objeto hijo que se agrega (se ignora para count)"
       },
       "summaryOperations.relationshipField": {
-        label: "Relationship Field",
-        helpText: "Child FK back to this parent (auto-detected when omitted)"
+        label: "Campo de relación",
+        helpText: "Clave foránea del hijo que apunta de vuelta a este padre (se detecta automáticamente si se omite)"
       },
       "summaryOperations.filter": {
-        label: "Filter",
-        helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
+        label: "Filtro",
+        helpText: "Solo se agregan las filas hijas que coinciden con este predicado (p. ej. status == received)"
       },
       externalId: {
         label: "ID externo",
@@ -567,8 +567,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Tiempo de espera por invocación (ms)"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "Memoria (MB)",
+        helpText: "Límite de memoria por invocación (MB, máx. 256)"
       },
       handler: {
         label: "Manejador",
@@ -582,8 +582,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Al error"
       },
       timeoutMs: {
-        label: "Timeout Ms",
-        helpText: "Abort the hook after N milliseconds"
+        label: "Tiempo de espera (ms)",
+        helpText: "Abortar el hook después de N milisegundos"
       },
       runAs: {
         label: "Ejecutar como",
@@ -594,26 +594,26 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Fórmula opcional — omite el hook cuando evalúa a false"
       },
       retryPolicy: {
-        label: "Retry Policy",
-        helpText: "Retry on failure — most useful for async hooks"
+        label: "Política de reintentos",
+        helpText: "Reintentar al fallar — especialmente útil para hooks asíncronos"
       },
       "retryPolicy.maxRetries": {
-        label: "Max Retries",
-        helpText: "Maximum retry attempts"
+        label: "Reintentos máximos",
+        helpText: "Número máximo de reintentos"
       },
       "retryPolicy.backoffMs": {
-        label: "Backoff Ms",
-        helpText: "Delay between retries (ms)"
+        label: "Retroceso (ms)",
+        helpText: "Retraso entre reintentos (ms)"
       }
     }
   },
   seed: {
-    label: "Seed Data",
-    description: "Fixture / initialization data applied on publish"
+    label: "Datos semilla",
+    description: "Datos predefinidos / de inicialización aplicados al publicar"
   },
   mapping: {
-    label: "Import Mapping",
-    description: "Reusable import/export field mapping (rename + transforms), referenced by name at import"
+    label: "Mapeo de importación",
+    description: "Mapeo de campos de importación/exportación reutilizable (renombrado + transformaciones), referenciado por nombre al importar"
   },
   view: {
     label: "Vista",
@@ -737,7 +737,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userFilters: {
         label: "Filtros de usuario",
-        helpText: "Barra de filtros rápidos: estilo de elemento (desplegable / pestañas / interruptor) + campos expuestos o preajustes de pestañas"
+        helpText: "Barra de filtros rápidos: estilo de elemento (dropdown / tabs / toggle) + campos expuestos o preajustes de pestañas"
       },
       tabs: {
         label: "Pestañas",
@@ -781,8 +781,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "Regiones de página y componentes colocados en ellas."
       },
       interface: {
-        label: "Interface (list pages)",
-        description: "Interface mode (Airtable parity): the page defines its own data surface directly — columns, filters, visualizations and toolbar — no inheriting from a separate view."
+        label: "Interface (páginas de lista)",
+        description: "Modo Interface (paridad con Airtable): la página define directamente su propia superficie de datos — columnas, filtros, visualizaciones y barra de herramientas — sin heredar de una vista aparte."
       },
       advanced: {
         label: "Avanzado",
@@ -852,24 +852,24 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Componentes"
       },
       interfaceConfig: {
-        label: "Interface Config",
-        helpText: "The page IS the view: source picks the object, columns/filterBy are defined directly here; appearance.allowedVisualizations whitelists renderers (one entry = locked); userActions toggles the toolbar."
+        label: "Configuración de Interface",
+        helpText: "La página ES la vista: source elige el objeto, columns/filterBy se definen directamente aquí; appearance.allowedVisualizations restringe los renderizadores (una sola entrada = bloqueado); userActions conmuta la barra de herramientas."
       },
       "interfaceConfig.source": {
-        label: "Source",
-        helpText: "Object this page reads from"
+        label: "Origen de datos",
+        helpText: "Objeto del que lee esta página"
       },
       "interfaceConfig.columns": {
-        label: "Columns",
-        helpText: "Columns to show — defined directly on the page (blank = all object fields)"
+        label: "Columnas",
+        helpText: "Columnas que mostrar — definidas directamente en la página (en blanco = todos los campos del objeto)"
       },
       "interfaceConfig.filterBy": {
-        label: "Filter By",
-        helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+        label: "Filtrar por",
+        helpText: "Filtro base siempre activo para la página — el mismo constructor visual que la barra de herramientas de la lista."
       },
       "interfaceConfig.sort": {
-        label: "Sort",
-        helpText: "Default sort order for the page, defined directly on the page."
+        label: "Orden",
+        helpText: "Orden predeterminado de la página, definido directamente en la página."
       },
       "interfaceConfig.sort.field": {
         label: "Campo"
@@ -878,40 +878,40 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Dirección"
       },
       "interfaceConfig.levels": {
-        label: "Levels",
-        helpText: "Hierarchy levels to display (tree-like sources)"
+        label: "Niveles",
+        helpText: "Niveles de jerarquía que mostrar (orígenes de tipo árbol)"
       },
       "interfaceConfig.appearance": {
-        label: "Appearance",
-        helpText: "Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility"
+        label: "Apariencia",
+        helpText: "Visualizaciones permitidas (Grid / Kanban / Calendar / …) y visibilidad de la descripción"
       },
       "interfaceConfig.userFilters": {
-        label: "User Filters",
-        helpText: "End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field). None removes the config."
+        label: "Filtros de usuario",
+        helpText: "Barra de filtros para el usuario final: None (sin barra) / Tabs (preajustes con nombre) / Dropdown (por campo). None elimina la configuración."
       },
       "interfaceConfig.userActions": {
-        label: "User Actions",
-        helpText: "Toolbar toggles (search, sort, filter, row height)"
+        label: "Acciones de usuario",
+        helpText: "Conmutadores de la barra de herramientas (buscar, ordenar, filtrar, altura de fila)"
       },
       "interfaceConfig.addRecord": {
-        label: "Add Record",
-        helpText: "Add-record entry point"
+        label: "Agregar registro",
+        helpText: "Punto de entrada para agregar registros"
       },
       "interfaceConfig.buttons": {
-        label: "Buttons",
-        helpText: "Toolbar buttons — pick from this object's actions"
+        label: "Botones",
+        helpText: "Botones de la barra de herramientas — elige entre las acciones de este objeto"
       },
       "interfaceConfig.recordAction": {
-        label: "Record Action",
-        helpText: "How clicking a record opens its detail"
+        label: "Acción de registro",
+        helpText: "Cómo se abre el detalle al hacer clic en un registro"
       },
       "interfaceConfig.showRecordCount": {
-        label: "Show Record Count",
-        helpText: "Show the record count bar"
+        label: "Mostrar recuento de registros",
+        helpText: "Mostrar la barra de recuento de registros"
       },
       "interfaceConfig.allowPrinting": {
-        label: "Allow Printing",
-        helpText: "Allow users to print this page"
+        label: "Permitir impresión",
+        helpText: "Permitir que los usuarios impriman esta página"
       },
       isDefault: {
         label: "Predeterminado",
@@ -1239,24 +1239,24 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Una expresión L1 o un body JS L2 en sandbox"
       },
       "body.language": {
-        label: "Language",
-        helpText: "expression = pure formula; js = sandboxed JavaScript"
+        label: "Idioma",
+        helpText: "expression = fórmula pura; js = JavaScript en sandbox"
       },
       "body.source": {
-        label: "Source",
-        helpText: "Function body source — no top-level imports"
+        label: "Código fuente",
+        helpText: "Código fuente del body de la función — sin imports de nivel superior"
       },
       "body.capabilities": {
-        label: "Capabilities",
-        helpText: "Allowed ctx APIs (api.read, api.write, crypto.uuid, log, …)"
+        label: "Capacidades",
+        helpText: "API ctx permitidas (api.read, api.write, crypto.uuid, log, …)"
       },
       "body.timeoutMs": {
-        label: "Timeout Ms",
-        helpText: "Per-invocation timeout (ms)"
+        label: "Tiempo de espera (ms)",
+        helpText: "Tiempo de espera por invocación (ms)"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "Memoria (MB)",
+        helpText: "Límite de memoria por invocación (MB, máx. 256)"
       },
       params: {
         label: "Parámetros",
@@ -1345,8 +1345,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Expresión CEL: desactivar cuando la condición sea true"
       },
       ai: {
-        label: "Ai",
-        helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
+        label: "Exposición a IA",
+        helpText: "Exposición a IA (voluntaria): establece ai.exposed=true y escribe ai.description (≥40 caracteres) para que los agentes puedan llamarla."
       },
       recordIdParam: {
         label: "Parámetro de ID de registro",
@@ -1370,8 +1370,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "Identidad y tipo de informe."
       },
       dataset_binding: {
-        label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        label: "Vinculación del conjunto de datos",
+        description: "El conjunto de datos de la capa semántica que renderiza este informe. Las medidas y las filas provienen, respectivamente, de las medidas y las dimensiones del conjunto de datos."
       },
       joined_blocks: {
         label: "Bloques unidos",
@@ -1398,16 +1398,16 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Tipo de informe: tabular/summary/matrix/joined"
       },
       dataset: {
-        label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        label: "Conjunto de datos",
+        helpText: "Conjunto de datos a vincular (las medidas/dimensiones provienen de su capa semántica)"
       },
       values: {
-        label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        label: "Medidas",
+        helpText: "Nombres de medida (del conjunto de datos) que se mostrarán"
       },
       rows: {
-        label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        label: "Filas",
+        helpText: "Nombres de dimensión (del conjunto de datos) por los que agrupar las filas"
       },
       columns: {
         label: "Columnas",
@@ -1424,8 +1424,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Dirección"
       },
       drilldown: {
-        label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        label: "Desglose",
+        helpText: "Haz clic en una fila/celda agregada para abrir los registros subyacentes"
       },
       blocks: {
         label: "Bloques",
@@ -1465,8 +1465,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Orden"
       },
       runtimeFilter: {
-        label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        label: "Filtro en tiempo de ejecución",
+        helpText: "Filtro de ámbito en tiempo de renderizado, combinado con AND en el momento de la consulta"
       },
       chart: {
         label: "Gráfico",
@@ -1475,54 +1475,54 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   dataset: {
-    label: "Dataset",
-    description: "Analytics semantic layer — dimensions & measures",
+    label: "Conjunto de datos",
+    description: "Capa semántica de analítica — dimensiones y medidas",
     sections: {
       basics: {
-        label: "Basics",
-        description: "Dataset identity."
+        label: "Aspectos básicos",
+        description: "Identidad del conjunto de datos."
       },
       source: {
-        label: "Source",
-        description: "The base object, the relationships to join, and the dataset’s intrinsic scope. Joins are derived from the object graph — pick relationship (lookup / master_detail) names, never write an ON clause."
+        label: "Origen de datos",
+        description: "El objeto base, las relaciones a unir y el ámbito intrínseco del conjunto de datos. Las uniones se derivan del grafo de objetos: elige nombres de relación (lookup / master_detail), nunca escribas una cláusula ON."
       },
       dimensions: {
-        label: "Dimensions",
-        description: "Groupable axes. Use a base field, or `relationship.field` (e.g. account.region) for a relationship included above."
+        label: "Dimensiones",
+        description: "Ejes agrupables. Usa un campo del objeto base o, para una relación incluida arriba, `relationship.field` (p. ej. account.region)."
       },
       measures: {
-        label: "Measures",
-        description: "Aggregatable values defined once and referenced by name. A measure is sum/avg/count/… of a field; a derived measure combines other measures (ratio/sum/difference/product). Measure-scoped filters and derived ops are edited per-row in the dataset designer."
+        label: "Medidas",
+        description: "Valores agregables definidos una vez y referenciados por nombre. Una medida es sum/avg/count/… de un campo; una medida derivada combina otras medidas (ratio/sum/difference/product). Los filtros por medida y las operaciones derivadas se editan por fila en el diseñador de conjuntos de datos."
       }
     },
     fields: {
       name: {
-        label: "Name",
-        helpText: "snake_case unique identifier"
+        label: "Nombre",
+        helpText: "Identificador único snake_case"
       },
       label: {
-        label: "Label",
-        helpText: "Display name"
+        label: "Etiqueta",
+        helpText: "Nombre mostrado"
       },
       description: {
-        label: "Description",
-        helpText: "What this dataset measures"
+        label: "Descripción",
+        helpText: "Qué mide este conjunto de datos"
       },
       object: {
-        label: "Object",
-        helpText: "Base object — the FROM"
+        label: "Objeto",
+        helpText: "Objeto base: el FROM"
       },
       include: {
-        label: "Include",
-        helpText: "Relationship (lookup / master_detail) field names to join — enables `relationship.field` dimensions/measures (e.g. include \"account\" → group by account.region)"
+        label: "Relaciones a incluir",
+        helpText: "Nombres de campo de relación (lookup / master_detail) a unir — habilita dimensiones/medidas `relationship.field` (p. ej. incluir \"account\" → agrupar por account.region)"
       },
       filter: {
-        label: "Filter",
-        helpText: "Intrinsic scope filter (e.g. exclude soft-deleted records), ANDed into every query"
+        label: "Filtro",
+        helpText: "Filtro de ámbito intrínseco (p. ej. excluir registros eliminados de forma lógica), combinado con AND en cada consulta"
       },
       dimensions: {
-        label: "Dimensions",
-        helpText: "Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity"
+        label: "Dimensiones",
+        helpText: "Cada dimensión: nombre (referenciado por las presentaciones), campo, tipo y, para fechas, una granularidad de agrupación predeterminada"
       },
       "dimensions.name": {
         label: "Nombre"
@@ -1540,7 +1540,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Granularidad de fecha"
       },
       measures: {
-        label: "Measures",
+        label: "Medidas",
         helpText: "Cada medida: nombre, agregación, campo (opcional para count) y formato de visualización/moneda"
       },
       "measures.name": {
@@ -1708,8 +1708,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "Catálogo externo"
   },
   api: {
-    label: "API Endpoint",
-    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+    label: "Endpoint API",
+    description: "Endpoint HTTP declarativo — una URL estable y una capa de política sobre un pipeline existente (ADR-0121)"
   },
   translation: {
     label: "Traducción"
@@ -1774,7 +1774,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       variables: {
         label: "Variables de plantilla",
-        helpText: "[{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
+        helpText: "Ejemplo: [{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
       },
       fromOverride: {
         label: "Sobrescritura de remitente",
@@ -1795,12 +1795,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   doc: {
-    label: "Documentation",
-    description: "Package documentation — flat Markdown items (ADR-0046)"
+    label: "Documentación",
+    description: "Documentación del paquete — elementos Markdown planos (ADR-0046)"
   },
   book: {
-    label: "Documentation Book",
-    description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
+    label: "Libro de documentación",
+    description: "Columna vertebral de navegación de la documentación — grupos ordenados con pertenencia derivada (ADR-0046 §6)"
   },
   permission: {
     label: "Conjunto de permisos",
@@ -1875,8 +1875,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   capability: {
-    label: "Capability",
-    description: "Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)"
+    label: "Capacidad",
+    description: "Capacidad de autorización declarada por el paquete — el lado de la DEFINICIÓN de ADR-0066 D1 (las concesiones residen en los conjuntos de permisos; los requisitos, en los recursos)"
   },
   agent: {
     label: "Agente de IA",

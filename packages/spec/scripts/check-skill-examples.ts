@@ -297,7 +297,12 @@ import os from 'os';
 import path from 'path';
 import ts from 'typescript';
 
-import { inspectDistFreshness } from './lib/dist-freshness';
+import {
+  EXIT_PREREQUISITE_NOT_MET,
+  inspectDistFreshness,
+  prerequisiteNotMetText,
+  type DistFreshness,
+} from './lib/dist-freshness';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -1469,6 +1474,30 @@ function fail(message: string): never {
 function refuse(message: string): never {
   console.error(`\n⛔ REFUSE — ${message}\n`);
   process.exit(1);
+}
+
+/**
+ * PREREQUISITE NOT MET — "this gate never got to look", as distinct from BOTH
+ * of the two above: `fail()` looked and found something, `refuse()` produced no
+ * result because the gate's own invariant broke. This one produced no result
+ * because the WORKSPACE is not built (#19227).
+ *
+ * A third token for the same reason the file already carries two — the states
+ * need spellings a reader can tell apart at a glance — but the half that
+ * matters here is the EXIT CODE, which is what a machine reads:
+ * `scripts/pm/dispatch-gates.mjs --ran` derives its NOT-MEASURED class from the
+ * recorded code and counts every other non-kill code as a family that RAN. So
+ * an unmet build prerequisite spelled `exit 1` is reconciled as coverage the
+ * round does not have. ⛔ `fail()` and `refuse()` keep exit 1 on purpose: both
+ * are real verdicts, and this change must not move either.
+ *
+ * ⚠️ It exits rather than throwing, like its two siblings, so the `exit`
+ * listener installed by `withBuildDirCleanup` is what removes the build dirs —
+ * `finally` does not run through `process.exit()`.
+ */
+function prerequisiteNotMet(text: string): never {
+  console.error(`${text}\n`);
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
@@ -3241,18 +3270,16 @@ function main() {
       // dist-independent and worth reporting even when a build is stale. So the
       // guard sits at the boundary rather than at the top: no verdict below it is
       // computed for a stale surface, and no honest finding above it is suppressed.
-      let staleMessage: string | null = null;
+      let stale: Extract<DistFreshness, { fresh: false }> | null = null;
       for (const pkgDir of surface.selfPackages) {
         const freshness = inspectDistFreshness(pkgDir, 'check', 'pnpm --filter @objectstack/spec check:skill-examples');
         if (!freshness.fresh) {
-          staleMessage = freshness.message;
+          stale = freshness;
           break;
         }
       }
-      if (staleMessage) {
-        console.error(`\n[${surface.name}]`);
-        console.error(staleMessage);
-        process.exit(1);
+      if (stale) {
+        prerequisiteNotMet(prerequisiteNotMetText(`check:skill-examples [${surface.name}]`, stale));
       }
 
       const { paths, missing } = surfacePaths(surface.selfPackages);
@@ -3263,11 +3290,18 @@ function main() {
       // mtime rule alone would read as fresh.
       const unbuiltSelfPackages = surface.selfPackages.filter((dir) => !fs.existsSync(paths[pkgName(dir)]?.[0] ?? ''));
       if (unbuiltSelfPackages.length > 0) {
-        fail(
-          `[${surface.name}] not built — no declarations to check examples against:\n\n` +
-            missing.map((m) => `  - ${m} (missing)`).join('\n') +
-            `\n\n  Build first (CI does this in the "Build workspace packages" step):\n\n` +
-            unbuiltSelfPackages.map((d) => `    pnpm --filter ${pkgName(d)} build`).join('\n'),
+        // Same event as the staleness guard above, reached the other way, so it
+        // answers with the same code (#19227) — ⛔ not `fail()`, whose exit 1
+        // said "these examples are wrong" about examples nothing ever compiled.
+        prerequisiteNotMet(
+          prerequisiteNotMetText(`check:skill-examples [${surface.name}]`, {
+            headline: 'a self-package on this surface has no declarations to check examples against',
+            detail:
+              `\n` +
+              missing.map((m) => `  - ${m} (missing)`).join('\n') +
+              `\n\n  Build first (CI does this in the "Build workspace packages" step):\n\n` +
+              unbuiltSelfPackages.map((d) => `    pnpm --filter ${pkgName(d)} build`).join('\n'),
+          }),
         );
       }
 

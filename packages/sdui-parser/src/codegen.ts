@@ -101,9 +101,9 @@ function armTsType(arm: ManifestInputType, input: ManifestInput): string {
     case 'boolean':
       return 'boolean';
     case 'array':
-      return 'unknown[]';
+      return `${memberTsType(input)}[]`;
     case 'object':
-      return 'Record<string, unknown>';
+      return `Record<string, ${memberTsType(input)}>`;
     case 'enum': {
       const vals = (input.enum ?? []).map((e) => (typeof e === 'object' ? e.value : e));
       return vals.length ? vals.map((v) => JSON.stringify(v)).join(' | ') : 'string';
@@ -111,6 +111,29 @@ function armTsType(arm: ManifestInputType, input: ManifestInput): string {
     default:
       return 'string';
   }
+}
+
+/**
+ * The TypeScript type of a container's MEMBERS, from `ManifestInput.of`
+ * (objectui#8067).
+ *
+ * `unknown` when nothing is declared, which is what every input published
+ * before `of` existed says — so an undeclared array still emits `unknown[]` and
+ * an undeclared object still emits `Record<string, unknown>`, byte for byte.
+ * A declared member kind narrows it: `of: 'string'` on `page:header.actions`
+ * turns `unknown[]` into `string[]`, and the JSX surface finally types the
+ * action IDs the contract has always required.
+ *
+ * `'slot'` is dropped for the same reason {@link valueArms} drops it one level
+ * up: it names a child position, not a value, so it contributes no member type.
+ * If that leaves nothing, the result is `unknown` — a declaration that types no
+ * member must not silently type them all as strings.
+ */
+function memberTsType(input: ManifestInput): string {
+  const arms = inputTypeArms(input.of).filter((arm) => arm !== 'slot');
+  if (arms.length === 0) return 'unknown';
+  const emitted = [...new Set(arms.map((arm) => armTsType(arm, { ...input, of: undefined })))];
+  return emitted.length === 1 ? emitted[0] : `(${emitted.join(' | ')})`;
 }
 
 /**

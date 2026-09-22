@@ -15,20 +15,49 @@
  *     build error — flatness is the contract that keeps cross-references
  *     stable (a link is `[text](./<name>.md)`; resolution is a basename
  *     lookup with zero path arithmetic).
- *   - **Absence**: a `src/<pkg>/docs/` directory one level down is NEVER
- *     collected (ADR-0046 anchors at `src/docs`), and under an ADR-0130
- *     multi-package layout that is where a moved docs directory lands — so it
- *     is REPORTED rather than passed over, because a build that keeps none of
- *     the author's docs and says nothing is the defect (#18170).
- *   - **Lint**: namespace-prefix naming (doc uniqueness is logical — the
- *     metadata registry key carries no package coordinate, so a bare-name
- *     collision silently overwrites across packages), the v1 syntax bans
- *     (no MDX, no images), and same-package link resolution.
+ *   - **Per-package collection** (ADR-0130 D4): an artifact that declares
+ *     `packages[]` also gets each package's OWN `docs/` directory, read out of
+ *     whatever directory that package answers to under `src/` and attached to
+ *     that package's body — ⛔ never to the top level. The directory is found
+ *     from the packages the artifact REGISTERS, at no fixed depth, so
+ *     `src/<pkg>/docs/` and the ADR-0130 D4 reference fixture's
+ *     `src/packages/<pkg>/docs/` are one case and not two (#18965).
+ *   - **Absence**: Markdown under a `<dir>/docs/` that no registered package
+ *     claims is still not collected — so it is REPORTED rather than passed
+ *     over, because a build that keeps none of the author's docs and says
+ *     nothing is the defect (#18170).
+ *   - **Lint**: namespace-prefix naming (`docs/namespace-prefix`,
+ *     `docs/namespace-required`), duplicate names (`docs/duplicate-name`), the
+ *     v1 syntax bans (no MDX, no images), and same-package link resolution.
  *
  * Cross-package links (a target whose prefix is not this package's
  * namespace) are deliberately not checked here: they resolve against
  * dependency docs at publish time, and render-side they degrade to a
  * "doc not found" notice rather than coupling into dependency resolution.
+ *
+ * ⚠️ What the naming lints rest on — and ⛔ what they no longer rest on.
+ * Doc uniqueness is logical rather than physical (ADR-0046 §3.2), but ⛔ NOT
+ * because "a bare-name collision silently overwrites across packages": that
+ * sentence is ADR-0048 §1.1 *context*, overturned by the same ADR's §3.3/§3.4
+ * (the write is already composite-keyed — §1.2, "the silence is in the read,
+ * not the write" — and "the cross-package throw is retired"), and it is
+ * declined by name at {@link lintDocNamesAcrossOwners}. ⛔ The two lints that
+ * one sentence used to cover are not interchangeable:
+ *
+ *   - `docs/duplicate-name` rests on **authoring hygiene**, the class §3.4
+ *     keeps. ⛔ The reading is deliberately NOT restated here — it lives at
+ *     {@link lintDocNamesAcrossOwners}, and a second copy of a justification is
+ *     exactly how this header went stale.
+ *   - `docs/namespace-prefix` / `docs/namespace-required` rest on the **flat
+ *     link namespace**, and the prefix is load-bearing *in this module*: a doc
+ *     link is `[text](./<name>.md)` — a bare name with nowhere to put a
+ *     package coordinate, flat on purpose so an editor or a GitHub preview
+ *     resolves it natively (ADR-0046 §3.1/§3.3) — so the prefix is the only
+ *     thing separating a same-package link, checked in {@link lintDocs}, from
+ *     a cross-package one, deferred to publish as above. ⚠️ ADR-0048 §3.3
+ *     repaired metadata reads by ADDING a package-id argument to `getItem`;
+ *     the link form has nowhere to put one, so nothing §3.4 retired was ever
+ *     load-bearing for these two.
  */
 
 import fs from 'fs';
@@ -282,6 +311,19 @@ function markdownFilesIn(dir: string): string[] {
  * than one (where the message NAMES the candidates, because "I read this
  * convention and could not attribute the result" is a different fact from "I do
  * not read this convention").
+ *
+ * ## What #18965 changed here, which is NOTHING — and that is a decision
+ *
+ * Letter B made the per-package directory resolve at no fixed depth, so the
+ * sentence below ("read from src/docs/ only") is false for every stack B newly
+ * reaches. ⛔ It was still not touched, because it is not reachable from one:
+ * the branch that emits it runs only when `refs.length === 0` — a stack that
+ * declares no `packages[]` — and for that stack B resolves no package
+ * directory at all, so `src/docs/` really is the only place its docs are read
+ * from. The paragraph above already argued exactly this and it survived the
+ * ruling intact. The message a stack WITH packages gets is the pair below it,
+ * which names the packages it was matched against and never claims a fixed
+ * path.
  */
 function uncollectedDocsMessage(rel: string, files: readonly string[]): string {
   return `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: package docs are read from src/docs/ only (ADR-0046 §3.2), so these are absent from the artifact's \`docs[]\` and from every book that includes them. Move them into src/docs/ (doc names carry the package namespace prefix, so packages do not collide there), declare them inline as \`defineStack({ docs })\`, or delete them if they are not package docs. Found: ${files.join(', ')}`;
@@ -358,45 +400,144 @@ export function docsPackageRefs(packages: unknown): DocsPackageRef[] {
 }
 
 /**
- * Walk every `src/<dir>/docs/` once and split the result two ways: collected
- * into the package that owns it, or reported as unread (#18170's warning, kept
- * by the #18431 ruling's clause 4).
+ * Where one package's docs directory IS — derived from the packages the
+ * artifact REGISTERS rather than from a fixed depth under `src/` (#18965,
+ * maintainer ruling batch #204 item 5, letter B).
+ *
+ * ## Why the search is by NAME, and why it carries no depth
+ *
+ * A registered package carries no source path. `ArtifactPackageSchema` is a
+ * `strictObject` whose single key is `manifest`, and that body is
+ * `AssembledPackageBodySchema` — `ManifestSchema` plus the collection keys.
+ * Neither declares the directory the package was authored in, so the only
+ * thing that can locate a package on disk is its NAME, and the two spellings
+ * {@link docsPackageRefs} derives are exactly that name.
+ *
+ * ⛔ The depth is therefore not a parameter of this walk and no number appears
+ * in it. Reading `src/<pkg>/docs/` and reading `src/packages/<pkg>/docs/` are
+ * the SAME act — find the directory this package answers to, then read the
+ * `docs/` inside it — which is why the ruling refused to pin a second depth
+ * (letter C): a layout the convention never enumerated is dropped in silence,
+ * the defect one level down.
+ *
+ * ## Two properties make it safe, and they are the whole design
+ *
+ *   1. ⛔ The recursion exists ONLY to find a registered package. A directory
+ *      that names one IS a package root, so the walk stops there — its subtree
+ *      is that package's own source, not more packages, which is what keeps a
+ *      `src/<pkg>/components/docs/*.md` out of this. And with NO registered
+ *      packages there is nothing to search for, so there is no recursion at
+ *      all: a single-package stack is walked exactly one level, as it always
+ *      was. That is the ruling's "unchanged by construction" — ⛔ it is the
+ *      absence of a search, not a special case guarding one.
+ *   2. A directory whose name names no package is never RESOLVED at any depth,
+ *      so this walk can only ever add directories a package claims. What it
+ *      reports is unmoved: an unmatched directory is still a candidate exactly
+ *      where it was a candidate before, because `node_modules` is skipped on
+ *      the way DOWN and never as a candidate — a single-package stack's
+ *      warning list is the same list, item for item, including that one.
+ */
+function packageDirectoryCandidates(
+  srcDir: string,
+  refs: readonly DocsPackageRef[],
+): Array<{ name: string; dir: string; rel: string; owners: DocsPackageRef[] }> {
+  const found: Array<{ name: string; dir: string; rel: string; owners: DocsPackageRef[] }> = [];
+  const walk = (dir: string, rel: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    const children = entries.filter((e) => e.isDirectory() && e.name !== COLLECTED_DOCS_DIR);
+    children.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of children) {
+      const childDir = path.join(dir, entry.name);
+      const childRel = `${rel}/${entry.name}`;
+      const owners = refs.filter((ref) => ref.directoryNames.includes(entry.name));
+      found.push({ name: entry.name, dir: childDir, rel: childRel, owners });
+      // ⛔ Descend only in SEARCH of a package (property 1). An installed
+      // dependency's tree is not this artifact's source, so a package id
+      // matching a directory inside `node_modules` names someone else's copy.
+      if (owners.length === 0 && refs.length > 0 && entry.name !== 'node_modules') {
+        walk(childDir, childRel);
+      }
+    }
+  };
+  walk(srcDir, 'src');
+  return found;
+}
+
+/**
+ * Walk the docs directories the artifact's packages resolve to, and split the
+ * result two ways: collected into the package that owns it, or reported as
+ * unread (#18170's warning, kept by the #18431 ruling's clause 4 and narrowed
+ * by no ruling since).
  *
  * ⭐ ONE traversal, and it is the traversal that was already here. The warning
- * this function grew out of already read every `src/<dir>/docs/` and already
- * listed its Markdown files by name; collecting them costs the file reads and
- * nothing else. That is the measurement the ruling asked for — see the PR that
- * landed this — and it is why the directory convention is the one implemented
- * first.
+ * this function grew out of already read every candidate `<dir>/docs/` and
+ * already listed its Markdown files by name; collecting them costs the file
+ * reads and nothing else. #18965 changed only where that traversal is allowed
+ * to go — see {@link packageDirectoryCandidates}.
+ *
+ * ## The one branch #18965 added, and why it is a REFUSAL
+ *
+ * Depth-free resolution makes a new ambiguity reachable: one package answering
+ * to TWO doc-bearing directories (`src/core/docs` and `src/packages/core/docs`
+ * in one tree). ⛔ It is not guessed and ⛔ it is not merged.
+ * {@link attachPackageDocs} keys its sets by package index through a `Map`, so
+ * a second set for one index would be dropped there without a word — the exact
+ * silence this card exists about, re-created one layer up. Both directories are
+ * reported and neither is collected, the same answer this collector already
+ * gives when one directory names two packages.
  */
 function sweepPackageDocsDirectories(
   srcDir: string,
   refs: readonly DocsPackageRef[],
 ): { packageDocs: PackageDocSet[]; issues: DocIssue[] } {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(srcDir, { withFileTypes: true });
-  } catch {
-    return { packageDocs: [], issues: [] };
-  }
   const issues: DocIssue[] = [];
   const packageDocs: PackageDocSet[] = [];
-  const packageDirs = entries.filter((e) => e.isDirectory() && e.name !== COLLECTED_DOCS_DIR);
-  packageDirs.sort((a, b) => a.name.localeCompare(b.name));
-  for (const entry of packageDirs) {
-    const dir = path.join(srcDir, entry.name, COLLECTED_DOCS_DIR);
-    const files = markdownFilesIn(dir);
-    if (files.length === 0) continue;
-    const rel = `src/${entry.name}/docs`;
 
-    const owners = refs.filter((ref) => ref.directoryNames.includes(entry.name));
+  const candidates = packageDirectoryCandidates(srcDir, refs)
+    .map((candidate) => ({
+      name: candidate.name,
+      owners: candidate.owners,
+      docsDir: path.join(candidate.dir, COLLECTED_DOCS_DIR),
+      rel: `${candidate.rel}/${COLLECTED_DOCS_DIR}`,
+      files: markdownFilesIn(path.join(candidate.dir, COLLECTED_DOCS_DIR)),
+    }))
+    .filter((candidate) => candidate.files.length > 0);
+
+  // How many doc-bearing directories each package answers to — the operand of
+  // the multi-location refusal above. Counted over the whole tree before any
+  // of it is collected, so the refusal does not depend on walk order.
+  const locationsOf = new Map<number, string[]>();
+  for (const candidate of candidates) {
+    if (candidate.owners.length !== 1) continue;
+    const { index } = candidate.owners[0];
+    locationsOf.set(index, [...(locationsOf.get(index) ?? []), candidate.rel]);
+  }
+
+  for (const { name, owners, docsDir, rel, files } of candidates) {
     if (owners.length === 1) {
-      const compiled = compileDocsDirectory(dir, rel);
+      const owner = owners[0];
+      const locations = locationsOf.get(owner.index) ?? [];
+      if (locations.length > 1) {
+        const elsewhere = locations.filter((location) => location !== rel).map((location) => `${location}/`).join(', ');
+        issues.push({
+          severity: 'warning',
+          rule: 'docs/uncollected-directory',
+          message: `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: package "${owner.id}" answers to ${locations.length} docs directories in this tree (also ${elsewhere}), so which one carries its docs is ambiguous and ⛔ this collector will not guess (ADR-0130 D4). Keep one directory per package — merge the others into it, or declare the docs inline as \`defineStack({ docs })\` on the package that owns them. Found: ${files.join(', ')}`,
+          path: rel,
+        });
+        continue;
+      }
+      const compiled = compileDocsDirectory(docsDir, rel);
       issues.push(...compiled.issues);
       packageDocs.push({
-        index: owners[0].index,
-        id: owners[0].id,
-        ...(owners[0].namespace !== undefined ? { namespace: owners[0].namespace } : {}),
+        index: owner.index,
+        id: owner.id,
+        ...(owner.namespace !== undefined ? { namespace: owner.namespace } : {}),
         dir: rel,
         docs: compiled.docs,
       });
@@ -420,8 +561,8 @@ function sweepPackageDocsDirectories(
       severity: 'warning',
       rule: 'docs/uncollected-directory',
       message: owners.length === 0
-        ? `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${entry.name}" names none of this artifact's packages, so there is no package body to attach them to (ADR-0130 D4). A per-package docs directory is matched against a package's \`id\` or the last dot-separated segment of that \`id\` — rename the directory to one of those two, declare the docs inline as \`defineStack({ docs })\` on the package that owns them, or move them into src/docs/. Declared packages: ${declared}. Found: ${files.join(', ')}`
-        : `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${entry.name}" names ${owners.length} of this artifact's packages (${owners.map((o) => o.id).join(', ')}), so which package body owns these docs is ambiguous and ⛔ this collector will not guess (ADR-0130 D4). Give those packages distinct \`id\` spellings — their last dot-separated segments must differ too — or declare the docs inline as \`defineStack({ docs })\` on the one that owns them. Found: ${files.join(', ')}`,
+        ? `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${name}" names none of this artifact's packages, so there is no package body to attach them to (ADR-0130 D4). A per-package docs directory is matched against a package's \`id\` or the last dot-separated segment of that \`id\` — rename the directory to one of those two, declare the docs inline as \`defineStack({ docs })\` on the package that owns them, or move them into src/docs/. Declared packages: ${declared}. Found: ${files.join(', ')}`
+        : `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${name}" names ${owners.length} of this artifact's packages (${owners.map((o) => o.id).join(', ')}), so which package body owns these docs is ambiguous and ⛔ this collector will not guess (ADR-0130 D4). Give those packages distinct \`id\` spellings — their last dot-separated segments must differ too — or declare the docs inline as \`defineStack({ docs })\` on the one that owns them. Found: ${files.join(', ')}`,
       path: rel,
     });
   }
@@ -551,8 +692,9 @@ function compileDocsDirectory(docsDir: string, relBase: string): { docs: DocItem
 
 /**
  * Read `src/docs/*.md` (flat) next to the given config file, and — when the
- * caller hands over the artifact's `packages[]` — every `src/<pkg>/docs/` whose
- * directory name resolves to one of those packages (#18431, ADR-0130 D4).
+ * caller hands over the artifact's `packages[]` — the `docs/` directory of
+ * every directory under `src/` that resolves to one of those packages (#18431,
+ * ADR-0130 D4; #18965 made that resolution depth-free).
  *
  * The two results stay SEPARATE and that separation is the ruling: the flat
  * directory's docs are the stack's own and keep attaching where they always
@@ -947,10 +1089,11 @@ function bodyDocsOf(packages: unknown, index: number): DocItem[] {
  * left open is the SEVERITY, not the reason: §3.4 hands authoring hygiene to a
  * warning-only lint while this one is `severity: 'error'`.
  *
- * ⚠️ "this module's older framing" above is not gone — it is still live in this
- * file's HEADER docblock, which states the retired claim as the current reason for
- * the naming lints. Out of #19248's file surface (it also justifies
- * `docs/namespace-prefix`), so it is reported, not edited here.
+ * ⚠️ "this module's older framing" above was, when #19248 landed, still live in
+ * this file's HEADER docblock as the current reason for the naming lints. Out of
+ * that round's file surface (it also justified `docs/namespace-prefix`), it was
+ * reported there rather than edited, and #19359 corrected the header — which now
+ * separates the two lints instead of covering both with the one retired sentence.
  */
 function lintDocNamesAcrossOwners(
   sets: ReadonlyArray<{ label: string; docs: readonly DocItem[] }>,

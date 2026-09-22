@@ -40,6 +40,7 @@ import { lazySchema } from '../shared/lazy-schema';
 // `strictObjectError`, `declarationStore`), and the error map builds its
 // suggester lazily on the first ISSUE, never at module scope. Measured with
 // this file as the entry module under eager evaluation (#13802).
+import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { SystemObjectName } from '../system/constants/system-names';
 import type { FieldType } from './field.zod';
@@ -496,7 +497,25 @@ export const FileValueSchema = lazySchema(() => z.looseObject({
   size: z.number().optional(),
   mimeType: z.string().optional(),
   alt: z.string().optional(),
-  duration: z.number().optional(),
+
+  // Renamed from `duration` (#18669, ruling A, decision batch #151 item 4): the
+  // unit of a duration-shaped number lives in the key NAME, not only in prose.
+  // The company it kept is what made the bare name worth a rename — the only
+  // other number on this shape is `size`, a BYTE count, so the one member that
+  // measured time was indistinguishable from a count at the authoring site, and
+  // a media length is exactly the value an author guesses at 1000x stakes.
+  // ⛔ The value type is deliberately unchanged: a fractional second is a legal
+  // media length (`12.34`), so no closed `DurationSeconds` and no `.int()`
+  // floor rides along with the rename.
+  durationSeconds: z.number().optional().describe('Media duration in seconds'),
+
+  /** Tombstone for the rename above (#18669, ruling A, decision batch #151 item 4). */
+  duration: retiredKey(
+    '`FileValue.duration` was renamed to `durationSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
+    + 'prose. Rename the key to `durationSeconds`; the value (seconds) is unchanged, and a '
+    + 'fractional second is still legal.',
+  ),
 }));
 export type FileValue = z.input<typeof FileValueSchema>;
 

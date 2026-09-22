@@ -281,10 +281,10 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
     // platform's one topological sorter, not from the artifact gate. A caller
     // matching on `code` alone would miss it — `DevPlugin`'s catch does not.
     const cyclic = {
-      manifest: { id: 'a', name: 'A', version: '1.0.0', type: 'app' },
+      manifest: { id: 'com.example.a', name: 'A', version: '1.0.0', type: 'app' },
       packages: [
-        { manifest: { id: 'a', name: 'A', version: '1.0.0', type: 'app', dependencies: { b: '^1.0.0' } } },
-        { manifest: { id: 'b', name: 'B', version: '1.0.0', type: 'module', dependencies: { a: '^1.0.0' } } },
+        { manifest: { id: 'com.example.a', name: 'A', version: '1.0.0', type: 'app', dependencies: { 'com.example.b': '^1.0.0' } } },
+        { manifest: { id: 'com.example.b', name: 'B', version: '1.0.0', type: 'module', dependencies: { 'com.example.a': '^1.0.0' } } },
       ],
     };
     let caught: (Error & { code?: unknown; status?: unknown }) | undefined;
@@ -365,8 +365,12 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
     // (packages/spec/src/assembled-package-body.test.ts). That project boots
     // today; a reader that threw here would have stopped it booting — and from
     // the block whose only job is deciding whether to register a translation
-    // service, while `new AppPlugin(...)` twenty lines above degrades the very
-    // same refusal to a log line.
+    // service, while the app-metadata branch degrades the very same refusal to
+    // a log line — `AppPlugin.init()` hands the stack to the `manifest`
+    // service, whose `register()` reaches the SAME `resolveArtifactPackageOrder`
+    // parse, and DevPlugin's child-`init()` loop logs it instead of rethrowing.
+    // ⛔ Not `new AppPlugin(...)`: the constructor reads `manifest.id` /
+    // `manifest.name` only and never sees this malformation (#15292).
     const refused = additiveNoI18nProject();
     (refused.packages as Array<{ manifest: Record<string, unknown> }>)[0]
       .manifest.objects = ['./src/objects/*.object.ts'];

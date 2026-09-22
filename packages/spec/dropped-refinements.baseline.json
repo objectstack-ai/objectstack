@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 204,
-    "droppedRefinementSites": 573,
+    "publishedSchemasWithDroppedRefinements": 205,
+    "droppedRefinementSites": 565,
     "refinementSitesThatDidProject": 357,
     "refinementSitesWithNoJsonFormToCompare": 9
   },
@@ -67,7 +67,6 @@
         "manifest.objectExtensions.element",
         "manifest.objects.element",
         "manifest.objects.element.fieldGroups",
-        "manifest.objects.element.fields.out.keyType",
         "manifest.objects.element.fields.out.valueType",
         "manifest.objects.element.fields.out.valueType.currencyConfig",
         "manifest.objects.element.lifecycle",
@@ -109,6 +108,11 @@
     "api/CreateImportJobRequest": {
       "sites": [
         ""
+      ]
+    },
+    "api/DatasetSelection": {
+      "sites": [
+        "runtimeFilter.lazy"
       ]
     },
     "api/DisablePackageResponse": {
@@ -160,7 +164,6 @@
         "data.options[1].manifest.objectExtensions.element",
         "data.options[1].manifest.objects.element",
         "data.options[1].manifest.objects.element.fieldGroups",
-        "data.options[1].manifest.objects.element.fields.out.keyType",
         "data.options[1].manifest.objects.element.fields.out.valueType",
         "data.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.options[1].manifest.objects.element.lifecycle",
@@ -243,7 +246,6 @@
         "options[1].manifest.objectExtensions.element",
         "options[1].manifest.objects.element",
         "options[1].manifest.objects.element.fieldGroups",
-        "options[1].manifest.objects.element.fields.out.keyType",
         "options[1].manifest.objects.element.fields.out.valueType",
         "options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "options[1].manifest.objects.element.lifecycle",
@@ -287,7 +289,6 @@
         "data.packages.element.options[1].manifest.objectExtensions.element",
         "data.packages.element.options[1].manifest.objects.element",
         "data.packages.element.options[1].manifest.objects.element.fieldGroups",
-        "data.packages.element.options[1].manifest.objects.element.fields.out.keyType",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
@@ -327,7 +328,6 @@
         "data.actions.element.in",
         "data.actions.element.in.params.element.in",
         "data.fieldGroups",
-        "data.fields.out.keyType",
         "data.fields.out.valueType",
         "data.fields.out.valueType.currencyConfig",
         "data.fields.out.valueType.relatedListFilter.lazy",
@@ -387,7 +387,7 @@
     },
     "automation/AssignmentConfig": {
       "sites": [
-        "assignments.out.valueType"
+        "out.assignments.out.valueType"
       ]
     },
     "automation/AssignmentValue": {
@@ -687,7 +687,6 @@
         "actions.element.in",
         "actions.element.in.params.element.in",
         "fieldGroups",
-        "fields.out.keyType",
         "fields.out.valueType",
         "fields.out.valueType.currencyConfig",
         "fields.out.valueType.relatedListFilter.lazy",
@@ -958,7 +957,6 @@
         "operations.element.options[3].object.actions.element.in",
         "operations.element.options[3].object.actions.element.in.params.element.in",
         "operations.element.options[3].object.fieldGroups",
-        "operations.element.options[3].object.fields.out.keyType",
         "operations.element.options[3].object.fields.out.valueType",
         "operations.element.options[3].object.lifecycle",
         "operations.element.options[3].object.listViews.valueType",
@@ -976,7 +974,6 @@
         "object.actions.element.in",
         "object.actions.element.in.params.element.in",
         "object.fieldGroups",
-        "object.fields.out.keyType",
         "object.fields.out.valueType",
         "object.fields.out.valueType.currencyConfig",
         "object.fields.out.valueType.relatedListFilter.lazy",
@@ -1019,7 +1016,6 @@
         "options[3].object.actions.element.in",
         "options[3].object.actions.element.in.params.element.in",
         "options[3].object.fieldGroups",
-        "options[3].object.fields.out.keyType",
         "options[3].object.fields.out.valueType",
         "options[3].object.lifecycle",
         "options[3].object.listViews.valueType",

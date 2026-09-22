@@ -59,6 +59,7 @@ import {
   BatchEndpointsConfigSchema,
   CrudEndpointsConfigSchema,
   MetadataEndpointsConfigSchema,
+  RestApiConfigSchema,
   RouteGenerationConfigSchema,
 } from '../../src/api/rest-server.zod';
 import { SubscriptionSchema } from '../../src/api/realtime.zod';
@@ -78,6 +79,7 @@ const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   metadata_endpoints: MetadataEndpointsConfigSchema,
   batch_endpoints: BatchEndpointsConfigSchema,
   route_generation: RouteGenerationConfigSchema,
+  rest_api: RestApiConfigSchema,
   realtime_subscription: SubscriptionSchema,
 };
 

@@ -56,20 +56,151 @@ afterEach(() => {
   }
 });
 
-describe('isOAuthEligibleBaseUrl (OAuth 2.1 TLS rule, loopback exempt)', () => {
+/**
+ * The transport rule is a SECURITY BOUNDARY, so every leg below is spelled
+ * out rather than sampled: the private/link-local arm that the rule opens,
+ * the public arm it must keep refusing exactly as before, the loopback and
+ * scheme invariants it may not disturb, and the four boundary traps a
+ * text-prefix implementation would get wrong.
+ *
+ * Shape ruled by the maintainer (2026-09-21): a DEPLOYMENT-level rule with
+ * the semantics of Keycloak's `sslRequired=external` — plain HTTP on a
+ * loopback or private / link-local host, TLS everywhere else, ⛔ no
+ * configuration key and ⛔ no environment variable, and no separate
+ * development-mode branch (a dev bind on a LAN address IS a private address).
+ */
+describe('isOAuthEligibleBaseUrl (OAuth 2.1 transport rule — TLS public, plain HTTP private)', () => {
+  // ── The arm this rule OPENS ───────────────────────────────────────────
+  it.each([
+    ['http://10.0.0.5:3000', true],
+    ['http://192.168.1.10', true],
+    ['http://172.16.0.1', true],
+    ['http://172.31.255.255', true],
+    ['http://[fc00::1]', true],
+    ['http://169.254.1.1', true],
+    ['http://[fe80::1]', true],
+  ])('private / link-local over plain HTTP is ELIGIBLE: %s → %s', (url, expected) => {
+    expect(isOAuthEligibleBaseUrl(url)).toBe(expected);
+  });
+
+  // ── The arm this rule must NOT open — the security floor ──────────────
+  //
+  // A regression here does not degrade a feature: it serves plaintext OAuth
+  // to the public internet, which is strictly worse than the refusal the
+  // card exists to relax. These legs are why the rule reads IP LITERALS and
+  // never a text prefix.
+  it.each([
+    ['http://example.com', false],
+    ['http://203.0.113.5', false],
+    ['http://intranet.corp:3000', false],
+    ['http://host.docker.internal:3000', false],
+  ])('a public host over plain HTTP is still REFUSED: %s → %s', (url, expected) => {
+    expect(isOAuthEligibleBaseUrl(url)).toBe(expected);
+  });
+
+  // ── Invariants the change may not disturb ─────────────────────────────
   it.each([
     ['https://acme.example.com', true],
     ['https://intranet.corp', true],
+    ['https://203.0.113.5', true],
     ['http://localhost:3000', true],
     ['http://127.0.0.1:8080', true],
+    // Loopback is 127.0.0.0/8 (RFC 1122 §3.2.1.3), not the single literal
+    // `127.0.0.1` the rule used to compare against. Without this leg nothing
+    // in the tree holds the whole block, and refusing 127.0.0.2 beside an
+    // eligible 10.0.0.5 would be incoherent.
+    ['http://127.0.0.2', true],
+    ['http://127.255.255.254:9000', true],
+    // The adjacent blocks on either side are ordinary public space.
+    ['http://126.0.0.1', false],
+    ['http://128.0.0.1', false],
     ['http://[::1]:3000', true],
     ['http://myapp.localhost:3000', true],
-    ['http://intranet.corp:3000', false],
-    ['http://10.0.0.5', false],
     ['ftp://localhost', false],
+    ['ws://10.0.0.5', false],
     ['not a url', false],
-  ])('%s → %s', (url, expected) => {
+  ])('unchanged: %s → %s', (url, expected) => {
     expect(isOAuthEligibleBaseUrl(url)).toBe(expected);
+  });
+
+  // ── Boundary traps ────────────────────────────────────────────────────
+  //
+  // Each of these is a value a plausible-looking implementation gets wrong,
+  // and each one it gets wrong in the UNSAFE direction.
+  it.each([
+    // RFC 1918 is 172.16.0.0/12 — 172.15.x and 172.32.x are ordinary public
+    // space, and a `172.` prefix test would hand both of them plaintext.
+    ['http://172.15.0.1', false],
+    ['http://172.32.0.1', false],
+    // The other three IPv4 blocks owe the same neighbours. Without these,
+    // widening 10.0.0.0/8 to /7 or /6, or 192.168.0.0/16 to /8, or
+    // 169.254.0.0/16 to /15, changes no assertion in this tree — a range
+    // this table spells in one character is one a typo can move.
+    ['http://11.0.0.1', false],
+    ['http://192.167.0.1', false],
+    ['http://192.169.0.1', false],
+    ['http://169.253.0.1', false],
+    ['http://169.255.0.1', false],
+    // A hostname that merely BEGINS with a private IPv4 string. Its owner
+    // points it wherever they like; a `startsWith('10.')` test opens it.
+    ['http://10.0.0.5.evil.com', false],
+    ['http://192.168.1.10.attacker.test', false],
+    // Site-local fec0::/10 was deprecated by RFC 3879 and is NOT inside
+    // fc00::/7 — the ruled range. febf:: is the last link-local prefix and
+    // fdff:: the last unique-local one, so both stay in.
+    ['http://[fec0::1]', false],
+    ['http://[febf::1]', true],
+    ['http://[fdff:ffff::1]', true],
+    // IPv4-mapped IPv6: WHATWG URL canonicalises `::ffff:10.0.0.5` to
+    // `::ffff:a00:5`. The rule refuses it rather than unwrapping it — the
+    // conservative side, pinned so the choice is visible if it is revisited.
+    ['http://[::ffff:10.0.0.5]', false],
+    // The unspecified/wildcard bind address is not a reachable origin.
+    ['http://0.0.0.0:3000', false],
+    ['http://[::]:3000', false],
+  ])('boundary: %s → %s', (url, expected) => {
+    expect(isOAuthEligibleBaseUrl(url)).toBe(expected);
+  });
+
+  it('accepts a private address in any spelling WHATWG URL canonicalises to one', () => {
+    // `http://167772161` parses to hostname 10.0.0.1 — it IS that address,
+    // so eligibility follows the canonical host, not the typed text.
+    expect(new URL('http://167772161').hostname).toBe('10.0.0.1');
+    expect(isOAuthEligibleBaseUrl('http://167772161')).toBe(true);
+    expect(isOAuthEligibleBaseUrl('http://[FC00::1]')).toBe(true);
+  });
+
+  it('is reachable by no configuration key and no environment variable', () => {
+    // The ruling refused the contributor's escape hatch as written. This pins
+    // the refusal where it can actually be observed: the predicate takes one
+    // argument, the deployment's own origin, and reads no process state.
+    expect(isOAuthEligibleBaseUrl.length).toBe(1);
+    process.env.OS_ALLOW_INSECURE_OAUTH_HTTP = 'true';
+    try {
+      expect(isOAuthEligibleBaseUrl('http://example.com')).toBe(false);
+      expect(isOAuthEligibleBaseUrl('http://203.0.113.5')).toBe(false);
+    } finally {
+      delete process.env.OS_ALLOW_INSECURE_OAUTH_HTTP;
+    }
+  });
+});
+
+describe('isMcpOAuthEnabled follows the transport rule through the manager', () => {
+  const managerOn = (baseUrl: string) =>
+    new AuthManager({ secret: 'test-secret-at-least-32-chars-long', baseUrl });
+
+  it('a private-address plain-HTTP deployment gets the OAuth track and its metadata URL', () => {
+    const m = managerOn('http://192.168.1.10:3000');
+    expect(m.isMcpOAuthEnabled()).toBe(true);
+    expect(m.getMcpResourceMetadataUrl()).toBe(
+      'http://192.168.1.10:3000/.well-known/oauth-protected-resource',
+    );
+  });
+
+  it('a public plain-HTTP deployment stays dark — fail-closed, nothing advertised', () => {
+    const m = managerOn('http://example.com');
+    expect(m.isMcpOAuthEnabled()).toBe(false);
+    expect(m.getMcpResourceMetadataUrl()).toBeNull();
   });
 });
 
@@ -156,7 +287,10 @@ describe('canonical issuer / resource URLs', () => {
     expect(manager().getMcpResourceMetadataUrl()).toBeNull();
   });
 
-  it('resource metadata URL is null on plain-HTTP non-loopback even with the AS on (TLS rule)', () => {
+  // The contributor's strict-spelling refusal pin, kept as the production
+  // arm's: `intranet.corp` is a HOSTNAME, not an IP literal, so the widened
+  // transport rule leaves it exactly as refused as before.
+  it('resource metadata URL is null on a plain-HTTP non-IP hostname even with the AS on', () => {
     process.env.OS_MCP_SERVER_ENABLED = 'true';
     const m = new AuthManager({
       secret: 'test-secret-at-least-32-chars-long',

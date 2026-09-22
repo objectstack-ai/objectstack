@@ -220,6 +220,17 @@
  * with the remedy — because a verifier that silently skips a leg it could not
  * run reports success it did not measure.
  *
+ * ## The FORK predicate (maintainer ruling, 2026-09-21)
+ *
+ * Batch 207 item 1, letter 是 (the director's record there carries the four-step intake): a PR whose head lives in
+ * another repository — `head.repo.full_name` ≠ `base.repo.full_name`, or `head.repo` null because the fork was deleted
+ * (fail closed) — is a PROPOSAL, never a delivery, whatever its paths: no AI seat flips it ready, enqueues it, arms
+ * auto-merge on it or approves it; the owning seat adopts the diff onto an internal branch (`Co-authored-by:` the
+ * contributor) and lands THAT. A third limb beside PATH and SIZE, read off the `GET /pulls/{n}` `--pr` already pays for
+ * and exiting on the GOVERNED code through the Tier H terminal with its own reason; `--branch` / `--test` see no head
+ * and say NOT MEASURED. A fork's CI runs only once a maintainer approves it, so ZERO check runs on the head (one
+ * `GET /commits/{sha}/check-runs`, same channel) read NOT MEASURED, never green.
+ *
  * ## The regime this audit belongs to (maintainer ruling, 2026-08-18)
  *
  * A human merge IS the review record for a governed PR. The seat put it as
@@ -913,11 +924,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the SIZE predicate: over the human-merge line threshold, whatever the paths': 30,
   '⭐ #18989: the guard is the CALLER\'s name, and the mirror is pinned to its owner': 18,
   '⭐ #19036: the sweep lists an OVERSIZED landing beside the governed ones': 20,
+  '⭐ the FORK predicate: head repo ≠ base repo is a proposal, never a delivery': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 30;
+const SELF_TEST_BATTERY_FLOOR = 31;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1230,7 +1242,7 @@ export function applyGeneratedExceptions(verdict, provenanceByPath = new Map()) 
     tier: matched.length > 0 ? landingTierOf(matched) : null,
     // A lift moves a PATH off the register and moves the SIZE not at all
     // (the 2026-09-18 ruling has no exemption for generated files).
-    humanMerge: matched.length > 0 || verdict.size?.exceeds === true,
+    humanMerge: matched.length > 0 || verdict.size?.exceeds === true || verdict.fork?.isFork === true,
     exceptions,
   };
 }
@@ -1432,11 +1444,12 @@ export function classifyCommit({ sha, date, subject }, changedPaths, repo = null
  * same in all five governed repos, so a seat can run this from anywhere with
  * the file list of any PR in any of them.
  */
-export function testVerdict(paths, { size = null } = {}) {
+export function testVerdict(paths, { size = null, fork = null, checks = null } = {}) {
   const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p !== '');
   const matched = governedPathsIn(list);
   const hit = new Set(matched.flatMap((s) => s.files));
   const sized = sizeVerdict(size);
+  const forked = fork && typeof fork === 'object' ? fork : forkVerdict(null); // the FORK limb, or NOT MEASURED
   return {
     governed: matched.length > 0,
     // The landing tier (#19133): `H` / `S` while governed, `null` when nothing
@@ -1448,7 +1461,8 @@ export function testVerdict(paths, { size = null } = {}) {
     hitPaths: [...hit],
     clearPaths: list.filter((p) => !hit.has(p)),
     size: sized,
-    humanMerge: matched.length > 0 || sized.exceeds,
+    fork: forked, checks: checks && typeof checks === 'object' ? checks : null,
+    humanMerge: matched.length > 0 || sized.exceeds || forked.isFork === true,
   };
 }
 
@@ -1478,9 +1492,17 @@ export function sizeVerdict(size = null) {
   };
 }
 
-/** Either limb: the PATH register or the SIZE threshold. The exit code reads this, never `governed` alone. */
+/** The FORK limb (header section "The FORK predicate") off the PR object. Pure: NOT MEASURED without a `base.repo`; a deleted fork is a fork, fail closed. */
+export function forkVerdict(pull = null) {
+  const baseRepo = pull?.base?.repo?.full_name;
+  if (typeof baseRepo !== 'string' || baseRepo === '') return { measured: false, isFork: false, headRepo: null, baseRepo: null };
+  const headRepo = typeof pull?.head?.repo?.full_name === 'string' ? pull.head.repo.full_name : null;
+  return { measured: true, isFork: headRepo === null || headRepo !== baseRepo, headRepo, baseRepo };
+}
+
+/** Any limb: the PATH register, the SIZE threshold or a FORK head. The exit code reads this, never `governed` alone. */
 export function landsByHumanMerge(verdict) {
-  return verdict?.governed === true || verdict?.size?.exceeds === true;
+  return verdict?.governed === true || verdict?.size?.exceeds === true || verdict?.fork?.isFork === true;
 }
 
 /**
@@ -1523,14 +1545,15 @@ export function renderTestVerdict(verdict) {
     (liftedCount > 0 ? ` after ${liftedCount} generated-artifact lift(s)` : '') +
     ` (${verdict.surfacesChecked} surfaces, repo-agnostic).`;
   const size = verdict.size ?? sizeVerdict(null);
+  const intake = renderForkLines(verdict.fork, verdict.checks);
   if (!verdict.governed) {
-    if (size.exceeds) {
-      // The PATH limb is clear and the SIZE limb is not: the "ordinary queue
-      // landing applies" sentence would be false here, so it is not printed.
+    if (size.exceeds || verdict.fork?.isFork === true) {
+      // The PATH limb is clear and the SIZE or FORK limb is not: the "ordinary
+      // queue landing applies" sentence would be false here, so it is not printed.
       return (
         `${head}\n` +
-        `  paths: none on the register — the SIZE decides this PR:\n` +
-        `${renderSizeLines(size)}` +
+        `  paths: none on the register — the ${verdict.fork?.isFork === true ? 'HEAD REPO' : 'SIZE'} decides this PR:\n` +
+        `${intake}${renderSizeLines(size)}` +
         renderExceptionLines(verdict)
       );
     }
@@ -1539,7 +1562,7 @@ export function renderTestVerdict(verdict) {
       `  ✅  NOT governed — ordinary queue landing applies to a PR with exactly this file list.\n` +
       `      Derived from GOVERNED_SURFACES, not recalled. Re-run on the FINAL file list: the register\n` +
       `      has grown several times in two days, and a reading taken earlier in the session is recall.\n` +
-      `${renderSizeLines(size)}` +
+      `${intake}${renderSizeLines(size)}` +
       renderExceptionLines(verdict)
     );
   }
@@ -1564,7 +1587,7 @@ export function renderTestVerdict(verdict) {
       `      and no maintainer click is waited for. One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」;\n` +
       `      one Tier H path among the hits and the whole PR would be Tier H.\n` +
       `${lines.join('\n')}${clear}\n` +
-      `${renderSizeLines(size)}` +
+      `${intake}${renderSizeLines(size)}` +
       renderExceptionLines(verdict)
     );
   }
@@ -1575,7 +1598,7 @@ export function renderTestVerdict(verdict) {
     `      One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.\n` +
     `      ⚖️ landing tier: H(人合) — ${GOVERNED_TIERS[GOVERNED_TIER_H].landing}.\n` +
     `${lines.join('\n')}${clear}\n` +
-    `${renderSizeLines(size)}` +
+    `${intake}${renderSizeLines(size)}` +
     renderExceptionLines(verdict)
   );
 }
@@ -1607,6 +1630,22 @@ export function renderSizeLines(size) {
     `      as a Tier H governed diff: no seat flips it ready, enqueues it, or arms auto-merge. ACCEPT on the card,\n` +
     `      \`needs-user-decision\` on the PR, the final 维护者速读, review requested from GOVERNED_APPROVERS.`
   );
+}
+
+/** The FORK limb's words + the head's check-run count (header section "The FORK predicate"). Pure; `--self-test` pins every branch. */
+export function renderForkLines(fork, checks = null) {
+  const f = fork ?? forkVerdict(null);
+  let out = '';
+  if (!f.measured) out += `  ⚠️  head repo: NOT MEASURED — this verdict cannot tell a fork PR from an internal one; \`--pr <n>\` reads it.\n`;
+  else if (f.isFork) out += `  ⛔  FORK PR — head ${f.headRepo ?? '(deleted fork repo)'} ≠ base ${f.baseRepo}: a PROPOSAL, never a delivery, whatever its paths.\n` +
+      `      The Tier H terminal, with its own reason: no AI seat flips it ready, enqueues it, arms auto-merge on it or approves it —\n` +
+      `      ever; a seat's review is required INPUT, never the permission. The owning seat adopts the diff onto an internal branch\n` +
+      `      (\`Co-authored-by:\` the contributor) and lands THAT through the ordinary gates; requests to the contributor go only as\n` +
+      `      review comments here, and this PR closes with thanks and the landing link.\n`;
+  if (checks && checks.total === 0) out += `  ⚠️  check runs on head ${String(checks.sha ?? '').slice(0, 10)}: 0 — NOT MEASURED, never green: a fork's CI does not run until a\n` +
+      `      maintainer approves it, and a head that never ran looks exactly like one that passed. No seat approves it to run.\n`;
+  else if (checks && checks.total === null) out += `  ⚠️  check runs on the head: NOT READ (${checks.reason}) — read as NOT MEASURED, never green.\n`;
+  return out;
 }
 
 // ── deriving the path list (#17003): three-dot, or a refusal ────────────────
@@ -2858,6 +2897,12 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
     };
   }
   const size = { ...pair, source: `GET /repos/${slug}/pulls/${pull}` };
+  // The FORK limb + the head's check-run count ride this read (header section "The FORK predicate"): one more GET, same channel.
+  const fork = forkVerdict(head);
+  const sha = typeof head?.head?.sha === 'string' ? head.head.sha : null;
+  const checksRead = sha ? await fetchJsonOver(fetchImpl, `${apiUrl}/repos/${slug}/commits/${sha}/check-runs?per_page=1`, chosen) : null;
+  const checks = checksRead?.ok && Number.isInteger(checksRead.body?.total_count) ? { sha, total: checksRead.body.total_count, reason: null }
+    : { sha, total: null, reason: !sha ? 'the PR object carries no head sha' : checksRead.ok ? 'the check-runs answer carries no total_count' : checksRead.reason };
 
   const files = [];
   let pages = 0;
@@ -2897,6 +2942,8 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
     ok: true,
     paths,
     size,
+    fork,
+    checks,
     derivation: {
       kind: 'pull',
       slug,
@@ -3254,8 +3301,8 @@ function rootFromArgs(args) {
  * leave two readings of the same register in circulation, which is the shape
  * the card is about. `--self-test` pins the identity end to end.
  */
-async function emitVerdict(paths, args, derivation = null, size = null) {
-  let verdict = testVerdict(paths, { size });
+async function emitVerdict(paths, args, derivation = null, size = null, intake = null) {
+  let verdict = testVerdict(paths, { size, ...(intake ?? {}) });
   // The provenance-aware exceptions (#9866 + #11705): recompute only when a
   // registered path is actually among the hits, so every other run stays the
   // zero-git, zero-cost read it always was. The driver applies each row's
@@ -3413,7 +3460,7 @@ async function runPullMode(args) {
     return EXIT_CANNOT_SWEEP;
   }
   if (!args.includes('--json')) console.log(renderDerivation(derived.derivation));
-  return await emitVerdict(derived.paths, args, derived.derivation, derived.size);
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks });
 }
 
 /**
@@ -5810,6 +5857,39 @@ async function selfTest() {
     rmSync(sizeFx, { recursive: true, force: true });
   }
 
+  // ── ⭐ the FORK predicate (maintainer ruling 2026-09-21) — header section "The FORK predicate" ──
+  battery('⭐ the FORK predicate: head repo ≠ base repo is a proposal, never a delivery');
+  const pullFrom = (headRepo, sha = 'feedface0001') => ({ head: { sha, repo: headRepo === null ? null : { full_name: headRepo } }, base: { repo: { full_name: 'o/r' } } });
+  const forkOf = (headRepo) => forkVerdict(pullFrom(headRepo));
+  const wordsOf = (paths, intake) => renderTestVerdict(testVerdict(paths, intake));
+  const forkPlain = testVerdict(['packages/spec/src/index.ts'], { fork: forkOf('someone/r') });
+  const forkWords = renderTestVerdict(forkPlain);
+  assert('⭐ a-fork-head-on-ordinary-paths-is-NOT-governed-by-path-and-lands-by-HUMAN-MERGE-on-the-fork-limb-the-GOVERNED-exit-with-the-fork-sentence-a-PROPOSAL-never-a-delivery-adopted-onto-an-internal-branch',
+    forkPlain.governed === false && forkPlain.fork.measured === true && forkPlain.fork.isFork === true && forkPlain.humanMerge === true && landsByHumanMerge(forkPlain) === true &&
+      forkWords.includes('FORK PR — head someone/r ≠ base o/r') && forkWords.includes('PROPOSAL, never a delivery') && forkWords.includes('arms auto-merge') && forkWords.includes('approves it') &&
+      forkWords.includes('Co-authored-by') && forkWords.includes('HEAD REPO decides') && !forkWords.includes('ordinary queue landing applies'), forkWords);
+  assert('⭐ head.repo-null-a-deleted-fork-is-a-FORK-fail-closed',
+    forkOf(null).isFork === true && landsByHumanMerge(testVerdict(['x.ts'], { fork: forkOf(null) })) && wordsOf(['x.ts'], { fork: forkOf(null) }).includes('(deleted fork repo) ≠ base o/r'), wordsOf(['x.ts'], { fork: forkOf(null) }));
+  const sameRepo = wordsOf(['packages/spec/src/index.ts'], { fork: forkOf('o/r'), size: { additions: 1, deletions: 0 } });
+  assert('a-same-repo-head-on-ordinary-paths-is-unchanged-NOT-governed-ordinary-queue-landing-and-no-fork-line',
+    forkOf('o/r').isFork === false && forkOf('o/r').measured === true && landsByHumanMerge(testVerdict(['x.ts'], { fork: forkOf('o/r') })) === false && sameRepo.includes('ordinary queue landing applies') && !sameRepo.includes('head repo') && !sameRepo.includes('FORK'), sameRepo);
+  const forkTierOf = (path, headRepo) => testVerdict([path], { fork: forkOf(headRepo) });
+  const S_PATH = '.claude/agents/os-dev.md';
+  assert('a-same-repo-governed-head-keeps-its-tier-H-or-S-word-for-word-while-a-fork-head-on-a-Tier-S-path-still-prints-the-fork-sentence-the-seat-adopts-it-never-lands-it',
+    forkTierOf('AGENTS.md', 'o/r').tier === GOVERNED_TIER_H && !wordsOf(['AGENTS.md'], { fork: forkOf('o/r') }).includes('FORK') && wordsOf(['AGENTS.md'], { fork: forkOf('o/r') }).includes('H(人合)') &&
+      forkTierOf(S_PATH, 'o/r').tier === GOVERNED_TIER_S && wordsOf([S_PATH], { fork: forkOf('o/r') }).includes('Tier S') && !wordsOf([S_PATH], { fork: forkOf('o/r') }).includes('head repo') &&
+      forkTierOf(S_PATH, 'someone/r').tier === GOVERNED_TIER_S && forkTierOf(S_PATH, 'someone/r').humanMerge === true && wordsOf([S_PATH], { fork: forkOf('someone/r') }).includes('FORK PR'), wordsOf([S_PATH], { fork: forkOf('someone/r') }));
+  const zeroChecks = wordsOf(['src/x.ts'], { fork: forkOf('someone/r'), checks: { sha: 'feedface0001', total: 0, reason: null } });
+  assert('⭐ ZERO-check-runs-on-the-head-read-NOT-MEASURED-never-green-a-head-whose-checks-ran-prints-no-such-line-an-unread-count-is-NOT-MEASURED-too-and-so-is-a-fork-limb-with-no-PR-object',
+    forkVerdict(null).measured === false && forkVerdict(null).isFork === false && forkVerdict({}).measured === false && wordsOf(['src/x.ts']).includes('head repo: NOT MEASURED') &&
+      zeroChecks.includes('check runs on head feedface00: 0 — NOT MEASURED, never green') && zeroChecks.includes('No seat approves it to run') && !wordsOf(['src/x.ts'], { checks: { sha: 'a', total: 43, reason: null } }).includes('check runs') && wordsOf(['src/x.ts'], { checks: { sha: 'a', total: null, reason: 'HTTP 403' } }).includes('NOT READ (HTTP 403)'), zeroChecks);
+  const respondWith = (body) => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => body });
+  const forkWalk = await fetchPullFiles({ apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: [{ id: 'fixture', name: 'fixture channel', headers: {} }],
+    fetchImpl: async (url) => (/\/files/.test(url) ? respondWith([{ filename: 'src/a.ts', status: 'modified' }]) : /\/commits\/feedface0001\/check-runs/.test(url) ? respondWith({ total_count: 0 })
+      : respondWith({ changed_files: 1, additions: 1, deletions: 0, ...pullFrom('someone/r') })) });
+  assert('⭐ --pr-reads-the-head-repo-off-its-own-GET-and-the-check-run-count-off-the-head-sha-on-the-same-channel',
+    forkWalk.ok === true && forkWalk.fork.isFork === true && forkWalk.fork.headRepo === 'someone/r' && forkWalk.checks.total === 0 && forkWalk.checks.sha === 'feedface0001', JSON.stringify({ fork: forkWalk.fork, checks: forkWalk.checks }));
+
   // ── ⭐ #19036: the sweep lists an OVERSIZED landing beside the governed ones ─
   //
   // The queue half of #19036 lives in the guard; this is the audit half. Until
@@ -6106,7 +6186,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled 5,000 declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and neither the importer's name nor the patrol's silences this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the importer's own guard, the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled 5,000 declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and neither the importer's name nor the patrol's silences this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the importer's own guard, the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }

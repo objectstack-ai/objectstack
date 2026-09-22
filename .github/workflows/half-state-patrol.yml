@@ -2,7 +2,19 @@ name: Half-State Patrol
 
 # The standing caller for `scripts/pm/check-half-states.mjs` (#9844).
 #
-# ## Why a workflow, and not "a seat should run it"
+# Since #18471 this file is a CALLER and nothing else: the patrol's body lives
+# in `.github/actions/half-state-patrol`, a composite action, and that action's
+# header is the authority on how the patrol works. What stays here is what is
+# NOT repo-agnostic — when it runs, what it may touch, the board's own anchor,
+# and the one step that writes to this repo's cards.
+#
+# ## Why a workflow at all — the transport, not the calendar
+#
+# ⚠️ HALF SUPERSEDED (ruling #208 on objectstack#19491, executed by
+# objectstack#19497): this file declares NO schedule. The argument below is kept
+# as the history that put the patrol on a runner, not as a promise that anything
+# fires it. What survives is the transport reason in the next paragraph; what the
+# ruling retired is the calendar.
 #
 # The sweeper carries thirteen predicates over the dispatch protocol's
 # label/assignee/PR invariants, and for most of its life its documented consumer
@@ -11,6 +23,10 @@ name: Half-State Patrol
 # claims (H2) and an unenumerated backlog sat on the board. Not one predicate had
 # fired. A healing mechanism with no scheduled caller heals only in the
 # counterfactual, and an alarm added to a script nobody runs is still silence.
+# That reading bought the schedule in #9844 and was true of its day. Ruling #208
+# re-measured the same instrument and found the standing caller charging more
+# than it healed — see the `on:` block below, which carries the reading and the
+# ⛔ that goes with it.
 #
 # "Some seat should run it" also kept not happening for a MEASURED reason, not a
 # discipline one: in every container class measured at the time, the live sweep
@@ -31,32 +47,37 @@ name: Half-State Patrol
 # `HTTPS_PROXY`, so the sweeper sent the proxy's placeholder token straight to
 # GitHub, earned a 401, and reported that refusal as the container's verdict.
 #
-# ⛔ That does NOT retire this workflow, and the fix deliberately did not touch
-# it. The #9844 reason stands on its own and is not a transport reason: an alarm
-# whose only caller is "a seat should remember" is silence, whoever CAN run it.
-# The on-demand path is restored BESIDE the schedule — a lane that needs the
-# board read right now (the 4x/day body trims its own rows, and says so) can now
-# get it — never instead of the schedule.
-#
-# What this means for a runner is nothing at all, and that is load-bearing given
-# this file is copied VERBATIM into sibling repos (#11217): the script re-execs
-# only when `HTTPS_PROXY`/`https_proxy` is set, and a runner sets neither. No
-# child process, no extra line, no behaviour change — pinned in the script's
-# `--self-test` and measured byte-identical on the probe output.
+# ⛔ That did NOT retire this workflow either, and the fix deliberately did not
+# touch it: a correction about WHO CAN run the sweep is not a ruling about
+# WHETHER it should run by the clock, and this file stayed exactly as it was.
+# What the correction bought is the path this workflow now runs on ALONE — a lane
+# that needs the board read right now (the body trims its own rows, and says so)
+# gets it from its own container or from a `workflow_dispatch` here. Since ruling
+# #208 that on-demand read is the only read there is.
 #
 # ## What lands where
 #
-# One pinned ANCHOR ISSUE, rewritten in place every run (`ANCHOR_ISSUE` below).
+# One pinned ANCHOR ISSUE, rewritten in place every run (`anchor-issue` below).
 # Never a comment per run: the board is one board, a per-run comment stream would
 # be a second tracker that nobody prunes, and GitHub's edit history is already the
 # archive this needs. The body is owned end-to-end by the generator, so no run can
 # leave half of it stale.
 #
-# The `Swept` timestamp in that body is the patrol's heartbeat and is deliberately
-# refreshed even when the findings are unchanged: a timestamp that stops advancing
-# is how a reader learns the standing caller died. That is the whole defect class
-# this workflow exists to close, so the run must not "optimize away" the no-op
-# edit that proves it is alive.
+# The `Swept` timestamp in that body is refreshed even when the findings are
+# unchanged, and the run must still not "optimize away" that no-op edit — but
+# read it for what it now is. With no schedule behind it, the stamp dates the
+# last time a seat ASKED for a reconciliation; it is no longer a heartbeat, and a
+# `Swept` that stopped advancing means nobody has dispatched the patrol since,
+# ⛔ not that a standing caller died.
+#
+# ⚠️ KNOWN STALE READING, deliberately not repaired here (objectstack#19497): the
+# generator stamps a cadence deadline beside `Swept` from its own `PATROL_CRON` /
+# `PATROL_CADENCE_HOURS` constants, so the anchor body will keep stamping an
+# "expected every 6h · next by …" deadline computed from the schedule string
+# those constants still hold — a deadline against a schedule this file no longer
+# declares, and nothing on this board fires. The ruling forbids editing the
+# sweeper for it (⛔ not one of its 36,717 lines); the repair is filed as its own
+# finding instead.
 #
 # ## Report-only, and the one thing that is NOT report-only
 #
@@ -75,63 +96,83 @@ name: Half-State Patrol
 # must never look like "input is clean") with a timestamp on it. Failing costs
 # nobody a PR: this workflow gates no branch and blocks no queue.
 #
-# ## Adopting this in a sibling repo (#11217)
+# ## Adopting the patrol in a sibling repo (#11217, #18471)
 #
-# This file is REPO-AGNOSTIC and is meant to be copied verbatim. It was not:
-# installed in objectstack alone, it left 37 of the fleet's 59 open `pm:blocked`
-# cards outside any patrol, and a hand-run of H19's predicate over objectui's
-# blocked inventory found 7 blocks whose blocker had already closed — 58% of
-# that repo's machine-readable blocks were false, one of them for a week. The
-# same predicate had been catching objectstack's four every hour. The difference
-# was never discipline; it was that one repo had a caller.
+# ⛔ Copy NOTHING. A sibling board installs the patrol by CALLING the action,
+# pinned to a sha of this repository, and passing its own constants:
 #
-# To adopt, in the sibling repo:
+#   jobs:
+#     patrol:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: actions/checkout@v7
+#         - uses: actions/setup-node@v7
+#           with:
+#             node-version: '22'
+#         - uses: objectstack-ai/objectstack/.github/actions/half-state-patrol@<sha>
+#           with:
+#             github-token: ${{ secrets.GITHUB_TOKEN }}
+#             anchor-issue: ${{ vars.HALF_STATE_ANCHOR_ISSUE }}
 #
-#   1. copy THREE files, unchanged: `scripts/pm/check-half-states.mjs`,
-#      `scripts/invoked-as.mjs` (the sweeper imports it — see below), and this
-#      file;
-#   2. open one `tracking`-labeled anchor issue there and set the repository
-#      VARIABLE `HALF_STATE_ANCHOR_ISSUE` to its number
-#      (Settings → Secrets and variables → Actions → Variables).
+# plus one `tracking`-labeled anchor issue opened in that repo, whose number is
+# what `anchor-issue` carries. ⛔ A sha, never `@main`: `@main` is the drift this
+# change removes, re-entered from the other side.
 #
-# ⚠️ Step 1 said TWO files until 2026-09-03, and the sweeper has imported
-# `../invoked-as.mjs` since well before that — so the documented install was a
-# patrol that could not start. Measured on a clean two-file copy of this repo's
-# own files: `ERR_MODULE_NOT_FOUND … /scripts/invoked-as.mjs`, exit 1, before a
-# single predicate runs; the same copy with the helper added passes the
-# sweeper's 2,062-case `--self-test`. It fails LOUDLY rather than silently (the
-# job's last step turns the run red and the anchor is rewritten with "THE SWEEP
-# DID NOT RUN"), which is the one mercy in it — but a repo adopting this file by
-# following the list above installed a dead patrol. ⛔ Do not shorten this list
-# again from memory: the import is what decides it, not this comment.
+# ⚠️ The paragraph this replaces was a LIST of files to copy, and it is worth
+# recording why a list is not the fix. It said TWO files until 2026-09-03 while
+# the sweeper had imported a third since well before that — so the documented
+# install was a patrol that could not start; a clean two-file copy died with
+# `ERR_MODULE_NOT_FOUND … /scripts/invoked-as.mjs`, exit 1, before a single
+# predicate ran. It was corrected, and two weeks later it was short by four
+# again. A hand-kept mirror of an import graph goes stale the way a hand-kept
+# copy of a script goes stale, which is to say: by arithmetic, not by
+# carelessness. The list is deleted rather than lengthened — the runner now
+# places this whole repository at the pinned sha for the action, so the import
+# graph travels with the code and the action asserts its own sources are there.
 #
-# That is the whole install. The swept repo needs no configuration at all: it is
-# `github.repository`, so the copy reads the board it lives in — a hardcoded
-# default was how a copied file could have swept THIS repo and written the
-# findings into a sibling's anchor, a fully green report about the wrong board.
-#
-# ⛔ Each install uses its OWN `secrets.GITHUB_TOKEN` and reads its own repo. No
-# cross-repo credential, no matrix over repos, no PAT: that route was refused at
-# grading (it buys no coverage a per-repo install lacks and raises the
-# credential floor for every repo at once). The accepted consequence is that a
-# cross-repo `Blocked-by:` target stays UNJUDGED in each install — H19 says so
-# in its own row rather than reading it as a healthy block.
+# ⛔ Each install still uses its OWN `secrets.GITHUB_TOKEN` and reads its own
+# repo. No cross-repo credential, no matrix over repos, no PAT: that route was
+# refused at grading (it buys no coverage a per-repo install lacks and raises the
+# credential floor for every repo at once). Calling a PUBLIC repo's action from a
+# private one needs no credential at all, so nothing here reopens it. The
+# accepted consequence is unchanged: a cross-repo `Blocked-by:` target stays
+# UNJUDGED in each install — H19 says so in its own row rather than reading it as
+# a healthy block.
 
 on:
-  schedule:
-    # Four times a day, six hours apart, at :37 past the hour.
-    #
-    # The minute is offset ON PURPOSE. The triage Routine that heals these same
-    # states fires hourly near the top of the hour, and a patrol landing at the
-    # same minute would keep reading the board mid-heal — reporting half-states
-    # the healer is in the middle of pairing, i.e. manufacturing findings that
-    # clear themselves. :37 puts this sweep in the quiet part of the healer's
-    # cycle in both directions. Four runs/day rather than hourly: H13's own
-    # threshold is 2h and the incident it comes from sat ~26h, so six-hourly
-    # detection is two orders of magnitude better than the status quo (never)
-    # while staying cheap on the core quota this sweep shares with the loop's
-    # hot path.
-    - cron: '37 1,7,13,19 * * *'
+  # ⛔ ON DEMAND ONLY — this workflow declares NO schedule, and re-adding one
+  # takes the maintainer's sentence, not a reading of the history above.
+  # Ruling #208 on objectstack#19491, executed by objectstack#19497, maintainer
+  # 「19491 接受你的建议,并立刻派发处理相关任务。」 The triage seat dispatches this
+  # workflow when it wants the board reconciled; nothing fires it by the clock.
+  #
+  # WHAT THE RETIRED SCHEDULE WAS: `37 1,7,13,19 * * *` — four runs a day, six
+  # hours apart, the minute deliberately off the top of the hour so the sweep
+  # never read the board mid-heal while the hourly triage Routine was pairing
+  # states, and four runs rather than hourly because H13's own threshold is 2h.
+  # None of that was what the ruling found wrong.
+  #
+  # WHY IT WENT: the patrol is REPORT-ONLY (see the section above) while the
+  # dispatch charter made its anchor rows a precondition for opening a dispatch.
+  # A row misreading a now-legal state therefore cost every executive seat a
+  # handling step — four times a day, until a dev repaired the row — and the
+  # sweeper was taking eight such repairs a day in the fortnight before the
+  # ruling. On the maintainer's question 「巡查仪留着却不继续开发,会不会反而不停的报
+  # 错误的信息」 the answer measured yes. The ruling stops the clock, ⛔ not the
+  # instrument: the script keeps every one of its 36,717 lines and stays runnable
+  # from here, and the charter's precondition is deleted on the sibling card.
+  #
+  # ⛔ Do not re-add a `schedule:` block on the argument the history above makes
+  # ("an alarm nobody runs is silence"). That argument is answered, not
+  # forgotten: it was weighed against what the standing caller was charging every
+  # seat, and it lost. If a month passes with nobody dispatching this, the ruling
+  # is that the sweeper is deleted whole on its own card — ⛔ never quietly
+  # re-scheduled.
+  #
+  # The cadence was always per-board and stays in the caller: a sibling repo that
+  # wants a scheduled sweep of ITS board declares `schedule:` in its own copy of
+  # this caller and picks its own minute against its own healer — never in the
+  # action, and never by reading a cadence out of this file.
   workflow_dispatch: {}
   # Changes to the patrol itself get exercised before they merge — the same
   # posture as engine-split-metric.yml. On a pull_request run the sweep still
@@ -139,66 +180,61 @@ on:
   # proven on a real runner), but the anchor write is skipped and the rendered
   # body goes to the run's step summary instead. A PR must never rewrite the
   # board's pinned view.
+  #
+  # This repo is the patrol's FIRST CONSUMER and calls the action by its local
+  # path, so a PR editing the action runs against the edit rather than against
+  # a pinned copy of what is already on `main`. That is the whole value of being
+  # the first consumer, and it is why the action's own directory is a trigger
+  # path below.
   pull_request:
     paths:
       - 'scripts/pm/check-half-states.mjs'
       # The sweeper imports this helper, so a change to it can break the patrol
       # without touching either file beside it — and the PR-time proof this
-      # trigger exists to give would not run. Same reasoning as the adopt list
-      # above, one layer down: an undeclared dependency is undeclared in every
-      # place that has to name it. (The adopted objectui copy carries this row
-      # already; upstream is catching up to its own port.)
+      # trigger exists to give would not run. An undeclared dependency is
+      # undeclared in every place that has to name it.
       - 'scripts/invoked-as.mjs'
       # The closed-card sweep this workflow also calls (#16005). Same reasoning
       # as the row above, one file along: a step whose script can change without
       # this trigger firing is a step whose PR-time proof is a coincidence.
       - 'scripts/pm/sweep-closed-cards.mjs'
+      # The citation census this workflow also calls (#18224). Same reasoning as
+      # the two rows above, one file along: a step whose script can change
+      # without this trigger firing is a step whose PR-time proof is a
+      # coincidence.
+      - 'scripts/check-issue-citations.mjs'
+      # The patrol's body. A glob, not the one file: anything added to that
+      # directory is part of what runs here.
+      - '.github/actions/half-state-patrol/**'
       - '.github/workflows/half-state-patrol.yml'
 
-# Least privilege: this job reads the repo and writes exactly one issue BODY.
-# `issues: write` is the narrowest scope GitHub offers for that edit; the job
-# never uses it for labels, comments, assignees or state, and the sweeper it
-# calls is read-only against the API by construction.
+# Least privilege: this job reads the repo and writes exactly one issue BODY,
+# plus the labels and comment the closed-card sweep is ruled to write. `issues:
+# write` is the narrowest scope GitHub offers for either edit; the sweeper the
+# patrol calls is read-only against the API by construction.
+#
+# `pull-requests: read` is READ-ONLY and buys one thing, for the citation
+# census step only — MEASURED on run 35495222460, this workflow's own
+# pull_request run WITHOUT this row: the census reported 3,628 unresolvable
+# citation sites where a full-scope read of the same tree reported 2,168, and
+# the difference is 1,460 — EXACTLY the `resolves-as-pull-request` tally.
+# `GET /repos/{owner}/{repo}/issues` answers with the pull requests omitted
+# unless this scope is held, so every citation naming a PR number was reported
+# as a number the board never had. A report-only reading that is wrong by 67%
+# is still a machine-readable surface telling a lie. ⛔ Do not drop this row
+# as tidying, and ⛔ do not widen it to `write`: nothing here writes a PR.
 permissions:
   contents: read
   issues: write
+  pull-requests: read
 
-# One patrol at a time. A scheduled run overlapping a manual dispatch would have
-# two runs racing to rewrite the same body, and the loser's findings would vanish
-# with no trace but an edit-history entry.
+# One patrol at a time. Two dispatches in flight at once — the shape that is left
+# now that nothing fires by the clock — would have two runs racing to rewrite the
+# same body, and the loser's findings would vanish with no trace but an
+# edit-history entry.
 concurrency:
   group: half-state-patrol
   cancel-in-progress: false
-
-env:
-  # The pinned anchor issue whose body this workflow owns — the ONE per-repo
-  # input this file takes (#11217).
-  #
-  # Resolution: the repository variable `HALF_STATE_ANCHOR_ISSUE` if set, else
-  # this repo's own pinned number, else EMPTY — and empty makes the job refuse
-  # to write rather than guess (see the "Resolve the anchor" step). The literal
-  # is guarded by the repository name on purpose: an unguarded fallback is what
-  # would let a verbatim copy in objectui rewrite ITS #9857 — some unrelated
-  # card — with this board's findings, silently and four times a day. A number
-  # is only ever meaningful in the repo it was minted in.
-  #
-  # TO ROTATE (here): open a new `tracking`-labeled issue, put its number below,
-  # and note the handover in the OLD issue's body before closing it (its edit
-  # history is the archive and does not travel).
-  # TO ADOPT (a sibling repo): change NOTHING here — set the repository variable.
-  #
-  # The anchor deliberately carries `tracking` and NO `domain:*` label: `tracking`
-  # is in the sweeper's own H13_EXEMPT_LABELS, so the anchor can never appear as a
-  # finding in the sweep it hosts.
-  #
-  # ⚠️ Folded scalar, and every continuation line sits at the SAME indent on
-  # purpose: a more-indented line in a `>-` block keeps its newline literally
-  # (measured on this very value), which would hand the expression parser a
-  # multi-line string instead of one expression.
-  ANCHOR_ISSUE: >-
-    ${{ vars.HALF_STATE_ANCHOR_ISSUE
-    || (github.repository == 'objectstack-ai/objectstack' && '9857')
-    || '' }}
 
 jobs:
   patrol:
@@ -206,54 +242,71 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # The patrol reads the SWEPT repo's own checkout for the passes that
+      # classify its workflows and its tracked files, so the checkout is the
+      # subject of the sweep rather than a source of the code that runs it.
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # Stays in the caller on purpose: `scripts/check-node-version.mjs` scans
+      # `.github/workflows/*.yml` only and reports how many setup-node steps it
+      # audited, so a step moved into the composite action would drop out of
+      # that census while the gate still printed OK. `.github/actions/setup-pnpm`
+      # records the same reasoning for the same gate.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: '22'
 
       # No `pnpm install`: the sweeper imports only `node:` builtins
-      # (`process`, `child_process`, `fs`, `url`), global `fetch`, and the one
-      # repo-local helper `../invoked-as.mjs` — no npm dependency, so installing
-      # the workspace here would buy nothing and would give a scheduled patrol a
-      # lockfile it could fail on. ⚠️ That repo-local import is why the adopt
-      # list above copies THREE files; this sentence read "imports nothing but
-      # `node:process` and global `fetch`" until 2026-09-03, which is the claim
-      # an adopter would have checked the copy list against.
-      - name: Run the live sweep
-        id: sweep
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # WHICH board this run reads: the repo this workflow is installed in,
-          # always. The sweeper would resolve the same answer on its own from
-          # the runner's `GITHUB_REPOSITORY` (`resolveSweepRepo`), and it is
-          # passed explicitly anyway so the wiring is visible to a reader of the
-          # workflow — the two agree by construction and a copy of this file
-          # cannot end up sweeping the repo it was copied FROM.
-          PM_SWEEP_REPO: ${{ github.repository }}
-          PROVENANCE: >-
-            run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            · commit `${{ github.sha }}` · trigger `${{ github.event_name }}`
-        run: |
-          set +e
-          node scripts/pm/check-half-states.mjs \
-            --format=markdown \
-            --provenance="$PROVENANCE" \
-            > "$RUNNER_TEMP/report.md" 2> "$RUNNER_TEMP/report.err"
-          code=$?
-          set -e
-          # Captured with NO pipe in between. `cmd | tail` would report the
-          # PIPE's status — `tail` essentially never fails, so a green and a red
-          # sweep both read as 0, and the script's own header calls this trap out
-          # by name (its exit codes are 0 / 2 / 3 and the split is the point).
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          echo "check-half-states exited $code"
-          cat "$RUNNER_TEMP/report.err" >&2 || true
+      # (`process`, `child_process`, `fs`, `url`), global `fetch`, and one
+      # repo-local helper — no npm dependency, so installing the workspace here
+      # would buy nothing and would give this patrol a lockfile it could fail
+      # on.
+      #
+      # `./` — the LOCAL action, deliberately, and this is the one consumer that
+      # should not pin a sha. A sibling pins one because it wants a reviewed
+      # moment between upstream landing a change and its board adopting it; this
+      # repo wants the opposite, because a PR editing the action must be proven
+      # by this job before it merges. Pinning here would exercise `main`'s copy
+      # of the thing under review.
+      - name: Sweep the board and update the anchor
+        uses: ./.github/actions/half-state-patrol
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # The pinned anchor issue whose body the patrol owns — this board's
+          # own number, and the one constant this file exists to carry.
+          #
+          # Resolution: the repository variable `HALF_STATE_ANCHOR_ISSUE` if
+          # set, else this repo's own pinned number, else EMPTY — and empty
+          # makes the action refuse to write rather than guess. The literal is
+          # guarded by the repository name even though this file no longer
+          # travels: the cheapest way to adopt the patrol is still to copy this
+          # caller, and an unguarded fallback is what would let such a copy
+          # rewrite some unrelated card in a sibling with this board's findings,
+          # silently, on every run it is given. A number is only ever meaningful
+          # the repo it was minted in.
+          #
+          # TO ROTATE (here): open a new `tracking`-labeled issue, put its
+          # number below, and note the handover in the OLD issue's body before
+          # closing it (its edit history is the archive and does not travel).
+          # TO ADOPT (a sibling repo): change NOTHING here — pass your own
+          # number to the action from your own caller.
+          #
+          # The anchor deliberately carries `tracking` and NO `domain:*` label:
+          # `tracking` is in the sweeper's own H13_EXEMPT_LABELS, so the anchor
+          # can never appear as a finding in the sweep it hosts.
+          #
+          # ⚠️ Folded scalar, and every continuation line sits at the SAME
+          # indent on purpose: a more-indented line in a `>-` block keeps its
+          # newline literally (measured on this very value), which would hand
+          # the expression parser a multi-line string instead of one expression.
+          anchor-issue: >-
+            ${{ vars.HALF_STATE_ANCHOR_ISSUE
+            || (github.repository == 'objectstack-ai/objectstack' && '9857')
+            || '' }}
 
       - name: Sweep the closed cards
-        id: closed-cards
         # #16005 — the pm-loop state labels are CLAIMS that work is in flight,
         # and GitHub leaves every label in place when a merged `Fixes` pull
         # request closes a card. The seat was paying a hand round trip per
@@ -263,30 +316,43 @@ jobs:
         # close-time hygiene rather than the backfill the 2026-08-31 maintainer
         # ruling refused.
         #
-        # ⛔ Gated on the repository NAME, unlike every other step in this file:
-        # this one is objectstack-only until a sibling has both its patrol
-        # anchor (objectui#5986) and a copy of the script. A verbatim copy of
-        # this workflow in a sibling repo therefore SKIPS this step rather than
-        # failing on a missing file.
+        # ⛔ NOT in the composite action, for two reasons that both say the same
+        # thing. It is the one step of the old file that was never
+        # repo-agnostic: it WRITES to cards under a ruling this repo's board
+        # took, and no sibling has taken it. And this workflow is the only place
+        # in CI that runs `scripts/pm/sweep-closed-cards.mjs --self-test`, which
+        # is how `scripts/check-self-test-wired.mjs` knows that self-test is
+        # run at all — that gate builds its population from `.github/workflows/`
+        # and nowhere else, so moving this step would leave it green while
+        # auditing one script fewer.
         #
-        # ⛔ This step never fails the job, whatever the sweep returns. The
-        # anchor write below is the patrol's product and must not be starved by
-        # a step that runs before it; the alarm rides an annotation and the run
-        # summary instead. Findings are not a failure condition here either —
-        # the same posture the sweep step above takes.
-        if: github.repository == 'objectstack-ai/objectstack'
+        # ⛔ This step never fails the job, whatever the sweep returns; the
+        # alarm rides an annotation and the run summary instead. Findings are
+        # not a failure condition here either — the same posture the patrol
+        # takes.
+        #
+        # It runs AFTER the patrol rather than before it, which is the one
+        # ordering change #18471 made. The anchor's content is unaffected: the
+        # half-state sweep still reads the board before this step touches it.
+        # What changes is that the patrol's product — the anchor write — can no
+        # longer be starved by anything this step does, which is what the old
+        # placement's own comment asked for and did not get. `!cancelled()`
+        # rather than an implicit `success()`: a patrol run that went red
+        # because it could not reach the board says nothing about whether this
+        # repo's closed cards still carry stale labels.
+        if: ${{ !cancelled() && github.repository == 'objectstack-ai/objectstack' }}
+        id: closed-cards
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Same wiring, and the same reason, as the live sweep above: the board
-          # this run acts on is the repo this workflow is installed in.
+          # The board this run acts on is the repo this workflow lives in.
           PM_SWEEP_REPO: ${{ github.repository }}
           PROVENANCE: >-
             posted by half-state-patrol [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
             · trigger `${{ github.event_name }}`
           # A pull_request run PROVES the step — the transport, the flags and
           # the rendering on a real runner — and writes nothing, exactly as the
-          # anchor write below is skipped for it. That convention is this file's
-          # and it is load-bearing: a PR must never write to the board.
+          # anchor write is skipped for it. That convention is this patrol's and
+          # it is load-bearing: a PR must never write to the board.
           SWEEP_MODE: ${{ github.event_name == 'pull_request' && '--dry-run' || '--write' }}
         run: |
           # The judge's own cases first, and the sweep only if they hold: this
@@ -316,9 +382,8 @@ jobs:
             > "$RUNNER_TEMP/closed-cards.md" 2> "$RUNNER_TEMP/closed-cards.err"
           code=$?
           set -e
-          # Captured with NO pipe in between, for the reason the step above
-          # states at length: piped, `$?` is the pipe's status and a red run and
-          # a green one read the same.
+          # Captured with NO pipe in between: piped, `$?` is the pipe's status
+          # and a red run and a green one read the same.
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           {
             echo "### Closed-card sweep — exit $code (\`$SWEEP_MODE\`)"
@@ -342,132 +407,121 @@ jobs:
             echo "::warning::closed-card sweep exited $code — at least one card was left UNJUDGED. An unjudged card is not a clean card; see this run's summary."
           fi
 
-      - name: Resolve the anchor issue
-        # An install with no anchor configured has nowhere to land its report,
-        # and the ONLY safe behaviour is to say so loudly (#11217). The two
-        # alternatives are both the failure this file exists to prevent:
-        # guessing a number would rewrite an unrelated card in this repo, and
-        # skipping the write quietly would leave a patrol that runs, finds, and
-        # tells nobody — indistinguishable from a clean board.
+      - name: Census the repo's issue citations
+        # #17512's gate, wired here by #18224 — the REPORT-ONLY half, and the
+        # posture is a ruling, not a preference. `--census` judges every
+        # citation in the gate's declared surfaces (the published release pages
+        # and package source docblocks), which is ~2,785 unresolvable sites on a
+        # tree nobody touched, and its verdict is NOT a function of this tree:
+        # #16783, #16786 and #16787 were measured RESOLVING on 2026-09-10 and
+        # 404 on 2026-09-14 with no change to this repository. That is exactly
+        # the shape this workflow exists for — a fact about a live shared board,
+        # not about whichever change happens to run CI next — so it belongs on
+        # the patrol lane and ⛔ NEVER on a blocking one. The DIFF-scoped half of
+        # the same gate is the blocking one and lives in `lint.yml`; the two
+        # postures are opposite on purpose and ⛔ neither moves to the other's
+        # lane.
         #
-        # Placed AFTER the sweep so the run summary still carries the rendered
-        # findings (the same "land the truth, then raise the alarm" order the
-        # final step keeps), and skipped on a pull_request run, which never
-        # writes an anchor at all.
-        if: github.event_name != 'pull_request'
-        run: |
-          if [ -z "${ANCHOR_ISSUE//[[:space:]]/}" ]; then
-            echo "::error::No anchor issue configured for ${{ github.repository }}. The sweep RAN (see the run summary) but has nowhere to land. Open a \`tracking\`-labeled anchor issue in this repo and set the repository variable HALF_STATE_ANCHOR_ISSUE to its number (Settings -> Secrets and variables -> Actions -> Variables)."
-            exit 1
-          fi
-          case "$ANCHOR_ISSUE" in
-            *[!0-9]*|'') echo "::error::HALF_STATE_ANCHOR_ISSUE is '$ANCHOR_ISSUE', which is not an issue number."; exit 1 ;;
-          esac
-          echo "anchor: #$ANCHOR_ISSUE in ${{ github.repository }}"
-
-      - name: Update the pinned anchor issue
-        # A pull_request run proves the sweep; it must not touch the board.
-        if: github.event_name != 'pull_request'
-        uses: actions/github-script@v9
+        # ⛔ NOT in the composite action this job `uses:` above — it is a step of
+        # the CALLER, for the same reason the closed-card sweep one step up
+        # states, plus two that are specific to a census of a TREE. All three
+        # are measurable on this repo rather than argued:
+        #
+        #   - It is not repo-agnostic. `scripts/check-issue-citations.mjs` is
+        #     objectstack-only, so the action's own "Locate the patrol sources"
+        #     step would have to either name it — and then REFUSE to run in
+        #     every sibling that adopted the action, which is the one thing that
+        #     action exists to make possible — or not name it, and leave a step
+        #     inside the action failing on a missing file in that sibling. The
+        #     repo-name gate below is what answers both, and it belongs where
+        #     the repository is the caller's own.
+        #   - The action runs its scripts from `steps.sources.outputs.root`, the
+        #     tree the ACTION ships from, while the board's checkout is
+        #     `github.workspace`; that split is deliberate and the action's own
+        #     comments carry it. This census's subject is the WORKSPACE tree's
+        #     declared surfaces, so from inside the action a sibling's run would
+        #     census objectstack's own release pages and report the count under
+        #     the sibling's name — a machine-readable surface telling a lie, the
+        #     failure this step's `permissions:` note above is about. In the
+        #     caller the two directories are the same one, on every install.
+        #   - `pull-requests: read` is granted by the `permissions:` block of
+        #     this file. A composite action declares no permissions and the
+        #     action's input documentation names only `issues: write` and
+        #     `contents: read`, so a census inside it would silently depend on a
+        #     scope no adopting caller was told to grant — measured above as a
+        #     reading wrong by 67%. A scope and its one consumer stay in one
+        #     file.
+        #
+        # WHERE THE REPORT GOES: this run's step summary and job log, plus one
+        # `::warning::` carrying the site count. ⛔ NOT the anchor issue — that
+        # body is owned end-to-end by `check-half-states.mjs`'s generator, and a
+        # second writer is how half of a generated body goes stale.
+        # HOW OFTEN: once per `workflow_dispatch` — this workflow has carried no
+        # schedule since ruling #208 (objectstack#19497) — plus the
+        # `pull_request` runs the paths filter above admits.
+        # WHAT IT COSTS AND WHO PAYS: the census enumerates the whole board once
+        # (159 requests on this repo at the time of writing, cursor-paginated —
+        # the alternative is one request per distinct number). It is paid by
+        # THIS repository's own `secrets.GITHUB_TOKEN` core quota, the same
+        # 5,000/hour this job already draws the live sweep from: ~159 requests
+        # per run, ~3% of a single hour's allowance, and no standing daily draw
+        # at all now that a seat has to ask for each run. ⛔ No PAT, no
+        # cross-repo credential — the file's own rule.
+        #
+        # ⛔ Gated on the repository NAME, for the reason the closed-card sweep
+        # above states: this script is objectstack-only until a sibling has a
+        # copy, and a verbatim copy of this workflow elsewhere must SKIP rather
+        # than fail on a missing file.
+        #
+        # ⛔ `!cancelled()` rather than an implicit `success()`, and this
+        # placement has to SPELL that rather than inherit it. While the patrol's
+        # steps were written inline in this file, this step sat ABOVE the one
+        # step that fails the job, so it ran whatever the sweep returned. The
+        # patrol is now a single `uses:` step that goes red itself when the
+        # sweep could not read the board, so a default `success()` here would
+        # skip the census on exactly the runs where the patrol is down. This
+        # step reads neither the sweep's exit code nor its files: a patrol that
+        # could not reach the board says nothing about whether the citations in
+        # this tree resolve.
+        #
+        # ⛔ This step never fails the job, whatever the census returns —
+        # findings are not a failure condition here, and neither is a census
+        # that could not read the board: that is an alarm (`::error::`), not a
+        # gate. LAST on purpose, after the patrol's own anchor write and after
+        # the closed-card sweep: the anchor is this patrol's product, this job
+        # has a 15-minute timeout, and a report-only reading must never be able
+        # to starve the thing the workflow exists to deliver.
+        if: ${{ !cancelled() && github.repository == 'objectstack-ai/objectstack' }}
         env:
-          SWEEP_EXIT: ${{ steps.sweep.outputs.exit_code }}
-        with:
-          # Delivery is retried, never assumed (#9575): this single PATCH is the
-          # entire product of the run, and a transient answer from the issues
-          # endpoint would otherwise discard a completed sweep.
-          retries: 3
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            const exitCode = Number(process.env.SWEEP_EXIT);
-            const anchor = Number(process.env.ANCHOR_ISSUE);
-            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
-            const read = (name) => {
-              try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8'); }
-              catch { return ''; }
-            };
-
-            // The composition split, deliberately: a COMPLETED sweep renders its
-            // own body (in the script, where --self-test pins every property of
-            // it). Only the did-not-run body is composed here, because saying
-            // "my callee failed" is the caller's job and the script's classified
-            // output is already the authored explanation — this wraps it, it
-            // does not re-word it.
-            let body;
-            if (exitCode === 0) {
-              body = read('report.md');
-              if (!body.trim()) {
-                throw new Error('the sweep exited 0 but produced an empty report — refusing to blank the anchor');
-              }
-            } else {
-              const classified = (read('report.err') || read('report.md') || '(no output captured)').trim();
-              const kind = exitCode === 3
-                ? 'PREREQUISITE NOT MET — the runner could not reach the board'
-                : 'SWEEP FAILED — an unclassified failure';
-              body = [
-                'os-half-state-sweep — machine-findable marker for this generated view.',
-                '',
-                `# ⛔ THE SWEEP DID NOT RUN (exit ${exitCode})`,
-                '',
-                `_Attempted ${new Date().toISOString()} · [run log](${runUrl}) · ${kind}._`,
-                '',
-                'Nothing below is a finding. **No issue was judged**, so this body says nothing about whether',
-                'the board carries half-states — it is not a clean board and it is not a dirty one, it is no',
-                'reading at all. A sweep that could not run must never read as a clean board.',
-                '',
-                'The standing patrol is DOWN until this is fixed; the previous run\'s findings are in this',
-                'issue\'s edit history. The sweeper\'s own classified output:',
-                '',
-                '```',
-                classified,
-                '```',
-              ].join('\n');
-            }
-
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: anchor,
-              body,
-            });
-            core.info(`anchor #${anchor} updated (${body.length} chars, sweep exit ${exitCode})`);
-
-      - name: Publish the rendered body to the run summary
-        # Always: on a PR this IS the delivery, and on a scheduled run it makes
-        # the run log self-contained when someone opens it after an alert.
-        if: always()
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set +e
+          node scripts/check-issue-citations.mjs --census \
+            > "$RUNNER_TEMP/issue-citations.md" 2> "$RUNNER_TEMP/issue-citations.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between, for the reason the two steps above
+          # state at length: piped, `$?` is the pipe's status and a red run and a
+          # green one read the same.
           {
-            echo "### Half-state patrol — sweep exit ${{ steps.sweep.outputs.exit_code }}"
+            echo "### Issue-citation census — exit $code (report-only)"
             echo
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              echo "_Anchor write skipped: a pull_request run proves the sweep without touching the board._"
-              echo
-            fi
-            echo '<details><summary>Rendered anchor body</summary>'
-            echo
-            cat "$RUNNER_TEMP/report.md" 2>/dev/null || echo '(no report produced)'
-            echo
-            echo '</details>'
+            echo '```'
+            cat "$RUNNER_TEMP/issue-citations.md" 2>/dev/null || echo '(no report produced)'
+            echo '```'
             echo
             echo '<details><summary>stderr</summary>'
             echo
             echo '```'
-            cat "$RUNNER_TEMP/report.err" 2>/dev/null || true
+            cat "$RUNNER_TEMP/issue-citations.err" 2>/dev/null || true
             echo '```'
             echo
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Fail the run if the sweep could not run
-        # LAST, on purpose: the anchor is updated with the did-not-run report
-        # BEFORE the job goes red. Land the truth, then raise the alarm — a run
-        # that failed early would leave the previous body in place with its old
-        # timestamp, which is precisely the stale-reads-as-clean shape above.
-        #
-        # Findings are NOT a failure condition and never appear here: exit 0 with
-        # 40 half-states is a successful patrol.
-        if: steps.sweep.outputs.exit_code != '0'
-        run: |
-          echo "::error::check-half-states exited ${{ steps.sweep.outputs.exit_code }} — the standing patrol did not read the board. See the anchor issue and this run's stderr."
-          exit 1
+          cat "$RUNNER_TEMP/issue-citations.err" >&2 || true
+          if [ "$code" != "0" ]; then
+            echo "::error::issue-citation census exited $code — the board was NOT read, so this run says nothing about whether unresolvable citations are accumulating. A census that could not run is not a clean census. See this run's summary."
+          else
+            sites=$(sed -n 's/^.*census: \([0-9][0-9]*\) unresolvable citation site(s).*$/\1/p' "$RUNNER_TEMP/issue-citations.md" | tail -1)
+            echo "::warning::issue-citation census: ${sites:-unknown} unresolvable citation site(s) in the declared surfaces. Report-only — the blocking half judges only what a change ADDS."
+          fi

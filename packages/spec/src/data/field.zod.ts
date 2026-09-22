@@ -1210,8 +1210,21 @@ export const FieldSchema = lazySchema(() => {
   // larger declaration could only ever crash a reader. See
   // {@link MAX_RENDERABLE_SCALE} for the measurement and why the number is
   // the platform's rather than a policy.
+  // #19320 — and on ONE type the declared number is not the stored allowance.
+  // Maintainer ruling batch #161 item 3 letter B (2026-09-18): on a `percent`
+  // field `scale` counts the decimal places of the PERCENTAGE-POINT value as
+  // displayed and entered — the landed objectui#9295 convention — and the
+  // storage side DERIVES from the field's storage scale instead of being
+  // declared a second time. A fraction-stored percent (`percentScaleOf` =
+  // `fraction`) holds the same quantity two places further right, so
+  // `packages/objectql`'s `max_scale` branch allows it `scale + 2`; a
+  // whole-percent field (`max` above 1) stores the displayed number itself and
+  // is allowed exactly `scale`, as is every other numeric type.
+  // ⛔ Both halves belong in the `.describe()` and not only in this comment:
+  // the field reference page is generated from the describe, and an author who
+  // reads only that page is exactly the author the ruling is about.
   scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places (integer 0-100). The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
+    .describe('Decimal places (integer 0-100). OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. Every other numeric type is allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**

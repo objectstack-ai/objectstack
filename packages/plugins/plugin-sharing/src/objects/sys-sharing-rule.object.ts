@@ -185,16 +185,26 @@ export const SysSharingRule = ObjectSchema.create({
       label: 'Recipient',
       required: true,
       maxLength: 200,
-      // Rendered as a record picker whose target object follows recipient_type
-      // (dependsOn: recipient_type): sys_user / sys_team / sys_business_unit /
-      // sys_position. Stores the value the evaluator matches on — a record id
-      // for user/team/business_unit, the position NAME for `position`, and for
-      // `field` (#15072) the NAME of a user-typed field of the shared object
-      // (the picker has no mapping for that kind and degrades to its text
-      // input, which is the right input for a field name). Falls back to a
-      // text input when the widget is unavailable.
+      // Rendered as a record picker whose target object follows recipient_type:
+      // sys_user / sys_team / sys_business_unit / sys_position. Stores the
+      // value the evaluator matches on — a record id for user/team/
+      // business_unit, the position NAME for `position`, and for `field`
+      // (#15072) the NAME of a user-typed field of the shared object, which the
+      // picker offers from the object named in the sibling `object_name`: its
+      // "holds users" predicate is a clause-for-clause copy of this plugin's
+      // own `fieldHoldsUsers`. Falls back to a text input when the widget is
+      // unavailable.
+      //
+      // `dependsOn` names BOTH siblings the widget reads — `recipient_type`
+      // picks the mode, and in `field` mode `object_name` decides whose columns
+      // are offered, the same dependency `criteria_json` declares a few lines
+      // up. Declaring only the first was masked by the form renderer handing
+      // widgets the WHOLE watched record instead of a `dependsOn`-scoped slice;
+      // a renderer that ever scoped it — which is what this key asks for —
+      // would drop the object name and degrade `field` mode to a plain text
+      // input in silence.
       widget: 'recipient-picker',
-      dependsOn: ['recipient_type'],
+      dependsOn: ['recipient_type', 'object_name'],
       description: 'The specific user, team, business unit or position that receives access — or, for the "Field" recipient type, the name of the record field that holds the user or users to share with.',
       group: 'Recipient',
     }),

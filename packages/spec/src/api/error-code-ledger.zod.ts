@@ -1093,6 +1093,32 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_METADATA',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
+    // [#19307] The data door's duplicate-name refusal on `sys_permission_set`
+    // — `PermissionSetNameConflictError` (`errors.ts`), thrown by the
+    // ADR-0094 D3 write-through middleware's insert leg
+    // (`permission-set-projection.ts`) when a set with that machine name
+    // already exists. `code` / `status` via the package's exported
+    // `PERMISSION_SET_NAME_CONFLICT_CODE` / `PERMISSION_SET_NAME_CONFLICT_STATUS`.
+    //
+    // THIRD EMITTER of a code `@objectstack/rest` (SQL conflict) and
+    // `@objectstack/driver-memory` (in-memory uniqueness refusal) already
+    // register, and the wire identity is deliberately the SAME for the reason
+    // their rows give: this object declares `{ fields: ['name'], unique:
+    // 'organization' }`, so the very same collision answers `409
+    // UNIQUE_VIOLATION` when the index catches it instead of this pre-check
+    // (the reading recorded on that index, #8554). A second spelling here
+    // would make one condition answer two envelopes depending only on which
+    // layer got there first. Per this file's header, a code emitted by
+    // several packages is listed once per emitting package — provenance, not
+    // identity; the union, its casing and every other package's rows are
+    // unchanged.
+    //
+    // Wire-reachable by the test the "Retiring a code" section applies
+    // (#8035), measured live on `examples/app-showcase` over a cookie session:
+    // `POST /api/v1/data/sys_permission_set {"name":"<a name already taken>"}`
+    // answers `409` with this code on the flat `{ error, code }` responder
+    // (`mapDataError`'s declared-status 4xx arm, `thrownCodeFields`).
+    'UNIQUE_VIOLATION',
   ],
   '@objectstack/plugin-webhooks': [
     // [#13353] The redeliver endpoint's malformed-body refusal — the plugin
@@ -1626,21 +1652,6 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       '(kernel/metadata-protection.zod.ts) construct the structured refusal, and the ' +
       'protocol layer — the registered emitter — turns it into the 403 the wire carries ' +
       '(ADR-0010 §3.3). Spec ships schemas and pure helpers, never an HTTP door.',
-  },
-  {
-    package: '@objectstack/plugin-sharing',
-    code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
-    registeredUnder: '@objectstack/objectql',
-    reason: 'Matches the code, never emits it (#14754, adjudicated on #14937 — maintainer ' +
-      'ruling A, 2026-09-04): `ENGINE_ORGANIZATION_REFUSAL_CODE` in ' +
-      '`plugin-sharing/src/sharing-rule-service.ts` is a `constdef` the per-grant catch in BOTH ' +
-      'reconcile loops compares an incoming `err.code` against, so exactly one engine refusal is ' +
-      'absorbed and a refused grant no longer aborts the pass or its stale-row revocations. The ' +
-      'emitter is `@objectstack/objectql` (`SystemWriteOrganizationRequiredError`, ' +
-      'tenancy/system-write-organization.ts) and the objectql owner key already carries the row ' +
-      '(#8844). Recognising a code is not emitting it; the named constant is typed FROM the ' +
-      'engine\'s own declaration so it cannot drift from what the engine throws. Removed together ' +
-      'with the stamp site when #14936 lands and objectql publishes a recognizer.',
   },
   {
     package: '@objectstack/types',

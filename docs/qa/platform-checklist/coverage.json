@@ -257,6 +257,13 @@
         "search.command-palette-navigation"
       ]
     },
+    "rest_api": {
+      "$comment": "Mapped 2026-09-21 (#14640) when RestApiConfigSchema — the FIFTH RestServerConfig sub-object — was enrolled as a liveness ledger, which is what put this kind in the ratchet's universe. ⚠️ READ WHAT THESE TWO ITEMS DO AND DO NOT COVER, because it is narrower than the three sibling `api-backend.rest-*-config-contract` items and pretending otherwise is the manufactured-coverage failure this file exists to stop. COVERED, on the DEFAULT config: route-ledger-live-parity boots the real stack and fires a representative route per family — discovery, openapi, metadata, ui, crud, batch, search — so the eight `enable*` switches are observed at their default (on) values by the mounts they gate, and every probe addresses `{apiPath}/…`; qa-suite-execution derives that prefix from RestApiConfigSchema's own `apiPath ?? {basePath}/{version}` and memoises a `/discovery` probe per run, so `version` / `basePath` / `apiPath` are exercised as the contract rather than as a literal. NOT COVERED: the NON-DEFAULT variants. The three sibling sub-objects each have a dedicated item that constructs a RestServer with a non-default block in a scratch vitest harness and reads getRoutes() back; the `api` sub-object has no such item, so `enableCrud: false` mounting nothing, a moved `apiPath`, and `projectResolution` deciding whether the unscoped legacy routes mount alongside the scoped ones are all unverified. An `api-backend.rest-api-config-contract` item on the siblings' shape is the gap, and it is authoring work with its own measurement, not a line in this file. ALSO NOT COVERED, and deliberately not a waiver: `api.documentation` and `api.responseFormat` are `dead` in the ledger — normalized and read by nothing — so there is no behaviour to drive; the enforce-or-remove call on them (ADR-0049) is a follow-up on the human floor, and whichever way it goes is what gives them a testable surface. ⛔ Not mapped to enforce-or-remove-authoring-gates, although route_generation is: this schema's `requireAuth` tombstone is `.omit()`ed by the REST seam on purpose (#3963 chose warn-and-ignore), so it does NOT refuse at construction the way that item's samples do — the tombstone that does refuse is the STACK-side twin, a different key on a different schema.",
+      "items": [
+        "api-backend.route-ledger-live-parity",
+        "cli.qa-suite-execution"
+      ]
+    },
     "route_generation": {
       "items": [
         "api-backend.rest-route-generation-tombstones",

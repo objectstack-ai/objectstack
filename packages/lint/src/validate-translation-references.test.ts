@@ -628,12 +628,12 @@ describe('validateTranslationReferences — apps, dashboards, global actions', (
  * all three placements here is what keeps that true.
  */
 describe('validateTranslationReferences — contributed navigation (#18203)', () => {
-  /** Package `crm_core` owns the app; package `crm_service` contributes into it. */
+  /** Package `com.example.crm-core` owns the app; package `com.example.crm-service` contributes into it. */
   const contributedArtifact = (contributions: unknown[]) => ({
     packages: [
       {
         manifest: {
-          id: 'crm_core',
+          id: 'com.example.crm-core',
           apps: [
             {
               name: 'crm_enterprise',
@@ -645,7 +645,7 @@ describe('validateTranslationReferences — contributed navigation (#18203)', ()
           ],
         },
       },
-      { manifest: { id: 'crm_service', navigationContributions: contributions } },
+      { manifest: { id: 'com.example.crm-service', navigationContributions: contributions } },
     ],
     objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
     apps: [
@@ -777,7 +777,7 @@ describe('validateTranslationReferences — contributed navigation (#18203)', ()
   it('reads contributions off the stack\'s own top-level `manifest` when there is no `packages[]`', () => {
     const findings = validateTranslationReferences({
       manifest: {
-        id: 'crm_service',
+        id: 'com.example.crm-service',
         navigationContributions: [
           { app: 'crm_enterprise', group: 'group_service', items: [{ id: 'nav_case', type: 'object' }] },
         ],
@@ -799,10 +799,10 @@ describe('validateTranslationReferences — contributed navigation (#18203)', ()
    */
   it('accepts the key in the per-package leg, where the app owner declares no contribution itself', () => {
     const artifactPackages = [
-      { manifest: { id: 'crm_core', apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }] } },
+      { manifest: { id: 'com.example.crm-core', apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }] } },
       {
         manifest: {
-          id: 'crm_service',
+          id: 'com.example.crm-service',
           navigationContributions: [
             { app: 'crm_enterprise', group: 'group_service', items: [{ id: 'nav_case', type: 'object' }] },
           ],
@@ -810,7 +810,7 @@ describe('validateTranslationReferences — contributed navigation (#18203)', ()
       },
     ];
     const ownerBody = {
-      id: 'crm_core',
+      id: 'com.example.crm-core',
       apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }],
       translations: localeKeys('nav_case'),
     };
@@ -929,7 +929,7 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
    */
   it('reads an extension declared by a SIBLING package of the same artifact', () => {
     const ownerBody = {
-      id: 'crm_core',
+      id: 'com.example.crm-core',
       objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
       translations: [{ 'zh-CN': { objects: { crm_lead: { fields: { sla_tier: { label: 'SLA 等级' } } } } } }],
     };
@@ -937,7 +937,7 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
       { manifest: ownerBody },
       {
         manifest: {
-          id: 'crm_service',
+          id: 'com.example.crm-service',
           objectExtensions: [{ extend: 'crm_lead', fields: { sla_tier: { type: 'text' } } }],
         },
       },
@@ -1097,7 +1097,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
   };
   /** The contributor package's own assembled body: contributions, translations, no apps. */
   const contributorBody = (bundleApps: Record<string, unknown>) => ({
-    id: 'crm_service',
+    id: 'com.example.crm-service',
     navigationContributions: [contribution],
     translations: [{ 'zh-CN': { apps: bundleApps } }],
   });
@@ -1109,7 +1109,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
   });
   const ownerEntry = {
     manifest: {
-      id: 'crm_core',
+      id: 'com.example.crm-core',
       apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }],
     },
   };
@@ -1126,7 +1126,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
 
   it('accepts it on the single-`defineStack` shape, contributions on the stack\'s own `manifest`', () => {
     const findings = validateTranslationReferences({
-      manifest: { id: 'crm_service', navigationContributions: [contribution] },
+      manifest: { id: 'com.example.crm-service', navigationContributions: [contribution] },
       translations: [{ 'zh-CN': { apps: { crm_enterprise: { navigation: { nav_case: { label: '个案' } } } } } }],
     });
     expect(findings).toEqual([]);
@@ -1185,7 +1185,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
    */
   it('keeps contributed ids per app', () => {
     const body = {
-      id: 'crm_service',
+      id: 'com.example.crm-service',
       navigationContributions: [contribution, { app: 'ops_console', items: [{ id: 'nav_ops', type: 'dashboard' }] }],
       translations: [{ 'zh-CN': { apps: { ops_console: { navigation: { nav_case: { label: '个案' } } } } } }],
     };
@@ -1197,7 +1197,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
 
   it('resolves the app even when no contributed item carries an id, and says so', () => {
     const body = {
-      id: 'crm_service',
+      id: 'com.example.crm-service',
       navigationContributions: [{ app: 'crm_enterprise', items: [{ type: 'object', objectName: 'crm_case' }] }],
       translations: [{ 'zh-CN': { apps: { crm_enterprise: { navigation: { nav_case: { label: '个案' } } } } } }],
     };
@@ -1413,6 +1413,461 @@ describe('validateTranslationReferences — an object a SIBLING package of the a
     });
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_account');
+  });
+});
+
+/**
+ * ⭐ #19349 — the remaining COLLECTION rungs of the same rule, on the same
+ * per-package leg, closed by the same carrier #19064 closed the object rung on.
+ *
+ * `os build` judges each package body as its own stack
+ * (`packageBodyAsStack(body, entries)`, `compile.ts` step 3b-ii). On that leg
+ * `stack.views` / `.pages` / `.actions` / `.apps` / `.dashboards` / `.flows`
+ * each hold ONE package's declarations, so a package translating something a
+ * SIBLING package of the same artifact declares had the key reported
+ * `translation-target-unknown` at `error` — the remedy advising a deletion the
+ * runtime honours. Measured on a throwaway probe before anything was touched:
+ * one `error` per level, at `translations[0]["zh-CN"].dashboards.crm_overview`,
+ * `….flows.lead_conversion`, `….globalActions.export_all`,
+ * `….objects.crm_order._views.board`, `….objects.crm_order._tabs.mine` and
+ * `….apps.crm_app`.
+ *
+ * ⛔ Not a new resolution-context decision, and not a new carrier: every one of
+ * these six keys carries disposition `concat` in `COMPOSE_KEY_DISPOSITIONS`,
+ * which is what puts it inside `ASSEMBLED_PACKAGE_BODY_DISPOSITIONS` and so
+ * inside an ADR-0130 D4 entry's assembled body — the same proof
+ * `objectExtensionsByTarget` (#18441) and `artifactProvidedRecords` (#19064)
+ * rest on. ADR-0130 makes the release artifact the co-ownership boundary.
+ *
+ * ## Why every one of these folds RECORDS, and ⛔ never names
+ *
+ * The judgement #19064 asked the taker to make per level, made per level:
+ *
+ *  - `dashboards`, `flows`, `apps` are keyed by their own name and carry a
+ *    SUB-RUNG derived from the record (widget ids and header `actionUrl`s,
+ *    screen node ids and their `config.fields[].name`, navigation ids). A
+ *    name-only fold would resolve the top key and then judge that sub-rung
+ *    against an EMPTY set, reporting every child key as an orphan — the trap
+ *    #19064 recorded one rung up, moved one rung down.
+ *  - `actions` is keyed by name, but the stored RECORD is itself read
+ *    downstream: `checkActionParams` judges `params.<name>` off it. Folding a
+ *    bare name would have nothing to give it.
+ *  - `views` and `pages` have no top-level bundle rung at ALL — they are pure
+ *    fact contributors into `objects.<name>` (`_views`, `_sections`, `_tabs`).
+ *    There is no name to fold: the record is the only thing that carries both
+ *    the fact and the object it binds to.
+ *
+ * ⇒ all six fold records, for three different reasons — ⛔ not one assumption
+ * applied six times.
+ */
+describe('validateTranslationReferences — collection rungs a SIBLING package of the artifact declares (#19349)', () => {
+  /**
+   * `examples/app-multi-package`'s shape: `core` declares, `orders` translates.
+   *
+   * ⚠️ `views` and `pages` here are bound to `crm_order` — the object the
+   * TRANSLATING package declares — deliberately. That isolates these rungs from
+   * #19064's object fold: if the object rung regressed, these cases would fail
+   * for the wrong reason and the `_views` / `_tabs` reading would be worthless.
+   */
+  const SIBLING_BODY = {
+    id: 'com.example.multi.core',
+    views: [{ name: 'board', object: 'crm_order' }],
+    pages: [
+      { name: 'order_console', object: 'crm_order', interfaceConfig: { userFilters: { tabs: [{ name: 'mine' }] } } },
+    ],
+    // Two actions: one object-less (the `globalActions` rung) and one bound to
+    // the translating package's own object (the routing control below).
+    actions: [
+      { name: 'export_all', label: 'Export all' },
+      { name: 'recalc_totals', label: 'Recalculate', objectName: 'crm_order' },
+    ],
+    apps: [{ name: 'crm_app', navigation: [{ id: 'leads' }] }],
+    dashboards: [
+      { name: 'crm_overview', widgets: [{ id: 'pipeline' }], actions: [{ actionUrl: '/orders/new' }] },
+    ],
+    flows: [
+      { name: 'lead_conversion', nodes: [{ id: 'qualify', type: 'screen', config: { fields: [{ name: 'amount' }] } }] },
+    ],
+  };
+
+  const ownBody = (data: Record<string, unknown>) => ({
+    id: 'com.example.multi.orders',
+    objects: [{ name: 'crm_order', fields: { number: { type: 'text' } } }],
+    translations: [{ 'zh-CN': data }],
+  });
+  /** `packageBodyAsStack(body, entries)` — the body IS its own manifest. */
+  const asPerPackageLeg = (body: Record<string, unknown>, entries: unknown[]) => ({
+    ...body,
+    manifest: body,
+    packages: entries,
+  });
+  /** The artifact leg: this package beside the sibling that declares. */
+  const perPackageLeg = (data: Record<string, unknown>) => {
+    const body = ownBody(data);
+    return validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }, { manifest: SIBLING_BODY }]));
+  };
+  /** ⭐ The reproduction, kept as the control: the same bundle, judged ALONE. */
+  const aloneLeg = (data: Record<string, unknown>) => {
+    const body = ownBody(data);
+    return validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]));
+  };
+  const onlyPath = (findings: ReturnType<typeof perPackageLeg>) => findings.map((f) => f.path);
+
+  describe('dashboards', () => {
+    const KEY = { dashboards: { crm_overview: { widgets: { pipeline: '管道' } } } };
+
+    it('CONTROL — judged ALONE the very same bundle still errors', () => {
+      const findings = aloneLeg(KEY);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        severity: 'error',
+        path: 'translations[0]["zh-CN"].dashboards.crm_overview',
+      });
+    });
+
+    it('accepts the dashboard key, its widget ids and its header actions', () => {
+      expect(perPackageLeg(KEY)).toEqual([]);
+      expect(perPackageLeg({ dashboards: { crm_overview: { actions: { '/orders/new': '新建' } } } })).toEqual([]);
+    });
+
+    it('NON-DEGENERACY — a dashboard NO package of the artifact declares still errors', () => {
+      const findings = perPackageLeg({ dashboards: { zzz_no_dashboard: { widgets: { a: 'x' } } } });
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        severity: 'error',
+        path: 'translations[0]["zh-CN"].dashboards.zzz_no_dashboard',
+      });
+      // The remedy enumerates what the ARTIFACT provides — the evidence the
+      // fold reached this run at all, and not a vacuous hint assertion.
+      expect(findings[0].hint).toContain('Defined dashboards: crm_overview.');
+    });
+
+    it('NON-DEGENERACY — the sub-rung stays judged against the SIBLING declaration', () => {
+      const widget = perPackageLeg({ dashboards: { crm_overview: { widgets: { zzz_gone: 'x' } } } });
+      expect(onlyPath(widget)).toEqual(['translations[0]["zh-CN"].dashboards.crm_overview.widgets.zzz_gone']);
+      expect(widget[0].hint).toContain('Declared widget ids: pipeline.');
+      const action = perPackageLeg({ dashboards: { crm_overview: { actions: { '/zzz/gone': 'x' } } } });
+      expect(onlyPath(action)).toEqual(['translations[0]["zh-CN"].dashboards.crm_overview.actions./zzz/gone']);
+      expect(action[0].hint).toContain('Declared header actions: /orders/new.');
+    });
+
+    /**
+     * ⭐ The precedence pin, and a false-negative control in its own right: the
+     * declaration this leg is JUDGING keeps the slot, exactly as #19064 decided
+     * for objects and #18441 one collection over. A sibling's same-named
+     * dashboard must not make the sibling's widget ids addressable here.
+     */
+    it("keeps the stack's OWN declaration when a sibling declares the same dashboard name", () => {
+      const body = {
+        id: 'com.example.multi.orders',
+        dashboards: [{ name: 'crm_overview', widgets: [{ id: 'own_widget' }] }],
+        translations: [
+          { 'zh-CN': { dashboards: { crm_overview: { widgets: { own_widget: '本包', pipeline: '兄弟包' } } } } },
+        ],
+      };
+      const findings = validateTranslationReferences(
+        asPerPackageLeg(body, [{ manifest: body }, { manifest: SIBLING_BODY }]),
+      );
+      expect(onlyPath(findings)).toEqual([
+        'translations[0]["zh-CN"].dashboards.crm_overview.widgets.pipeline',
+      ]);
+    });
+  });
+
+  describe('flows', () => {
+    const KEY = { flows: { lead_conversion: { screens: { qualify: { fields: { amount: '金额' } } } } } };
+
+    it('CONTROL — judged ALONE the very same bundle still errors', () => {
+      const findings = aloneLeg(KEY);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        severity: 'error',
+        path: 'translations[0]["zh-CN"].flows.lead_conversion',
+      });
+    });
+
+    it('accepts the flow key, its screen node ids and their field names', () => {
+      expect(perPackageLeg(KEY)).toEqual([]);
+    });
+
+    it('NON-DEGENERACY — a flow NO package of the artifact declares still errors', () => {
+      const findings = perPackageLeg({ flows: { zzz_no_flow: {} } });
+      expect(onlyPath(findings)).toEqual(['translations[0]["zh-CN"].flows.zzz_no_flow']);
+      expect(findings[0].hint).toContain('Defined flows: lead_conversion.');
+    });
+
+    it('NON-DEGENERACY — both sub-rungs stay judged against the SIBLING declaration', () => {
+      const screen = perPackageLeg({ flows: { lead_conversion: { screens: { zzz_gone: {} } } } });
+      expect(onlyPath(screen)).toEqual(['translations[0]["zh-CN"].flows.lead_conversion.screens.zzz_gone']);
+      expect(screen[0].hint).toContain('Declared screen node ids: qualify.');
+      const field = perPackageLeg({
+        flows: { lead_conversion: { screens: { qualify: { fields: { zzz_gone: 'x' } } } } },
+      });
+      expect(onlyPath(field)).toEqual([
+        'translations[0]["zh-CN"].flows.lead_conversion.screens.qualify.fields.zzz_gone',
+      ]);
+      expect(field[0].hint).toContain('Declared screen field names: amount.');
+    });
+  });
+
+  describe('globalActions (the `actions` collection)', () => {
+    const KEY = { globalActions: { export_all: { label: '全部导出' } } };
+
+    it('CONTROL — judged ALONE the very same bundle still errors', () => {
+      const findings = aloneLeg(KEY);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        severity: 'error',
+        path: 'translations[0]["zh-CN"].globalActions.export_all',
+      });
+    });
+
+    it('accepts an object-less action a sibling package declares', () => {
+      expect(perPackageLeg(KEY)).toEqual([]);
+    });
+
+    it('NON-DEGENERACY — an action NO package of the artifact declares still errors', () => {
+      const findings = perPackageLeg({ globalActions: { zzz_no_action: { label: 'x' } } });
+      expect(onlyPath(findings)).toEqual(['translations[0]["zh-CN"].globalActions.zzz_no_action']);
+      expect(findings[0].hint).toContain('Object-less actions: export_all.');
+    });
+
+    /**
+     * ⭐ The ROUTING control — the one false negative this rung can produce that
+     * the others cannot. A sibling action BOUND to an object resolves under
+     * `objects.<obj>._actions.<name>` and never under `globalActions`, so the
+     * fold must place it by its owner rather than make it globally addressable.
+     * Widening the `globalActions` map instead would accept a key the resolver
+     * never reads, which is the mirror image of the orphan this rule reports.
+     */
+    it('routes an object-BOUND sibling action to its owner, not to `globalActions`', () => {
+      expect(perPackageLeg({ objects: { crm_order: { _actions: { recalc_totals: { label: '重算' } } } } })).toEqual([]);
+      const findings = perPackageLeg({ globalActions: { recalc_totals: { label: '重算' } } });
+      expect(onlyPath(findings)).toEqual(['translations[0]["zh-CN"].globalActions.recalc_totals']);
+      expect(findings[0].message).toContain('is bound to object "crm_order"');
+      expect(findings[0].hint).toContain('Move these keys under `objects.crm_order._actions.recalc_totals`.');
+    });
+
+    /** The stored RECORD is what `checkActionParams` reads — so it is folded. */
+    it('judges `params` off the SIBLING record rather than an empty set', () => {
+      const body = {
+        id: 'com.example.multi.orders',
+        translations: [{ 'zh-CN': { globalActions: { export_all: { params: { zzz_gone: { label: 'x' } } } } } }],
+      };
+      const sibling = {
+        id: 'com.example.multi.core',
+        actions: [{ name: 'export_all', params: [{ name: 'format' }] }],
+      };
+      const findings = validateTranslationReferences(
+        asPerPackageLeg(body, [{ manifest: body }, { manifest: sibling }]),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0]["zh-CN"].globalActions.export_all.params.zzz_gone');
+      const ok = {
+        id: 'com.example.multi.orders',
+        translations: [{ 'zh-CN': { globalActions: { export_all: { params: { format: { label: '格式' } } } } } }],
+      };
+      expect(
+        validateTranslationReferences(asPerPackageLeg(ok, [{ manifest: ok }, { manifest: sibling }])),
+      ).toEqual([]);
+    });
+  });
+
+  describe('views and pages — pure fact contributors under an object', () => {
+    it('CONTROL — judged ALONE both rungs still error', () => {
+      expect(onlyPath(aloneLeg({ objects: { crm_order: { _views: { board: { label: '看板' } } } } }))).toEqual([
+        'translations[0]["zh-CN"].objects.crm_order._views.board',
+      ]);
+      expect(onlyPath(aloneLeg({ objects: { crm_order: { _tabs: { mine: { label: '我的' } } } } }))).toEqual([
+        'translations[0]["zh-CN"].objects.crm_order._tabs.mine',
+      ]);
+    });
+
+    it("accepts a view a sibling declares at the stack level over THIS package's object", () => {
+      expect(perPackageLeg({ objects: { crm_order: { _views: { board: { label: '看板' } } } } })).toEqual([]);
+    });
+
+    it("accepts a filter-preset tab a sibling's page declares over THIS package's object", () => {
+      expect(perPackageLeg({ objects: { crm_order: { _tabs: { mine: { label: '我的' } } } } })).toEqual([]);
+    });
+
+    it('NON-DEGENERACY — a view and a tab neither package declares still error', () => {
+      const view = perPackageLeg({ objects: { crm_order: { _views: { zzz_gone: { label: 'x' } } } } });
+      expect(onlyPath(view)).toEqual(['translations[0]["zh-CN"].objects.crm_order._views.zzz_gone']);
+      expect(view[0].hint).toContain('Declared views: board.');
+      const tab = perPackageLeg({ objects: { crm_order: { _tabs: { zzz_gone: { label: 'x' } } } } });
+      expect(onlyPath(tab)).toEqual(['translations[0]["zh-CN"].objects.crm_order._tabs.zzz_gone']);
+      expect(tab[0].hint).toContain('Declared tabs: mine.');
+    });
+
+    /**
+     * A sibling's page contributes `_sections` through the SAME component walk
+     * the stack's own pages go through — one collector, so the two cannot
+     * disagree about which anchors register a section name.
+     */
+    it("accepts a `record:details` section a sibling's page declares", () => {
+      const sibling = {
+        id: 'com.example.multi.core',
+        pages: [
+          {
+            name: 'order_detail',
+            object: 'crm_order',
+            regions: [
+              { components: [{ type: 'record:details', properties: { sections: [{ name: 'billing' }] } }] },
+            ],
+          },
+        ],
+      };
+      const body = ownBody({ objects: { crm_order: { _sections: { billing: { label: '账单' } } } } });
+      expect(
+        validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }, { manifest: sibling }])),
+      ).toEqual([]);
+      // …and the same bundle judged ALONE still errors.
+      expect(
+        onlyPath(validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]))),
+      ).toEqual(['translations[0]["zh-CN"].objects.crm_order._sections.billing']);
+    });
+  });
+
+  describe('apps — the half #18442 did NOT cover', () => {
+    /**
+     * ⚠️ #18442 closed the CONTRIBUTED-app level: an app becomes addressable
+     * when THIS package contributes into it through
+     * `manifest.navigationContributions`. That reads contributions, never
+     * declarations — so a sibling's `apps[]` entry was invisible on both
+     * halves, measured rather than assumed:
+     *
+     *   1. contributing nothing, the app NAME itself was the orphan;
+     *   2. contributing something, the name resolved through #18442 but the
+     *      sibling's own navigation ids were orphans — and were diagnosed
+     *      "this stack contributes no such item", advising a move to a package
+     *      that is right here in the artifact.
+     *
+     * Both are closed by folding the sibling's app RECORDS, which also lands
+     * them in `apps` BEFORE the contributed-only pass, so such an app is no
+     * longer flagged `contributedOnly` and gets the declared-app diagnosis.
+     */
+    const KEY = { apps: { crm_app: { navigation: { leads: '线索' } } } };
+
+    it('CONTROL — judged ALONE the very same bundle still errors, at the APP rung', () => {
+      const findings = aloneLeg(KEY);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        severity: 'error',
+        path: 'translations[0]["zh-CN"].apps.crm_app',
+      });
+    });
+
+    it('half 1 — accepts an app a sibling declares while this package contributes nothing', () => {
+      expect(perPackageLeg(KEY)).toEqual([]);
+    });
+
+    it('half 2 — a contributor sees the OWNER declaration beside its own contribution', () => {
+      const body = {
+        id: 'com.example.multi.orders',
+        navigationContributions: [{ app: 'crm_app', items: [{ id: 'orders' }] }],
+        translations: [{ 'zh-CN': { apps: { crm_app: { navigation: { leads: '线索', orders: '订单' } } } } }],
+      };
+      expect(
+        validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }, { manifest: SIBLING_BODY }])),
+      ).toEqual([]);
+    });
+
+    it('NON-DEGENERACY — an app NO package of the artifact declares or is contributed into still errors', () => {
+      const findings = perPackageLeg({ apps: { zzz_no_app: { navigation: { a: 'x' } } } });
+      expect(onlyPath(findings)).toEqual(['translations[0]["zh-CN"].apps.zzz_no_app']);
+      expect(findings[0].hint).toContain('Apps this stack defines or contributes into: crm_app.');
+    });
+
+    /**
+     * ⭐ Both the false-negative control for the nav rung AND the pin on the
+     * DIAGNOSIS: the sibling's declaration is readable here, so an unresolved
+     * id gets the declared-app wording, ⛔ never the contributed-only wording
+     * that would send the author to a package sitting in the same artifact.
+     */
+    it('NON-DEGENERACY — a nav id nothing declares still errors, with the DECLARED-app diagnosis', () => {
+      const findings = perPackageLeg({ apps: { crm_app: { navigation: { zzz_gone: 'x' } } } });
+      expect(onlyPath(findings)).toEqual(['translations[0]["zh-CN"].apps.crm_app.navigation.zzz_gone']);
+      expect(findings[0].hint).toContain('Declared navigation ids: leads.');
+      expect(findings[0].message).toContain('does not declare');
+      expect(findings[0].message).not.toContain('contributes into');
+    });
+
+    /**
+     * ⛔ …and the #18442 contributed-only path is NOT collaterally removed: an
+     * app whose owner is outside this artifact keeps its own diagnosis.
+     */
+    it('leaves #18442 intact — an app contributed into but owned OUTSIDE the artifact keeps its wording', () => {
+      const body = {
+        id: 'com.example.multi.orders',
+        navigationContributions: [{ app: 'other_app', items: [{ id: 'orders' }] }],
+        translations: [{ 'zh-CN': { apps: { other_app: { navigation: { orders: '订单', zzz_gone: 'x' } } } } }],
+      };
+      const findings = validateTranslationReferences(
+        asPerPackageLeg(body, [{ manifest: body }, { manifest: SIBLING_BODY }]),
+      );
+      expect(onlyPath(findings)).toEqual(['translations[0]["zh-CN"].apps.other_app.navigation.zzz_gone']);
+      expect(findings[0].message).toContain('contributes into');
+    });
+  });
+
+  describe('the widening is not a path', () => {
+    /**
+     * ⛔ Only the ADR-0130 D4 entry shape is read. A segment reference carries
+     * no manifest content, and inventing a name for one would be the mistake
+     * this context must not make — a name in here SILENCES the ladder.
+     */
+    it('an entry with no readable body makes nothing addressable, on every rung', () => {
+      const body = ownBody({
+        dashboards: { crm_overview: {} },
+        flows: { lead_conversion: {} },
+        globalActions: { export_all: {} },
+        apps: { crm_app: {} },
+        objects: { crm_order: { _views: { board: {} }, _tabs: { mine: {} } } },
+      });
+      const findings = validateTranslationReferences(
+        asPerPackageLeg(body, [{ manifest: body }, { ref: 'com.example.multi.core@1.0.0', integrity: 'sha512-zzz' }]),
+      );
+      expect(onlyPath(findings).sort()).toEqual(
+        [
+          'translations[0]["zh-CN"].apps.crm_app',
+          'translations[0]["zh-CN"].dashboards.crm_overview',
+          'translations[0]["zh-CN"].flows.lead_conversion',
+          'translations[0]["zh-CN"].globalActions.export_all',
+          'translations[0]["zh-CN"].objects.crm_order._tabs.mine',
+          'translations[0]["zh-CN"].objects.crm_order._views.board',
+        ].sort(),
+      );
+    });
+
+    /**
+     * The single-`defineStack` shape is untouched: all six are STACK
+     * collections, not manifest keys, so there is no `stack.manifest.<key>`
+     * form to read and a bundle keyed to a name nothing declares still errors.
+     */
+    it('leaves the single-stack shape alone — no `packages[]`, no widening', () => {
+      const findings = validateTranslationReferences({
+        objects: [{ name: 'crm_order', fields: { number: { type: 'text' } } }],
+        translations: [
+          {
+            'zh-CN': {
+              dashboards: { crm_overview: {} },
+              flows: { lead_conversion: {} },
+              globalActions: { export_all: {} },
+              apps: { crm_app: {} },
+              objects: { crm_order: { _views: { board: {} }, _tabs: { mine: {} } } },
+            },
+          },
+        ],
+      });
+      expect(findings).toHaveLength(6);
+      expect(findings.every((f) => f.rule === TRANSLATION_TARGET_UNKNOWN && f.severity === 'error')).toBe(true);
+    });
   });
 });
 

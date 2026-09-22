@@ -234,7 +234,7 @@ describe('syncAudienceBindingSuggestions (ADR-0090 D5/D9)', () => {
 
   it('ignores non-isDefault sets and unowned declarations', async () => {
     const ql = makeQl([
-      { enabled: true, manifest: { id: 'p1', permissions: [{ name: 'plain', objects: {} }] } },
+      { enabled: true, manifest: { id: 'com.example.p1', permissions: [{ name: 'plain', objects: {} }] } },
       { enabled: true, manifest: { permissions: [{ name: 'orphan', isDefault: true, objects: {} }] } },
     ]);
     const out = await syncAudienceBindingSuggestions(ql);

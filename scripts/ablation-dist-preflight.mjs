@@ -6,7 +6,12 @@
 //
 //   node scripts/ablation-dist-preflight.mjs <package> <marker>
 //   node scripts/ablation-dist-preflight.mjs <package> <marker> --absent
+//   node scripts/ablation-dist-preflight.mjs <package> <marker> --absent --source-marker=<source spelling>
 //   node scripts/ablation-dist-preflight.mjs --self-test
+//
+// Exit codes, one per question (see "Two questions, two readings" below):
+//   0 both readings pass   1 the dist/ reading failed   2 usage
+//   3 the tree reading failed   4 both failed
 //
 // ## The failure this exists to stop
 //
@@ -160,18 +165,86 @@
 // enumerating those three leaves every other generated-artifact package with
 // the same hole.
 //
-// ### Which leg you are on is DERIVED from the marker, not declared
+// ## Two questions, two readings -- and they do NOT share a marker
+//
+// This script answers two independent questions, and the measured defect was
+// that it answered them with ONE marker and ONE exit code:
+//
+//   dist  reading   is the mutation in / out of the BUILT artifact?
+//   tree  reading   is the WORKING TREE in the state this leg requires?
+//
+// The two read different artifacts, and a bundler re-spells literals on its way
+// from one to the other. WHICH re-spellings is a property of the BUILD, not a
+// rule you can carry between repositories or between configs, so the emitted
+// spelling is read out of `dist/` -- never out of a sentence like this one.
+//
+// Measured both ways on a real package build (`@objectstack/platform-objects`,
+// tsup 8.5.1, this package's own config, counted over `dist/**/*.js`):
+//
+//   as every tsup config in this repo builds       src   label: 'Operator'
+//   (none of the 21 sets `minify`; the only two    dist  label: "Operator"
+//   occurrences of the word on `main` are the      19666 x `label: "`, 0 x `label:"`
+//   `plugin build` CLI flag, default false)
+//
+//   the same build with --minify                   src   label: 'Operator'
+//                                                  dist  label:"Operator"
+//                                                  0 x `label: "`, 19666 x `label:"`
+//
+// So here the QUOTES change and the whitespace does not -- and one `--minify`
+// away both change. Either reading, one string cannot be both spellings, which
+// is what forces the split below.
+//
+// Getting the positional marker wrong is not a wrong answer, it is a PASS: a
+// spelling this build never emits scores 0 hits in `dist/`, and 0 hits is
+// exactly what `--absent` mode is looking for.
+//
+// Measured, on a DELETE ablation that dropped a form label (a package whose src
+// spells it with single quotes, whose dist emits double):
+//
+//   marker spelled as DIST emits it      dist reading GREEN (the true answer),
+//                                        tree reading RED -- "restore leg: 1
+//                                        path still differs from HEAD", telling
+//                                        the author to restore the very mutation
+//                                        being measured. exit 1.
+//   marker spelled as SOURCE spells it   tree reading GREEN (mutate leg found),
+//                                        dist reading GREEN **VACUOUSLY** -- that
+//                                        spelling was never in dist/ at all, so
+//                                        the pass proves nothing. exit 0.
+//
+// So the two readings demanded MUTUALLY EXCLUSIVE spellings, and the only
+// invocation that satisfied both limbs at once was the one that proved nothing.
+// The first shape refuses a correct ablation; the second certifies a vacuous
+// one -- the false green this whole script exists to stop, arriving through the
+// argument list.
+//
+// The fix is to stop making one string do two jobs. `--source-marker=<text>`
+// names the spelling the SOURCE carries; the tree reading probes with it and the
+// dist reading never sees it. Omit it and the tree reading falls back to the
+// positional marker, which is correct whenever the build does not re-spell.
+//
+// ### Which leg you are on is DERIVED from evidence, and "cannot tell" is its own answer
 //
 // A dirty tree is CORRECT on a mutate leg and WRONG on a restore leg, and the
 // two share a command line: `--absent` is both the delete-ablation mutate leg
-// and the plant-ablation restore leg (see the two-shapes section above). Rather
-// than grow a flag -- which would strand the three documents that state this
-// script's invocation, two of them governed surfaces no code PR may edit -- the
-// leg is read off the marker, per dirty path, against HEAD:
+// and the plant-ablation restore leg (see the two-shapes section above). The leg
+// is read off the marker, per dirty path, against HEAD -- evidence, never a
+// declaration. A `--leg=` flag was considered and rejected: the script cannot
+// check a claim, and a mistaken `--leg=mutate` at a real restore leg would
+// switch off the leaked-artifact catch below, which is the one thing here that
+// has already recovered a measured run.
 //
 //   present mode   a dirty path that GAINED the marker is the plant     -> MUTATE leg
 //   absent  mode   a dirty path that LOST the marker is the deleted guard -> MUTATE leg
-//   neither, on any dirty path                                          -> RESTORE leg
+//   the tree is CLEAN                                                   -> RESTORE leg, satisfied
+//   dirty, and no dirty path moves the marker either way                -> INDETERMINATE
+//
+// That fourth row used to be spelled RESTORE, and that collapse WAS the defect:
+// one leg value answering two different questions, "you are restoring" and "I
+// cannot tell which leg you are on". The failure of an inference is not a
+// finding, and reporting it as one is how a correct mutate leg got told to
+// restore itself. INDETERMINATE is RED -- refusing is the safe direction, and
+// the message carries BOTH readings with the exact remedy for each, because from
+// here the two are genuinely indistinguishable.
 //
 // On a MUTATE leg every other dirty path is REPORTED and never fatal: the build
 // was supposed to write them, and that is the earliest moment the restore leg's
@@ -185,6 +258,30 @@
 // A scratch file of your own trips this too, by design: at the restore leg the
 // honest statement is "this tree is not the tree you think you are measuring",
 // and the remedy (move it out, or restore it) is one line either way.
+//
+// ## The presence pre-condition: where it is sound, and where it is NOT
+//
+// `--absent` cannot, on its own, tell "the marker was removed" from "the marker
+// was never spelled that way here" -- the vacuous green above. The reason is not
+// an oversight, it is the clock: `--absent` runs AFTER the rebuild, and the
+// pre-mutation `dist/` no longer exists, so nothing readable at that moment
+// witnesses that the marker was ever in the artifact. A check bolted on here
+// would have to use a surviving proxy, and the only one is the SOURCE -- whose
+// spelling is, by the trap above, exactly the one that differs. It would fire on
+// the CORRECT invocation.
+//
+// So no dist-domain presence check is added. The presence pre-condition is paid
+// in the domain where a witness does survive: with `--source-marker`, a DELETE
+// ablation's mutate leg is green only when a tracked path HAD that literal at
+// HEAD and LOST it. That is evidence the construct existed and left, and it runs
+// alongside a dist reading taken in the emitted spelling -- so neither limb is
+// vacuous, which is precisely what the measured first attempt lacked.
+//
+// The dist-domain half is a reading, not a check, and it is taken one step
+// EARLIER: run this script in default (present) mode on the PRISTINE build,
+// before mutating, and the marker's presence in `dist/` is measured while the
+// evidence is still there. Every `--absent` pass therefore prints what it did
+// not prove, so exit 0 is never read as more than it is.
 //
 // Reading the tree is not optional and not skippable: a `git status` that
 // cannot be read is RED, like every other thing this script cannot see.
@@ -219,6 +316,102 @@ const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
 
 // Read as text, but never let a binary artifact fabricate a match.
 const BINARY_EXT = new Set(['.wasm', '.node', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.zip', '.gz', '.br']);
+
+// ---------------------------------------------------------------------------
+// Exit codes -- ONE PER QUESTION. A driver reads `status`, so the dist reading
+// and the tree reading must not share a code: when they did, a correct DELETE
+// ablation's mutate leg and a genuinely unrestored tree were the same exit 1,
+// and a driver that trusted it aborted the correct one.
+// ---------------------------------------------------------------------------
+export const EXIT_OK = 0;
+export const EXIT_DIST = 1; // the dist/ reading failed -- and every "cannot see" refusal
+export const EXIT_USAGE = 2;
+export const EXIT_TREE = 3; // the tree reading failed; the dist/ reading passed
+export const EXIT_BOTH = 4;
+
+/**
+ * Which spelling the TREE reading probes. The dist reading always uses the
+ * positional marker; this is the ONLY place the two are allowed to diverge, so
+ * it is a named function and not an inline fallback -- inline, the wiring is
+ * invisible to the self-test, and the wiring is exactly what the split is.
+ *
+ * Nullish coalescing, never `||`: an empty source marker must stay empty and be
+ * refused upstream, not silently fall back to the emitted spelling, which is the
+ * defect this whole split exists to remove.
+ */
+export function treeReadingMarker({ marker, sourceMarker }) {
+  return sourceMarker ?? marker;
+}
+
+/** The one place the two readings are combined into a status. */
+export function exitCodeFor({ distOk, treeOk }) {
+  if (distOk && treeOk) return EXIT_OK;
+  if (!distOk && !treeOk) return EXIT_BOTH;
+  return distOk ? EXIT_TREE : EXIT_DIST;
+}
+
+// ---------------------------------------------------------------------------
+// Argv -- the correct invocation is the ONLY invocation.
+//
+// `argv.includes('--absent')` plus `argv.filter((a) => !a.startsWith('--'))`
+// discarded every unrecognised flag in silence, so a typo'd `--absnet` ran the
+// OPPOSITE mode and printed a verdict that reads exactly like a real one. An
+// unknown option is now a usage refusal, and `--source-marker` has exactly one
+// spelling: written with a space its value would land in the marker position.
+// ---------------------------------------------------------------------------
+const SOURCE_MARKER_FLAG = '--source-marker';
+const KNOWN_FLAGS = new Set(['--absent', '--self-test']);
+
+/**
+ * Parse argv into `{ mode, pkgArg, marker, sourceMarker }`, or `{ usage }`.
+ * Pure, so the self-test can pin every refusal without spawning a process.
+ */
+export function parseArgs(argv) {
+  const positional = [];
+  let mode = 'present';
+  let sourceMarker = null;
+  for (const arg of argv) {
+    if (!arg.startsWith('--')) {
+      positional.push(arg);
+      continue;
+    }
+    if (KNOWN_FLAGS.has(arg)) {
+      if (arg === '--absent') mode = 'absent';
+      continue;
+    }
+    if (arg === SOURCE_MARKER_FLAG) {
+      return {
+        usage:
+          `\`${SOURCE_MARKER_FLAG}\` takes its value joined with "=" and in no other spelling: `
+          + `\`${SOURCE_MARKER_FLAG}=<the spelling the SOURCE carries>\`. Written with a space the value lands in `
+          + 'the marker position instead, and this run would measure the wrong string in both readings.',
+      };
+    }
+    if (arg.startsWith(`${SOURCE_MARKER_FLAG}=`)) {
+      sourceMarker = arg.slice(SOURCE_MARKER_FLAG.length + 1);
+      if (sourceMarker.trim().length === 0) {
+        return {
+          usage:
+            `\`${SOURCE_MARKER_FLAG}=\` is blank -- a blank marker matches every file, so the tree reading would `
+            + 'call the first dirty path your mutation. Give it the spelling the source carries, or drop the flag.',
+        };
+      }
+      continue;
+    }
+    return {
+      usage:
+        `unknown option "${arg}". The options are --absent, ${SOURCE_MARKER_FLAG}=<text> and --self-test, and `
+        + 'there are no others: an unrecognised flag used to be discarded in silence, so a mistyped "--absnet" ran '
+        + `the OPPOSITE mode and its verdict read like a real one. If "${arg}" is your marker, pass it after the `
+        + 'package name.',
+    };
+  }
+  const [pkgArg, marker, ...rest] = positional;
+  if (!pkgArg || !marker) return { usage: 'needs a package and a marker string.' };
+  if (rest.length > 0) return { usage: `unexpected extra argument "${rest[0]}" -- quote the marker if it contains spaces.` };
+  if (marker.trim().length === 0) return { usage: 'the marker is blank -- a blank marker matches everything and proves nothing.' };
+  return { mode, pkgArg, marker, sourceMarker };
+}
 
 /**
  * Parse the `packages:` globs out of pnpm-workspace.yaml (no YAML dependency).
@@ -332,7 +525,19 @@ export function verdict({ mode, distExists, scanned, codeHits, mapHits }) {
     return { ok: false, msg: `marker still present in ${codeHits} built file${codeHits === 1 ? '' : 's'} -- dist/ still carries the code you expected to be gone, so the run would test the wrong tree (and every later run in this worktree with it). Rebuild the package, then re-run this pre-flight.` };
   }
   const extra = mapHits > 0 ? ` (${mapHits} stale sourcemap hit${mapHits === 1 ? '' : 's'} ignored -- sourcemaps do not execute)` : '';
-  return { ok: true, msg: `marker absent from all ${scanned} built files${extra} -- the artifact the suite consumes no longer carries it.` };
+  // What this line does NOT say, and what a reader will supply for it if it is
+  // not said here: that the marker was ever IN dist/. A spelling this build
+  // never emits prints these exact words. The reading that settles it cannot be
+  // taken from here -- the pre-mutation artifact is gone by now -- so it is
+  // named instead of faked.
+  return {
+    ok: true,
+    msg:
+      `marker absent from all ${scanned} built files${extra} -- the artifact the suite consumes no longer `
+      + 'carries it. NOT proved by this line: that the marker was ever IN dist/ -- a spelling this build never '
+      + 'emits prints the same words. That reading is this script in default mode on the PRISTINE build, taken '
+      + 'BEFORE the mutation.',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -384,17 +589,36 @@ export function classifyTree({ mode, files }) {
   const explains = (f) => (mode === 'present' ? f.treeHas && !f.headHas : f.headHas && !f.treeHas);
   const mutated = files.filter(explains);
   const unaccounted = files.filter((f) => !explains(f));
-  return { leg: mutated.length > 0 ? 'mutate' : 'restore', mutated, unaccounted };
+  // Three legs, because there are three states. 'restore' is asserted only on a
+  // CLEAN tree; dirt this marker cannot explain is INDETERMINATE, never
+  // 'restore'. Collapsing those two was the defect: the failure of an inference
+  // is not a finding, and reported as one it told a correct DELETE mutate leg to
+  // restore the very mutation it was measuring.
+  let leg;
+  if (mutated.length > 0) leg = 'mutate';
+  else if (files.length === 0) leg = 'restore';
+  else leg = 'indeterminate';
+  return { leg, mutated, unaccounted };
 }
 
 /**
  * The whole-tree verdict, pure so the self-test can pin every branch.
  *
- * Fatal ONLY on a restore leg. A mutate leg's tree is dirty by construction, so
- * refusing there would void a legitimate step; naming what the build wrote is
- * the useful act at that moment instead.
+ * Never fatal on a mutate leg: that tree is dirty by construction, so refusing
+ * there would void a legitimate step; naming what the build wrote is the useful
+ * act at that moment instead. Fatal on a restore leg that is not restored, and
+ * fatal when the leg cannot be determined at all -- refusing is the safe
+ * direction, and the refusal carries both readings rather than picking one.
+ *
+ * `sourceMarker` is the spelling the tree reading was probed with when it came
+ * from `--source-marker`; it changes only the wording of the indeterminate
+ * refusal, which is a different sentence once the author has already named it.
+ *
+ * `classify` is the leg inference, injectable for ONE reason: the clean line is
+ * guarded against that inference below, and a guard no case can reach is a
+ * guard nobody can show works.
  */
-export function treeVerdict({ mode, gitReadable, gitError, files }) {
+export function treeVerdict({ mode, gitReadable, gitError, files, sourceMarker = null, classify = classifyTree }) {
   if (!gitReadable) {
     return {
       ok: false,
@@ -406,13 +630,34 @@ export function treeVerdict({ mode, gitReadable, gitError, files }) {
         + 'mutates has a build that writes checked-in artifacts, and this is the only check here that can see it.',
     };
   }
-  const { leg, mutated, unaccounted } = classifyTree({ mode, files });
-  if (files.length === 0) {
+  const { leg, mutated, unaccounted } = classify({ mode, files });
+  // Defence in depth on the ONE branch whose failure direction is a false green.
+  // `leg === 'restore'` is an INFERENCE; `files.length === 0` is the tree. The
+  // clean line is only allowed out when BOTH hold, so a broken inference can
+  // never print "working tree clean against HEAD" over a list of dirty paths at
+  // exit 0 -- which is precisely what ablating the inference produced.
+  const treeIsClean = files.length === 0;
+  if (leg === 'restore' && treeIsClean) {
     return {
       ok: true,
-      leg: 'restore',
+      leg,
       paths: [],
       msg: 'working tree clean against HEAD -- nothing of this ablation is recorded outside dist/.',
+    };
+  }
+  if (leg === 'restore' || treeIsClean) {
+    const n = files.length;
+    return {
+      ok: false,
+      leg,
+      paths: files.map((f) => f.path),
+      msg:
+        `the leg inference and the tree disagree: the leg reads ${JSON.stringify(leg)} while `
+        + `${n === 0 ? 'no path differs' : `${n} path${n === 1 ? ' differs' : 's differ'}`} from HEAD. Those two `
+        + 'cannot both be right, so this reading is not evidence about your ablation at all -- it is evidence this '
+        + 'script is broken. Refusing rather than printing the clean line, because the clean line over a dirty tree '
+        + 'is the false green everything here exists to stop. Report it, and read the tree yourself with '
+        + '`git status --porcelain` meanwhile.',
     };
   }
   if (leg === 'mutate') {
@@ -432,17 +677,30 @@ export function treeVerdict({ mode, gitReadable, gitError, files }) {
     };
   }
   const n = unaccounted.length;
+  const moved = mode === 'present' ? 'GAINED' : 'LOST';
+  const secondReading = sourceMarker !== null
+    ? `(2) MUTATE leg, and the \`--source-marker\` you named (${JSON.stringify(sourceMarker)}) is not the spelling `
+      + `that moved -- no dirty path ${moved} it. Correct that spelling, or the mutation is not in the file you `
+      + 'think it is.'
+    : '(2) MUTATE leg of a DELETE ablation, measured with the spelling `dist/` carries while the SOURCE spells it '
+      + "differently -- measured here, this repo's builds re-spell the QUOTES and keep the whitespace, so the "
+      + 'source\'s `label: \'Operator\'` is emitted as `label: "Operator"`; it emits `label:"Operator"` only under '
+      + '`--minify`, which no tsup config here sets. ⛔ Do not take either spelling from this sentence: `grep` the '
+      + 'one your build emitted out of `dist/` first, because a positional marker this build never emits scores 0 '
+      + 'hits there and in `--absent` mode 0 hits is a PASS. Then re-run with `--source-marker=<the spelling in the '
+      + 'source>`; the positional marker keeps the emitted spelling, so the dist reading stays exact.';
   return {
     ok: false,
     leg,
     paths: unaccounted.map((f) => f.path),
     msg:
-      `restore leg: no dirty path carries the marker, so the source you mutated is back -- but ${n} path`
-      + `${n === 1 ? ' still differs' : 's still differ'} from HEAD, so the TREE is not restored. Two ways to get here, `
-      + 'both fatal to the next measurement: the leg\'s build wrote a CHECKED-IN artifact (the ablation is still '
-      + 'recorded there, the next build reads it as a real change, and `git add -A` commits the phantom into a '
-      + 'committed baseline); or work of your own was never committed, which the ablation discipline requires before '
-      + 'mutating precisely so that HEAD is a restore point. Read the paths below and treat them as the restore leg.',
+      `cannot tell which leg this is: ${n} path${n === 1 ? ' differs' : 's differ'} from HEAD and none of them `
+      + `${moved} the marker this reading probed, so the mutation is not visible in the tree. Two readings are live `
+      + "and this script will not guess between them. (1) RESTORE leg, and the tree is NOT restored: the leg's "
+      + 'build wrote a CHECKED-IN artifact, or work of your own was never committed -- either way the ablation is '
+      + 'still recorded in the paths below, the next build reads it as a real change, and `git add -A` commits the '
+      + `phantom into a committed baseline. Restore them. ${secondReading} Refusing is deliberate: guessing here is `
+      + 'how a correct mutate leg was told to restore the very mutation it was measuring.',
   };
 }
 
@@ -493,6 +751,27 @@ function markerPresence(repoRoot, entries, marker) {
   });
 }
 
+/**
+ * The tree reading end to end: choose the spelling, read the tree, probe every
+ * dirty path with it, judge.
+ *
+ * It exists as one function because the marker CHOICE is the whole of the split
+ * and a call site is not covered by a unit test of the function it calls.
+ * `treeReadingMarker()` had three pins and `run()` still owned a second,
+ * untested copy of the wiring: severing `run()`'s use of it -- probing with the
+ * emitted `marker` instead of the chosen one, i.e. the exact pre-split defect --
+ * left the self-test at 64/64, exit 0. Routing the self-test's own helper
+ * through `treeReadingMarker()` did not change that number either, because the
+ * helper was never the uncovered part. There is now ONE wiring, `run()` and the
+ * self-test's real-tree batteries both go through it, and severing it reds.
+ */
+export function readTreeLeg({ repoRoot, mode, marker, sourceMarker = null }) {
+  const treeMarker = treeReadingMarker({ marker, sourceMarker });
+  const status = readTreeStatus(repoRoot);
+  const files = status.gitReadable ? markerPresence(repoRoot, status.entries, treeMarker) : [];
+  return treeVerdict({ mode, gitReadable: status.gitReadable, gitError: status.gitError, files, sourceMarker });
+}
+
 function fail(msg) {
   console.error(`✗ ablation-dist-preflight: ${msg}`);
   process.exit(1);
@@ -502,17 +781,18 @@ function usage(msg) {
   console.error(`ablation-dist-preflight: ${msg}\n`);
   console.error('  node scripts/ablation-dist-preflight.mjs <package> <marker>            marker MUST be in dist/ (planted ablation)');
   console.error('  node scripts/ablation-dist-preflight.mjs <package> <marker> --absent   marker must be GONE (deleted guard / restore leg)');
+  console.error('  node scripts/ablation-dist-preflight.mjs <package> <marker> --absent --source-marker=<source spelling>');
+  console.error('        when the build re-spells the literal: <marker> is what dist/ EMITS, --source-marker what the SOURCE carries.');
+  console.error('        One string cannot be both, and the two readings below are probed with one each.');
   console.error('  node scripts/ablation-dist-preflight.mjs --self-test');
-  process.exit(2);
+  console.error('\n  exit 0 both readings pass | 1 the dist/ reading failed | 2 usage | 3 the tree reading failed | 4 both');
+  process.exit(EXIT_USAGE);
 }
 
 function run(argv) {
-  const mode = argv.includes('--absent') ? 'absent' : 'present';
-  const positional = argv.filter((a) => !a.startsWith('--'));
-  const [pkgArg, marker, ...rest] = positional;
-  if (!pkgArg || !marker) usage('needs a package and a marker string.');
-  if (rest.length > 0) usage(`unexpected extra argument "${rest[0]}" -- quote the marker if it contains spaces.`);
-  if (marker.trim().length === 0) usage('the marker is blank -- a blank marker matches everything and proves nothing.');
+  const parsed = parseArgs(argv);
+  if (parsed.usage) usage(parsed.usage);
+  const { mode, pkgArg, marker, sourceMarker } = parsed;
 
   const byName = workspacePackages(REPO_ROOT);
   const { dir, name, near } = resolvePackageDir(pkgArg, byName);
@@ -527,7 +807,10 @@ function run(argv) {
   const v = verdict({ mode, distExists, scanned: scan.scanned, codeHits: scan.codeHits.length, mapHits: scan.mapHits.length });
 
   const where = relative(REPO_ROOT, distDir);
-  console.log(`ablation-dist-preflight: ${name} -- ${mode === 'present' ? 'expecting' : 'expecting NO'} "${marker}" in ${where}`);
+  // JSON.stringify, not bare quotes: a marker that itself carries a quote --
+  // which is the whole subject of the source/emitted split -- printed inside
+  // bare quotes reads as a different string than the one that was measured.
+  console.log(`ablation-dist-preflight: ${name} -- ${mode === 'present' ? 'expecting' : 'expecting NO'} ${JSON.stringify(marker)} in ${where}`);
   for (const f of scan.codeHits.slice(0, 5)) console.log(`  hit  ${relative(REPO_ROOT, f)}`);
   if (scan.codeHits.length > 5) console.log(`  hit  ... and ${scan.codeHits.length - 5} more`);
   for (const f of scan.mapHits.slice(0, 3)) console.log(`  map  ${relative(REPO_ROOT, f)} (sourcemap, not counted)`);
@@ -544,19 +827,35 @@ function run(argv) {
   // still present in 26 built files" AND a leaked committed baseline), and
   // reporting only the first sends the agent into a rebuild loop against a
   // build that is refusing precisely because of the second.
-  const status = readTreeStatus(REPO_ROOT);
-  const files = status.gitReadable ? markerPresence(REPO_ROOT, status.entries, marker) : [];
-  const tv = treeVerdict({ mode, gitReadable: status.gitReadable, gitError: status.gitError, files });
+  //
+  // It is also the OTHER question, and it is probed with the OTHER spelling:
+  // `dist/` holds what the bundler emitted, the tree holds what the author
+  // wrote. `--source-marker` is how they are told apart; without it the tree
+  // reading falls back to the positional marker, which is correct exactly when
+  // the build does not re-spell the literal.
+  if (sourceMarker !== null) {
+    console.log(`  tree reading probes the SOURCE spelling ${JSON.stringify(sourceMarker)} (--source-marker)`);
+  }
+  const tv = readTreeLeg({ repoRoot: REPO_ROOT, mode, marker, sourceMarker });
   const say = (s) => (tv.ok ? console.log(s) : console.error(s));
   say(`${tv.ok ? (tv.paths.length > 0 ? '⚠' : '✓') : '✗'} tree: ${tv.msg}`);
   for (const p of tv.paths.slice(0, 20)) say(`  dirty  ${p}`);
   if (tv.paths.length > 20) say(`  dirty  ... and ${tv.paths.length - 20} more`);
   if (tv.paths.length > 0) {
-    say(`  restore: git checkout HEAD -- ${tv.paths.slice(0, 3).join(' ')}${tv.paths.length > 3 ? ' <...>' : ''}`);
+    const when = tv.leg === 'mutate' ? 'restore leg, when you get there' : 'restore';
+    say(`  ${when}: git checkout HEAD -- ${tv.paths.slice(0, 3).join(' ')}${tv.paths.length > 3 ? ' <...>' : ''}`);
     say('           (an untracked path has nothing at HEAD -- delete it or move it out of the repo)');
   }
 
-  if (!v.ok || !tv.ok) process.exit(1);
+  const code = exitCodeFor({ distOk: v.ok, treeOk: tv.ok });
+  if (code === EXIT_OK) return;
+  const which = code === EXIT_BOTH
+    ? 'BOTH readings failed'
+    : code === EXIT_TREE
+      ? 'the tree reading failed; the dist/ reading PASSED'
+      : 'the dist/ reading failed';
+  console.error(`✗ exit ${code} -- ${which}.`);
+  process.exit(code);
 }
 
 // -- The self-test's own battery roster and floor (#13489) ------------------
@@ -573,14 +872,16 @@ function run(argv) {
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'whole-tree accounting: the pure table': 26,
+  'whole-tree accounting: the pure table': 29,
   'porcelain parsing': 3,
   'whole-tree accounting: a real git tree': 7,
+  'argv: the correct invocation is the only one': 19,
+  'the two-marker split: source spelling vs emitted spelling': 9,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 3;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -673,16 +974,16 @@ function selfTest() {
     ['present: planted source alone -> mutate leg, green', { mode: 'present', gitReadable: true, files: [f('src/a.ts', false, true)] }, true, 'mutate'],
     ['present: plant + leaked artifact -> mutate leg, green but both listed', { mode: 'present', gitReadable: true, files: [f('src/a.ts', false, true), f('gen/base.json', false, false)] }, true, 'mutate'],
     // The measured incident: restore leg, only the build-written artifact left.
-    ['absent: leaked artifact after restore -> RESTORE leg, RED', { mode: 'absent', gitReadable: true, files: [f('gen/base.json', false, true)] }, false, 'restore'],
-    ['present: leaked artifact after a delete-ablation restore -> RESTORE leg, RED', { mode: 'present', gitReadable: true, files: [f('gen/base.json', true, true)] }, false, 'restore'],
+    ['absent: leaked artifact after restore -> INDETERMINATE, RED', { mode: 'absent', gitReadable: true, files: [f('gen/base.json', false, true)] }, false, 'indeterminate'],
+    ['present: leaked artifact after a delete-ablation restore -> INDETERMINATE, RED', { mode: 'present', gitReadable: true, files: [f('gen/base.json', true, true)] }, false, 'indeterminate'],
     // absent mode is ALSO a delete-ablation's mutate leg: the guard's literal left the tree.
     ['absent: deleted guard -> mutate leg, green', { mode: 'absent', gitReadable: true, files: [f('src/a.ts', true, false)] }, true, 'mutate'],
     ['absent: deleted guard + leaked artifact -> mutate leg, green', { mode: 'absent', gitReadable: true, files: [f('src/a.ts', true, false), f('gen/base.json', false, false)] }, true, 'mutate'],
     // An untracked path is dirty too -- a sharded artifact gains FILES, and `git add -A` takes them.
-    ['absent: untracked path at the restore leg is RED', { mode: 'absent', gitReadable: true, files: [f('gen/new-shard.json', false, false, true)] }, false, 'restore'],
+    ['absent: an untracked path is dirt this marker cannot explain -> INDETERMINATE, RED', { mode: 'absent', gitReadable: true, files: [f('gen/new-shard.json', false, false, true)] }, false, 'indeterminate'],
     // A marker present on BOTH sides never identifies a mutation in either mode.
-    ['absent: marker on both sides does not explain the dirt', { mode: 'absent', gitReadable: true, files: [f('gen/base.json', true, true)] }, false, 'restore'],
-    ['present: marker on neither side does not explain the dirt', { mode: 'present', gitReadable: true, files: [f('gen/base.json', false, false)] }, false, 'restore'],
+    ['absent: marker on both sides does not explain the dirt -> INDETERMINATE', { mode: 'absent', gitReadable: true, files: [f('gen/base.json', true, true)] }, false, 'indeterminate'],
+    ['present: marker on neither side does not explain the dirt -> INDETERMINATE', { mode: 'present', gitReadable: true, files: [f('gen/base.json', false, false)] }, false, 'indeterminate'],
   ];
   for (const [label, input, expectedOk, expectedLeg] of treeCases) {
     const got = treeVerdict(input);
@@ -699,7 +1000,27 @@ function selfTest() {
   {
     const red = treeVerdict({ mode: 'absent', gitReadable: true, files: [f('packages/spec/authorable-surface/data.json', false, true)] });
     const named = red.paths.includes('packages/spec/authorable-surface/data.json');
-    check('a red restore leg names the leaked path', named);
+    check('a red tree reading names the leaked path', named);
+  }
+
+  // The clean line is guarded against its own leg inference. `classifyTree` is
+  // injected here because that is the only way to reach the guard: with the real
+  // inference the two can never disagree, and a guard no case can reach is a
+  // guard nobody can show works. The shape below is what ablating the inference
+  // produces -- "working tree clean against HEAD", empty dirty list, exit 0,
+  // over a tree that is not clean.
+  {
+    const dirty = [f('gen/base.json', false, true)];
+    const liesRestore = () => ({ leg: 'restore', mutated: [], unaccounted: dirty });
+    const liesIndeterminate = () => ({ leg: 'indeterminate', mutated: [], unaccounted: [] });
+    const overDirty = treeVerdict({ mode: 'absent', gitReadable: true, files: dirty, classify: liesRestore });
+    const overClean = treeVerdict({ mode: 'absent', gitReadable: true, files: [], classify: liesIndeterminate });
+    const guardChecks = [
+      ['a leg inference reading "restore" over a DIRTY tree is refused, not printed clean', overDirty.ok === false && overDirty.paths.includes('gen/base.json')],
+      ['... and the refusal says the inference and the tree disagree', overDirty.msg.includes('the leg inference and the tree disagree')],
+      ['the mirror -- a CLEAN tree the inference will not call restore -- is refused too', overClean.ok === false],
+    ];
+    for (const [label, ok] of guardChecks) check(label, ok);
   }
 
   // ---- porcelain parsing ---------------------------------------------------
@@ -738,11 +1059,9 @@ function selfTest() {
     git('add', '-A');
     git('commit', '-q', '-m', 'base');
 
-    const legFor = (mode) => {
-      const st = readTreeStatus(repo);
-      const files = st.gitReadable ? markerPresence(repo, st.entries, mode === 'present' ? MARK : GUARD) : [];
-      return treeVerdict({ mode, gitReadable: st.gitReadable, gitError: st.gitError, files });
-    };
+    // Through `readTreeLeg`, not around it: the wiring under test is the one
+    // `run()` uses, and a battery that rebuilds it inline covers a copy.
+    const legFor = (mode) => readTreeLeg({ repoRoot: repo, mode, marker: mode === 'present' ? MARK : GUARD });
 
     // 1. plant ablation, mutate leg: the source gains the marker and the
     //    "build" writes the marker into the committed baseline as well.
@@ -773,7 +1092,7 @@ function selfTest() {
 
     const gitChecks = [
       ['git leg: mutate leg is green and lists BOTH files', mutateLeg.ok === true && mutateLeg.leg === 'mutate' && mutateLeg.paths.length === 2],
-      ['git leg: per-path restore leaves the tree RED', restoreLeg.ok === false && restoreLeg.leg === 'restore'],
+      ['git leg: per-path restore leaves the tree RED', restoreLeg.ok === false && restoreLeg.leg === 'indeterminate'],
       ['git leg: the RED names the leaked baseline', restoreLeg.paths.includes('generated-baseline.json')],
       ['git leg: the per-path diff is EMPTY on that same unrestored tree', perPathDiffAtRestore === ''],
       ['git leg: whole-tree restore is green', cleanLeg.ok === true && cleanLeg.paths.length === 0],
@@ -783,6 +1102,108 @@ function selfTest() {
     for (const [label, ok] of gitChecks) check(label, ok);
   } finally {
     rmSync(repo, { recursive: true, force: true });
+  }
+
+
+  // ---- argv: the correct invocation is the only one -------------------------
+  battery('argv: the correct invocation is the only one');
+  // `argv.includes('--absent')` plus a `startsWith('--')` filter discarded every
+  // unrecognised flag in silence, so a mistyped `--absnet` ran the OPPOSITE mode
+  // and printed a verdict indistinguishable from a real one.
+  {
+    const argvCases = [
+      ['--absent selects the absent mode', parseArgs(['pkg', 'mk', '--absent']).mode === 'absent'],
+      ['no flag selects the present mode', parseArgs(['pkg', 'mk']).mode === 'present'],
+      ['a mistyped --absnet is REFUSED, not discarded', typeof parseArgs(['pkg', 'mk', '--absnet']).usage === 'string'],
+      ['the unknown-option refusal names the real options', /--source-marker=<text>/.test(parseArgs(['pkg', 'mk', '--absnet']).usage ?? '')],
+      ['a marker written as a flag is refused, not silently dropped', typeof parseArgs(['pkg', '--weird-marker']).usage === 'string'],
+      ['--source-marker=<text> parses, spaces and quotes included', parseArgs(['pkg', 'mk', "--source-marker=label: 'Operator'"]).sourceMarker === "label: 'Operator'"],
+      ['--source-marker with a SPACE is refused and names the = spelling', /=<the spelling the SOURCE carries>/.test(parseArgs(['pkg', 'mk', '--source-marker', 'x']).usage ?? '')],
+      ['a blank --source-marker= is refused', typeof parseArgs(['pkg', 'mk', '--source-marker=  ']).usage === 'string'],
+      ['omitting --source-marker leaves it null, never empty', parseArgs(['pkg', 'mk']).sourceMarker === null],
+      ['a blank marker is still refused', typeof parseArgs(['pkg', '  ']).usage === 'string'],
+      ['a third positional is still refused', typeof parseArgs(['pkg', 'mk', 'extra']).usage === 'string'],
+      ['without --source-marker the tree reading probes the positional marker', treeReadingMarker({ marker: 'emitted', sourceMarker: null }) === 'emitted'],
+      ['with --source-marker the tree reading probes THAT spelling', treeReadingMarker({ marker: 'emitted', sourceMarker: 'written' }) === 'written'],
+      ['the wiring is nullish-coalescing, so an empty source marker does NOT fall back', treeReadingMarker({ marker: 'emitted', sourceMarker: '' }) === ''],
+    ];
+    for (const [label, ok] of argvCases) check(label, ok);
+    const exitCases = [
+      ['both readings pass -> 0', exitCodeFor({ distOk: true, treeOk: true }) === EXIT_OK],
+      ['the dist reading alone fails -> 1', exitCodeFor({ distOk: false, treeOk: true }) === EXIT_DIST],
+      ['the tree reading alone fails -> 3, NOT the dist code', exitCodeFor({ distOk: true, treeOk: false }) === EXIT_TREE && EXIT_TREE !== EXIT_DIST],
+      ['both fail -> 4', exitCodeFor({ distOk: false, treeOk: false }) === EXIT_BOTH],
+      ['no reading shares a code with usage', ![EXIT_OK, EXIT_DIST, EXIT_TREE, EXIT_BOTH].includes(EXIT_USAGE)],
+    ];
+    for (const [label, ok] of exitCases) check(label, ok);
+  }
+
+  // ---- the two-marker split: source spelling vs emitted spelling ------------
+  battery('the two-marker split: source spelling vs emitted spelling');
+  // The measured shape. A DELETE ablation on a package whose build re-spells the
+  // literal: the author writes `label: 'Operator'`, the build emits
+  // `label: "Operator"` -- the quotes re-spelled, the whitespace kept, as
+  // measured in the header. The spelling that makes the dist reading true is NOT
+  // the spelling the tree reading can see, so before the split this exact tree --
+  // a correct mutate leg -- was told "restore leg ... 1 path still differs from
+  // HEAD", i.e. to restore the very mutation being measured. WHICH character
+  // moves is incidental to the split and is why these two are named constants:
+  // one `--minify` away the emitted form is `label:"Operator"` instead, and the
+  // two readings still demand different strings.
+  const split = mkdtempSync(join(tmpdir(), 'ablation-preflight-split-'));
+  try {
+    const git = (...args) => execFileSync('git', args, { cwd: split, env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+    const SRC_SPELLING = "label: 'Operator'";
+    const EMITTED = 'label: "Operator"';
+    const srcPath = join(split, 'skill.form.ts');
+    const genPath = join(split, 'authorable-surface.json');
+
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'selftest@objectstack.invalid');
+    git('config', 'user.name', 'ablation selftest');
+    writeFileSync(srcPath, `export const form = { rows: [{ ${SRC_SPELLING} }] };\n`);
+    writeFileSync(genPath, '{"labels":["Operator"]}\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base');
+
+    // The whole battery drives `readTreeLeg` -- the same function `run()` calls,
+    // marker choice included. Calling `treeReadingMarker()` here instead would
+    // cover the helper a third time and still leave `run()`'s wiring untested:
+    // measured, that change left this battery green under an ablation that
+    // severed exactly that wiring.
+    const readWith = (marker, sourceMarker = null) => readTreeLeg({ repoRoot: split, mode: 'absent', marker, sourceMarker });
+
+    // 1. DELETE ablation, mutate leg: the label entry leaves the source.
+    writeFileSync(srcPath, 'export const form = { rows: [{}] };\n');
+    const emittedOnly = readWith(EMITTED);
+    const withSource = readWith(EMITTED, SRC_SPELLING);
+
+    // 2. restore the source, leave the build-written artifact dirty -- the
+    //    measured incident. It must STILL refuse, and passing the new flag must
+    //    not turn the refusal off, or the flag is a way to disable the catch.
+    git('checkout', 'HEAD', '--', 'skill.form.ts');
+    writeFileSync(genPath, '{"labels":[]}\n');
+    const leakedPlain = readWith(EMITTED);
+    const leakedWithSource = readWith(EMITTED, SRC_SPELLING);
+
+    // 3. restore the artifact too.
+    git('checkout', 'HEAD', '--', 'authorable-surface.json');
+    const clean = readWith(EMITTED, SRC_SPELLING);
+
+    const splitChecks = [
+      ['the emitted spelling alone cannot see the mutation -> INDETERMINATE, RED', emittedOnly.ok === false && emittedOnly.leg === 'indeterminate'],
+      ['... and it does NOT call that tree a restore leg', emittedOnly.leg !== 'restore'],
+      ['... and it names the --source-marker remedy', emittedOnly.msg.includes('--source-marker=')],
+      ['--source-marker makes the SAME tree a green MUTATE leg', withSource.ok === true && withSource.leg === 'mutate'],
+      ['... naming the path the ablation touched', withSource.paths.includes('skill.form.ts')],
+      ['a leaked artifact after restore still REFUSES', leakedPlain.ok === false && leakedPlain.paths.includes('authorable-surface.json')],
+      ['... and --source-marker does NOT switch that refusal off', leakedWithSource.ok === false && leakedWithSource.paths.includes('authorable-surface.json')],
+      ['... and the refusal says the named source marker is not what moved', leakedWithSource.msg.includes('is not the spelling that moved')],
+      ['only a whole-tree restore is a green RESTORE leg', clean.ok === true && clean.leg === 'restore' && clean.paths.length === 0],
+    ];
+    for (const [label, ok] of splitChecks) check(label, ok);
+  } finally {
+    rmSync(split, { recursive: true, force: true });
   }
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----

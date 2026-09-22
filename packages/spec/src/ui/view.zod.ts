@@ -1216,14 +1216,114 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  * as complete, which is worse than the unbounded-and-silent one this key
  * replaces — the author needs to know the cap is visible, and the renderer
  * author needs to know it is owed.
+ *
+ * ⚠️ WHICH FACE THIS KEY IS ON, and why that has to be said first. There are
+ * TWO `limit`s a reader can confuse, on two different documents, and three
+ * rounds of #19228 went wrong on the boundary:
+ *   · **VIEW FACE** — THIS key. A member of a `ListViewSchema` document's
+ *     `kanban` / `gallery` / `timeline` block. An ADAPTER turns that document
+ *     into a rendered node; no renderer reads this document directly.
+ *   · **ELEMENT FACE** — a page component node's OWN `limit`
+ *     (`ObjectKanbanPropsSchema`, `ObjectTimelinePropsSchema`),
+ *     declared in `component.zod.ts`, with no applied default. That is the key
+ *     every renderer and `ElementDataSourceGate` actually read.
+ * Every sentence below names its face before it says anything else.
+ *
+ * ⚠️ WHAT THIS VIEW-FACE KEY REACHES TODAY — recorded, not repaired (#19228).
+ * Measured first-hand at the pin this repo builds against (`.objectui-sha` =
+ * `87af769e9`), 2026-09-21T09:15Z, with TWO instruments, because one was not
+ * enough and the first one's answer was wrong:
+ *
+ *  1. PROPERTY-ACCESS spellings. ⛔ Published as its EXPRESSION, not as a
+ *     number — this card exists because a confident count was wrong once, so
+ *     a control nobody can re-derive is not a control. Run at the pin, from
+ *     an objectui checkout, over every tracked file:
+ *       probe:   git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.limit\b'
+ *       control: git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.(groupByField|scale|coverField)\b'
+ *     Probe: **0** lines, 0 files. Control: **13** lines across **6** files —
+ *     `app-shell/src/views/ObjectView.galleryBinding-7547.test.tsx:41`,
+ *     `app-shell/src/views/ObjectView.tsx:450`,
+ *     `plugin-list/src/ListView.tsx:2538`, `:2540`, `:2547`, `:3057`, `:3114`,
+ *     `:3116`,
+ *     `plugin-list/src/__tests__/ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`,
+ *     `:99`, `plugin-view/src/ObjectView.tsx:1695`, and
+ *     `types/src/__tests__/object-kanban-group-by-limit-7322.test.ts:146`, `:148`.
+ *     ⚠️ Filtering changes that number and the filter must be stated with it.
+ *     Of the 13: **2 are COMMENTS** (`ObjectView.galleryBinding-7547.test.tsx:41`,
+ *     `ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`), **1 is an
+ *     `it()` TITLE string** (same file, `:99` — ⛔ not a comment), and **2 are
+ *     lines inside a QUOTED source-text pin**
+ *     (`object-kanban-group-by-limit-7322.test.ts:146`, `:148`). So a reader
+ *     counting executable reads only gets **8**. All three readings are of one
+ *     hit set. A live instrument — and a WRONG answer.
+ *  2. ⭐ SPREADS — a spread carries a key without ever spelling it, so it is
+ *     the hole instrument 1 cannot see by construction. ⛔ Re-take it by its
+ *     PREDICATE, not by its count: **a spread whose target is the object
+ *     literal an adapter RETURNS as the node** — flattening onto the node —
+ *     as against a merge that builds a nested config (`...mergedTimeline` is
+ *     the lit control for the instrument AND the example of what the predicate
+ *     excludes). A grep broad enough to find these also returns the nested
+ *     merges, so the rule, not the number, is what makes it reproducible.
+ *     ⛔ And name what the predicate EXCLUDES, or the next reader re-finds
+ *     it and wonders: `app-shell/src/views/ObjectView.tsx:206` and `:342`
+ *     ARE spreads of a view block, inside `timelineViewOptions` (`:201`) and
+ *     `galleryViewOptions` (`:334`). They build an OPTIONS BAG that feeds
+ *     `ListView`'s nested forward, not the object literal an adapter returns
+ *     as the node, so the predicate excludes them — deliberately, not by
+ *     oversight. Two more the predicate excludes for their own reasons:
+ *     `plugin-list/src/ListView.tsx:3044-3046` (`mergedGallery`) builds a
+ *     NESTED gallery prop, the `...mergedTimeline` family; and
+ *     `app-shell/src/views/ObjectView.tsx:1284`
+ *     (`spec.kanban = { ...(spec.kanban || {}), columns }`) writes back into a
+ *     VIEW document's own block — a metadata write, not a node build.
+ *     Under that predicate, at that pin, the VIEW-face per-kind blocks give:
+ *       `plugin-list/src/ListView.tsx:2979`   `...restKanban`
+ *       `plugin-view/src/ObjectView.tsx:1638`  `...restKanban`
+ *       `plugin-view/src/ObjectView.tsx:1697`  `...(viewOptions.gallery || {})`
+ *       `plugin-view/src/ObjectView.tsx:1725`  `...(viewOptions.timeline || {})`
+ *     Neither `restKanban` destructure strips `limit` (`ListView.tsx:2952`,
+ *     `ObjectView.tsx:1579`), so a VIEW's per-kind `limit` — INCLUDING the 100
+ *     this applied default materializes — becomes the generated node's
+ *     ELEMENT-face flat `limit`, which is the key the renderers read.
+ *
+ * ⇒ **A view's `kanban.limit`: flattened on BOTH adapter routes, and read.**
+ *   `ObjectKanban.tsx:553` runs `describeRefusedRowLimit(schema.limit, …)`
+ *   unconditionally.
+ * ⇒ **A view's `timeline.limit`: ROUTE-DEPENDENT.** `plugin-view` flattens it
+ *   (`ObjectView.tsx:1725`) and the node it returns carries no `timeline`
+ *   block at all, so the value arrives as the node's flat `limit` and
+ *   `ObjectTimeline.tsx:279` reads it. `plugin-list` instead forwards the
+ *   block NESTED (`ListView.tsx:3084`), where nothing reads it.
+ * ⇒ **A view's `gallery.limit`: flattened by `ObjectView.tsx:1697` and read by
+ *   NOBODY** — `ObjectGallery.tsx` contains no `limit` at all (0 occurrences,
+ *   case-insensitive, against a lit control `schema.imageField` /
+ *   `schema.titleField` at `:340` / `:348`). ⛔ Do not generalise that
+ *   asymmetry to the other two; it is gallery's alone.
+ *
+ * ⚠️ Where it IS read, the `$top` it would govern (`ObjectKanban.tsx:676`,
+ * `ObjectTimeline.tsx:407`) is still not issued on either adapter route today:
+ * both hosts hand rows down as a React `data` prop (`ListView.tsx:4702`,
+ * `ObjectView.tsx:2319`) and both children short-circuit their own fetch on it
+ * (`ObjectKanban.tsx:559`, `ObjectTimeline.tsx:420`). ⛔ That is a statement
+ * about the QUERY, not about the key being unread.
+ *
+ * ⚠️ A consequence of APPLIED that the open decision needs: through those
+ * spreads a spec-parsed view emits a node carrying an authored-LOOKING
+ * ELEMENT-face `limit: 100` that no author wrote. ⛔ Flagged, not acted on —
+ * changing it is a contract direction, not a tidy-up.
+ *
+ * ⛔ Which of the row bounds wins is NOT decided here and NOT implied by this
+ * declaration: #19228 opens that question and picks nothing, and neither does
+ * this note. What is recorded is only what each key reaches today.
  */
 const rowLimitKey = (view: RowLimitView) =>
   z.number().int().positive().default(DEFAULT_VIEW_ROW_LIMIT).describe(
-    `Row ceiling — the most ${ROW_LIMIT_SUBJECT[view]}, sent as the query \`$top\`; default `
-    + `${DEFAULT_VIEW_ROW_LIMIT} when the key is absent. When the ceiling APPLIES (the filtered `
-    + 'set is larger than it), the renderer must show a visible truncation signal saying what is '
-    + 'on screen is not the whole set — a bounded view that looks complete is worse than an '
-    + 'unbounded one.',
+    `Row ceiling — the most ${ROW_LIMIT_SUBJECT[view]}; default `
+    + `${DEFAULT_VIEW_ROW_LIMIT} when the key is absent. The renderer owes two things: bound its `
+    + 'fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), '
+    + 'show a visible truncation signal saying what is on screen is not the whole set — a bounded '
+    + 'view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a '
+    + 'renderer that reads this key yet; which do is recorded on the declaration.',
   );
 
 /**
@@ -1847,29 +1947,35 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * Closed (strict) from the start, and the strictness stands on its own: it does
  * NOT rest on the renderer refusing an undeclared key, because nothing
  * downstream refuses one. Measured at the `.objectui-sha` pin `53ded82b` by
- * EXECUTING the pinned declarations, not by reading them — and each anchor
- * below quotes the line it was read at, so the next pin bump reds instead of
- * rotting (`check:objectui-pin-citations`):
+ * EXECUTING the pinned declarations, not by reading them, and RE-READ at pin
+ * `87af769e9` on 2026-09-20 — every one of the seven anchors below moved on
+ * that hop, one of them lost the symbol it quoted, and the quotes now read the
+ * NEW tree; each anchor quotes the line it was read at, so the next pin bump
+ * reds instead of rotting (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
- *   (`packages/plugin-list/src/ListView.tsx:113` first line
+ *   (`packages/plugin-list/src/ListView.tsx:146` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
- *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1381` first line
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1764` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
- *   (`packages/plugin-list/src/ListView.tsx:67` first line
- *   `export const FLAT_MAP_CONFIG_KEYS = [`) — this block's keys minus
- *   `style` — and emit those as flat props. An undeclared key IS dropped
+ *   (`packages/plugin-list/src/ListView.tsx:85` first line
+ *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
+ *   the whitelist was a key LIST named `FLAT_MAP_CONFIG_KEYS` carrying this
+ *   block's keys MINUS `style`, and objectui#9950 made it a total map from
+ *   every declared key to its flat spelling, `style` delivered as `mapStyle`.
+ *   So all eight keys now reach the product — and emit those as flat props. An
+ *   undeclared key IS still dropped
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:562` first line
+ *   `packages/types/src/zod/objectql.zod.ts:1574` first line
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. `getMapConfig` consults that `safeParse`
- *   (`packages/plugin-map/src/ObjectMap.tsx:373` first line
+ *   (`packages/plugin-map/src/ObjectMap.tsx:385` first line
  *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
  *   whether to `console.warn`, then returns a spread of the AUTHORED block
- *   (`:378` first line `return { ...config, style: config.style || style };`),
+ *   (`:390` first line `return { ...config, style: config.style || style };`),
  *   undeclared key and all. That spread is reached by objectui's own
  *   component-node `map` prop, never by this face's flatten product ("neither
  *   flattener emits a `map` key at all", `getMapConfig`).
@@ -1878,7 +1984,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * checker at all: it dies in the whitelist without a word, and the one schema
  * that could have reported it is open and warn-only. And this parse is the only
  * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:313`
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:734`
  * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
  * `ListViewSchema` imports THIS block by reference and the document check on
  * that side is this same schema. The two key sets MIRROR each other, key for
@@ -1888,11 +1994,12 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (`schema.map?.style`) while this block did not declare it, so strictness here
  * refused a style URL the renderer honours — an author could not declare a map
  * style through this face at all (#18406, director decision batch #153 item 4).
- * The two key sets match again. Measured at the `.objectui-sha` pin `53ded82b`:
- * `packages/types/src/zod/objectql.zod.ts:562` declares the eight keys,
- * `packages/plugin-map/src/ObjectMap.tsx:365` reads
+ * The two key sets match again. Re-read at the `.objectui-sha` pin `87af769e9`
+ * (2026-09-20; each of these three moved on the hop and each was re-READ):
+ * `packages/types/src/zod/objectql.zod.ts:1574` declares the eight keys,
+ * `packages/plugin-map/src/ObjectMap.tsx:377` reads
  * `schema.mapStyle || schema.map?.style`, and objectui's own
- * `content/docs/plugins/plugin-map.mdx:131` documents `style` in the block —
+ * `content/docs/plugins/plugin-map.mdx:143` documents `style` in the block —
  * so the divergence was against the documented surface this docblock cites, not
  * merely against the code. The gantt / tree blocks
  * above used to be this file's two `.passthrough()` exceptions (renderer-ahead
@@ -2670,7 +2777,7 @@ export const FormSelectOptionSchema = lazySchema(() => {
     guidance: {
       default:
         '`options[].default` on a form-view field was removed from the FormView vocabulary in '
-        + '@objectstack/spec 18 (ADR-0049 declared-but-unenforced) — on this surface the key '
+        + '@objectstack/spec 17.3.0 (ADR-0049 declared-but-unenforced) — on this surface the key '
         + 'parsed clean and nothing read it: the insert-path default falls back to the OBJECT '
         + "definition's option list, never a form view's, and no form renderer seeds a value "
         + 'from it. Delete the key. Declare the pre-selected choice on the object definition '
@@ -2933,16 +3040,21 @@ const FormFieldBaseSchema = lazySchema(() => {
   colSpan: z.number().int().min(1).max(4).optional().describe("Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all."),
   /**
    * [#2578] Relative field width. 'full' resolves to the form grid's full
-   * column count (`plugin-form` `resolveColSpan`); which container-query tiers
-   * receive the span class is the form renderer's, not this key's.
-   * At the `.objectui-sha` pin `53ded82bf7` the renderer emits the widest
-   * tier's class only, so at intermediate widths the field takes a single
-   * cell, not the row (objectstack#17328: one cell of two at 720px). objectui#9253 (objectui
-   * `bd09957380`, 2026-09-12, ahead of that pin) emits one clamped class per
-   * multi-column tier, making 'full' the whole row at every multi-column tier
-   * — re-read this block at the pin bump that absorbs it.
+   * column count (`plugin-form` `resolveColSpan`, `autoLayout.ts:153`); which
+   * container-query tiers receive the span class is the form renderer's, not
+   * this key's.
+   * At the `.objectui-sha` pin `87af769e9` the renderer emits one clamped
+   * col-span class per multi-column tier — `spanLadderFor`
+   * (`components/src/renderers/form/form.tsx:204-231`) walks the container
+   * class's tiers and emits a class each time a tier can give more cells than
+   * the field already holds — so 'full' is the whole row at every multi-column
+   * tier. ⚠️ This is the re-read the previous revision of this block asked for:
+   * objectui#9244 / objectui#9253 (objectui `bd09957380`, 2026-09-12) land
+   * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
+   * under-span this block used to record (#17328: one cell of two at
+   * 720px) no longer reproduces at the pin this repo builds against.
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `53ded82bf7`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin only the widest tier's class is emitted (`@2xl:col-span-3` for a 3-column grid), so at intermediate widths the field takes a single cell, not the row (one of two at the 720px modal width; measured in Chromium at viewport widths 390, 720 and 1700)."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `87af769e9`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),

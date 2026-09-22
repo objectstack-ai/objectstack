@@ -2,8 +2,10 @@
 
 import { z } from 'zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
+import { MAJOR_MINOR_PATCH_VERSION_PATTERN } from './version-grammar';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
+import { formatSuggestion } from '../shared/suggestions.zod';
 import { SeedSchema } from '../data/seed.zod';
 import { NavigationContributionSchema } from '../ui/app.zod';
 
@@ -241,6 +243,77 @@ export type PluginIntegrity = z.input<typeof PluginIntegritySchema>;
  *   - "./src/objects/*.object.yml"
  * ```
  */
+/**
+ * The reverse-domain identifier rule, declared ONCE.
+ *
+ * Two surfaces name the same identity — `ManifestSchema.id` here (what an
+ * author writes) and `PackageSchema.manifestId` in
+ * `../marketplace/package.zod.ts` (what the registry stores and addresses the
+ * package by, `manifest_id`). They were two independent declarations and drifted:
+ * the registry enforced the shape and the authoring surface accepted any string,
+ * so a package that scaffolded, validated and booted was refused at publish.
+ * Both sites now reference this constant, which is what makes a future drift a
+ * one-line edit rather than a silent divergence.
+ *
+ * Reads as: a lowercase segment, then one or more dot-separated lowercase
+ * segments. Each segment starts with a letter and may carry digits and hyphens.
+ * ⛔ Underscores are NOT admitted — `manifest.namespace` allows them and this
+ * key does not, so a namespace is never a legal id by itself.
+ */
+export const MANIFEST_ID_PATTERN = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
+
+/**
+ * The example ids the refusal shows an author, and the same two the TSDoc on
+ * {@link ManifestSchema}'s `id` carries as `@example`.
+ *
+ * They are one list so the refusal cannot show an example the schema would
+ * reject: `manifest.test.ts` asserts every entry here matches
+ * {@link MANIFEST_ID_PATTERN}. An example that fails its own rule teaches the
+ * exact wrong thing to the author who is already stuck.
+ */
+export const MANIFEST_ID_EXAMPLES = ['com.steedos.crm', 'org.apache.superset'] as const;
+
+/**
+ * The remedy a rejected package id carries (#4001: a refusal names the key,
+ * echoes the value, and prescribes the fix).
+ *
+ * The suggestion arm is deliberately conditional. A bare word — the shape the
+ * scaffolder and `os init` used to produce, and what an author reaches for
+ * first — has one obvious repair, `com.example.<value>`, and offering it is the
+ * whole difference between a rule restated and a fix. But a bare word may itself
+ * be unusable: `manifest.namespace` admits underscores, so `my_app` prefixed
+ * still fails this pattern. So the candidate is VERIFIED against the pattern
+ * before it is offered, hyphenating underscores when that is what rescues it,
+ * and no suggestion is made at all when nothing mechanical does.
+ *
+ * @param key - The authoring path to name, e.g. `manifest.id` or `manifestId`.
+ * @param input - Whatever the author actually wrote.
+ */
+export function manifestIdRefusal(key: string, input: unknown): string {
+  const received = typeof input === 'string' ? input : String(input ?? '');
+  const examples = MANIFEST_ID_EXAMPLES.map((e) => `'${e}'`).join(', ');
+  const base =
+    `Invalid package id '${received}' on \`${key}\`. Expected reverse-domain notation `
+    + `(${examples}) — lowercase dot-separated segments; hyphens allowed inside a segment, `
+    + 'underscores are not.';
+
+  // Two mechanical repairs, tried in order, and only ever OFFERED once the
+  // candidate has been checked against the pattern itself:
+  //   • a value already carrying a dot is trying to be reverse-domain — the
+  //     usual break is an underscore, so hyphenate and re-check;
+  //   • a bare word has no prefix at all, so prefix it with the documentation
+  //     namespace (and hyphenate, for a namespace-shaped `my_app`).
+  const candidates = received.includes('.')
+    ? [received.replace(/_/g, '-')]
+    : [`com.example.${received}`, `com.example.${received.replace(/_/g, '-')}`];
+  if (received.length > 0) {
+    for (const candidate of candidates) {
+      if (MANIFEST_ID_PATTERN.test(candidate)) return `${base} ${formatSuggestion([candidate])}`;
+    }
+  }
+  return base;
+}
+
 export const ManifestSchema = strictObject({
   surface: 'this package manifest',
   history:
@@ -260,12 +333,24 @@ export const ManifestSchema = strictObject({
 }, {
   /** 
    * Unique package identifier using reverse domain notation.
-   * Must be unique across the entire ecosystem.
-   * 
+   * Must be unique across the entire ecosystem — so a package that is never
+   * published still carries a name for the ecosystem it may one day join, which
+   * is why the rule holds for a private app exactly as for a listed one.
+   *
+   * Enforced by {@link MANIFEST_ID_PATTERN}, the single declaration this key
+   * shares with `PackageSchema.manifestId` (`../marketplace/package.zod.ts`).
+   * ⛔ `manifest.namespace` is NOT an id: it admits underscores and carries no
+   * dot, so it fails this rule by construction.
+   *
+   * Both examples below are held against the pattern by `manifest.test.ts` via
+   * {@link MANIFEST_ID_EXAMPLES}.
+   *
    * @example "com.steedos.crm"
    * @example "org.apache.superset"
    */
-  id: z.string().describe('Unique package identifier (reverse domain style)'),
+  id: z.string()
+    .regex(MANIFEST_ID_PATTERN, { error: (iss) => manifestIdRefusal('manifest.id', iss.input) })
+    .describe('Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm)'),
   
   /**
    * Short namespace identifier for metadata scoping AND the mandatory
@@ -327,7 +412,7 @@ export const ManifestSchema = strictObject({
    * @example "1.0.0"
    * @example "2.1.0"
    */
-  version: z.string().regex(/^\d+\.\d+\.\d+$/).describe('Package version (semantic versioning)'),
+  version: z.string().regex(MAJOR_MINOR_PATCH_VERSION_PATTERN).describe('Package version (semantic versioning)'),
   
   /** 
    * Type of the package in the ObjectStack ecosystem.

@@ -3058,15 +3058,24 @@ const warnedEmailTemplateFloors = new Set<string>();
  *
  * ## What goes wrong without this
  *
- * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and retries
- * exactly one rung — the literal `en-US`. There is no language-subtag folding,
- * so a bundle whose English row is tagged `en` is unreachable from `en-US` and
- * from every other tag it does not itself carry: each such delivery raises
- * `TEMPLATE_NOT_FOUND`, which classifies **permanent**, so it dead-letters with
- * no retry. `sys_user.locale` is user-editable free-text BCP-47 and is NOT
- * constrained to `supportedLocales`, so the locales that can reach the lookup
- * are not the ones the author enumerated — a recipient can break their own mail
- * by setting a legal tag.
+ * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and, for a call
+ * that NAMES a locale, retries exactly one rung — the literal `en-US` — and
+ * stops. There is no language-subtag folding, so a bundle whose English row is
+ * tagged `en` is unreachable from `en-US` and from every other tag it does not
+ * itself carry: each such delivery raises `TEMPLATE_NOT_FOUND`, which
+ * classifies **permanent**, so it dead-letters with no retry. `sys_user.locale`
+ * is user-editable free-text BCP-47 and is NOT constrained to
+ * `supportedLocales`, so the locales that can reach the lookup are not the ones
+ * the author enumerated — a recipient can break their own mail by setting a
+ * legal tag.
+ *
+ * ⛔ A call that names NO locale is the other case, and it does not fail: it
+ * starts at `en-US` by name and, when the bundle carries no `en-US` row, drops
+ * to that bundle's lowest locale tag and renders it silently. So one floorless
+ * bundle dead-letters the recipients whose locale was named and quietly fills
+ * for the ones whose was not. The full three-rung ladder is on
+ * `SendTemplateInput.locale` in `packages/spec/src/contracts/email-service.ts`
+ * and is not restated here.
  *
  * ⭐ The trap is that the author does the CONSISTENT thing: a stack declaring
  * `defaultLocale: 'en'` whose English row says `locale: 'en'` agrees with
@@ -3089,6 +3098,37 @@ const warnedEmailTemplateFloors = new Set<string>();
  * not be reported — the reader below mirrors that default rather than relying
  * on the call site for it, so the two agree wherever this is called from.
  * Warn-once per bundle, keyed by name plus the tags it actually carries.
+ *
+ * ## What this deliberately does NOT examine
+ *
+ * Two shapes leave here silently and both can still ship a floorless bundle.
+ * They are written down because the summary line above is the only place the
+ * scope was ever stated, while the hazard section reads as a promise to catch
+ * every floorless bundle — which this does not do:
+ *
+ *  1. **A stack whose `i18n.supportedLocales` is absent or empty.** Measured:
+ *     `i18n` is optional but `supportedLocales` is REQUIRED inside it, so the
+ *     absent arm is reached only by a stack carrying no `i18n` block at all,
+ *     and the empty arm only by a literal `supportedLocales: []`. Either way
+ *     there is nothing to measure "carries rows for this stack's own supported
+ *     locales" against, so the function returns before building anything.
+ *     ⚠️ This early return is not a second scope decision: with no supported
+ *     set every bundle's `declared` list below is empty and shape 2 would skip
+ *     it anyway, so what the return actually buys is not reading `.map` off
+ *     `undefined`.
+ *  2. **A bundle whose tags are ALL outside `supportedLocales`.** `declared` is
+ *     empty, so the bundle is skipped one line after the floor check
+ *     established that it carries no floor row. A stack supporting `en-US`
+ *     whose bundle is tagged `en` alone is exactly that case: floorless, and
+ *     silent here.
+ *
+ * ⚠️ Whether either shape SHOULD warn is the ADR-0049 enforce-or-remove
+ * question, and it is deliberately not answered here: widening a `defineStack`
+ * diagnostic is a behaviour change on an authoring surface, which the posture
+ * note above puts on a scheduled migration rather than behind a lint. What is
+ * closed is the silence being UNDECLARED — both shapes are pinned in
+ * `stack-email-template-locale-floor.test.ts` against a warning control, so
+ * neither can start or stop returning without a test saying so.
  */
 function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
   const supported = data.i18n?.supportedLocales;
@@ -3119,11 +3159,13 @@ function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
     warnedEmailTemplateFloors.add(key);
     console.warn(
       `defineStack: emailTemplates '${name}' carries rows for ${declared.map((t) => `'${t}'`).join(', ')} ` +
-      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor. ` +
-      `sendTemplate matches (name, locale) exactly and retries only the literal ` +
-      `'${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every recipient ` +
-      `locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is permanent ` +
-      `(dead-letter, no retry). Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
+      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor for a ` +
+      `send that names a locale. sendTemplate matches (name, locale) exactly and retries only the ` +
+      `literal '${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every ` +
+      `recipient locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is ` +
+      `permanent (dead-letter, no retry). A send naming NO locale does not fail: it drops to this ` +
+      `bundle's lowest tag and renders that silently, so one gap is loud for some recipients and ` +
+      `invisible for others. Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
       `it is spelled '${EMAIL_TEMPLATE_FLOOR_LOCALE}': tag the English row '${EMAIL_TEMPLATE_FLOOR_LOCALE}' ` +
       `and keep the other tags beside it.`,
     );
@@ -3526,6 +3568,92 @@ function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
   );
 }
 
+/** As much of a zod node's `def` as the collection walk below reads. */
+interface CollectionWalkDef {
+  type?: string;
+  innerType?: unknown;
+  in?: unknown;
+  out?: unknown;
+  options?: unknown[];
+  getter?: () => unknown;
+}
+
+/**
+ * The `def` of a zod node, or `undefined` when the value is not one.
+ *
+ * `typeof === 'function'` is load-bearing, not padding: the canonical schemas
+ * on this shape arrive as the `lazySchema` proxy, which is CALLABLE, and an
+ * object-only guard answers "not a schema" for every one of them.
+ * @internal
+ */
+function collectionWalkDef(schema: unknown): CollectionWalkDef | undefined {
+  if (schema === null || (typeof schema !== 'object' && typeof schema !== 'function')) return undefined;
+  return (schema as { _zod?: { def?: CollectionWalkDef } })._zod?.def;
+}
+
+/**
+ * The wrappers the collection walk peels, as a set — the same labels the
+ * `switch` in {@link declaresCollection} peels by `case`. Used to look THROUGH
+ * a pipe's IN side before asking whether it is a transform stage: a transform
+ * one level down is still a transform.
+ * @internal
+ */
+const COLLECTION_WALK_WRAPPERS: ReadonlySet<string> = new Set([
+  'optional',
+  'nullable',
+  'default',
+  'prefault',
+  'readonly',
+  'nonoptional',
+  'catch',
+]);
+
+/**
+ * The side of a `pipe` node an author actually writes.
+ *
+ * Two constructs compile to the same `pipe` node and their authorable sides
+ * are OPPOSITE: `a.transform(fn)` keeps the accepted input shape in `in` and
+ * puts the transform stage in `out`, while `z.preprocess(fn, schema)` puts the
+ * TRANSFORM in `in` and the real, validated schema in `out`. Reading `in`
+ * unconditionally therefore hands back a transform node for every preprocess
+ * node, and a transform declares no shape at all — so {@link declaresCollection}
+ * falls through to `false` and a preprocess-wrapped collection key silently
+ * leaves the refusal set {@link objectCollectionKeys} derives. Silently is the
+ * whole point: that derivation exists precisely so a collection key added to
+ * the object shape tomorrow cannot fall back to the wholesale replacement
+ * `objectConflict: 'merge'` refuses.
+ *
+ * ⛔ Deliberately NOT `in || out`. For a genuine `a.transform(fn).pipe(b)` the
+ * author writes `a`; taking either side would pull a key whose AUTHORED value
+ * is a scalar into a refusal set that then names it a collection — a refusal
+ * nobody earned, printed in the vocabulary of entries that were never written.
+ * Reading OUT only when IN is a transform stage is the rule four sibling
+ * walkers already run — `pipeAuthorableSide` in `scripts/lib/zod-graph.ts`,
+ * `kernel/metadata-authoring-lint.ts`,
+ * `system/metadata-form-zod-reconciliation.test.ts` and `packages/lint`'s
+ * `validate-predicate-path-refs.ts` — so this is one rule with a fifth site,
+ * not a fifth dialect.
+ * @internal
+ */
+function pipeAuthorableSide(def: CollectionWalkDef): unknown {
+  let node = def.in;
+  for (let hops = 0; hops < 8; hops++) {
+    const inner = collectionWalkDef(node);
+    if (!inner?.type) break;
+    if (inner.type === 'transform') return def.out;
+    if (COLLECTION_WALK_WRAPPERS.has(inner.type)) {
+      node = inner.innerType;
+      continue;
+    }
+    if (inner.type === 'lazy') {
+      node = inner.getter?.();
+      continue;
+    }
+    break;
+  }
+  return def.in;
+}
+
 /**
  * Does this schema declare a COLLECTION — an array, or a record of named
  * members — once the optional/default/nullable wrappers are stripped, reading
@@ -3538,13 +3666,15 @@ function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
  * the same. A fixed-shape config object (`enable`, `access`, `protection`, …)
  * is not a collection — its members are declared keys, not authored entries —
  * and stays on the scalar rule.
+ *
+ * A `pipe` is read on the side the AUTHOR writes, never on `in` alone — see
+ * {@link pipeAuthorableSide} for the two opposite conventions that compile to
+ * that one node.
  * @internal
  */
 function declaresCollection(schema: unknown, depth = 0): boolean {
   if (depth > 8) return false;
-  const def = (schema as {
-    _zod?: { def?: { type?: string; innerType?: unknown; in?: unknown; options?: unknown[]; getter?: () => unknown } };
-  })._zod?.def;
+  const def = collectionWalkDef(schema);
   if (!def?.type) return false;
   switch (def.type) {
     case 'array':
@@ -3561,7 +3691,7 @@ function declaresCollection(schema: unknown, depth = 0): boolean {
     case 'lazy':
       return declaresCollection(def.getter?.(), depth + 1);
     case 'pipe':
-      return declaresCollection(def.in, depth + 1);
+      return declaresCollection(pipeAuthorableSide(def), depth + 1);
     case 'union':
       return (def.options ?? []).some((option) => declaresCollection(option, depth + 1));
     default:

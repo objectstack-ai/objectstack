@@ -586,13 +586,17 @@
  *       state-model row (its protocol face) and applying the label to the
  *       specimen card, which is a seat's write.
  *
- * ## H26 — the block that nothing can ever release
+ * ## H26 — the block nothing is SCHEDULED or DECLARED to release
  *
  *   H26 an open `pm:blocked` card whose resolvable `Blocked-by:` target is OPEN
- *       and parked in a state that can never close — `pm:on-hold` or
- *       `needs-user-decision`, both by definition states a card sits in WHILE
- *       OPEN. The unlock predicate is "the target closed", so such a block is
- *       structurally indefinite and nothing reported it: the waiting card is
+ *       and parked in `pm:on-hold` or `needs-user-decision` with no exit this
+ *       sweep can fire. ⛔ NOT a claim that such a target CANNOT close: that
+ *       categorical half was asserted, never counted, and counting refutes it
+ *       (#18017 — the census and its control live in the row's own rationale
+ *       block). What survives is that no timer, sweep or queue in this loop
+ *       closes either state and, since #19255, that the card declared no
+ *       label-transition exit for this target — so the block has NO SCHEDULED
+ *       OR DECLARED RELEASE and nothing reported it: the waiting card is
  *       perfectly well-formed (H4 clean, target resolves, target open, so H19
  *       clean, label correct), and H9 — the nearest neighbour — audits the HELD
  *       card rather than the waiting one. Six measured instances, all found by
@@ -607,7 +611,7 @@
  *       cycle. FREE: H19 already resolves every distinct target, and a resolved
  *       target's labels rode in on a payload this sweep had already paid for.
  *       ⛔ Not a judgement that the block is wrong — waiting on a deferred card
- *       is sometimes right; the row says the wait has no releasing mechanism,
+ *       is sometimes right; the row says nobody is SCHEDULED to end the wait,
  *       which is a fact a human should be handed rather than discover.
  *       NOT reported BY THIS ROW: a target labelled `pm:queue` while titled
  *       `[Decision]` (one of the six). The reason is unchanged and this row is
@@ -1870,6 +1874,19 @@ function stripMatchingDecoration(value, opener) {
 }
 
 /**
+ * What may sit BETWEEN two directives on one line: decoration, spaces and a
+ * list separator, nothing else. That class is the whole guard — a key after a
+ * WORD stays the mid-sentence mention the anchoring above protects (「seats
+ * park the `Blocked-by: #1` line in comments」), a key after 「` · `」 is the
+ * second directive of a list a seat really wrote.
+ */
+const DIRECTIVE_SEPARATOR = String.raw`[ \t]*(?:${DIRECTIVE_MARKER}[ \t]*)*[·•|,;、]+[ \t]*`;
+
+/** A FURTHER directive on the same line, its own opening decoration captured. */
+const nextDirectiveOnLine = (key) =>
+  new RegExp(`${DIRECTIVE_SEPARATOR}((?:${DIRECTIVE_MARKER}[ \\t]*)*)${directiveKey(key)}[ \\t]*`);
+
+/**
  * Every value carried by a `<key>:` directive line in this text, decoration
  * removed, empties dropped — the one reader H9 and the `Blocked-by:` index
  * share, so a decoration tolerated for one is tolerated for both.
@@ -1879,16 +1896,37 @@ function stripMatchingDecoration(value, opener) {
  * silently kept its trailing backtick is exactly the regression this shares a
  * cause with.
  *
+ * ## EVERY directive on the line, never the first one alone
+ *
+ * A seat fits as many directives on a line as it likes — nine `·`-separated
+ * backticked ones is a MEASURED live shape — and this used to hand back ONE
+ * value per line: the first key, then the rest of the line as its value. Every
+ * family therefore read the others as that value's prose, which for the
+ * `Blocked-by:` index meant eight blockers dropped in silence and a block that
+ * reads as EXPIRED (「1 of 1」 on a card stating nine). So the line splits at
+ * every FURTHER key after a separator run; ⛔ a key after a WORD is prose.
+ *
  * @param {string} text
  * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'|'Unlock-action'} key
  * @returns {string[]}
  */
 export function directiveValues(text, key) {
   const re = new RegExp(`^${DIRECTIVE_PREFIX}${directiveKey(key)}[ \\t]*(\\S.*)$`, 'gm');
+  const next = nextDirectiveOnLine(key);
   const out = [];
-  for (const m of String(text ?? '').matchAll(re)) {
-    const value = stripMatchingDecoration(m[2], m[1]);
+  const take = (raw, opener) => {
+    const value = stripMatchingDecoration(raw, opener);
     if (value) out.push(value);
+  };
+  for (const m of String(text ?? '').matchAll(re)) {
+    let opener = m[1];
+    let rest = m[2];
+    for (let split = next.exec(rest); split; split = next.exec(rest)) {
+      take(rest.slice(0, split.index), opener);
+      opener = split[1];
+      rest = rest.slice(split.index + split[0].length);
+    }
+    take(rest, opener);
   }
   return out;
 }
@@ -3667,13 +3705,21 @@ export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
  *    line because it sits in code, this one reads a line whose code markers
  *    are the author formatting a directive. Both serve the same test — would
  *    the unlock sweep's grep act on this line — and its answer here is yes.
- * 2. **Only the LEADING ref run is taken.** Real lines carry trailing prose —
- *    「Blocked-by: #9689 (the relocation it needs is the same edit)」 — and
- *    prose can name a second card that is context, not a blocker. Scanning
- *    the whole value would manufacture a dependent for it, and the cost lands
- *    on a THIRD card (a phantom "missing cache" row against someone who did
- *    nothing wrong). So the scan walks refs and separators from the start of
- *    the value and stops at the first token that is neither.
+ * 2. **EVERY ref in a directive's value is a target**, never the leading run
+ *    alone. That run was taken to keep a `#N` in trailing prose out of the
+ *    index (a phantom "missing cache" row against a third card), and it does
+ *    not buy that: a value whose FIRST ref is prose — the measured
+ *    「Blocked-by: objectui#7434's PR #8090 … and whatever PR repairs
+ *    objectui#8065」 — indexed the possessive, a card that was never a
+ *    blocker, and dropped both real blockers. So the run files a phantom too;
+ *    what it ADDS is substitution, and a block whose real blockers are
+ *    invisible reads as expired. Reading every ref can only ADD a target, and
+ *    an extra target can only WITHHOLD a discharge (H19 counts it open and
+ *    names it on the row) — ⛔ never found a release: this file's standing
+ *    posture on an ambiguity (#4690), applied to the value rather than to the
+ *    resolution. The context ref that rides along is the price, it is named
+ *    on the row, and unlike the comment archive the line carrying it is
+ *    rewritable by the seat that wrote it.
  *
  * The key is matched case-sensitively and line-anchored, byte-stable like H4
  * and H9: a lowercase or mid-sentence spelling is a line the real scan cannot
@@ -3682,18 +3728,18 @@ export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
  * @param {string} body
  * @returns {{ repo: string|null, number: number }[]}
  */
+const BLOCKED_BY_REF = /(?<![A-Za-z0-9._\/-])([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?)?#(\d+)/gu;
+
 export function blockedByTargets(body) {
   const out = [];
-  // The shared decorated-directive reader: the value arrives trimmed and with
-  // a matching trailing marker already removed, so the ref walk below sees
-  // 「#9823」 whether the author wrote it bare, bulleted, bolded or in code.
+  // The shared decorated-directive reader: ONE value per directive, trimmed
+  // and with a matching trailing marker already removed, so the scan below
+  // sees 「#9823」 whether the author wrote it bare, bulleted, bolded or in
+  // code. A qualifier must TOUCH its `#` and no match may START inside a
+  // path-like token, so a URL fragment in a value names no target.
   for (const value of directiveValues(body, 'Blocked-by')) {
-    let rest = value;
-    for (;;) {
-      const ref = /^[\s,;+、]*(?:and[ \t]+)?([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?)?#(\d+)/u.exec(rest);
-      if (!ref) break;
+    for (const ref of value.matchAll(BLOCKED_BY_REF)) {
       out.push({ repo: ref[1] ?? null, number: Number(ref[2]) });
-      rest = rest.slice(ref[0].length);
     }
   }
   return out;
@@ -6880,12 +6926,47 @@ export function h19DeclaredExitFired(issue, resolutions, commentBodies, ownerRep
 }
 
 // ---------------------------------------------------------------------------
-// H26 — a block whose target can never CLOSE, and the stale chain (#11219).
+// H26 — a block with no scheduled or declared release, and the stale chain (#11219).
 //
-// The unlock predicate is "the `Blocked-by:` target CLOSED". `pm:on-hold` and
-// `needs-user-decision` are, by definition, states a card sits in WHILE OPEN.
-// A block naming such a target is therefore structurally indefinite: nothing in
-// the machinery can ever fire it, and until this row nothing said so.
+// The unlock predicate is "the `Blocked-by:` target CLOSED", and since #19255 a
+// card can declare a second one: a label-transition exit this sweep fires. This
+// row is what is left when NEITHER is in reach — the target is parked in
+// `pm:on-hold` or `needs-user-decision`, no timer, sweep or queue in this loop
+// closes either state, and the card declared no exit for that target. So the
+// block has NO SCHEDULED OR DECLARED RELEASE, and until this row nothing said so.
+//
+// ## Why this row no longer says "can never close" (#18017)
+//
+// It used to, and that half was an ASSERTION — never counted. Counting refutes
+// it. Taken on this board 2026-09-20T19:06Z, REST
+// `/issues?labels=LABEL&state=STATE&per_page=100` walked to exhaustion, the
+// population every ISSUE carrying the label — pull requests excluded, which is
+// not tidying: 96 of the 111 rows the closed `needs-user-decision` leg returns
+// are PRs, so dropping that filter measures another population.
+//
+//   label                    open   closed   closed `state_reason`
+//   `pm:on-hold`              101       14   7 completed, 7 not_planned
+//   `needs-user-decision`       8       15   9 completed, 6 not_planned
+//   `pm:blocked` (control)     69       21   17 completed, 4 not_planned
+//
+// ⭐ The control has a known direction and it HIT: the same enumerator returned
+// non-zero on all three CLOSED rows, so a `state=closed` leg answering nothing
+// silently would have read as three zeros, and it did not. ⇒ cards DO close out
+// of both indefinite states, 16 of those 29 closures `completed` — the hold
+// lifted and the work finished, the very release the retired wording denied.
+//
+// This file presupposed it already, twice, in its own text: `PM_RESIDUE_LABELS`
+// (H22) carries `pm:on-hold`, and a label is residue only on a CLOSED card; and
+// H22's own note calls `needs-user-decision` one of the "perfectly good states
+// for a closed card to have ended in" — the direct converse, one file away.
+//
+// ⚠️ What is KEPT is the half that survives the count, and the POPULATION is
+// untouched: every card this row fired on before, it fires on now. The
+// overstatement was "no one is scheduled to act" rendered as "no mechanism
+// exists", and only the rendering changed. This sentence does not stay in a
+// report body — it is quoted outward as a structural verdict, and seats have
+// cited it as grounds to abandon locks they would otherwise have opened, so
+// what it claims has to be what the numbers support.
 //
 // ## Why every existing check passes on these cards
 //
@@ -6929,16 +7010,18 @@ export function h19DeclaredExitFired(issue, resolutions, commentBodies, ownerRep
 // rows simply stopped throwing the labels away.
 //
 // Report-only, and pointedly not a judgement that the block is WRONG: waiting
-// on a deferred card is sometimes exactly right. The row says this block has no
-// mechanism that will ever release it, which is the thing a human should see
-// rather than discover in a hand sweep.
+// on a deferred card is sometimes exactly right. The row says nobody is
+// SCHEDULED to release this block and the card declared no exit for it, which
+// is the thing a human should see rather than discover in a hand sweep.
 // ---------------------------------------------------------------------------
 
 /**
- * Target states that can never satisfy the unlock predicate, because they are
- * states an OPEN card sits in. `pm:blocked` is deliberately not here — that is
- * the chain leg below, and it says something different: the target CAN close,
- * once its own blocker does.
+ * Target states that nothing is SCHEDULED to move a card out of, so nothing is
+ * scheduled to satisfy the unlock predicate either. ⛔ NOT states a card cannot
+ * leave — cards close out of both, counted in the block above; they lift when
+ * a person acts and on no timer this loop owns. `pm:blocked` is deliberately
+ * not here — that is the chain leg below, saying something different: the
+ * target has a named next step, its own blocker closing.
  */
 export const INDEFINITE_TARGET_LABELS = ['pm:on-hold', 'needs-user-decision'];
 
@@ -6991,15 +7074,19 @@ export function h26BlockOnIndefiniteTarget(issue, resolutions, commentBodies, ow
         ? ` +${indefinite.length - H19_TARGET_LIST_CAP} more`
         : '';
     parts.push(
-      `\`pm:blocked\` on ${indefinite.length} target(s) that can never CLOSE: ${named}${more}. ` +
-        'The unlock predicate is "the `Blocked-by:` target closed", and `pm:on-hold` / ' +
-        '`needs-user-decision` are by definition states a card sits in WHILE OPEN — so this ' +
-        'block has NO MECHANISM THAT WILL EVER RELEASE IT. Every existing check passes on this ' +
+      `\`pm:blocked\` on ${indefinite.length} target(s) with no scheduled or declared release: ${named}${more}. ` +
+        'The unlock predicate is "the `Blocked-by:` target closed"; no timer, sweep or queue in ' +
+        'this loop closes `pm:on-hold` or `needs-user-decision`, and this card declares no ' +
+        'label-transition exit for them — so this block has NO SCHEDULED OR DECLARED RELEASE. ' +
+        '⛔ Deliberately weaker than the categorical claim this row used to make, which counting ' +
+        'refutes: on this board 2026-09-20, `pm:on-hold` closed 14 and `needs-user-decision` ' +
+        'closed 15, 16 of the 29 `completed` (control: `pm:blocked` closed 21, so the closed ' +
+        'enumerator fires) — these targets DO close. Every existing check passes on this ' +
         'card (the line is present, the target resolves, the target is open, the label is ' +
         'correct), which is why the measured instances were found by a human reading and by no ' +
         'gauge; H9 asks the mirror question about the HELD card and nothing asked about the ' +
         'WAITING one. ⚠️ Not a claim that the block is wrong — waiting on a deferred card is ' +
-        'sometimes exactly right. It says the wait is indefinite BY CONSTRUCTION, so the release ' +
+        'sometimes exactly right. It says nobody is SCHEDULED to end the wait, so the release ' +
         'has to come from the target\'s own state changing (a ruling answered, a hold restarted) ' +
         'and someone has to want that.',
     );
@@ -9194,22 +9281,48 @@ export function seatPostLastEventMs(seat, commentRows) {
  * The `Seat:` line of a claim body — the seat NUMBER the claiming PM sits on
  * (`Seat: domain:<x>#<n>`, free-claim multi-seat), read with the same key-line
  * tolerance as `threadReadField` (leading bullet or blockquote, bold or code
- * decoration around the key).
+ * decoration around the key). Three answers, and the middle one is the reason
+ * this reader is not a one-liner:
  *
- * Absent ⇒ 1. Every claim written before the line existed belongs to seat 1,
- * which is the only seat those lanes had, so the default is backward
- * compatible with every existing claim rather than a guess. A line that is
- * PRESENT but names no `#<n>` is unreadable and returns null: it matches no
- * seat, so its claim is invisible to the seat filter below — the file's
- * under-reporting direction on every unrecognised spelling — and ⛔ never
- * silently read as seat 1.
+ * · ABSENT ⇒ 1. Every claim written before the line existed belongs to seat 1,
+ *   which is the only seat those lanes had, so the default is backward
+ *   compatible with every existing claim rather than a guess.
+ * · PRESENT but unreadable ⇒ null. It matches no seat, so the claim is
+ *   invisible to the seat filter below — the file's under-reporting direction
+ *   on every unrecognised spelling — and ⛔ never silently read as seat 1.
+ *   TWO spellings reach it: a line-initial key naming no `#<n>`, and a
+ *   declaration the key line cannot see at all (mid-sentence, inside a code
+ *   span, inside a subscript tag, behind a `> - ` prefix).
+ * · Otherwise the number the line names.
+ *
+ * ⚠️ The second spelling of the second answer is the repair, and the cost it
+ * removes is measured: a wrong answer that is a REAL seat does not surface as
+ * an error, it surfaces as an ACCUSATION against whoever sits there — three
+ * claims of one round declared their seat inside the opening sentence, were
+ * read as seat 1, and H38 rowed another seat's post as stale over it. ⛔ The
+ * presence probe below therefore does NOT widen `CLAIM_SEAT_KEY_LINE`:
+ * accepting a malformed declaration would leave the writer no way to find out
+ * either, which is the same defect wearing the other costume. Refusing it at
+ * the writing path is a different instrument's job.
  */
 const CLAIM_SEAT_KEY_LINE = /^[ \t]*(?:[-*+][ \t]+)?>?[ \t]*(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*(.*)$/im;
 
-/** @returns {number|null} the seat number, 1 when the line is absent, null when it is present but unreadable. */
+/**
+ * PRESENCE only — consulted solely when the key line matched nothing, and it
+ * ⛔ never yields a number. Case-SENSITIVE, and it demands the whole declared
+ * payload (`domain:<lane>#<n>`), because off the line start there is no
+ * position left to tell a declaration from prose: the pinned control
+ * 「the seat: domain:services#2 is busy」 has to keep reading as seat 1. Pinned
+ * to the measured shape; an unmeasured variant it misses falls back to 1,
+ * which is the defect, so widen it on evidence rather than narrowing it.
+ */
+const CLAIM_SEAT_DECLARATION_ANYWHERE = /(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*`?domain:[a-z0-9_-]+[ \t]*#\d/;
+
+/** @returns {number|null} the seat number, 1 when NO declaration is present at all, null when one is present but unreadable. */
 export function claimSeatNumber(body) {
-  const m = CLAIM_SEAT_KEY_LINE.exec(String(body ?? ''));
-  if (!m) return 1;
+  const text = String(body ?? '');
+  const m = CLAIM_SEAT_KEY_LINE.exec(text);
+  if (!m) return CLAIM_SEAT_DECLARATION_ANYWHERE.test(text) ? null : 1;
   const n = /#(\d+)\b/.exec(String(m[1] ?? ''));
   return n ? Number(n[1]) : null;
 }
@@ -11916,17 +12029,22 @@ export function h50ThreadReadMismatch(issue, commentRows, sinceMs = Date.parse(T
 // current statement of what is open: a later round that closes a question out
 // writes `open_questions: []`, and that empty array is the record that stands
 // this row down. ⚠️ The known and deliberate cost of that choice is stated
-// rather than hidden: a question ANSWERED in the thread — by a ruling comment,
-// a chat reply recorded on the card — with no newer report and no label still
-// reads as open here. That is an over-report, and it is the direction this row
-// chooses on purpose, because the two repairs it asks for are both repairs the
-// board needs anyway: route the question if it is open, and record the answer
-// in a report or on the label if it is not. ⛔ The opposite direction — teach
-// the row to recognise a ruling — was refused: `isTriageRulingComment`'s anchor
-// set is H33's population, the live answer that motivated this row (「Ruling
-// recorded — the three residuals …」) matches none of its five anchors, and
-// widening them would be a change to H33 rather than an addition beside it.
-//
+// rather than hidden: a question ANSWERED in the thread — by a ruling comment, a
+// chat reply recorded on the card — with no newer report and no label still reads
+// as open here. ⛔ Teaching the row to recognise a RULING was refused:
+// `isTriageRulingComment`'s anchor set is H33's population, the live answer that
+// motivated this row (「Ruling recorded — the three residuals …」) matches none of
+// its five anchors, and widening them would be a change to H33 rather than an
+// addition beside it. ⚠️ But that over-report has NO floor on a card no dev is
+// dispatched to (#19160): closing is forbidden
+// (「缺陷卡 ⛔ 不藏进 hold 也不自行关闭」), re-hanging `needs-user-decision` is
+// forbidden by this row's own remedy for a residual, and no newer report can
+// exist — a `pm:on-hold` card is dispatched to nobody. Two live carriers
+// (objectui#8348, objectui#9868) answered on the thread NEWER than the report and
+// re-fired every sweep: the 「无机制可唤醒的卡 ⛔ 不 hold」 shape the charter
+// refuses one layer down, for a CARD. So a FOURTH exit — `H52_ANSWERED_HEADING`
+// on a NON-report comment newer than the report, a shape the answer DECLARES and
+// ⛔ never a ruling: the ruling comment stays a FIRING case, pinned.
 // ## Population — measured, not assumed
 //
 // The first census is what set it. The row was first written over open
@@ -12159,6 +12277,42 @@ export function latestDevReport(commentRows) {
 }
 
 /**
+ * A seat's ANSWER to the report's questions, as a HEADING of its comment.
+ *
+ * MEASURED, ⛔ not invented: the only two live answers carry it UNEDITED —
+ * objectui#8348 `5737496254` 「### The two open questions, answered」 and
+ * objectui#9868 `5736885341` 「## Half-state patrol H52 — the two `open_questions`
+ * on this card are ANSWERED …」. ONE heading line naming the array and saying
+ * ANSWERED is all they share, and that pair IS the pin. LINE-anchored (`m`) where
+ * `OS_DEV_REPORT_MARKER` is body-anchored, because one of the two carries its
+ * heading 32 lines into a seat review; the ATX heading is what keeps that safe,
+ * so ⛔ a blockquoted `> ###` (a QUOTE of another card's answer) and the same
+ * words in prose are both refused. ⛔ No `g` flag.
+ */
+export const H52_ANSWERED_HEADING =
+  /^#{1,6}[ \t]+(?=[^\n]*\bopen[\s_`*]*questions?\b)(?=[^\n]*\banswered\b)/im;
+
+/**
+ * Does the thread carry a seat ANSWER NEWER than its newest `os-dev-report`?
+ *
+ * A SIBLING of `latestDevReport`, ⛔ never a change to it — that reader is shared
+ * with other rows and still returns exactly what it returned. Ordering is CALLED
+ * rather than restated: `latestMarkedComment` is the newest-of rule,
+ * `releaseAnswersClaim` the "is this the later record" one — and that pair is ALSO
+ * what refuses a REPORT, so ⛔ no second guard excludes one. The newest report is
+ * BY CONSTRUCTION at least as new as any report carrying the heading, so ordering
+ * already answers false; a guard there was written, ABLATED (the suite stayed
+ * green without it) and removed as the phantom check it was.
+ */
+export function h52AnswerStandsDown(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const report = latestMarkedComment(rows, OS_DEV_REPORT_MARKER);
+  const answer = latestMarkedComment(rows, H52_ANSWERED_HEADING);
+  if (!report || !answer) return false;
+  return releaseAnswersClaim(answer, report);
+}
+
+/**
  * Which cards this row can speak about AT ALL — exported for the
  * counting-policy reason every such predicate is: the predicate that decides
  * what is even counted is where a silent hole would live.
@@ -12195,6 +12349,9 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
   if (!report.parsed) return null;
   const questions = report.questions.filter((q) => q !== null);
   if (report.questions.length === 0) return null;
+  // The FOURTH exit (#19160) — a seat ANSWER newer than that report, the only
+  // clearing act a card no dev is dispatched to can write.
+  if (h52AnswerStandsDown(commentRows)) return null;
   const reportId = commentIdText(report.row?.id);
   const named = reportId ? `comment ${reportId}` : 'a comment carrying no readable id';
   const stamped = report.row?.created_at ?? 'unstamped';
@@ -12220,7 +12377,9 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
     're-flagged card leaves the inbox unable to say WHICH question is open and invites a reader to re-present ' +
     'a ruling that has already been executed, and because this card\'s close would take the label, and the ' +
     'question\'s only visibility, with it. If the question has already been ANSWERED, say so in the next ' +
-    'report, whose empty `open_questions` is the record that stands this row down. ⛔ Nothing here changes ' +
+    'report, whose empty `open_questions` is the record that stands this row down — or, on a card no dev is ' +
+    'dispatched to and which therefore can never get one, answer them on the thread in a comment NEWER than ' +
+    'that report, under a HEADING that names `open_questions` and says ANSWERED. ⛔ Nothing here changes ' +
     'the report contract: the array is the right place for the question. Report-only patrol INPUT: nothing is ' +
     'blocked and no label is written.'
   );
@@ -14485,8 +14644,24 @@ export function h59FalseCloseRow({ pr, card, attribution, closedEvent, closedAtM
  *
  * The card's presence in the open listing IS the reading, so a truncated
  * listing can only lose a row and never invent one.
+ *
+ * ⭐ The row also carries `state_reason`, the whole discriminator for the
+ * REOPENED arm: a card open because somebody REOPENED it is a deliberate act,
+ * ⛔ never GitHub failing to close it, so the arm changes the SENTENCE only.
  */
 export function h59FalseOpenRow({ pr, card, keyword }) {
+  if (String(card?.state_reason ?? '') === 'reopened') {
+    return (
+      `FALSE OPEN (reopened): merged PR #${pr?.number} binds \`${keyword} #${card?.number}\` in its body and ` +
+      'the card is open carrying `state_reason: reopened` — it was CLOSED at some point and REOPENED since, a ' +
+      'deliberate act and ⛔ never the platform failure the plain row names. ⚠️ This row buys no timeline, so it ' +
+      'does not PLACE that reopen against the merge: whether the declared closure fired and was reversed, or ' +
+      'never fired on an already-reopened card, is unread here — what the payload settles is that a REOPEN ' +
+      'happened, and that is the act to read. Remedy, and it belongs to the SEAT THAT OWNS the card: read the ' +
+      'reopen\'s own reason — the comment that made it, or the decision-box label it carries — and ⛔ do not ' +
+      'close a card somebody reopened on purpose. ⛔ This row closes nothing and writes no label.'
+    );
+  }
   return (
     `FALSE OPEN: merged PR #${pr?.number} binds \`${keyword} #${card?.number}\` in its body, and the card ` +
     'is STILL OPEN after that merge — GitHub did not perform the closure the PR declared. ' +
@@ -15323,6 +15498,72 @@ export function h63StaleFindingBesideGrade(issue) {
     'index exists for and is clean here; a `pm:seat` post is never judged; closed-card residue is ' +
     'H22/H39\'s, and `finding` is deliberately not in that set; the two-positions contradiction is ' +
     'H29\'s, which is correct to stay silent — this row does not claim the marker is a position.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H68 (#18901) — a class-(b) card with no `Seam:` line
+//
+// The three-class filing rule (os-dev.md 六条基本规则 3) makes a class-(b)
+// finding — 违背已声明契约 — carry ONE machine-readable line naming both ends
+// of its seam, `Seam: spec:KEY → runtime:CALL_SITE | renderer:COMPONENT`
+// (`consumer: none` when no consumer was measured), which the routing half
+// reads; a (b) card without it names its seam in prose no router can read.
+// The signal, MEASURED (2026-09-20T11:12Z, 537 open cards): 20 bodies say
+// `class (b)` / `判据 (b)`, 16 DECLARE it (a heading naming the class or a
+// line opening with it; one a `pm:seat` post), 4 mention it mid-sentence (one
+// a card ABOUT the rule); comments name the class on 0 of 20 `finding` cards
+// and on 8 of the 20 body hits, comment-only 0. So the body DECLARATION is
+// the reader — it dominates the comment signal, it is what the rule asks the
+// dev to write, and it costs no request; a mid-sentence mention is not a
+// declaration. `Seam:` lines at line start on that board: 0.
+// Population: the UNSCOPED listing (H63's channel) — declared before any
+// grade. ⛔ Report-only, never a verdict by itself. ⛔ The VALUE after `Seam:`
+// is not judged: presence at line start is the filed contract, the value the
+// routing half's reading; the reader is the one `Blocked-by:` shares.
+// ---------------------------------------------------------------------------
+
+/** A heading naming the class, or a line opening with it (decoration and a leading `Finding` tolerated) — the measured shapes. */
+export const CLASS_B_HEADING_RE = /^#{1,6}[ \t]+[^\n]*?(?:[Cc]lass|判据)[ \t]*[(（]b[)）]/m;
+export const CLASS_B_LINE_RE = /^[ \t]*(?:[-*>⇒·][ \t]*)*(?:\*\*|`|_)*(?:Finding[ \t]+)?(?:[Cc]lass|判据)[ \t]*[(（]b[)）]/m;
+export const H68_QUOTE_LIMIT = 160;
+/** Spelled without angle brackets: the anchor body is a GitHub body. */
+export const SEAM_LINE_SHAPE = '`Seam: spec:KEY → runtime:CALL_SITE | renderer:COMPONENT`';
+
+/** The class-(b) DECLARATION line in this body, trimmed, or null. */
+export function classBDeclaration(body) {
+  const text = String(body ?? '');
+  const m = CLASS_B_HEADING_RE.exec(text) ?? CLASS_B_LINE_RE.exec(text);
+  if (!m) return null;
+  const end = text.indexOf('\n', m.index);
+  return text.slice(m.index, end === -1 ? text.length : end).trim();
+}
+
+/** A `Seam:` line at line start — the shared directive reader, a same-line value required. */
+export function hasSeamLine(text) {
+  return directiveValues(text, 'Seam').length > 0;
+}
+
+/** H68 — null when out of scope, undeclared, or already carrying the line; else the finding sentence quoting the declaration. */
+export function h68ClassBWithoutSeamLine(issue) {
+  if (!issue || issue.pull_request || issue.state !== 'open') return null;
+  if (NEVER_SWEPT_LABELS.some((label) => labelNames(issue).includes(label))) return null;
+  const body = String(issue.body ?? '');
+  const declared = classBDeclaration(body);
+  if (declared === null || hasSeamLine(body)) return null;
+  const quoted = declared.length > H68_QUOTE_LIMIT ? `${declared.slice(0, H68_QUOTE_LIMIT)}…` : declared;
+  return (
+    `open and DECLARED class (b) — 「${quoted}」 — with no \`Seam:\` line at line start: the three-class filing ` +
+    'rule (os-dev.md 六条基本规则 3) makes a 违背已声明契约 finding carry ONE machine-readable line naming both ' +
+    `ends of the seam, ${SEAM_LINE_SHAPE}, \`consumer: none\` when the filer measured no consumer — and the ` +
+    'routing half reads that line (a seam whose producer is `packages/spec` is dispatched vertically; one whose ' +
+    'consumer is in objectui is split into parent + sub-issues), so a card without it names its seam in prose ' +
+    'that no router can read. Remedy — WHO and HOW: the filer, or the seat that next writes on this card, adds ' +
+    'the line to the BODY (bare, or decorated the way `Blocked-by:` may be) with its value on the same line; ' +
+    'the value itself is the routing half\'s to judge, not this row\'s. ⛔ Report-only: no label is written ' +
+    'from this script and no card is graded from here. Boundaries: a mid-sentence mention of the class is not a ' +
+    'declaration and is not listed (restate it at a heading or line start); a `pm:seat` post is never judged; ' +
+    'a closed card is archive; the ungraded marker beside a grade is H63\'s, which this row does not duplicate.'
   );
 }
 
@@ -19411,6 +19652,17 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // RELEASE RECORD on the newest comment, this one reads the DELIVERY on the
   // timeline.
   H67: 'state',
+
+  // H68 is a `state` (#18901), the three refusals on the refused band's OWN
+  // criterion. ⛔ NOT `gate`: nothing here decides a landing; the absent LINE
+  // reads as nothing — a router that cannot place the card, not a green light.
+  // ⛔ NOT `stall`: whether a line-less (b) card routes slower is UNMEASURED,
+  // and the grading seat reads the seam out of the prose by hand — the cost,
+  // not a halt. ⛔ NOT `inventory`: one card; the population reading lives in
+  // the docblock. Left is `state` exactly: a LIVE card's face half-written
+  // against a shape it owes — class declared, seam unnamed — repaired in one
+  // body edit; H63's and H65's band, the rows it sits beside.
+  H68: 'state',
 
   // H57 is a `stall` (#17132), and the three refusals are each taken on the
   // refused band's own criterion rather than on this subject's vocabulary —
@@ -23623,6 +23875,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // population IS the sweep's target set rather than an approximation of it.
     const staleFinding = h63StaleFindingBesideGrade(issue);
     if (staleFinding) findings.push([issue, 'H63', staleFinding]);
+    // H68 (#18901) — the class-(b) declaration with no `Seam:` line, on this
+    // listing for H63's reason: the class is declared in the BODY before any
+    // grade. Two body reads on a row already held — no request, no thread.
+    const seamless = h68ClassBWithoutSeamLine(issue);
+    if (seamless) findings.push([issue, 'H68', seamless]);
   }
 
   // H35 (#11881) — the EVENT behind the state H31 compares. One repo-wide
@@ -24116,11 +24373,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // waiting on one epic is the normal shape, and it costs one read.
   //
   // The map holds the ISSUE, not just its number, because H26 (#11219) asks a
-  // second question of the same target — is it parked in a state that can never
-  // close? — and the answer is a field the payload already carried. Free by
-  // construction: a locally-open target is answered from a listing in hand, and
-  // a fetched one arrives with its labels on the same response. Nothing here
-  // adds a request; the resolution rows simply stop discarding the labels.
+  // second question of the same target — is it parked in a state nothing is
+  // scheduled to end? — and the answer is a field the payload already carried.
+  // Free by construction: a locally-open target is answered from a listing in
+  // hand, and a fetched one arrives with its labels on the same response.
+  // Nothing here adds a request; the resolution rows simply stop discarding the
+  // labels.
   const openLocalIssues = new Map();
   for (const [number, issue] of seenUnscoped) openLocalIssues.set(number, issue);
   for (const [number, issue] of seen) openLocalIssues.set(number, issue);
@@ -24836,10 +25094,13 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   'ISSUE_BODY_LIMIT measured cap': 52,
   // Registered with the label-transition unlock exit (#19255), pin just under the count: a NEW EXIT beside a STAND-DOWN.
   'H19/H26 label-transition unlock exit': 10,
+  // Registered with the class-(b) seam-line row (#18901), pin just under the
+  // count: a READER pinned on MEASURED live shapes, its firing controls inside.
+  'H68 class-(b) seam line': 24,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
-export const SELF_TEST_BATTERY_FLOOR = 7;
+export const SELF_TEST_BATTERY_FLOOR = 8;
 
 async function selfTest() {
   const cases = [];
@@ -26494,13 +26755,13 @@ async function selfTest() {
     numbersOf(blockedByTargets('Blocked-by: #9689 (the relocation it needs is the same edit; doing them in the other order means touching the line twice).')),
     '9689',
   );
-  // The reason only the LEADING run is taken: a `#N` inside the trailing prose
-  // is context, not a blocker, and indexing it would file a phantom
-  // missing-cache row against a third card that did nothing wrong.
+  // ⭐ The leading run is GONE: a `#N` in the trailing prose is now a target
+  // too. It can only WITHHOLD a discharge, while the run it replaces
+  // SUBSTITUTED a false blocker for two real ones (the #8093 shape below).
   t(
-    'blockedByTargets: a ref inside the trailing prose is NOT a blocker',
+    'blockedByTargets: a ref inside the trailing prose is a target too, and can only withhold',
     numbersOf(blockedByTargets('Blocked-by: #123 (see #456 for the background)')),
-    '123',
+    '123,456',
   );
   t('blockedByTargets: a comma-separated run is all blockers', numbersOf(blockedByTargets('Blocked-by: #6234, #6245')), '6234,6245');
   t('blockedByTargets: the `and` connector is a separator', numbersOf(blockedByTargets('Blocked-by: #1 and #2')), '1,2');
@@ -26528,6 +26789,34 @@ async function selfTest() {
   // (the unlock scan greps the literal), so a fenced line really does fire the
   // live machinery and must be reported as part of the index it feeds.
   t('blockedByTargets: a fenced line still counts (this reader greps, it does not read prose)', numbersOf(blockedByTargets('```\nBlocked-by: #42\n```')), '42');
+
+  // -- Multiplicity and substitution, both MEASURED on live bodies ----------
+  // objectui#8347: NINE `·`-separated backticked directives on ONE line. The
+  // reader took the first and H19 printed 「1 of 1 … CLOSED」 — the row the
+  // unlock scan releases from — while three of the nine were open.
+  const nineOnOneLine =
+    '`Blocked-by: #8345` · `Blocked-by: #8648` · `Blocked-by: #8649` · `Blocked-by: #8650` · ' +
+    '`Blocked-by: #8651` · `Blocked-by: #8652` · `Blocked-by: #8653` · `Blocked-by: #8654` · `Blocked-by: #8655`';
+  t('blockedByTargets: the #8347 shape — nine directives on one line are NINE targets', numbersOf(blockedByTargets(nineOnOneLine)), '8345,8648,8649,8650,8651,8652,8653,8654,8655');
+  t('directiveValues: …and each directive is its own CLEAN value, decoration stripped per directive', directiveValues(nineOnOneLine, 'Blocked-by').join('|'), '#8345|#8648|#8649|#8650|#8651|#8652|#8653|#8654|#8655');
+  // objectui#8093: ONE directive whose remainder is prose naming three
+  // numbers. The leading run returned the POSSESSIVE — never a blocker — and
+  // dropped both real ones: a substituted target answers the liveness
+  // question about the wrong card, which is the worse of the two failures.
+  const proseRemainder =
+    "`Blocked-by:` objectui#7434's PR #8090 (the `AGENTS.md` half, draft, awaiting human merge) " +
+    'and whatever PR repairs objectui#8065 (the `skills/objectui` half).';
+  t('blockedByTargets: the #8093 shape — both REAL blockers are read, not dropped', blockedByTargets(proseRemainder).map((r) => `${r.repo ?? ''}#${r.number}`).join(','), 'objectui#7434,#8090,objectui#8065');
+  // The dark controls: one directive is one target, and prose OUTSIDE a
+  // directive is not a directive however many numbers it names.
+  t('blockedByTargets: ONE directive still yields exactly one target', numbersOf(blockedByTargets('`Blocked-by: #4242`')), '4242');
+  t('blockedByTargets: prose naming `#n` OUTSIDE any directive invents nothing', numbersOf(blockedByTargets('We will wait for #9 and #10 before starting.')), '');
+  t('blockedByTargets: a URL fragment inside a value is not a target', numbersOf(blockedByTargets('Blocked-by: #12 (trail: https://example.test/issues/8347#40)')), '12');
+  // The whole directive family reads through `directiveValues`, so all of it
+  // gains the multiplicity — pinned on a NON-`Blocked-by:` key, beside the pin
+  // that a key after a WORD is still prose and invents nothing.
+  t('directiveValues: a second directive on one line is read for EVERY family', directiveValues('`Restart-when: closed acme/w#9` · `Restart-when: manual — x`', 'Restart-when').join('|'), 'closed acme/w#9|manual — x');
+  t('directiveValues: …and a key after a WORD is still prose, not a second directive', directiveValues('Restart-when: closed acme/w#9 — seats park the `Restart-when: manual` line in comments', 'Restart-when').length, 1);
 
   // The index.
   const idx = (issues) => buildBlockingIndex(issues, { repo: 'objectstack-ai/objectstack' });
@@ -26923,6 +27212,15 @@ async function selfTest() {
   t('H19: …names the target that is still open', partialRow.includes('`#3`'), true);
   t('H19: …and does not decide the card is unblocked', partialRow.includes('it does not decide it'), true);
   t('H19: two closed of two reads as 2 of 2', h19row(blockedCard(1), [target(2, 'closed'), target(3, 'closed')]).includes('2 of 2'), true);
+  // ⭐ End to end from the BODY, because the COUNT is what a reader trusts: two
+  // directives on ONE line, one closed and one open, must read 「1 of 2」 — the
+  // 「1 of 1」 it used to print is a FULL discharge on a card with an open
+  // blocker, which is the row the unlock scan releases from.
+  const twoOnOneLine = blockedCard(1, '`Blocked-by: #2` · `Blocked-by: #3`');
+  const twoResolved = blockerTargetsFor(twoOnOneLine, null, REPO_OS).map((tg, i) => ({ ...tg, state: i === 0 ? 'closed' : 'open', closedAt: null, detail: null }));
+  t('H19: a two-directive line resolves TWO targets', twoResolved.map((tg) => tg.number).join(','), '2,3');
+  t('H19: …so the row reads 1 of 2, never 1 of 1', h19row(twoOnOneLine, twoResolved, REPO_OS).includes('1 of 2 `Blocked-by:` target(s)'), true);
+  t('H19: …and calls it a PARTIAL discharge rather than a full one', h19row(twoOnOneLine, twoResolved, REPO_OS).includes('Every target it names is closed'), false);
 
   // UNRESOLVED — never reads as clean, and never reads as closed either.
   const unresolvedOnly = h19BlockOutlivedBlocker(blockedCard(1), [foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })]);
@@ -27968,6 +28266,41 @@ async function selfTest() {
   t('H63 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H63'), true);
   t('H63 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H63 band: …and none is registered that the sweep never pushes', familyRegistryCoverage().extra.length, 0);
+
+  // -- H68 (#18901): a class-(b) card with no `Seam:` line — the reader pinned
+  //    on the shapes MEASURED on the live board, a lit control under every
+  //    silence, the floor pins at the foot ------------------------------------
+  const BATTERY18901 = 'H68 class-(b) seam line';
+  const SEAM_LIVE = 'Seam: spec:field.relatedListFilter → consumer: none';
+  const B19160 = '## What is wrong\n\nprose.\n\n## Class (b) — it violates a contract this repository publishes\n\nAGENTS.md PD#14 says …';
+  const bCard = (body, labels = ['pm:queue', 'domain:skills', 'priority:p2'], over = {}) => ({ number: 19160, state: 'open', body, labels: labels.map((name) => ({ name })), ...over });
+  const row68 = (...args) => String(h68ClassBWithoutSeamLine(...args) ?? '');
+  b(BATTERY18901, 'H68: the live #19160 specimen — a `## Class (b) — …` heading, no `Seam:` line -> finding', typeof h68ClassBWithoutSeamLine(bCard(B19160)), 'string');
+  b(BATTERY18901, 'H68: …and the row QUOTES the declaration it found, so the reader knows which line put the card in the set', row68(bCard(B19160)).includes('「## Class (b) — it violates a contract this repository publishes」'), true);
+  b(BATTERY18901, 'H68: every measured heading spelling fires — `Why it is class (b)`, `Why this is class (b), …`, `The defect — class (b), …`, `判据 (b):…`, a bare `### Class (b)`', ['## Why it is class (b)', '## Why this is class (b), violating a declared contract', '## The defect — class (b), declared ≠ enforced, on a published API contract', '## 判据 (b):一条声明过的规则,在一个它够不到的地方被违反着', '### Class (b)'].every((h) => typeof h68ClassBWithoutSeamLine(bCard(`intro\n\n${h}\n\nbody`)) === 'string'), true);
+  b(BATTERY18901, 'H68: every measured line-opening spelling fires — bare, bold, `⇒`, `Finding class (b)`, a bullet, `判据 (b)`', ['Class (b): the same declared invariant, violated the same way, in a different package.', '**Class (b)** — a prohibition without a permitted action.', '⇒ class (b): violates an already-declared contract, with the contract text cited.', 'Finding class (b), surfaced by the maintainer\'s first sweep batch', '- Class (b), violating a declared contract: check (c)\'s own documented contract', '判据 (b):声明了却没人读'].every((l) => typeof h68ClassBWithoutSeamLine(bCard(`intro\n\n${l}\n\nbody`)) === 'string'), true);
+  b(BATTERY18901, 'H68: an UNGRADED `finding` carrier fires too — the class is declared before any grade, which is why the row reads the unscoped listing', typeof h68ClassBWithoutSeamLine(bCard(B19160, ['finding'])), 'string');
+  b(BATTERY18901, '⭐ H68: the same body with a bare `Seam:` line is clean', h68ClassBWithoutSeamLine(bCard(`${B19160}\n\n${SEAM_LIVE}`)), null);
+  b(BATTERY18901, 'H68: …decorated — bulleted, bold, backticked, nested — is the same line (shared reader)', [`- ${SEAM_LIVE}`, `**${SEAM_LIVE}**`, `\`${SEAM_LIVE}\``, `- **\`${SEAM_LIVE}\`**`].every((l) => h68ClassBWithoutSeamLine(bCard(`${B19160}\n\n${l}`)) === null), true);
+  b(BATTERY18901, 'H68: …and the renderer-shaped and runtime-shaped values are lines too — the VALUE is not judged here', ['Seam: spec:view.columns[].width → renderer:ObjectGrid', 'Seam: spec:object.validations → runtime:packages/objectql/src/validate.ts'].every((l) => h68ClassBWithoutSeamLine(bCard(`${B19160}\n${l}`)) === null), true);
+  b(BATTERY18901, '⛔ H68: a `Seam:` with NOTHING after it is no line, and a mid-sentence `Seam:` is no line — the card still fires', [typeof h68ClassBWithoutSeamLine(bCard(`${B19160}\n\nSeam:`)), typeof h68ClassBWithoutSeamLine(bCard(`${B19160}\n\nthe dev writes a Seam: line here`))].join(), 'string,string');
+  b(BATTERY18901, 'H68 control: …and the byte-identical body with the value on the line is clean', h68ClassBWithoutSeamLine(bCard(`${B19160}\n\n${SEAM_LIVE}`)), null);
+  b(BATTERY18901, '⛔ H68: a MID-SENTENCE mention is not a declaration — the measured false positive is a card ABOUT the rule', h68ClassBWithoutSeamLine(bCard('one report-only row — an OPEN card graded class (b) (a `finding` whose triage comment names 判据 (b)) with no `Seam:` line')), null);
+  b(BATTERY18901, 'H68 control: …and the same words at line start fire', typeof h68ClassBWithoutSeamLine(bCard('Class (b) (a `finding` whose triage comment names 判据 (b)) with no `Seam:` line')), 'string');
+  b(BATTERY18901, '⛔ H68: `class-(b)` hyphenated in prose, `(b)` alone, and the class (a) / (c) headings are not this class', ['a class-(b) finding carries one line', '## (b) the second option', '## Class (a) — a reproducible defect', '## Class (c) — a metadata trap'].every((l) => h68ClassBWithoutSeamLine(bCard(`intro\n\n${l}`)) === null), true);
+  b(BATTERY18901, '⛔ H68: a `pm:seat` post is NEVER judged — the measured `### 判据 (b) 九车道全量读数` heading is a reading, not a card', h68ClassBWithoutSeamLine(bCard('### 判据 (b) 九车道全量读数(2026-09-13 R+219)', ['pm:seat'])), null);
+  b(BATTERY18901, 'H68 control: …and the identical body without `pm:seat` fires', typeof h68ClassBWithoutSeamLine(bCard('### 判据 (b) 九车道全量读数(2026-09-13 R+219)', ['domain:skills'])), 'string');
+  b(BATTERY18901, '⛔ H68: a CLOSED card is archive, a PULL REQUEST row is not a card, a body-less card has no declaration, a missing row does not crash', [h68ClassBWithoutSeamLine(bCard(B19160, undefined, { state: 'closed' })), h68ClassBWithoutSeamLine(bCard(B19160, undefined, { pull_request: {} })), h68ClassBWithoutSeamLine(bCard(null)), h68ClassBWithoutSeamLine(undefined)].every((v) => v === null), true);
+  b(BATTERY18901, 'H68 text: the remedy names the line\'s shape with both ends and the `consumer: none` arm, spelled WITHOUT angle brackets (the anchor body is a GitHub body)', [row68(bCard(B19160)).includes('Seam: spec:KEY → runtime:CALL_SITE | renderer:COMPONENT'), row68(bCard(B19160)).includes('`consumer: none`'), /<[a-z ]+>/.test(row68(bCard(B19160)))].join(), 'true,true,false');
+  b(BATTERY18901, 'H68 text: ⛔ report-only — no label written, no card graded — and the value is declared the routing half\'s to judge', ['no label is written from this script', 'no card is graded from here', 'not this row\'s'].every((s) => row68(bCard(B19160)).includes(s)), true);
+  b(BATTERY18901, 'H68 text: the boundaries are on the row — mid-sentence mention, seat post, closed card, H63', ['not a declaration', 'never judged', 'archive', 'H63'].every((s) => row68(bCard(B19160)).includes(s)), true);
+  b(BATTERY18901, 'H68 text: a long declaration is quoted to the cap and marked cut', row68(bCard(`## Class (b) — ${'x'.repeat(300)}`)).includes('…」'), true);
+  b(BATTERY18901, 'H68: not a loud finding — it never escalates a sweep', isLoudFinding(h68ClassBWithoutSeamLine(bCard(B19160))), false);
+  b(BATTERY18901, 'H68 band: registered as `state` — a live card, the repair one body edit', familyBand('H68'), 'state');
+  b(BATTERY18901, 'H68 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H68'), true);
+  b(BATTERY18901, 'H68 band: no code is left unregistered and none registered that the sweep never pushes', familyRegistryCoverage().missing.length + familyRegistryCoverage().extra.length, 0);
+  b(BATTERY18901, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18901) && SELF_TEST_BATTERIES[BATTERY18901] > 0, true);
+  b(BATTERY18901, 'floor: the roster now declares EIGHT batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR === 8 && Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
@@ -29106,7 +29439,7 @@ async function selfTest() {
   b(BATTERY18664, '#18664 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18664), true);
   b(BATTERY18664, '#18664 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY18664] > 0, true);
   b(BATTERY18664, '#18664 floor: the roster is frozen', Object.isFrozen(SELF_TEST_BATTERIES), true);
-  b(BATTERY18664, '#18664 floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
+  b(BATTERY18664, '#18664 floor: the roster now declares EIGHT batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 8);
   b(BATTERY18664, '#18664 floor: …including the five this battery landed BESIDE, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'H2/H47/H66 decorated ownership marker'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY18664, '#18664 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -30652,7 +30985,7 @@ async function selfTest() {
   t('#16393 summary: a bare line reports the divisor UNCHECKED, not agreed with', saidBy('h22Window', summaryLine({}, 0)).includes('RATE PREMISE UNOBSERVED'), true);
   t('#16393 summary: …and renders numbers, never `undefined`', saidBy('h22Window', summaryLine({}, 0)).includes('undefined'), false);
 
-  // -- H26: a block whose target can never close, + the stale chain (#11219) --
+  // -- H26: a block with no scheduled or declared release, + the chain (#11219)
   // The measured cards, by name, and both directions of every leg.
   const waiting = (number = 1119) => ({
     number,
@@ -30676,11 +31009,23 @@ async function selfTest() {
     ...extra,
   });
   t('H26: target parked in pm:on-hold -> finding', typeof h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold'])]), 'string');
-  t('H26: …and the row says the block has no releasing mechanism', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('NO MECHANISM THAT WILL EVER RELEASE IT'), true);
+  // #18017 — the categorical half is RETIRED and its replacement pinned
+  // POSITIVELY: an absence-only check stays green when a later edit deletes the
+  // assertion with the sentence it named. ⛔ And each retired phrase is pinned
+  // in the CASE the row wrote it — `can never CLOSE`, not a paraphrase that was
+  // already absent before this change and would therefore pin nothing.
+  t('H26: …and the row says the block has no scheduled or declared release', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('NO SCHEDULED OR DECLARED RELEASE'), true);
+  t('H26: …and the retired categorical claim is gone', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('NO MECHANISM THAT WILL EVER RELEASE IT'), false);
+  t('H26: …and so is the retired opening, in the case the row wrote it', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('can never CLOSE'), false);
+  t('H26: …and it carries the counted population that refuted them', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('`pm:on-hold` closed 14 and `needs-user-decision` closed 15'), true);
+  t('H26: …with the control, so the count is a reading and not a bare number', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('control: `pm:blocked` closed 21'), true);
+  t('H26: ⭐ …and the USEFUL half survives verbatim', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('the release has to come from the target\'s own state changing (a ruling answered, a hold restarted) and someone has to want that'), true);
   t('H26: …and names the target and its state', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('`#987` (`pm:on-hold`)'), true);
   t('H26: target parked in needs-user-decision -> finding', typeof h26BlockOnIndefiniteTarget(waiting(75), [tgt(68, ['needs-user-decision'])]), 'string');
   t('H26: a target carrying BOTH indefinite states names both', h26row(waiting(), [tgt(987, ['pm:on-hold', 'needs-user-decision'])]).includes('`pm:on-hold` + `needs-user-decision`'), true);
-  // The clean directions — an ordinary open target is not this row's business.
+  // The clean directions — an ordinary open target is not this row's business,
+  // nor is a parked one the card hands a fireable exit for (#19255 stands down).
+  t('H26: a parked target with a DECLARED label-transition exit stands down (#19255)', h26BlockOnIndefiniteTarget({ ...waiting(), body: 'Blocked-by: #987\nUnlock-action: re-check #987 when label pm:on-hold absent' }, [tgt(987, ['pm:on-hold'])], [], REPO_OS), null);
   t('H26: an ordinary open target -> clean', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:queue', 'domain:devx'])]), null);
   t('H26: an unlabelled open target -> clean', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, [])]), null);
   t('H26: no targets at all -> no row (H4 owns the missing line)', h26BlockOnIndefiniteTarget(waiting(), []), null);
@@ -30697,14 +31042,15 @@ async function selfTest() {
   // The chain leg.
   t('H26: a target that is itself pm:blocked -> the transitive row', typeof h26BlockOnIndefiniteTarget(waiting(1395), [tgt(10101, ['pm:blocked'])]), 'string');
   t('H26: …and it says to look one level further', h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('TRANSITIVE'), true);
-  t('H26: …and does not claim the block can never release', h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('NO MECHANISM'), false);
+  t('H26: …and does not claim the block has no scheduled or declared release', h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('NO SCHEDULED OR DECLARED RELEASE'), false);
+  t('H26: …nor the retired categorical claim it replaced', h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('NO MECHANISM'), false);
   // Both legs at once, on two different targets, in one row.
   const bothLegs = String(h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold']), tgt(10101, ['pm:blocked'])]) ?? '');
-  t('H26: both legs report together', bothLegs.includes('NO MECHANISM THAT WILL EVER RELEASE IT') && bothLegs.includes('TRANSITIVE'), true);
+  t('H26: both legs report together', bothLegs.includes('NO SCHEDULED OR DECLARED RELEASE') && bothLegs.includes('TRANSITIVE'), true);
   // A target that is BOTH parked and blocked is named ONCE, under the reading
   // that ends the wait forever rather than the one that merely lengthens it.
   const bothOnOne = String(h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold', 'pm:blocked'])]) ?? '');
-  t('H26: a parked AND blocked target is named once, as indefinite', bothOnOne.includes('NO MECHANISM THAT WILL EVER RELEASE IT'), true);
+  t('H26: a parked AND blocked target is named once, as indefinite', bothOnOne.includes('NO SCHEDULED OR DECLARED RELEASE'), true);
   t('H26: …and not a second time as a chain', bothOnOne.includes('TRANSITIVE'), false);
   // A partially indefinite block still reports: one live blocker does not make
   // the indefinite one fireable.
@@ -30740,7 +31086,7 @@ async function selfTest() {
   b(BATTERY19255, '⭐ H26 stand-down: an exit naming the parked target silences the row in either channel — and once the label leaves, H19 fires the exit while H26 stays quiet', [h26row(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [parked], undefined, REPO_OS), h26row(exitCard('Blocked-by: #68'), [parked], [LIVE_EXIT], REPO_OS), h26row(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled], undefined, REPO_OS)].every((v) => v === '') && typeof h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled]) === 'string', true);
   b(BATTERY19255, 'H26 stand-down: ⛔ a comment it was not handed is not read; an exit naming ANOTHER card, or the PR-shaped value, leaves the row firing and the latter is named as a line nothing fires; two parked targets with one exit report only the other', [h26row(exitCard('Blocked-by: #68'), [parked], undefined, REPO_OS) !== '', h26row(exitCard('Blocked-by: #68\nUnlock-action: re-check #987 when label pm:on-hold absent'), [parked], undefined, REPO_OS) !== '', h26row(exitCard('Blocked-by: #68\nUnlock-action: re-check PR #123'), [parked], undefined, REPO_OS).includes('already do (`re-check PR #123`)'), h26row(exitCard(`Blocked-by: #68, #987\n${LIVE_EXIT}`), [parked, tgt(987, ['pm:on-hold'])], undefined, REPO_OS).includes('on 1 target(s)'), h26row(exitCard(`Blocked-by: #68, #987\n${LIVE_EXIT}`), [parked, tgt(987, ['pm:on-hold'])], undefined, REPO_OS).includes('`#987`')].join(), 'true,true,true,true,true');
   b(BATTERY19255, 'H26 remedy: the row without an exit prescribes the live spelling and the close, says other spellings fall back silently, and the chain leg carries none of it', [h26row(waiting(75), [parked]).includes('`Unlock-action: re-check #N when label needs-user-decision absent`'), h26row(waiting(75), [parked]).includes('close the waiting card `not planned`'), h26row(waiting(75), [parked]).includes('falls back silently'), h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('⭐ The exit')].join(), 'true,true,true,false');
-  b(BATTERY19255, 'floor: the roster now declares SEVEN batteries, and this one is on it', SELF_TEST_BATTERY_FLOOR === 7 && Object.hasOwn(SELF_TEST_BATTERIES, BATTERY19255), true);
+  b(BATTERY19255, 'floor: the roster now declares EIGHT batteries, and this one is on it', SELF_TEST_BATTERY_FLOOR === 8 && Object.hasOwn(SELF_TEST_BATTERIES, BATTERY19255), true);
 
   // -- The UNGATED liveness read + H28: the stale body line (#11747) ----------
   //
@@ -31407,10 +31753,16 @@ async function selfTest() {
   t('H38 seat: `Seat: domain:services#2` reads 2', claimSeatNumber('Claim: x\nSeat: domain:services#2'), 2);
   t('H38 seat: …backticked too', claimSeatNumber('Claim: x\nSeat: `domain:services#2`'), 2);
   t('H38 seat: …and behind a bullet then a blockquote, bold key', claimSeatNumber('- > **Seat**: domain:services#4'), 4);
-  // ⛔ Blockquote-then-bullet is out, exactly as `claimedBranches` pins for `Branch:` — invisible, so absent, so seat 1.
-  t('H38 seat: a `> - Seat:` line is not read (measured shape, same as `Branch:`)', claimSeatNumber('> - Seat: domain:services#4'), 1);
+  // ⛔ Blockquote-then-bullet is still out, exactly as `claimedBranches` pins for `Branch:` — but it is PRESENT, so unreadable, ⛔ not seat 1.
+  t('H38 seat: a `> - Seat:` line is still no line-initial match — now unreadable, ⛔ not seat 1', claimSeatNumber('> - Seat: domain:services#4'), null);
   t('H38 seat: a `Seat:` line naming no number is unreadable, not seat 1', claimSeatNumber('Claim: x\nSeat: domain:services'), null);
   t('H38 seat: prose mentioning a seat is not a `Seat:` line', claimSeatNumber('the seat: domain:services#2 is busy'), 1);
+  // The measured misread: the declaration carried somewhere the key line cannot see is PRESENT, so null — ⛔ never a real seat.
+  t('H38 seat: a declaration mid-sentence in a code span is unreadable, ⛔ not seat 1', claimSeatNumber('**Claim:** dispatched by the `domain:spec` execution seat. `Seat: domain:spec#3` · claimed 2026-09-18T19:31Z'), null);
+  t('H38 seat: …and the same declaration inside a subscript tag', claimSeatNumber('<sub>Seat: domain:spec#3</sub>'), null);
+  // The two controls that keep the probe from swallowing the default: prose (above) needs the capital key, and a lane token alone is not a declaration.
+  t('H38 seat: a lane token with no `Seat:` key is not a declaration, so the absent default holds', claimSeatNumber('Claim: x\nre-graded for `domain:spec#3` work'), 1);
+  t('H38 seat: a body with no declaration at all is still seat 1 — every pre-line claim keeps its default', claimSeatNumber('Claim: x\nSession: `session_y`\nWorktree: `objectstack-issue-1`'), 1);
   const seatRow = (seatLine, iso) => [{ body: `Claim: PM loop round 1\nSession: \`session_x\`\n${seatLine}`, created_at: iso }];
   const oneCard = [laneCard(1, ['pm:dispatched', 'domain:services'])];
   const seat2Claim = new Map([[1, seatRow('Seat: `domain:services#2`', '2026-08-30T00:00:00Z')]]);
@@ -31421,6 +31773,9 @@ async function selfTest() {
   t('H38 seat: …and the seat 2 post does not', newestLaneClaim('domain:services', oneCard, seat1Claim, 2), null);
   t('H38 seat: the default seat argument is 1, so every pre-existing call reads as before', newestLaneClaim('domain:services', laneIssues, laneComments).number, 13398);
   t('H38 seat: an unreadable `Seat:` line matches no seat', newestLaneClaim('domain:services', oneCard, new Map([[1, seatRow('Seat: domain:services', '2026-08-30T00:00:00Z')]]), 1), null);
+  const midLineClaim = new Map([[1, [{ body: '**Claim:** by the `domain:services` seat. `Seat: domain:services#3` · claimed', created_at: '2026-08-30T00:00:00Z' }]]]);
+  t('H38 seat: a mid-line declaration is invisible to the seat it names…', newestLaneClaim('domain:services', oneCard, midLineClaim, 3), null);
+  t('H38 seat: …and — the whole point — invisible to seat 1 too, so no post is rowed over it', newestLaneClaim('domain:services', oneCard, midLineClaim, 1), null);
   t('H38 seat: the newest SAME-seat claim wins over a newer other-seat one', newestLaneClaim('domain:services', oneCard, new Map([[1, [...seatRow('Seat: domain:services#1', '2026-08-29T00:00:00Z'), ...seatRow('Seat: domain:services#2', '2026-08-30T00:00:00Z')]]]), 1).at, at38('2026-08-29T00:00:00Z'));
   // End to end on the post: a seat-2 post is judged against the claim handed to it, and names its seat.
   t('H38 seat: a seat-2 post behind a same-seat claim -> finding', typeof h38SeatPostStale(seat38(seat2Title), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')), 'string');
@@ -33338,6 +33693,20 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H52 order: ⛔ a ruling comment does NOT stand the row down — the documented over-report', typeof h52([cm52(1, report52(Q52), T52), cm52(2, 'Ruling recorded — A, A, A.', '2026-09-08T09:00:00Z')]), 'string');
   t('H52 order: …and H33 cannot see that ruling either, which is why it was not reused', isTriageRulingComment('Ruling recorded — the three residuals: A, A, A'), false);
 
+  // The FOURTH exit (#19160) — both live headings are fixtures VERBATIM: measured, ⛔ not invented.
+  const A8348 = '### The two open questions, answered';
+  const A9868 = '## Half-state patrol H52 — the two `open_questions` on this card are ANSWERED, and this comment is the record that stands the row down';
+  const answered52 = (answer, at = '2026-09-08T09:00:00Z') => [cm52(1, report52(Q52_TWO), T52), cm52(2, answer + '\n\nQ1 and Q2 taken by name.', at)];
+  t('H52 answer: objectui#8348\'s live heading, verbatim, stands the row down', h52(answered52(A8348)), null);
+  t('H52 answer: …and objectui#9868\'s, verbatim — both carry the shape UNEDITED', h52(answered52(A9868)), null);
+  t('H52 answer: ⛔ an answer OLDER than the report does not clear — the report re-raised them', typeof h52(answered52(A8348, '2026-09-06T09:00:00Z')), 'string');
+  t('H52 answer: ⛔ nor the same words in PROSE, with no heading', typeof h52(answered52('The two open questions are answered above.')), 'string');
+  t('H52 answer: ⛔ nor a QUOTE of another card\'s answer', typeof h52(answered52('> ' + A8348)), 'string');
+  t('H52 answer: ⛔ a REPORT carrying the heading never clears — ordering refuses it, its own array governs', typeof h52([cm52(1, report52(Q52_TWO), T52), cm52(2, 'os-dev-report\n\n' + A8348 + '\n\n```json\n{"open_questions":[{"question":"q"}]}\n```', '2026-09-08T09:00:00Z')]), 'string');
+  t('H52 answer: an answer with NO report is not a clearing, and ⛔ the marker carries no `g` flag', h52AnswerStandsDown([cm52(1, A8348, T52)]) === false && H52_ANSWERED_HEADING.global === false, true);
+  t('H52 answer: a SIBLING reader — `latestDevReport` still names the report row', latestDevReport(answered52(A8348)).row.id, 1);
+  t('H52 sentence: the remedy names the thread route beside the report one', h52row(OPEN52).includes('under a HEADING that names `open_questions` and says ANSWERED'), true);
+
   // Population — every OPEN card, and ⛔ deliberately not one `pm:*` state.
   t('H52 population: an open `pm:dispatched` card is in', h52SpeaksAbout(DISPATCHED52), true);
   t('H52 population: a `pm:queue` card is IN — the census\'s LARGEST bucket at 19 carriers', h52SpeaksAbout(card52(['pm:queue'])), true);
@@ -34625,6 +34994,19 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H59 (b): ⛔ no angle-bracket placeholder reaches the row body', /[<>]/.test(row59b), false);
   t('H59 (b): not a loud finding', isLoudFinding(row59b), false);
 
+  // ⭐ Direction (b), REOPENED — the discriminator rides the same open listing row, so the arm buys nothing.
+  const row59bBy = (state_reason) => h59FalseOpenRow({ pr: pr59FalseOpen, card: { ...card59Open, state_reason }, keyword: 'Fixes' });
+  const row59bReopened = row59bBy('reopened');
+  t('H59 (b) reopened: ⛔ the platform-failure sentence is NOT printed at all', row59bReopened.includes('GitHub did not perform the closure'), false);
+  t('H59 (b) reopened: …it quotes the field it read off the payload it already held', row59bReopened.includes('`state_reason: reopened`'), true);
+  t('H59 (b) reopened: it says the card was closed and REOPENED since, a deliberate act', row59bReopened.includes('CLOSED at some point and REOPENED since'), true);
+  t('H59 (b) reopened: ⛔ it refuses to PLACE the reopen against the merge, buying no timeline', row59bReopened.includes('buys no timeline'), true);
+  t('H59 (b) reopened: the remedy points at the REOPEN\'s own reason', row59bReopened.includes('read the reopen\'s own reason'), true);
+  t('H59 (b) reopened: …and ⛔ warns off closing a card somebody reopened on purpose', row59bReopened.includes('do not close a card somebody reopened on purpose'), true);
+  t('H59 (b) reopened: the row still FIRES — this changed the SENTENCE, ⛔ not the population', row59bReopened.startsWith('FALSE OPEN (reopened):'), true);
+  t('H59 (b) reopened: ⛔ no angle-bracket placeholder reaches this one either', /[<>]/.test(row59bReopened), false);
+  t('H59 (b) reopened: ⛔ every OTHER state_reason keeps today\'s sentence, null included', [null, undefined, 'completed', 'not_planned'].every((r) => row59bBy(r).includes('GitHub did not perform the closure')), true);
+
   // The two directions are DISTINCT sentences — neither restates the other.
   t('H59 directions: the two rows do not share an opening', row59a.slice(0, 20) === row59b.slice(0, 20), false);
 
@@ -35522,7 +35904,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // THE ROSTER — a floor that cannot be satisfied by a zero.
   b(BATTERY67, 'H67 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY67), true);
   b(BATTERY67, 'H67 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY67] > 0, true);
-  b(BATTERY67, 'H67 floor: the roster grew again with #19255\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
+  b(BATTERY67, 'H67 floor: the roster grew again with #19255\'s and #18901\'s batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 8);
   b(BATTERY67, 'H67 floor: …including the two batteries this row landed BESIDE, so neither side of the base merge silently dropped one', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H65 tier declaration spelling') && Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H19 judged-set founding'), true);
   b(BATTERY67, 'H67 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -35865,7 +36247,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // FLOOR — this battery is declared, pinned, and the roster grew with it.
   b(BATTERY68, 'floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY68), true);
   b(BATTERY68, 'floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY68] > 0, true);
-  b(BATTERY68, 'floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
+  b(BATTERY68, 'floor: the roster now declares EIGHT batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 8);
   b(BATTERY68, 'floor: …including the four this battery landed BESIDE and the one that landed after it, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'ISSUE_BODY_LIMIT measured cap'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY68, 'floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 

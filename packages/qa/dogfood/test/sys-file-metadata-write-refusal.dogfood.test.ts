@@ -88,7 +88,7 @@ const SEEDED = { mime_type: 'application/octet-stream', size: 11 } as const;
  */
 const pinStack = defineStack({
   manifest: {
-    id: 'com.dogfood.sys_file_write_refusal',
+    id: 'com.dogfood.sys-file-write-refusal',
     namespace: 'sfp',
     version: '0.0.0',
     type: 'app',

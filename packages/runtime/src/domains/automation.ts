@@ -912,6 +912,9 @@ const RESTORE_REFUSAL_UNKNOWN_STATUS = 500;
 const RUN_CANCEL_UNSUPPORTED_MESSAGE =
     'Cancelling a run is not supported by the automation service this deployment mounts — it does not implement '
     + '`cancelRun`, an optional member of `IAutomationService`. No run was cancelled.';
+const RUNS_LIST_UNSUPPORTED_MESSAGE =
+    'Listing the runs of a flow is not supported by the automation service this deployment mounts — it does not '
+    + 'implement `listRunsPage`, an optional member of `IAutomationService`. No runs were listed.';
 const RUN_RESTORE_UNSUPPORTED_MESSAGE =
     'Restoring a consumed suspension is not supported by the automation service this deployment mounts — it does '
     + 'not implement `restoreConsumedSuspension`, an optional member of `IAutomationService`. No suspension was '
@@ -1533,8 +1536,14 @@ async function consumedSuspensionSurvives(
  *                                  are NOT re-pointed — the response says so (§9).
  *                                  ⚑ authoring write — `manage_metadata`: it
  *                                    registers flow metadata, like `POST /`
- *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
- *                                  status — validated AND honoured, #7359)
+ *   GET    /:name/runs           → listRunsPage (query: limit — validated AND
+ *                                  honoured end to end, #7300 / #8054; status —
+ *                                  validated AND honoured, #7359; cursor —
+ *                                  RETIRED, #19543, so a value carrying it is
+ *                                  ignored rather than validated). `hasMore` is
+ *                                  computed from the engine's own truncation
+ *                                  report, never a constant. A service without
+ *                                  `listRunsPage` → 501, ⛔ never a 200
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
  *   GET    /:name/runs/:runId    → getRun
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
@@ -2537,9 +2546,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             }
         }
 
-        // GET /:name/runs → listRuns
+        // GET /:name/runs → listRunsPage
         if (parts[1] === 'runs' && !parts[2] && m === 'GET') {
-            if (typeof automationService.listRuns === 'function') {
+            if (typeof automationService.listRunsPage === 'function') {
                 // [#7300] Both options are CHECKED at the point they are read,
                 // in the shared query-parameter refusal this route now consumes
                 // with `/notifications` (#6928 / PR #7299 — the same defect, one
@@ -2561,6 +2570,36 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 //    worth closing at the boundary rather than downstream: the
                 //    first implementation that starts honouring cursors must not
                 //    be the one that discovers the type was never enforced.
+                //
+                // [#19543] ⚠️ THAT SECOND BULLET IS NOW HISTORY, AND ITS
+                // DECISION IS REVERSED ON PURPOSE. #7300 chose to validate a
+                // key rather than decide it, on the reasoning that a future
+                // cursor implementation must not be the one to discover the
+                // type was unenforced. The maintainer ruling of decision batch
+                // #204 item 2 (letter C) decides it instead: there will be no
+                // cursor implementation on this door, so `cursor` is a
+                // `retiredKey()` tombstone on `ListRunsRequestSchema` and this
+                // boundary stops reading it.
+                //
+                // The wire consequence, stated because it is a REGRESSION in
+                // strictness and not a no-op: `?cursor=a&cursor=b` used to
+                // answer `400 VALIDATION_FAILED` and now answers `200`, the
+                // key ignored like any other unrecognised query name. Nothing
+                // is handed a wrong type by that — the option no longer exists
+                // to be filled — and this route has never declared a closed
+                // query set (Route & surface ownership rule 5), so an
+                // unrecognised name has never been refused here on its own
+                // account. ⛔ Do not re-add a `cursor` read to restore the
+                // 400: the refusal would be validating a key the contract no
+                // longer has.
+                //
+                // `limit` is UNTOUCHED by that retirement and stays fully
+                // read — it is this door's real window, bounded below by the
+                // schema's own `.min()`/`.max()` a few lines down, forwarded
+                // to the service, and spent by the engine as the store's
+                // history window. The sibling `/packages` door retired ITS
+                // `limit` (#17667) because nothing read it; the two doors
+                // looked identical and measured differently.
                 //
                 // [#8054] `limit`'s RANGE — `ListRunsRequestSchema` has always
                 // declared `.min(1).max(100)`, and until now this gate only
@@ -2617,13 +2656,22 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                             min: limitBounds.minValue ?? undefined,
                             max: limitBounds.maxValue ?? undefined,
                         }),
-                        cursor: parseStringParam('cursor', query.cursor),
                         status: parseEnumParam('status', query.status, ExecutionStatus.options),
                     }
                     : undefined;
-                const runs = await automationService.listRuns(name, options);
-                return { handled: true, response: deps.success({ runs, hasMore: false }) };
+                const { runs, hasMore } = await automationService.listRunsPage(name, options);
+                return { handled: true, response: deps.success({ runs, hasMore }) };
             }
+            // [#19543] A service that does not implement `listRunsPage` is told
+            // so, and ⛔ never answered 200 with an invented `hasMore`. Falling
+            // through to the domain's 404 would have been the silent form: the
+            // caller cannot tell "this deployment mounts no run listing" from
+            // "this flow does not exist", and the door's whole subject is a
+            // field that used to be confidently wrong. The 403 run-read gate
+            // above runs first and is unaffected — its own note says a
+            // 501-vs-403 must not be what tells an ungranted caller whether
+            // automation is mounted here.
+            return { handled: true, response: deps.error(RUNS_LIST_UNSUPPORTED_MESSAGE, 501) };
         }
 
         // GET /:name → getFlow (no sub-path)

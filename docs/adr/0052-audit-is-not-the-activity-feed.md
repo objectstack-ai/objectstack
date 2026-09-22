@@ -323,9 +323,13 @@ rather than written twice.
   ships P0a.**
 - **P0b — ownership, no behavior change.** ✅ `sys_attachment` registration moved
   `plugin-audit` → `service-storage` (both always-on, so it stays available; the
-  definition stays in `platform-objects`). `sys_notification` is **deferred** — it
-  is mid-migration to an event model (`metadata/.../migrate-sys-notification-to-event.ts`,
-  ADR-0030), so moving it now would collide with that in-flight work. Still TODO:
+  definition stays in `platform-objects`). `sys_notification` is **deferred** —
+  originally because it was mid-migration to an event model (ADR-0030) and moving it
+  would have collided with that in-flight work. That migration is **retired**
+  (#16194) and the file this line used to name
+  (`metadata/.../migrate-sys-notification-to-event.ts`) is deleted, so the collision
+  reason no longer holds; ⚠️ whether the move now proceeds is a call for this
+  record's owner, not a consequence of the retirement. Still TODO:
   make "collaboration/activity is a platform primitive" an explicit capability
   rather than an audit side-effect; keep it default-available so no UI regresses.
 - **P1 — kill the split-brain + milestone templates (§5b.2).** Choose the

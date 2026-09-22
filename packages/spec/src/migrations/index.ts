@@ -3,10 +3,11 @@
 /**
  * Metadata migration chain + change manifest (ADR-0087 D3/D4) — public surface.
  *
- * The permanent, replayable chain that carries any past major's metadata to
- * current in one command (`objectstack migrate meta --from N`), and the
- * machine-readable `spec-changes.json` manifest every other release artifact is
- * a projection of. See {@link ./types} and {@link ./spec-changes} for rationale.
+ * The permanent, replayable chain that carries metadata from the support floor
+ * (`MIGRATION_SUPPORT_FLOOR`, below which `--from` refuses) to current in one
+ * command (`objectstack migrate meta --from N`), and the machine-readable
+ * `spec-changes.json` manifest every other release artifact is a projection
+ * of. See {@link ./types} and {@link ./spec-changes} for rationale.
  */
 
 export type {

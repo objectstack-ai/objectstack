@@ -5,6 +5,7 @@ import { z } from 'zod';
 // Service method interfaces use z.function() instead of z.any() for type safety.
 // Generic data fields use z.unknown() for type safety.
 import { lazySchema } from '../shared/lazy-schema';
+import { SEMVER_SHAPED_VERSION_PATTERN } from './version-grammar';
 export const PluginContextSchema = lazySchema(() => z.object({
   ql: z.object({
     object: z.function().describe('Get object handle for method chaining'),
@@ -180,12 +181,15 @@ export const PluginSchema = lazySchema(() => z.object({
   // refused `1.0.0-alpha.1` and `1.0.0+20230101` — a declaration refusing part
   // of what it declared.
   //
-  // ⭐ This is `PluginLoader.isSemverShapedVersion`'s spelling character for
-  // character (`packages/core/src/plugin-loader.ts`), deliberately, and not a
-  // third grammar invented here. That check is the one the boot path has always
-  // run, so adopting it makes the two declarations converge EXACTLY — which is
-  // what let `assertPluginContract` drop the `version` exclusion it carried as a
-  // stopgap, and is why nothing that loads today is refused now.
+  // ⭐ This key and `PluginLoader.isSemverShapedVersion`
+  // (`packages/core/src/plugin-loader.ts`) reference ONE exported declaration,
+  // `SEMVER_SHAPED_VERSION_PATTERN` (`kernel/version-grammar.ts`); each used to
+  // spell the grammar out and the two were held equal character for character by
+  // hand. It is not a third grammar invented here: that check is the one the
+  // boot path has always run, so adopting it made the two declarations converge
+  // EXACTLY — which is what let `assertPluginContract` drop the `version`
+  // exclusion it carried as a stopgap, and is why nothing that loads today is
+  // refused now.
   //
   // ⚠️ MEASURED, not assumed, in both directions. It is a strict SUPERSET of the
   // regex it replaces (same three-segment core, two OPTIONAL suffix groups), so
@@ -209,7 +213,7 @@ export const PluginSchema = lazySchema(() => z.object({
   // eight forbidden forms are pinned as ACCEPTED in `plugin.test.ts` — stated
   // and enforced, not narrated — and `PluginLoader`'s predicate was renamed
   // `isSemverShapedVersion` in the same change, for the same reason.
-  version: z.string().regex(/^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/).optional().describe('Version: major.minor.patch, with an optional -prerelease and an optional +build suffix. Looser than SemVer 2.0.0 — leading zeroes (01.1.1) and empty identifiers (1.0.0-alpha..1) are accepted.'),
+  version: z.string().regex(SEMVER_SHAPED_VERSION_PATTERN).optional().describe('Version: major.minor.patch, with an optional -prerelease and an optional +build suffix. Looser than SemVer 2.0.0 — leading zeroes (01.1.1) and empty identifiers (1.0.0-alpha..1) are accepted.'),
   description: z.string().optional(),
   author: z.string().optional(),
   homepage: z.string().url().optional(),
