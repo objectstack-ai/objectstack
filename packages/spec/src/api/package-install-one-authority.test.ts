@@ -31,14 +31,24 @@
  * because all three declarations spelled `z.boolean().default(true)`. They now
  * spell `z.boolean().optional()` and the 缺省 readings are `undefined`.
  *
- * ⛔ That is a FLIP, not a repair, and it was expected on the day this pin
- * landed — {@link FLIP_TRIGGER} is the phrase this file registered in advance
- * so the next reader meets the reason instead of a silently edited
- * expectation. The trigger fired: the install door was ruled onto
+ * ⛔ That is a FLIP, not a repair: the install door was ruled onto
  * 「缺省 = 保持，有旗 = 设置」 (maintainer batch #157 item 5 letter C) and stopped
  * making any lifecycle call on an absent key, which left the declarations
  * claiming a default the runtime deliberately no longer applies. The
  * declarations followed in maintainer batch #210 item 4 letter A.
+ *
+ * ⚠️ {@link FLIP_TRIGGER} is registered HERE, WITH the flip — ⛔ it was NOT
+ * pre-registered when this pin landed. Measured on the parent commit: this
+ * file carried the phrase nowhere, and no flip or trigger note of any kind
+ * (zero hits for 缺省 / 保持 / 有旗 / flip / trigger, against `MATRIX` and
+ * `absent` as the controls proving the file was read). The card's own protocol
+ * — 「本卡 pin 断言兄弟卡在改的行为 ⇒ 在用例内预登记翻转触发词」 — expected a
+ * pin asserting a behaviour a sibling card was already changing to carry the
+ * trigger in advance, and that did not happen. ⭐ The gap is left recorded
+ * rather than papered over, because a reader who learns the pre-registration
+ * was MISSED is better served than one told it happened: the lesson is that a
+ * pin written against a contested cell needs its trigger at the moment the pin
+ * lands, when the contest is known, not at the moment the cell finally moves.
  *
  * ⭐ What did NOT move, and is re-read below precisely because of that: the
  * `true` and `false` arms. A fix that makes absence visible by making the key
