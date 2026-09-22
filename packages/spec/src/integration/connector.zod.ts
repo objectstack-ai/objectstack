@@ -274,7 +274,7 @@ export const DataSyncConfigSchema = lazySchema(() => z.object({
   ]).optional().default('import').describe('Sync direction'),
   
   /*
-   * `syncConfig.schedule` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * `syncConfig.schedule` was DELETED here in @objectstack/spec 17 (ADR-0049
    * enforce-or-remove, #16320). The cron slot on connector-attached sync was
    * declared, parsed into the `{ dialect: 'cron', source }` envelope and read by
    * nothing: `syncConfig` has no reader outside `packages/spec`, no engine schedules
