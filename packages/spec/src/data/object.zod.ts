@@ -1217,7 +1217,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   /** @deprecated [ADR-0085 → `collapse`] UI-dialect alias (pair with `collapsed`); mapped onto `collapse` at parse. */
   collapsible: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum."),
   /** @deprecated [ADR-0085 → `collapse`] UI-dialect alias (pair with `collapsible`); mapped onto `collapse` at parse. */
-  collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsible`; use the `collapse` enum."),
+  collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'collapsed' (collapsible, starts closed) on its own — it needs no `collapsible` and outranks `collapsible: false`; false → 'none', or 'expanded' beside `collapsible: true`. Use the `collapse` enum."),
 }));
 
 export type ObjectFieldGroup = z.input<typeof ObjectFieldGroupSchema>;
