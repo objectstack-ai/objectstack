@@ -19,6 +19,7 @@
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
 - 绿即转 ready + 挂 auto-merge;未绿按阶梯重挂定点。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
+- undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
 - 确认 MERGED 要两个读数:每轮同时读队列分支与 `origin/main`。
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
 - 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
@@ -47,7 +48,6 @@
 - 暂停或交接时把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。
 - main-red 约定①:p0 fix-forward 允许跳队,限 p0、机械、根因已核实的止血 PR。
 - 也可按既有 governed 例外由维护者人工直合一行修复;仅限 main-red 修复。
-- ⛔ 不放宽其它任何 PR 的 queue-only 落地。
 - main-red 约定②:一个失败 check 只锚一张卡,先立者赢,后见者评论到锚卡,⛔ 不另立。
 
 ## C. 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单
