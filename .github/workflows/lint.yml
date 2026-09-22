@@ -1355,11 +1355,34 @@ jobs:
       # the throttle would simply stop throttling — which is the shape
       # `check:self-test-wired` requires this step for.
       #
-      # Its last battery is the wiring: the five write transports each call both
+      # Its last battery is the wiring: the seven write transports each call both
       # halves, and the roster IS the set of files under scripts/pm that issue a
-      # write verb, so a SIXTH write path cannot land unpaced.
+      # write verb, so an EIGHTH write path cannot land unpaced. Two batteries
+      # run REAL child processes: the lease that keeps one write in flight
+      # fleet-wide, and the batch gap one process announces and two others obey,
+      # are claims about separate processes and are measured on separate
+      # processes, by their timestamps.
       - name: Write-pace throttle self-test
         run: pnpm check:pm-write-pace
+
+      # The fleet identity and the two doors — same family, same split. The
+      # minter's LIVE path is a POST to the platform signed with a private key,
+      # so the offline half is all CI can hold: a throwaway RSA pair, a fake
+      # platform through every branch, and the assertion that matters most — a
+      # known token and a known key fed through every output path and grepped
+      # out of ALL of them. The card-creation door and the shell wrapper both
+      # pin their wiring into the throttle above; the wrapper's self-test reads a
+      # fixture cache in place of the platform and proves what git sees (the
+      # bot as committer, no token in any remote or config file, a credential
+      # helper reached from the environment alone).
+      - name: Fleet token minter self-test
+        run: pnpm check:pm-fleet-token
+
+      - name: Issue-create door self-test
+        run: pnpm check:pm-issue-create
+
+      - name: with-fleet wrapper self-test
+        run: pnpm check:pm-with-fleet
 
       - name: Stamped-post helper self-test
         run: pnpm check:pm-post-stamped
