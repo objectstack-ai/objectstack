@@ -250,7 +250,7 @@ describe('PluginHealthMonitor', () => {
   // overrun) — share the counters, and a throw keeps its own `failed` label.
   // What leaves is the restart decision they were also said to share, because
   // there is no restart (#12032: `autoRestart` / `maxRestartAttempts` /
-  // `restartBackoff` retired in @objectstack/spec 18, ADR-0049).
+  // `restartBackoff` retired in @objectstack/spec 17.3.0, ADR-0049).
   //
   // These pin the observable consequence, never the source. `plugin.destroy()`
   // had exactly one caller in this class, so a `destroyed.count` of zero is

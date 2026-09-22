@@ -2777,7 +2777,7 @@ export const FormSelectOptionSchema = lazySchema(() => {
     guidance: {
       default:
         '`options[].default` on a form-view field was removed from the FormView vocabulary in '
-        + '@objectstack/spec 18 (ADR-0049 declared-but-unenforced) — on this surface the key '
+        + '@objectstack/spec 17.3.0 (ADR-0049 declared-but-unenforced) — on this surface the key '
         + 'parsed clean and nothing read it: the insert-path default falls back to the OBJECT '
         + "definition's option list, never a form view's, and no form renderer seeds a value "
         + 'from it. Delete the key. Declare the pre-selected choice on the object definition '

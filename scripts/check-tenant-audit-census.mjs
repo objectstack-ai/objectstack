@@ -642,13 +642,13 @@ export function censusRefusals(census) {
   }
   for (const u of notRoundTrippableSites(census)) {
     problems.push(
-      `[type-text-not-round-trippable] ${u.file}:${u.line} \`${u.receiver}\`.${u.verb}() -- the census `
-      + `stored this receiver's declared type whitespace-collapsed and cannot re-parse it as a type `
-      + `alias, so the door rule could not be read off it and the census cannot say whether this site `
-      + `is an engine write at all: \`${u.type}\`. The SOURCE parsed -- what did not is the census's own `
-      + 're-serialisation of a fragment of it, so this is a fault in the tool and not a fact about the '
-      + 'corpus. Give the receiver a NAMED type the engine type index can be keyed on, or spell the '
-      + "literal's members with `;` separators so the stored text round-trips.",
+      `[type-text-not-round-trippable] ${u.file}:${u.line} \`${u.receiver}\`.${u.verb}() -- this tool `
+      + `cannot re-parse the declared type it derived for this receiver, so the door rule could not be `
+      + `read off it and the census cannot say whether this site is an engine write at all: `
+      + `\`${u.type}\`. The SOURCE parsed -- what did not is the census's own re-serialisation of a `
+      + 'fragment of it, so this is a fault in the tool and not a fact about the corpus. ⛔ Nothing is '
+      + 'wrong with the code at this site and nothing here asks you to restyle it: file this against '
+      + 'the census, with the located parse verdict the generator prints under the site.',
     );
   }
   for (const r of census.staleLedgerRows ?? []) {

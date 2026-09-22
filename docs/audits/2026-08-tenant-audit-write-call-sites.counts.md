@@ -34,15 +34,15 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 | Measure | Value |
 |---|---:|
 | Write call sites | 227 |
-| Object name statically decidable | 151 |
-| Object name chosen at run time | 76 |
-| Against a tenancy-enabled object | 150 |
+| Object name statically decidable | 153 |
+| Object name chosen at run time | 74 |
+| Against a tenancy-enabled object | 152 |
 | Against an object declaring tenancy off | 1 |
 | Threading a tenant context | 143 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
-| …and decidably tenancy-enabled | 32 |
+| …and decidably tenancy-enabled | 34 |
 | Threading a decidably elevated context | 108 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 102 |
@@ -61,10 +61,10 @@ or dependency-owned declaration is one this census never saw, and «never saw it
 must not be spelled the same way as «read it, not an engine».
 
 ⚠️ One arm here says something else again: `type-text-not-round-trippable` is a
-receiver whose declared type the census STORED whitespace-collapsed and could
-not read back — the source parsed, the re-serialisation of it did not, so the
-door rule could never be read off it. That is a fault in this tool rather than
-a fact about the corpus, and it is the one row here that also fails the gate.
+receiver whose declared type THIS TOOL derived and then could not read back —
+the source parsed, the re-serialisation of it did not, so the door rule could
+never be read off it. That is a fault in this tool rather than a fact about the
+corpus, and it is the one row here that also fails the gate.
 
 | what | count |
 | :--- | ---: |
@@ -90,7 +90,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-20 at `215840f43`.
+Measured on 2026-09-22 at `9db2c6234`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
@@ -195,8 +195,8 @@ Measured on 2026-09-20 at `215840f43`.
 | `packages/plugins/plugin-sharing/src/sharing-service.ts` | `delete` | `sys_record_share` | enabled | elevated | 2 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts` | `insert` | `sys_record_share` | enabled | elevated | 1 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts` | `update` | `sys_record_share` | enabled | elevated | 1 |
-| `packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts` | `insert` | `subscriptionsObject` | undecidable | options unreadable | 1 |
-| `packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts` | `update` | `subscriptionsObject` | undecidable | options unreadable | 1 |
+| `packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts` | `insert` | `sys_webhook` | enabled | options unreadable | 1 |
+| `packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts` | `update` | `sys_webhook` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-webhooks/src/migrate-webhook-secrets.ts` | `update` | `subscriptionsObject` | undecidable | options unreadable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `delete` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
