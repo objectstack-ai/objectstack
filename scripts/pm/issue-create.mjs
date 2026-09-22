@@ -290,7 +290,7 @@ export async function createIssue(plan, deps = {}) {
     lines.push('✗ issue-create: no GITHUB_TOKEN / GH_TOKEN in the environment — nothing was sent. Run it through scripts/pm/with-fleet.sh, which mints the fleet identity.');
     return { exitCode: EXIT_PREREQUISITE, number: null, url: null, author: null, lines };
   }
-  const route = deps.route ?? resolveRoute(deps.env ?? process.env);
+  const route = deps.route ?? (await resolveRoute(deps.env ?? process.env));
   if (route.error) {
     lines.push(`✗ issue-create: PREREQUISITE NOT MET — ${route.error} Nothing was sent.`);
     return { exitCode: EXIT_PREREQUISITE, number: null, url: null, author: null, lines, transport: route.transport };

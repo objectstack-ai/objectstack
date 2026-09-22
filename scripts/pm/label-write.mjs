@@ -509,7 +509,7 @@ const loginsOf = (raw) => (Array.isArray(raw) ? raw : []).map((a) => (typeof a =
 export async function runLabelWrite(options, deps = {}) {
   const call = deps.call ?? rest;
   const send = deps.send ?? sendFleetWrite;
-  const route = deps.route ?? resolveRoute(process.env);
+  const route = deps.route ?? (await resolveRoute(process.env));
   const clock = deps.now ?? (() => new Date());
   const emit = deps.log ?? ((line) => console.log(line));
   const lines = [];

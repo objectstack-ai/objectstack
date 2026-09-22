@@ -565,7 +565,7 @@ export async function runCloseCards(options, deps = {}) {
   };
 
   const { repo, numbers, commentFile, reason, expectState, skipPrReferenced, dryRun } = options;
-  const route = deps.route ?? resolveRoute(process.env);
+  const route = deps.route ?? (await resolveRoute(process.env));
   const send = deps.send ?? sendFleetWrite;
 
   const postComment =

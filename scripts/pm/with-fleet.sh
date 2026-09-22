@@ -22,11 +22,13 @@
 #
 #   --via direct    a command after `--`, as the fleet, from a shell that can mint (today's path).
 #   --via dispatch  `--repo owner/name --actions <file>`; never a command — the relay hands out no token.
-#   --via auto      (the default, or OS_FLEET_TRANSPORT) — `dispatch` when CCR_AGENT_PROXY_ENABLED=1
-#                   names a cloud seat container, `direct` otherwise. A COMMAND under auto in a cloud
-#                   container is REFUSED (exit 3) with the actions-file spelling: it cannot be run as
-#                   the fleet there, and running it as the session's login instead would be a silent
-#                   change of identity.
+#   --via auto      (the default, or OS_FLEET_TRANSPORT) — asks `fleet-write/dispatch.mjs --route`,
+#                   the ONE selector every tool shares: `dispatch` only when the cloud discriminator,
+#                   a well-formed OS_FLEET_SESSION and a live relay on the board all hold, `direct`
+#                   otherwise (the line says which condition failed). A COMMAND under auto that
+#                   resolves to `dispatch` is REFUSED (exit 3) with the actions-file spelling: it
+#                   cannot be run as the fleet there, and running it as the session's login instead
+#                   would be a silent change of identity.
 #
 # What it does, in order:
 #
@@ -93,7 +95,7 @@ log() { printf 'with-fleet: %s\n' "$*" >&2; }
 
 ST_PASS=0
 ST_FAIL=0
-ST_MIN_CASES=27
+ST_MIN_CASES=28
 st_case() {
   local name="$1" got="$2" want="$3"
   if [[ "$got" == "$want" ]]; then
@@ -238,13 +240,30 @@ EOF
   rc=0
   run --via dispatch --repo objectstack-ai/objectstack --actions "$dir/actions.json" -- true || rc=$?
   st_case '--actions AND a command is usage (2)' "$rc" "$EXIT_USAGE"
-  # A cloud seat container, under auto, with a command: refused before any mint, naming the relay spelling.
+  # A cloud seat container, under auto, with a command: the ONE shared selector decides. With no
+  # OS_FLEET_SESSION the seat has not opted in, so it is direct — said out loud — and the command runs.
+  : > "$err.cloud"
+  rc=0
+  env -u GIT_DIR OS_FLEET_TOKEN_CACHE_FILE="$cache" OS_FLEET_APP_ID=1 OS_FLEET_INSTALLATION_ID=2 OS_PM_WRITE_PACE_FILE="$pace" HTTPS_PROXY= https_proxy= OS_FLEET_TRANSPORT= OS_FLEET_SESSION= \
+    CCR_AGENT_PROXY_ENABLED=1 bash "$SELF" --read -- sh -c 'printf "%s" "$GITHUB_TOKEN"' > "$dir/cloud.out" 2> "$err.cloud" || rc=$?
+  st_case 'a command under auto in a cloud container WITHOUT a session is direct (the seat has not opted in): it runs, and the line names OS_FLEET_SESSION' \
+    "$rc|$(grep -c 'auto → direct' "$err.cloud")|$(grep -c 'OS_FLEET_SESSION' "$err.cloud")|$(cat "$dir/cloud.out")" "0|1|1|$token"
+  cat "$err.cloud" >> "$err"
+  # …with a session AND a live relay (stood in by the test override): dispatch, so a command is refused with the relay spelling.
   : > "$err.cloud"
   rc=0
   env -u GIT_DIR OS_FLEET_TOKEN_CACHE_FILE="$cache" OS_FLEET_APP_ID=1 OS_FLEET_INSTALLATION_ID=2 OS_PM_WRITE_PACE_FILE="$pace" HTTPS_PROXY= https_proxy= OS_FLEET_TRANSPORT= \
-    CCR_AGENT_PROXY_ENABLED=1 bash "$SELF" --read -- sh -c 'printf "%s" "$GITHUB_TOKEN"' > "$dir/cloud.out" 2> "$err.cloud" || rc=$?
-  st_case 'a command under auto in a cloud container is REFUSED (3) with the relay spelling, and no token reached it' \
+    CCR_AGENT_PROXY_ENABLED=1 OS_FLEET_SESSION=session_01ABCDEFGHJKMNPQRSTVWXYZ OS_FLEET_RELAY_LIVE=1 bash "$SELF" --read -- sh -c 'printf "%s" "$GITHUB_TOKEN"' > "$dir/cloud.out" 2> "$err.cloud" || rc=$?
+  st_case 'a command under auto when all three conditions hold is REFUSED (3) with the relay spelling, and no token reached it' \
     "$rc|$(grep -c -- '--via dispatch' "$err.cloud")|$(cat "$dir/cloud.out")" '3|1|'
+  cat "$err.cloud" >> "$err"
+  # …with a session but the relay NOT live: direct again, and the line says the relay is not live.
+  : > "$err.cloud"
+  rc=0
+  env -u GIT_DIR OS_FLEET_TOKEN_CACHE_FILE="$cache" OS_FLEET_APP_ID=1 OS_FLEET_INSTALLATION_ID=2 OS_PM_WRITE_PACE_FILE="$pace" HTTPS_PROXY= https_proxy= OS_FLEET_TRANSPORT= \
+    CCR_AGENT_PROXY_ENABLED=1 OS_FLEET_SESSION=session_01ABCDEFGHJKMNPQRSTVWXYZ OS_FLEET_RELAY_LIVE=0 bash "$SELF" --read -- sh -c 'printf "%s" "$GITHUB_TOKEN"' > "$dir/cloud.out" 2> "$err.cloud" || rc=$?
+  st_case 'a command under auto with a session but no live relay is direct, the line naming the relay, and it runs' \
+    "$rc|$(grep -c 'not live' "$err.cloud")|$(cat "$dir/cloud.out")" "0|1|$token"
   cat "$err.cloud" >> "$err"
   # …while an EXPLICIT --via direct still runs there (the operator said so), from the cache.
   out="$(env -u GIT_DIR OS_FLEET_TOKEN_CACHE_FILE="$cache" OS_FLEET_APP_ID=1 OS_FLEET_INSTALLATION_ID=2 OS_PM_WRITE_PACE_FILE="$pace" HTTPS_PROXY= https_proxy= \
@@ -262,10 +281,9 @@ EOF
   st_case '--via dispatch --dry-run packs the actions file through dispatch.mjs and sends nothing — no mint, no cache needed' \
     "$rc|$(printf '%s' "$out" | grep -c '"event_type": "fleet-write"')|$(grep -c 'transport dispatch' "$err.relay")" '0|1|1'
   cat "$err.relay" >> "$err"
-  # The discriminator this shell spells is the one dispatch.mjs exports — one name, pinned in both places.
-  out="$(node --input-type=module -e "const m = await import(process.argv[1]); console.log(m.CLOUD_DISCRIMINATOR)" -- "file://$HERE/fleet-write/dispatch.mjs" 2>> "$err")"
-  st_case 'the cloud discriminator the shell reads is the one dispatch.mjs exports' "$(grep -c "\${$out:-}" "$SELF")" "$(grep -c '${CCR_AGENT_PROXY_ENABLED:-}' "$SELF")"
-  st_case '…and it is CCR_AGENT_PROXY_ENABLED' "$out" 'CCR_AGENT_PROXY_ENABLED'
+  # The shell reads NO discriminator of its own: under auto it asks the one selector every tool shares.
+  st_case 'under auto the shell consults dispatch.mjs --route, and spells no cloud discriminator of its own' \
+    "$(grep -v 'st_case\|grep -c' "$SELF" | grep -c -- 'fleet-write/dispatch.mjs" --route')|$(grep -v 'st_case\|grep -c' "$SELF" | grep -c 'CCR_AGENT_PROXY_ENABLED:-')" '1|0'
 
   local total=$((ST_PASS + ST_FAIL))
   if ((total < ST_MIN_CASES)); then
@@ -348,13 +366,25 @@ if [[ "$VIA" == dispatch ]]; then
   usage
   exit "$EXIT_USAGE"
 fi
-if [[ "$VIA" == auto && "${CCR_AGENT_PROXY_ENABLED:-}" == 1 ]]; then
-  log 'transport auto: CCR_AGENT_PROXY_ENABLED=1 — a cloud seat container, whose proxy replaces the Authorization header, so the fleet identity cannot be minted here and a command would run as the session login instead.'
-  log '  Put the writes in an actions file and run:  scripts/pm/with-fleet.sh --via dispatch --repo <owner/name> --actions <file>'
-  log '  (--via direct overrides this when a mint really is possible here.) Exit 3, nothing ran.'
-  exit 3
+if [[ "$VIA" == auto ]]; then
+  # The ONE selector every tool shares decides: dispatch only when the cloud discriminator, a
+  # well-formed OS_FLEET_SESSION and a live relay all hold. Its JSON line is read, never re-derived.
+  ROUTE_JSON="$(node "$HERE/fleet-write/dispatch.mjs" --route)" || {
+    log "the transport selector refused (fleet-write/dispatch.mjs --route exit $?); nothing ran."
+    exit 3
+  }
+  ROUTE_LINE="$(printf '%s' "$ROUTE_JSON" | node -e 'let d = ""; process.stdin.on("data", (c) => (d += c)).on("end", () => { const j = JSON.parse(d); process.stdout.write(`${j.transport}\t${j.reason}`); })')"
+  TRANSPORT="${ROUTE_LINE%%$'\t'*}"
+  log "transport auto → ${TRANSPORT} — ${ROUTE_LINE#*$'\t'}"
+  if [[ "$TRANSPORT" == dispatch ]]; then
+    log '  A command cannot take the relay: the fleet identity cannot be minted in this shell, and running the command as the session login instead would be a silent change of identity.'
+    log '  Put the writes in an actions file and run:  scripts/pm/with-fleet.sh --via dispatch --repo <owner/name> --actions <file>'
+    log '  (--via direct overrides this when a mint really is possible here.) Exit 3, nothing ran.'
+    exit 3
+  fi
+else
+  log "transport direct — minting the fleet identity into this shell."
 fi
-log "transport direct — minting the fleet identity into this shell."
 
 # ① the identity, into this shell. A non-zero exit here is the minter's own
 # (3 prerequisite · 5 platform refused · 10 throttle refused), already explained.

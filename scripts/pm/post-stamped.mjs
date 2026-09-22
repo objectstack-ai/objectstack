@@ -2912,7 +2912,7 @@ async function main(argv) {
 
   // The transport, decided and SAID before anything leaves. A dry run makes no
   // request, so a route that cannot be resolved is a note there, not a refusal.
-  const route = resolveRoute(process.env);
+  const route = await resolveRoute(process.env);
   if (route.error && !options.dryRun) {
     console.error(`post-stamped: PREREQUISITE NOT MET — ${route.error}\n  NOTHING WAS WRITTEN.`);
     return EXIT_PREREQUISITE_NOT_MET;

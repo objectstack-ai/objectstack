@@ -24,23 +24,35 @@
  * ## The transport selector — `OS_FLEET_TRANSPORT` ∈ direct | dispatch | auto
  *
  * `direct` is today's path (the tool's own requests with the token it holds);
- * `dispatch` is the relay; `auto` (the default) is `dispatch` when this
- * process runs in a cloud seat container and `direct` otherwise. The
- * discriminator is `CCR_AGENT_PROXY_ENABLED=1` — the variable that names the
- * very proxy whose header replacement makes the direct path unusable, present
- * in every cloud container measured and absent on a developer's machine and
- * on a runner. ⛔ Not the proxy port: a port is a fact about one container's
- * boot, and nothing about identity. Every selection PRINTS which transport it
- * took and why; a silent choice between two identities is the one thing this
- * file must never make.
+ * `dispatch` is the relay; `auto` (the default) is `dispatch` only when ALL
+ * THREE hold, and `direct` otherwise:
  *
- * ## Identity on the envelope: `OS_FLEET_SESSION`
+ *   ① the cloud discriminator — `CCR_AGENT_PROXY_ENABLED=1`, the variable that
+ *      names the very proxy whose header replacement makes the direct path
+ *      unusable, present in every cloud container measured and absent on a
+ *      developer's machine and on a runner (⛔ not the proxy port: a port is a
+ *      fact about one container's boot, and nothing about identity);
+ *   ② a well-formed `OS_FLEET_SESSION` — the seat's own `session_…` id, which
+ *      the envelope carries and the run's summary names;
+ *   ③ the relay is LIVE on the board — `GET /repos/{board}/contents/
+ *      .github/workflows/fleet-write.yml?ref=main` answers 200; a 404 or any
+ *      other answer (or no answer) is "not live". Read ONCE per process and
+ *      cached, and only reached once ① and ② hold, so a seat outside the
+ *      cloud never makes it.
  *
- * The payload carries the dispatching seat's `session_…` id, and the run's
- * summary names it. A seat sets `OS_FLEET_SESSION` to its own id; in dispatch
- * mode a missing one is a PREREQUISITE refusal (exit 3), never an invented
- * value and never a silent fall-back to `direct` — the fall-back would change
- * the identity every write below is booked against.
+ * Any condition failing ⇒ `direct`, with ONE printed line naming the failed
+ * condition, and ⛔ no 90 s wait on that path: a seat that has not opted in,
+ * or a board without the listening workflow, gets today's behaviour at
+ * today's speed. Every selection PRINTS which transport it took and why; a
+ * silent choice between two identities is the one thing this file must never
+ * make.
+ *
+ * An explicit `OS_FLEET_TRANSPORT=dispatch` stays STRICT: a missing session or
+ * a relay that is not live is a PREREQUISITE refusal (exit 3), never an
+ * invented value and never a silent fall-back to `direct` — the operator asked
+ * for the relay, and the fall-back would change the identity every write is
+ * booked against. `OS_FLEET_RELAY_LIVE=1|0` overrides condition ③ FOR TESTS
+ * (the self-tests and with-fleet's), and says so when it is read.
  *
  * ## The run-poller, and the two ceilings
  *
@@ -109,6 +121,10 @@ export const EXIT_UNCONFIRMED = 6;
 /** The cloud-seat discriminator `auto` reads. */
 export const CLOUD_DISCRIMINATOR = 'CCR_AGENT_PROXY_ENABLED';
 
+/** The workflow whose presence on the board's default branch is condition ③, and the test-only override for it. */
+export const RELAY_WORKFLOW_PATH = '.github/workflows/fleet-write.yml';
+export const RELAY_LIVE_OVERRIDE_ENV = 'OS_FLEET_RELAY_LIVE';
+
 export const DEFAULT_START_MS = 90_000;
 export const DEFAULT_CEILING_MS = 5 * 60 * 1000;
 export const DEFAULT_POLL_MS = 5_000;
@@ -118,25 +134,82 @@ export const DEFAULT_POLL_MS = 5_000;
 // ---------------------------------------------------------------------------
 
 /**
- * Which transport this process takes, and why. Pure.
- * @returns {{ requested: string, transport: 'direct'|'dispatch'|null, reason: string, error: string|null }}
+ * Which transport this process takes, and why. Pure: the three conditions
+ * `auto` needs are handed in (`relay` is the cached liveness reading, or
+ * `null` when it was not read because an earlier condition already failed).
+ *
+ * @param {Record<string,string|undefined>} env
+ * @param {{ relay?: { live: boolean, reason: string } | null }} [conditions]
+ * @returns {{ requested: string, transport: 'direct'|'dispatch'|null, reason: string, error: string|null, failed: string|null }}
  */
-export function selectTransport(env = process.env) {
+export function selectTransport(env = process.env, { relay = null } = {}) {
   const raw = String(env[TRANSPORT_ENV] ?? '').trim();
   const requested = raw || 'auto';
   if (!TRANSPORTS.includes(requested)) {
-    return { requested, transport: null, reason: '', error: `${TRANSPORT_ENV}=${JSON.stringify(raw)} is not one of ${TRANSPORTS.join(' | ')} — refusing to guess between two identities` };
+    return { requested, transport: null, reason: '', error: `${TRANSPORT_ENV}=${JSON.stringify(raw)} is not one of ${TRANSPORTS.join(' | ')} — refusing to guess between two identities`, failed: null };
   }
-  if (requested !== 'auto') return { requested, transport: requested, reason: `${TRANSPORT_ENV}=${requested}`, error: null };
+  if (requested !== 'auto') return { requested, transport: requested, reason: `${TRANSPORT_ENV}=${requested}`, error: null, failed: null };
   const cloud = String(env[CLOUD_DISCRIMINATOR] ?? '') === '1';
+  const direct = (failed, why) => ({ requested, transport: 'direct', reason: `${TRANSPORT_ENV} is auto → direct: ${why}`, error: null, failed });
+  if (!cloud) return direct('cloud', `${CLOUD_DISCRIMINATOR} is not 1 — not a cloud seat container, so the tool's own requests go out directly`);
+  if (!sessionFrom(env)) return direct('session', `${CLOUD_DISCRIMINATOR}=1 but ${SESSION_ENV} is absent or malformed — the envelope cannot carry this seat's identity, so the tool's own requests go out directly (set ${SESSION_ENV}=session_… to opt in)`);
+  if (!relay || !relay.live) return direct('relay', relay ? relay.reason : `the relay's liveness was not read`);
   return {
     requested,
-    transport: cloud ? 'dispatch' : 'direct',
-    reason: cloud
-      ? `${TRANSPORT_ENV} is auto and ${CLOUD_DISCRIMINATOR}=1 — a cloud seat container, whose proxy replaces the Authorization header, so the fleet identity is reachable only through the relay`
-      : `${TRANSPORT_ENV} is auto and ${CLOUD_DISCRIMINATOR} is not 1 — not a cloud seat container, so the tool's own requests go out directly`,
+    transport: 'dispatch',
+    reason: `${TRANSPORT_ENV} is auto → dispatch: ${CLOUD_DISCRIMINATOR}=1 (a cloud seat container, whose proxy replaces the Authorization header), ${SESSION_ENV} is set, and ${relay.reason}`,
     error: null,
+    failed: null,
   };
+}
+
+// ── condition ③, read once per process ───────────────────────────────────
+let relayLiveCache = null;
+
+/** For the self-test only: forget the cached liveness reading. */
+export function resetRelayLiveCache() {
+  relayLiveCache = null;
+}
+
+/**
+ * Is the relay workflow on the board's default branch? ONE GET per process,
+ * cached whatever it answered; `OS_FLEET_RELAY_LIVE=1|0` short-circuits it FOR
+ * TESTS and is named in the reason. Never throws.
+ * @returns {Promise<{ live: boolean, status: number, reason: string, source: 'read'|'cache'|'override' }>}
+ */
+export async function relayLive(deps = {}) {
+  const env = deps.env ?? process.env;
+  const override = String(env[RELAY_LIVE_OVERRIDE_ENV] ?? '').trim();
+  if (override === '1' || override === '0') {
+    const live = override === '1';
+    return { live, status: live ? 200 : 404, reason: `${RELAY_LIVE_OVERRIDE_ENV}=${override} (a test override) says the relay is ${live ? 'live' : 'not live'}`, source: 'override' };
+  }
+  if (relayLiveCache) return { ...relayLiveCache, source: 'cache' };
+  const fetchImpl = deps.fetch ?? globalThis.fetch;
+  const api = deps.api ?? DEFAULT_API;
+  const token = deps.token ?? env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
+  const path = `/repos/${RELAY_REPO}/contents/${RELAY_WORKFLOW_PATH}?ref=main`;
+  let status = 0;
+  let detail = '';
+  try {
+    const res = await fetchImpl(`${api}${path}`, {
+      method: 'GET',
+      headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    });
+    status = res.status;
+  } catch (e) {
+    status = 0;
+    detail = e?.message ?? 'fetch threw';
+  }
+  const live = status === 200;
+  relayLiveCache = {
+    live,
+    status,
+    reason: live
+      ? `the relay workflow ${RELAY_WORKFLOW_PATH} is on ${RELAY_REPO}@main (GET answered 200)`
+      : `the relay workflow ${RELAY_WORKFLOW_PATH} is NOT live on ${RELAY_REPO}@main (GET answered ${status === 404 ? '404' : status === 0 ? `no answer — ${detail}` : `HTTP ${status}`})`,
+  };
+  return { ...relayLiveCache, source: 'read' };
 }
 
 /** The seat's session id from the environment, or null. */
@@ -318,22 +391,36 @@ export function exitForResult(result) {
 
 /**
  * The route a tool takes for THIS write, resolved once: the transport, the
- * session the envelope needs, and the refusal when dispatch mode has no
- * session. Pure. Every tool prints `reason` — the choice is never silent.
+ * session the envelope needs, and the refusal an explicit `dispatch` gets
+ * when its prerequisites fail. Async only for condition ③, which is read
+ * once per process and only when the cheaper conditions already hold. Every
+ * tool prints `reason` — the choice is never silent.
  */
-export function resolveRoute(env = process.env) {
-  const sel = selectTransport(env);
-  if (sel.error) return { ...sel, session: null, error: sel.error };
-  if (sel.transport !== 'dispatch') return { ...sel, session: null };
+export async function resolveRoute(env = process.env, deps = {}) {
+  const first = selectTransport(env);
+  if (first.error) return { ...first, session: null };
+  if (first.requested === 'direct') return { ...first, session: null };
+  // auto with ① or ② already failed: direct, said, and condition ③ is never read.
+  if (first.requested === 'auto' && first.failed !== 'relay') return { ...first, session: null };
   const session = sessionFrom(env);
-  if (!session) {
-    return {
-      ...sel,
-      session: null,
-      error: `transport ${sel.transport} (${sel.reason}) needs ${SESSION_ENV}=session_… — this seat's own session id — on the envelope; it is absent or malformed. ⛔ Not falling back to direct: that would change the identity the write is booked against.`,
-    };
+  if (first.requested === 'dispatch') {
+    if (!session) {
+      return {
+        ...first,
+        session: null,
+        error: `${TRANSPORT_ENV}=dispatch needs ${SESSION_ENV}=session_… — this seat's own session id — on the envelope; it is absent or malformed. ⛔ Not falling back to direct: that would change the identity the write is booked against.`,
+      };
+    }
+    const relay = await relayLive({ ...deps, env });
+    if (!relay.live) {
+      return { ...first, session, error: `${TRANSPORT_ENV}=dispatch but ${relay.reason}. ⛔ Not falling back to direct: the operator asked for the relay; use ${TRANSPORT_ENV}=auto to let a dead relay fall back, or land the relay workflow first.` };
+    }
+    return { ...first, session, reason: `${first.reason} — ${relay.reason}` };
   }
-  return { ...sel, session };
+  // auto: ① and ② held (selectTransport would have answered direct otherwise), so ③ is read now.
+  const relay = await relayLive({ ...deps, env });
+  const sel = selectTransport(env, { relay });
+  return { ...sel, session: sel.transport === 'dispatch' ? session : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -342,8 +429,9 @@ export function resolveRoute(env = process.env) {
 // ---------------------------------------------------------------------------
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the selector: OS_FLEET_TRANSPORT wins; auto is dispatch in a cloud container and direct without the variable': 8,
+  'the selector: OS_FLEET_TRANSPORT wins; auto is dispatch only under all three conditions and direct otherwise': 8,
   'the session: read from OS_FLEET_SESSION, refused in dispatch mode when absent, never invented': 4,
+  'the three conditions of auto: cloud, session and a live relay — each alone failing is direct with its line, all three is dispatch, explicit dispatch stays strict': 14,
   'the packer: one payload per stroke, a fresh request id under the cap, judged by the shared validator': 6,
   'the dispatch: one paced POST to the board repo with event_type and client_payload; 204 is acceptance, anything else a refusal': 7,
   'the run-poller: the run named after the request id, its completion, its conclusion': 6,
@@ -351,7 +439,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log': 4,
   'the CLI: a dry run sends nothing, usage, the exit ladder': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -378,11 +466,12 @@ export async function selfTest() {
   const ACTIONS = [{ op: 'comment', issue: 19701, body: 'Hello from the relay.' }];
 
   // ── the selector ────────────────────────────────────────────────────────
-  battery('the selector: OS_FLEET_TRANSPORT wins; auto is dispatch in a cloud container and direct without the variable');
+  battery('the selector: OS_FLEET_TRANSPORT wins; auto is dispatch only under all three conditions and direct otherwise');
   {
-    t('no variables at all is auto → direct', [selectTransport({}).requested, selectTransport({}).transport], ['auto', 'direct']);
-    t('the cloud discriminator alone makes auto → dispatch', selectTransport({ [CLOUD_DISCRIMINATOR]: '1' }).transport, 'dispatch');
-    t('…and the reason names the variable and the proxy', selectTransport({ [CLOUD_DISCRIMINATOR]: '1' }).reason.includes(CLOUD_DISCRIMINATOR) && selectTransport({ [CLOUD_DISCRIMINATOR]: '1' }).reason.includes('Authorization'));
+    const LIVE = { live: true, reason: 'the relay workflow is on the board (fixture)' };
+    t('no variables at all is auto → direct, naming the cloud condition', [selectTransport({}).requested, selectTransport({}).transport, selectTransport({}).failed], ['auto', 'direct', 'cloud']);
+    t('the cloud discriminator alone is still direct — the session condition failed, and the line says how to opt in', [selectTransport({ [CLOUD_DISCRIMINATOR]: '1' }).transport, selectTransport({ [CLOUD_DISCRIMINATOR]: '1' }).failed, selectTransport({ [CLOUD_DISCRIMINATOR]: '1' }).reason.includes(SESSION_ENV)], ['direct', 'session', true]);
+    t('all three conditions make auto → dispatch, and the reason names the variable and the proxy', [selectTransport({ [CLOUD_DISCRIMINATOR]: '1', [SESSION_ENV]: SESSION }, { relay: LIVE }).transport, selectTransport({ [CLOUD_DISCRIMINATOR]: '1', [SESSION_ENV]: SESSION }, { relay: LIVE }).reason.includes(CLOUD_DISCRIMINATOR) && selectTransport({ [CLOUD_DISCRIMINATOR]: '1', [SESSION_ENV]: SESSION }, { relay: LIVE }).reason.includes('Authorization')], ['dispatch', true]);
     t('the discriminator must be exactly 1 — an empty value is not a cloud container', selectTransport({ [CLOUD_DISCRIMINATOR]: '' }).transport, 'direct');
     t('an explicit direct wins over the discriminator', selectTransport({ [TRANSPORT_ENV]: 'direct', [CLOUD_DISCRIMINATOR]: '1' }).transport, 'direct');
     t('an explicit dispatch wins outside a cloud container', selectTransport({ [TRANSPORT_ENV]: 'dispatch' }).transport, 'dispatch');
@@ -395,9 +484,63 @@ export async function selfTest() {
   {
     t('a well-formed session id is read', sessionFrom({ [SESSION_ENV]: SESSION }), SESSION);
     t('a UUID is not a session id', sessionFrom({ [SESSION_ENV]: 'd589e4b7-cc75-54c6-a119-874fab8f21f8' }), null);
-    const missing = resolveRoute({ [TRANSPORT_ENV]: 'dispatch' });
+    const missing = await resolveRoute({ [TRANSPORT_ENV]: 'dispatch' });
     t('dispatch mode without a session is a refusal naming the variable and saying it will NOT fall back', [missing.transport, missing.error?.includes(SESSION_ENV), missing.error?.includes('Not falling back')], ['dispatch', true, true]);
-    t('direct mode needs no session and carries no error', [resolveRoute({}).transport, resolveRoute({}).error, resolveRoute({}).session], ['direct', null, null]);
+    const plain = await resolveRoute({});
+    t('direct mode needs no session and carries no error', [plain.transport, plain.error, plain.session], ['direct', null, null]);
+  }
+
+  // ── the three conditions of auto ────────────────────────────────────────
+  battery('the three conditions of auto: cloud, session and a live relay — each alone failing is direct with its line, all three is dispatch, explicit dispatch stays strict');
+  {
+    const CONTENTS = `GET /repos/${RELAY_REPO}/contents/${RELAY_WORKFLOW_PATH}`;
+    const board = (status, seen, throws = null) => async (url, init) => {
+      const u = new URL(url);
+      seen.push({ call: `${init?.method ?? 'GET'} ${u.pathname}`, ref: u.searchParams.get('ref'), auth: init?.headers?.authorization ?? '' });
+      if (throws) throw new Error(throws);
+      return { status, headers: new Headers(), json: async () => ({}) };
+    };
+    const route = async (env, status = 200, throws = null) => {
+      resetRelayLiveCache();
+      const seen = [];
+      const r = await resolveRoute(env, { fetch: board(status, seen, throws), token: 'ghs_FixtureTokenNotRealAtAll0000000000000' });
+      return { ...r, seen };
+    };
+    const CLOUD = { [CLOUD_DISCRIMINATOR]: '1' };
+    const OPTED = { ...CLOUD, [SESSION_ENV]: SESSION };
+    const noCloud = await route({ [SESSION_ENV]: SESSION });
+    t('① missing (not a cloud container): direct, its line, and the relay is NOT read', [noCloud.transport, noCloud.failed, noCloud.seen.length], ['direct', 'cloud', 0]);
+    const noSession = await route(CLOUD);
+    t('② missing (no OS_FLEET_SESSION in a cloud container): direct, its line names the variable, and the relay is NOT read', [noSession.transport, noSession.failed, noSession.reason.includes(SESSION_ENV), noSession.seen.length], ['direct', 'session', true, 0]);
+    const dead = await route(OPTED, 404);
+    t('③ failing (the relay workflow answers 404 on main): direct, its line names the workflow and the 404, ONE read, ⛔ no 90 s wait on this path', [dead.transport, dead.failed, dead.reason.includes(RELAY_WORKFLOW_PATH) && dead.reason.includes('404'), dead.seen.length], ['direct', 'relay', true, 1]);
+    t('…the read is the contents endpoint on the board at ref=main, with the token', [dead.seen[0].call, dead.seen[0].ref, dead.seen[0].auth.startsWith('Bearer ')], [CONTENTS, 'main', true]);
+    const live = await route(OPTED, 200);
+    t('all three: dispatch, with the session on the route and the reason naming every condition', [live.transport, live.session, live.reason.includes(CLOUD_DISCRIMINATOR) && live.reason.includes(SESSION_ENV) && live.reason.includes('200')], ['dispatch', SESSION, true]);
+    const odd = await route(OPTED, 500);
+    t('any other answer (HTTP 500) is not live: direct, and the line says which status', [odd.transport, odd.failed, odd.reason.includes('HTTP 500')], ['direct', 'relay', true]);
+    const down = await route(OPTED, 200, 'ECONNRESET');
+    t('no answer at all is not live: direct, never a throw', [down.transport, down.failed, down.reason.includes('no answer')], ['direct', 'relay', true]);
+    // The cache: two routes in one process, one read.
+    resetRelayLiveCache();
+    const seenOnce = [];
+    const deps = { fetch: board(200, seenOnce), token: 'x' };
+    const a = await resolveRoute(OPTED, deps);
+    const b = await resolveRoute(OPTED, deps);
+    t('condition ③ is read ONCE per process and cached for the next route', [a.transport, b.transport, seenOnce.length], ['dispatch', 'dispatch', 1]);
+    const strictNoSession = await route({ [TRANSPORT_ENV]: 'dispatch' }, 200);
+    t('explicit dispatch without a session is exit-3 shaped (error), never direct, and the relay is not even read', [strictNoSession.transport, typeof strictNoSession.error, strictNoSession.seen.length], ['dispatch', 'string', 0]);
+    const strictDead = await route({ [TRANSPORT_ENV]: 'dispatch', [SESSION_ENV]: SESSION }, 404);
+    t('explicit dispatch with a dead relay is an error naming the relay and saying it will NOT fall back', [strictDead.transport, strictDead.error?.includes('NOT live') && strictDead.error?.includes('Not falling back')], ['dispatch', true]);
+    const strictLive = await route({ [TRANSPORT_ENV]: 'dispatch', [SESSION_ENV]: SESSION }, 200);
+    t('explicit dispatch with a session and a live relay is dispatch, outside any cloud container', [strictLive.transport, strictLive.error, strictLive.session], ['dispatch', null, SESSION]);
+    const explicitDirect = await route({ ...OPTED, [TRANSPORT_ENV]: 'direct' }, 200);
+    t('explicit direct never reads the relay', [explicitDirect.transport, explicitDirect.seen.length], ['direct', 0]);
+    const overrideLive = await route({ ...OPTED, [RELAY_LIVE_OVERRIDE_ENV]: '1' }, 404);
+    t(`${RELAY_LIVE_OVERRIDE_ENV}=1 (tests only) stands in for the read and is named in the reason`, [overrideLive.transport, overrideLive.seen.length, overrideLive.reason.includes(RELAY_LIVE_OVERRIDE_ENV)], ['dispatch', 0, true]);
+    const overrideDead = await route({ ...OPTED, [RELAY_LIVE_OVERRIDE_ENV]: '0' }, 200);
+    t(`…and ${RELAY_LIVE_OVERRIDE_ENV}=0 makes it direct without a read`, [overrideDead.transport, overrideDead.failed, overrideDead.seen.length], ['direct', 'relay', 0]);
+    resetRelayLiveCache();
   }
 
   // ── the packer ──────────────────────────────────────────────────────────
@@ -559,6 +702,10 @@ export async function selfTest() {
       const noSession = spawn(['--repo', 'objectstack-ai/objectstack', '--actions-file', join(dir, 'actions.json'), '--dry-run'], { [SESSION_ENV]: '' });
       t('no session is exit 3 naming the variable — even on a dry run, the envelope needs it', [noSession.status, noSession.stderr.includes(SESSION_ENV)], [EXIT_PREREQUISITE, true]);
       t('⛔ no spawned run printed the token', [dry, noSession].some((r) => `${r.stdout}${r.stderr}`.includes(TOKEN)), false);
+      const routeOut = spawn(['--route'], { [CLOUD_DISCRIMINATOR]: '', [TRANSPORT_ENV]: '' });
+      t('--route prints ONE JSON line with the transport and its reason, exit 0 — outside a cloud container: direct', [routeOut.status, JSON.parse(routeOut.stdout.trim()).transport, JSON.parse(routeOut.stdout.trim()).failed], [EXIT_OK, 'direct', 'cloud']);
+      const routeLive = spawn(['--route'], { [CLOUD_DISCRIMINATOR]: '1', [TRANSPORT_ENV]: '', [RELAY_LIVE_OVERRIDE_ENV]: '1' });
+      t('…and under all three conditions (the relay stood in by the test override): dispatch, no network', [routeLive.status, JSON.parse(routeLive.stdout.trim()).transport], [EXIT_OK, 'dispatch']);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -605,7 +752,7 @@ export async function selfTest() {
 // ---------------------------------------------------------------------------
 
 export function parseArgs(argv) {
-  const opts = { repo: null, actionsFile: null, session: null, requestId: null, dryRun: false, json: false, selfTest: false, help: false, errors: [] };
+  const opts = { repo: null, actionsFile: null, session: null, requestId: null, dryRun: false, json: false, selfTest: false, help: false, route: false, errors: [] };
   const args = [...argv];
   const value = (flag) => {
     const v = args.shift();
@@ -619,6 +766,7 @@ export function parseArgs(argv) {
     const a = args.shift();
     if (a === '--help' || a === '-h') opts.help = true;
     else if (a === '--self-test') opts.selfTest = true;
+    else if (a === '--route') opts.route = true;
     else if (a === '--dry-run') opts.dryRun = true;
     else if (a === '--json') opts.json = true;
     else if (a === '--repo') opts.repo = value(a);
@@ -630,7 +778,7 @@ export function parseArgs(argv) {
       args.unshift(k, rest.join('='));
     } else opts.errors.push(`unrecognised argument ${JSON.stringify(a)}`);
   }
-  if (!opts.selfTest && !opts.help) {
+  if (!opts.selfTest && !opts.help && !opts.route) {
     if (!opts.repo) opts.errors.push('--repo owner/name is required (the TARGET repo)');
     if (!opts.actionsFile) opts.errors.push('--actions-file <path> is required — a JSON array of actions');
   }
@@ -641,6 +789,7 @@ const USAGE = [
   'usage:',
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file actions.json [--session session_…] [--request-id id] [--json]',
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file actions.json --dry-run',
+  '  node scripts/pm/fleet-write/dispatch.mjs --route        # ONE JSON line: the transport this environment resolves to, and why',
   '  node scripts/pm/fleet-write/dispatch.mjs --self-test',
   '',
   `  The session comes from --session or ${SESSION_ENV}. The dispatch always goes to ${RELAY_REPO}; --repo names the target.`,
@@ -682,6 +831,14 @@ export async function main(argv) {
     for (const e of opts.errors) console.error(`fleet-write/dispatch: ${e}`);
     console.error(USAGE);
     return EXIT_USAGE;
+  }
+  if (opts.route) {
+    // The liveness read is a GET to the board; in a cloud container it needs the proxy route like every other request.
+    const rearmedForRoute = rearmThroughProxy(argv);
+    if (rearmedForRoute !== null) return rearmedForRoute;
+    const r = await resolveRoute(process.env);
+    console.log(JSON.stringify({ requested: r.requested, transport: r.transport, failed: r.failed ?? null, session: r.session ? 'set' : null, reason: r.reason, error: r.error ?? null }));
+    return r.error ? EXIT_PREREQUISITE : EXIT_OK;
   }
   let actions;
   try {
