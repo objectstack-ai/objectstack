@@ -3618,7 +3618,12 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
 // 「8348 以协议为准」 (batch #83, 2026-09-08) and batch #136 item 3 (Q1-C).
 //
 // The acceptance the card names, pinned: each row's KEY SET is the one the
-// renderer's read points support at the `.objectui-sha` pin `53ded82b`, and
+// renderer's read points support at the pin this repo builds against
+// (`.objectui-sha` = `87af769e9`; re-READ at that pin 2026-09-22 — all three
+// renderers moved hard on the hop from `53ded82bf`, so NO anchor in this
+// block is carried and every one was re-derived from the pinned tree. Two
+// changed CONTENT rather than position and say so where they are cited: the
+// map's array-shorthand head, and the tree's `titleField` rung), and
 // `Object.keys(ComponentPropsMap)` lists the three. The key sets are asserted
 // WHOLE rather than by spot-check — a row derived from read points is a claim
 // about a complete set, and only an equality can hold a later addition to
@@ -3635,21 +3640,28 @@ describe('the three #18305 object blocks — key sets derived from the renderers
   };
 
   it('object-map declares exactly its measured read set', () => {
-    // ObjectMap.tsx @ 53ded82b: data (:169 -> resolveRecordSourceConfig :174),
-    // staticData / objectName (the shared ladder's rungs 2 and 3), filter
-    // (:742), sort (:743), map (:370), mapStyle (:365), navigation (:889),
-    // enableClustering (:905).
+    // ObjectMap.tsx @ 87af769e9: data (:183 — `getDataConfig` is now that one
+    // `resolveRecordSourceConfig(schema, 'view-data')` statement; the
+    // array-shorthand head that used to open it is GONE, and the docblock at
+    // :168-176 records that an authored array now reaches this renderer only
+    // through the React props channel), staticData / objectName (the shared
+    // ladder's rungs 2 and 3, record-source.ts :296 and :302), filter (:814
+    // and :895 — the inline and the object fetch), sort (:815 and :896), map
+    // (:382), mapStyle (:377), navigation (:1042), enableClustering (:1058).
     expect(keysOf('object-map')).toEqual([
       'data', 'enableClustering', 'filter', 'map', 'mapStyle', 'navigation', 'objectName', 'sort', 'staticData',
     ]);
   });
 
   it('object-gantt declares exactly its measured read set', () => {
-    // ObjectGantt.tsx @ 53ded82b: the ladder (:593), filter (:738), sort
-    // (:739), gantt (:499), navigation (:1487), label (:1849), skipWeekends
-    // (:1205), holidays (:1206), persistLayout (:1357), viewName (:1359),
-    // markers (:1826), criticalPath (:1829), showBaselines (:1832), readOnly
-    // (:1833), mobileReadOnly (:1834).
+    // ObjectGantt.tsx @ 87af769e9: the ladder (:613), filter (:844), sort
+    // (:845), gantt (:501-503), navigation (:1615), label (:2181 — the
+    // `resolveI18nLabel` call in the export-file-name chain; the retired
+    // reading :1849 was the COMMENT above that chain even at its own pin, and
+    // at this one it is not even that), skipWeekends (:1333), holidays
+    // (:1334), persistLayout (:1485), viewName (:1487), markers (:2136),
+    // criticalPath (:2139), showBaselines (:2142), readOnly (:1985 and
+    // :2143), mobileReadOnly (:2144).
     expect(keysOf('object-gantt')).toEqual([
       'criticalPath', 'data', 'filter', 'gantt', 'holidays', 'label', 'markers', 'mobileReadOnly',
       'navigation', 'objectName', 'persistLayout', 'readOnly', 'showBaselines', 'skipWeekends',
@@ -3659,14 +3671,19 @@ describe('the three #18305 object blocks — key sets derived from the renderers
 
   it('object-tree declares exactly its measured read set — and `data` IS in it', () => {
     // The card's open question, answered by measurement rather than by family
-    // symmetry: ObjectTree.tsx @ 53ded82b reaches `schema.data` through
-    // `resolveRecordSourceConfig(schema)` at :359 — rung 1 of the shared
-    // ladder, which returns the authored value VERBATIM as a `ViewData`. That
+    // symmetry: ObjectTree.tsx @ 87af769e9 reaches `schema.data` through
+    // `resolveRecordSourceConfig(schema, 'undeclared')` at :582 — rung 1 of
+    // the shared ladder, which returns the authored value VERBATIM. That
     // ONE site is the whole support for the object arm, and it is sufficient.
-    // ⛔ :496 is NOT a second one: `(rest as any).data ?? (schema as any).data`
-    // is gated by `Array.isArray(passed)` on the next line, so it honours only
+    // ⚠️ The ARM is `'undeclared'` here, not the `'view-data'` its siblings
+    // pass, so rung 1 honours any truthy value at the renderer — WIDER than
+    // this row, which is the harmless direction: the door below refuses the
+    // bare array the renderer would have taken.
+    // ⛔ :775 is NOT a second one: `(rest as any).data ?? schema.data` (the
+    // cast on `schema` went away with objectui#8655) is gated by
+    // `Array.isArray(passed)` on the next line, so it honours only
     // the bare-ARRAY shorthand this row REFUSES (pinned below). objectui#9234
-    // left the :359 read marked `undeclared` because neither published face
+    // left the rung-1 read marked `undeclared` because neither published face
     // carried the key; the protocol row follows the READ POINTS, which is what
     // 「以协议为准」 resolving for this block means.
     expect(keysOf('object-tree')).toEqual([
@@ -3740,14 +3757,21 @@ describe('the three #18305 object blocks — key sets derived from the renderers
     // renderer's flat branch still reads beside `dependenciesField`.
     expect(setFor('object-gantt', 'OBJECT_GANTT_FLAT_CONFIG_KEYS'))
       .toEqual([...Object.keys(GanttConfigSchema.shape), 'dependencyField'].sort());
-    // tree: `TreeConfigSchema`'s shape PLUS `titleField`, which `getTreeConfig`
-    // reads only as `labelField`'s last fallback (ObjectTree.tsx:117).
+    // tree: `TreeConfigSchema`'s shape PLUS `titleField`. ⚠️ Re-READ at
+    // 87af769e9 and the read point is GONE, not moved: objectui#8841 deleted
+    // the `?? schema.titleField` rung from `getTreeConfig` (now :235-248),
+    // and the docblock above it (:197-210) records why — it read the
+    // FLATTENED NODE, never the block, and the key is declared on neither
+    // face. The key stays in THIS set because the set is the flat-spelling
+    // refusal prescription, not a read-point list; the prescription's own
+    // sentence about that fallback is stale and is reported rather than
+    // rewritten here, being author-facing runtime text.
     expect(setFor('object-tree', 'OBJECT_TREE_FLAT_CONFIG_KEYS'))
       .toEqual([...Object.keys(TreeConfigSchema.shape), 'titleField'].sort());
   });
 
   it('the config blocks are the spec own schemas where the renderer names one, `z.unknown()` where it does not', () => {
-    // gantt: `ObjectGantt.tsx:501` validates the authored block against
+    // gantt: `ObjectGantt.tsx:503` validates the authored block against
     // `GanttConfigSchema` imported from `@objectstack/spec/ui`, so the read
     // point names the schema and the door takes it — a misspelling inside the
     // block is refused here exactly as the renderer's own safeParse warns.
@@ -3762,7 +3786,7 @@ describe('the three #18305 object blocks — key sets derived from the renderers
     expect(door('object-tree').safeParse({ tree: { labelFeild: 'name' } }).success).toBe(false);
     // map: `ListMapConfigSchema` — the ratchet the previous posture deferred,
     // taken now that `style` is declared on that block (the key `getMapConfig`
-    // reads at `ObjectMap.tsx:365`, `schema.mapStyle || schema.map?.style`). The
+    // reads at `ObjectMap.tsx:377`, `schema.mapStyle || schema.map?.style`). The
     // two assertions that used to record the divergence are INVERTED here: the
     // list-view face accepts the style URL, and the door accepts it through the
     // spec's own schema rather than through an open value.
