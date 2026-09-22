@@ -2714,8 +2714,39 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     }),
   }).optional()
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
-  defaultFilters: z.unknown().optional()
-    .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
+  /**
+   * [#19514] The legacy base-filter fallback — the SAME value in the SAME role
+   * as `filter` above, so it carries the same declaration.
+   *
+   * Its own description has always said "read only when `filter` is absent",
+   * which is a statement that the two keys hold one kind of value: objectui's
+   * `ObjectGrid` reads this one through the same lowering sink it reads `filter`
+   * through, so every refusal that sink can give is reachable from a document
+   * that passed the protocol. While `filter` was narrowed to the rule array and
+   * this stayed `z.unknown()`, the block had a declared door and an undeclared
+   * one onto the same seam — a bare string, a number, a MongoDB-style record and
+   * an ObjectQL AST tuple array all parsed here, and the author's receipt said
+   * nothing about the 400 waiting for them.
+   *
+   * ⛔ **Narrowed, NOT retired.** Refusing the key outright is the other arm this
+   * could have taken and it is a REMOVAL of an accepted shape, which needs its
+   * own ruling; this change only pulls the ACCEPT SET back to the one the
+   * consumer already honours. The deprecation stated in the description stands
+   * exactly where it stood — prefer `filter` — and is unchanged by this.
+   *
+   * The `{ error }` map is `filter`'s, deliberately: an author who wrote the
+   * record form here needs the same conversion table, computed from their own
+   * keys, and a second hand-written sentence at this door is the drift
+   * `ruleArrayFilterError` exists to prevent. Its `surface` names which key was
+   * written, because the message's own subject is `filter`.
+   */
+  defaultFilters: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-grid` (you wrote it on the `defaultFilters` fallback, which takes the same form)',
+      migration: 'object-grid-default-filters-rule-array',
+    }),
+  }).optional()
+    .describe('Legacy base-filter fallback, read only when `filter` is absent — the SAME ViewFilterRule array form `[{ field, operator, value }, ...]` as `filter`, lowered through the same sink. Prefer `filter`. The MongoDB-style record form, a bare string and an ObjectQL AST tuple array are refused — see migration `object-grid-default-filters-rule-array`'),
   /**
    * Initial row order — the `SortItem` ARRAY form, `[{ field, order }, ...]`,
    * the one sort orthography every DECLARED `sort` door on this platform

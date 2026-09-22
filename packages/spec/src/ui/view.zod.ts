@@ -70,6 +70,12 @@ import { retiredKey } from '../shared/retired-key';
 // docblock for the measurement and for the two routes that were not taken.
 import { MAX_RENDERABLE_SCALE, SCALE_UPPER_BOUND_MESSAGE } from '../shared/scale-ceiling';
 import { FieldType, SelectOptionSchema } from '../data/field.zod';
+// [#19514] The text-comparand door the Filter Protocol publishes for the
+// case-insensitive contains operator — the discrimination `FILTER_TEXT_CASES`'
+// two REJECTION rows are about, and the reason text that answers them. Imported
+// rather than restated so this vocabulary and the `$` dialect cannot drift into
+// judging two different sets; the module imports nothing, so no cycle.
+import { isRefusedTextComparand, textComparandRefusalReason } from '../data/filter-text-comparand';
 import { BulkActionDefSchema } from './bulk-action.zod';
 
 /**
@@ -518,6 +524,34 @@ function previewFilterValue(value: unknown): string {
 }
 
 /**
+ * The operators that take their direction from their NAME and ignore `value`.
+ *
+ * Deliberately NOT exported, where {@link VIEW_FILTER_LIST_VALUE_OPERATORS} and
+ * {@link VIEW_FILTER_PAIR_VALUE_OPERATORS} are. Those two exist because a
+ * PRODUCER has to ask the question the schema asks — `@object-ui`'s filter
+ * builder decides `isMultiOperator` and would otherwise keep its own list. This
+ * set answers the opposite question ("may I skip the value check?"), which only
+ * the check below asks; publishing it would enlarge the package's public face to
+ * carry a fact nothing outside this file needs. The vocabulary itself is
+ * declared once, in {@link VIEW_FILTER_OPERATORS}, and this is a subset of it.
+ */
+const VIEW_FILTER_VALUELESS_OPERATORS = [
+  'is_empty', 'is_not_empty', 'is_null', 'is_not_null',
+] as const satisfies readonly ViewFilterOperator[];
+
+/**
+ * The one operator this vocabulary spells for which `FILTER_TEXT_CASES` writes
+ * comparand REJECTION rows — the infix twin of the `$` dialect's `$icontains`
+ * (the `AST_OPERATOR_MAP` row that made them one capability, not two spellings).
+ *
+ * A named constant rather than a literal at the comparison, so the coupling
+ * between "the operator this door judges" and "the spelling the refusal names"
+ * is one declaration. Private for the same reason
+ * {@link VIEW_FILTER_VALUELESS_OPERATORS} is.
+ */
+const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOperator;
+
+/**
  * [#6227] `value` must have the shape the rule's OPERATOR can execute.
  *
  * ## The two-stage failure this closes
@@ -534,33 +568,56 @@ function previewFilterValue(value: unknown): string {
  * module docblock names this schema as the reachable authoring source of the
  * defect.
  *
- * ## Why this mirrors the runtime gate EXACTLY, and refuses to go further
+ * ## Why this mirrors the query path EXACTLY, and refuses to go further
  *
- * The checks below are `assertListComparandShapes`' three constraints, one for
- * one: `$in`/`$nin` must be an array, `$between` must be a 2-array. Nothing else
- * is judged here, deliberately — #5685 already ruled on the opposite error, where
- * `FieldOperatorsSchema` declared `$gt` as `number | Date | FieldReference` while
- * every first-party producer put an ISO STRING there; the schema was ruled the
- * wrong side and widened to match the runtime. A publish-time gate refusing more
- * than the query path refuses would re-create that mismatch pointing the other
- * way, and would reject stored metadata that executes correctly today.
- * Specifically NOT refused, because the runtime does not refuse them:
+ * The first two checks below are `assertListComparandShapes`' constraints, one
+ * for one: `$in`/`$nin` must be an array, `$between` must be a 2-array. The
+ * third — a SCALAR operator handed an array — is `driver-sql`'s
+ * `assertCompilableComparand` scalar arm, and it is here for the same reason the
+ * other two are: the query path refuses it, so refusing it at authoring time
+ * moves the refusal to the moment the author can still act on it. Nothing beyond
+ * those is judged, deliberately — #5685 already ruled on the opposite error,
+ * where `FieldOperatorsSchema` declared `$gt` as `number | Date | FieldReference`
+ * while every first-party producer put an ISO STRING there; the schema was ruled
+ * the wrong side and widened to match the runtime. A publish-time gate refusing
+ * more than the query path refuses would re-create that mismatch pointing the
+ * other way, and would reject stored metadata that executes correctly today.
+ *
+ * ⚠️ **The scalar arm REVERSES a reading recorded here at #6227**, which said
+ * `equals: ['a','b']` "lowers to a bare `{ field: value }` deep-equality
+ * comparand, which every backend answers". Re-measured at source: the lowered
+ * `{ tags: ['a'] }` reaches `driver-sql`'s bare `{ field: value }` loop, which
+ * calls `assertCompilableComparand(column, '=', value)`; `'='` is in that file's
+ * `SCALAR_COMPARAND_OPERATORS`, `isBindableComparand(['a'])` is `false` (an array
+ * is none of the six accepted comparand types — `isAcceptedFilterComparand`,
+ * `filter-comparand-type.ts`), and the comparand is refused with the withheld
+ * `INVALID_FILTER` / 400 envelope. Every in-memory matcher excludes every row for
+ * the same reason. So the ORIGINAL reading was the one that widened the accept
+ * set past the query path; this arm pulls it back to what `value`'s own
+ * `.describe()` has declared all along — 「every other operator takes a scalar」.
+ * Direction set by objectui#9050's ruling C′ (「the differences are the
+ * protocol's to close」); prescription registered as the ADR-0087 entry
+ * `view-filter-rule-scalar-operator-array-refused`.
+ *
+ * Specifically NOT refused, because the query path does not refuse them:
  *
  * - **`in: []` / `not_in: []`.** An empty list is a legitimate declared predicate
  *   — "matches nothing" / "matches everything" — and the runtime gate says so in
  *   as many words. Arity is not this check's business for membership; only "is it
  *   a list at all".
- * - **A scalar operator carrying an array** (`equals: ['a','b']`). `equals`
- *   lowers to a bare `{ field: value }` deep-equality comparand
- *   (`convertComparison`), which every backend answers.
  * - **A string operator carrying a number** (`contains: 5`). Lowers to
- *   `$contains: 5`; no backend refuses it.
- * - **A unary operator carrying a value** (`is_empty: ''`). The null predicates
- *   take their direction from the operator NAME — `convertComparison` maps them
- *   to `{ $null: true|false }` and ignores the value position entirely — and the
- *   ObjectUI client deliberately sends a truthy PLACEHOLDER value for both
- *   `isnull` and `isnotnull`. Refusing it would break a live first-party producer
- *   to enforce nothing.
+ *   `$contains: 5`; no backend refuses it. `icontains` is the ONE exception and
+ *   it is not an analogy — `FILTER_TEXT_CASES` declares that comparand
+ *   refused as data, and {@link checkViewFilterRuleTextComparand} below answers
+ *   those rows and only those rows.
+ * - **A unary operator carrying a value** (`is_empty: ''`, and `is_empty: []`).
+ *   The null predicates take their direction from the operator NAME —
+ *   `convertComparison` maps them to `{ $null: true|false }` and ignores the
+ *   value position entirely — and the ObjectUI client deliberately sends a
+ *   truthy PLACEHOLDER value for both `isnull` and `isnotnull`. Refusing it would
+ *   break a live first-party producer to enforce nothing, which is why the scalar
+ *   arm skips them explicitly rather than by accident. `value`'s own
+ *   `.describe()` carves them out in the same words.
  *
  * ## Why `superRefine` and not `z.discriminatedUnion` (measured, not assumed)
  *
@@ -630,16 +687,102 @@ function checkViewFilterRuleValueShape(
     return;
   }
 
-  if (!isPair) return;
-  if (Array.isArray(value) && value.length === 2) return;
+  if (isPair) {
+    if (Array.isArray(value) && value.length === 2) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['value'],
+      message:
+        `Operator "${operator}" on field "${field}" requires a [min, max] value array. `
+        + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
+        + `A range needs exactly two bounds, in order. This is refused at authoring time `
+        + `because the query path refuses it too (400 INVALID_FILTER).`,
+    });
+    return;
+  }
+
+  // Everything left takes a SCALAR — `value`'s own `.describe()` has said so
+  // since #6227 and nothing judged it, so the whole class rode through. The two
+  // carve-outs are the ones the query path itself makes: an ABSENT value (the
+  // key is optional, and unary operators never carry one) and the valueless
+  // operators, whose `value` position is discarded by `convertComparison`.
+  if (value === undefined) return;
+  if ((VIEW_FILTER_VALUELESS_OPERATORS as readonly string[]).includes(operator)) return;
+  if (!Array.isArray(value)) return;
   ctx.addIssue({
     code: 'custom',
     path: ['value'],
     message:
-      `Operator "${operator}" on field "${field}" requires a [min, max] value array. `
+      `Operator "${operator}" on field "${field}" requires a SCALAR value. `
       + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
-      + `A range needs exactly two bounds, in order. This is refused at authoring time `
-      + `because the query path refuses it too (400 INVALID_FILTER).`,
+      + `Only "${VIEW_FILTER_LIST_VALUE_OPERATORS.join('" / "')}" take a list and only `
+      + `"${VIEW_FILTER_PAIR_VALUE_OPERATORS.join('" / "')}" takes a [min, max] range — write `
+      + `${value.length > 0 ? previewFilterValue(value[0]) : 'the value to compare against'} `
+      + `to compare against one value, or use "${VIEW_FILTER_LIST_VALUE_OPERATORS[0]}" to test `
+      + `membership of the list. This is refused at authoring time because the query path `
+      + `refuses it too (400 INVALID_FILTER).`,
+  });
+}
+
+/**
+ * [#19514] `icontains` takes the comparand `FILTER_TEXT_CASES` declares,
+ * on the one operator that table writes a row for.
+ *
+ * ## The half this answers, and the half it leaves alone
+ *
+ * `@objectstack/spec/data` publishes two REJECTION rows for the
+ * case-insensitive contains operator — an EMPTY comparand and a NON-STRING one,
+ * each `code: 'INVALID_FILTER'`, `mustMention: ['$icontains']` — and publishes
+ * the discrimination those rows are about as {@link isRefusedTextComparand},
+ * with the author-facing half as {@link textComparandRefusalReason}. Three
+ * objectui faces already seat that reason in their own envelopes.
+ *
+ * ⭐ This arm CALLS the predicate rather than restating it. A hand-written
+ * `typeof value !== 'string' || value === ''` here would be a second spelling of
+ * a rule the table owns, and the two would drift the first time a row moved —
+ * which is the failure the predicate was lifted into spec to end. A row added to
+ * the table therefore reaches this door without an edit here.
+ *
+ * ## Three carve-outs, each the caller's own and none of them a new row
+ *
+ * 1. **ABSENCE.** `isRefusedTextComparand(undefined)` answers `true`, and its
+ *    docblock says in as many words that a vocabulary with an "absent" must test
+ *    for it BEFORE asking. A view rule is exactly that vocabulary — `value` is
+ *    optional on every rule — so an omitted comparand is left to whatever judges
+ *    absence, and the table says nothing about it.
+ * 2. **ARRAYS** are {@link checkViewFilterRuleValueShape}'s business. One defect,
+ *    one issue: an author who wrote `icontains: ['a']` is told about the SHAPE,
+ *    which is what they have to fix first.
+ * 3. **THE SIBLING OPERATORS.** `contains` / `starts_with` / `ends_with` have no
+ *    row in the table and keep the answer they have always given. Widening by
+ *    analogy is the table's decision to make, never this door's.
+ *
+ * ## The `$` twin is named here, not in the contract half
+ *
+ * `textComparandRefusalReason` names the spelling that ARRIVED — `icontains`
+ * from this vocabulary — and deliberately does not substitute the `$` dialect's
+ * `$icontains` for it, because a view author cannot write that key. Naming the
+ * wire operator is the FACE's job, and this tail does it: that is where the
+ * refusal the author will hit at query time is spelled, and it is what the
+ * published rows' `mustMention` is written in.
+ */
+function checkViewFilterRuleTextComparand(
+  rule: { field?: unknown; operator?: unknown; value?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (rule.operator !== VIEW_FILTER_TEXT_COMPARAND_OPERATOR) return;
+  const value = rule.value;
+  if (value === undefined) return;
+  if (Array.isArray(value)) return;
+  if (!isRefusedTextComparand(value)) return;
+  const field = typeof rule.field === 'string' ? rule.field : '<field>';
+  ctx.addIssue({
+    code: 'custom',
+    path: ['value'],
+    message:
+      `The ${textComparandRefusalReason(field, VIEW_FILTER_TEXT_COMPARAND_OPERATOR, value)}. `
+      + `This rule lowers to the wire operator "$icontains", where the query path refuses the `
+      + `same comparand (400 INVALID_FILTER).`,
   });
 }
 
@@ -712,16 +855,28 @@ export const ViewFilterRuleSchema = lazySchema(() => strictObject({
    * Filter value (optional for unary operators like is_empty, is_null).
    *
    * The accepted SHAPE is coupled to `operator` by
-   * {@link checkViewFilterRuleValueShape} (#6227).
+   * {@link checkViewFilterRuleValueShape} (#6227, scalar arm #19514), and the
+   * `icontains` COMPARAND by {@link checkViewFilterRuleTextComparand} (#19514).
    */
   value: z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.union([z.string(), z.number()]))])
     .optional().describe(
       'Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an '
       + 'array (any length, including []), `between` takes exactly [min, max], every other '
       + 'operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / '
-      + 'is_not_null) take their direction from the operator name and ignore this key.',
+      + 'is_not_null) take their direction from the operator name and ignore this key. '
+      + 'One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY '
+      + 'STRING, the comparand the Filter Protocol conformance table declares for it — an '
+      + 'empty comparand constrains nothing and a non-string one would answer a query nobody '
+      + 'wrote, and both are refused at the query path too.',
     ),
-}).superRefine(checkViewFilterRuleValueShape).describe('View filter rule'));
+}).superRefine((rule, ctx) => {
+  // ONE refinement calling two checks, rather than two chained `.superRefine`s:
+  // zod runs every check in the chain even after one has added an issue, so a
+  // chain would report an `icontains` array TWICE — once for its shape and once
+  // for its comparand. The order is the order an author fixes them in.
+  checkViewFilterRuleValueShape(rule, ctx);
+  checkViewFilterRuleTextComparand(rule, ctx);
+}).describe('View filter rule'));
 
 export type ViewFilterRule = z.input<typeof ViewFilterRuleSchema>;
 /** Post-parse shape of {@link ViewFilterRule} — defaults applied, transforms run (ADR-0122). */

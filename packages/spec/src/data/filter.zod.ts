@@ -4,6 +4,11 @@ import { z } from 'zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
 import { normalizeFilterComparandTypes } from './filter-comparand-type';
 import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './date-range-presets';
+// [#19514] The text-comparand door this package publishes for the
+// case-insensitive contains operator: the discrimination `FILTER_TEXT_CASES`'
+// two REJECTION rows are about, and the reason text that answers them. Called
+// rather than restated so the `$` dialect and the view vocabulary judge one set.
+import { isRefusedTextComparand, textComparandRefusalReason } from './filter-text-comparand';
 import { OPERATOR_PREFIX_KEY_PATTERN, bannedKeyPattern } from '../shared/refinement-projection';
 
 /**
@@ -1527,6 +1532,13 @@ const PRESET_JUDGED_ORDERING_OPS: ReadonlySet<string> = new Set(['$gt', '$gte', 
 /** Bounded-depth guard — mirrors the engine door's own limit. */
 const PRESET_WALK_MAX_DEPTH = 32;
 
+/**
+ * [#19514] The `$`-dialect operator `FILTER_TEXT_CASES` writes comparand
+ * REJECTION rows for — the spelling the published rows' `mustMention` carries,
+ * named once so the judged key and the refused key cannot drift apart.
+ */
+const FILTER_TEXT_COMPARAND_OPERATOR = '$icontains';
+
 /** Plain filter STRUCTURE, as the engine door classifies it (a `Date` is a comparand). */
 function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
   return (
@@ -1538,8 +1550,10 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * [#8793] Walk one condition node and report every bare preset name sitting in
- * an ordering-comparand position.
+ * Walk one condition node and report every comparand this authoring door
+ * refuses — the bare date-range PRESET names in an ordering position (#8793),
+ * and the `$icontains` comparands the platform's own conformance table declares
+ * refused (#19514).
  *
  * Descends non-`$` keys only (operator specs and nested relations): the
  * `$and` / `$or` / `$not` members are re-parsed by {@link FilterConditionSchema}
@@ -1547,8 +1561,40 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
  * descending here as well would double-report. Unrecognised `$` keys are
  * skipped WITHOUT descending, the engine door's own conservatism: a hole, not
  * a false refusal, is the right failure direction.
+ *
+ * ## Why the second arm rides this walk instead of a second refinement
+ *
+ * They ask the same question of the same positions — "what is sitting in this
+ * operator's comparand slot?" — and they share every boundary the walk draws:
+ * the depth bound, the `$`-key conservatism, and the rule that combinator
+ * members are judged by their own pass. A second `superRefine` would duplicate
+ * the descent, and the two copies would answer differently the first time one
+ * of those boundaries moved. One walk, one set of boundaries, `n` arms.
+ *
+ * ## The `$icontains` arm answers the TABLE, and does not read it here
+ *
+ * `FILTER_TEXT_CASES` declares two REJECTION rows for this operator (an EMPTY
+ * comparand and a NON-STRING one, `code: 'INVALID_FILTER'`,
+ * `mustMention: ['$icontains']`) and `filter-text-comparand.ts` publishes the
+ * discrimination those rows are about. This arm CALLS that predicate. A local
+ * `typeof !== 'string' || === ''` would be a second spelling of a rule the table
+ * owns, drifting apart the first time a row moved — which is the exact failure
+ * that lifted the predicate into this package. A row added to the table reaches
+ * this door with no edit here.
+ *
+ * ⚠️ **No absence carve-out, and that is the DIALECT's fact, not an extra row.**
+ * `isRefusedTextComparand` answers `true` for `undefined` and its docblock hands
+ * the carve-out to "a vocabulary with an 'absent' the `$` dialect does not
+ * have". This is that dialect: `{ name: { $icontains: undefined } }` is not an
+ * omitted comparand, it is `undefined` written into a comparand slot — the
+ * shape `FILTER_COMPARAND_TYPE_CASES` calls the mongo silent-edit worst cell.
+ * The view vocabulary, which DOES have an absent, carves it out on its own side.
+ *
+ * ⛔ **Scoped to the one operator the table writes rows for.** `$contains` /
+ * `$startsWith` / `$endsWith` / `$like` / `$ilike` have no such row and keep the
+ * answer they have always given; widening by analogy is the table's decision.
  */
-function checkBarePresetOrderingComparands(
+function checkFilterConditionComparands(
   node: unknown,
   ctx: z.RefinementCtx,
   path: (string | number)[] = [],
@@ -1564,10 +1610,20 @@ function checkBarePresetOrderingComparands(
     if (!hasOperatorKeys) {
       // Nested relation / deep equality — the schema does not re-parse these,
       // so the walk descends itself.
-      checkBarePresetOrderingComparands(value, ctx, [...path, key], depth + 1);
+      checkFilterConditionComparands(value, ctx, [...path, key], depth + 1);
       continue;
     }
     for (const [op, comparand] of Object.entries(value)) {
+      if (op === FILTER_TEXT_COMPARAND_OPERATOR && isRefusedTextComparand(comparand)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...path, key, op],
+          message:
+            `The ${textComparandRefusalReason(key, op, comparand)}. This is refused at `
+            + `authoring time because the query path refuses it too (400 INVALID_FILTER).`,
+        });
+        continue;
+      }
       if (PRESET_JUDGED_ORDERING_OPS.has(op) && isDateRangePresetName(comparand)) {
         ctx.addIssue({
           code: 'custom',
@@ -1709,12 +1765,16 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
       $or: z.array(FilterConditionSchema).optional(),
       $not: FilterConditionSchema.optional(),
     })
-  // [#8793] Bare date-range preset names are refused from ordering comparands
-  // at the authoring door — see the § 3.35 block above for the ruling, the
-  // measured defect, and the ordering-only boundary. The refinement judges
-  // this node's own field entries; `$and` / `$or` / `$not` members re-enter
-  // the schema and are judged by their own pass with nested issue paths.
-  ).superRefine((node, ctx) => checkBarePresetOrderingComparands(node, ctx))
+  // Two comparand refusals ride one walk — see its docblock for why. [#8793]
+  // Bare date-range preset names are refused from ordering comparands (the
+  // § 3.35 block above carries the ruling, the measured defect and the
+  // ordering-only boundary); [#19514] `$icontains` comparands are refused on
+  // the two shapes `FILTER_TEXT_CASES` already declares refused, so the door
+  // stops admitting the document its own conformance table says will 400. The
+  // refinement judges this node's own field entries; `$and` / `$or` / `$not`
+  // members re-enter the schema and are judged by their own pass with nested
+  // issue paths.
+  ).superRefine((node, ctx) => checkFilterConditionComparands(node, ctx))
 );
 
 // ============================================================================
