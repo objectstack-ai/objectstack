@@ -18,6 +18,8 @@
 - FAIL 同 PASS 剥双载体:同笔留卡上交接评论(引复审、独立性对、欠改);卡态与 assignee 不动。
 - 重挂前先查裁决:闸门标签缺失 ⇒ 先 grep 卡评论找复审结论;`get_reviews` 读空 ≠ 未复审。
 - PASS + 无标 + head 未动 = 已清标不是被剥;head 后移或无结论才重挂;清标缺引记录即半态。
+- 例外:纯重生成的 head 后移不重挂,原记录继续管;判据机器读已提交树 ⛔ 非席位自述。
+- 判据 = 两 head 间非 `merge=os-regen` 路径为空;PR 落 `Regen-provenance: 记录id · 旧head → 新head`。
 
 ## 复核归属与资格(按面)
 

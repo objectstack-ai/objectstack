@@ -857,6 +857,11 @@ export function recordVerdict({ pair, recognisers, cardNote = null }) {
     // ⛔ never quoted back — a refusal that quotes it lands the identifier in
     // one more artifact, which is the thing `AGENTS.md` forbids of a comment.
     servedIsIdentifier: located.served?.state === 'read' && recognisers.isModelIdentifierToken(located.served.value),
+    // ⭐ A record reached through the 纯重生成 carry names an OLDER head, so the
+    // clear must say which head was reviewed and over how many certified hops.
+    // ⛔ A verdict may not deny its own evidence (#15406).
+    carriedFrom: located.carriedFrom ?? null,
+    carriedHops: located.carriedHops ?? 0,
   };
   if (located.state === 'unsigned') return { state: 'unsigned', ...found };
   if (!recognisers.servedTierStands(located.served)) return { state: 'below-tier', ...found };
@@ -1277,6 +1282,14 @@ export function renderGuardVerdict(verdict) {
           (entry.record.served?.stamps
             ? ` on a stamp control of ${entry.record.served.stamps.atTier}/${entry.record.served.stamps.total}.`
             : ' (no stamp control declared, which the rule permits).'),
+        ...(entry.record.carriedFrom
+          ? [
+              `           ⭐ that record names head \`${String(entry.record.carriedFrom).slice(0, 12)}\`, carried forward over ` +
+                `${entry.record.carriedHops} certified PURE-REGENERATION hop(s) —`,
+              '           re-run on the COMMITTED trees by this build (`git diff --name-only`, no `merge=os-regen` path left),',
+              '           ⛔ never on the `Regen-provenance:` line being present (maintainer 2026-09-20).',
+            ]
+          : []),
         '           ⚠️ EXISTENCE and PROVENANCE, never the verdict: whether that record reads PASS is precondition ①',
         '           of the landing check and stays human. This leg measures what produced it, not what it concluded.',
       );
@@ -1516,7 +1529,7 @@ export function renderGuardVerdict(verdict) {
  * still governs everything the verdict is derived FROM; it never governed
  * things the verdict merely mentions.
  */
-export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [] }) {
+export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null }) {
   const { governed, unattributed } = decomposeGovernedWork(rows);
   if (governed.length === 0 && unattributed.length === 0) {
     return guardVerdict({ event, governed, unattributed, apiCalls: 0, lifted });
@@ -1604,7 +1617,11 @@ export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComm
       // locations this leg READS are the locations `--template` STATES, because
       // both are this list. The cross-tool pin drives exactly this loop.
       const numbers = { pr: entry.pr, card: card.card };
-      const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null };
+      // ⭐ `runGit` is what lets the imported reader re-run the 纯重生成 test on
+      // the two COMMITTED trees when this head moved past its record. ⛔ Its
+      // absence is never a pass: the reader answers `unreadable` and this leg
+      // REFUSES, exactly as it does for a thread it could not read.
+      const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null, runGit };
       let unreadable = null;
       for (const thread of recognisers.threads) {
         const number = numbers[thread.number];
@@ -2078,8 +2095,8 @@ export function groupExitCode({ governed, size, carrier }) {
 
 // ── git (diff decomposition; zero API) ──────────────────────────────────────
 
-function git(root, args) {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+function git(root, args, input) {
+  return execFileSync('git', args, { cwd: root, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
 /** Is `rev` an object this checkout actually has? A missing sha is a hard failure, never an empty diff. */
@@ -2453,7 +2470,15 @@ async function main() {
   const fetchLabels = makeLabelReader(reader);
   const fetchComments = makeCommentReader(reader);
 
-  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPull, fetchComments, lifted });
+  const verdict = await runGuard({
+    event: context.event,
+    rows,
+    fetchReviews,
+    fetchPull,
+    fetchComments,
+    lifted,
+    runGit: (args, input) => git(repoRoot, args, input),
+  });
   // The SIZE leg (#19036): every queued pull request, through the same pull
   // reader the governed leg reads heads with. `merge_group` only, '' on the
   // other leg, so the `pull_request` output is byte-identical to what it was.
