@@ -10852,9 +10852,10 @@ export class ObjectQL implements IObjectQLEngine {
     // restated as if it were: a traversing validation rule needs its related
     // rows, so this operation issues a READ per reference field the rules name
     // (see the `previewRelatedForRow` block below). Nothing is written, no hook
-    // runs, and the read happens only for a caller the write path would admit
-    // at the object and field level — ⛔ not a promise the write would succeed
-    // (`registerWriteGateProbe` names what that bound does and does not carry).
+    // runs, and the read happens only for a caller who passes the arms the
+    // write-gate probe RUNS — ⛔ never a category of the write decision, and
+    // ⛔ not a promise the write would succeed (`registerWriteGateProbe` names
+    // those arms, and the families it does not carry).
     // `update()` deliberately does not default (#2706: a PATCH's explicit
     // `null` means "clear it"), so neither does an `update`-mode preview.
     const rawRows = Array.isArray(data) ? data : [data];
