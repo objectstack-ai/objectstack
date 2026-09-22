@@ -1226,10 +1226,13 @@ const battery = (name) => {
 let selfTestReachedVerdict = false;
 
 /**
- * The write transports this throttle is wired into — the census. Seven: the
+ * The write transports this throttle is wired into — the census. Nine: the
  * five board tools, the token minter (its one POST creates no content, but a
- * write verb is a write verb and the roster below is mechanical), and the
- * card-creation door.
+ * write verb is a write verb and the roster below is mechanical), the
+ * card-creation door, and the two halves of the fleet-write relay — the
+ * seat-side dispatcher (its one POST is the `repository_dispatch` that
+ * carries a stroke) and the runner-side executor (the writes that stroke asked
+ * for, paced on the runner's own log).
  */
 export const WIRED_WRITE_TOOLS = Object.freeze([
   'post-stamped.mjs',
@@ -1239,6 +1242,8 @@ export const WIRED_WRITE_TOOLS = Object.freeze([
   'sweep-stale-finding.mjs',
   'fleet-token.mjs',
   'issue-create.mjs',
+  'fleet-write/dispatch.mjs',
+  'fleet-write/execute.mjs',
 ]);
 
 /**
@@ -1705,7 +1710,7 @@ export async function selfTest() {
     `✓ write-pace self-test: ${cases.length} cases pass across ${declared.length} batteries — the per-token key that ` +
       'never carries the token, the gap remainder, the 41st refusal and its prescription, the stop marker a 429 writes, ' +
       'the prune that keeps a long retry-after alive, the lease that kept one write in flight across real processes, ' +
-      'the batch gap one process announced and two others obeyed, the shell door, and the seven write transports ' +
+      'the batch gap one process announced and two others obeyed, the shell door, and the nine write transports ' +
       'that call both halves.',
   );
   selfTestReachedVerdict = true;

@@ -36,6 +36,18 @@
  *   - a body carrying `{{NOW}}` / `{{WAS:…}}` — those are `post-stamped.mjs`'s
  *     contract for comments and body EDITS; a new card is dated by the platform.
  *
+ * ## The transport — `OS_FLEET_TRANSPORT` direct | dispatch | auto
+ *
+ * `direct` is the one POST above with the token this process holds.
+ * `dispatch` packs that SAME create into ONE `repository_dispatch` and
+ * `scripts/pm/fleet-write/dispatch.mjs` waits for the relay run that performs
+ * it as `objectstack-fleet[bot]` — a cloud seat container's proxy replaces the
+ * Authorization header, so that is the only way it can create as the fleet.
+ * `auto` (the default) takes `dispatch` there and `direct` elsewhere, and says
+ * which. Under the relay the new card's number is found by READING it back:
+ * the newest issue on the target created at or after the dispatch whose title
+ * is the one sent — then the same read-back as the direct path.
+ *
  * ## Read-back
  *
  * After a 201 the card is fetched again and its title compared. A mismatch is
@@ -51,6 +63,10 @@
  *       credential rate-limit exhausted. Nothing was created.
  *   4   created, and the READ-BACK DISAGREES. The number is printed.
  *   5   the platform refused (403 / 404 / 422 …). Its own sentence is printed.
+ *   6   UNCONFIRMED — the dispatch was accepted and its run did not appear or
+ *       did not complete within the ceiling, or the created card could not be
+ *       found by title afterwards. The run URL is printed. Go READ the board;
+ *       ⛔ never re-run blind: a second dispatch is a second card.
  *  10   the write throttle refused (a stop marker, no turn on the lease, the
  *       hourly budget). Nothing was sent.
  */
@@ -62,6 +78,8 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo } from './check-half-states.mjs';
+import { EXIT_UNCONFIRMED, exitForResult, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { classifyHttp } from './label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
 
@@ -272,18 +290,69 @@ export async function createIssue(plan, deps = {}) {
     lines.push('✗ issue-create: no GITHUB_TOKEN / GH_TOKEN in the environment — nothing was sent. Run it through scripts/pm/with-fleet.sh, which mints the fleet identity.');
     return { exitCode: EXIT_PREREQUISITE, number: null, url: null, author: null, lines };
   }
-  const created = await rest(`/repos/${plan.repo}/issues`, { method: 'POST', body: plan.payload }, deps);
-  const verdict = classifyHttp({ status: created.status, rateRemaining: created.rateRemaining });
-  const bad = exitForVerdict(verdict);
-  if (bad !== null || !Number.isInteger(created.json?.number)) {
-    lines.push(`✗ issue-create: ${created.call} → HTTP ${created.status}${created.detail ? ` — ${created.detail}` : ''} (${verdict}). Nothing was created.`);
-    if (verdict === 'ratelimit') lines.push('  The credential is rate-limit exhausted: this binds the IDENTITY, so switching tools or tokens to keep writing is the same act as retrying. ⛔ Do not.');
-    return { exitCode: bad ?? EXIT_PLATFORM_REFUSAL, number: null, url: null, author: null, lines };
+  const route = deps.route ?? resolveRoute(deps.env ?? process.env);
+  if (route.error) {
+    lines.push(`✗ issue-create: PREREQUISITE NOT MET — ${route.error} Nothing was sent.`);
+    return { exitCode: EXIT_PREREQUISITE, number: null, url: null, author: null, lines, transport: route.transport };
   }
-  const number = created.json.number;
-  const url = created.json.html_url ?? null;
-  const author = created.json.user?.login ?? null;
-  lines.push(`✓ issue-create: created #${number}${url ? ` ${url}` : ''}${author ? ` (as ${author})` : ''}`);
+  lines.push(`  issue-create: transport ${route.transport} — ${route.reason}`);
+
+  let number = null;
+  let url = null;
+  let author = null;
+  let relay = null;
+  if (route.transport === 'dispatch') {
+    const packed = packRequest({ repo: plan.repo, session: route.session, actions: [{ op: 'issue_create', ...plan.payload }] });
+    if (!packed.ok) {
+      lines.push(relayRefusalText(packed.errors), '  Nothing was sent.');
+      return { exitCode: EXIT_USAGE, number: null, url: null, author: null, lines, transport: route.transport };
+    }
+    const dispatchedAt = (deps.now ?? (() => Date.now()))();
+    const sent = await (deps.send ?? sendFleetWrite)(packed.payload, { token, log: (line) => lines.push(`  ${line}`) });
+    if (sent.ok) {
+      relay = sent;
+      // The relay does not hand the number back; the board does. The newest
+      // issue on the target created at or after the dispatch carrying the title
+      // sent is the one — and the ordinary read-back below then judges it.
+      const since = new Date(dispatchedAt - 60_000).toISOString();
+      const listed = await rest(`/repos/${plan.repo}/issues?state=all&sort=created&direction=desc&per_page=30&since=${encodeURIComponent(since)}`, {}, deps);
+      const hit = (Array.isArray(listed.json) ? listed.json : []).find((i) => !i.pull_request && String(i.title ?? '').trim() === plan.payload.title && Date.parse(i.created_at) >= dispatchedAt - 60_000);
+      if (listed.status !== 200 || !hit) {
+        lines.push(
+          `✗ issue-create: UNCONFIRMED — the relay run ${sent.run?.url ?? sent.run?.id ?? ''} completed, but ${listed.status !== 200 ? `${listed.call} → HTTP ${listed.status}` : 'no issue created since the dispatch carries the title sent'}. ` +
+            `Go READ the board; ⛔ do not re-run blind — a second dispatch is a second card. Exit ${EXIT_UNCONFIRMED}.`,
+        );
+        return { exitCode: EXIT_UNCONFIRMED, number: null, url: null, author: null, lines, transport: route.transport, relay };
+      }
+      number = hit.number;
+      url = hit.html_url ?? null;
+      author = hit.user?.login ?? null;
+      lines.push(`✓ issue-create: created #${number}${url ? ` ${url}` : ''}${author ? ` (as ${author})` : ''} — via the relay run ${sent.run?.url ?? sent.run?.id ?? ''}`);
+    } else if (route.requested === 'auto' && sent.state === 'no-run') {
+      lines.push(`  ${fallbackText(sent, 'issue-create')}`);
+    } else if (sent.state === 'no-run' || sent.state === 'timeout') {
+      lines.push(unconfirmedText(sent, 'issue-create'));
+      return { exitCode: EXIT_UNCONFIRMED, number: null, url: null, author: null, lines, transport: route.transport, relay: sent };
+    } else {
+      lines.push(`✗ issue-create: relay ${sent.state === 'refused' ? 'REFUSED the dispatch' : 'run FAILED'} — ${sent.detail}${sent.run?.url ? ` ${sent.run.url}` : ''}. ⛔ Not retried and not fallen back: go READ the run and the board.`);
+      return { exitCode: exitForResult(sent), number: null, url: null, author: null, lines, transport: route.transport, relay: sent };
+    }
+  }
+
+  if (relay === null) {
+    const created = await rest(`/repos/${plan.repo}/issues`, { method: 'POST', body: plan.payload }, deps);
+    const verdict = classifyHttp({ status: created.status, rateRemaining: created.rateRemaining });
+    const bad = exitForVerdict(verdict);
+    if (bad !== null || !Number.isInteger(created.json?.number)) {
+      lines.push(`✗ issue-create: ${created.call} → HTTP ${created.status}${created.detail ? ` — ${created.detail}` : ''} (${verdict}). Nothing was created.`);
+      if (verdict === 'ratelimit') lines.push('  The credential is rate-limit exhausted: this binds the IDENTITY, so switching tools or tokens to keep writing is the same act as retrying. ⛔ Do not.');
+      return { exitCode: bad ?? EXIT_PLATFORM_REFUSAL, number: null, url: null, author: null, lines, transport: route.transport };
+    }
+    number = created.json.number;
+    url = created.json.html_url ?? null;
+    author = created.json.user?.login ?? null;
+    lines.push(`✓ issue-create: created #${number}${url ? ` ${url}` : ''}${author ? ` (as ${author})` : ''}`);
+  }
 
   const back = await rest(`/repos/${plan.repo}/issues/${number}`, {}, deps);
   if (back.status !== 200 || !back.json) {
@@ -296,7 +365,7 @@ export async function createIssue(plan, deps = {}) {
     return { exitCode: EXIT_READ_BACK_MISMATCH, number, url, author, lines };
   }
   lines.push(`  read-back: #${number} title matches; state ${back.json.state ?? '?'}; labels ${(back.json.labels ?? []).map((l) => l?.name ?? l).join(', ') || '(none)'}.`);
-  return { exitCode: EXIT_OK, number, url, author, lines };
+  return { exitCode: EXIT_OK, number, url, author, lines, transport: route.transport, relay };
 }
 
 // ---------------------------------------------------------------------------
@@ -309,8 +378,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the transport: a fake platform, and what each answer does to the exit code': 9,
   'dry-run: no request leaves, and the plan is printed': 3,
   'the wiring: both halves around the one POST, on the write verb only': 4,
+  'the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, auto falls back only on no-run': 8,
 });
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -400,11 +470,12 @@ export async function selfTest() {
       'POST /repos/o/r/issues': { status: 201, json: { number: 12, html_url: 'https://github.test/o/r/issues/12', user: { login: 'objectstack-fleet[bot]' } } },
       'GET /repos/o/r/issues/12': { status: 200, json: { number: 12, title: plan.payload.title, state: 'open', labels: [{ name: 'pm:queue' }] } },
     };
-    const drive = async (answers, { file } = {}) => {
+    const DIRECT_ROUTE = { requested: 'direct', transport: 'direct', reason: 'self-test: direct', error: null, session: null };
+    const drive = async (answers, { file, route, send, now, plan: planOverride } = {}) => {
       const seen = [];
       const pace = paceFor(file ?? join(dir, `pace-${paceCase++}.jsonl`));
       try {
-        const r = await createIssue(plan, { fetch: platform(answers, seen), token: TOKEN_FIXTURE, pace });
+        const r = await createIssue(planOverride ?? plan, { fetch: platform(answers, seen), token: TOKEN_FIXTURE, pace, route: route ?? DIRECT_ROUTE, send, now });
         return { ...r, seen, pace };
       } catch (e) {
         if (e?.throttleExit === undefined) throw e;
@@ -416,13 +487,13 @@ export async function selfTest() {
     battery('the transport: a fake platform, and what each answer does to the exit code');
     {
       const ok = await drive(happy, { file: paceFile });
-      t('a 201 and a matching read-back is exit 0, and the number, URL and actor are printed', [ok.exitCode, ok.number, ok.lines[0].includes('#12') && ok.lines[0].includes('objectstack-fleet[bot]')], [EXIT_OK, 12, true]);
+      t('a 201 and a matching read-back is exit 0, and the number, URL and actor are printed', [ok.exitCode, ok.number, ok.lines.some((l) => l.includes('created #12') && l.includes('objectstack-fleet[bot]'))], [EXIT_OK, 12, true]);
       t('the POST carries the payload the plan built, and the bearer token', [ok.seen[0].body, ok.seen[0].auth], [plan.payload, `Bearer ${TOKEN_FIXTURE}`]);
       t('…then exactly one read-back GET', ok.seen.map((s) => s.call), ['POST /repos/o/r/issues', 'GET /repos/o/r/issues/12']);
       const mismatch = await drive({ ...happy, 'GET /repos/o/r/issues/12': { status: 200, json: { number: 12, title: 'something else' } } });
       t('a read-back that disagrees is exit 4, with the number still printed', [mismatch.exitCode, mismatch.number], [EXIT_READ_BACK_MISMATCH, 12]);
       const refused = await drive({ ...happy, 'POST /repos/o/r/issues': { status: 403, json: { message: 'Resource not accessible by integration' } } });
-      t('a 403 is a platform refusal (exit 5) carrying the platform\'s own sentence', [refused.exitCode, refused.lines[0].includes('Resource not accessible')], [EXIT_PLATFORM_REFUSAL, true]);
+      t('a 403 is a platform refusal (exit 5) carrying the platform\'s own sentence', [refused.exitCode, refused.lines.some((l) => l.includes('Resource not accessible'))], [EXIT_PLATFORM_REFUSAL, true]);
       const exhausted = await drive({ ...happy, 'POST /repos/o/r/issues': { status: 403, headers: { 'x-ratelimit-remaining': '0' }, json: { message: 'API rate limit exceeded' } } });
       t('a 403 with the quota exhausted is a PREREQUISITE failure (exit 3) that binds the identity', [exhausted.exitCode, exhausted.lines.some((l) => l.includes('binds the IDENTITY'))], [EXIT_PREREQUISITE, true]);
       const afterMarker = await drive(happy, { file: exhausted.pace.file });
@@ -446,6 +517,48 @@ export async function selfTest() {
       t('--dry-run exits 0 and prints the request it did not send', [spawned.status, spawned.stdout.includes('NOTHING was sent') && spawned.stdout.includes('POST /repos/o/r/issues')], [0, true], spawned.stderr.slice(-300));
       t('…and the throttle recorded nothing: a dry run makes no write', existsSync(join(dir, 'dry-pace.jsonl')), false);
       t('a refused plan is usage, printed, and nothing is sent', spawnSync(process.execPath, [SELF_PATH, '--dry-run', '--repo', 'o/r', '--title', 'x'], { encoding: 'utf8', env: { ...process.env, HTTPS_PROXY: '', https_proxy: '' } }).status, EXIT_USAGE);
+    }
+
+    // ── the relay transport ─────────────────────────────────────────────────
+    battery('the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, auto falls back only on no-run');
+    {
+      const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
+      const NOW = Date.UTC(2026, 8, 22, 9, 4, 0);
+      const dispatchRoute = (requested = 'dispatch') => ({ requested, transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: SESSION });
+      const RUN = { id: 42, url: 'https://github.test/run/42', status: 'completed', conclusion: 'success' };
+      const outcome = (state, extra = {}) => async (payload) => ({ state, ok: state === 'success', status: state === 'refused' ? 404 : 204, verdict: state === 'refused' ? 'refusal' : 'ok', requestId: payload.request_id, startMs: 1, ceilingMs: 2, run: state === 'no-run' || state === 'refused' ? null : RUN, detail: '', ...extra });
+      // The relay only serves the organization the App is installed on, so these cases target a repo of it.
+      const ORG_REPO = 'objectstack-ai/objectstack';
+      const orgPlan = planFrom(parseArgs(['--repo', ORG_REPO, '--title-file', 'title.txt', '--body-file', 'body.md', '--label', 'pm:queue']), { read, env });
+      const orgHappy = {
+        [`POST /repos/${ORG_REPO}/issues`]: { status: 201, json: { number: 12, html_url: `https://github.test/${ORG_REPO}/issues/12`, user: { login: 'objectstack-fleet[bot]' } } },
+        [`GET /repos/${ORG_REPO}/issues/12`]: { status: 200, json: { number: 12, title: orgPlan.payload.title, state: 'open', labels: [{ name: 'pm:queue' }] } },
+      };
+      const listing = (rows) => ({ [`GET /repos/${ORG_REPO}/issues`]: { status: 200, json: rows } });
+      const created = { number: 12, title: orgPlan.payload.title, html_url: `https://github.test/${ORG_REPO}/issues/12`, user: { login: 'objectstack-fleet[bot]' }, created_at: new Date(NOW + 5000).toISOString() };
+      const sentPayloads = [];
+      const ok = await drive({ ...orgHappy, ...listing([{ ...created, number: 13, title: 'another card', created_at: new Date(NOW + 9000).toISOString() }, created]) }, {
+        plan: orgPlan,
+        route: dispatchRoute(),
+        now: () => NOW,
+        send: async (p) => {
+          sentPayloads.push(p);
+          return outcome('success')(p);
+        },
+      });
+      t('under dispatch ONE payload carries the create — title, body, labels — with the session and the target', [sentPayloads.length, sentPayloads[0]?.session, sentPayloads[0]?.repo, sentPayloads[0]?.actions], [1, SESSION, ORG_REPO, [{ op: 'issue_create', title: orgPlan.payload.title, body: orgPlan.payload.body, labels: ['pm:queue'] }]]);
+      t('…no POST left this process; the card was found by title among issues created since the dispatch, then read back', [ok.exitCode, ok.number, ok.seen.map((s) => s.call)], [EXIT_OK, 12, [`GET /repos/${ORG_REPO}/issues`, `GET /repos/${ORG_REPO}/issues/12`]], ok.lines.join(' | '));
+      t('…and the actor printed is the bot the relay wrote as', ok.lines.some((l) => l.includes('objectstack-fleet[bot]') && l.includes('via the relay run')));
+      const notFound = await drive({ ...orgHappy, ...listing([]) }, { plan: orgPlan, route: dispatchRoute(), now: () => NOW, send: outcome('success') });
+      t('a run that succeeded but no card carrying the title since the dispatch is exit 6 UNCONFIRMED, never a second dispatch', [notFound.exitCode, notFound.lines.some((l) => l.includes('UNCONFIRMED'))], [EXIT_UNCONFIRMED, true]);
+      const timedOut = await drive(orgHappy, { plan: orgPlan, route: dispatchRoute(), send: outcome('timeout', { run: { ...RUN, status: 'in_progress', conclusion: null } }) });
+      t('a run that did not complete within the ceiling is exit 6 with the run url, and no POST left', [timedOut.exitCode, timedOut.lines.join('\n').includes('https://github.test/run/42'), timedOut.seen.length], [EXIT_UNCONFIRMED, true, 0]);
+      const noRunExplicit = await drive(orgHappy, { plan: orgPlan, route: dispatchRoute('dispatch'), send: outcome('no-run') });
+      t('under an EXPLICIT dispatch, no run is exit 6 — no fall-back', [noRunExplicit.exitCode, noRunExplicit.seen.length], [EXIT_UNCONFIRMED, 0]);
+      const noRunAuto = await drive(orgHappy, { plan: orgPlan, route: dispatchRoute('auto'), send: outcome('no-run') });
+      t('under AUTO, no run falls back to the direct POST — said out loud — and the card is created and read back', [noRunAuto.exitCode, noRunAuto.number, noRunAuto.lines.some((l) => l.includes('Falling back to DIRECT')), noRunAuto.seen.map((s) => s.call)], [EXIT_OK, 12, true, [`POST /repos/${ORG_REPO}/issues`, `GET /repos/${ORG_REPO}/issues/12`]]);
+      const failedRun = await drive(orgHappy, { plan: orgPlan, route: dispatchRoute('auto'), send: outcome('failure', { run: { ...RUN, conclusion: 'failure' }, detail: 'conclusion failure' }) });
+      t('⛔ a run that FAILED is never fallen back from, even under auto: exit 5, no POST', [failedRun.exitCode, failedRun.seen.length], [EXIT_PLATFORM_REFUSAL, 0]);
     }
 
     // ── the wiring ──────────────────────────────────────────────────────────
@@ -511,7 +624,9 @@ const USAGE = [
   '',
   '  The body comes from a file, always; the title from a file by preference. A batch of N ≥ 5 cards is',
   '  announced first:  node scripts/pm/write-pace.mjs --announce-batch N --kind "issue-create POST"',
-  `  Exits: 0 created and read back · ${EXIT_USAGE} usage · ${EXIT_PREREQUISITE} prerequisite · ${EXIT_READ_BACK_MISMATCH} read-back mismatch · ${EXIT_PLATFORM_REFUSAL} platform refused · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
+  '  OS_FLEET_TRANSPORT=direct|dispatch|auto (default auto): dispatch sends the create through the fleet-write relay as',
+  '  objectstack-fleet[bot]; auto takes it in a cloud seat container (OS_FLEET_SESSION must carry this seat\'s session_… id).',
+  `  Exits: 0 created and read back · ${EXIT_USAGE} usage · ${EXIT_PREREQUISITE} prerequisite · ${EXIT_READ_BACK_MISMATCH} read-back mismatch · ${EXIT_PLATFORM_REFUSAL} platform refused · ${EXIT_UNCONFIRMED} dispatched but UNCONFIRMED · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
 ].join('\n');
 
 function rearmThroughProxy(args) {
@@ -564,7 +679,7 @@ export async function main(argv) {
   if (rearmed !== null) return rearmed;
   const result = await createIssue(plan);
   for (const line of result.lines) console.error(line);
-  if (opts.json && result.number !== null) console.log(JSON.stringify({ number: result.number, html_url: result.url, author: result.author, repo: plan.repo }));
+  if (opts.json && result.number !== null) console.log(JSON.stringify({ number: result.number, html_url: result.url, author: result.author, repo: plan.repo, transport: result.transport ?? null, relay_run: result.relay?.run?.url ?? null }));
   return result.exitCode;
 }
 
