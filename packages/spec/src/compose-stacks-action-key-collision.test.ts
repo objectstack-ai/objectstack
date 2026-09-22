@@ -352,9 +352,16 @@ describe('composeStacks - what stays accepted', () => {
     });
     const out = composeStacks([orders, core], { manifest: 'preserve' });
     expect(out.packages).toHaveLength(2);
-    expect(keysOf(out).top).toEqual(['crm_order:ship_order']);
-    // Each package's action is carried exactly once — the bound one no longer
-    // doubled by the composed merge (#14847), the embedded one as before.
-    expect(keysOf(out).embedded).toEqual({ crm_order: ['ship_order/BOUND'], crm_account: ['archive_account/EMB'] });
+    // ⭐ #14512: a multi-package artifact carries its collections in the
+    // package bodies only, so the keys are read there. Each package's action is
+    // still carried exactly once — the bound one no longer doubled by the
+    // composed merge (#14847), the embedded one as before.
+    expect(keysOf(out)).toEqual({ top: [], embedded: {} });
+    const bodies = (out.packages ?? []).map((p) => p.manifest as unknown as ObjectStackDefinition);
+    expect(bodies.flatMap((b) => keysOf(b).top)).toEqual(['crm_order:ship_order']);
+    expect(Object.assign({}, ...bodies.map((b) => keysOf(b).embedded))).toEqual({
+      crm_order: ['ship_order/BOUND'],
+      crm_account: ['archive_account/EMB'],
+    });
   });
 });

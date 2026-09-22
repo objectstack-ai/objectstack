@@ -103,13 +103,18 @@ describe('composeStacks - a bound standalone action appears once in the composed
     expect(aItem.actions![0]).toBe(a.actions![0]);
   });
 
-  it("carries it once under manifest: 'preserve' too, and the packages[] halves agree with the composed objects", () => {
+  it("carries it once under manifest: 'preserve' too — in the package bodies, which are the artifact's only copy", () => {
     const out = composeStacks([boundA(), boundB()], { manifest: 'preserve' });
-    expect(keysOf(out).embedded).toEqual({ a_item: ['dup_x/BOUND'], b_item: ['dup_y/BOUND'] });
-    const perPackage = (out.packages ?? []).map((p) =>
-      ((p.manifest as { objects?: ObjectStackDefinition['objects'] }).objects ?? []).map((o) => [o.name, (o.actions ?? []).length]),
-    );
-    expect(perPackage).toEqual([[['a_item', 1]], [['b_item', 1]]]);
+    // ⭐ #14512: the flattened top level is not emitted for a multi-package
+    // artifact, so `keysOf` over the artifact reads empty and the bodies carry
+    // the whole of it. The property this pin is about is unchanged — the bound
+    // action appears ONCE on its object, never doubled by the composed merge.
+    expect(keysOf(out)).toEqual({ top: [], embedded: {} });
+    const bodies = (out.packages ?? []).map((p) => p.manifest as unknown as ObjectStackDefinition);
+    expect(bodies.map((b) => keysOf(b))).toEqual([
+      { top: ['a_item:dup_x'], embedded: { a_item: ['dup_x/BOUND'] } },
+      { top: ['b_item:dup_y'], embedded: { b_item: ['dup_y/BOUND'] } },
+    ]);
   });
 
   // Three stacks each declaring `shared`, each embedding one action on it and

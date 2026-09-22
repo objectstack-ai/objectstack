@@ -228,24 +228,26 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
     ]);
   });
 
-  it('is ADDITIVE — the singular `manifest` is still selected, by the default rule', () => {
-    // Preserve does not delete a key every previous output carried. The
+  it('RETAINS the singular `manifest` — still selected, by the default rule', () => {
+    // Preserve does not delete the key every previous output carried. The
     // artifact keeps an artifact-level identity (D6 — one artifact, one
     // version), and D4's read-both rule means nothing is registered twice: a
     // `packages`-carrying artifact is read through `packages`, and `manifest`
     // is the fallback branch for artifacts that have none.
+    //
+    // ⚠️ These inputs carry NO collections, which is what makes the
+    // whole-object relation below a statement about the manifest half alone.
+    // The collections half is #14512's and is pinned in its own block: a
+    // multi-package artifact carries them in `packages[]` ONLY.
     const stacks = [raw({ manifest: crmManifest }), raw({ manifest: cpqManifest })];
     const preserved = composeStacks(stacks, { manifest: 'preserve' });
     const byDefault = composeStacks(stacks);
 
-    // "Additive" is only a claim if something was added: assert the addition
-    // before asserting that nothing else moved — otherwise this pin is green on
+    // The addition is asserted before the relation, so this pin is not green on
     // an implementation that adds nothing (measured in the ablation leg).
     expect(idsOf(preserved)).toEqual(['com.example.crm', 'com.example.crm.cpq']);
     expect(preserved.manifest?.id).toBe('com.example.crm.cpq');
     expect(preserved.manifest).toEqual(byDefault.manifest);
-    // Stated as the whole-object relation, so "additive" is a machine
-    // criterion: preserve's output is the default's output plus `packages`.
     expect({ ...preserved, packages: undefined }).toEqual({ ...byDefault, packages: undefined });
   });
 
@@ -310,6 +312,78 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
 
     const warnings: string[] = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
     expect(warnings.some((w: string) => w.includes("'packages'"))).toBe(false);
+  });
+
+  // ── #14512 — the emitter half: ONE copy, in `packages[]` ────────────
+  //
+  // Ruled by the maintainer on 2026-09-03 (decision batch #23, recorded on
+  // #14512) and recorded as ADR-0130 D4's 2026-09-22 addendum: a multi-package
+  // artifact carries each definition ONCE, under the package that owns it. The
+  // flattened top level was a second copy of every object, view, flow and
+  // permission set — it doubled the payload and nothing reconciled the two
+  // halves. Readers were converted first (every one resolves `packages[]`);
+  // this is the emitter that stops feeding the flat copy.
+
+  const withObjects = (manifest: Record<string, unknown>, object: string): ObjectStackDefinition =>
+    raw({ manifest, objects: [{ name: object, label: object, fields: {} }], apps: [{ name: `${object}_app`, label: object }] });
+
+  it('#14512 — a multi-package artifact carries its collections ONCE, in the package bodies', () => {
+    const stacks = [withObjects(crmManifest, 'crm_account'), withObjects(cpqManifest, 'cpq_quote')];
+    const preserved = composeStacks(stacks, { manifest: 'preserve' });
+
+    // Nothing flattened: the two package-owned collections these inputs carry
+    // have no top-level expression at all.
+    expect(preserved.objects).toBeUndefined();
+    expect(preserved.apps).toBeUndefined();
+
+    // And nothing lost: the union across the bodies is exactly what the
+    // pick-one composition flattens, which is the criterion that makes this a
+    // copy REMOVAL rather than a narrowing of what the artifact carries.
+    const bodies = (preserved.packages ?? []).map((p) => p.manifest as Record<string, unknown>);
+    const byDefault = composeStacks(stacks);
+    expect(bodies.flatMap((b) => (b.objects as { name: string }[]) ?? [])).toEqual(byDefault.objects);
+    expect(bodies.flatMap((b) => (b.apps as { name: string }[]) ?? [])).toEqual(byDefault.apps);
+
+    // The envelope is untouched — `manifest` above, and `packages` itself.
+    expect(preserved.manifest?.id).toBe('com.example.crm.cpq');
+    expect(idsOf(preserved)).toEqual(['com.example.crm', 'com.example.crm.cpq']);
+  });
+
+  it('#14512 — keeps the flattened copy when an input has NO manifest to own its collections', () => {
+    // `preservePackageEntries` contributes a body only for a stack that has a
+    // manifest, and `manifest` is optional on the stack schema. Stripping here
+    // would not remove a copy, it would delete the only one — so the emitter
+    // leaves today's additive shape, which every reader still reads.
+    const stacks = [withObjects(crmManifest, 'crm_account'), raw({ objects: [{ name: 'loose_obj', label: 'loose', fields: {} }] })];
+    const preserved = composeStacks(stacks, { manifest: 'preserve' });
+
+    expect((preserved.objects ?? []).map((o) => o.name)).toEqual(['crm_account', 'loose_obj']);
+    expect(idsOf(preserved)).toEqual(['com.example.crm']);
+  });
+
+  it('#14512 — keeps the flattened copy when a `packages`-carrying input declares collections of its own', () => {
+    // Such a stack contributes its ENTRIES untouched (re-assembling one would
+    // fold the composition's collections onto a package that does not own
+    // them), so its own collections are attributed to no body either.
+    const carrier = raw({
+      packages: [{ manifest: crmManifest }, { manifest: cpqManifest }],
+      objects: [{ name: 'carrier_obj', label: 'carrier', fields: {} }],
+    });
+    const preserved = composeStacks([carrier, withObjects(billingManifest, 'bill_invoice')], { manifest: 'preserve' });
+
+    expect((preserved.objects ?? []).map((o) => o.name)).toEqual(['carrier_obj', 'bill_invoice']);
+    expect(idsOf(preserved)).toEqual(['com.example.crm', 'com.example.crm.cpq', 'com.example.crm.billing']);
+  });
+
+  it('#14512 — a ONE-package artifact keeps today\'s shape (ADR-0130 D7)', () => {
+    // D7 stated as a condition rather than trusted: an artifact that reaches a
+    // single package entry by any route stays flattened, so the single-package
+    // shape every customer has on disk is byte-identical to before.
+    const stacks = [withObjects(crmManifest, 'crm_account'), raw({ packages: [] })];
+    const preserved = composeStacks(stacks, { manifest: 'preserve' });
+
+    expect(idsOf(preserved)).toEqual(['com.example.crm']);
+    expect((preserved.objects ?? []).map((o) => o.name)).toEqual(['crm_account']);
   });
 
   it('short-circuits on a single stack, exactly as every other strategy does', () => {
