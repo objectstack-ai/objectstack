@@ -66,16 +66,25 @@ import { AssignmentConfigSchema } from '../automation/builtin-node-config.zod';
 const MESSAGE = 'pin: the refusal text that must survive formatting';
 
 /**
- * Keys these tests would see appear on `Object.prototype` under the defect.
- * Cleaned after every test so one failure cannot cascade into the next file.
+ * `Object.prototype`'s own keys before any formatter in this file has run.
+ *
+ * Captured as a SNAPSHOT rather than as a guessed list of key names, because
+ * the defect's pollution is not limited to the path element: walking into
+ * `Object.prototype` also makes the walker install its own container key
+ * (`properties` for `treeifyError`) there. A fixed roster missed that one, and
+ * the leak then made a LATER test fail for a reason having nothing to do with
+ * its own subject — a polluted `Object.prototype.properties` is inherited, so
+ * the next `curr.properties ??= {}` finds it non-nullish, creates no own
+ * container, and quietly shares one object across every tree the process
+ * builds afterwards.
  */
-const CANARY_KEYS = ['polluted', '_errors', 'errors'] as const;
+const PRISTINE_PROTOTYPE_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype));
 
 afterEach(() => {
-  for (const key of CANARY_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(Object.prototype, key)) {
-      delete (Object.prototype as Record<string, unknown>)[key];
-    }
+  // Restore, so one test's pollution cannot cascade into the next test or the
+  // next file in this worker.
+  for (const key of prototypePollution()) {
+    delete (Object.prototype as Record<string, unknown>)[key];
   }
 });
 
@@ -92,10 +101,10 @@ function ownValue(node: unknown, key: string): unknown {
   return Object.getOwnPropertyDescriptor(node, key)?.value;
 }
 
-/** Own keys `Object.prototype` did not have before the formatters ran. */
+/** Own keys `Object.prototype` has gained since this file was loaded. */
 function prototypePollution(): string[] {
-  return CANARY_KEYS.filter((key) =>
-    Object.prototype.hasOwnProperty.call(Object.prototype, key),
+  return Object.getOwnPropertyNames(Object.prototype).filter(
+    (key) => !PRISTINE_PROTOTYPE_KEYS.has(key),
   );
 }
 
