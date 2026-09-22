@@ -1226,7 +1226,6 @@ export class SecurityPlugin implements Plugin {
     this.metadata = metadata;
     this.ql = ql;
 
-
     // [#11968] Bind the invalidation epoch to the ENGINE's seam when the wired
     // engine exposes one. Resolved here, once, rather than probed per request:
     // the plugin DI graph is static after start, and a per-request probe would
