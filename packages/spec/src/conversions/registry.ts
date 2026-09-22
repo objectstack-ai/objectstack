@@ -8880,7 +8880,7 @@ const fieldReferenceToAlias: MetadataConversion = {
  * `logUnmapped`) and `ErrorMappingRuleSchema` (`sourceCode`, `sourceMessage`,
  * `targetCode`, `targetCategory`, `severity`, `retryable`, `userMessage`) were
  * authorable through `ConnectorSchema.errorMapping` — and, because
- * `DeclarativeConnectorEntrySchema` `superRefine`s the same shape, through
+ * `DeclarativeConnectorEntrySchema` carries the same shape, through
  * `stack.connectors[]` and the `PUT /meta/connector/:name` door — and NOTHING
  * read them: measured on `origin/main`, the only reference outside the
  * declaring file and its unit test was a type-identity pin. No provider,
@@ -8971,8 +8971,8 @@ const connectorErrorMappingRemoved: MetadataConversion = {
  * enforce-or-remove; maintainer ruling 2026-09-22, letter A).
  *
  * A bounded (`min(1000).max(300000)`), defaulted (`30000`), `.describe()`d key
- * on `ConnectorSchema` — and, because `DeclarativeConnectorEntrySchema`
- * `superRefine`s the same shape, on `stack.connectors[]` and the
+ * on `ConnectorSchema` — and, because `DeclarativeConnectorEntrySchema` wraps
+ * the same private base object, on `stack.connectors[]` and the
  * `PUT /meta/connector/:name` door — that no site ever applied as a deadline.
  *
  * ⚠️ NOT a zero-mention retirement, and the distinction is the whole finding:

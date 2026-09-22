@@ -542,7 +542,8 @@ const ERROR_MAPPING_RETIRED =
 // ============================================================================
 //
 // A bounded (`min(1000).max(300000)`), defaulted (`30000`), `.describe()`d key
-// on this schema and — through `ConnectorSchema.superRefine` — on
+// on this schema and — because both published carriers wrap the same private
+// `ConnectorBaseSchema` — on
 // `DeclarativeConnectorEntrySchema`, so it was authorable from `stack.connectors[]`,
 // from `PUT /meta/connector/:name`, and served back by `/meta/connector`. Every
 // signal an authoring surface can give said it worked.
@@ -1017,8 +1018,11 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
    * nobody anything. `ConnectorSchema` is NOT `.strict()`, so a plain delete
    * would be a silent strip (ADR-0104); the tombstone makes the removal audible
    * in the two channels an upgrading author actually hits — `tsc` and the
-   * parse — and `DeclarativeConnectorEntrySchema` (`ConnectorSchema.superRefine`)
-   * inherits it, so `stack.connectors[]` and the `/meta/connector` door refuse
+   * parse — and `DeclarativeConnectorEntrySchema` carries it too (both
+   * published carriers wrap the same private `ConnectorBaseSchema`; until the
+   * `connectionTimeoutMs` retirement the entry schema was literally
+   * `ConnectorSchema.superRefine(...)`), so `stack.connectors[]` and the
+   * `/meta/connector` door refuse
    * it too. Registered as `integration/Connector:errorMapping` and
    * `integration/DeclarativeConnectorEntry:errorMapping` in
    * `RETIRED_KEYS_BY_MAJOR[18]`; sources are rewritten by the D2 conversion
@@ -1074,8 +1078,16 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
  *
  * The wrapper is a `z.preprocess` PIPE, not a `ZodObject`: it keeps a
  * read-through `shape` so the schema walkers and shape-reading consumers see
- * the inner authorable truth, but ⛔ it cannot be `.extend()`ed or
- * `.superRefine()`d directly — do that on `ConnectorBaseSchema` and re-wrap,
+ * the inner authorable truth, but the `ZodObject` combinators do NOT survive
+ * it. Measured on the built entry against a plain-object control
+ * (`WebhookConfigSchema`, which keeps all nine): `.extend()`, `.omit()`,
+ * `.pick()`, `.partial()`, `.merge()`, `.strict()`, `.keyof()` and
+ * `.safeExtend()` are gone.
+ *
+ * ⚠️ `.superRefine()` is the exception and the trap — it lives on zod's base
+ * type, so it is still CALLABLE here and silently returns a schema with no
+ * read-through `shape`, which is precisely what the authorable-surface and
+ * liveness walkers duck-test. So: build on `ConnectorBaseSchema` and re-wrap,
  * the way `DeclarativeConnectorEntrySchema` below does (the
  * `EffectiveObjectPermissionSchema` precedent).
  */
@@ -1101,8 +1113,26 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  * plus the cross-field rules that apply only when a connector is *authored inside
  * a stack*, as opposed to a def a plugin builds at runtime and hands to
  * `registerConnector`. `stack.zod.ts` validates the `connectors:` array against
- * this; the base {@link ConnectorSchema} stays a plain object so connector
- * *subtypes* (github / database / …) can still `.extend()` it.
+ * this.
+ *
+ * ⚠️ This used to end "the base {@link ConnectorSchema} stays a plain object so
+ * connector *subtypes* (github / database / …) can still `.extend()` it". That
+ * is NO LONGER TRUE and the sentence is corrected rather than deleted, because
+ * it was quoted verbatim downstream: both published exports are now
+ * `z.preprocess` PIPES (the ADR-0049 retired-default residue stage), and a pipe
+ * is not a `ZodObject`. Measured on the built entry, against a plain-object
+ * control (`WebhookConfigSchema`) that keeps all nine: `.extend()`, `.omit()`,
+ * `.pick()`, `.partial()`, `.merge()`, `.strict()`, `.keyof()` and
+ * `.safeExtend()` are all gone from `ConnectorSchema` and from this schema.
+ * `.superRefine()` is the one that survives — it lives on zod's base type — but
+ * ⛔ calling it on a pipe returns a schema with NO read-through `shape`, which
+ * is what the authorable-surface and liveness walkers duck-test, so a
+ * refinement still belongs on the inner object.
+ *
+ * **Subtype route:** extend `ConnectorBaseSchema` and re-wrap the result with
+ * `acceptRetiredDefaultResidue(…, CONNECTOR_RETIRED_KEY_RESIDUE)` — exactly
+ * what this schema does below, and the `EffectiveObjectPermissionSchema`
+ * precedent.
  *
  * One rule applies to EVERY authored entry (#7990, maintainer-ruled 2026-08-12):
  *  - NO entry may inline secrets via `authentication`. A published connector

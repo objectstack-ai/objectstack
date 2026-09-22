@@ -26,6 +26,7 @@ The key was bounded (`min(1000).max(300000)`), defaulted (`30000`),
 | --- | --- |
 | `connector.connectionTimeoutMs` (on `Connector` and on `DeclarativeConnectorEntry`, so `stack.connectors[]` and `PUT /meta/connector/:name`) | `requestTimeoutMs` — the deadline the platform keeps, applied as `resilientFetch`'s per-attempt timeout. For a connect-only bound, configure it at a connector provider or upstream gateway on a transport that can separate the phases. |
 | `ConnectorProviderContext.connectionTimeoutMs` (handed to every `ConnectorProviderFactory`) | `ctx.requestTimeoutMs`, or the factory's own `providerConfig` where the provider owns the vocabulary. |
+| The `ZodObject` combinators on `ConnectorSchema` and `DeclarativeConnectorEntrySchema` — `.extend()`, `.omit()`, `.pick()`, `.partial()`, `.merge()`, `.strict()`, `.keyof()`, `.safeExtend()` | Both exports are now `z.preprocess` **pipes** (the residue stage below), so those methods no longer exist on them. **Build on the object and re-wrap:** `acceptRetiredDefaultResidue(<your extended object>, { connectionTimeoutMs: 30000 })`, the `EffectiveObjectPermissionSchema` route. ⚠️ `.superRefine()` still *exists* on a pipe but returns a schema with no read-through `shape`, so refine before wrapping, not after. Parsing, `z.input` / `z.infer`, and the read-through `.shape` are unchanged. |
 
 **The one-line fix: delete the key** — and, for a custom provider factory, stop
 reading `ctx.connectionTimeoutMs`. `os migrate meta --from 17` lists the
@@ -104,9 +105,14 @@ ruling that made the siblings live forbids.)
   materialized it into **every** connector — measured across two builds: the base
   build emits it for an entry that authored only `name`/`label`/`type`, and the
   tombstoned build refuses that exact object at `connectors.0.connectionTimeoutMs`.
-  The D2 does **not** discharge this: `ObjectPermission:allowPurge` carries both,
-  because `AutomationEngine.registerConnector` parses `ConnectorSchema` for a def
-  a plugin builds **in code**, where no conversion runs. So the emitted `30000`
+  The D2 does **not** discharge the obligation, and the precedent shows it:
+  `ObjectPermission:allowPurge` carries a D2 **and** the residue stage, for its
+  own reason (a released toolchain materialized its default into every built
+  artifact's entries). The reason *here* is a different one — this schema has a
+  second door: `AutomationEngine.registerConnector` parses `ConnectorSchema` for
+  a def a plugin or provider factory builds **in code**, where no conversion
+  ever runs, and all four shipped connector packages put the materialized value
+  straight into that def literal. So the emitted `30000`
   is accepted-and-stripped while `15000` keeps the tombstone's refusal, and
   nothing is un-retired: `z.input` stays `never` and the `[RETIRED]` row stays.
 - **No deprecation window** (maintainer 2026-08-27: 「项目在创业阶段，用户也很少，短期不考虑渐进」),
