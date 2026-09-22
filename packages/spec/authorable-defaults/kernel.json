@@ -46,7 +46,6 @@
     "kernel/HotReloadConfig:preserveState = true",
     "kernel/HotReloadConfig:shutdownTimeout = 30000",
     "kernel/HotReloadConfig:stateStrategy = \"memory\"",
-    "kernel/InstallPackageRequest:enableOnInstall = true",
     "kernel/InstalledPackage:enabled = true",
     "kernel/InstalledPackage:status = \"installed\"",
     "kernel/KernelContext:features = {}",
