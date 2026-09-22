@@ -274,7 +274,7 @@ describe('#18682 — the refusal names the RELATED object, not the referencing o
     ['read failed', unavailable('unreadable'), ['could not read', "'crm_account'"]],
     ['undeclared related field', unavailable('undeclared-field', ['type']), ['declares no', "'type'"]],
     ['no reference stored', unavailable('no-reference'), ['no single related record', 'MULTIPLE references']],
-    ['related row gone', unavailable('unresolved'), ['could not be read']],
+    ['related row gone', unavailable('unresolved'), ['no record with that id exists', 'system authority']],
   ];
 
   for (const [name, binding, expected] of cases) {
