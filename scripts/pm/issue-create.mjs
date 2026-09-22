@@ -625,7 +625,8 @@ const USAGE = [
   '  The body comes from a file, always; the title from a file by preference. A batch of N ≥ 5 cards is',
   '  announced first:  node scripts/pm/write-pace.mjs --announce-batch N --kind "issue-create POST"',
   '  OS_FLEET_TRANSPORT=direct|dispatch|auto (default auto): dispatch sends the create through the fleet-write relay as',
-  '  objectstack-fleet[bot]; auto takes it in a cloud seat container (OS_FLEET_SESSION must carry this seat\'s session_… id).',
+  "  objectstack-fleet[bot]; auto takes it in a cloud seat container (the seat's session is read from the container's",
+  '  CLAUDE_CODE_REMOTE_SESSION_ID; OS_FLEET_SESSION overrides it — a local checkout, a test) and direct elsewhere.',
   `  Exits: 0 created and read back · ${EXIT_USAGE} usage · ${EXIT_PREREQUISITE} prerequisite · ${EXIT_READ_BACK_MISMATCH} read-back mismatch · ${EXIT_PLATFORM_REFUSAL} platform refused · ${EXIT_UNCONFIRMED} dispatched but UNCONFIRMED · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
 ].join('\n');
 
