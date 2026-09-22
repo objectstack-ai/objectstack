@@ -2988,6 +2988,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the size refusal: a 422 the platform answered is not a route that never existed': 53,
+  'the two positions: a declaration renders as bare digits, and the patrol reads digits': 17,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 20,
 });
@@ -3931,6 +3932,46 @@ export function selfTest() {
   t('⛔ …standing apart from the transport failure it used to be reported as', EXIT_TOO_LARGE !== EXIT_PREREQUISITE_NOT_MET);
   t('⛔ …from the contract refusal, which is this tool\'s rule and not the platform\'s', EXIT_TOO_LARGE !== EXIT_REFUSED);
   t('⛔ …and from the write that HAPPENED and was not stored', EXIT_TOO_LARGE !== EXIT_NOT_STORED);
+
+  // ⛔ The two positions the patrol reads are the other half of this tool's
+  // contract, so every row here asserts the two halves AGREE about ONE body:
+  // what the write side does with it, and what H56 would file on the bytes
+  // that would have gone to the board. Both the reader and the row are
+  // imported — this battery restates neither.
+  battery('the two positions: a declaration renders as bare digits, and the patrol reads digits');
+  {
+    const READING = '2026-09-08T14:00Z'; // a real reading of something ELSE, two days back
+    const STORED = '2026-09-10T06:37:55Z'; // the platform's write instant, seconds after this act's clock
+    const posted = (body) => substituteTokens(body, stampNow(NOW_MS)).body;
+    const patrolFiles = (body) => h56EstimatedStamp({ body: posted(body), created_at: STORED, updated_at: STORED }) !== null;
+    const writeRefuses = (body) => stampRefusals(body, NOW_MS).length > 0;
+    const agree = (body) => writeRefuses(body) === patrolFiles(body);
+    const DECLARED_OPENING = `Unlock — upstream #18373 closed at {{WAS:${READING}}}.`;
+    const DECLARED_SUB = `Seat post.\n\n<sub>read {{WAS:${READING}}}</sub>`;
+    const DECLARED_IN_BODY = `Unlock — released {{NOW}}.\n\nUpstream #18373 closed at {{WAS:${READING}}}.`;
+    const ACT_CLOCK_OPENING = 'Unlock — released {{NOW}}.';
+    const HOLDOUT = `Verdict {{NOW}} — on the board read {{WAS:${READING}}}.`;
+    const OWN_MINUTE = `Round opened {{WAS:${stampNow(NOW_MS)}}}.`;
+    const TYPED_OPENING = `Claim: seat ${READING} — dispatched.`;
+
+    t('⭐ THE FILED REPRO: a declared reading on the OPENING line is REFUSED', kinds(DECLARED_OPENING, NOW_MS).join() === 'positional-declared');
+    t('⛔ WHY it used to pass: the positional walk read MASKED text, where a declaration is blanked', h56StampedReadings(maskQuotedStamps(DECLARED_OPENING)).length === 0);
+    t('⭐ …while the patrol reads the RENDERED body, where the declaration is spent and the digits stand bare', h56StampedReadings(posted(DECLARED_OPENING))[0]?.stamp === READING);
+    t('…and files a row on it, because a reading of something ELSE is not the write time', patrolFiles(DECLARED_OPENING) === true);
+    t('⭐ PARITY: the two halves now answer the same about that body', agree(DECLARED_OPENING) === true);
+    t('⭐ the SECOND position the card measured behaves identically', kinds(DECLARED_SUB, NOW_MS).join() === 'positional-declared' && agree(DECLARED_SUB) === true);
+    t('the refusal names the position, the declaration and the digits it renders to', ['the opening line', `{{WAS:${READING}}}`, READING].every((s) => stampRefusals(DECLARED_OPENING, NOW_MS)[0]?.detail?.includes(s) === true));
+    t('…and prescribes the act-clock token THERE, with the reading moved into the body', stampRefusals(DECLARED_OPENING, NOW_MS)[0]?.detail?.includes(STAMP_TOKEN) === true && stampRefusals(DECLARED_OPENING, NOW_MS)[0]?.detail?.includes('into the BODY') === true);
+    t('⭐ THE CONTROL: the act-clock token at that position is ACCEPTED, and the patrol files nothing', writeRefuses(ACT_CLOCK_OPENING) === false && patrolFiles(ACT_CLOCK_OPENING) === false);
+    t('⭐ …and the same declaration one line down is accepted, with the patrol silent there too', writeRefuses(DECLARED_IN_BODY) === false && patrolFiles(DECLARED_IN_BODY) === false);
+    t('⛔ the patrol HOLDS OUT a rendered position carrying two stamps rather than guess, and so does this', h56StampedReadings(posted(HOLDOUT)).length === 0 && writeRefuses(HOLDOUT) === false && agree(HOLDOUT) === true);
+    t('⛔ a declaration whose value IS this act\'s clock writes the bytes the token would, so it is not this refusal\'s business', writeRefuses(OWN_MINUTE) === false && patrolFiles(OWN_MINUTE) === false);
+    t('⛔ the BARE scan is untouched and stays value-free: a typed stamp at that position is still refused', kinds(TYPED_OPENING, NOW_MS).join() === 'positional');
+    t('…with ONE row, not two — the declared walk declines a position the bare scan already took', stampRefusals(TYPED_OPENING, NOW_MS).length === 1);
+    t('…and its remedy no longer offers the quoted route AT the position, but in the body', stampRefusals(TYPED_OPENING, NOW_MS)[0].detail.includes('into the BODY') && stampRefusals(TYPED_OPENING, NOW_MS)[0].detail.includes(`{{WAS:${READING}}}`));
+    t('⛔ a value the shape or direction rules already refused is not ALSO filed here — one typo, one refusal', kinds('read {{WAS:2099-01-01T00:00Z}}', NOW_MS).join() === 'quoted-in-the-future' && kinds('read {{WAS:2026-13-45T99:99Z}}', NOW_MS).join() === 'quoted-no-such-instant');
+    t('structural: the walk runs over the body `substituteTokens` will SEND, and the reader is the patrol\'s own', /h56StampedReadings\(substituteTokens\(raw, now, spans\)\.body\)/u.test(stampSource) && new RegExp('function\\s+h56StampedReadings\\b').test(stampSource) === false);
+  }
 
   battery('the shared rule: this tool and H56 cannot come to disagree');
   t('⭐ the positions this tool refuses are the ones H56 reads — one imported reader, never two', h56StampedReadings(maskQuotedStamps(OPENING)).length === 1);
