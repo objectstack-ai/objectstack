@@ -541,7 +541,8 @@ function opensClassScope(node) {
 }
 
 /**
- * Where a CALLABLE'S OWN NAME is declared: the lexical scopes, plus the class.
+ * Where a CALLABLE'S OWN NAME is declared -- a RECORDING predicate, ⛔ not a
+ * lookup one: the lexical scopes, plus the class.
  *
  * A method's name belongs to its class body, a function declaration's and a
  * `const fn = () => …`'s to the block or file that declares it -- so this is
@@ -549,9 +550,51 @@ function opensClassScope(node) {
  * same predicate as {@link opensClassScope}: a method named `getEngine` is
  * class-scoped, while a `function getEngine()` two lines above the class is not,
  * and a chain that saw only classes would lose the second one.
+ *
+ * ⭐ That reasoning answers WHERE A NAME IS DECLARED, and it is the whole
+ * question only while a declaration is being recorded. A CALL SITE asks a
+ * different question -- which declaration THIS call reaches -- and the answer
+ * there is keyed on how the call is WRITTEN. ⛔ Reading a bare `getEngine()`
+ * through this union is how a method came to shadow a file-level function that
+ * the language would never let it shadow. {@link calleeScopeChain} is the
+ * lookup-side predicate; the two are deliberately not the same function.
  */
 function opensCallableScope(node) {
   return opensScope(node) || opensClassScope(node);
+}
+
+/**
+ * ⭐ The scope chain a CALL SITE resolves its callee through -- by how the call
+ * is WRITTEN, which is not the question {@link opensCallableScope} answers.
+ *
+ * One map records every callable's name at the scope that declares it, and that
+ * map is read from three different call shapes, each of which the language
+ * resolves differently:
+ *
+ *   • `f()`      -- a BARE IDENTIFIER is a lexical name and nothing else. A
+ *                    method lives on the prototype, ⛔ never in lexical scope,
+ *                    so the enclosing class body is not on this chain: a
+ *                    `class C { getEngine() {…} }` does not shadow a
+ *                    `function getEngine()` for a call written `getEngine()`
+ *                    inside `C`. Reading it through the class subtracted a real
+ *                    engine write under the DEFENDED `platform-type` arm, which
+ *                    prints nothing and is counted nowhere.
+ *   • `this.m()` -- a method name, which belongs to the enclosing class exactly
+ *                    as a property does, and to no lexical scope.
+ *   • `x.m()`    -- a member of whatever `x` is, and this module has no index of
+ *                    class members to read that off (interfaces and type-literal
+ *                    aliases only, via {@link memberTypeOfShapes}, tried before
+ *                    this chain). `null` ⇒ the file-wide FLOOR alone, which is
+ *                    exactly what this receiver resolved through before there
+ *                    were any scopes at all. ⛔ Not a placement this module can
+ *                    justify -- it is the one it can defend as unchanged.
+ */
+function calleeScopeChain(callee) {
+  if (ts.isIdentifier(callee)) return opensScope;
+  if (ts.isPropertyAccessExpression(callee) && callee.expression.kind === ts.SyntaxKind.ThisKeyword) {
+    return opensClassScope;
+  }
+  return null;
 }
 
 /**
@@ -617,10 +660,18 @@ function scopedNames(opens = opensScope) {
       scopeMap(declNode).set(name, entry);
       flat.set(name, entry);
     },
-    /** The declaration `name` refers to AT `node` -- lexical tier, then the floor. */
-    lookup(name, node) {
-      if (node) {
-        for (const scope of scopeChainOf(node, opens)) {
+    /**
+     * The declaration `name` refers to AT `node` -- lexical tier, then the floor.
+     *
+     * `chain` defaults to the predicate this map RECORDS under, which is the
+     * right answer wherever the name is looked up the same way it is declared.
+     * A callable's name is not: it is recorded where it is declared and read by
+     * how the call is written, so {@link resolveReceiver} passes the chain from
+     * {@link calleeScopeChain} instead. `null` asks for the FLOOR alone.
+     */
+    lookup(name, node, chain = opens) {
+      if (node && chain) {
+        for (const scope of scopeChainOf(node, chain)) {
           const hit = byScope.get(scope)?.get(name);
           if (hit) return hit;
         }
@@ -851,7 +902,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
         return inlineEngineDoorOrOther(mt, `${fname}() return`, sf);
       }
     }
-    const entry = fname ? decls.fnReturns.lookup(fname, callee) : null;
+    const entry = fname ? decls.fnReturns.lookup(fname, callee, calleeScopeChain(callee)) : null;
     if (entry) return fromEntry(entry, `${fname}()`);
     return { kind: 'unresolved', how: 'call', detail: receiverKey(r, sf) };
   }
@@ -2481,6 +2532,39 @@ export function selfTest() {
       + `export function w(d: Deps) {\n  d.getEngine().${WRITE};\n}\n`, ['IProbeEngine']),
     'engine/IProbeEngine');
 
+  // ── ⭐⭐ ONE MAP, THREE CALL SHAPES ────────────────────────────────
+  // The cases above all read the callable map the way its name was DECLARED.
+  // These four read it the way the call is WRITTEN, which is the other question
+  // and the one the lookup site actually asks. A single chain answering both is
+  // wrong for one of them: reading a BARE `getEngine()` through the enclosing
+  // class body lets a method shadow a file-level function that the language
+  // would never let it shadow -- and in this instrument that is the quiet
+  // direction again, a real engine write subtracted under `platform-type`, an
+  // arm that DEFENDS the subtraction and so prints nothing and is counted
+  // nowhere. ⛔ Pinned in BOTH declaration orders, because the floor decides the
+  // one the lexical tier does not reach and the two orders disagree there.
+  t('⭐⭐ a BARE call resolves lexically -- a method never shadows a file-level function of the same name',
+    verdictsIn('function getEngine(): IProbeEngine { return null as never; }\n'
+      + 'class C {\n  getEngine(): Map<string, number> { return new Map(); }\n'
+      + `  w() { getEngine().${WRITE}; }\n}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐⭐ …and in the other declaration order, where the file-wide floor would have answered the method',
+    verdictsIn('class C {\n  getEngine(): Map<string, number> { return new Map(); }\n'
+      + `  w() { getEngine().${WRITE}; }\n}\n`
+      + 'function getEngine(): IProbeEngine { return null as never; }\n', ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐ a `this.<method>()` call DOES read the enclosing class, so its own method wins over a same-named function',
+    verdictsIn('function getEngine(): IProbeEngine { return null as never; }\n'
+      + 'class C {\n  getEngine(): Map<string, number> { return new Map(); }\n'
+      + "  w() { this.getEngine().delete('k'); }\n}\n", ['IProbeEngine']),
+    'other/platform-type');
+  t('⛔ FLOOR: an `x.<method>()` call is not the enclosing class\'s method -- the site\'s own class does not capture it',
+    verdictsIn('class A {\n  getEngine(): IProbeEngine { return null as never; }\n}\n'
+      + 'class B {\n  constructor(private readonly x: A) {}\n'
+      + '  getEngine(): Map<string, number> { return new Map(); }\n'
+      + `  w() { this.x.getEngine().${WRITE}; }\n}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+
   // The same conflation decided two OTHER questions, and both are verdicts the
   // artefacts carry: WHICH object a site writes, and whether it is elevated.
   /** Every write call's object-name verdict, in source order. */
@@ -2554,7 +2638,10 @@ export function selfTest() {
     + 'two places a name is NOT lexical: two classes sharing a property name are two properties at both '
     + 'storage sites and through a `this.<base>.<member>` base, two same-named local functions are two '
     + 'callables, each in both declaration orders, while a `this.<prop>` no enclosing class declares and '
-    + 'a method called from outside its class both still resolve file-wide).',
+    + 'a method called from outside its class both still resolve file-wide -- and the callable map read '
+    + 'by how the CALL is written rather than by where the name was declared: a bare `f()` resolves '
+    + 'lexically and is never shadowed by a same-named method of the enclosing class, in both '
+    + 'declaration orders, while `this.m()` does read that class and `x.m()` reads neither).',
   );
   return 0;
 }
