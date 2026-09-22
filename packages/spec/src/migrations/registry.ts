@@ -5211,7 +5211,34 @@ const step18: MigrationStep = {
     + 'dashboard widgets only — `ReportChartSchema` and the inline-data react `<ObjectChart>` '
     + 'tier keep their own axes — and the paired semantic entry carries what the stripped '
     + 'keys were saying, because an authored axis field may name a column the widget never '
-    + 'selected and no walker can move that intent into the dataset.',
+    + 'selected and no walker can move that intent into the dataset. '
+    + 'It also retires `connector.connectionTimeoutMs` (ADR-0049 enforce-or-remove; '
+    + 'maintainer ruling 2026-09-22, letter A — the narrower SECOND decision the key was '
+    + 'owed after the ruling that made its nine ledger siblings live deliberately left this '
+    + 'one dead). Bounded, defaulted, `.describe()`d and served back by `/meta/connector`, '
+    + 'so an author had every signal it worked — and no site ever applied it as a deadline. '
+    + 'This retirement is NOT the zero-mention shape: five sites outside `packages/spec` '
+    + 'read the key (the materialization fingerprint and the provider-context build in the '
+    + 'automation service, `ctx.connectionTimeoutMs` in the `rest` and `openapi` provider '
+    + 'factories, and the `?? 30000` fallbacks that put it back on the reported def), but '
+    + 'every one is a pass-through whose only termini are the def `GET /connectors` echoes '
+    + 'and the fingerprint that decides whether to re-materialize. The one mapping from '
+    + 'authored policy onto the platform\'s outbound `fetch` was handed `retryConfig` and '
+    + '`requestTimeoutMs` only, so the key was carried and never honoured — the same '
+    + 'parsed-unmarked-unenforced state ADR-0049 forbids, wearing a longer route. Nor was '
+    + 'the `实现` arm available: a WHATWG `fetch` exposes one `AbortSignal` over the whole '
+    + 'operation and never the connect phase, so bounding time-to-response with it would '
+    + 'kill a slow-but-connected upstream the author meant to allow with a large '
+    + '`requestTimeoutMs`. `requestTimeoutMs` is the replacement and the bound the platform '
+    + 'can keep. The carrier key is a retiredKey tombstone on the non-strict '
+    + '`ConnectorSchema` (a bare deletion would be a silent strip), registered under both '
+    + 'def keys because `DeclarativeConnectorEntrySchema` inherits it; the D2 conversion '
+    + 'strips it from `connectors[]` as a pure lossless delete — it never had an effect to '
+    + 'lose — because a stored connector row CAN carry it (the `PUT /meta/connector/:name` '
+    + 'door persists the authored value and the stored-row rehydration seam is live for '
+    + 'this type, both measured); and the withdrawn `ConnectorProviderContext` member, '
+    + 'which is code and has no authored source to rewrite, leaves via the paired semantic '
+    + 'entry instead.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5232,6 +5259,7 @@ const step18: MigrationStep = {
     'form-view-option-default-removed',
     'field-reference-to-alias',
     'connector-error-mapping-removed',
+    'connector-connection-timeout-ms-removed',
     'hook-timeout-to-timeout-ms',
     'job-timeout-to-timeout-ms',
     'api-endpoint-cache-ttl-to-cache-ttl-seconds',

@@ -227,18 +227,22 @@ describe('rest provider factory (ADR-0097)', () => {
             expect(calls).toBe(1);
         });
 
-        it('carries the declared timeouts onto the def it registers', async () => {
+        it('carries the declared request timeout onto the def it registers', async () => {
             const { impl } = stubFetch();
             const factory = createRestProviderFactory({ fetchImpl: impl });
             const { def } = await factory(
                 ctx({
                     providerConfig: { baseUrl: 'https://api.example.com' },
-                    connectionTimeoutMs: 5000,
                     requestTimeoutMs: 7000,
                 }),
             );
-            expect(def.connectionTimeoutMs).toBe(5000);
             expect(def.requestTimeoutMs).toBe(7000);
+            // `connectionTimeoutMs` was the second half of this pin and is
+            // RETIRED (ADR-0049): the factory never applied it, it only echoed
+            // it back onto the def. The absence pin lives tree-scoped in
+            // `packages/spec/src/integration/connector.test.ts`; here the point
+            // is only that the surviving timeout still travels.
+            expect((def as Record<string, unknown>).connectionTimeoutMs).toBeUndefined();
         });
     });
 });

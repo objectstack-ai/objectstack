@@ -91,7 +91,9 @@ export function createSlackConnector(opts: SlackConnectorOptions): SlackConnecto
         // the (post-parse) Connector output type.
         status: 'active',
         enabled: true,
-        connectionTimeoutMs: 30000,
+        // `connectionTimeoutMs` — REMOVED with the spec key (ADR-0049): it was
+        // written here only so the literal satisfied the post-parse type, and
+        // the platform never applied it as a connect deadline.
         requestTimeoutMs: 30000,
         actions: [
             {
