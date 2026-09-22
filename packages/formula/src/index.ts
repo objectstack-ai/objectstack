@@ -72,6 +72,23 @@ export type { PermissionBinding } from './stdlib';
 // hand-rolled permission map has no shape of its own to be wrong against: it
 // parses, `can` answers from it, and the answer is a confident silent denial.
 export { toEvalPermissions } from './eval-permissions';
+// #18682 — relationship traversal in predicates. The static half: which
+// reference fields an authored predicate reads through, and which shapes the
+// authoring layer must refuse. Published because two layers ask the same
+// question and must get the same answer — `@objectstack/lint` (and the engine's
+// publish path) refuse the conflicting shapes, and the ObjectQL engine uses the
+// hop list to preload exactly those related fields before evaluation. A second
+// implementation in either consumer is how the accepted set forks.
+export {
+  analyzeRelationshipTraversals,
+  findTraversalConflicts,
+  DEFAULT_TRAVERSAL_ROOT,
+} from './relationship-traversal';
+export type {
+  RelationshipTraversalAnalysis,
+  TraversalConflict,
+  TraversalConflictKind,
+} from './relationship-traversal';
 export { resolveSeed, resolveSeedRecord } from './seed-eval';
 export { normalizeExpression, normalizeExpressionTree } from './normalize';
 // ADR-0058 — canonical CEL → FilterCondition pushdown compiler (one AST,
