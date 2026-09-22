@@ -11187,8 +11187,10 @@ export class SqlDriver implements IDataDriver {
           );
         }
         if (withheld > 0) {
+          // #6009 — the tracker id stays in this comment, never in the string:
+          // an operator reading the log has no way to resolve one.
           this.logger.warn(
-            `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted (#6009): ` +
+            `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted: ` +
             `their stored value is a bare number, which SQLite's date functions read as a ` +
             `JULIAN DAY, so canonicalising them would overwrite the original bytes with a ` +
             `date nobody wrote. Reads are unchanged — the column keeps its (unindexed) ` +
@@ -11404,8 +11406,10 @@ export class SqlDriver implements IDataDriver {
           );
         }
         if (withheld > 0) {
+          // #6009 — the tracker id stays in this comment, never in the string:
+          // an operator reading the log has no way to resolve one.
           this.logger.warn(
-            `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted (#6009): ` +
+            `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted: ` +
             `their stored value is a bare number, which SQLite's date functions read as a ` +
             `JULIAN DAY, so canonicalising them would overwrite the original bytes with a ` +
             `time nobody wrote. Reads are unchanged — the column keeps its (unindexed) ` +

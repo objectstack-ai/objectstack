@@ -280,11 +280,14 @@ describe('#6009 — a withheld row blocks the canonical mark, so no query answer
     const warnings: Array<{ msg: string; meta: any }> = [];
     (driver as any).logger.warn = (msg: string, meta?: any) => warnings.push({ msg, meta });
     await (driver as any).backfillCanonicalDatetimes('evt', true);
-    const hit = warnings.filter((w) => w.msg.includes('#6009'));
+    // Keyed on the message's own words, not on a tracker id: `check:doc-authoring`
+    // forbids an issue number in a runtime string, so one here would be a pin on
+    // a spelling the repo does not allow.
+    const hit = warnings.filter((w) => w.msg.includes('JULIAN DAY'));
     expect(hit).toHaveLength(1);
     expect(hit[0].meta.rowsWithheld).toBe(JULIAN_ONLY.length);
     expect(hit[0].meta.field).toBe('at');
-    expect(hit[0].msg).toContain('JULIAN DAY');
+    expect(hit[0].msg).toContain('Reads are unchanged');
   });
 });
 
