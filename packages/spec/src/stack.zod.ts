@@ -1408,7 +1408,8 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
   manifest: ManifestSchema.optional().describe('Project Package Configuration'),
 
   /**
-   * The artifact's package list (ADR-0130 D4) — **optional, and additive**.
+   * The artifact's package list (ADR-0130 D4) — **optional**, and read beside
+   * `manifest` rather than instead of it.
    *
    * A release artifact MAY carry N package manifests so a product can be split
    * into modules **without renaming a single object** (which is what separate
@@ -3213,14 +3214,31 @@ export const ComposeStacksOptionsSchema = lazySchema(() => z.object({
    * plain single-`manifest` stack — every stack written before ADR-0130 — folds
    * in as exactly one package.
    *
-   * ⚠️ `'preserve'` is **additive, not a replacement**: the singular `manifest`
-   * is still selected, by the same `'last'` rule as the default, so the output
-   * is the default's output **plus** the package list. The artifact keeps an
+   * ⚠️ The singular `manifest` is **retained, not replaced**: it is still
+   * selected by the same `'last'` rule as the default, so the artifact keeps an
    * artifact-level identity (ADR-0130 D6 — one artifact, one version) and no
-   * consumer reading `composed.manifest` sees a key disappear. Nothing is
-   * registered twice: D4's read-both rule says a `packages`-carrying artifact
-   * is read through `packages`, and `manifest` is the fallback branch for
-   * artifacts that have none.
+   * consumer reading `composed.manifest` sees a key disappear.
+   *
+   * ## The COLLECTIONS are carried once, under their package (#14512)
+   *
+   * A multi-package `'preserve'` output does **not** also carry the flattened
+   * collections: `objects`, `views`, `flows`, `permissions` and every other
+   * package-owned key live in `packages[i].manifest` and nowhere else, so one
+   * definition is serialized once. Until 2026-09-22 the output was both halves,
+   * every definition twice — which doubled the payload the marketplace
+   * transfers and startup parses, and left two copies of one definition that
+   * nothing reconciled: they are measured to differ in content whenever the
+   * composition merges or overrides an object, and a consumer saw whichever
+   * copy its own reader happened to read. The maintainer ruled the copy out
+   * (ADR-0130 D4's 2026-09-22 addendum, batch #23), READERS FIRST: every reader
+   * resolves `packages[]` before this emitter stopped feeding the flat copy.
+   *
+   * Two conditions hold it to a copy-removal, both in
+   * {@link packagesCarryEveryInputCollection}: at least TWO package entries
+   * (ADR-0130 D7 — a single-package artifact is byte-identical to before), and
+   * every input's collections attributed to a body. An input with no `manifest`
+   * has no package to own its collections, so such a composition keeps the
+   * flattened shape rather than losing them.
    *
    * @default 'last'
    */
@@ -3938,6 +3956,73 @@ function preservePackageEntries(stacks: ObjectStackDefinition[]): ArtifactPackag
 }
 
 /**
+ * The package-owned collection keys — every key an assembled package body
+ * carries beyond its manifest fields, which is exactly the set option B moves
+ * off the artifact's top level.
+ *
+ * DERIVED from {@link assembledPackageBodyShape}, never transcribed, so a
+ * metadata family added to the stack schema is carried by a package body and
+ * dropped from the flattened copy in the same change. Memoized because the
+ * emitter reads it on every preserve composition, and computed lazily because
+ * the shape it reads is built from the lazily-declared collection schemas.
+ * @internal
+ */
+let cachedPackageOwnedKeys: readonly string[] | undefined;
+function packageOwnedCollectionKeys(): readonly string[] {
+  return (cachedPackageOwnedKeys ??= Object.freeze(Object.keys(assembledPackageBodyShape())));
+}
+
+/**
+ * Does `packages` carry EVERY input's collections, so the flattened top level
+ * can be dropped without losing one? (ADR-0130 D4 option B, #14512.)
+ *
+ * The emitter half of option B removes a COPY. It is only ever a copy when the
+ * package list already carries what it removes, and two legal preserve inputs
+ * make it something else:
+ *
+ * - **An input with no `manifest`.** {@link preservePackageEntries} contributes
+ *   a body only for a stack that HAS a manifest, because a body is a manifest
+ *   with collections written over it — there is no package to own a
+ *   manifest-less stack's objects. Its collections reach the composed top level
+ *   and nowhere else, so stripping would delete them outright. `manifest` is
+ *   optional on {@link ObjectStackDefinitionSchema}, so this is not a
+ *   hypothetical shape.
+ * - **An input that already carries `packages` AND its own collections.** Such
+ *   a stack contributes its entries untouched (re-assembling one would fold the
+ *   composition's collections onto a package that does not own them), so its
+ *   OWN top-level collections are attributed to no body either.
+ *
+ * Both cases keep today's additive output, which every reader still reads
+ * (D4's read-both rule is unchanged, and `resolveArtifactCollections` in
+ * `@objectstack/runtime` merges the two halves). ⛔ They are NOT refused here:
+ * a composition that was legal before this change stays legal, and narrowing
+ * the accept set is not what the ruling asked the emitter to do.
+ *
+ * The `< 2` floor is ADR-0130 D7 stated as a condition rather than trusted: a
+ * single-package artifact keeps today's shape byte for byte, so an artifact
+ * that reaches one package entry by any route — including a second input that
+ * carried an empty `packages` array — is left flattened.
+ * @internal
+ */
+function packagesCarryEveryInputCollection(
+  stacks: readonly ObjectStackDefinition[],
+  entries: readonly ArtifactPackage[],
+): boolean {
+  if (entries.length < 2) return false;
+  const owned = packageOwnedCollectionKeys();
+  for (const stack of stacks) {
+    const source = stack as Record<string, unknown>;
+    if (Array.isArray(source.packages)) {
+      // Its entries are carried; its own collections are assembled into none.
+      if (owned.some((key) => source[key] !== undefined)) return false;
+      continue;
+    }
+    if (!stack.manifest) return false;
+  }
+  return true;
+}
+
+/**
  * Fold ONE input stack into the assembled package body the artifact carries
  * (ADR-0130 D4; #14242 B).
  *
@@ -3961,12 +4046,15 @@ function preservePackageEntries(stacks: ObjectStackDefinition[]): ArtifactPackag
  * {@link ObjectStackDefinitionSchema}'s `packages` key parses against it, so a
  * body this function builds and a body the load path accepts cannot drift.
  *
- * ⚠️ ADDITIVE, like `'preserve'` itself: the composed stack keeps its flattened
- * collections, so every consumer that reads the artifact's top level — the
- * metadata service's artifact door among them — sees exactly what it saw
- * before. What `packages` adds is per-package OWNERSHIP at registration, which
- * is the whole of ADR-0130 D1: without it, a composed multi-package artifact
- * registers N package records owning nothing at all.
+ * ⚠️ This body is the artifact's ONLY copy of the collections it carries, for
+ * a multi-package artifact (#14512, ADR-0130 D4 addendum 2026-09-22): the
+ * flattened top level is no longer emitted beside it, so a consumer reads the
+ * definitions here or not at all. Every reader in the platform resolves
+ * `packages[]` — the reader half of the same ruling — and D4's read-both rule
+ * still reads an artifact already on disk that carries both halves. What
+ * `packages` gives is per-package OWNERSHIP at registration, which is the whole
+ * of ADR-0130 D1: without it, a composed multi-package artifact registers N
+ * package records owning nothing at all.
  *
  * @internal
  */
@@ -4077,7 +4165,9 @@ function collectArtifactCrossReferenceErrors(
  * **Objects** are merged according to the `objectConflict` strategy.
  * **Manifest** is selected based on the `manifest` option — or, with
  * `manifest: 'preserve'`, every input's package identity is additionally folded
- * into `packages` (ADR-0130 D4) instead of N−1 of them being discarded.
+ * into `packages` (ADR-0130 D4) instead of N−1 of them being discarded, and a
+ * multi-package artifact then carries its collections in those package bodies
+ * ONLY, never also flattened at the top level (#14512).
  * **Single-valued configuration** (`i18n`, `api`, `server`, `runtimeModule`) is
  * neither overridden nor merged: identical declarations pass through, and two
  * stacks declaring *different* values throw an error naming both stacks
@@ -4125,6 +4215,8 @@ function collectArtifactCrossReferenceErrors(
  * // Preserve — one artifact carrying BOTH packages, each assembled (ADR-0130 D4)
  * const artifact = composeStacks([crm, cpq], { manifest: 'preserve' });
  * artifact.packages; // [{ manifest: { ...crmManifest, objects: [...] } }, …]
+ * artifact.objects;  // undefined — each definition is carried ONCE, in its
+ *                    // package body (#14512); `artifact.manifest` is retained
  * ```
  */
 export function composeStacks(
@@ -4140,11 +4232,12 @@ export function composeStacks(
 
   // 1. Manifest — pick based on strategy.
   //
-  //    `'preserve'` is additive over the default rather than a fourth pick: the
-  //    singular `manifest` is still selected by `'last'`, so a preserve
-  //    composition's output is the default's output PLUS the package list built
-  //    in step 3a. The artifact keeps an artifact-level identity (ADR-0130 D6)
-  //    and no consumer reading `composed.manifest` loses a key.
+  //    `'preserve'` is not a fourth pick: the singular `manifest` is still
+  //    selected by `'last'`, so the artifact keeps an artifact-level identity
+  //    (ADR-0130 D6) and no consumer reading `composed.manifest` loses a key.
+  //    What preserve adds is the package list built in step 3a; what step 7
+  //    then removes, for a multi-package artifact, is the flattened copy of the
+  //    collections those bodies carry (#14512).
   composed.manifest = selectManifest(stacks, opts.manifest === 'preserve' ? 'last' : opts.manifest);
 
   // 2. Objects — use conflict strategy (and remember, per composed object,
@@ -4265,10 +4358,26 @@ export function composeStacks(
     throw new Error(formatComposedActionKeyCollisions(actionCollisions));
   }
 
-  // 7. Bind every standalone action to its object — ONCE. Each input built by
+  // 7. `manifest: 'preserve'` — a MULTI-package artifact carries each
+  //    definition ONCE, under the package that owns it, so the flattened copy
+  //    is not emitted at all (ADR-0130 D4 addendum 2026-09-22, maintainer
+  //    ruling batch #23). AFTER steps 3b and 6, which read the composed
+  //    collections to refuse an artifact nobody should be able to build: the
+  //    emitted shape narrows, the refusals do not.
+  if (opts.manifest === 'preserve') {
+    const entries = Array.isArray(composed.packages) ? (composed.packages as ArtifactPackage[]) : [];
+    if (packagesCarryEveryInputCollection(stacks, entries)) {
+      for (const key of packageOwnedCollectionKeys()) delete composed[key];
+    }
+  }
+
+  // 8. Bind every standalone action to its object — ONCE. Each input built by
   //    `defineStack` already carries its own bound actions on its objects (the
   //    echo step 6 steps around), and the surviving objects reach here as-is,
   //    so the merge appends only what an object does not already carry by
-  //    identity (#14847): the other inputs' actions bound to it.
+  //    identity (#14847): the other inputs' actions bound to it. A stripped
+  //    multi-package artifact reaches it with neither `objects` nor `actions`,
+  //    where it is the identity function — the per-package binding is each
+  //    body's own, performed by the `defineStack` that built that input.
   return mergeActionsIntoObjects(composed as ObjectStackDefinition);
 }
