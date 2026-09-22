@@ -413,6 +413,22 @@ and posts a `Release:` line. Findings are filed unassigned; assign at the moment
 maintainer's own work under the shared account carries no claim comment and is indistinguishable
 from a dispatch — an accepted blind spot; per-seat identities are not introduced.
 
+**Every GitHub write leaves through `scripts/pm/`, as the fleet's App identity, behind one shared
+write gate — properties of the path, not of whoever remembered them.** A seat's writes act as
+`objectstack-fleet[bot]`: `scripts/pm/fleet-token.mjs` mints the installation token from
+`OS_FLEET_APP_ID`, `OS_FLEET_INSTALLATION_ID` and `OS_FLEET_PRIVATE_KEY` (PEM or base64), caches
+it at mode 0600 and refreshes it early, and nothing is written under a person;
+`scripts/pm/write-pace.mjs` serialises every write verb fleet-wide (one in flight), spaces them,
+raises the gap for an announced batch and refuses on a platform back-off — its header is the
+authority on every number. Use the tool that owns the write: `issue-create.mjs` for a new card,
+`label-write.mjs` for labels and assignees, `post-stamped.mjs` for comments and bodies,
+`close-cards.mjs` for closures; for a write no tool owns — a push, a PR flag, an auto-merge arm —
+`scripts/pm/with-fleet.sh -- <command…>`, which mints, exports the identity for `gh` and `git`,
+and runs the command behind the gate (`--read` for reads, which are never gated). ⛔ Never a bare
+`curl`, `fetch` or `gh api -X POST|PATCH|PUT|DELETE` write from a seat; ⛔ never a token in a
+remote URL, in a `git config` value on disk, or in a log line — the wrapper hands git its
+credential through the environment, and `git remote -v` stays token-free.
+
 **State on your PR that you did not set belongs to another actor — ask, never "correct"
 it.** Under one shared identity every other participant's write arrives unsigned: the PM
 flipping your draft to ready and arming auto-merge, a bot re-labelling, the platform

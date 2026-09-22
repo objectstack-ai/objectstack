@@ -4,8 +4,14 @@
 /**
  * write-pace — one throttle in front of every seat write (#19572).
  *
- *   node scripts/pm/write-pace.mjs --status      # this token's budget, before a batch
- *   node scripts/pm/write-pace.mjs --self-test   # offline, injected clock, no network
+ *   node scripts/pm/write-pace.mjs --status      # this token's budget, the lease holder, the queue
+ *   node scripts/pm/write-pace.mjs --self-test   # offline core with an injected clock, plus a
+ *                                                # real-process battery for the lease (no network)
+ *   node scripts/pm/write-pace.mjs --announce-batch 17 --kind 'issue-create POST'
+ *                                                # rule ⑤: raise the gap for the next 17 writes
+ *   node scripts/pm/write-pace.mjs --run --kind 'gh api POST' -- gh api -X POST …
+ *                                                # rule ④ for a SHELL caller: take the lease, pace,
+ *                                                # run the command, release. `--read` skips the gate.
  *
  * ## What this is, and the one thing it must never become
  *
@@ -41,6 +47,75 @@
  * TESTS. The defaults above are the contract; an override that does not parse
  * as a non-negative integer is IGNORED and said out loud, because an override
  * that silently loosens a budget is worse than one that is refused.
+ *
+ * ## Rules ④ and ⑤ — the lease and the batch gap, and the reading behind them
+ *
+ * The three rules above were written per PROCESS, and the fleet is many
+ * processes: every seat's subagent runs in its own worktree, so a per-process
+ * pause of 1.2 s in each of N processes is a burst of N writes from ONE
+ * identity. The measured shape of the second suspension, read from the
+ * platform's own headers:
+ *
+ *   - the token was user-to-server (`GET /user` answered a login, `X-OAuth-Scopes`
+ *     empty, `X-RateLimit-Limit: 15000`, a one-hour expiry header), so every
+ *     write was booked against a person;
+ *   - `X-RateLimit-Remaining` never moved off 15000/15000 — quota was NOT the
+ *     trigger. The trigger was RATE SHAPE: 17 issues created in 29 s (a 1.2 s
+ *     gap, each process sleeping its own), after which the account was
+ *     restricted for the window 08:16–08:52 UTC that day, and every later push
+ *     by it — the platform's own `web-flow` merge commits included — got no
+ *     `github-actions` check-suite while sibling PRs dispatched normally;
+ *   - the platform names "rapid content creation" and "bursts" as secondary-
+ *     limit triggers and asks for ≥ 1.5 s between content-creating writes.
+ *
+ * So two more rules, both FLEET-WIDE because both live in the shared log:
+ *
+ *   ④ ONE WRITE IN FLIGHT, fleet-wide. A write holds the LEASE from the moment
+ *      it is reserved until its response is in hand (`paceWrite` takes it,
+ *      `noteResponse` releases it), and the minimum gap is slept UNDER the
+ *      lease, so two processes cannot agree they are both "3 s after the last
+ *      one". The lease is a `mkdir` beside the log with a holder record (pid,
+ *      instant, kind); a waiter takes a TICKET in a queue directory and only
+ *      the head contends, so grants are FIFO among waiters rather than decided
+ *      by who happens to poll — the same shape as `os-verify-lock.sh`, whose
+ *      `flock` this host may not have (a stock macOS ships none). A holder
+ *      whose process is gone, or that has held longer than
+ *      `DEFAULT_LEASE_MAX_HOLD_MS` (2 min), is broken by the next waiter and
+ *      said out loud. A waiter that gets no turn within
+ *      `DEFAULT_LEASE_WAIT_MS` (15 min) is REFUSED — exit
+ *      `EXIT_WRITE_PACE_REFUSED`, naming the holder — never left spinning.
+ *   ⑤ BATCH MODE. A caller about to create or change N ≥ `DEFAULT_BATCH_THRESHOLD`
+ *      (5) objects announces it first (`announceBatch` / `--announce-batch N`):
+ *      the gap for that token's next N writes rises to `DEFAULT_BATCH_GAP_MS`
+ *      (30 s) — every process sees it, because the batch is a record in the
+ *      shared log — and the announcement prints the item count and the
+ *      estimated duration, so a seat reading the log knows the pause is the
+ *      contract and not a hang. Below the threshold nothing changes.
+ *
+ * `OS_PM_WRITE_BATCH_THRESHOLD`, `OS_PM_WRITE_BATCH_GAP_MS`,
+ * `OS_PM_WRITE_LEASE_MAX_HOLD_MS` and `OS_PM_WRITE_LEASE_WAIT_MS` override ④
+ * and ⑤ FOR TESTS, under the same parse rule as the two above. Reads are
+ * never leased, never gapped, never counted — `isWriteMethod()` is the gate.
+ *
+ * ⛔ What a 403/429 does is rule ③ and NOT a retry loop. The git-retry
+ * convention (2 s / 4 s / 8 s / 16 s) is for a transport that dropped a packet;
+ * a secondary-limit refusal is the platform saying this IDENTITY is writing
+ * too fast, and the platform's own guidance is to wait the `retry-after` it
+ * names or at least a minute, growing on every repeat. A marker of 30 minutes
+ * (or the `retry-after`, whichever reaches further) refused loudly is the
+ * conservative end of that, and every seat sharing the identity sees the same
+ * refusal — a 16 s sleep inside one process would be exactly the per-process
+ * pacing that produced the burst.
+ *
+ * ## `--run` — the door for shell callers
+ *
+ * A write that no `scripts/pm/` tool owns still leaves through this file:
+ * `scripts/pm/with-fleet.sh -- <command…>` mints the fleet identity and runs the
+ * command through `--run`, which takes the lease, paces, spawns the command
+ * with inherited stdio, releases on exit and passes the command's own exit
+ * code through. It cannot see an HTTP status, so rule ③ is not applied to a
+ * `--run` — a tool that owns its transport calls both halves and gets all
+ * five rules; that is the reason to prefer the tool over the door.
  *
  * ## Where the log lives, and why the token is not in it
  *
@@ -108,18 +183,20 @@
  *
  *   0   `--status` completed, or a `--self-test` that reached its verdict.
  *   2   usage.
- *  10   `EXIT_WRITE_PACE_REFUSED` — the budget or a stop marker refused this
- *       write. Distinct from every code the five calling tools use (their
- *       highest is 9), so a seat reading an exit code can always tell "the
- *       throttle stopped me" from anything the tool itself decided. ⛔ NOT a
- *       failure of the work: nothing was written, nothing is half-written, and
- *       re-running after the printed instant is safe.
+ *  10   `EXIT_WRITE_PACE_REFUSED` — the budget, a stop marker, or a lease that
+ *       gave no turn within its wait refused this write. Distinct from every
+ *       code the calling tools use (their highest is 9), so a seat reading an
+ *       exit code can always tell "the throttle stopped me" from anything the
+ *       tool itself decided. ⛔ NOT a failure of the work: nothing was written,
+ *       nothing is half-written, and re-running after the printed instant is
+ *       safe. `--run` passes the wrapped command's own exit code through and
+ *       raises 10 only when the gate itself refused, before the command ran.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
+import { constants as OS_CONSTANTS, homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -150,6 +227,20 @@ const LOCK_POLL_MS = 40;
 // The second bound. See `withPaceLock`: a deadline read from an injected clock
 // is not a bound on its own.
 const LOCK_MAX_ATTEMPTS = 400;
+
+/** Rules ④ and ⑤. Overridable FOR TESTS only, like ① and ②; see the header. */
+export const DEFAULT_BATCH_THRESHOLD = 5;
+export const DEFAULT_BATCH_GAP_MS = 30_000;
+export const DEFAULT_LEASE_MAX_HOLD_MS = 120_000;
+export const DEFAULT_LEASE_WAIT_MS = 15 * 60 * 1000;
+
+const LEASE_POLL_MS = 50;
+// The attempt bound beside the wait deadline, for the same frozen-clock reason
+// `LOCK_MAX_ATTEMPTS` exists: 40 000 polls of 50 ms is longer than any wait a
+// real clock allows, so under a real clock the deadline always fires first.
+const LEASE_MAX_ATTEMPTS = 40_000;
+// A waiter says it is waiting after this long, once — a silent wait is a hang.
+const LEASE_ANNOUNCE_AFTER_MS = 2_000;
 
 // ---------------------------------------------------------------------------
 // Pure core — every decision this file makes is one of the functions below,
@@ -201,6 +292,10 @@ export function limitsFrom(env = process.env) {
   return {
     minGapMs: read('OS_PM_WRITE_MIN_GAP_MS', DEFAULT_MIN_GAP_MS),
     hourlyMax: read('OS_PM_WRITE_HOURLY_MAX', DEFAULT_HOURLY_MAX),
+    batchThreshold: read('OS_PM_WRITE_BATCH_THRESHOLD', DEFAULT_BATCH_THRESHOLD),
+    batchGapMs: read('OS_PM_WRITE_BATCH_GAP_MS', DEFAULT_BATCH_GAP_MS),
+    leaseMaxHoldMs: read('OS_PM_WRITE_LEASE_MAX_HOLD_MS', DEFAULT_LEASE_MAX_HOLD_MS),
+    leaseWaitMs: read('OS_PM_WRITE_LEASE_WAIT_MS', DEFAULT_LEASE_WAIT_MS),
     notes,
   };
 }
@@ -208,18 +303,32 @@ export function limitsFrom(env = process.env) {
 /**
  * The trailing-hour prune, applied on every read of the log.
  *
- * Two different survival rules, deliberately: a WRITE survives by age, a
- * MARKER survives by its own expiry. A `retry-after` of two hours writes a
- * marker that an age rule would prune away thirty minutes before the platform
- * said it could be ignored.
+ * Three different survival rules, deliberately: a WRITE survives by age, a
+ * MARKER survives by its own expiry, and a BATCH survives by its expiry AND by
+ * having writes left in it. A `retry-after` of two hours writes a marker that
+ * an age rule would prune away thirty minutes before the platform said it
+ * could be ignored; a batch whose N writes are spent is over whatever its
+ * expiry says.
  */
 export function pruneRecords(records, nowMs) {
   const cutoff = nowMs - WINDOW_MS;
   return (Array.isArray(records) ? records : []).filter((r) => {
     if (!r || typeof r !== 'object') return false;
     if (Number.isFinite(Number(r.stop))) return Number(r.stop) > nowMs;
+    if (Number.isFinite(Number(r.batch))) return Number(r.batch) > nowMs && Number(r.left) > 0;
     return Number.isFinite(Number(r.t)) && Number(r.t) > cutoff;
   });
+}
+
+/** The active batch for a token key, if any — the newest unexpired one with writes left. */
+export function activeBatch(records, key, nowMs) {
+  let found = null;
+  for (const r of Array.isArray(records) ? records : []) {
+    if (!r || r.k !== key || !Number.isFinite(Number(r.batch))) continue;
+    if (Number(r.batch) <= nowMs || !(Number(r.left) > 0)) continue;
+    if (!found || Number(r.at) > Number(found.at)) found = r;
+  }
+  return found;
 }
 
 /**
@@ -233,7 +342,10 @@ export function pruneRecords(records, nowMs) {
  *               the window has room again.
  *   `ok`        `sleepMs` is rule ①'s remainder (0 when the gap has passed),
  *               and `issueAtMs` is when the write will actually be issued —
- *               the instant the reservation is stamped with.
+ *               the instant the reservation is stamped with. `gapMs` is the
+ *               gap in force — rule ①'s, or rule ⑤'s while a batch is active,
+ *               whichever is larger — and `batch` names that batch when there
+ *               is one.
  */
 export function decidePace({ records = [], key, nowMs, minGapMs = DEFAULT_MIN_GAP_MS, hourlyMax = DEFAULT_HOURLY_MAX } = {}) {
   const mine = (Array.isArray(records) ? records : []).filter((r) => r && r.k === key);
@@ -243,10 +355,21 @@ export function decidePace({ records = [], key, nowMs, minGapMs = DEFAULT_MIN_GA
     if (!Number.isFinite(Number(r.stop))) continue;
     if (!marker || Number(r.stop) > Number(marker.stop)) marker = r;
   }
-  const writes = mine.filter((r) => !Number.isFinite(Number(r.stop)) && Number.isFinite(Number(r.t))).map((r) => Number(r.t));
+  const writes = mine.filter((r) => !Number.isFinite(Number(r.stop)) && !Number.isFinite(Number(r.batch)) && Number.isFinite(Number(r.t))).map((r) => Number(r.t));
   const inWindow = writes.filter((t) => t > nowMs - WINDOW_MS);
   const last = writes.length ? Math.max(...writes) : null;
-  const base = { key, count: inWindow.length, hourlyMax, minGapMs, nowMs, lastAtMs: last };
+  const batch = activeBatch(mine, key, nowMs);
+  const gapMs = batch ? Math.max(minGapMs, Number(batch.gap) || 0) : minGapMs;
+  const base = {
+    key,
+    count: inWindow.length,
+    hourlyMax,
+    minGapMs,
+    gapMs,
+    nowMs,
+    lastAtMs: last,
+    batch: batch ? { n: Number(batch.n), left: Number(batch.left), gapMs: Number(batch.gap), kind: String(batch.kind ?? 'write') } : null,
+  };
 
   if (marker && Number(marker.stop) > nowMs) {
     return { ...base, verdict: 'stopped', sleepMs: 0, resumeAtMs: Number(marker.stop), why: String(marker.why ?? 'a platform back-off signal'), markerAtMs: Number(marker.at) || null };
@@ -254,7 +377,7 @@ export function decidePace({ records = [], key, nowMs, minGapMs = DEFAULT_MIN_GA
   if (inWindow.length >= hourlyMax) {
     return { ...base, verdict: 'exhausted', sleepMs: 0, resumeAtMs: Math.min(...inWindow) + WINDOW_MS };
   }
-  const sleepMs = last === null ? 0 : Math.max(0, last + minGapMs - nowMs);
+  const sleepMs = last === null ? 0 : Math.max(0, last + gapMs - nowMs);
   return { ...base, verdict: 'ok', sleepMs, issueAtMs: nowMs + sleepMs };
 }
 
@@ -396,13 +519,61 @@ export function unrecordableText(file, error) {
   ].join('\n');
 }
 
-/** Rule ① — the pause, said out loud. */
+/** Rule ① — the pause, said out loud (and rule ⑤'s wider one, when a batch is in force). */
 export function gapText(d, kind) {
+  const gap = d.gapMs ?? d.minGapMs;
+  const why = d.batch
+    ? `the batch gap is ${fmtDuration(gap)} (${d.batch.left} of ${d.batch.n} ${d.batch.kind} left in the announced batch)`
+    : `the minimum gap is ${gap}ms`;
   return (
-    `write-pace: pausing ${fmtDuration(d.sleepMs)} before ${kind || 'this write'} — the minimum gap is ` +
-    `${d.minGapMs}ms and the previous write by token key ${d.key} was ${fmtDuration(d.nowMs - d.lastAtMs)} ago ` +
-    `(${d.count}/${d.hourlyMax} in the trailing hour).`
+    `write-pace: pausing ${fmtDuration(d.sleepMs)} before ${kind || 'this write'} — ${why} and the previous write by ` +
+    `token key ${d.key} was ${fmtDuration(d.nowMs - d.lastAtMs)} ago (${d.count}/${d.hourlyMax} in the trailing hour).`
   );
+}
+
+/** Rule ⑤ — the announcement: the count, the gap, and the estimate, so the pause reads as the contract. */
+export function batchText({ n, gapMs, threshold, key, kind, estimateMs }) {
+  return (
+    `write-pace: batch of ${n} ${kind || 'write'} item(s) announced for token key ${key} — at or above the threshold of ` +
+    `${threshold}, so the gap for the next ${n} write(s) by this identity is ${fmtDuration(gapMs)}, fleet-wide. ` +
+    `Estimated ${fmtDuration(estimateMs)} of pacing for this batch; the pauses below are the contract, not a hang.`
+  );
+}
+
+/** Rule ⑤ — below the threshold, said once so a reader knows the announcement was heard. */
+export function batchBelowThresholdText({ n, threshold }) {
+  return `write-pace: batch of ${n} is below the threshold of ${threshold} — the ordinary gap applies; nothing recorded.`;
+}
+
+/** Rule ④ — a waiter says it is waiting, once. */
+export function leaseWaitingText({ holder, ahead, waitedMs, nowMs }) {
+  const who = holder
+    ? `held by pid ${holder.pid} (${holder.kind}) for ${fmtDuration(nowMs - holder.atMs)}`
+    : 'being handed over';
+  return `write-pace: waiting for the fleet write lease — ${who}; ${ahead} ahead in the queue; waited ${fmtDuration(waitedMs)} so far.`;
+}
+
+/** Rule ④ — a dead or over-held holder was broken, and by whom. */
+export function leaseBrokenText({ holder, nowMs, maxHoldMs, pid }) {
+  const why = !holder
+    ? 'its holder record was unreadable'
+    : !pidAlive(holder.pid)
+      ? `pid ${holder.pid} (${holder.kind}) is gone`
+      : `pid ${holder.pid} (${holder.kind}) held it ${fmtDuration(nowMs - holder.atMs)}, past the ${fmtDuration(maxHoldMs)} bound`;
+  return `write-pace: ⚠ broke a stale fleet write lease — ${why}; pid ${pid} takes it.`;
+}
+
+/** Rule ④ — no turn within the wait. Nothing was written. */
+export function leaseRefusedText({ holder, ahead, waitedMs, waitMs, nowMs, kind }) {
+  const who = holder ? `held by pid ${holder.pid} (${holder.kind}) since ${stampUtc(holder.atMs)}` : 'contended without a readable holder';
+  return [
+    `✗ write-pace: REFUSED — no turn on the fleet write lease within ${fmtDuration(waitMs)} for ${kind || 'this write'}:`,
+    `  ${who}, ${ahead} waiter(s) ahead, waited ${fmtDuration(waitedMs)} (until ${stampUtc(nowMs)}).`,
+    '  ⛔ NOT a wait: nothing was written, nothing is half-written, and this process will not retry.',
+    '  A holder whose process is gone is broken by the next waiter automatically; a live one is a',
+    '  seat mid-write. Read the holder and the queue:  node scripts/pm/write-pace.mjs --status',
+    `  Exit ${EXIT_WRITE_PACE_REFUSED} is this refusal and nothing else.`,
+  ].join('\n');
 }
 
 /** Rule ③ — the marker, at the moment it is written. */
@@ -527,6 +698,261 @@ function sleepSync(ms) {
 const sleepAsync = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 // ---------------------------------------------------------------------------
+// Rule ④ — the lease. `mkdir` is the exclusion primitive (the one every host
+// here has); a ticket directory beside it is ADVISORY ORDER, exactly as
+// `os-verify-lock.sh` layers its queue over `flock`: only the head of the live
+// queue contends, dead tickets are pruned on the way past, and a holder record
+// names who has it so a waiter can say so. Taking and breaking both happen
+// under the decision lock, so two waiters cannot both conclude the holder is
+// dead and both take it.
+// ---------------------------------------------------------------------------
+
+export function leaseDirFor(file) {
+  return `${file}.lease`;
+}
+
+export function queueDirFor(file) {
+  return `${file}.q`;
+}
+
+/** Is there a process behind this pid? EPERM is "yes, not ours"; ESRCH is "no". */
+export function pidAlive(pid) {
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return false;
+  try {
+    process.kill(n, 0);
+    return true;
+  } catch (e) {
+    return e?.code === 'EPERM';
+  }
+}
+
+/** The holder record: `<pid> <acquired-ms> <kind…>`. `null` when unreadable. */
+export function readHolder(leaseDir) {
+  try {
+    const [pid, at, ...kind] = readFileSync(join(leaseDir, 'holder'), 'utf8').trim().split(' ');
+    const rec = { pid: Number(pid), atMs: Number(at), kind: kind.join(' ') || 'write' };
+    return Number.isInteger(rec.pid) && Number.isFinite(rec.atMs) ? rec : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A ticket name sorts by arrival, then pid — `queueLive` reads them in that order. */
+function ticketName(arrivalMs, pid) {
+  return `${String(Math.max(0, Math.floor(arrivalMs))).padStart(15, '0')}-${pid}`;
+}
+
+/**
+ * Live tickets in arrival order. With `prune` (the default) a ticket whose
+ * process is gone or whose age passed `maxAgeMs` is removed on the way past;
+ * `--status` reads with `prune: false`, because a read that deletes is not a
+ * read.
+ */
+export function queueLive(qDir, nowMs, maxAgeMs, { prune = true } = {}) {
+  let names;
+  try {
+    names = readdirSync(qDir);
+  } catch {
+    return [];
+  }
+  const live = [];
+  for (const name of names.sort()) {
+    const m = /^(\d+)-(\d+)$/.exec(name);
+    if (!m) continue;
+    const atMs = Number(m[1]);
+    const pid = Number(m[2]);
+    const dead = !pidAlive(pid) || nowMs - atMs > maxAgeMs;
+    if (dead && prune) {
+      try {
+        rmSync(join(qDir, name), { force: true });
+      } catch {
+        /* someone else pruned it first */
+      }
+      continue;
+    }
+    live.push({ name, atMs, pid, dead });
+  }
+  return live;
+}
+
+const heldLeases = new Map(); // file -> { leaseDir, atMs, kind, pid }
+let exitHookInstalled = false;
+
+function installExitHook() {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.once('exit', () => {
+    for (const file of [...heldLeases.keys()]) releaseWriteLease(file);
+  });
+}
+
+/**
+ * Take the fleet write lease for `file`'s log.
+ *
+ * Returns `{ held: true, … }`, or `{ held: false, holder, ahead, waitedMs }`
+ * after `waitMs` passed with no turn, or `{ held: false, unusable }` when the
+ * path itself cannot carry a lease (the parent is a file, say) — which is not
+ * contention and is reported as the log being unwritable. Re-entrant for the
+ * process that already holds it.
+ */
+export function acquireWriteLease(file, deps = {}) {
+  const now = deps.now ?? (() => Date.now());
+  const sleep = deps.sleep ?? sleepSync;
+  const log = deps.log ?? ((line) => console.error(line));
+  const pid = deps.pid ?? process.pid;
+  const kind = deps.kind ?? 'write';
+  const waitMs = deps.waitMs ?? DEFAULT_LEASE_WAIT_MS;
+  const maxHoldMs = deps.maxHoldMs ?? DEFAULT_LEASE_MAX_HOLD_MS;
+  const leaseDir = leaseDirFor(file);
+  const qDir = queueDirFor(file);
+
+  if (heldLeases.has(file)) return { held: true, reentered: true, waitedMs: 0, broke: null };
+
+  try {
+    mkdirSync(qDir, { recursive: true });
+  } catch {
+    /* an unusable queue costs FIFO, never exclusion — the lease dir still decides */
+  }
+  const arrivalMs = now();
+  const ticket = join(qDir, ticketName(arrivalMs, pid));
+  try {
+    writeFileSync(ticket, `${pid} ${arrivalMs} ${kind}\n`, 'utf8');
+  } catch {
+    /* same: contend without a place in line */
+  }
+  const dropTicket = () => {
+    try {
+      rmSync(ticket, { force: true });
+    } catch {
+      /* already gone */
+    }
+  };
+
+  const deadline = arrivalMs + waitMs;
+  let announced = false;
+  let broke = null;
+  for (let attempt = 0; attempt < LEASE_MAX_ATTEMPTS && now() <= deadline; attempt++) {
+    const nowMs = now();
+    const live = queueLive(qDir, nowMs, waitMs + 60_000);
+    const head = live[0];
+    if (!head || head.pid === pid) {
+      let got;
+      try {
+        got = withPaceLock(
+          file,
+          () => {
+            if (existsSync(leaseDir)) {
+              const holder = readHolder(leaseDir);
+              if (holder && holder.pid === pid) return 'mine';
+              const stale = !holder || !pidAlive(holder.pid) || nowMs - holder.atMs > maxHoldMs;
+              if (!stale) return null;
+              rmSync(leaseDir, { recursive: true, force: true });
+              broke = holder ?? { pid: 0, atMs: nowMs, kind: '?' };
+              log(leaseBrokenText({ holder, nowMs, maxHoldMs, pid }));
+            }
+            try {
+              mkdirSync(leaseDir);
+            } catch (e) {
+              if (e?.code === 'EEXIST') return null; // taken between the check and the mkdir — wait
+              throw e; // not contention: the path cannot carry a lease at all
+            }
+            writeFileSync(join(leaseDir, 'holder'), `${pid} ${nowMs} ${kind}\n`, 'utf8');
+            return 'taken';
+          },
+          { now, sleep },
+        );
+      } catch (e) {
+        dropTicket();
+        return { held: false, unusable: e, holder: null, ahead: 0, waitedMs: now() - arrivalMs, broke };
+      }
+      if (got) {
+        dropTicket();
+        heldLeases.set(file, { leaseDir, atMs: nowMs, kind, pid });
+        installExitHook();
+        return { held: true, reentered: false, waitedMs: nowMs - arrivalMs, broke };
+      }
+    }
+    if (!announced && nowMs - arrivalMs >= LEASE_ANNOUNCE_AFTER_MS) {
+      announced = true;
+      const idx = live.findIndex((t) => t.pid === pid);
+      log(leaseWaitingText({ holder: readHolder(leaseDir), ahead: idx === -1 ? live.length : idx, waitedMs: nowMs - arrivalMs, nowMs }));
+    }
+    sleep(LEASE_POLL_MS);
+  }
+  dropTicket();
+  const nowMs = now();
+  const live = queueLive(qDir, nowMs, waitMs + 60_000);
+  const idx = live.findIndex((t) => t.pid === pid);
+  return { held: false, holder: readHolder(leaseDir), ahead: idx === -1 ? live.length : idx, waitedMs: nowMs - arrivalMs, broke };
+}
+
+/**
+ * Release the lease this process holds on `file`'s log — idempotent, and it
+ * never removes another holder's. A transport whose request THREW (no response
+ * will come, so `noteResponse` will not be called) calls this on its way out.
+ */
+export function releaseWriteLease(file = paceFilePath()) {
+  const mine = heldLeases.get(file);
+  if (!mine) return false;
+  heldLeases.delete(file);
+  const holder = readHolder(mine.leaseDir);
+  if (holder && holder.pid !== mine.pid) return false; // broken and re-taken while we held it: not ours to remove
+  try {
+    rmSync(mine.leaseDir, { recursive: true, force: true });
+  } catch {
+    /* already gone */
+  }
+  return true;
+}
+
+/** Who holds the lease on `file`'s log right now, and who waits. A READ: prunes nothing. */
+export function leaseStatus(file, nowMs = Date.now(), waitMs = DEFAULT_LEASE_WAIT_MS) {
+  const leaseDir = leaseDirFor(file);
+  const held = existsSync(leaseDir);
+  const holder = held ? readHolder(leaseDir) : null;
+  const queue = queueLive(queueDirFor(file), nowMs, waitMs + 60_000, { prune: false });
+  return { held, holder, holderAlive: holder ? pidAlive(holder.pid) : false, queue };
+}
+
+/**
+ * Rule ⑤ — announce a batch of `count` writes by `token`. At or above the
+ * threshold it records the batch in the shared log (every process sees it) and
+ * prints the count and the estimate; below it, one line and nothing recorded.
+ * A new announcement for the same identity REPLACES its unspent batch.
+ */
+export function announceBatch({ token, count, kind = 'write' } = {}, deps = {}) {
+  const now = deps.now ?? (() => Date.now());
+  const log = deps.log ?? ((line) => console.error(line));
+  const env = deps.env ?? process.env;
+  const file = deps.file ?? paceFilePath(env, deps.home ?? homedir());
+  const { batchThreshold, batchGapMs, notes } = limitsFrom(env);
+  for (const note of notes) log(`write-pace: ${note}`);
+
+  const n = Number(count);
+  if (!Number.isInteger(n) || n < 1) throw new RangeError(`announceBatch: count must be a positive integer, got ${JSON.stringify(count)}`);
+  const key = tokenKey(token);
+  const nowMs = now();
+  if (n < batchThreshold) {
+    log(batchBelowThresholdText({ n, threshold: batchThreshold }));
+    return { batched: false, n, threshold: batchThreshold, gapMs: null, estimateMs: 0, key, file };
+  }
+  const estimateMs = n * batchGapMs;
+  const record = { batch: nowMs + Math.max(WINDOW_MS, estimateMs * 3), k: key, gap: batchGapMs, n, left: n, at: nowMs, kind };
+  withPaceLock(
+    file,
+    () => {
+      const kept = pruneRecords(readRecordsFrom(file), nowMs).filter((r) => !(r.k === key && Number.isFinite(Number(r.batch))));
+      kept.push(record);
+      writeRecordsTo(file, kept);
+    },
+    { now, sleep: deps.sleepSync ?? sleepSync },
+  );
+  log(batchText({ n, gapMs: batchGapMs, threshold: batchThreshold, key, kind, estimateMs }));
+  return { batched: true, n, threshold: batchThreshold, gapMs: batchGapMs, estimateMs, key, file, expiresAtMs: record.batch };
+}
+
+// ---------------------------------------------------------------------------
 // The two halves every write path calls.
 // ---------------------------------------------------------------------------
 
@@ -547,10 +973,37 @@ export async function paceWrite({ token, kind = 'write' } = {}, deps = {}) {
   const env = deps.env ?? process.env;
   const file = deps.file ?? paceFilePath(env, deps.home ?? homedir());
 
-  const { minGapMs, hourlyMax, notes } = limitsFrom(env);
+  const { minGapMs, hourlyMax, leaseMaxHoldMs, leaseWaitMs, notes } = limitsFrom(env);
   for (const note of notes) log(`write-pace: ${note}`);
 
   const key = tokenKey(token);
+
+  // Rule ④ first: nothing below is decided until this process holds the
+  // fleet's one turn, and the turn is kept through the gap sleep and the
+  // request — `noteResponse` gives it back. `deps.lease === false` is for the
+  // injected-clock cases that drive the arithmetic alone.
+  if (deps.lease !== false) {
+    const turn = acquireWriteLease(file, {
+      kind,
+      now,
+      sleep: deps.sleepSync ?? sleepSync,
+      log,
+      waitMs: leaseWaitMs,
+      maxHoldMs: leaseMaxHoldMs,
+      pid: deps.pid,
+    });
+    if (!turn.held && turn.unusable) {
+      log(unrecordableText(file, turn.unusable));
+      exit(EXIT_WRITE_PACE_REFUSED);
+      return { verdict: 'unrecordable', key, refused: true, exitCode: EXIT_WRITE_PACE_REFUSED, file, error: turn.unusable?.message ?? String(turn.unusable) };
+    }
+    if (!turn.held) {
+      log(leaseRefusedText({ ...turn, waitMs: leaseWaitMs, nowMs: now(), kind }));
+      exit(EXIT_WRITE_PACE_REFUSED);
+      return { verdict: 'no-lease', key, refused: true, exitCode: EXIT_WRITE_PACE_REFUSED, file, holder: turn.holder ?? null, waitedMs: turn.waitedMs };
+    }
+  }
+
   const nowMs = now();
   let decision;
 
@@ -560,23 +1013,32 @@ export async function paceWrite({ token, kind = 'write' } = {}, deps = {}) {
       () => {
         const kept = pruneRecords(readRecordsFrom(file), nowMs);
         decision = decidePace({ records: kept, key, nowMs, minGapMs, hourlyMax });
-        if (decision.verdict === 'ok') kept.push({ t: decision.issueAtMs, k: key, kind });
+        if (decision.verdict === 'ok') {
+          kept.push({ t: decision.issueAtMs, k: key, kind });
+          if (decision.batch) {
+            const spent = activeBatch(kept, key, nowMs);
+            if (spent) spent.left = Number(spent.left) - 1;
+          }
+        }
         writeRecordsTo(file, kept);
       },
       { now, sleep: deps.sleepSync ?? sleepSync },
     );
   } catch (e) {
+    releaseWriteLease(file);
     log(unrecordableText(file, e));
     exit(EXIT_WRITE_PACE_REFUSED);
     return { verdict: 'unrecordable', key, refused: true, exitCode: EXIT_WRITE_PACE_REFUSED, file, error: e?.message ?? String(e) };
   }
 
   if (decision.verdict === 'stopped') {
+    releaseWriteLease(file);
     log(stoppedText(decision));
     exit(EXIT_WRITE_PACE_REFUSED);
     return { ...decision, refused: true, exitCode: EXIT_WRITE_PACE_REFUSED, file };
   }
   if (decision.verdict === 'exhausted') {
+    releaseWriteLease(file);
     log(exhaustedText(decision));
     exit(EXIT_WRITE_PACE_REFUSED);
     return { ...decision, refused: true, exitCode: EXIT_WRITE_PACE_REFUSED, file };
@@ -585,7 +1047,7 @@ export async function paceWrite({ token, kind = 'write' } = {}, deps = {}) {
     log(gapText(decision, kind));
     await sleep(decision.sleepMs);
   }
-  return { ...decision, refused: false, slept: decision.sleepMs, file };
+  return { ...decision, refused: false, slept: decision.sleepMs, file, leased: deps.lease !== false };
 }
 
 /**
@@ -604,7 +1066,10 @@ export function noteResponse({ token, status, headers, body, verdict } = {}, dep
 
   const nowMs = now();
   const signal = stopSignalFrom({ status, headers, body, verdict }, nowMs);
-  if (!signal) return null;
+  if (!signal) {
+    releaseWriteLease(file); // rule ④: the response is in hand, the turn is over
+    return null;
+  }
 
   const key = tokenKey(token);
   try {
@@ -618,6 +1083,7 @@ export function noteResponse({ token, status, headers, body, verdict } = {}, dep
       { now, sleep: deps.sleepSync ?? sleepSync },
     );
   } catch (e) {
+    releaseWriteLease(file);
     // ⛔ This half NEVER throws, and that is not the same judgement as
     // `paceWrite`'s. It is called on a transport's error path, one line before
     // the caller throws the platform's own refusal — an exception raised here
@@ -633,6 +1099,7 @@ export function noteResponse({ token, status, headers, body, verdict } = {}, dep
     return { ...signal, key, file, recorded: false };
   }
   log(markerText(signal, key, nowMs));
+  releaseWriteLease(file); // after the marker is on disk, so the next holder reads it
   return { ...signal, key, file, recorded: true };
 }
 
@@ -641,12 +1108,13 @@ export function statusReport({ token } = {}, deps = {}) {
   const now = deps.now ?? (() => Date.now());
   const env = deps.env ?? process.env;
   const file = deps.file ?? paceFilePath(env, deps.home ?? homedir());
-  const { minGapMs, hourlyMax, notes } = limitsFrom(env);
+  const { minGapMs, hourlyMax, leaseWaitMs, notes } = limitsFrom(env);
 
   const nowMs = now();
   const key = tokenKey(token);
   const kept = pruneRecords(readRecordsFrom(file), nowMs);
   const d = decidePace({ records: kept, key, nowMs, minGapMs, hourlyMax });
+  const lease = leaseStatus(file, nowMs, leaseWaitMs);
 
   const byKind = new Map();
   for (const r of kept) {
@@ -665,6 +1133,15 @@ export function statusReport({ token } = {}, deps = {}) {
         ? `last write ${stampUtc(d.lastAtMs)} (${fmtDuration(nowMs - d.lastAtMs)} ago) — the next would pause ${fmtDuration(Math.max(0, d.lastAtMs + minGapMs - nowMs))}`
         : 'no write by this token in the window — the next would not pause'),
     `  marker    : ${d.verdict === 'stopped' ? `ACTIVE until ${stampUtc(d.resumeAtMs)} (${fmtDuration(d.resumeAtMs - nowMs)}) — ${d.why}` : 'none active'}`,
+    `  batch     : ${d.batch ? `active — ${d.batch.left} of ${d.batch.n} ${d.batch.kind} left, gap ${fmtDuration(d.batch.gapMs)}` : 'none'}`,
+    `  lease     : ${
+      !lease.held
+        ? 'free'
+        : lease.holder
+          ? `held by pid ${lease.holder.pid} (${lease.holder.kind}) for ${fmtDuration(nowMs - lease.holder.atMs)}${lease.holderAlive ? '' : ' — ⚠ that process is GONE; the next waiter breaks it'}`
+          : 'held, holder record unreadable — the next waiter breaks it'
+    }`,
+    `  queue     : ${lease.queue.length ? `${lease.queue.length} waiting (${lease.queue.map((q) => `pid ${q.pid}${q.dead ? ' †' : ''}`).join(', ')})` : 'empty'}`,
     `  verdict   : ${d.verdict === 'ok' ? 'the next write may go' : d.verdict === 'exhausted' ? `the next write is REFUSED until ${stampUtc(d.resumeAtMs)}` : `every write is REFUSED until ${stampUtc(d.resumeAtMs)}`}`,
   ];
   if (recent.length) lines.push(`  in window : ${recent.join(' · ')}`);
@@ -686,15 +1163,18 @@ export function statusReport({ token } = {}, deps = {}) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the token key: enough to separate identities, useless as a credential': 6,
   'the write-verb predicate: a read is never paced': 5,
-  'the limits: overrides are for tests, and a malformed one never loosens': 6,
+  'the limits: overrides are for tests, and a malformed one never loosens': 10,
   'rule ①: the remainder is slept, and the pause is said out loud': 7,
   'rule ②: the 41st is REFUSED, with a prescription': 8,
   'rule ③: what writes a stop marker, how long it lasts, what it refuses': 10,
-  'the prune: the trailing hour for writes, the expiry for markers': 6,
+  'the prune: the trailing hour for writes, the expiry for markers': 8,
   'the log, --status and the CLI: what lands on disk, and what must never': 14,
+  'rule ④: the lease — one write in flight, fleet-wide, measured on real processes': 12,
+  'rule ⑤: batch mode — the gap rises for an announced batch, and the estimate is printed': 9,
+  "--run: the shell door — gated by default, ungated with --read, the command's own exit code": 7,
   'the wiring: both halves, in every write transport, on write verbs only': 7,
 });
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 12;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -709,13 +1189,20 @@ const battery = (name) => {
 // is not a handshake.
 let selfTestReachedVerdict = false;
 
-/** The five write transports this throttle is wired into — the card's census. */
+/**
+ * The write transports this throttle is wired into — the census. Seven: the
+ * five board tools, the token minter (its one POST creates no content, but a
+ * write verb is a write verb and the roster below is mechanical), and the
+ * card-creation door.
+ */
 export const WIRED_WRITE_TOOLS = Object.freeze([
   'post-stamped.mjs',
   'label-write.mjs',
   'close-cards.mjs',
   'sweep-closed-cards.mjs',
   'sweep-stale-finding.mjs',
+  'fleet-token.mjs',
+  'issue-create.mjs',
 ]);
 
 /**
@@ -807,6 +1294,10 @@ export async function selfTest() {
   t('…and says so, so a loosened budget is never silent', limitsFrom({ OS_PM_WRITE_HOURLY_MAX: '4O' }).notes.length, 1);
   t('a negative override is malformed too', limitsFrom({ OS_PM_WRITE_MIN_GAP_MS: '-1' }).minGapMs, DEFAULT_MIN_GAP_MS);
   t('zero is a real value, not a malformed one', limitsFrom({ OS_PM_WRITE_MIN_GAP_MS: '0' }).minGapMs, 0);
+  t('rules ④ and ⑤ have defaults too', [limitsFrom({}).batchThreshold, limitsFrom({}).batchGapMs, limitsFrom({}).leaseMaxHoldMs, limitsFrom({}).leaseWaitMs], [DEFAULT_BATCH_THRESHOLD, DEFAULT_BATCH_GAP_MS, DEFAULT_LEASE_MAX_HOLD_MS, DEFAULT_LEASE_WAIT_MS]);
+  t('…and their overrides are honoured', [limitsFrom({ OS_PM_WRITE_BATCH_THRESHOLD: '2', OS_PM_WRITE_BATCH_GAP_MS: '400' }).batchThreshold, limitsFrom({ OS_PM_WRITE_BATCH_THRESHOLD: '2', OS_PM_WRITE_BATCH_GAP_MS: '400' }).batchGapMs], [2, 400]);
+  t('…under the same malformed rule: the default, never unlimited', limitsFrom({ OS_PM_WRITE_LEASE_WAIT_MS: 'soon' }).leaseWaitMs, DEFAULT_LEASE_WAIT_MS);
+  t('the batch gap default sits inside the 30–60 s band the platform reading asks for', DEFAULT_BATCH_GAP_MS >= 30_000 && DEFAULT_BATCH_GAP_MS <= 60_000);
 
   const dir = mkdtempSync(join(tmpdir(), 'write-pace-'));
   try {
@@ -897,6 +1388,8 @@ export async function selfTest() {
       t('an EXPIRED marker is dropped', kept.some((r) => r.why === 'expired'), false);
       t('⛔ an unexpired marker survives the hour it outlives — by its expiry, never by age', kept.some((r) => r.why === 'a two-hour retry-after'));
       t('a torn line is dropped rather than fatal', kept.length, 2);
+      t('a spent batch (no writes left) is dropped whatever its expiry says', pruneRecords([{ batch: now + 1000, k: 'aaa', gap: 30_000, n: 5, left: 0, at: now - 1 }], now).length, 0);
+      t('…and an unspent, unexpired one survives', pruneRecords([{ batch: now + 1000, k: 'aaa', gap: 30_000, n: 5, left: 3, at: now - 1 }], now).length, 1);
 
       const file = join(dir, 'prune.jsonl');
       writeFileSync(file, `${records.slice(0, 4).map((r) => JSON.stringify(r)).join('\n')}\n{ not json\n`, 'utf8');
@@ -952,6 +1445,153 @@ export async function selfTest() {
       t('⛔ a held lock under a FROZEN clock still returns — the attempt bound, never the deadline, ends it', ran);
       t('…and the lock it could not take is left alone, ⛔ never stolen', existsSync(`${heldFile}.lock`));
     }
+
+    // ── real processes, real clocks ─────────────────────────────────────────
+    // Rules ④ and ⑤ are claims about SEPARATE processes, so they are measured
+    // on separate processes: children of this file's own CLI, each recording
+    // when it actually ran to a file only it writes. Nothing below reads the
+    // code to decide; it reads the timestamps.
+    const CHILD_MARK =
+      'const fs=require("node:fs");const f=process.env.OS_PM_WRITE_SELFTEST_OUT;' +
+      'fs.appendFileSync(f,`${process.pid} start ${Date.now()}\\n`);' +
+      'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,Number(process.env.OS_PM_WRITE_SELFTEST_RUN_MS||120));' +
+      'fs.appendFileSync(f,`${process.pid} end ${Date.now()}\\n`);';
+    const runChild = (args, extraEnv = {}) =>
+      new Promise((resolve) => {
+        const child = spawn(process.execPath, [SELF, ...args], { env: { ...process.env, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        let err = '';
+        child.stdout.on('data', (d) => {
+          out += d;
+        });
+        child.stderr.on('data', (d) => {
+          err += d;
+        });
+        child.on('close', (code) => resolve({ code, out, err }));
+      });
+    const readMarks = (f) => {
+      const byPid = new Map();
+      for (const line of readFileSync(f, 'utf8').split('\n').filter(Boolean)) {
+        const [pid, what, ms] = line.split(' ');
+        const rec = byPid.get(pid) ?? {};
+        rec[what] = Number(ms);
+        byPid.set(pid, rec);
+      }
+      return [...byPid.values()].filter((r) => r.start && r.end).sort((a, b) => a.start - b.start);
+    };
+    const issuedStamps = (file) =>
+      parseRecords(readFileSync(file, 'utf8'))
+        .filter((r) => Number.isFinite(Number(r.t)))
+        .map((r) => Number(r.t))
+        .sort((a, b) => a - b);
+
+    // ── rule ④ ──────────────────────────────────────────────────────────────
+    battery('rule ④: the lease — one write in flight, fleet-wide, measured on real processes');
+    {
+      const file = join(dir, 'lease.jsonl');
+      const marks = join(dir, 'lease-marks.txt');
+      writeFileSync(marks, '', 'utf8');
+      const env = { OS_PM_WRITE_PACE_FILE: file, OS_PM_WRITE_MIN_GAP_MS: '250', OS_PM_WRITE_SELFTEST_OUT: marks, OS_PM_WRITE_SELFTEST_RUN_MS: '120', GITHUB_TOKEN: TOKEN, GH_TOKEN: '' };
+      const N = 4;
+      const results = await Promise.all(Array.from({ length: N }, () => runChild(['--run', '--kind', 'lease-case', '--', process.execPath, '-e', CHILD_MARK], env)));
+      t('every gated child ran and exited 0', results.map((r) => r.code), Array(N).fill(0), results.map((r) => r.err.slice(-300)).join(' | '));
+      const runs = readMarks(marks);
+      t(`all ${N} children recorded a start and an end`, runs.length, N);
+      const overlaps = runs.filter((r, i) => i > 0 && r.start < runs[i - 1].end).length;
+      t('⛔ THE case: no two gated commands were in flight at once — each started after the previous one ENDED', overlaps, 0, JSON.stringify(runs));
+      const stamps = issuedStamps(file);
+      const gaps = stamps.slice(1).map((v, i) => v - stamps[i]);
+      t("…and consecutive reservations are at least the minimum gap apart, by the log's own stamps", gaps.length === N - 1 && gaps.every((g) => g >= 250), true, JSON.stringify(gaps));
+      // The children's own clocks say the same, less the spawn latency of the
+      // inner node they measure from — 100 ms of tolerance is that latency, not
+      // slack in the gap: the log stamps above carry the exact reading.
+      t("…and the children's own starts are that far apart too", runs.slice(1).every((r, i) => r.start - runs[i].start >= 150), true, JSON.stringify(runs));
+      t('the lease is released when the last command exits', existsSync(leaseDirFor(file)), false);
+      t('…and the queue is empty', queueLive(queueDirFor(file), Date.now(), 60_000).length, 0);
+
+      // A dead holder is broken by the next caller; a LIVE one is waited on and, past the wait, refused.
+      const deadFile = join(dir, 'dead.jsonl');
+      let deadPid = 99_999;
+      while (pidAlive(deadPid)) deadPid -= 1;
+      mkdirSync(leaseDirFor(deadFile), { recursive: true });
+      writeFileSync(join(leaseDirFor(deadFile), 'holder'), `${deadPid} ${Date.now()} ghost\n`, 'utf8');
+      const broken = [];
+      const took = acquireWriteLease(deadFile, { kind: 'reaper', log: (l) => broken.push(l), waitMs: 2_000 });
+      t('a holder whose process is gone is broken and taken', [took.held, took.broke?.pid], [true, deadPid]);
+      t('…and the break is said out loud, naming the pid', broken.some((l) => l.includes(`pid ${deadPid}`) && l.includes('gone')));
+      releaseWriteLease(deadFile);
+      t('…and releasing removes it', existsSync(leaseDirFor(deadFile)), false);
+
+      const liveFile = join(dir, 'live.jsonl');
+      const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 4000)'], { stdio: 'ignore' });
+      mkdirSync(leaseDirFor(liveFile), { recursive: true });
+      writeFileSync(join(leaseDirFor(liveFile), 'holder'), `${sleeper.pid} ${Date.now()} sibling-write\n`, 'utf8');
+      const refused = acquireWriteLease(liveFile, { kind: 'newcomer', log: () => {}, waitMs: 300 });
+      sleeper.kill('SIGKILL');
+      t('a LIVE holder is waited on, and past the wait the newcomer is refused — never a second in flight', [refused.held, refused.holder?.pid], [false, sleeper.pid]);
+      t('…with the holder named in the refusal text', leaseRefusedText({ ...refused, waitMs: 300, nowMs: Date.now(), kind: 'newcomer' }).includes(`pid ${sleeper.pid} (sibling-write)`));
+      t('…and the lease it could not take is left alone, ⛔ never stolen', existsSync(leaseDirFor(liveFile)));
+      rmSync(leaseDirFor(liveFile), { recursive: true, force: true });
+    }
+
+    // ── rule ⑤ ──────────────────────────────────────────────────────────────
+    battery('rule ⑤: batch mode — the gap rises for an announced batch, and the estimate is printed');
+    {
+      const file = join(dir, 'batch.jsonl');
+      const h = harness(file, { env: { OS_PM_WRITE_MIN_GAP_MS: '0', OS_PM_WRITE_BATCH_THRESHOLD: '5', OS_PM_WRITE_BATCH_GAP_MS: '30000' } });
+      const small = announceBatch({ token: TOKEN, count: 4, kind: 'issue-create POST' }, h.deps);
+      t('below the threshold nothing is recorded — not even the file — and the line says so', [small.batched, existsSync(file), h.text().includes('below the threshold')], [false, false, true]);
+      const big = announceBatch({ token: TOKEN, count: 6, kind: 'issue-create POST' }, h.deps);
+      t('at the threshold the batch is recorded with its count and gap', [big.batched, big.gapMs, big.estimateMs], [true, 30_000, 180_000]);
+      t('…and the announcement prints the item count and the estimate', h.text().includes('batch of 6 issue-create POST item(s)') && h.text().includes('Estimated 3m'));
+      const first = await paceWrite({ token: TOKEN, kind: 'issue-create POST' }, h.deps);
+      t('the first write of the batch does not pause', first.sleepMs, 0);
+      h.state.ms += 1000;
+      const second = await paceWrite({ token: TOKEN, kind: 'issue-create POST' }, h.deps);
+      t("the second sleeps the BATCH gap's remainder, not rule ①'s", [second.gapMs, second.sleepMs], [30_000, 29_000]);
+      t('…and says which batch it is pacing', h.text().includes('the batch gap is 30s (5 of 6 issue-create POST left'));
+      t('⛔ another identity is not held behind this batch', (await paceWrite({ token: 'a-different-token', kind: 'label-write POST' }, h.deps)).gapMs, 0);
+      for (let i = 0; i < 4; i++) {
+        h.state.ms += 30_000;
+        await paceWrite({ token: TOKEN, kind: 'issue-create POST' }, h.deps);
+      }
+      h.state.ms += 30_000;
+      const after = await paceWrite({ token: TOKEN, kind: 'issue-create POST' }, h.deps);
+      t('once the N writes are spent the batch is over and rule ① is back', [after.batch, after.gapMs], [null, 0]);
+      t('…and the spent batch is pruned from the log', parseRecords(readFileSync(file, 'utf8')).some((r) => Number.isFinite(Number(r.batch))), false);
+
+      // Cross-process: an announcement in one process paces --run in two others.
+      const xfile = join(dir, 'batch-x.jsonl');
+      const xmarks = join(dir, 'batch-x-marks.txt');
+      writeFileSync(xmarks, '', 'utf8');
+      const xenv = { OS_PM_WRITE_PACE_FILE: xfile, OS_PM_WRITE_MIN_GAP_MS: '0', OS_PM_WRITE_BATCH_THRESHOLD: '2', OS_PM_WRITE_BATCH_GAP_MS: '400', OS_PM_WRITE_SELFTEST_OUT: xmarks, OS_PM_WRITE_SELFTEST_RUN_MS: '10', GITHUB_TOKEN: TOKEN, GH_TOKEN: '' };
+      const announced = await runChild(['--announce-batch', '2', '--kind', 'x'], xenv);
+      const xr = await Promise.all([0, 1].map(() => runChild(['--run', '--kind', 'x', '--', process.execPath, '-e', CHILD_MARK], xenv)));
+      const xissued = issuedStamps(xfile);
+      t("announced in one process, the batch gap holds between two OTHER processes' writes", [announced.code, xr.map((r) => r.code), xissued.length === 2 && xissued[1] - xissued[0] >= 400], [0, [0, 0], true], JSON.stringify({ xissued, err: announced.err.slice(-200) }));
+      t('…and the announcement itself went to stderr, naming the estimate', announced.err.includes('batch of 2 x item(s)') && announced.err.includes('Estimated'));
+    }
+
+    // ── --run ───────────────────────────────────────────────────────────────
+    battery("--run: the shell door — gated by default, ungated with --read, the command's own exit code");
+    {
+      const file = join(dir, 'run.jsonl');
+      const env = { OS_PM_WRITE_PACE_FILE: file, OS_PM_WRITE_MIN_GAP_MS: '0', GITHUB_TOKEN: TOKEN, GH_TOKEN: '' };
+      const ok = await runChild(['--run', '--kind', 'door', '--', process.execPath, '-e', 'process.stdout.write("ran")'], env);
+      t('the command runs with inherited stdio and its exit code passes through', [ok.code, ok.out], [0, 'ran']);
+      t('…and one reservation was recorded for it, under the kind given', parseRecords(readFileSync(file, 'utf8')).filter((r) => r.kind === 'door').length, 1);
+      const failing = await runChild(['--run', '--', process.execPath, '-e', 'process.exit(7)'], env);
+      t("a failing command's own code is the exit, ⛔ never rewritten to 10", failing.code, 7);
+      const marks = join(dir, 'read-marks.txt');
+      writeFileSync(marks, '', 'utf8');
+      const reads = await Promise.all([0, 1, 2].map(() => runChild(['--run', '--read', '--', process.execPath, '-e', CHILD_MARK], { ...env, OS_PM_WRITE_SELFTEST_OUT: marks, OS_PM_WRITE_SELFTEST_RUN_MS: '50' })));
+      t('--read runs are never gated: no reservation, no lease, exit 0', [reads.map((r) => r.code), parseRecords(readFileSync(file, 'utf8')).length, existsSync(leaseDirFor(file))], [[0, 0, 0], 2, false]);
+      noteResponse({ token: TOKEN, status: 429 }, { file, log: () => {} });
+      const blocked = await runChild(['--run', '--', process.execPath, '-e', 'process.stdout.write("must not run")'], env);
+      t('a stop marker refuses the door too: exit 10, and the command never ran', [blocked.code, blocked.out], [EXIT_WRITE_PACE_REFUSED, '']);
+      t('an empty command is usage', (await runChild(['--run', '--'], env)).code, EXIT_USAGE);
+      t('--announce-batch needs a positive count', (await runChild(['--announce-batch', 'lots'], env)).code, EXIT_USAGE);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -969,8 +1609,8 @@ export async function selfTest() {
     t('…and `noteResponse` after it', WIRED_WRITE_TOOLS.filter((n) => !sources.get(n).includes('noteResponse(')), []);
     t('…guarded by the write-verb predicate, so a GET is never paced', WIRED_WRITE_TOOLS.filter((n) => !sources.get(n).includes('isWriteMethod(')), []);
 
-    // The closed set: a SIXTH write path in this directory reds here, which is
-    // the only way a new one cannot land unpaced.
+    // The closed set: an EIGHTH write path in this directory reds here, which
+    // is the only way a new one cannot land unpaced.
     const names = spawnSync('git', ['ls-files', '--', 'scripts/pm'], { cwd: resolve(PM_DIR, '../..'), encoding: 'utf8' })
       .stdout.split('\n')
       .map((l) => l.trim())
@@ -978,7 +1618,7 @@ export async function selfTest() {
       .map((l) => l.slice('scripts/pm/'.length))
       .filter((n) => n !== 'write-pace.mjs');
     t('git listed this directory', names.length > 5);
-    t('⛔ the roster IS the set of files that issue a write verb — a sixth one reds here', writeVerbFiles(PM_DIR, names, read, maskComments), [...WIRED_WRITE_TOOLS].sort());
+    t('⛔ the roster IS the set of files that issue a write verb — an eighth one reds here', writeVerbFiles(PM_DIR, names, read, maskComments), [...WIRED_WRITE_TOOLS].sort());
     t('this throttle issues no write of its own', writeVerbFiles(PM_DIR, ['write-pace.mjs'], read, maskComments), []);
   }
 
@@ -1013,7 +1653,9 @@ export async function selfTest() {
   console.log(
     `✓ write-pace self-test: ${cases.length} cases pass across ${declared.length} batteries — the per-token key that ` +
       'never carries the token, the gap remainder, the 41st refusal and its prescription, the stop marker a 429 writes, ' +
-      'the prune that keeps a long retry-after alive, and the five write transports that call both halves.',
+      'the prune that keeps a long retry-after alive, the lease that kept one write in flight across real processes, ' +
+      'the batch gap one process announced and two others obeyed, the shell door, and the seven write transports ' +
+      'that call both halves.',
   );
   selfTestReachedVerdict = true;
   return 0;
@@ -1023,32 +1665,125 @@ export async function selfTest() {
 // Dispatch
 // ---------------------------------------------------------------------------
 
-export const KNOWN_FLAGS = Object.freeze(['--status', '--self-test', '--help', '-h']);
+export const KNOWN_FLAGS = Object.freeze(['--status', '--self-test', '--help', '-h', '--run', '--read', '--kind', '--batch', '--announce-batch']);
 
 const USAGE = [
   'usage:',
-  '  node scripts/pm/write-pace.mjs --status      this token\'s trailing-hour budget and any active stop marker',
-  '  node scripts/pm/write-pace.mjs --self-test   offline, injected clock, no network and no real cache file',
+  "  node scripts/pm/write-pace.mjs --status      this token's trailing-hour budget, any stop marker, the lease holder",
+  '  node scripts/pm/write-pace.mjs --self-test   offline core with an injected clock, plus real child processes for the lease',
+  '  node scripts/pm/write-pace.mjs --announce-batch N [--kind K]',
+  '                                               rule ⑤: raise the gap for the next N writes by this token, fleet-wide',
+  '  node scripts/pm/write-pace.mjs --run [--kind K] [--batch N] [--read] -- <command…>',
+  '                                               rule ④ for a shell caller: take the lease, pace, run the command,',
+  '                                               release; --read skips the gate (a read is never paced).',
   '',
-  `  Exits: 0 ok · ${EXIT_USAGE} usage · ${EXIT_WRITE_PACE_REFUSED} the throttle refused a write (that code is only ever`,
-  '         raised from inside a calling tool, never by --status).',
+  `  Exits: 0 ok · ${EXIT_USAGE} usage · ${EXIT_WRITE_PACE_REFUSED} the throttle refused a write (raised from inside a calling`,
+  "         tool or by --run before the command ran, never by --status); --run otherwise passes the command's own code through.",
 ].join('\n');
 
+/** The CLI's own flags, stopping at `--`; what follows is the command. Pure. */
+export function parseCli(argv) {
+  const opts = { mode: null, kind: null, batch: null, announce: null, read: false, command: [], unknown: [] };
+  const args = [...argv];
+  while (args.length) {
+    const a = args.shift();
+    if (a === '--') {
+      opts.command = args.splice(0);
+      break;
+    }
+    if (a === '--help' || a === '-h') opts.mode = 'help';
+    else if (a === '--self-test') opts.mode = opts.mode ?? 'self-test';
+    else if (a === '--status') opts.mode = opts.mode ?? 'status';
+    else if (a === '--run') opts.mode = opts.mode ?? 'run';
+    else if (a === '--read') opts.read = true;
+    else if (a === '--kind') opts.kind = args.shift() ?? '';
+    else if (a === '--batch') opts.batch = args.shift() ?? '';
+    else if (a === '--announce-batch') {
+      opts.mode = opts.mode ?? 'announce';
+      opts.announce = args.shift() ?? '';
+    } else opts.unknown.push(a);
+  }
+  return opts;
+}
+
+const positiveCount = (raw) => {
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : null;
+};
+
+/** `--run`: rule ④ (and ⑤ with `--batch`) around a command this file cannot see inside. */
+async function runGated(cli, token) {
+  const kind = cli.kind ?? `run ${cli.command[0]}`;
+  const file = paceFilePath();
+  if (!cli.read) {
+    if (cli.batch !== null) {
+      const n = positiveCount(cli.batch);
+      if (n === null) {
+        console.error(`write-pace: --batch needs a positive integer count, got ${JSON.stringify(cli.batch)}\n`);
+        console.error(USAGE);
+        return EXIT_USAGE;
+      }
+      try {
+        announceBatch({ token, count: n, kind });
+      } catch (e) {
+        console.error(unrecordableText(file, e));
+        return EXIT_WRITE_PACE_REFUSED;
+      }
+    }
+    const paced = await paceWrite({ token, kind }, { exit: () => {} });
+    if (paced.refused) return paced.exitCode ?? EXIT_WRITE_PACE_REFUSED;
+  }
+  const code = await new Promise((resolve) => {
+    const child = spawn(cli.command[0], cli.command.slice(1), { stdio: 'inherit', env: process.env });
+    child.on('error', (e) => {
+      console.error(`write-pace: could not run ${cli.command[0]}: ${e?.message ?? e}`);
+      resolve(127);
+    });
+    child.on('close', (status, signal) => resolve(typeof status === 'number' ? status : signal ? 128 + (OS_CONSTANTS.signals[signal] ?? 0) : 1));
+  });
+  if (!cli.read) releaseWriteLease(file);
+  return code;
+}
+
 export async function main(argv) {
-  if (argv.includes('--help') || argv.includes('-h')) {
+  const cli = parseCli(argv);
+  if (cli.mode === 'help') {
     console.log(USAGE);
     return EXIT_OK;
   }
   if (argv.includes('--self-test')) return selfTest();
-  const unknown = argv.filter((a) => !KNOWN_FLAGS.includes(a));
-  if (unknown.length) {
-    console.error(`write-pace: unrecognised option ${unknown.map((u) => `\`${u}\``).join(', ')}\n`);
+  if (cli.unknown.length) {
+    console.error(`write-pace: unrecognised option ${cli.unknown.map((u) => `\`${u}\``).join(', ')}\n`);
     console.error(USAGE);
     return EXIT_USAGE;
   }
-  if (argv.includes('--status')) {
-    console.log(statusReport({ token: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '' }).text);
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
+  if (cli.mode === 'status') {
+    console.log(statusReport({ token }).text);
     return EXIT_OK;
+  }
+  if (cli.mode === 'announce') {
+    const n = positiveCount(cli.announce);
+    if (n === null) {
+      console.error(`write-pace: --announce-batch needs a positive integer count, got ${JSON.stringify(cli.announce)}\n`);
+      console.error(USAGE);
+      return EXIT_USAGE;
+    }
+    try {
+      announceBatch({ token, count: n, kind: cli.kind ?? 'write' });
+    } catch (e) {
+      console.error(unrecordableText(paceFilePath(), e));
+      return EXIT_WRITE_PACE_REFUSED;
+    }
+    return EXIT_OK;
+  }
+  if (cli.mode === 'run') {
+    if (cli.command.length === 0) {
+      console.error('write-pace: --run needs a command after `--`\n');
+      console.error(USAGE);
+      return EXIT_USAGE;
+    }
+    return runGated(cli, token);
   }
   console.error(USAGE);
   return EXIT_USAGE;
