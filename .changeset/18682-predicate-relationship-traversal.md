@@ -1,5 +1,6 @@
 ---
 '@objectstack/formula': minor
+'@objectstack/lint': minor
 '@objectstack/objectql': minor
 ---
 

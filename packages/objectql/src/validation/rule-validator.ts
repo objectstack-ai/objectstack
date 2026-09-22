@@ -292,7 +292,8 @@ interface RuleContext {
    *  authored `rule.message` (#14253) — one hook, two message sources. */
   messages: ValidationMessageContext | undefined;
   /** [#18682] Related rows the engine resolved for this write, or undefined
-   *  when it resolved none. Applied per rule — see {@link hydrateRelated}. */
+   *  when it resolved none. Applied per rule — see
+   *  {@link resolveTraversalScope}. */
   related: RelatedRecordBinding | undefined;
 }
 
@@ -390,18 +391,18 @@ export interface EvaluateRulesOptions {
    * not be read.
    *
    * Only the engine owns a driver, so it resolves these and hands them over —
-   * the same division of labour `parent` follows. One difference, and it is
-   * deliberate: `parent` reads as SYSTEM because a master-detail lock is a
-   * property of the header's state, whereas these rows are read under the
-   * ACTING USER so the referenced object's RLS and FLS apply. A field the user
-   * may not read therefore arrives ABSENT, the predicate faults on it, and a
-   * faulting validation predicate REJECTS the write (#4649) — loudly, never
-   * silently true.
+   * the same division of labour `parent` follows, and like `parent` the read is
+   * made under SYSTEM authority. A validation rule's output is a pass/fail the
+   * SYSTEM enforces, not data handed to the caller, which is why RLS predicates
+   * are excluded from this capability altogether. What bounds the elevation is
+   * the PROJECTION — only the columns the predicate names, intersected with the
+   * related object's declared fields — never the caller.
    *
    * ⛔ NOT applied to every rule alike. A rule is hydrated only for the
    * reference fields ITS OWN condition reads through, because hydrating a field
    * replaces its stored id with the related record: a sibling rule that
-   * compares the bare id must keep seeing the id. See {@link hydrateRelated}.
+   * compares the bare id must keep seeing the id. See
+   * {@link resolveTraversalScope}.
    */
   related?: RelatedRecordBinding;
   /**
@@ -465,9 +466,9 @@ export function needsPriorRecord(
  * (#4649) — the one policy under which an unreadable related field produces the
  * loud refusal the permission rule requires. The field-level `requiredWhen` /
  * `readonlyWhen` / option `visibleWhen` predicates are deliberately NOT
- * collected here: they fail OPEN, so a related field the acting user cannot
- * read would silently not enforce their gate, which is the opposite of what a
- * permission-sensitive read must do. They are their own card.
+ * collected here: they fail OPEN, so a rule that could not be evaluated would
+ * silently not enforce their gate — the opposite of what this capability's
+ * refusal is for. They are their own card.
  *
  * ## Only REFERENCE-typed fields
  *
@@ -534,10 +535,10 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
 
 /**
  * [#18682] Reference FIELD name → the related row, or `null` when it could not
- * be read (no id stored, row gone, or the acting user may not read it). The
- * three collapse on purpose: every one of them means "this predicate cannot be
- * answered from data the caller is allowed to see", and the predicate must
- * fault rather than quietly pick a verdict.
+ * be read (no reference stored, the row is gone, the related object declares no
+ * such column, or the read failed). They do NOT collapse: each names itself in
+ * the refusal, because "there is no parent" and "that column does not exist"
+ * send an author to different repairs.
  */
 export type RelatedUnavailableReason =
   /** The record stores no reference — the FK is null/empty, so there is no row. */
@@ -2904,35 +2905,6 @@ function analysisFor(source: string): RelationshipTraversalAnalysis | null {
   return analysis;
 }
 
-/**
- * [#18682] Overlay the related rows THIS predicate reads through onto a COPY of
- * the record.
- *
- * ## Why a copy, always
- *
- * The record handed to a rule is the engine's merged write payload. Hydrating
- * it in place would replace a stored foreign key with the related RECORD and
- * then hand that to the driver — writing an expanded object into the column.
- * The copy is shallow, which is enough: only the top-level reference keys are
- * replaced, and nothing mutates the related rows themselves.
- *
- * ## Why per RULE, and not once per write
- *
- * Hydrating `crm_account` makes `record.crm_account` the related record, so a
- * rule comparing the bare id would stop matching. Rules on one object do not
- * have to agree about how they read a field, so each rule is hydrated for
- * exactly the fields ITS OWN condition reads through. A rule that never
- * traverses is handed the record untouched — byte-for-byte the pre-#18682
- * input, which is what keeps this change invisible to every existing rule.
- *
- * ## Absence is left absent, deliberately
- *
- * A field with no entry, or an entry of `null`, is NOT overlaid: the stored id
- * stays, `record.<fk>.<field>` faults with `No such key`, and an unevaluable
- * validation predicate rejects the write (#4649). That is the loud failure the
- * permission rule requires — a related row the acting user may not read must
- * never resolve to a quiet verdict.
- */
 /** What {@link resolveTraversalScope} decided for one predicate. */
 type TraversalScope =
   /** Evaluate against `record` (hydrated where the rule traverses). */
@@ -3040,12 +3012,21 @@ function traversalRefusal(
   const on = `\`${field}\` (object '${binding.object}')`;
   switch (binding.unavailable) {
     case 'no-reference':
+      // Three stored shapes reach this arm and the sentence names all three,
+      // because "empty" and "a list" and "already expanded" send an author to
+      // different repairs: a null/empty FK has nothing to read; a MULTI-valued
+      // reference names no single related record, so one hop is not defined on
+      // it at all; and a slot already holding an expanded object is not a
+      // foreign key this can resolve from.
       return {
-        summary: `cannot read ${columns} through ${on}: no related record`,
+        summary: `cannot read ${columns} through ${on}: no single related record`,
         detail:
-          ` The rule reads ${columns} through ${on}, but this record stores no reference there,`
-          + ' so there is no related record to read. Guard the rule on the reference being set,'
-          + ' or make the reference required.',
+          ` The rule reads ${columns} through ${on}, but this record holds no single`
+          + ' reference there to read — the field is empty, holds MULTIPLE references, or'
+          + ' already holds an expanded record rather than an id. A predicate resolves ONE'
+          + ' hop through a single reference. Guard the rule on the reference being set, make'
+          + ' it required, or — for a multi-value reference — test it with a macro'
+          + ' (`exists`, `size`) instead of reading through it.',
       };
     case 'undeclared-field': {
       const missing = (binding.undeclaredFields ?? []).map((n) => `'${n}'`).join(', ') || columns;

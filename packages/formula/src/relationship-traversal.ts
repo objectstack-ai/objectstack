@@ -102,6 +102,15 @@ function isRootId(node: unknown, root: string): boolean {
  *
  * An index whose key is not a literal string (`a[someVar]`) names no field this
  * analysis can resolve, so it is not a member access here.
+ *
+ * ⚠️ A traversal whose RECEIVER is computed rather than named — the ternary
+ * shape `(c ? record.a : record.b).type` — is likewise not recognised, and that
+ * is deliberate rather than an oversight: which reference field is being read
+ * is not decidable before evaluation, so there is nothing the engine could
+ * preload. Such an expression is left to fault at evaluation, which on this
+ * fail-CLOSED seam rejects the write. ⛔ It carries no prescription, because
+ * the only honest one would be "write the traversal on a named field", which is
+ * a rewrite of the author's expression rather than a repair of it.
  */
 const MEMBER_OPS = new Set(['.', '.?']);
 const INDEX_OPS = new Set(['[]', '[?]']);

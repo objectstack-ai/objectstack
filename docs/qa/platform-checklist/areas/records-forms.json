@@ -4166,14 +4166,14 @@
       ],
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts (no_invoice_for_churned_account)",
-        "packages/objectql/src/validation/rule-validator.ts (checkPredicate, hydrateRelated, collectPredicateRelationships)",
+        "packages/objectql/src/validation/rule-validator.ts (checkPredicate, resolveTraversalScope, collectPredicateRelationships)",
         "packages/formula/src/relationship-traversal.ts (which hops a predicate names)"
       ],
       "history": [
         {
           "revision": 1,
           "date": "2026-09-22",
-          "change": "initial — acceptance for predicate relationship traversal under ADR-0137 D2 (a field-rule predicate that faults refuses the submit and names the field and the rule); the capability's three ruled outcomes (passes / refuses / faults loudly on an unreadable parent)",
+          "change": "initial — acceptance for predicate relationship traversal under ADR-0137 D2 (a field-rule predicate that faults refuses the submit and names the field and the rule). The related record is read under SYSTEM authority bounded by the fields the predicate names, so the ruled outcomes are: the write passes when the parent field does not trip the rule, is refused with the AUTHORED message when it does, and is refused naming the related object when the rule cannot be evaluated at all",
           "ref": "claude/issue-18682-predicate-relationship-traversal"
         }
       ]

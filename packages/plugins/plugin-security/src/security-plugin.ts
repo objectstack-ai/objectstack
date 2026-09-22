@@ -1226,6 +1226,39 @@ export class SecurityPlugin implements Plugin {
     this.metadata = metadata;
     this.ql = ql;
 
+    // [#18682] Answer the engine's create/update gate question for `validate()`.
+    //
+    // The real write path gets this gate from the middleware below for free, so
+    // only a caller who could write can observe a validation rule's verdict.
+    // `validate()` runs no middleware for its target object, so without this the
+    // dry run would answer for callers the write path refuses. Same evaluator
+    // and same permission sets the CRUD gate itself uses — ⛔ not a second
+    // decision about who may write.
+    //
+    // Fails CLOSED: any resolution error denies, and the engine treats a denial
+    // as "resolve nothing", which makes a traversing rule refuse in preview.
+    if (typeof (ql as any).registerWriteGateProbe === 'function') {
+      (ql as any).registerWriteGateProbe(
+        async (object: string, operation: 'insert' | 'update', context: any): Promise<boolean> => {
+          if (context?.isSystem) return true;
+          if (!context?.userId) return false;
+          try {
+            const meta = await this.getObjectSecurityMeta(object);
+            const sets = await this.resolvePermissionSetsForContext(context);
+            return this.permissionEvaluator.checkObjectPermission(
+              operation, object, sets, { isPrivate: meta.isPrivate },
+            );
+          } catch (e) {
+            this.logger.warn?.(
+              `[security] validate() write-gate probe failed for object '${object}' — denying (fail-closed)`,
+              e instanceof Error ? e : new Error(String(e)),
+            );
+            return false;
+          }
+        },
+      );
+    }
+
     // [#11968] Bind the invalidation epoch to the ENGINE's seam when the wired
     // engine exposes one. Resolved here, once, rather than probed per request:
     // the plugin DI graph is static after start, and a per-request probe would

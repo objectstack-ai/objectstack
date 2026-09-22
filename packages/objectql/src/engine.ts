@@ -58,6 +58,7 @@ import {
   renderOperationMessage,
   objectLabelKey,
   resolveBundleLocale,
+  SystemFieldName,
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -3935,6 +3936,48 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.debug('Registered held-file resolver for sys_file hydration');
   }
 
+  /**
+   * [#18682] "May this context CREATE or UPDATE this object?" — supplied by the
+   * security plugin, never decided here.
+   *
+   * ## What it protects, and why only the dry run needs it
+   *
+   * A validation rule reads its related record under SYSTEM authority, and the
+   * accepted cost of that is an inference channel: a caller can learn something
+   * about a value they cannot read by observing which of THEIR WRITES are
+   * refused. That bound holds on the real write path for free — the CRUD gate
+   * runs in middleware and refuses a caller with no write grant long before any
+   * rule is evaluated, so only someone who could already write the row can
+   * observe anything at all.
+   *
+   * `validate()` runs NO middleware for the target object, by design: it
+   * executes nothing. Its network ingress (the `dryRun` import) checks auth and
+   * API access but not the caller's CRUD grant on the object. So the elevated
+   * read, wired into the preview without this gate, would hand the same
+   * one-bit-per-row oracle to any authenticated caller with no permission on the
+   * object and no ability to write it at all — a strictly wider channel than the
+   * one that was accepted.
+   *
+   * This restores the accepted bound rather than narrowing or widening it: the
+   * preview answers for callers who could perform the write, and for nobody
+   * else.
+   *
+   * ## Unwired
+   *
+   * A composition with no security plugin has no CRUD gate on the write path
+   * either, so there is no bound to restore and the preview resolves. That is
+   * the same behaviour such a composition already has everywhere else.
+   */
+  private _writeGateProbe?: (object: string, operation: 'insert' | 'update', context: unknown) => Promise<boolean>;
+
+  /** Wire the create/update gate question (#18682). Last registration wins. */
+  registerWriteGateProbe(
+    fn: (object: string, operation: 'insert' | 'update', context: unknown) => Promise<boolean>,
+  ): void {
+    this._writeGateProbe = fn;
+    this.logger.debug('Registered write-gate probe for validate() relationship resolution');
+  }
+
 
   /**
    * [#11968] The engine-seam write epoch — the invalidation substrate of the
@@ -6898,23 +6941,27 @@ export class ObjectQL implements IObjectQLEngine {
    * — which is what bounds the N+1: one hop, only the fields a rule names, one
    * batched read per reference field per write, and only when a rule asks.
    *
-   * ## Read as the ACTING USER, deliberately unlike `parent`
+   * ## Read under SYSTEM authority, like `parent` and for a related reason
    *
    * {@link resolveMasterDetailParent} reads as SYSTEM because a master-detail
    * lock is a property of the header's state, not of the caller's visibility of
-   * it. This read is the opposite case: the value lands in a predicate whose
-   * verdict the caller can observe through the accept/reject of their own
-   * write, so it goes through the engine's own `find` path under the caller's
-   * context and the referenced object's CRUD gate, RLS and FLS all apply. A row
-   * — or a field — the caller may not read therefore does not arrive.
+   * it. This read is the same shape: a validation rule's output is a pass/fail
+   * the SYSTEM enforces, not data handed to the caller — categorically unlike
+   * an access-control rule, which is why RLS predicates are excluded from this
+   * capability altogether. Reading as the acting user instead made the rule
+   * unauthorable for exactly the persona it exists to constrain.
    *
-   * ## An unresolved row is left ABSENT, and that is the loud answer
+   * What bounds the elevation is the PROJECTION, not the caller: only the
+   * columns the predicate names, intersected with the related object's declared
+   * fields. ⛔ Never the whole row.
    *
-   * No id, row gone, refused by the security layer, read threw: all four leave
-   * the field unbound. The stored id stays in the record, the traversal faults
-   * with `No such key`, and an unevaluable validation predicate REJECTS the
-   * write (#4649). ⛔ Never silently true, and never silently false — the two
-   * verdicts a security-relevant absence must not be allowed to pick between.
+   * ## An unresolved row is left UNAVAILABLE, and it says which kind
+   *
+   * No reference stored, row gone, the related object declares no such column,
+   * or the read failed: each is recorded as its own reason, and
+   * {@link checkPredicate} turns it into a refusal naming the related object and
+   * column. The write is REJECTED rather than judged on a rule that produced no
+   * verdict. ⛔ Never silently true, and never silently false.
    *
    * The projection always names `id` alongside the fields the rules read:
    * the map below is keyed on `row.id`, and a projection that omitted it would
@@ -6955,7 +7002,21 @@ export class ObjectQL implements IObjectQLEngine {
       // reported as one rather than silently dropped.
       const targetSchema = this._registry.getObject(target) as { fields?: Record<string, unknown> } | undefined;
       const declared = targetSchema?.fields;
-      const undeclared = declared ? named.filter((n) => !(n in declared)) : [];
+      // [#8215] The PRIMARY KEY is declared by the platform, not by the author,
+      // so it is absent from every object's field map — the map carries the
+      // injected audit/tenant/owner columns but never the PK. It still has to
+      // count as declared HERE, because `record.<fk>.id` is the repair this
+      // capability's own conflict refusal prescribes: without this the engine
+      // refuses the very spelling it just told the author to write, and then
+      // hands them a second prescription ("declare `id` on the related object")
+      // that is equally impossible. An actively misleading prescription is
+      // worse than none (ADR-0078 §6).
+      //
+      // ⛔ This widens the READ SET by nothing: `id` is already unconditionally
+      // in the projection below, because the by-id map is keyed on it.
+      const declaredHere = (n: string): boolean =>
+        n === SystemFieldName.ID || !!declared && n in declared;
+      const undeclared = declared ? named.filter((n) => !declaredHere(n)) : [];
       if (undeclared.length > 0) {
         resolved.set(fk, { object: target, byId: new Map(), undeclared });
         continue;
@@ -10704,7 +10765,14 @@ export class ObjectQL implements IObjectQLEngine {
     //
     // Both helpers are pure and synchronous: they read the registry, copy the
     // row, and touch neither driver nor hook — so running them here keeps the
-    // "nothing is written, nothing is executed" contract intact. `update()`
+    // "nothing is WRITTEN" contract intact.
+    //
+    // ⚠️ "Nothing is executed" is no longer literally true and must not be
+    // restated as if it were: a traversing validation rule needs its related
+    // rows, so this operation issues a READ per reference field the rules name
+    // (see the `previewRelatedForRow` block below). Nothing is written, no hook
+    // runs, and the read happens only for a caller who could perform the write
+    // being previewed. `update()`
     // deliberately does not default (#2706: a PATCH's explicit `null` means
     // "clear it"), so neither does an `update`-mode preview.
     const rawRows = Array.isArray(data) ? data : [data];
@@ -10730,17 +10798,25 @@ export class ObjectQL implements IObjectQLEngine {
     // accepts — the false alarm this operation was created to prevent, and the
     // import dry run rides on it.
     //
-    // Resolved once for the whole set, like every other posture input above,
-    // and under the CALLER's context so the preview's permission answer is the
-    // caller's own. ⚠️ Named limit, not widened here: an `update`-mode preview
+    // Resolved once for the whole set, like every other posture input above.
+    // ⚠️ Named limit, not widened here: an `update`-mode preview
     // carries no prior row (nothing is read), so a traversing rule whose FK the
     // PATCH does not itself carry has no id to resolve and still refuses. The
     // real update path reads the prior row and does resolve it; closing the
     // preview's half needs a read this operation's "nothing is executed"
     // contract does not make.
-    const previewRelatedForRow = await this.resolvePredicateRelated(
-      schemaForValidation, rows, options?.context,
-    );
+    // ⛔ Behind the caller's own create/update gate — see
+    // {@link registerWriteGateProbe} for why the preview needs a gate the write
+    // path gets from middleware for free. A caller who could not perform this
+    // write gets NO elevated read: `related` stays unresolved, and a traversing
+    // rule then refuses, which is the fail-closed direction and is honest about
+    // what it did not evaluate.
+    const mayWrite = this._writeGateProbe
+      ? await this._writeGateProbe(object, mode, options?.context).catch(() => false)
+      : true;
+    const previewRelatedForRow = mayWrite
+      ? await this.resolvePredicateRelated(schemaForValidation, rows, options?.context)
+      : () => undefined;
 
     const results: NonNullable<ValidateDataResponse['results']> = rows.map((row) => {
       const warnings: ValidateDataIssue[] = [];
@@ -11469,7 +11545,8 @@ export class ObjectQL implements IObjectQLEngine {
           : undefined;
         // [#18682] The related rows this object's predicate rules read one hop
         // through a reference field. Batched across the whole insert, and free
-        // when no rule traverses. Read under the CALLER's context, not system.
+        // when no rule traverses. Read under SYSTEM authority, bounded by the
+        // projection — see `resolvePredicateRelated`.
         const insertRelatedForRow = await this.resolvePredicateRelated(schemaForValidation, rows, opCtx.context);
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;

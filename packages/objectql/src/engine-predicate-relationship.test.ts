@@ -9,16 +9,18 @@
  * engine behaviour that only a call site can show (PD #10: a `case` label is not
  * enforcement — check the CALL SITE):
  *
- *  - the related read runs under the ACTING USER's context, ⛔ never `isSystem`
- *    (`resolveMasterDetailParent` reads as system on purpose; this must not);
- *  - the projection names `id` plus only the fields the rules actually read;
+ *  - the related read runs under SYSTEM authority (like `parent`, and for the
+ *    same kind of reason: a validation verdict is the system's, not the
+ *    caller's), bounded by its PROJECTION rather than by the caller;
+ *  - the projection names `id` plus only the fields the rules actually read,
+ *    and never smuggles a column the related object does not declare;
  *  - on UPDATE the foreign key is read off the PRIOR row when the patch omits
  *    it, so a rule still resolves;
  *  - the driver's write payload carries the foreign KEY, never the expanded
  *    related record;
- *  - a readable-but-empty related column evaluates as `null` rather than
+ *  - a DECLARED but empty related column evaluates as `null` rather than
  *    refusing (#6457's trap, one root over and on a fail-CLOSED seam);
- *  - an unreadable related field refuses, whichever CEL operator was written.
+ *  - an unresolvable related field refuses, whichever CEL operator was written.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -270,6 +272,86 @@ describe('#18682 — engine-produced relationship bindings', () => {
       { mode: 'insert', context: ACTING } as any,
     );
     expect(refused.results?.[0]?.valid).toBe(false);
+  });
+
+  // ⭐ THE REPAIR THE REFUSAL PRESCRIBES MUST ACTUALLY WORK.
+  //
+  // The conflict arm tells an author to compare `record.<fk>.id`. The primary
+  // key is declared by the platform, not by the author, so it is absent from
+  // every object's field map — which made the engine refuse the very spelling
+  // it had just prescribed, and then prescribe declaring `id` on the related
+  // object, which is equally impossible. An actively misleading prescription is
+  // worse than none (ADR-0078 §6), so this drives the loop end to end: take the
+  // message the refusal emits, write the rule it asks for, and require that it
+  // is ACCEPTED.
+  it('accepts the repair its own refusal prescribes', async () => {
+    const mixed = "record.account.type == 'partner' && record.account == 'acc_p'";
+    engine.registry.registerObject({
+      name: 'crm_opportunity',
+      fields: {
+        name: { type: 'text' }, amount: { type: 'number' },
+        account: { type: 'lookup', reference: 'crm_account' },
+      },
+      validations: [{ name: 'mixed', type: 'script', severity: 'error', message: 'x', condition: mixed }],
+    } as any, 'test-package');
+
+    let prescription = '';
+    try {
+      await engine.insert('crm_opportunity', { name: 'A', amount: 1, account: 'acc_p' }, { context: ACTING } as any);
+      throw new Error('expected the mixed shape to be refused');
+    } catch (e) {
+      prescription = JSON.stringify((e as any).fields ?? (e as Error).message);
+    }
+    // The refusal names the repair…
+    expect(prescription).toContain('record.account.id');
+
+    // …and the repair is accepted, on the same engine, against the same row.
+    engine.registry.registerObject({
+      name: 'crm_opportunity',
+      fields: {
+        name: { type: 'text' }, amount: { type: 'number' },
+        account: { type: 'lookup', reference: 'crm_account' },
+      },
+      validations: [{
+        name: 'repaired', type: 'script', severity: 'error', message: 'partner acc_p is capped',
+        condition: "record.account.type == 'partner' && record.account.id == 'acc_p' && record.amount > 10000",
+      }],
+    } as any, 'test-package');
+
+    // Under the cap: accepted, and NOT with an unevaluable fault.
+    await expect(
+      engine.insert('crm_opportunity', { name: 'ok', amount: 10, account: 'acc_p' }, { context: ACTING } as any),
+    ).resolves.toBeTruthy();
+    // Over the cap: the rule fires for real, so `.id` genuinely resolved.
+    await expect(
+      engine.insert('crm_opportunity', { name: 'no', amount: 50000, account: 'acc_p' }, { context: ACTING } as any),
+    ).rejects.toThrow(/partner acc_p is capped/);
+  });
+
+  // The gate that keeps the accepted inference channel to writers only. A
+  // caller who could not perform this write gets NO elevated read at all.
+  it('issues NO elevated read in validate() for a caller who may not write', async () => {
+    (engine as any).registerWriteGateProbe(async () => false);
+    d.calls.length = 0;
+    const preview = await engine.validate(
+      'crm_opportunity', { name: 'A', amount: 50000, account: 'acc_d' },
+      { mode: 'insert', context: ACTING } as any,
+    );
+    // ⛔ Nothing was read on the related object.
+    expect(d.calls.filter((c) => c.object === 'crm_account')).toHaveLength(0);
+    // …and the preview refuses rather than answering from data it never read.
+    expect(preview.results?.[0]?.valid).toBe(false);
+  });
+
+  it('issues the elevated read in validate() for a caller who MAY write', async () => {
+    (engine as any).registerWriteGateProbe(async () => true);
+    d.calls.length = 0;
+    const preview = await engine.validate(
+      'crm_opportunity', { name: 'A', amount: 50000, account: 'acc_d' },
+      { mode: 'insert', context: ACTING } as any,
+    );
+    expect(d.calls.filter((c) => c.object === 'crm_account').length).toBeGreaterThan(0);
+    expect(preview.results?.[0]?.valid).toBe(true);
   });
 
   it('pays nothing when no rule traverses', async () => {

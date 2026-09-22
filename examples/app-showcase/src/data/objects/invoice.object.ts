@@ -174,9 +174,12 @@ export const Invoice = ObjectSchema.create({
       // unenforced on the server is the shape the platform refuses to ship.
       //
       // The predicate states the FAILURE condition. The engine reads the
-      // account under the ACTING USER before evaluating, so a rep who cannot
-      // read the account does not get a quiet pass: the rule faults and the
-      // write is rejected.
+      // account under SYSTEM authority before evaluating — a validation rule's
+      // output is a pass/fail the system enforces, not data handed to the user
+      // — and reads ONLY the columns the predicate names. So a rep who cannot
+      // read accounts at all is still held to this rule, and can still file
+      // invoices against the accounts it allows. Reading as the rep instead
+      // would make the rule unauthorable for exactly the person it constrains.
       type: 'script' as const,
       name: 'no_invoice_for_churned_account',
       label: 'No Invoice For Churned Account',
