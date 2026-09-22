@@ -5117,10 +5117,12 @@ export class SecurityPlugin implements Plugin {
    * target object, by design: it executes nothing. A validation rule that reads
    * one hop through a reference field is evaluated there against a related row
    * fetched under SYSTEM authority, and the accepted cost of that elevation is
-   * an inference channel bounded to callers who could perform the write — a
+   * an inference channel bounded to callers the write path would admit — a
    * bound the real path gets for free, because the middleware's write gate
    * refuses long before any rule is evaluated. The preview has no such gate, so
-   * it asks this.
+   * it asks this. What this method restores is the OBJECT-level and the
+   * FIELD-level halves of that bound, ⛔ never the whole of the write decision
+   * — the closing paragraph names what stays ahead of it.
    *
    * ## The arms, in the middleware's own order — ⛔ the CRUD grant is not the gate
    *
@@ -5171,11 +5173,23 @@ export class SecurityPlugin implements Plugin {
    * Fails CLOSED: a throw anywhere denies, and callers must treat a throw as a
    * denial too.
    *
-   * ⛔ `true` never means "this write will succeed". What is still ahead of it,
-   * by name: the row-level pre-image (step 2.7 — this answers about no ROW, and
-   * without a payload about no FIELD either), `readonlyWhen`, the static
-   * `readonly` strip, and the validation rules themselves. Nothing here may be
-   * used to widen.
+   * ⭐ What it answers, POSITIVELY: the OBJECT-level and the FIELD-level halves
+   * of the write decision — arms 1-6 over the object, arm 7 over the keys the
+   * payload names — each pinned EQUAL to the registered middleware's.
+   *
+   * ⛔ `true` never means "this write will succeed", and ⛔ what follows is not
+   * an enumeration of the distance to success: the middleware refuses before
+   * `next()` for reasons this method is never asked. Nearest to hand are the
+   * row-level and post-image refusals — the step 2.7 `using` pre-image, the
+   * ADR-0055 controlled-by-parent master edit (2.8), the RLS `check`
+   * post-image (3.6) and the Layer 0 tenant post-image (3.7), none of which
+   * this method can judge because it is asked about no ROW; the payload-VALUE
+   * refusals the same caller passes by simply not sending the value — the
+   * masked echo (2.5a) and the `owner_id` forge (3.5), which therefore widen
+   * the caller class by nothing; the anti-filter-oracle guard on the caller's
+   * own predicate (2.9), which this method is handed none of; and, outside the
+   * middleware entirely, `readonlyWhen`, the static `readonly` strip and the
+   * validation rules themselves. Nothing here may be used to widen.
    */
   async canWriteObject(
     object: string,

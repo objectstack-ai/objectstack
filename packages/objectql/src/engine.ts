@@ -3968,13 +3968,38 @@ export class ObjectQL implements IObjectQLEngine {
    * an editor of the child object who is FLS-locked out of the lookup column is
    * refused by `insert()` and refused the elevated read here, alike.
    *
-   * ⚠️ What this gate still does NOT cover, named rather than implied — the
-   * preview is NOT a promise that the write would succeed:
+   * ⭐ What this gate closes, stated POSITIVELY. The probe closes the
+   * OBJECT-level and the FIELD-level halves of the write decision: an elevated
+   * read is issued only for a caller the write path would admit at the object
+   * level (the CRUD grant, the ADR-0066 D3 capability AND-gate, the ADR-0090
+   * D10 delegator intersection and the fail-closed postures) AND at the field
+   * level (the middleware's own step 2.5 FLS write gate, over the keys THIS
+   * payload names). Both halves are pinned EQUAL to the registered
+   * middleware's, arm for arm.
    *
-   *  - **The row-level pre-image (the middleware's step 2.7).** A row-level
-   *    `using` / `check` policy judges a ROW, and the preview names none: it
-   *    reads nothing and has no prior image to judge. A caller the row filter
-   *    would refuse can still reach the verdict here.
+   * ⛔ That is the whole of the claim. A `true` here is NOT a promise that the
+   * write would succeed, and ⛔ no enumeration of the distance to success is
+   * attempted — the middleware refuses before `next()` for reasons this gate is
+   * never asked. The families nearest to hand, named so the two halves above
+   * are not mistaken for the whole list:
+   *
+   *  - **Row-level and post-image refusals — the preview names no stored row.**
+   *    The step 2.7 `using` pre-image, the ADR-0055 controlled-by-parent
+   *    master-edit check (step 2.8), the RLS `check` post-image (step 3.6) and
+   *    the Layer 0 tenant post-image (step 3.7) each judge a ROW: a prior
+   *    image, a master record, or a pre-image merged with the change set. The
+   *    preview reads nothing and holds none of them, so it judges none of them.
+   *  - **Payload-VALUE refusals — the same caller passes by not sending the
+   *    value.** The masked-echo write refusal (step 2.5a) and the `owner_id`
+   *    ownership forge (step 3.5) refuse a VALUE, not a caller: the identical
+   *    caller sending the identical row without the echoed or forged value is
+   *    admitted. They widen the caller class by nothing, which is why this gate
+   *    does not ask them — measured, with the CRUD grant held and the column
+   *    editable and `owner_id` naming another user, `insert()` refuses at step
+   *    3.5 with ZERO related reads while the preview issues ONE.
+   *  - **The caller's own PREDICATE.** Step 2.9's anti-filter-oracle guard
+   *    refuses an update whose `where` names a field the caller may not read.
+   *    The preview carries no predicate, so that guard is never asked here.
    *  - **The static `readonly` strip.** `insert()` strips an author-declared
    *    `readonly` reference field inside the write's executor, so the real
    *    write resolves NO related row for it and a traversing rule refuses;
@@ -3982,11 +4007,6 @@ export class ObjectQL implements IObjectQLEngine {
    *    answers the rule against it. Every writer is affected alike — it widens
    *    the channel to no caller the write path refuses — but the id the
    *    preview judges is one the write path never carries.
-   *
-   * So the bound this restores is the one that was accepted, neither narrowed
-   * nor widened: an elevated read is issued only for a caller the write path
-   * would admit THIS PAYLOAD from, and the two limits above are the distance
-   * between "admitted this payload" and "this write would succeed".
    *
    * ## Unwired
    *
@@ -10815,10 +10835,11 @@ export class ObjectQL implements IObjectQLEngine {
     // restated as if it were: a traversing validation rule needs its related
     // rows, so this operation issues a READ per reference field the rules name
     // (see the `previewRelatedForRow` block below). Nothing is written, no hook
-    // runs, and the read happens only for a caller who could perform the write
-    // being previewed. `update()`
-    // deliberately does not default (#2706: a PATCH's explicit `null` means
-    // "clear it"), so neither does an `update`-mode preview.
+    // runs, and the read happens only for a caller the write path would admit
+    // at the object and field level — ⛔ not a promise the write would succeed
+    // (`registerWriteGateProbe` names what that bound does and does not carry).
+    // `update()` deliberately does not default (#2706: a PATCH's explicit
+    // `null` means "clear it"), so neither does an `update`-mode preview.
     const rawRows = Array.isArray(data) ? data : [data];
     const nowSnapshot = new Date();
     const rows: Record<string, unknown>[] = mode === 'insert'

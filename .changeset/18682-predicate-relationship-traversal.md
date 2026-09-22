@@ -90,10 +90,21 @@ preview is the first — and an equivalence suite pins its answer EQUAL to the
 registered middleware's, case for case AND payload for payload, so the two
 cannot drift.
 
-⛔ `true` never means the write will succeed. What is still ahead of it, by
-name: the row-level pre-image (this method is asked about no ROW, and without a
-payload about no FIELD either), `readonlyWhen`, the static `readonly` strip, and
-the validation rules themselves.
+⭐ What it answers, POSITIVELY: the OBJECT-level and the FIELD-level halves of
+the write decision — the object arms over the object, the payload arm over the
+keys the payload names — each pinned EQUAL to the registered middleware's.
+
+⛔ `true` never means the write will succeed, and ⛔ what follows is not an
+enumeration of the distance to success: the middleware refuses before `next()`
+for reasons this method is never asked. Nearest to hand are the row-level and
+post-image refusals — the `using` pre-image, the ADR-0055 controlled-by-parent
+master edit, the RLS `check` post-image and the Layer 0 tenant post-image, none
+of which this method can judge because it is asked about no ROW; the
+payload-VALUE refusals the same caller passes by simply not sending the value —
+the masked echo and the `owner_id` forge, which therefore widen the caller class
+by nothing; the anti-filter-oracle guard on the caller's own predicate, which
+this method is handed none of; and, outside the middleware entirely,
+`readonlyWhen`, the static `readonly` strip and the validation rules themselves.
 
 ### Scope
 
