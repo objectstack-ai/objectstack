@@ -554,7 +554,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
   '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 30,
   '⭐ #19344: the remedy names a path the ruleset actually offers': 5,
-  '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 10,
+  '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -4459,13 +4459,20 @@ export async function selfTest() {
   const qRegen = { moved: 'packages/spec/api-surface/ui.txt\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0' };
   const qCarry = { moved: 'packages/spec/api-surface/ui.txt\0AGENTS.md\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0AGENTS.md\0merge\0unspecified\0', own: {} };
   const qHand = { moved: 'AGENTS.md\0', attrs: 'AGENTS.md\0merge\0unspecified\0', own: { [REF_HEAD]: 'AGENTS.md\0' } };
+  // (ii) an edit SLIPPED IN beside the regeneration: a generated path moved, and
+  // so did one of this pull request's own, which its delta at the NEW head names.
+  const qSlipped = { moved: 'packages/spec/api-surface/ui.txt\0scripts/pm/x.mjs\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0scripts/pm/x.mjs\0merge\0unspecified\0', own: { [REF_HEAD]: 'scripts/pm/x.mjs\0' } };
   const gitPure = qgit(qRegen);
-  const gitHand = qgit({ ...qHand, own: { [REF_HEAD]: 'AGENTS.md\0' } });
+  const gitHand = qgit(qSlipped);
   const carried = await tierRun({ comments: onOldHead, runGit: gitPure, baseRef: QBASE });
   assert('⭐ a-record-on-an-OLDER-head-CARRIES-when-the-move-is-a-certified-pure-regeneration', carried.exitCode === EXIT_CLEAR && carried.entries[0].record.state === 'stands' && carried.entries[0].record.carriedHops === 1, JSON.stringify(carried.entries[0].record));
   assert('and-the-CLEAR-names-the-head-actually-reviewed-and-says-it-re-ran-on-the-committed-trees', /carried forward over 1 certified PURE-REGENERATION hop/.test(renderGuardVerdict(carried)) && /COMMITTED trees/.test(renderGuardVerdict(carried)) && /never on the `Regen-provenance:` line being present/.test(renderGuardVerdict(carried)), renderGuardVerdict(carried));
   const handMoved = await tierRun({ comments: onOldHead, runGit: gitHand, baseRef: QBASE });
-  assert('⛔ a-HAND-WRITTEN-path-in-the-range-refuses-exactly-as-an-uncarried-old-head-does', handMoved.exitCode === EXIT_REFUSED_UNAPPROVED && handMoved.entries[0].record.state === 'absent');
+  assert('⛔ (ii) an-EDIT-SLIPPED-IN-beside-the-regeneration-refuses-exactly-as-an-uncarried-old-head-does', handMoved.exitCode === EXIT_REFUSED_UNAPPROVED && handMoved.entries[0].record.state === 'absent');
+  // ⭐ WHICH path is named by the reader that owns the reason; at the queue the
+  // refusal surfaces as an absent record, so the name is asserted at its source.
+  const { unexplainedPathsBetween } = await import(RECOGNISER_SOURCES.tier);
+  assert('…and-the-reader-NAMES-the-slipped-in-path-rather-than-the-generated-one-beside-it', unexplainedPathsBetween(gitHand, { from: REF_OLD, to: REF_HEAD, base: QBASE }).join() === 'scripts/pm/x.mjs', unexplainedPathsBetween(gitHand, { from: REF_OLD, to: REF_HEAD, base: QBASE }).join());
   const blindTree = await tierRun({ comments: onOldHead, runGit: () => { throw new Error('fatal: bad object'); }, baseRef: QBASE });
   assert('⛔ a-tree-this-build-cannot-reach-is-UNREADABLE-exit-4-never-clean', blindTree.exitCode === EXIT_REFUSED_UNREADABLE && blindTree.entries[0].record.state === 'unreadable');
   assert('⛔ and-a-run-with-NO-git-reader-refuses-too-the-line-alone-certifies-nothing', (await tierRun({ comments: onOldHead, baseRef: QBASE })).exitCode === EXIT_REFUSED_UNREADABLE);

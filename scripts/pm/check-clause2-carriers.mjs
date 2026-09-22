@@ -863,7 +863,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18862: cross-author LIVE claims with no `Release:` between — the hand-over the protocol never wrote, named; judged only after its effective instant': 52,
   '#16770: the exit-0 line says which carriers agreed — LABEL carriers — and that the PR body was not read': 14,
   '#18892: the claim comment\'s EDIT reading — taken from the two stamps already in hand, reported and never failed': 10,
-  '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 23,
+  '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 25,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -3165,7 +3165,15 @@ const shaMeets = (a, b) => a.startsWith(b) || b.startsWith(a);
  * thread carries no chain — the only direction this may err in.
  */
 export function regenChainToHead(pair) {
-  const hops = regenProvenanceHops(pair);
+  // ⭐ DE-DUPLICATED FIRST, on record + from + to. The reader searches BOTH
+  // carriers and the governed text trains the dual-carrier habit, so ONE hop
+  // posted on the PR and on its card arrives here twice — identical bytes, not
+  // ambiguity. Judged by the ambiguity test below it would END the walk and
+  // kill the carry in its most likely shape; two DIFFERENT hops into one head
+  // still do, which is the fact that test exists for.
+  const hops = [
+    ...new Map(regenProvenanceHops(pair).map((h) => [`${h.record}\u0000${h.from}\u0000${h.to}`, h])).values(),
+  ];
   let target = String(pair?.headSha ?? '').toLowerCase();
   if (target.length < H51_SHA_MIN_HEX) return null;
   const chain = [];
@@ -8142,6 +8150,8 @@ export async function selfTest() {
   t('⛔ a line naming only one sha is not a hop — the tail after it is the seat\'s transcript and is unread', regenProvenanceHops({ prComments: [{ id: 9, body: `Regen-provenance: 3301 · \`${HEAD_9AF9}\`` }] }).length === 0);
   t('the chain walks BACK over several hops, oldest first', regenChainToHead({ headSha: 'cccccccc', prComments: [PROV(HEAD_9AF9, 'bbbbbbbb'), PROV('bbbbbbbb', 'cccccccc')] })?.map((h) => h.from).join() === `${HEAD_9AF9},bbbbbbbb`);
   t('⛔ two hops arriving at ONE head carry no chain — ambiguity is never ranked', regenChainToHead({ headSha: NEW_HEAD, prComments: [PROV(HEAD_9AF9), PROV('bbbbbbbb')] }) === null);
+  t('⭐ the SAME hop on BOTH carriers is ONE hop, ⛔ not ambiguity — the dual-carrier habit this file trains must not kill the carry', regenChainToHead({ headSha: NEW_HEAD, prComments: [PROV()], cardComments: [PROV(HEAD_9AF9, NEW_HEAD, 3301, 3351)] })?.length === 1);
+  t('…and it CARRIES end to end from there, so the pair is CLEAN rather than 重挂', (() => { const dual = moved([RECORD_ON_9AF9, PROV()], GIT_EMPTY, { cardComments: [CLAIM('Clause-②: yes'), PROV(HEAD_9AF9, NEW_HEAD, 3301, 3351)] }); return gateBindingState(dual).state === 'completed' && locateReviewOfRecord(dual).state === 'found' && pairRows(dual).length === 0; })());
   t('⛔ a thread with no line carries none, so today\'s rule is untouched where nobody claims the exception', regenChainToHead(moved([RECORD_ON_9AF9])) === null && gateBindingState(moved([RECORD_ON_9AF9])).state === 'moved-after-clear');
   // the tree test — and it reads COMMITTED trees, never the working one
   t('⭐ an EMPTY non-`merge=os-regen` diff CARRIES the record: the pair reads COMPLETED, ⛔ not 重挂', gateBindingState(CARRIED()).state === 'completed');
