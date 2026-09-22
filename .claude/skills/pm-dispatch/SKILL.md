@@ -602,9 +602,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
 - PR 形态与范围:draft、目标 `main`、`Fixes`/`Part of` 首行判据,翻 ready 前亲核。
 - `Part of` 卡 MERGED 时点收口;changed files 范围与 changeset/`skip-changeset` 分流;测试证据。
+- 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取维护者原话或出处三件转述。
 - 报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧:gate `in_progress` 是诚实读数。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
-- 删除与二进制:死代码删除亲核引用面;`+0/-0` 先疑 NUL;sweep 范围外产出成组列出。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。
 - 超派发预算或小功能大扩写 ⇒ REWORK,⛔ 不因已经写好了放行。
 - 判决 ACCEPT:issue 英文短评论,核对清单结论 + 抽查读数 + 偏差,链接 PR,⛔ 不复述其叙事。
