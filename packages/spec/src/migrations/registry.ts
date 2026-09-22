@@ -14214,13 +14214,25 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // said it worked.
     //
     // ⚠️ This is NOT the zero-mention retirement shape, and reading it as one loses
-    // the finding. FIVE sites outside `packages/spec` READ the key: the
-    // materialization fingerprint and the provider-context build in
-    // `services/service-automation/src/plugin.ts`, `ctx.connectionTimeoutMs` in the
-    // `rest` and `openapi` provider factories, and the `?? 30000` fallbacks that
-    // deposit it back onto the reported def. Measured across all five, every one is
-    // a pass-through: the value's only termini are the def `GET /connectors` echoes
-    // and the fingerprint that decides whether to re-materialize. Never a deadline.
+    // the finding. Measured with `git grep -n connectionTimeoutMs SHA -- .
+    // ':!packages/spec'` at `origin/main`: THIRTEEN non-test source occurrences over
+    // seven files in five packages — SIX READS (openapi-connector.ts:242,
+    // openapi-provider.ts:193, rest-connector.ts:134, rest-provider.ts:64,
+    // plugin.ts:307, plugin.ts:1589), FOUR TYPE DECLARATIONS
+    // (openapi-connector.ts:135, rest-connector.ts:47, plugin.ts:291,
+    // plugin.ts:339), and THREE surviving hardcoded `30000` writes
+    // (mcp-connector.ts:247, slack-connector.ts:94, plugin.ts:1782).
+    //
+    // ⭐ The card's own Leg-2 table — "five non-spec mentions, all writes of a
+    // hardcoded 30000" — was CORRECT at the SHA it cited and dated (0870fb5418:
+    // exactly those five, line for line). It is STALE, not false; b929e0a662, the
+    // PR the card itself flagged as pending, is what moved it. ⛔ Do not re-cite
+    // either reading without its tree: a census is a count plus the commit it was
+    // taken against.
+    //
+    // Measured across all six reads, every one is a pass-through: the value's only
+    // termini are the def `GET /connectors` echoes and the fingerprint that decides
+    // whether to re-materialize. Never a deadline.
     // `connectorFetchOptions()` (`integration/connector-fetch-policy.ts`) is the one
     // mapping from authored policy onto the platform's outbound `fetch`, and it was
     // handed `{ retryConfig, requestTimeoutMs }` only. Carrying a number is not
@@ -14251,6 +14263,37 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // withdrawn `ConnectorProviderContext` member, which is code with no authored
     // source, leaves via the D3 semantic entry
     // `connector-provider-context-connection-timeout-ms-retired`.
+    //
+    // ⭐ RETIRED-DEFAULT RESIDUE: the `acceptRetiredDefaultResidue` stage IS owed
+    // here, and is adopted — `{ connectionTimeoutMs: 30000 }` on both carriers
+    // (#12840, maintainer ruling 2026-08-28; the class rule lives in
+    // `shared/retired-key.ts`). The discriminator across the three siblings is
+    // whether a released toolchain MATERIALIZED the default into something that is
+    // later re-parsed — `security/ObjectPermission:allowPurge` adopted the stage
+    // for exactly that reason, `kernel/PluginQualityMetrics:securityScan` did not
+    // because the key carried no default of its own, and
+    // `api/ListInstalledPackagesRequest:limit` did not because nothing ever parses
+    // through that schema so its `.default(50)` was never materialized anywhere.
+    //
+    // This key is in the FIRST bucket, measured across two builds rather than
+    // argued: on the base build `ObjectStackSchema.parse({ connectors: [{ name,
+    // label, type }] })` returns an entry carrying `connectionTimeoutMs: 30000`
+    // (emitted keys: authentication, connectionTimeoutMs, enabled, label, name,
+    // requestTimeoutMs, status, type — the author typed three), and feeding that
+    // exact object back to the tombstoned build is refused at
+    // `connectors.0.connectionTimeoutMs`.
+    //
+    // ⛔ The presence of a D2 conversion does NOT discharge this obligation, and
+    // reading it that way is the trap: `security/ObjectPermission:allowPurge` has
+    // BOTH a D2 (`permission-allow-restore-purge-removed`, in the same step-18
+    // chain) AND the residue stage. The reason is the SECOND door — the fact
+    // `liveness/connector.json` opens its `_note` with: besides the authoring
+    // doors, `AutomationEngine.registerConnector` parses `ConnectorSchema` for a def
+    // a PLUGIN or an ADR-0097 provider factory builds IN CODE. No conversion runs
+    // there. A connector package still compiled against 17.x carries the
+    // materialized `30000` in that def literal — all four shipped connectors did,
+    // which is what the card counted as its hardcoded writes — so without this
+    // stage a 17.x plugin fails registration on a value its author never typed.
     //
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set

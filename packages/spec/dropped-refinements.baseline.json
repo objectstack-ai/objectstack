@@ -52,7 +52,7 @@
       "sites": [
         "manifest.actions.element.in",
         "manifest.actions.element.in.params.element.in",
-        "manifest.connectors.element",
+        "manifest.connectors.element.out",
         "manifest.dashboards.element.globalFilters.element",
         "manifest.dashboards.element.widgets.element",
         "manifest.datasets.element",
@@ -149,7 +149,7 @@
         "data.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "data.options[1].manifest.actions.element.in",
         "data.options[1].manifest.actions.element.in.params.element.in",
-        "data.options[1].manifest.connectors.element",
+        "data.options[1].manifest.connectors.element.out",
         "data.options[1].manifest.dashboards.element.globalFilters.element",
         "data.options[1].manifest.dashboards.element.widgets.element",
         "data.options[1].manifest.datasets.element",
@@ -230,7 +230,7 @@
         "options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "options[1].manifest.actions.element.in",
         "options[1].manifest.actions.element.in.params.element.in",
-        "options[1].manifest.connectors.element",
+        "options[1].manifest.connectors.element.out",
         "options[1].manifest.dashboards.element.globalFilters.element",
         "options[1].manifest.dashboards.element.widgets.element",
         "options[1].manifest.datasets.element",
@@ -272,7 +272,7 @@
         "data.packages.element.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "data.packages.element.options[1].manifest.actions.element.in",
         "data.packages.element.options[1].manifest.actions.element.in.params.element.in",
-        "data.packages.element.options[1].manifest.connectors.element",
+        "data.packages.element.options[1].manifest.connectors.element.out",
         "data.packages.element.options[1].manifest.dashboards.element.globalFilters.element",
         "data.packages.element.options[1].manifest.dashboards.element.widgets.element",
         "data.packages.element.options[1].manifest.datasets.element",
@@ -806,7 +806,7 @@
     },
     "integration/DeclarativeConnectorEntry": {
       "sites": [
-        ""
+        "out"
       ]
     },
     "kernel/DisablePackageResponse": {

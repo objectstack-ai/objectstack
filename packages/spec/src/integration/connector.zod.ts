@@ -5,7 +5,7 @@ import { WebhookSchema } from '../automation/webhook.zod';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { retiredKey } from '../shared/retired-key';
+import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
 
 /**
  * Connector Protocol - LEVEL 3: Enterprise Connector
@@ -614,6 +614,42 @@ const CONNECTION_TIMEOUT_MS_RETIRED =
   + 'provider or upstream gateway on a transport that can separate the phases. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
+/**
+ * The retired default the published 17.x toolchain MATERIALIZED, captured as a
+ * literal because nothing else records it once the declaration is gone
+ * (#12840, maintainer ruling 2026-08-28; the class rule is
+ * `shared/retired-key.ts` — "the next retirement of a defaulted key reuses this
+ * helper with its own captured literal instead of re-inventing the judgement").
+ *
+ * ⭐ WHY THIS RETIREMENT IS OWED THE STAGE, measured rather than argued by
+ * analogy. `connectionTimeoutMs` was declared `.optional().default(30000)`, so a
+ * 17.x parse emitted it into EVERY connector — authored or not. Measured across
+ * two builds: on the base build `ObjectStackSchema.parse({ connectors: [{ name,
+ * label, type }] })` returns an entry whose keys are `authentication`,
+ * `connectionTimeoutMs`, `enabled`, `label`, `name`, `requestTimeoutMs`,
+ * `status`, `type` — the author typed three of those. Feed that exact emitted
+ * object back to the tombstoned build and it is refused at
+ * `connectors.0.connectionTimeoutMs`.
+ *
+ * That residue is not hypothetical, because this schema has TWO DOORS (the fact
+ * `liveness/connector.json` records at the top of its `_note`): besides the
+ * authoring doors, `AutomationEngine.registerConnector` parses `ConnectorSchema`
+ * for a def a PLUGIN or an ADR-0097 provider factory builds IN CODE. A connector
+ * package still compiled against 17.x carries the materialized `30000` in that
+ * def literal — every one of the four shipped connectors did, which is what the
+ * card counted as its five hardcoded writes — so without this stage a 17.x
+ * plugin fails registration on a value its author never typed.
+ *
+ * ⛔ Nothing is un-retired: `z.input` stays `never` (authoring it is still a tsc
+ * error), the `[RETIRED]` authorable-surface row stays, and any OTHER value —
+ * `15000`, `1000` — keeps the tombstone's refusal with the prescription
+ * byte-for-byte. Only the emitted default is accepted, and it is STRIPPED, so a
+ * parse → serialize round-trip converges on the clean shape.
+ */
+const CONNECTOR_RETIRED_KEY_RESIDUE = {
+  connectionTimeoutMs: 30000,
+} as const;
+
 // ============================================================================
 // Health Check & Circuit Breaker Configuration
 // ============================================================================
@@ -815,7 +851,7 @@ export type ConnectorTrigger = z.input<typeof ConnectorTriggerSchema>;
  * Base Connector Schema
  * Core connector configuration shared across all connector types
  */
-export const ConnectorSchema = lazySchema(() => z.object({
+const ConnectorBaseSchema = lazySchema(() => z.object({
   /**
    * Machine name (snake_case)
    */
@@ -1032,6 +1068,21 @@ export const ConnectorSchema = lazySchema(() => z.object({
   ...MetadataProtectionFields,
 }));
 
+/**
+ * Core connector configuration — the authorable shape behind the ruled
+ * retired-default residue stage (see {@link CONNECTOR_RETIRED_KEY_RESIDUE}).
+ *
+ * The wrapper is a `z.preprocess` PIPE, not a `ZodObject`: it keeps a
+ * read-through `shape` so the schema walkers and shape-reading consumers see
+ * the inner authorable truth, but ⛔ it cannot be `.extend()`ed or
+ * `.superRefine()`d directly — do that on `ConnectorBaseSchema` and re-wrap,
+ * the way `DeclarativeConnectorEntrySchema` below does (the
+ * `EffectiveObjectPermissionSchema` precedent).
+ */
+export const ConnectorSchema = lazySchema(() =>
+  acceptRetiredDefaultResidue(ConnectorBaseSchema, CONNECTOR_RETIRED_KEY_RESIDUE),
+);
+
 export type Connector = z.input<typeof ConnectorSchema>;
 /** Post-parse shape of {@link Connector} — defaults applied, transforms run (ADR-0122). */
 export type ConnectorParsed = z.infer<typeof ConnectorSchema>;
@@ -1069,7 +1120,15 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  *    authoring both the instance and its actions reintroduces drift (§5 non-goals).
  */
 export const DeclarativeConnectorEntrySchema = lazySchema(() =>
-  ConnectorSchema.superRefine((entry, ctx) => {
+  // [#12840 precedent] The ADR-0097 refusals ride on the BASE, INSIDE the
+  // residue stage, for the reason `ObjectPermissionSchema` records: in zod 4
+  // `.superRefine()` on a `ZodObject` returns a `ZodObject` that keeps
+  // `.shape`, while the same call on the residue PIPE returns a schema with no
+  // `.shape` — and the pipe's read-through `shape` is exactly what the
+  // authorable-surface / liveness walkers duck-test. Wrapping second also keeps
+  // this door's residue tolerance identical to the base's rather than a second
+  // dialect.
+  acceptRetiredDefaultResidue(ConnectorBaseSchema.superRefine((entry, ctx) => {
     const isInstance = typeof entry.provider === 'string' && entry.provider.length > 0;
     // #7990 — the one rule that binds EVERY authored entry, descriptor and
     // instance alike: `authentication` is the RUNTIME shape (its secret fields
@@ -1116,7 +1175,7 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
         message: `Provider-bound connector instance '${entry.name}' must not author \`triggers\` — the '${entry.provider}' provider derives them from the upstream at boot (ADR-0097 §5).`,
       });
     }
-  }),
+  }), CONNECTOR_RETIRED_KEY_RESIDUE),
 );
 
 export type DeclarativeConnectorEntry = z.input<typeof DeclarativeConnectorEntrySchema>;

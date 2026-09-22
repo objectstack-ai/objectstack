@@ -39,12 +39,13 @@ not. What does change is observable and intended: the def served by
 
 ### ⭐ This is NOT the zero-mention retirement shape
 
-Five sites outside `packages/spec` **read** the key before this landed, and
-reading the retirement as "nothing referenced it" loses the finding. The
-materialization fingerprint and the provider-context build in
-`service-automation`, `ctx.connectionTimeoutMs` in the `rest` and `openapi`
-provider factories, and the `?? 30000` fallbacks that deposited it back onto the
-reported def. Measured across all five, every one is a **pass-through**: the
+Measured with `git grep -n connectionTimeoutMs SHA -- . ':!packages/spec'` at
+`origin/main`: **thirteen** non-test source occurrences over seven files in five
+packages — **six reads** (`openapi-connector.ts:242`, `openapi-provider.ts:193`,
+`rest-connector.ts:134`, `rest-provider.ts:64`, `plugin.ts:307`,
+`plugin.ts:1589`), **four type declarations**, and **three** surviving hardcoded
+`30000` writes. Reading the retirement as "nothing referenced it" loses the
+finding. Measured across all six reads, every one is a **pass-through**: the
 value's only termini were the def `GET /connectors` echoes and the fingerprint
 that decides whether to re-materialize. `connectorFetchOptions()` — the one
 mapping from authored policy onto the platform's outbound `fetch` — was handed
@@ -93,8 +94,21 @@ ruling that made the siblings live forbids.)
   `authorable-defaults/integration.json` loses the two `= 30000` rows.
 - The liveness row **stays** `dead` with a `REMOVED` note, because `retiredKey()`
   keeps the key in the walked shape. Its previous note claimed "every occurrence
-  outside `packages/spec` is a WRITE"; that was already false and is corrected
-  there rather than carried forward.
+  outside `packages/spec` is a WRITE". That reading was **correct at the SHA the
+  card cited and dated** (`0870fb5418` — exactly five non-spec source hits, all
+  five `connectionTimeoutMs: 30000,`) and was superseded by `b929e0a662`, the PR
+  the card itself flagged as pending. It is **stale, not false**, and the row now
+  carries both readings with their trees rather than one undated claim.
+- **An `acceptRetiredDefaultResidue` stage** (#12840), `{ connectionTimeoutMs: 30000 }`
+  on both carriers. The key was `.optional().default(30000)`, so a 17.x parse
+  materialized it into **every** connector — measured across two builds: the base
+  build emits it for an entry that authored only `name`/`label`/`type`, and the
+  tombstoned build refuses that exact object at `connectors.0.connectionTimeoutMs`.
+  The D2 does **not** discharge this: `ObjectPermission:allowPurge` carries both,
+  because `AutomationEngine.registerConnector` parses `ConnectorSchema` for a def
+  a plugin builds **in code**, where no conversion runs. So the emitted `30000`
+  is accepted-and-stripped while `15000` keeps the tombstone's refusal, and
+  nothing is un-retired: `z.input` stays `never` and the `[RETIRED]` row stays.
 - **No deprecation window** (maintainer 2026-08-27: 「项目在创业阶段，用户也很少，短期不考虑渐进」),
   and no staged retirement.
 

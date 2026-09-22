@@ -240,8 +240,8 @@ describe('rest provider factory (ADR-0097)', () => {
             // `connectionTimeoutMs` was the second half of this pin and is
             // RETIRED (ADR-0049): the factory never applied it, it only echoed
             // it back onto the def. The absence pin lives tree-scoped in
-            // `packages/spec/src/integration/connector.test.ts`; here the point
-            // is only that the surviving timeout still travels.
+            // `packages/spec/src/integration/connector-connection-timeout-retirement.test.ts`;
+            // here the point is only that the surviving timeout still travels.
             expect(Object.keys(def)).not.toContain('connectionTimeoutMs');
         });
     });

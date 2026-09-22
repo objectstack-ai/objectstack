@@ -139,6 +139,61 @@ describe('connector.connectionTimeoutMs retirement — the tombstone', () => {
     expect(parsed).not.toHaveProperty('connectionTimeoutMs');
   });
 
+  it('accepts and STRIPS the retired default as inert residue, on both carriers', () => {
+    // #12840, maintainer ruling 2026-08-28. The key was
+    // `.optional().default(30000)`, so a released 17.x toolchain materialized
+    // `30000` into EVERY connector — authored or not — and the second door
+    // (`AutomationEngine.registerConnector`, which parses `ConnectorSchema` for
+    // a def a plugin builds IN CODE) runs no conversion that could strip it.
+    // So the emitted default parses as inert residue and is stripped; the
+    // normalized output does not carry the key, so a parse then serialize
+    // round-trip converges on the clean shape.
+    for (const [label, schema] of [
+      ['base', ConnectorSchema],
+      ['the /meta + stack.connectors carrier', DeclarativeConnectorEntrySchema],
+    ] as const) {
+      const r = schema.safeParse({ ...WELL_FORMED, connectionTimeoutMs: 30000 });
+      expect(r.success, `${label} must accept the retired default as residue`).toBe(true);
+      if (!r.success) continue;
+      expect(r.data, `${label} must STRIP it, not carry it`).not.toHaveProperty('connectionTimeoutMs');
+      // CONTROL: the live sibling on the same shape is untouched by the stage.
+      expect(r.data.requestTimeoutMs, `${label} keeps the live sibling`).toBe(30000);
+    }
+  });
+
+  it('⛔ keeps the tombstone refusal for every value that is NOT the retired default', () => {
+    // The whole point of discriminating by value: nothing is un-retired. A
+    // number an author actually chose still meets the prescription.
+    for (const value of [15000, 1000, 300000, 29999]) {
+      const r = ConnectorSchema.safeParse({ ...WELL_FORMED, connectionTimeoutMs: value });
+      expect(r.success, `${value} must still be refused`).toBe(false);
+      if (r.success) continue;
+      const issue = r.error.issues.find((i) => i.path[0] === 'connectionTimeoutMs');
+      expect(issue, `${value} must be refused AT the key`).toBeDefined();
+      expect(issue!.message, `${value} must carry the prescription`).toMatch(PRESCRIPTION);
+    }
+    // And the residue tolerance is value-identity, not type-loose: the string
+    // "30000" is not the emitted default.
+    expect(ConnectorSchema.safeParse({ ...WELL_FORMED, connectionTimeoutMs: '30000' }).success).toBe(false);
+  });
+
+  it('the residue stage leaves the walked shape intact — the pipe reads through to the base', () => {
+    // `acceptRetiredDefaultResidue` returns a preprocess PIPE, not a ZodObject.
+    // The authorable-surface and liveness walkers duck-test `.shape`, so a
+    // wrapper that lost it would silently drop this whole def from both
+    // ratchets while every parse pin above stayed green.
+    for (const [label, schema] of [
+      ['base', ConnectorSchema],
+      ['entry', DeclarativeConnectorEntrySchema],
+    ] as const) {
+      const shape = (schema as unknown as { shape?: Record<string, unknown> }).shape;
+      expect(shape, `${label} must expose a read-through shape`).toBeDefined();
+      expect(Object.keys(shape!), `${label} keeps the retired key in the walked shape`)
+        .toContain('connectionTimeoutMs');
+      expect(Object.keys(shape!), `${label} keeps its live neighbours`).toContain('requestTimeoutMs');
+    }
+  });
+
   it('fails tsc at the authoring site: the input type of the key is `never`', () => {
     const connector: Connector = {
       ...WELL_FORMED,
