@@ -3226,7 +3226,8 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Measured at the pin this repo builds against (`.objectui-sha` =
    * `87af769e9`; re-READ there 2026-09-22 — every anchor re-derived from the
    * pinned tree rather than carried, none of them at its `53ded82bf`
-   * number and one of them changed in CONTENT too): `ObjectKanban.tsx:1210`
+   * number and one of them no longer spelled the way this record quoted it):
+   * `ObjectKanban.tsx:1210`
    * reads `schema.navigation ?? { mode: 'drawer' }` and hands it to
    * `useNavigationOverlay` (`:1218-1219`), whose result drives the card click
    * (`:1587`) and the detail overlay (`:1468`, whose `NavigationOverlay` is
@@ -3601,7 +3602,8 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  *    ruled an internal transport form (objectui#5018). They get
  *    {@link OBJECT_MAP_FLAT_CONFIG_GUIDANCE}'s wrong-layer prescription.
  *  - `style`. `ObjectMap.tsx:295`, inside `warnOnTopLevelStyleUrl` (`:289`),
- *    reads it only to say it is NOT consumed as a map style (objectui#5017): it is `BaseSchema.style`, the node's inline CSS
+ *    reads it only to say it is NOT consumed as a map style (objectui#5017):
+ *    it is `BaseSchema.style`, the node's inline CSS
  *    record, and `COMPONENT_NODE_KEYS` above already sends it back to the node.
  *  - `clusterRadius`, `data` as an ARRAY, `onMarkerClick` / `onRowClick` /
  *    `onEdit` / `onDelete`, `className` and `dataSource` — React props of
@@ -3772,9 +3774,9 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * this renderer never reads (the export-name chain is `gantt.exportFileName` →
  * `label` → the OBJECT's label → `objectName`, `:2179-2185`); a row cap — the
  * reload's `$top` is the platform ceiling `NON_GRID_ROW_CEILING_TOP` (`:855`)
- * and the
- * renderer's own comment marks it "⛔ Not authorable" (`:853`); and the `onTaskClick` /
- * `onRowClick` / `onBeforeTaskUpdate` callbacks, which are host props.
+ * and the renderer's own comment marks it "⛔ Not authorable" (`:853`); and
+ * the `onTaskClick` / `onRowClick` / `onBeforeTaskUpdate` callbacks, which are
+ * host props.
  *
  * VALUE posture: `gantt` is the one config block in this family whose value
  * contract is already the SPEC's — `ObjectGantt.tsx:503` validates it against

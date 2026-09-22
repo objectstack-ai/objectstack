@@ -3621,9 +3621,10 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
 // renderer's read points support at the pin this repo builds against
 // (`.objectui-sha` = `87af769e9`; re-READ at that pin 2026-09-22 — all three
 // renderers moved hard on the hop from `53ded82bf`, so NO anchor in this
-// block is carried and every one was re-derived from the pinned tree. Two
+// block is carried and every one was re-derived from the pinned tree. Four
 // changed CONTENT rather than position and say so where they are cited: the
-// map's array-shorthand head, and the tree's `titleField` rung), and
+// map's array-shorthand head, the tree's record-source ARM, the cast on the
+// tree's `schema.data` read, and the tree's `titleField` rung), and
 // `Object.keys(ComponentPropsMap)` lists the three. The key sets are asserted
 // WHOLE rather than by spot-check — a row derived from read points is a claim
 // about a complete set, and only an equality can hold a later addition to
