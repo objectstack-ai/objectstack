@@ -18,8 +18,7 @@
 - FAIL 同 PASS 剥双载体:同笔留卡上交接评论(引复审、独立性对、欠改);卡态与 assignee 不动。
 - 重挂前先查裁决:闸门标签缺失 ⇒ 先 grep 卡评论找复审结论;`get_reviews` 读空 ≠ 未复审。
 - PASS + 无标 + head 未动 = 已清标不是被剥;head 后移或无结论才重挂;清标缺引记录即半态。
-- 例外:纯重生成的 head 后移不重挂,原记录继续管;判据机器读已提交树 ⛔ 非席位自述。
-- 判据 = 两 head 间非 `merge=os-regen` 路径为空;PR 落 `Regen-provenance: 记录id · 旧head → 新head`。
+- 例外:纯重生成 head 后移原记录继续管;判据机读已提交树 ⛔ 非自述;PR 落 provenance 行。
 
 ## 复核归属与资格(按面)
 
@@ -42,7 +41,6 @@
 - 轮次报告设复审清单专节,形状与代裁清单同为强制审计。
 - 落地前检三条,过则 Tier S 入队、Tier H 等人批:① 达档条款②复核 PASS 在案(同形记录)。
 - ② 双载体已清,逐对机读 `PM_SWEEP_REPO=仓 node scripts/pm/check-clause2-carriers.mjs --pair N`。
-- 0 = 确定性行全清;4 = 任一不成立,只确定性行红才挡落地;3 = 环境答不了 ⛔ 不作干净。
 - 确定性行 = 记录在案、`Served-tier:`、双载体一致、认领形;C5 放宽 tell 只报告,归复核裁。
 - ③ PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。
 - 签名 = 失败步 + 首错行,读 base check runs 的 API ⛔ 不凭口述;主干红止血立单不变。

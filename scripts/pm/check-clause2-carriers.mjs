@@ -863,7 +863,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18862: cross-author LIVE claims with no `Release:` between — the hand-over the protocol never wrote, named; judged only after its effective instant': 52,
   '#16770: the exit-0 line says which carriers agreed — LABEL carriers — and that the PR body was not read': 14,
   '#18892: the claim comment\'s EDIT reading — taken from the two stamps already in hand, reported and never failed': 10,
-  '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 17,
+  '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -3130,20 +3130,18 @@ export function needsGateHistory(pair) {
 // ⛔ MACHINE-READ ON COMMITTED TREES, never a seat's statement, and the committed
 // half is not stylistic: before `git add -A` one regeneration answers `git
 // status`, `git diff --cached` and `git diff` three DIFFERENT ways, and the
-// `--cached` reading is main's side, which looks exactly like the answer.
-//
-// ⭐ THE `Regen-provenance:` LINE IS A POINTER, NEVER THE EVIDENCE: it names the
-// record and the two commits so a later reader RE-RUNS the test. A reader that
-// cannot reach both answers with a GAP and the pair is UNJUDGED, ⛔ never clean.
+// `--cached` reading is main's side, which looks exactly like the answer. ⭐ The
+// `Regen-provenance:` line is a POINTER, NEVER the evidence: it names the record
+// and the two commits so a later reader RE-RUNS the test, and a reader that
+// cannot reach both answers with a GAP — UNJUDGED, ⛔ never clean.
 
 /**
- * One hop, as a seat posts it:
- * `Regen-provenance: <record id> · <old head> → <new head> · <command> → (empty)`
- *
+ * One hop, as a seat posts it (the printable shape is in C3's own remedy):
+ * `Regen-provenance: RECORD-ID · OLD-HEAD → NEW-HEAD · COMMAND → (empty)`.
  * Decoration is tolerated as `REVIEWED_BY_LINE` tolerates it — bullet, bold,
- * backticked shas — since none of it changes which commits the line names. The
+ * backticked shas — since none of it changes which commits the line names; the
  * tail after the second sha is the seat's own transcript and is deliberately
- * UNREAD: a reader re-runs its own command rather than believing a pasted one.
+ * UNREAD, because a reader re-runs its own command, never a pasted one.
  */
 export const REGEN_PROVENANCE_LINE =
   /^[\s>]*(?:[-*+]\s*)?\**\s*Regen-provenance\**\s*:\s*`?#?(\d+)`?\s*[·•]\s*`?([0-9a-fA-F]{7,40})`?\s*(?:→|->)\s*`?([0-9a-fA-F]{7,40})`?/;
@@ -3161,10 +3159,10 @@ export function regenProvenanceHops(pair) {
 const shaMeets = (a, b) => a.startsWith(b) || b.startsWith(a);
 
 /**
- * The hops that chain BACK from this head, oldest first — `null` when none
- * does. Several hops are ordinary: a PR is re-synced once per drift. ⛔ Two
- * hops arriving at one head END the walk rather than being ranked, so a
- * contradictory thread carries no chain — the only direction this may err in.
+ * The hops that chain BACK from this head, oldest first — `null` when none does.
+ * Several hops are ordinary: a PR is re-synced once per drift. ⛔ Two hops
+ * arriving at one head END the walk rather than being ranked, so a contradictory
+ * thread carries no chain — the only direction this may err in.
  */
 export function regenChainToHead(pair) {
   const hops = regenProvenanceHops(pair);
@@ -3183,26 +3181,44 @@ export function regenChainToHead(pair) {
 }
 
 /**
- * The ruled test on two COMMITTED trees: which moved paths carry no
- * `merge=os-regen` attribute. Empty is the whole criterion. `--source <to>`
- * reads `.gitattributes` out of THAT COMMIT rather than out of whatever the
- * working tree holds, which is what keeps the whole reading on committed trees;
- * `-z` on both calls because a path may hold a space, a quote or a colon.
+ * The ruled test on COMMITTED trees: which moved paths are explained by NEITHER
+ * arm of 「every touched path is a generated artefact OR THE MERGE COMMIT'S OWN
+ * CARRY-OVER FROM MAIN」. Empty is the whole criterion.
+ *
+ * ① the `merge=os-regen` attribute, read with `--source <to>` so
+ * `.gitattributes` itself comes out of that COMMIT rather than out of whatever
+ * the working tree holds. ② the carry-over arm: a path this pull request never
+ * touched AT EITHER HEAD moved only because `base` moved. ⛔ Without ② the
+ * exception never fires on the loop this card measured — a merge-forward lists
+ * every path main carried over, and a head-to-head diff reads them as hand-written.
+ *
+ * ⭐ The PR's OWN delta is read once per HEAD (`merge-base` + one name-only
+ * diff), never once per path: a path is byte-explained by `base` exactly when
+ * neither delta names it, which is the same verdict as comparing
+ * `git diff FROM TO -- p` with `git diff MB_FROM MB_TO -- p` per path, at four
+ * calls instead of two per path. The refusing direction is unchanged — a
+ * hand-resolved merge leaves its resolution in the delta at the NEW head, and a
+ * slipped-in edit in whichever delta carries it. `-z` throughout: a path may
+ * hold a space, a quote or a colon and the parse must not be the weak link.
  */
-export function handWrittenPathsBetween(runGit, from, to) {
-  const names = String(runGit(['diff', '-z', '--name-only', from, to])).split('\0').filter((p) => p !== '');
-  if (names.length === 0) return [];
-  const f = String(runGit(['check-attr', '--source', to, '-z', 'merge', '--stdin'], names.join('\0'))).split('\0');
+export function unexplainedPathsBetween(runGit, { from, to, base }) {
+  const names = (a, b) => String(runGit(['diff', '-z', '--name-only', a, b])).split('\0').filter((p) => p !== '');
+  const moved = names(from, to);
+  if (moved.length === 0) return [];
+  const f = String(runGit(['check-attr', '--source', to, '-z', 'merge', '--stdin'], moved.join('\0'))).split('\0');
   const hand = [];
   for (let i = 0; i + 2 < f.length; i += 3) if (f[i + 2] !== 'os-regen') hand.push(f[i]);
-  return hand;
+  if (hand.length === 0) return [];
+  const mergeBase = (rev) => String(runGit(['merge-base', base, rev])).trim();
+  const own = new Set([...names(mergeBase(from), from), ...names(mergeBase(to), to)]);
+  return hand.filter((p) => own.has(p));
 }
 
 /**
- * The git reader the carry re-runs the test with — this checkout, read-only,
- * and injectable so the self-test drives every branch offline. Its failure is a
- * GAP, never a verdict: a checkout that never fetched the recorded head, or a
- * git without `check-attr --source`, cannot answer this question at all.
+ * The git reader the carry re-runs the test with — this checkout, read-only, and
+ * injectable so the self-test drives every branch offline. Its failure is a GAP,
+ * never a verdict: a checkout that never fetched the recorded head, or a git
+ * without `check-attr --source`, cannot answer this question at all.
  */
 export const REPO_GIT = (args, input) =>
   execFileSync('git', args, { encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -3211,12 +3227,10 @@ const REGEN_CARRY_MEMO = new WeakMap();
 
 /**
  * Does a chain of certified pure regenerations carry the record to this head?
- * Memoised per pair: `gateBindingState` asks several times per run, each miss
- * costs two subprocesses per hop, and two commits cannot change under a run.
- *
- * ⛔ FOUR states, none foldable: `none` (no line — today's rule, unchanged),
- * `refused` (a line that does NOT certify: an ordinary re-hang), `unreadable`
- * (the environment could not answer) and `carried`.
+ * Memoised per pair: `gateBindingState` asks several times per run and two
+ * commits cannot change under one. ⛔ FOUR states, none foldable: `none` (no
+ * line — today's rule, unchanged), `refused` (a line that does NOT certify: an
+ * ordinary re-hang), `unreadable` (the environment could not answer), `carried`.
  *
  * @returns {{ state: 'none' } | { state: 'unreadable', gaps: string[] }
  *          | { state: 'refused', reason: string }
@@ -3239,17 +3253,23 @@ function computeRegenCarry(pair) {
   if (typeof runGit !== 'function') {
     return { state: 'unreadable', gaps: [`PR #${pair?.pr}'s \`Regen-provenance:\` chain — this run holds no git reader, so the two committed trees were never compared`] };
   }
+  // ⛔ The base ref is what separates 「what main brought」 from 「what the PR
+  // changed」, so a run that names none cannot answer at all — never clean.
+  const base = pair?.baseRef;
+  if (typeof base !== 'string' || base === '') {
+    return { state: 'unreadable', gaps: [`PR #${pair?.pr}'s base ref — this run names none, so the merge commit's own carry-over could not be told apart from a hand edit`] };
+  }
   for (const hop of chain) {
     const span = `${hop.from.slice(0, 10)}..${hop.to.slice(0, 10)}`;
     let hand;
     try {
-      hand = handWrittenPathsBetween(runGit, hop.from, hop.to);
+      hand = unexplainedPathsBetween(runGit, { from: hop.from, to: hop.to, base });
     } catch (error) {
       const why = String(error?.message ?? error).split('\n')[0];
-      return { state: 'unreadable', gaps: [`the committed trees ${span} (${why}) — fetch both (\`git fetch origin pull/${pair?.pr}/head\`, \`git fetch origin ${hop.from}\`) and re-run`] };
+      return { state: 'unreadable', gaps: [`the committed trees ${span} against base \`${base}\` (${why}) — fetch both (\`git fetch origin pull/${pair?.pr}/head\`, \`git fetch origin ${hop.from}\`) and re-run`] };
     }
     if (hand.length > 0) {
-      return { state: 'refused', reason: `${span} moved ${hand.length} path(s) carrying no \`merge=os-regen\` attribute (${hand.slice(0, 4).join(', ')}) — hand-written content moved, so this is no pure regeneration` };
+      return { state: 'refused', reason: `${span} moved ${hand.length} path(s) that carry no \`merge=os-regen\` attribute and are not what \`${base}\` brought (${hand.slice(0, 4).join(', ')}) — this pull request's own hand-written content moved, so it is no pure regeneration` };
     }
   }
   // Expanded through git so the carried head is spelled at least as fully as
@@ -3371,6 +3391,14 @@ export function c3DeclaredYesUngated(pair) {
         'this gate judged a different tree, so the clear no longer covers what would land. This is ' +
         'the 重挂-owed state the recovery rule already names — 「head 后移或无结论才重挂」 — and ' +
         `the re-hang is a seat's act, not this script's.` +
+        // ⭐ THE FORMAT LIVES HERE, not in the governed text: the rule says a
+        // provenance line is posted and re-run, and this script owns its detail.
+        ' ⭐ Unless the move was a PURE REGENERATION, which since 2026-09-20 keeps the record: post ONE line on the ' +
+        'PR — `Regen-provenance: RECORD-ID · OLD-HEAD → NEW-HEAD · COMMAND → (empty)`, shas as code spans and angle ' +
+        'brackets kept out — and this reader RE-RUNS the test on the COMMITTED trees: of the paths ' +
+        '`git diff --name-only OLD NEW` lists, none may both carry no `merge=os-regen` attribute and be one this ' +
+        'pull request touched at either head. ⛔ The line certifies NOTHING by being present, and a chain this ' +
+        'environment cannot re-run is UNJUDGED rather than carried.' +
         (binding.carry?.state === 'refused'
           ? ` ⚠️ A \`Regen-provenance:\` chain IS on the thread and does NOT certify this move: ${binding.carry.reason}. The 纯重生成 exception is decided on the committed trees, ⛔ never on the line being present.`
           : '') +
@@ -4522,10 +4550,10 @@ export function locateReviewOfRecord(pair, carriedHead = null) {
   );
   const newest = latestMarkedComment(onHead.map(({ row }) => row), CONTRACT_REVIEW_HEADING_MARKER);
   if (!newest) {
-    // ⭐ The ruled exception, consulted ONLY here — after the ordinary read
-    // found nothing — so it can turn an absence into a record and never the
-    // reverse. The second read is pinned to the carried head AND to the record
-    // id the chain names. Depth is one: the recursive call passes that head.
+    // ⭐ The ruled exception, consulted ONLY here — after the ordinary read found
+    // nothing — so it turns an absence into a record and never the reverse. The
+    // second read is pinned to the carried head AND to the record id the chain
+    // names; depth is one, since the recursive call passes that head.
     if (carriedHead === null) {
       const carry = regenCarry(pair);
       if (carry.state === 'unreadable') return { state: 'unreadable', gaps: carry.gaps };
@@ -6134,10 +6162,14 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
         draft: Boolean(pr.draft),
         card: Number(n),
         headSha: pr?.head?.sha ?? null,
-        // The carry's git reader, read by `regenCarry` alone. It rides the pair
-        // rather than a parameter so every reader of a pair — this file's rows
-        // and the queue guard's tier leg — reaches the same one mechanism.
+        // The carry's git reader and the base its carry-over arm is measured
+        // against, read by `regenCarry` alone. They ride the pair rather than a
+        // parameter so every reader — this file's rows and the queue guard's
+        // tier leg — reaches the same one mechanism. `origin/main` is the base
+        // BRANCH here; a merge-base against it is the PR's fork point, which a
+        // sibling's fetch advancing that ref does not move.
         runGit: REPO_GIT,
+        baseRef: 'origin/main',
         // ⭐ The pairing's own inputs, carried for the input record (#18456)
         // and read by nothing else: the evidence kind is the SAME call
         // `prDeliversCard` just made, so the block states the derivation that
@@ -8079,11 +8111,32 @@ export async function selfTest() {
   const NEW_HEAD = 'e1ae0257'; // the head a whole-tree regeneration produced, as the board abbreviated it.
   const PROV = (from = HEAD_9AF9, to = NEW_HEAD, record = 3301, id = 3350) => ({ id, created_at: '2026-09-01T09:10:00Z', body: `Regen-provenance: ${record} · \`${from}\` → \`${to}\` · \`git diff --name-only\` → (empty)` });
   const GIT_SEEN = [];
-  const GIT_EMPTY = (args) => (GIT_SEEN.push(args.join(' ')), args[0] === 'diff' ? 'packages/spec/api-surface/data.txt\0' : args[0] === 'check-attr' ? 'packages/spec/api-surface/data.txt\0merge\0os-regen\0' : `${HEAD_9AF9}00\n`);
-  const GIT_HAND = (args) => (args[0] === 'diff' ? 'packages/spec/api-surface/data.txt\0scripts/pm/x.mjs\0' : 'packages/spec/api-surface/data.txt\0merge\0os-regen\0scripts/pm/x.mjs\0merge\0unspecified\0');
+  const BASE = 'origin/main';
+  // A fake git over COMMITTED trees. `moved` is the head-to-head name list,
+  // `attrs` the `check-attr` answer, `own` the PULL REQUEST'S OWN delta at each
+  // head (`merge-base BASE head` .. head) — the fact the carry-over arm reads.
+  const GIT = (spec) => (args) => {
+    GIT_SEEN.push(args.join(' '));
+    if (args[0] === 'merge-base') return `mb-${args[2]}\n`;
+    if (args[0] === 'check-attr') return spec.attrs;
+    if (args[0] === 'rev-parse') return `${HEAD_9AF9}00\n`;
+    const [, , , a, b] = args; // diff -z --name-only A B
+    return a === HEAD_9AF9 && b === NEW_HEAD ? spec.moved : (spec.own?.[b] ?? '');
+  };
+  const REGEN_ONLY = { moved: 'packages/spec/api-surface/data.txt\0', attrs: 'packages/spec/api-surface/data.txt\0merge\0os-regen\0' };
+  // (i) the loop the card measured: a merge-forward carries a hand-written path
+  // ANOTHER pull request landed, beside this one's regeneration.
+  const CARRY_OVER = { moved: 'packages/spec/api-surface/data.txt\0AGENTS.md\0', attrs: 'packages/spec/api-surface/data.txt\0merge\0os-regen\0AGENTS.md\0merge\0unspecified\0', own: {} };
+  // (ii) an edit slipped in beside the regeneration: this PR's own delta at the new head names it.
+  const SEAT_EDIT = { moved: 'packages/spec/api-surface/data.txt\0scripts/pm/x.mjs\0', attrs: 'packages/spec/api-surface/data.txt\0merge\0os-regen\0scripts/pm/x.mjs\0merge\0unspecified\0', own: { [NEW_HEAD]: 'scripts/pm/x.mjs\0' } };
+  // (iii) the same path as (i), but the merge was RESOLVED BY HAND, so the new head no longer holds what main brought.
+  const HAND_RESOLVED = { moved: 'AGENTS.md\0', attrs: 'AGENTS.md\0merge\0unspecified\0', own: { [NEW_HEAD]: 'AGENTS.md\0' } };
+  const GIT_EMPTY = GIT(REGEN_ONLY);
+  const GIT_HAND = GIT(SEAT_EDIT);
   const GIT_BLIND = () => { throw new Error(`fatal: bad object ${HEAD_9AF9}`); };
-  const moved = (rows, runGit) => declaredYes({ pr: 13864, card: 13657, headSha: NEW_HEAD, cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [PR_HUNG, PR_CLEARED], headCommittedAt: '2026-09-01T10:30:00Z', prComments: rows, runGit });
+  const moved = (rows, runGit, over = {}) => declaredYes({ pr: 13864, card: 13657, headSha: NEW_HEAD, cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [PR_HUNG, PR_CLEARED], headCommittedAt: '2026-09-01T10:30:00Z', prComments: rows, runGit, baseRef: BASE, ...over });
   const CARRIED = () => moved([RECORD_ON_9AF9, PROV()], GIT_EMPTY);
+  const withGit = (runGit, over) => moved([RECORD_ON_9AF9, PROV()], runGit, over);
   // the line and the chain, before any tree is touched
   t('the hop is READ off either thread, decorated or bare', regenProvenanceHops({ prComments: [PROV()], cardComments: [{ id: 9, body: '- **Regen-provenance**: `3301` · `aaaaaaa` -> `bbbbbbb`' }] }).length === 2);
   t('⛔ a line naming only one sha is not a hop — the tail after it is the seat\'s transcript and is unread', regenProvenanceHops({ prComments: [{ id: 9, body: `Regen-provenance: 3301 · \`${HEAD_9AF9}\`` }] }).length === 0);
@@ -8103,7 +8156,17 @@ export async function selfTest() {
   t('⭐ a tree this checkout cannot reach is a GAP: UNJUDGED, ⛔ never carried and ⛔ never clean', gateBindingState(moved([RECORD_ON_9AF9, PROV()], GIT_BLIND)).state === 'unreadable' && locateReviewOfRecord(moved([RECORD_ON_9AF9, PROV()], GIT_BLIND)).state === 'unreadable');
   t('…and the gap names the remedy, so the reader knows what to fetch', says(pairUnjudged(moved([RECORD_ON_9AF9, PROV()], GIT_BLIND)), 'git fetch origin pull/13864/head'));
   t('⛔ a run holding NO git reader is a gap too — a claim nobody re-ran is not a certification', regenCarry(moved([RECORD_ON_9AF9, PROV()], undefined)).state === 'unreadable');
-  t('the hand-written set is read from the attribute, ⛔ never from a path list spelled here', handWrittenPathsBetween(GIT_HAND, 'a1b2c3d', 'e4f5a6b').join() === 'scripts/pm/x.mjs');
+  t('the unexplained set is read from the ATTRIBUTE and the PR\'s own delta, ⛔ never from a path list spelled here', unexplainedPathsBetween(GIT_HAND, { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).join() === 'scripts/pm/x.mjs');
+  // ⭐ the CARRY-OVER arm — 「every touched path is a generated artefact OR THE
+  // MERGE COMMIT'S OWN CARRY-OVER FROM MAIN」. Without it the exception never
+  // fires on the loop this card measured, because a merge-forward lists every
+  // path main carried over and a head-to-head diff alone reads them as hand-written.
+  t('⭐ (i) a MERGE-FORWARD carrying ANOTHER PR\'s hand-written path beside the regeneration is CARRIED', gateBindingState(withGit(GIT(CARRY_OVER))).state === 'completed' && locateReviewOfRecord(withGit(GIT(CARRY_OVER))).state === 'found');
+  t('…and the pair is CLEAN on it — this is the loop the card measured, and it now exits', pairRows(withGit(GIT(CARRY_OVER))).length === 0 && pairUnjudged(withGit(GIT(CARRY_OVER))) === null);
+  t('⛔ (iii) the SAME path, hand-resolved so the new head no longer holds what main brought, is REFUSED', gateBindingState(withGit(GIT(HAND_RESOLVED))).state === 'moved-after-clear' && says(c3DeclaredYesUngated(withGit(GIT(HAND_RESOLVED))), 'AGENTS.md'));
+  t('⇒ the DELTA decides, ⛔ never the path name: one path, two specimens, two verdicts', unexplainedPathsBetween(GIT(CARRY_OVER), { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).length === 0 && unexplainedPathsBetween(GIT(HAND_RESOLVED), { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).join() === 'AGENTS.md');
+  t('…and the delta is read ONCE PER HEAD against `merge-base BASE head`, ⛔ never once per path', GIT_SEEN.includes(`merge-base ${BASE} ${HEAD_9AF9}`) && GIT_SEEN.includes(`diff -z --name-only mb-${NEW_HEAD} ${NEW_HEAD}`), GIT_SEEN.slice(-4).join(' | '));
+  t('⛔ (iv) a run naming NO base ref cannot tell main\'s carry-over from a hand edit — UNJUDGED, ⛔ never clean', withGit(GIT(CARRY_OVER), { baseRef: null }) && regenCarry(withGit(GIT(CARRY_OVER), { baseRef: null })).state === 'unreadable' && says(pairUnjudged(withGit(GIT(CARRY_OVER), { baseRef: null })), 'base ref'));
 
   // -- #18141: the head sha's span holds the sha ALONE -----------------------
   //
