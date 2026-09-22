@@ -818,6 +818,8 @@ import {
   threadReadField,
 } from './check-half-states.mjs';
 import { readClause2Line } from './clause2-line.mjs';
+import { EXIT_UNCONFIRMED, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -849,6 +851,8 @@ export const EXIT_NOT_STORED = 4;
  * number.
  */
 export const EXIT_TOO_LARGE = 5;
+// 6 is EXIT_UNCONFIRMED, imported from fleet-write/dispatch.mjs: the relay was
+// dispatched and its outcome could not be confirmed — go READ, never retry blind.
 
 /**
  * The re-exec guard, per script rather than shared with its neighbours: two
@@ -2618,6 +2622,51 @@ export function parseOptions(argv) {
 }
 
 // ---------------------------------------------------------------------------
+// The relay transport — pure halves. `OS_FLEET_TRANSPORT` direct | dispatch |
+// auto: `dispatch` packs THIS act's one write — the comment, or the body
+// rewrite — into ONE `repository_dispatch` that the fleet-write relay executes
+// as `objectstack-fleet[bot]`; `auto` (the default) takes it in a cloud seat
+// container and `direct` elsewhere. The stamp is substituted BEFORE packing
+// (the stamp is the seat's act), and the read-back afterwards is the same
+// `readBackVerdict` the direct path runs — what changes is only where the
+// stored body is fetched from.
+// ---------------------------------------------------------------------------
+
+/** The relay action this act's write becomes: the SAME comment or body rewrite, as one op. Pure. */
+export function relayAction(options, body) {
+  return options.mode === 'comment' ? { op: 'comment', issue: options.number, body } : { op: 'issue_patch', issue: options.number, body };
+}
+
+/**
+ * Under the relay the comment's id comes back from the BOARD, not from a
+ * response: the newest comment on the card created at or after the dispatch
+ * (a minute of clock slack) whose stored body is what this act sent — the
+ * platform's own footer appending and newline stripping are the read-back
+ * classes that still count as landed. Pure. Returns the comment, or null.
+ */
+export function pickRelayComment(comments, sent, dispatchedAtMs) {
+  const since = dispatchedAtMs - 60_000;
+  const landed = (c) => {
+    const rb = classifyReadBack({ sent, stored: c?.body });
+    return rb.class !== 'unreadable' && sentBodyLanded(rb);
+  };
+  const candidates = (Array.isArray(comments) ? comments : []).filter((c) => Date.parse(c?.created_at) >= since && landed(c));
+  return candidates.length ? candidates[candidates.length - 1] : null;
+}
+
+/**
+ * What a relay outcome that is not success means for THIS tool's register.
+ * Pure. A refused dispatch is no act at all (3); a run that completed without
+ * success is a write the platform did not keep whole (4 — go READ); no run,
+ * or no completion, is UNCONFIRMED (6).
+ */
+export function relayExitFor(result) {
+  if (result?.state === 'refused') return EXIT_PREREQUISITE_NOT_MET;
+  if (result?.state === 'failure') return EXIT_NOT_STORED;
+  return EXIT_UNCONFIRMED;
+}
+
+// ---------------------------------------------------------------------------
 // Live layer
 // ---------------------------------------------------------------------------
 
@@ -2684,6 +2733,33 @@ async function writeArtefact(repo, options, body) {
   const patched = await rest(`/repos/${repo}/issues/${options.number}`, { method: 'PATCH', body: { body } });
   const back = await rest(`/repos/${repo}/issues/${options.number}`);
   return { id: options.number, url: back?.html_url ?? patched?.html_url ?? null, writtenAt: back?.updated_at ?? patched?.updated_at ?? null, stored: back?.body };
+}
+
+/**
+ * The same act through the relay: one dispatch, its run, then the stored
+ * body read from the board. Returns the shape `writeArtefact` returns on
+ * success; `{ refused }` when the packed payload failed the validator;
+ * `{ sent }` when the relay did not succeed; `{ sent, unfound }` when the run
+ * succeeded and the board does not show the write.
+ */
+async function writeViaRelay(repo, options, body, route) {
+  const packed = packRequest({ repo, session: route.session, actions: [relayAction(options, body)] });
+  if (!packed.ok) return { refused: packed.errors };
+  const dispatchedAt = Date.now();
+  const sent = await sendFleetWrite(packed.payload, { token: TOKEN });
+  if (!sent.ok) return { sent };
+  try {
+    if (options.mode === 'comment') {
+      const tail = await readCardTail(repo, options.number, dispatchedAt - 60_000);
+      const hit = pickRelayComment(tail.comments, body, dispatchedAt);
+      if (!hit) return { sent, unfound: true };
+      return { id: hit.id, url: hit.html_url ?? null, writtenAt: hit.created_at ?? null, stored: hit.body, sent };
+    }
+    const back = await rest(`/repos/${repo}/issues/${options.number}`);
+    return { id: options.number, url: back?.html_url ?? null, writtenAt: back?.updated_at ?? null, stored: back?.body, sent };
+  } catch (err) {
+    return { sent, unfound: true, error: err?.message ?? 'the read-back threw' };
+  }
 }
 
 /**
@@ -2834,6 +2910,15 @@ async function main(argv) {
     return EXIT_REFUSED;
   }
 
+  // The transport, decided and SAID before anything leaves. A dry run makes no
+  // request, so a route that cannot be resolved is a note there, not a refusal.
+  const route = resolveRoute(process.env);
+  if (route.error && !options.dryRun) {
+    console.error(`post-stamped: PREREQUISITE NOT MET — ${route.error}\n  NOTHING WAS WRITTEN.`);
+    return EXIT_PREREQUISITE_NOT_MET;
+  }
+  console.error(route.error ? `post-stamped: transport undecidable on a live run — ${route.error}` : `post-stamped: transport ${route.transport} — ${route.reason}`);
+
   if (options.dryRun) {
     console.error(
       `post-stamped: DRY RUN — nothing was written. Substituted with \`${rendered.stamp}\` — ` +
@@ -2864,8 +2949,38 @@ async function main(argv) {
   }
 
   let written;
+  let relayed = null;
   try {
-    written = await writeArtefact(repoRes.repo, options, rendered.body);
+    if (route.transport === 'dispatch') {
+      relayed = await writeViaRelay(repoRes.repo, options, rendered.body, route);
+      if (relayed.refused) {
+        console.error(relayRefusalText(relayed.refused));
+        return EXIT_REFUSED;
+      }
+      if (relayed.sent && !relayed.sent.ok) {
+        if (route.requested === 'auto' && relayed.sent.state === 'no-run') {
+          console.error(`post-stamped: ${fallbackText(relayed.sent, 'post-stamped')}`);
+          relayed = null;
+        } else if (relayed.sent.state === 'no-run' || relayed.sent.state === 'timeout') {
+          console.error(unconfirmedText(relayed.sent, 'post-stamped'));
+          return EXIT_UNCONFIRMED;
+        } else {
+          console.error(
+            `post-stamped: relay ${relayed.sent.state === 'refused' ? `REFUSED the dispatch (HTTP ${relayed.sent.status})` : 'run FAILED'} — ${relayed.sent.detail}` +
+              `${relayed.sent.run?.url ? ` ${relayed.sent.run.url}` : ''}. ⛔ Not retried and not fallen back: go READ the run and the card.`,
+          );
+          return relayExitFor(relayed.sent);
+        }
+      } else if (relayed.unfound) {
+        console.error(
+          `post-stamped: UNCONFIRMED — the relay run ${relayed.sent.run?.url ?? relayed.sent.run?.id ?? ''} completed, but ` +
+            `${relayed.error ? `the read-back threw (${relayed.error})` : `no comment created since the dispatch on ${repoRes.repo}#${options.number} stores the body this act sent`}. ` +
+            `Go READ the card; ⛔ do not re-run blind — a second dispatch is a second write. Exit ${EXIT_UNCONFIRMED}.`,
+        );
+        return EXIT_UNCONFIRMED;
+      }
+    }
+    written = relayed ?? (await writeArtefact(repoRes.repo, options, rendered.body));
   } catch (err) {
     // ⛔ Only the WRITE path is classified. A read sends no body, so a size
     // refusal cannot be what it was answered with, and the pre-read above keeps
@@ -2913,6 +3028,8 @@ async function main(argv) {
           drift_minutes: verdict.drift,
           body_mutated: verdict.mutated,
           body_landed: verdict.landed,
+          transport: route.transport,
+          relay_run: relayed?.sent?.run?.url ?? null,
           read_back: {
             class: verdict.readBack.class,
             first_difference_byte: verdict.readBack.offset,
@@ -2941,6 +3058,7 @@ async function main(argv) {
         ...verdict.lines,
         ...(unread ? [unreadPassText(unread)] : []),
         `  substitutions: ${substitutionSummary(rendered)}`,
+        ...(relayed ? [`  transport: dispatch — via the relay run ${relayed.sent?.run?.url ?? relayed.sent?.run?.id ?? ''}`] : []),
       ].join('\n'),
     );
   }
@@ -2983,8 +3101,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the two positions: a declaration renders as bare digits, and the patrol reads digits': 17,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 20,
+  'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 12,
 });
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -3999,6 +4118,33 @@ export function selfTest() {
     t('↔ owner coupling: the id pattern and the `none` are `check-half-states.mjs`\'s own spellings, read off its source', ownerSource.includes('/^[1-9]\\d*$/') && ownerSource.includes("'none'") && THREAD_READ_VALUE.source.includes('[1-9]\\d*') && THREAD_READ_VALUE.test('none'));
     t('structural: the CLI runs this on `--comment` only, ⛔ never on a card body, and every reader is imported, ⛔ none restated', /const keyed = options\.mode === 'comment' \? claimKeyedLineRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && new RegExp('function\\s+(claimSeatNumber|threadReadField|readClause2Line)\\b').test(stampSource) === false);
     t('the refusal names all three readers, and that no flag turns it off', ['claimSeatNumber', 'h50ThreadReadMismatch', 'readClause2Line', 'No flag turns it off'].every((s) => keyedLineRefusalText(claimKeyedLineRefusals(MISLAID_SEAT)).includes(s)));
+  }
+
+  // ── the relay transport ──────────────────────────────────────────────────
+  battery('the relay transport: the same act as one op, the comment found on the board, the exit register kept apart');
+  {
+    const body = 'A stamped body.\n';
+    t('a comment becomes ONE `comment` op on the card', JSON.stringify(relayAction({ mode: 'comment', number: 17 }, body)) === JSON.stringify({ op: 'comment', issue: 17, body }));
+    t('a body rewrite becomes ONE `issue_patch` op carrying only the body', JSON.stringify(relayAction({ mode: 'body', number: 17 }, body)) === JSON.stringify({ op: 'issue_patch', issue: 17, body }));
+    const NOW = Date.UTC(2026, 8, 22, 9, 4, 0);
+    const at = (s) => new Date(NOW + s * 1000).toISOString();
+    const comments = [
+      { id: 1, body, created_at: at(-3600) },
+      { id: 2, body: 'another seat\'s comment', created_at: at(20) },
+      { id: 3, body: `${body.replace(/\n$/, '')}${PLATFORM_COMMENT_FOOTER}`, created_at: at(30) },
+    ];
+    t('the newest comment since the dispatch whose stored body is the sent one is picked — the platform footer counts as landed', pickRelayComment(comments, body, NOW)?.id === 3);
+    t('…a comment from before the dispatch is never it, however equal', pickRelayComment([comments[0]], body, NOW) === null);
+    t('…another body is never it', pickRelayComment([comments[1]], body, NOW) === null);
+    t('…a mutated body is never it', pickRelayComment([{ id: 4, body: 'A stamped body, edited.', created_at: at(5) }], body, NOW) === null);
+    t('…and a minute of clock slack before the dispatch is allowed', pickRelayComment([{ id: 5, body, created_at: at(-30) }], body, NOW)?.id === 5);
+    t('no comments at all is null, not a crash', pickRelayComment(null, body, NOW) === null && pickRelayComment([], body, NOW) === null);
+    t('a refused dispatch is exit 3 (no act at all)', relayExitFor({ state: 'refused' }) === EXIT_PREREQUISITE_NOT_MET);
+    t('a run that completed without success is exit 4 (go READ)', relayExitFor({ state: 'failure' }) === EXIT_NOT_STORED);
+    t('no run, or no completion, is exit 6 UNCONFIRMED', relayExitFor({ state: 'no-run' }) === EXIT_UNCONFIRMED && relayExitFor({ state: 'timeout' }) === EXIT_UNCONFIRMED);
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    const mainSource = ownSource.slice(ownSource.indexOf('async function main(argv)'), ownSource.indexOf('// --self-test — offline'));
+    t('structural: in main a dry run returns before the relay can be reached, and ONE read-back verdict serves both transports', mainSource.indexOf('if (options.dryRun) {') < mainSource.indexOf('await writeViaRelay(') && (mainSource.match(/readBackVerdict\(\{/g) ?? []).length === 1);
   }
 
   // The floor, evaluated last: a battery that stops running names itself here.

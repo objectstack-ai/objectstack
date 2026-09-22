@@ -112,6 +112,19 @@
  * does not retry — and exits 4 naming the card and exactly which steps landed.
  * Continuing would turn one half-state into a page of them.
  *
+ * ## The transport — `OS_FLEET_TRANSPORT` direct | dispatch | auto
+ *
+ * A cloud seat container cannot write as the fleet directly, so each of the
+ * three writes takes the fleet-write relay there: the comment through
+ * `post-stamped.mjs` (the child resolves its own transport from the same
+ * environment), the label write through `runLabelWrite` (handed THIS run's
+ * route, so one decision serves both), and the close as ONE dispatch carrying
+ * `issue_patch` — then the card is READ BACK, which is the same check the
+ * direct `PATCH` answer gets. `auto` (the default) takes `dispatch` in a cloud
+ * seat container and `direct` elsewhere, and says which. A relay outcome that
+ * is not success on the close is a HALF-WRITE (the comment and the label
+ * landed): the run stops there, exit 4, naming the run.
+ *
  * ## Exit codes — capture them BEFORE any pipe
  *
  *   0  every non-skipped card landed all three writes (a run of all-skips too).
@@ -140,6 +153,8 @@ import {
   proxyRoute,
   resolveSweepRepo,
 } from './check-half-states.mjs';
+import { fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { classifyHttp, parseOptions as parseLabelWriteOptions, runLabelWrite } from './label-write.mjs';
 import { isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
 import {
@@ -550,6 +565,8 @@ export async function runCloseCards(options, deps = {}) {
   };
 
   const { repo, numbers, commentFile, reason, expectState, skipPrReferenced, dryRun } = options;
+  const route = deps.route ?? resolveRoute(process.env);
+  const send = deps.send ?? sendFleetWrite;
 
   const postComment =
     deps.postComment ??
@@ -573,7 +590,7 @@ export async function runCloseCards(options, deps = {}) {
     (async ({ issue, remove }) => {
       const parsed = parseLabelWriteOptions(['--repo', repo, '--issue', String(issue), '--remove', remove]);
       if (!parsed.ok) return { exit: EXIT_USAGE, detail: parsed.error };
-      const res = await runLabelWrite(parsed.options, { log: (line) => record(`      ${line}`) });
+      const res = await runLabelWrite(parsed.options, { log: (line) => record(`      ${line}`), route, send: deps.send });
       return { exit: res.exit, detail: '' };
     });
 
@@ -587,6 +604,12 @@ export async function runCloseCards(options, deps = {}) {
       `reason \`${reason}\` · expect-state \`${expectState}\` · open-PR skip ${skipPrReferenced ? 'ON' : 'OFF'}` +
       `${skipPrReferenced ? '' : ' (⛔ declared off: a card an open PR references will be closed under it)'}`,
   );
+  if (route.error) {
+    record(`close-cards: PREREQUISITE NOT MET — ${route.error}`);
+    record('⛔ NOTHING was read and nothing was written.');
+    return result(EXIT_PREREQUISITE, { transport: route.transport });
+  }
+  record(`close-cards: transport ${route.transport} — ${route.reason}`);
 
   for (const issue of numbers) {
     const base = `/repos/${repo}/issues/${issue}`;
@@ -664,8 +687,38 @@ export async function runCloseCards(options, deps = {}) {
 
     // ④ close — and READ THE ANSWER BACK. A 200 whose body does not say
     // `closed` is not a close, and a close recorded under another reason is a
-    // wrong record rather than a near miss.
-    const patched = await call(base, { method: 'PATCH', body: { state: 'closed', state_reason: reason } });
+    // wrong record rather than a near miss. Under the relay the close is ONE
+    // dispatch and the answer read back is the card itself.
+    let patched = null;
+    if (route.transport === 'dispatch') {
+      const packed = packRequest({ repo, session: route.session, actions: [{ op: 'issue_patch', issue, state: 'closed', state_reason: reason }] });
+      if (!packed.ok) {
+        record(relayRefusalText(packed.errors));
+        record(halfWriteText({ issue, repo, landed: ['comment', 'label'], failedStep: 'close', detail: 'the relay payload was refused before any dispatch' }));
+        return result(EXIT_HALF_WRITE, { stoppedAt: issue, landed: ['comment', 'label'], transport: route.transport });
+      }
+      record(`#${issue} close (relay) — ONE dispatch, request ${packed.payload.request_id}: issue_patch closed \`${reason}\``);
+      const sent = await send(packed.payload, { token: TOKEN, log: (line) => record(`      ${line}`) });
+      if (sent.ok) {
+        const back = await call(base, {});
+        patched = { ...back, call: `${back.call} (read back after relay run ${sent.run?.url ?? sent.run?.id ?? ''})` };
+      } else if (route.requested === 'auto' && sent.state === 'no-run') {
+        record(`      ${fallbackText(sent, 'close-cards')}`);
+      } else {
+        if (sent.state === 'no-run' || sent.state === 'timeout') record(unconfirmedText(sent, 'close-cards'));
+        record(
+          halfWriteText({
+            issue,
+            repo,
+            landed: ['comment', 'label'],
+            failedStep: 'close',
+            detail: `relay ${sent.state}${sent.run?.url ? ` ${sent.run.url}` : ''}${sent.detail ? ` — ${sent.detail}` : ''}`,
+          }),
+        );
+        return result(EXIT_HALF_WRITE, { stoppedAt: issue, landed: ['comment', 'label'], transport: route.transport, relay: sent });
+      }
+    }
+    if (patched === null) patched = await call(base, { method: 'PATCH', body: { state: 'closed', state_reason: reason } });
     const patchVerdict = classifyHttp({ status: patched.status, op: 'card-patch', rateRemaining: patched.rateRemaining });
     if (patchVerdict !== 'ok' || patched.json?.state !== 'closed' || patched.json?.state_reason !== reason) {
       record(
@@ -723,8 +776,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the unreadable card: a verdict taken from nothing is not taken': 7,
   'the dry run: a plan that proves it wrote nothing': 7,
   'the sibling tools: driven, never re-implemented': 8,
+  'the relay transport: the close as ONE dispatch read back from the card, the label write on the same route, a relay miss is a half-write': 8,
 });
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -794,11 +848,34 @@ export function fakeApi(initial = {}) {
 }
 
 /** Drive the whole run offline: a fake board, a stubbed comment poster and a stubbed label write. */
+const DIRECT_ROUTE = Object.freeze({ requested: 'direct', transport: 'direct', reason: 'self-test: direct', error: null, session: null });
+
+/** A fake relay: `success` applies the `issue_patch` to the fake card the run reads back; the other outcomes answer `sendFleetWrite`'s shapes. */
+function fakeRelay(api, outcome, sent) {
+  const RUN = { id: 42, url: 'https://github.test/run/42', status: 'completed', conclusion: 'success' };
+  return async (payload) => {
+    sent.push(payload);
+    const base = { requestId: payload.request_id, startMs: 1, ceilingMs: 2, status: 204, verdict: 'ok', detail: '' };
+    if (outcome === 'no-run') return { ...base, state: 'no-run', ok: false, run: null, detail: 'no run appeared' };
+    if (outcome === 'timeout') return { ...base, state: 'timeout', ok: false, run: { ...RUN, status: 'in_progress', conclusion: null } };
+    if (outcome === 'failure') return { ...base, state: 'failure', ok: false, run: { ...RUN, conclusion: 'failure' }, detail: 'conclusion failure' };
+    for (const a of payload.actions) {
+      const card = api.cards.get(a.issue);
+      if (card && a.op === 'issue_patch') {
+        if ('state' in a) card.state = a.state;
+        if ('state_reason' in a) card.state_reason = a.state_reason;
+      }
+    }
+    return { ...base, state: 'success', ok: true, run: RUN, detail: 'conclusion success' };
+  };
+}
+
 async function driveOffline(options, initial = {}, stubs = {}) {
   const api = fakeApi(initial);
   const posted = [];
   const labelled = [];
   const out = [];
+  const sent = [];
   const commentExits = [...(stubs.commentExits ?? [])];
   const labelExits = [...(stubs.labelExits ?? [])];
   const res = await runCloseCards(
@@ -814,6 +891,8 @@ async function driveOffline(options, initial = {}, stubs = {}) {
     {
       call: api.call,
       log: (line) => out.push(line),
+      route: stubs.route ?? DIRECT_ROUTE,
+      send: stubs.relay ? fakeRelay(api, stubs.relay, sent) : undefined,
       postComment: async ({ issue }) => {
         const exit = commentExits.length ? commentExits.shift() : 0;
         posted.push({ issue, exit });
@@ -826,7 +905,7 @@ async function driveOffline(options, initial = {}, stubs = {}) {
       },
     },
   );
-  return { res, api, posted, labelled, out, text: out.join('\n') };
+  return { res, api, posted, labelled, out, sent, text: out.join('\n') };
 }
 
 const QUEUED = (number, extra = {}) => ({ [number]: { state: 'open', labels: ['pm:queue', 'tooling'], assignees: [], timeline: [], ...extra } });
@@ -1006,6 +1085,27 @@ export async function selfTest() {
   // The floor runs BEFORE the verdict, so a success line can only be printed by
   // a run in which every declared battery registered its cases.
   const floorProblems = [];
+  // ── the relay transport ──────────────────────────────────────────────────
+  battery('the relay transport: the close as ONE dispatch read back from the card, the label write on the same route, a relay miss is a half-write');
+  {
+    const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
+    const dispatchRoute = (requested = 'dispatch') => ({ requested, transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: SESSION });
+    const ok = await driveOffline({ numbers: [61] }, { cards: QUEUED(61) }, { route: dispatchRoute(), relay: 'success' });
+    t('under dispatch the close lands through ONE relay dispatch and the card reads back closed, exit 0', [ok.res.exit, ok.res.counts.closed, ok.api.cards.get(61).state, ok.api.cards.get(61).state_reason], [EXIT_OK, 1, 'closed', 'not_planned']);
+    t('…the payload carries issue_patch closed with the reason, the session and the target', [ok.sent.length, ok.sent[0].session, ok.sent[0].repo, ok.sent[0].actions], [1, SESSION, 'objectstack-ai/objectstack', [{ op: 'issue_patch', issue: 61, state: 'closed', state_reason: 'not_planned' }]]);
+    t('…and no PATCH left this process — the reads and a read-back only', ok.api.calls.map((c) => c.kind), ['read', 'timeline', 'read']);
+    t('the transport is printed on every run, direct included', ok.text.includes('transport dispatch') && (await driveOffline({ numbers: [61] }, { cards: QUEUED(61) })).text.includes('transport direct'));
+    const timedOut = await driveOffline({ numbers: [62, 63] }, { cards: { ...QUEUED(62), ...QUEUED(63) } }, { route: dispatchRoute(), relay: 'timeout' });
+    t('a close whose run did not complete is UNCONFIRMED and a HALF-WRITE: exit 4 naming the run, the next card never read', [timedOut.res.exit, timedOut.text.includes('UNCONFIRMED') && timedOut.text.includes('https://github.test/run/42'), timedOut.res.counts.read], [EXIT_HALF_WRITE, true, 1]);
+    const noRunAuto = await driveOffline({ numbers: [64] }, { cards: QUEUED(64) }, { route: dispatchRoute('auto'), relay: 'no-run' });
+    t('under AUTO, no run falls back to the direct PATCH — said out loud — and the card closes', [noRunAuto.res.exit, noRunAuto.text.includes('Falling back to DIRECT'), noRunAuto.api.calls.some((c) => c.kind === 'patch'), noRunAuto.api.cards.get(64).state], [EXIT_OK, true, true, 'closed']);
+    const failed = await driveOffline({ numbers: [65] }, { cards: QUEUED(65) }, { route: dispatchRoute('auto'), relay: 'failure' });
+    t('⛔ a run that FAILED is never fallen back from, even under auto: half-write, no PATCH', [failed.res.exit, failed.api.calls.some((c) => c.kind === 'patch')], [EXIT_HALF_WRITE, false]);
+    const badRoute = await driveOffline({ numbers: [66] }, { cards: QUEUED(66) }, { route: { requested: 'dispatch', transport: 'dispatch', reason: '', error: 'OS_FLEET_SESSION is absent', session: null } });
+    t('a route with an error is exit 3 before the first card is read', [badRoute.res.exit, badRoute.api.calls.length], [EXIT_PREREQUISITE, 0]);
+    t('structural: the label write is handed THIS run\'s route, so one decision serves both writes', readFileSync(SELF_PATH, 'utf8').includes('runLabelWrite(parsed.options, { log: (line) => record(`      ${line}`), route, send: deps.send })'));
+  }
+
   const declared = Object.keys(SELF_TEST_BATTERIES);
   if (declared.length < SELF_TEST_BATTERY_FLOOR) {
     floorProblems.push(`SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned ${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`);
