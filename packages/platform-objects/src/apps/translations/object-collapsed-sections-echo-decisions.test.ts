@@ -878,18 +878,29 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     expect(FORM_SECTIONS.length).toBe(4);
     expect(COLLAPSED_SECTIONS).toEqual(['capabilities', 'advanced']);
     expect(OPEN_SECTIONS).toEqual(['basics', 'fields']);
-    // 45 leaves: 9 this round decides, 2 already authored, 32 deferred.
-    expect(PANEL_LEAVES.length).toBe(45);
+    // 55 leaves: 9 this round decided, 2 already authored, 32 deferred, and 12
+    // that arrived with #19331. That card gave the object form's five declared
+    // top-level scalars an `advanced` row each — `ownership`, `sharingModel`,
+    // `managedBy`, `editMode`, `fileAccessDelegate`, a label and a help text
+    // apiece — and the same card authored all thirty of their translated leaves,
+    // so the ratchet below still reads zero. The population is DERIVED from the
+    // form, so the arrival needed no edit here; this count is the measured fact
+    // that moved with it, and it is what makes a SIXTEENTH row noticeable.
+    expect(PANEL_LEAVES.length).toBe(55);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(9);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(36);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(46);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {
     // 94 leaves are left out. The sharpest single exclusion is a key #19403's
     // own body samples as the echoing field-editor panel: it is OUT, and it is
     // already authored, so a walk that wrongly swept it in would not go red.
-    expect(OPEN_LEAVES.length).toBe(94);
+    // 96 since #19331 gave `basics` its `nameField` row — the ADR-0079
+    // record-title pointer the schema declared and no control offered — whose
+    // label and help text are authored in all three locales by that same card,
+    // so the `openEchoes` reading below is unchanged at zero.
+    expect(OPEN_LEAVES.length).toBe(96);
     expect(PANEL_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(false);
     expect(OPEN_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(true);
     for (const path of ['name', 'label', 'fields', 'fields.valueDomain', 'fields.deleteBehavior', 'fields.expression']) {
