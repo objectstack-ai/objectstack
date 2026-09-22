@@ -6,6 +6,7 @@ import {
   analyzeRelationshipTraversals,
   findTraversalConflicts,
 } from './relationship-traversal';
+import { validateExpression } from './validate';
 
 /** Shorthand: the related fields named on one FK, as a sorted array. */
 const hop = (source: string, field: string): string[] => {
@@ -137,5 +138,60 @@ describe('findTraversalConflicts — what the authoring layer refuses', () => {
   it('accepts a bare FK comparison on its own', () => {
     const a = analyzeRelationshipTraversals("record.crm_account == 'acc_1'")!;
     expect(findTraversalConflicts(a, isLookup)).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The authoring-time half: the refusal an author actually meets. `fieldTypes`
+// is what tells a REFERENCE field from an object-valued one, and
+// `@objectstack/lint` already supplies it at every record-scoped site.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('validateExpression — refuses the unserviceable traversal shapes', () => {
+  const schema = {
+    objectName: 'crm_opportunity',
+    fields: ['account', 'amount', 'address'],
+    fieldTypes: { account: 'lookup', amount: 'currency', address: 'object' },
+    scope: 'record' as const,
+  };
+
+  it('accepts the plain one-hop traversal — the shape this card adds', () => {
+    const r = validateExpression('predicate', "record.account.type == 'partner'", schema);
+    expect(r.ok).toBe(true);
+  });
+
+  it('refuses a reference field read BOTH through the relationship and bare', () => {
+    const r = validateExpression(
+      'predicate',
+      "record.account.type == 'partner' && record.account == 'acc_1'",
+      schema,
+    );
+    expect(r.ok).toBe(false);
+    const message = r.errors.map((e) => e.message).join('\n');
+    expect(message).toContain('record.account.id');
+  });
+
+  it('refuses a read deeper than one hop', () => {
+    const r = validateExpression('predicate', 'record.account.owner.email != null', schema);
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e) => e.message).join('\n')).toContain('ONE hop');
+  });
+
+  // The narrowing must not reach a field whose traversal works today.
+  it('leaves an object-valued field alone', () => {
+    const r = validateExpression(
+      'predicate',
+      "record.address.city == 'SF' && record.address != null",
+      schema,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('checks nothing when the caller supplies no fieldTypes', () => {
+    const r = validateExpression(
+      'predicate',
+      "record.account.type == 'partner' && record.account == 'acc_1'",
+      { objectName: 'crm_opportunity', fields: ['account'], scope: 'record' },
+    );
+    expect(r.ok).toBe(true);
   });
 });

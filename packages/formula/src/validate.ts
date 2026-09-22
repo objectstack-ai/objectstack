@@ -26,6 +26,8 @@ import {
   type FieldCelType,
 } from './cel-engine';
 import { templateEngine } from './template-engine';
+import { analyzeRelationshipTraversals, findTraversalConflicts } from './relationship-traversal';
+import { REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 // #13594 — the one reader of cel-js's `found no matching overload for '…'`
 // template. Both this module (which asks whether the name is ADVERTISED, to word
 // a hint) and `firstUnknownFunctionCall` (which asks whether the environment
@@ -851,6 +853,21 @@ export function validateExpression(
         const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened');
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
+    }
+  }
+  // [#18682] Relationship traversal: refuse the shapes that cannot be served
+  // as written. Needs `fieldTypes` to tell a REFERENCE field from an
+  // object-valued one — `record.address.city` traverses today and must keep
+  // traversing — so a caller that supplies none is not checked, exactly like
+  // the type-soundness pass above.
+  if (schema?.fieldTypes) {
+    const analysis = analyzeRelationshipTraversals(source);
+    if (analysis) {
+      const conflicts = findTraversalConflicts(
+        analysis,
+        (field) => REFERENCE_VALUE_TYPES.has(schema.fieldTypes![field] ?? ''),
+      );
+      for (const conflict of conflicts) errors.push({ source, message: conflict.message });
     }
   }
   return { ok: errors.length === 0, errors, warnings };
