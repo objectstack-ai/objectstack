@@ -1,0 +1,30 @@
+{
+  "number": 19726,
+  "kind": "pull_request",
+  "title": "ci: fleet-write relay workflow (repository_dispatch → App token → executor) and lint wiring for its self-tests",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T11:39:14Z",
+  "updated_at": "2026-09-22T14:10:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19726",
+  "body": "Part of #19701 — the relay workflow (PR A of two). **Depends on PR B (`claude/issue-19701-fleet-write-transport`) landing first**: the workflow's `run:` lines execute `scripts/pm/fleet-write/validate.mjs` and `scripts/pm/fleet-write/execute.mjs` from `main`, and the three `lint.yml` steps added here run `check:pm-fleet-write-*` rows that PR B adds to `package.json`. Kept as a draft for the maintainer to merge by hand once PR B is on `main` (`.github/workflows/**` — seat tokens cannot land workflow changes).\n\n## `.github/workflows/fleet-write.yml`\n\n- Trigger: `repository_dispatch` with `types: [fleet-write]` only. `run-name: fleet-write REQUEST_ID` so a seat's run-poller finds its run by name.\n- `permissions: {}` for the workflow's `GITHUB_TOKEN`; the job re-grants `contents: read` alone (the checkout needs it; `persist-credentials: false`). The run's only write path is the App token of the mint step, which exists only inside the execute step's environment and is revoked by the action's post step.\n- Four steps, no logic of their own: checkout → setup-node 22 (no package manager: the scripts are dependency-free) → `validate.mjs --from-env --github-output` (the payload through `env:`, never interpolated into a `run:` line; a refusal fails the run with every reason in the step summary and zero writes; on success it outputs `repo_name`) → `actions/create-github-app-token@v2` with `app-id: vars.OS_FLEET_APP_ID`, `private-key: secrets.OS_FLEET_PRIVATE_KEY`, `owner: objectstack-ai`, `repositories: STEPS.VALIDATE.OUTPUTS.REPO_NAME`, `permission-issues: write`, `permission-pull-requests: write`, `permission-metadata: read` → `execute.mjs` with the payload, `github.event.sender.login` and the minted token through `env:`.\n- Sender gate, closed op list, caps, stop-at-first-failure and the summary table live in `scripts/pm/fleet-write/` (PR B); this file is the invocation.\n\n## `.github/workflows/lint.yml`\n\nThree steps after the card-closure helper's, spelled like their neighbours: `pnpm check:pm-fleet-write-validate`, `pnpm check:pm-fleet-write-execute`, `pnpm check:pm-fleet-write-dispatch`. `check:self-test-wired` requires the first two the moment `fleet-write.yml` names those scripts; the third is wired for the same reason its siblings are.\n\n## Maintainer's prerequisites for the live probe (from the card, not for this code)\n\n1. Organization secret `OS_FLEET_PRIVATE_KEY` — done 2026-09-22.\n2. Organization variable `OS_FLEET_APP_ID` = `5028251`, visible to objectstack.\n3. App `objectstack-fleet` → repository access **All repositories**.\n\n## Live-probe plan (the director seat's, after this lands and 2–3 exist)\n\nFrom a cloud seat with `OS_FLEET_SESSION=session_…` set: `node scripts/pm/post-stamped.mjs --comment=19701 --file=probe.md` (transport `auto` → `dispatch`). Expected: `POST …/dispatches → 204`, a run named `fleet-write fw-…` appears, completes `success`, the step summary carries one `comment` row, the read-back on the card finds the comment with `user.login == objectstack-fleet[bot]`. Two readings to take: the run start latency (tune `OS_FLEET_DISPATCH_START_MS`, default 90 s) and completion time (tune `OS_FLEET_DISPATCH_TIMEOUT_MS`, default 5 min). If the probe with `automerge_enable` is refused for permissions, add `permission-contents: write` to the mint step — deliberately not pre-granted.\n\n## Verification\n\nRun in the relay worktree at `690954b` (this branch carries only the two workflow files; the gates below judge the workflow tree and the lint wiring): 43 families reconciled with `--ran` — 42 run, 1 NOT MEASURED (`check:type-check-debt`, exit 3, needs the workspace build), 0 unrun; two of the 42 are red on this branch ALONE and green on the combined tree, for the one reason stated at the top: `check-self-test-wired --self-test` keys the three `pnpm check:pm-fleet-write-*` invocations to rows only PR B's `package.json` carries, and `check:pm-dispatch-gates` reports the same three as 'no root script'. Everything else green, including `check:workflow-status-functions`, `check:workflow-step-name-quoting`, `check-step-collectors`, `check-aggregator-roster`, `check:required-contexts`, `check:pm-widening-tells`, `check:nul-bytes`.\n\nThe `yaml` parse of `fleet-write.yml` is exercised by `check:workflow-status-functions` and `check:workflow-step-name-quoting`. `check:self-test-wired` was run against a tree carrying BOTH branches' changes (PR B's scripts plus this workflow) to prove the wiring holds once both land: production run green (229 scripts CI runs ship a `--self-test`, every one run by CI), `--self-test` 73 cases across 11 batteries green; `check:pm-dispatch-gates` on that combined tree 1906/1906 with 0 unreachable families.\n\n## 维护者速读(草稿)\n\n- **改了什么**:新增 `fleet-write.yml`(`repository_dispatch` 监听,四步:校验 → 铸造 App token → 执行),`lint.yml` 加三个自测步骤。\n- **为什么改**:云席位容器拿不到 App 身份(代理替换 Authorization、拒 `/app/**`),只能发 dispatch;这个 workflow 就是「方案 1」的中继,让写入以 `objectstack-fleet[bot]` 落地。\n- **风险与代价**:token 在 runner 上铸、按目标仓与三项权限收窄、步骤结束即撤销;发送者门禁读目标仓权限,无名单变量。回滚 = 删两个文件。⚠️ `permissions: {}` 之下 job 单独给了 `contents: read` 供 checkout。\n- **席位意见**:(留空)\n- **你要做的**:先合 PR B,再人合本 PR;确认组织变量 `OS_FLEET_APP_ID` 与 App 的仓库范围;之后由总监席发一次探针。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VhatbEZCV5JJBoU579UBCG)_"
+}

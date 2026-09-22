@@ -2,8 +2,8 @@
   "number": 18886,
   "kind": "issue",
   "title": "Request for the domain:cli seat: #15638's identity record is a `## Claim` HEADING no marker tool can read, beside assignee os-litant + `pm:queue` — normalise it to a `Claim:` or `Release:` line and settle the assignee (row 1 of #18831)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,16 +12,19 @@
   },
   "labels": [
     "domain:cli",
-    "pm:awaiting-maintainer",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T04:15:48Z",
-  "updated_at": "2026-09-20T14:58:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T10:30:25Z",
+  "closed_at": "2026-09-22T10:30:25Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

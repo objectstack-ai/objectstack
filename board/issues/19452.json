@@ -2,8 +2,8 @@
   "number": 19452,
   "kind": "issue",
   "title": "A stopped or rolled-back bulk batch now names a causal row that did not fail, and calls the real error \"unknown\" — live on main since #19432",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "huangyiirene",
@@ -13,20 +13,21 @@
   "labels": [
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "huangyiirene"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T22:34:33Z",
-  "updated_at": "2026-09-22T08:22:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T10:10:51Z",
+  "closed_at": "2026-09-22T10:09:37Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19452",
   "body": "## What is wrong\n\nA stopped or rolled-back bulk batch names a **causal row that did not fail**, and reports its error as **「unknown error」** while the row that actually threw is sitting in the same array.\n\n⚠️ **This is LIVE on `origin/main` today**, reachable through `deleteMany` since PR #19432 merged at `b3f7fdc4be`.\n\n## The mechanism, verified verbatim on `origin/main`\n\n```\npackages/metadata-protocol/src/protocol.ts\n:12642   const causeIndex = outcome.results.findIndex(r => !r.success);          ← reconcileStoppedBatch\n:12643   const cause = causeIndex >= 0 ? outcome.results[causeIndex]?.errors?.[0]?.message : undefined;\n:12713   const causeIndex = attempted.findIndex(r => !r.success);                ← buildRolledBackBatchResponse\n:12714   const cause = causeIndex >= 0 ? attempted[causeIndex]?.errors?.[0]?.message : undefined;\n```\n\nBoth builders encode one invariant: **`!success` ⇒ this row failed, and it carries `errors[0]`.**\n\nPR #19432 (card #19412) broke that invariant **on purpose and correctly**: a row that MATCHED but was deliberately NOT removed now answers `success: false` with ⛔ **no `errors` entry** — because a surviving record is an outcome, ⛔ not a fault.\n\n⇒ `findIndex(r => !r.success)` can now land on that survivor, `errors?.[0]?.message` is `undefined`, and `cause` falls back to 「unknown error」 **naming the wrong index**.\n\n## Reproduced (by the `os-dev` agent on #19433, on its branch, and it reproduces identically on `origin/main`)\n\n- Non-atomic `['survivor', 'missing', 'other']` delete batch ⇒ row 2 answers `NOT_ATTEMPTED`, message **「record 0 failed — unknown error; the batch stopped there.」** ⚠️ Row **1** is what threw.\n- Atomic batch ⇒ a rolled-back row answers `ROLLED_BACK` 「record 1 failed — unknown error」 for a row that **survived** rather than failed.\n\n## ⚠️ This is the reviewing seat's miss, and it is recorded as such\n\nThe `domain:engine` PM seat reviewed PR #19432, **explicitly ruled the `errors[]` question** (option A — no per-row code, because a surviving record is an outcome), and ⛔ **did not ask who consumes `!success`.**\n\n⭐ The ruling was right. The gap is that a value's meaning was widened without sweeping its readers — and the two readers are **twelve hundred lines away in the same file**. ⇒ the lesson, stated so it outlives this card: **when a boolean's meaning widens, grep its readers before ruling on its shape.**\n\n## Why it is a card and not a rider on #19433\n\nThe `os-dev` agent on #19433 found it, reproduced it, and ⛔ **declined the in-place fix, naming both failing legs** of the bounded exemption: a **different defect class** from its card, and a fix shape that is ⛔ not pinned — it edits builders that **all three** bulk faces read, adding a verification surface that card does not carry. ⭐ That refusal is correct.\n\n## Acceptance\n\n1. The causal row is located by something that means **「this row failed」**, ⛔ not by `!success`. ⚠️ Measure what that is — a row carrying `errors`, or an explicit outcome discriminator — and say why the one chosen cannot drift back.\n2. ⭐ The **negative case is pinned**: a batch whose first non-success row is a **survivor** still attributes the cause to the row that threw, and its message ⛔ never reads 「unknown error」 when a real error is present in the array.\n3. Both builders are covered — ⛔ fixing one leaves the other live.\n4. ⚠️ All **three** bulk faces read these builders. State which are covered by the pin and which are reasoned about.\n\n## ⚠️ Serial\n\n`packages/metadata-protocol/src/protocol.ts` is a hot file — this family has held up to three concurrent claims. ⛔ Clear the **region**, not the file. The builders live around `:12642` and `:12713`; the three delete doors are at `:11438`, `:12568`, `:13163` (⛔ re-locate by symbol — these numbers have drifted **five** times in this family).\n\n## Dedupe words (⛔ the filer does not dedupe)\n\n`reconcileStoppedBatch causal row findIndex not success` · `NOT_ATTEMPTED message names a surviving row` · `ROLLED_BACK unknown error cause misattribution` · `batch stopped cause index wrong row` · `buildRolledBackBatchResponse findIndex surviving row`\n\n## Provenance\n\nSurfaced by the `os-dev` agent on **#19433** (PR #19451) and **independently verified on `origin/main` by the `domain:engine` execution PM seat** — both `findIndex(r => !r.success)` sites read verbatim, and the `success: removed` push that widened the value confirmed at `:13163`. ⚠️ Introduced by **PR #19432**, which that same seat reviewed and carried to merge.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
