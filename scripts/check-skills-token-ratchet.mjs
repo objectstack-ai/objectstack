@@ -472,6 +472,33 @@ export const CEILINGS = new Map([
   ['skills/objectstack-ui/rules/navigation.md', 2273],
   ['skills/objectstack-ui/rules/pages.md', 5501],
 
+  // ── 2026-09-22 evals fixtures — decision batch #213 item 2, PR #19721 ────
+  // Every published skill gained `evals/*.json` in the objectui fixture shape.
+  // The maintainer ruled the work in batch #213, verbatim and untranslated:
+  // 「1 2 4 同意」 on item 2 「objectstack 各 skill 先补 3 题 evals(复用 objectui 的
+  // json 形状),先于第 1 项,好量化『切了没变差』」. The eleven files landed
+  // unpriced on 02b931d2 and this gate redded on every one of them, as the
+  // header says it must; the maintainer's follow-up word, recorded as issue
+  // comment 5776586573 (2026-09-22), verbatim and untranslated —
+  // 「天花板行按照你的意见就行」 — adopts pricing them in. So: one row per file,
+  // each an INITIAL measurement taken on that same tree in the convention
+  // above (re-measured unchanged on the commit that adds the rows) and pinned
+  // AT it — zero headroom, on the same terms as the #12392 extension rows and
+  // the #14296 「NEW FILE … pinned at its landed count」 rows. Nothing else
+  // moves: no existing row is raised, the population is unchanged, and
+  // `evals/**` stays priced.
+  ['skills/objectstack-ai/evals/skills-tools-knowledge.json', 1074],
+  ['skills/objectstack-api/evals/endpoints-auth-routes.json', 1042],
+  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 1255],
+  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 894],
+  ['skills/objectstack-data/evals/objects-fields-relationships.json', 946],
+  ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1046],
+  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1004],
+  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1211],
+  ['skills/objectstack-query/evals/filters-pagination-search.json', 955],
+  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 1505],
+  ['skills/objectstack-upgrade/evals/protocol-major-upgrade.json', 1033],
+
   // the remaining skills' eval notes
 ]);
 
