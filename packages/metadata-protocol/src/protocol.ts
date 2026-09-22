@@ -21979,7 +21979,17 @@ export class ObjectStackProtocolImplementation implements
                             `DELETE /api/v1/metadata/object/${record.name}.`,
                         );
                     } else {
-                        console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
+                        // The declared `code` is printed, not left to the prose.
+                        // A LOG LINE has no envelope beside it — the `code`
+                        // axis a caller reads does not exist here — so the one
+                        // machine-readable token an operator can grep for has
+                        // to be IN the line. Until the refusal messages stopped
+                        // restating their own code, this line inherited the
+                        // token by accident from the message it interpolates;
+                        // now it names it deliberately, which is also what the
+                        // sibling branch above already does.
+                        const hydrateCode = (e as any)?.code;
+                        console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}${typeof hydrateCode === 'string' && hydrateCode.length > 0 ? ` (code=${hydrateCode})` : ''}`);
                     }
                 }
             }
