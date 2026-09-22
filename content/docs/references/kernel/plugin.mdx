@@ -31,7 +31,7 @@ const result = PluginSchema.parse(data);
 | **staticPath** | `string` | optional | Absolute path to static assets (Required for type="ui") |
 | **slug** | `string` | optional | URL path segment (Required for type="ui") |
 | **default** | `boolean` | optional | Serve at root path (Only one "ui" plugin can be default) |
-| **version** | `string` | optional | Version: major.minor.patch, with an optional -prerelease and an optional +build suffix. Looser than SemVer 2.0.0 — leading zeroes (01.1.1) and empty identifiers (1.0.0-alpha..1) are accepted. |
+| **version** | `string` | optional | Version (SemVer 2.0.0 — major.minor.patch with an optional -prerelease and an optional +build suffix; e.g. 1.2.3, 2.0.0-beta.1, 1.0.0-rc.1+exp.sha.5114f85) |
 | **description** | `string` | optional |  |
 | **author** | `string` | optional |  |
 | **homepage** | `string` | optional |  |
