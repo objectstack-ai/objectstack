@@ -429,7 +429,7 @@ describe('[#10886] [GUARD] `duplicatePackage`’s `failed[].error` is the SOLE c
 
         expect(r.failedCount).toBe(1);
         expect(r.failed[0]).toMatchObject({ type: 'object', name: 'crm_task' });
-        expect(r.failed[0].error).toContain('[destructive_change]');
+        expect(r.failed[0].error).toContain('would drop or transform existing data');
     });
 
     it('⛔ carries the per-field prose with NO structured channel beside it', async () => {
@@ -525,7 +525,7 @@ describe('[#11015] [GUARD] the destructive remedy clause is face-aware', () => {
         // findings prose stays, because `failed[].error` is its sole carrier on
         // this face — is untouched, and this is the assertion that says so.
         expect(r.failed[0].error).toContain(FINDING_PROSE);
-        expect(r.failed[0].error).toContain('[destructive_change]');
+        expect(r.failed[0].error).toContain('would drop or transform existing data');
     });
 
     it('the refusal still REFUSES — this is a message repair, not a behaviour one', async () => {
@@ -616,7 +616,7 @@ describe('[#11095] [GUARD] the `meta-dispatch` face prescribes a remedy that doo
         // it was untouched by #11015: only the remedy clause is face-aware, and
         // the findings the refusal renders stay whole on every face.
         expect(err.message).toContain(FINDING_PROSE);
-        expect(err.message).toContain('[destructive_change]');
+        expect(err.message).toContain('would drop or transform existing data');
     });
 
     it('⛔ the three faces are a SWITCH — repairing one did not move the others', async () => {
