@@ -977,7 +977,7 @@ export function selfTest() {
     what: 'a ledger row whose write call left the tree',
   };
   const refuse = (unledgered, staleLedgerRows) =>
-    censusRefusals({ ...census, unledgered, staleLedgerRows });
+    censusRefusals({ ...census, unledgered, staleLedgerRows, undefendedSubtractions: [] });
 
   t('a census that could not place a receiver is a finding',
     refuse([unplaceableSite], []).some((p) => p.startsWith('[untyped-receiver]')));
