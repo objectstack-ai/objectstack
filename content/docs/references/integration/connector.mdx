@@ -55,17 +55,20 @@ construction. ⚠️ Retrying a `429` is not throttling it: a retry policy
 spaces out the calls you already made, it does not cap the rate, so the
 sentence above about rate limiting stands unchanged.
 
-⛔ **Two exceptions, both still inert and both still `dead` in
-`packages/spec/liveness/connector.json`.** `health.circuitBreaker`: every
-sub-key is unread and no breaker ever opens — implement circuit breaking in
-the connector provider. `connectionTimeoutMs`: it is carried to a provider
-factory but the platform does not enforce it, because a WHATWG `fetch`
+⛔ **One exception remains, still inert and still `dead` in
+`packages/spec/liveness/connector.json`:** `health.circuitBreaker` — every
+sub-key is unread and no breaker ever opens; implement circuit breaking in
+the connector provider.
+
+`connectionTimeoutMs` used to be the second exception and is now **removed**
+(ADR-0049, the narrower second decision that surface was owed): it was
+carried to a provider factory but never applied as a deadline anywhere, and
+it is not implementable where it was declared, because a WHATWG `fetch`
 exposes one `AbortSignal` over the whole operation and never the connection
-phase alone; `requestTimeoutMs` is the bound the platform can keep, and
-ADR-0049 owes this one key a narrower decision. The full removal reasoning
-for the rate-limit shape is recorded at the removal site: the "REMOVED:
-outbound rate limiting" block in `integration/connector.zod.ts`, and
-`packages/spec/docs/SYNC_ARCHITECTURE.md`.
+phase alone. `requestTimeoutMs` is the bound the platform can keep. The full
+removal reasoning is recorded at each removal site: the "REMOVED:
+`connectionTimeoutMs`" and "REMOVED: outbound rate limiting" blocks in
+`integration/connector.zod.ts`, and `packages/spec/docs/SYNC_ARCHITECTURE.md`.
 
 **Field mapping does not transform values.** This header used to offer "field
 mapping and transformations"; only the first half was ever true.
@@ -200,7 +203,7 @@ Circuit breaker configuration
 | **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Webhook configurations  |
 | **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **retryConfig** | `{ strategy: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts: number; initialDelayMs: number; maxDelayMs: number; … }` | optional | Retry configuration |
-| **connectionTimeoutMs** | `number` | optional (default: `30000`) | Connection timeout in ms |
+| **connectionTimeoutMs** | `never` | optional | [REMOVED] `connector.connectionTimeoutMs` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — the platform never honoured it and cannot honour it where it was declared: a connector's outbound call is a WHATWG `fetch`, whose only cancellation surface is one `AbortSignal` over the whole operation, so nothing there observes the connection phase separately, and the value only ever travelled (onto the reported def and the materialization fingerprint) without ever bounding a connect. Delete the key. Use `requestTimeoutMs` for the deadline the platform does keep — it is applied as `resilientFetch`'s per-attempt timeout — and bound the connect phase at a connector provider or upstream gateway on a transport that can separate the phases. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **requestTimeoutMs** | `number` | optional (default: `30000`) | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional (default: `"inactive"`) | Connector status |
 | **enabled** | `boolean` | optional (default: `true`) | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor. |
@@ -684,7 +687,7 @@ Connector type
 | **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Webhook configurations  |
 | **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **retryConfig** | `{ strategy: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts: number; initialDelayMs: number; maxDelayMs: number; … }` | optional | Retry configuration |
-| **connectionTimeoutMs** | `number` | optional (default: `30000`) | Connection timeout in ms |
+| **connectionTimeoutMs** | `never` | optional | [REMOVED] `connector.connectionTimeoutMs` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — the platform never honoured it and cannot honour it where it was declared: a connector's outbound call is a WHATWG `fetch`, whose only cancellation surface is one `AbortSignal` over the whole operation, so nothing there observes the connection phase separately, and the value only ever travelled (onto the reported def and the materialization fingerprint) without ever bounding a connect. Delete the key. Use `requestTimeoutMs` for the deadline the platform does keep — it is applied as `resilientFetch`'s per-attempt timeout — and bound the connect phase at a connector provider or upstream gateway on a transport that can separate the phases. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **requestTimeoutMs** | `number` | optional (default: `30000`) | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional (default: `"inactive"`) | Connector status |
 | **enabled** | `boolean` | optional (default: `true`) | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor. |

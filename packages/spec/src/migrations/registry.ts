@@ -6560,6 +6560,48 @@ const step18: MigrationStep = {
         + 'widening a local mirror of the enum.',
     },
     {
+      id: 'connector-provider-context-connection-timeout-ms-retired',
+      surface: 'ConnectorProviderContext.connectionTimeoutMs, the declared connect deadline handed '
+        + 'to every ConnectorProviderFactory (integration/connector-provider.ts)',
+      replacement: 'requestTimeoutMs for the deadline the platform keeps; for a connect-only bound, '
+        + "the provider's own providerConfig, where the provider owns the vocabulary",
+      reason:
+        'ADR-0049 enforce-or-remove, maintainer ruling 2026-09-22 letter A: retire '
+        + 'connector.connectionTimeoutMs. The spec key is tombstoned and its authored sources are '
+        + 'rewritten by the D2 conversion connector-connection-timeout-ms-removed; this entry '
+        + 'carries the half a conversion cannot reach. The key was placed on this context by the '
+        + 'round that made the connector resilience policy live, explicitly as a CARRY — handed '
+        + 'over so that a custom provider on a transport able to separate the phases could honour '
+        + 'it. Measured before removal, none did, and the carry itself was the last thing keeping '
+        + 'the key alive in argument: the built-in rest and openapi factories read '
+        + 'ctx.connectionTimeoutMs only to deposit it back onto the def that GET /connectors '
+        + 'echoes, and connectorFetchOptions — the one mapping from authored policy onto the '
+        + "platform's outbound fetch — was never handed it. Being handed a value is not honouring "
+        + 'it, so the carry is the same parsed-unmarked-unenforced state on one more surface, and '
+        + 'it leaves with the key rather than outliving it as an orphan a factory could still '
+        + 'read. Why a semantic entry and not a D2 conversion: a provider factory is CODE. There is '
+        + 'no authored source and no sys_metadata row holding a read of ctx.connectionTimeoutMs, so '
+        + 'the chain has no seam to rewrite — the removal reaches a factory author as a tsc error '
+        + 'and as this entry, never as a mechanical edit. The declaration cannot be made honest by '
+        + 'implementing it either: a WHATWG fetch exposes one AbortSignal over the whole operation '
+        + 'and never the connect phase, so bounding time-to-response with this key would kill a '
+        + 'slow-but-connected upstream the author meant to allow with a large requestTimeoutMs. '
+        + 'ADR-0087, ADR-0097.',
+      acceptanceCriteria:
+        'No ConnectorProviderFactory reads ctx.connectionTimeoutMs; the member does not exist on '
+        + 'ConnectorProviderContext and reading it fails to compile. A factory that genuinely needs '
+        + 'a connect-phase bound declares it in its own providerConfig and applies it itself, on a '
+        + 'transport that can observe the connect phase — it does not receive one from the host. '
+        + 'Behaviour is unchanged for every shipped provider, because none applied the value: a '
+        + 'connector that authored connectionTimeoutMs made exactly the same calls with exactly '
+        + 'the same deadlines before and after. What does change is observable and intended: the '
+        + 'def served by GET /connectors no longer echoes a connect deadline nobody keeps, and '
+        + 'requestTimeoutMs — which resilientFetch applies as each attempt deadline — is the only '
+        + 'timeout on the surface. The sibling members retryConfig and requestTimeoutMs '
+        + 'deliberately do NOT move, and a sweep that removed either has over-applied this entry: '
+        + 'both resolve to real reads at the fetch site.',
+    },
+    {
       id: 'cube-join-sql-and-relationship-retired',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
       // span AND a table cell.
@@ -14163,6 +14205,54 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `connectors:` is a stack collection and a published connector row lands whole
     // in `sys_metadata`, so the chain has a seam that sees it.
     'integration/CircuitBreakerConfig:monitoringWindow',
+    // ADR-0049 enforce-or-remove on `ConnectorSchema.connectionTimeoutMs`
+    // (maintainer ruling 2026-09-22, letter A — the narrower SECOND decision this
+    // key was owed, after the ruling that made its nine ledger siblings live left
+    // this one dead on a stated reason rather than by oversight). The key was
+    // bounded (`min(1000).max(300000)`), defaulted (`30000`), `.describe()`d and
+    // served back by `/meta/connector`: every signal an authoring surface can give
+    // said it worked.
+    //
+    // ⚠️ This is NOT the zero-mention retirement shape, and reading it as one loses
+    // the finding. FIVE sites outside `packages/spec` READ the key: the
+    // materialization fingerprint and the provider-context build in
+    // `services/service-automation/src/plugin.ts`, `ctx.connectionTimeoutMs` in the
+    // `rest` and `openapi` provider factories, and the `?? 30000` fallbacks that
+    // deposit it back onto the reported def. Measured across all five, every one is
+    // a pass-through: the value's only termini are the def `GET /connectors` echoes
+    // and the fingerprint that decides whether to re-materialize. Never a deadline.
+    // `connectorFetchOptions()` (`integration/connector-fetch-policy.ts`) is the one
+    // mapping from authored policy onto the platform's outbound `fetch`, and it was
+    // handed `{ retryConfig, requestTimeoutMs }` only. Carrying a number is not
+    // honouring it — ADR-0049 forbids the parsed-unmarked-unenforced state whether
+    // the inert value travels or sits still.
+    //
+    // The `实现` arm was unavailable, which is why the second decision came out
+    // `retire` rather than `enforce`: a connector's outbound call is a WHATWG
+    // `fetch`, whose only cancellation surface is ONE `AbortSignal` covering the
+    // whole operation, so nothing there observes the connect phase. Bounding
+    // "time until the response arrives" with this key would kill a slow-but-
+    // connected upstream the author meant to allow with a large `requestTimeoutMs`
+    // — breaking the very promise the key makes. (undici's `connectTimeout` needs a
+    // custom dispatcher: Node-only, and a new subsystem underneath every connector.)
+    // `requestTimeoutMs` — live since PR #19388, and the lit control for every
+    // census above — is the bound the platform can keep.
+    //
+    // Tombstoned with `retiredKey()`: `ConnectorSchema` is a non-strict `z.object`,
+    // so a bare deletion would be a silent strip (ADR-0104). No def leaves with it —
+    // the key was a bare `z.number()`, not a `ConfigSchema` shape, so
+    // `RETIRED_DEFS_BY_MAJOR[18]` gains nothing. Authored sources and stored rows are
+    // rewritten by the D2 conversion `connector-connection-timeout-ms-removed`; the
+    // withdrawn `ConnectorProviderContext` member, which is code with no authored
+    // source, leaves via the D3 semantic entry
+    // `connector-provider-context-connection-timeout-ms-retired`.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look — the disposition
+    // `18.integration__Connector__errorMapping.ts` records for the same schema.
+    'integration/Connector:connectionTimeoutMs',
     // #14676 — ADR-0049 enforce-or-remove on `ConnectorSchema.errorMapping` (triage
     // ruling 2026-09-02: removal via the `spec-property-retirement` playbook; the
     // split condition — a downstream consumer in objectui or a customer stack —
@@ -14203,6 +14293,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // by it). The rename does not change that; it makes the declaration honest
     // about its unit for whoever implements the loop.
     'integration/ConnectorTrigger:interval',
+    // The same tombstone seen through the second carrier.
+    // `DeclarativeConnectorEntrySchema` is `ConnectorSchema.superRefine(...)`, so the
+    // `connectionTimeoutMs` tombstone on the base is inherited by the shape that
+    // `stack.connectors[]` (`stack.zod.ts`) and the `PUT /meta/connector/:name` door
+    // (`kernel/metadata-type-schemas.ts`) actually parse, and the authorable-surface
+    // walk publishes the `[RETIRED]` row under this def key as well. One tombstone,
+    // two registered keys: gate (b) of `scripts/build-schemas.ts` reads EXACT
+    // `${defKey}:${name}` membership per def, never by radiating from a neighbour.
+    //
+    // This carrier is also what made the D2 conversion owed rather than optional:
+    // the door persists what it parses, so a stored `sys_metadata` connector row can
+    // carry the key — measured, not assumed, before the tombstone landed.
+    // See `18.integration__Connector__connectionTimeoutMs.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:connectionTimeoutMs',
     // #14676 — the same tombstone seen through the second carrier.
     // `DeclarativeConnectorEntrySchema` is `ConnectorSchema.superRefine(...)`, so the
     // `errorMapping` tombstone on the base is inherited by the shape that
