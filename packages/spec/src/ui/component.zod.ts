@@ -3973,10 +3973,14 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * builds against (`.objectui-sha` = `87af769e9`, re-COUNTED there
    * 2026-09-22) its registry shell has ZERO hits for that wiring, against 3
    * each in `plugin-map`, `plugin-gantt`, `plugin-grid` and `plugin-calendar`
-   * — four controls, so the zero discriminates. ⚠️ The control count itself
-   * moved on this hop, 7 each to 3 each; the discriminating ZERO did not, and
-   * the zero is the reading. ⛔ A count carried instead of re-taken would have
-   * been wrong here without a single anchor moving. Its shell pulls a `dataSource`
+   * — four controls, so the zero discriminates. ⚠️ Re-counted at BOTH ends of
+   * the hop with ONE method (occurrences of that identifier in each
+   * `src/index.tsx`): `53ded82bf` reads 3 each and 0 for the tree as well, so
+   * nothing about this reading moved. The `7 each` this record used to carry is
+   * reproducible at neither pin by that method, nor by a whole-package count
+   * (7 / 5 / 11 / 5, not 7 each). ⛔ A count is a reading only with its METHOD
+   * written beside it — without one, re-stating the carried number is exactly
+   * what survives a re-measure. Its shell pulls a `dataSource`
    * off the schema context and hands it down as the data ADAPTER; nothing on
    * that path writes an object name.
    *
@@ -4139,10 +4143,13 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  *    nested key either.
  *  - **VIEW FACE — a `ListViewSchema` document's `timeline.limit`: that is
  *    the route-dependent one**, and it is a different key on a different
- *    document. `ObjectView.tsx:1725` flattens the view block onto the node it
- *    returns (which then carries no `timeline` block at all), so the value
- *    arrives as this node's FLAT `limit` and is read; `ListView.tsx:3084`
- *    forwards it nested instead, where nothing reads it. Recorded on
+ *    document. `plugin-view/src/ObjectView.tsx:1725` flattens the view block
+ *    onto the node it returns (which then carries no `timeline` block at all),
+ *    so the value arrives as this node's FLAT `limit` and is read;
+ *    `ListView.tsx:3084` forwards it nested instead, where nothing reads it.
+ *    The package is spelled because objectui carries a second `ObjectView.tsx`
+ *    (in `app-shell`), where that same line number is an unrelated `catch` —
+ *    a bare spelling here names neither file. Recorded on
  *    `rowLimitKey` in `view.zod.ts`, which is where that key lives.
  *
  * ⚠️ Flagged, not fixed — a THIRD route neither the card nor the first two
@@ -4162,8 +4169,12 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  *
  * ⚠️ `variant: 'gantt'` is declared because the registration declares it
  * (`index.tsx:361-362`) and the renderer reads it — but the OBJECT-BOUND
- * composed path REFUSES it loudly (objectui#6655: `:518` renders
- * `timeline-unsupported-variant`), so on this block it is usable only
+ * composed path REFUSES it loudly (objectui#6655, `ObjectTimeline.tsx:706-708`:
+ * `:706` gates on `!hasAuthoredItems && schema.variant === 'gantt'` and `:708`
+ * renders `timeline-unsupported-variant`. ⚠️ The `:518` this clause carried is
+ * that gate at the RETIRED `53ded82bf` and a comment line at this pin — the one
+ * number in this record the 2026-09-22 re-read did not reach, because it sat on
+ * a line the conversion never touched), so on this block it is usable only
  * together with authored `items`. Declared-and-refused-with-a-diagnostic is not
  * the accepted-and-dropped class this section exists to close: the author is
  * told, in the renderer, by name.
