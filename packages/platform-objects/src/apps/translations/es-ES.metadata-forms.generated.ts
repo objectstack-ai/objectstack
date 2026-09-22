@@ -56,6 +56,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Descripción",
         helpText: "Documentación para desarrolladores"
       },
+      nameField: {
+        label: "Campo de título",
+        helpText: "Campo cuyo valor titula cada registro (p. ej. \"name\", \"subject\"). Puntero canónico de ADR-0079: lo leen la presentación del registro, la búsqueda de ObjectQL y las vistas previas de registros relacionados."
+      },
       isSystem: {
         label: "Integrado del sistema",
         helpText: "Objeto de sistema (protegido contra eliminación; el uso compartido predeterminado es público)"
@@ -257,6 +261,26 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Fuente de datos",
         helpText: "ID de fuente de datos de destino (valor predeterminado: \"default\")"
       },
+      ownership: {
+        label: "Propiedad",
+        helpText: "Modelo de propiedad del registro. Si se omite, se resuelve como user."
+      },
+      sharingModel: {
+        label: "Modelo de uso compartido",
+        helpText: "Visibilidad predeterminada de la organización (OWD) para usuarios internos. Un objeto personalizado que lo omita se resuelve como private en tiempo de ejecución (ADR-0090 D1)."
+      },
+      managedBy: {
+        label: "Gestionado por",
+        helpText: "Categoría de ciclo de vida: platform (CRUD de usuario), config (escrito por el administrador), system-data (esquema definido por la plataforma con datos escribibles por administrador o usuario), engine-owned (sin escrituras de usuario), append-only (auditoría), better-auth (identidad). Los clientes de UI derivan de aquí las acciones CRUD disponibles, así que decide qué se ofrece al usuario en los registros de este objeto."
+      },
+      editMode: {
+        label: "Modo de edición",
+        helpText: "Intención de interacción al editar registros de este objeto. Si se omite, el renderizador elige su propio valor predeterminado. Es una intención entre renderizadores, no un estilo."
+      },
+      fileAccessDelegate: {
+        label: "Delegado de acceso a archivos",
+        helpText: "Servicio del kernel que autoriza la descarga de archivos pertenecientes a los campos multimedia de este objeto, en lugar de comprobar si quien llama puede leer la fila propietaria. Para objetos cuyo acceso media un servicio. Falla cerrado."
+      },
       lifecycle: {
         label: "Ciclo de vida de los datos",
         helpText: "Contrato de ciclo de vida de los datos (ADR-0057): cuánto viven las filas y cómo se recupera el espacio. Déjalo en blanco para una semántica record permanente. Las clases distintas de record requieren al menos una política acotante (retención, TTL o rotación)."
@@ -384,6 +408,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Marcador de posición",
         helpText: "Texto de ayuda que se muestra dentro del campo vacío (desaparece al introducir un valor); usa inlineHelpText para ayuda siempre visible"
       },
+      inlineHelpText: {
+        label: "Texto de ayuda fijo",
+        helpText: "Ayuda siempre visible bajo el campo, a diferencia de `placeholder`, que desaparece en cuanto se escribe un valor."
+      },
       minLength: {
         label: "Longitud mínima",
         helpText: "Longitud mínima de caracteres"
@@ -415,6 +443,30 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       scale: {
         label: "Decimales",
         helpText: "Número de dígitos decimales"
+      },
+      step: {
+        label: "Incremento",
+        helpText: "Incremento del control deslizante (1 por defecto). Solo lo usa el renderizador: la ruta de escritura no rechaza un valor fuera de la cuadrícula."
+      },
+      maxSize: {
+        label: "Tamaño máximo",
+        helpText: "Tamaño máximo permitido en BYTES (entero positivo). Se aplica en el servidor al escribir, contra el tamaño registrado del archivo; un archivo sin tamaño registrado no puede incumplirlo."
+      },
+      dimensions: {
+        label: "Dimensiones",
+        helpText: "Dimensionalidad del vector: un entero entre 1 y 10000 (p. ej. 1536 para los embeddings de OpenAI)."
+      },
+      language: {
+        label: "Lenguaje",
+        helpText: "Lenguaje del editor para el resaltado de sintaxis (p. ej. javascript, python, sql)."
+      },
+      autonumberFormat: {
+        label: "Formato de numeración",
+        helpText: "Texto literal más un contador {0000}, tokens de fecha {YYYY}/{MM}/{DD}/{YYYYMMDD} en la zona horaria del negocio e interpolación {field_name}. El contador se reinicia por cada prefijo generado. Si se omite en un campo autonumber, el valor predeterminado es {0000}."
+      },
+      referenceVia: {
+        label: "Referencia mediante",
+        helpText: "Convierte este campo de texto en la mitad de id de un puntero polimórfico: nombra el campo HERMANO del mismo objeto que guarda, fila a fila, el nombre del objeto destino (ADR-0052 §5). En snake_case; solo campos de texto y excluyente con `reference`."
       },
       options: {
         label: "Opciones",
@@ -450,9 +502,41 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Filtro de lista relacionada",
         helpText: "Filtro predeterminado para la lista relacionada de esta relación en la página de detalle del registro padre: combinado con AND con la coincidencia del registro padre, y el distintivo de la pestaña cuenta el mismo conjunto"
       },
+      displayField: {
+        label: "Campo mostrado",
+        helpText: "Campo que se muestra como etiqueta de cada candidato en el selector. Si se omite, se usa el campo de título del objeto referenciado."
+      },
+      descriptionField: {
+        label: "Campo de descripción",
+        helpText: "Campo secundario que se muestra bajo la etiqueta en el menú emergente de selección rápida."
+      },
+      allowCreate: {
+        label: "Permitir crear",
+        helpText: "Permite crear un registro a partir del texto escrito cuando el selector no encuentra coincidencias. Recomendado para objetos cuyo único campo obligatorio es el campo mostrado."
+      },
+      lookupPageSize: {
+        label: "Filas por página",
+        helpText: "Filas por página en el diálogo del selector de registros: un entero positivo; 10 por defecto."
+      },
+      relatedListTitle: {
+        label: "Título de la lista relacionada",
+        helpText: "Título de la lista relacionada de esta relación en la página de detalle del registro padre."
+      },
+      inlineTitle: {
+        label: "Título en línea",
+        helpText: "Título de la cuadrícula maestro-detalle incrustada en el registro padre."
+      },
+      inlineAmountField: {
+        label: "Campo de importe en línea",
+        helpText: "Campo numérico del objeto hijo que se suma para el total de la cuadrícula en línea."
+      },
       expression: {
         label: "Expresión",
         helpText: "Expresión CEL para calcular este campo (lo hace de solo lectura)"
+      },
+      returnType: {
+        label: "Tipo de retorno",
+        helpText: "Tipo de valor declarado de la fórmula, registrado a partir del tipo CEL inferido. Los consumidores lo leen en vez de volver a analizar la expresión."
       },
       summaryOperations: {
         label: "Operaciones de resumen",
@@ -501,6 +585,22 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maskingRule: {
         label: "Regla de enmascaramiento",
         helpText: "Enmascaramiento parcial: preset ('phone', 'id_card', 'bank_account', 'email', 'name') o {\"keepHead\": n, \"keepTail\": m}. Enmascarado salvo que el llamante tenga los requiredPermissions del campo"
+      },
+      internal: {
+        label: "Interno",
+        helpText: "Nunca devuelve el valor de este campo por la ruta de datos genérica: el motor omite la clave en los resultados de find/findOne y en los cuerpos de respuesta de creación y actualización, tanto en la proyección predeterminada como cuando un cliente la nombra en ?select=. El almacenamiento, el filtrado y los índices no se ven afectados."
+      },
+      trackHistory: {
+        label: "Registrar historial",
+        helpText: "Muestra los cambios de valor de este campo como entradas en la línea de actividad del registro (ADR-0052 §5b). Se activa campo a campo."
+      },
+      widget: {
+        label: "Control del campo",
+        helpText: "Sustituye el control del formulario: nombra un componente de campo registrado, que se resuelve como `field:` más este nombre, para dibujar el campo en lugar del control derivado del type. Un nombre no registrado vuelve al control del type."
+      },
+      ackPlaintextMasking: {
+        label: "Confirmar texto sin cifrar",
+        helpText: "Confirma que el contrato de este campo password genérico — texto sin cifrar en reposo y enmascarado al leer — es intencionado, y silencia la advertencia de autoría (ADR-0100). No afecta a ningún otro tipo."
       }
     }
   },
@@ -813,6 +913,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       description: {
         label: "Descripción",
         helpText: "Descripción de página para navegación"
+      },
+      source: {
+        label: "Código fuente",
+        helpText: "Texto fuente de la página. Con kind 'html' (alias 'jsx') es JSX restringido que se compila al árbol de componentes al guardar: se analiza, nunca se ejecuta. Con kind 'react' es React real que el runtime de confianza ejecuta al renderizar."
       },
       object: {
         label: "Objeto",
@@ -1144,6 +1248,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Predeterminado",
         helpText: "Convierte esta app en la predeterminada para usuarios nuevos"
       },
+      hidden: {
+        label: "Oculta",
+        helpText: "Mantiene la aplicación fuera del conmutador de aplicaciones: el shell la ofrece desde el menú del avatar. Solo afecta a la navegación: una aplicación oculta sigue siendo enrutable y con permisos comprobados."
+      },
       navigation: {
         label: "Navegación",
         helpText: "Árbol de navegación — estructura recursiva"
@@ -1225,6 +1333,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       variant: {
         label: "Variante visual",
         helpText: "Estilo de botón (primary=blue, danger=red, ghost=transparent)"
+      },
+      mode: {
+        label: "Modo",
+        helpText: "Modo semántico de la acción. Hoy solo lo lee la heurística de intervención humana de la IA; ningún renderizador se ramifica por él."
+      },
+      order: {
+        label: "Orden",
+        helpText: "Orden dentro de un grupo de ubicación: cuanto menor, más arriba, y la cabecera del registro toma la primera como botón principal. Sin valor se mantiene el orden de registro."
       },
       target: {
         label: "Destino",
@@ -1316,6 +1432,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "params.requiresFeature": {
         label: "Requiere función"
       },
+      operation: {
+        label: "Operación",
+        helpText: "Escritura declarativa de campos sobre un único registro: 'update' aplica `patch`, fusionado bajo los `params` recogidos, al registro actual EN NOMBRE DE QUIEN LLAMA — nunca con privilegios del sistema, así que los permisos de quien llama, los hooks del objeto y sus validaciones se ejecutan igual que en una edición de usuario."
+      },
+      undoable: {
+        label: "Reversible",
+        helpText: "Ofrece deshacer después de que la actualización se complete. El deshacer captura el valor previo de cada campo que la acción escribe: el conjunto fusionado, `patch` bajo los `params` recogidos. Una acción sin `operation` no declara conjunto de escritura, así que no hay nada que capturar."
+      },
+      execution: {
+        label: "Ejecución",
+        helpText: "Contrato de despacho masivo para el que está escrito el cuerpo de esta acción: 'perRecord' envía un despacho por cada fila seleccionada, con el recordId de esa fila; 'aggregate' envía UN solo despacho para toda la selección, con todos los id en params._selectedIds. Si se omite, la acción se despacha por registro."
+      },
       confirmText: {
         label: "Texto de confirmación",
         helpText: "Mensaje de confirmación (p. ej., \"Are you sure?\")"
@@ -1327,6 +1455,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       refreshAfter: {
         label: "Actualizar después",
         helpText: "Actualiza la lista/página tras completar la acción"
+      },
+      openIn: {
+        label: "Abrir en",
+        helpText: "Dónde abrir una URL estática de `target`: 'self' navega en la misma pestaña y 'new-tab' abre una pestaña nueva. Si se omite, una URL absoluta o externa se abre en pestaña nueva y una relativa navega en el sitio."
+      },
+      opensInNewTab: {
+        label: "Abre en pestaña nueva",
+        helpText: "Abre el RESULTADO de la acción en una pestaña nueva: el renderizador la abre de forma síncrona al hacer clic (a prueba de bloqueadores de ventanas emergentes) y luego la lleva a la redirectUrl del manejador. Distinto de `openIn`, que enruta un destino de URL estática."
+      },
+      newTabUrl: {
+        label: "URL de pestaña nueva",
+        helpText: "Plantilla de URL directa para la pestaña nueva, con un marcador {recordId}. Junto con `opensInNewTab`, el renderizador lleva la pestaña preabierta aquí de inmediato y no envía nada, así que el endpoint debe aplicar la autenticación por su cuenta."
       },
       locations: {
         label: "Ubicaciones",
@@ -1343,6 +1483,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       disabled: {
         label: "Deshabilitado",
         helpText: "Expresión CEL: desactivar cuando la condición sea true"
+      },
+      requiresFeature: {
+        label: "Requiere función",
+        helpText: "Indicador público de función de autenticación que condiciona esta acción. Se traslada al predicado `visible` durante el análisis y se elimina de la salida, así que ningún consumidor posterior llega a ver la clave."
       },
       ai: {
         label: "Exposición a IA",
@@ -1695,6 +1839,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       errorHandling: {
         label: "Manejo de errores",
         helpText: "Qué hacer cuando falla un nodo (fail, retry, continue)"
+      },
+      successMessage: {
+        label: "Mensaje de éxito",
+        helpText: "Mensaje que viaja en el resultado de la ejecución cuando el flujo termina bien; la interfaz de flujo de pantalla lo muestra como aviso en lugar de un \"Done\" genérico."
+      },
+      errorMessage: {
+        label: "Mensaje de error",
+        helpText: "Mensaje que viaja en el resultado de la ejecución cuando el flujo falla; la interfaz de flujo de pantalla lo muestra como aviso en lugar del error en bruto."
       }
     }
   },
@@ -1831,6 +1983,22 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Etiqueta",
         helpText: "Etiqueta mostrada para administradores"
       },
+      description: {
+        label: "Descripción",
+        helpText: "Descripción legible que se muestra en Setup (se guarda como sys_permission_set.description)."
+      },
+      isDefault: {
+        label: "Predeterminado",
+        helpText: "Línea base de la aplicación para la posición everyone (ADR-0090 D5): un conjunto de nivel de aplicación se vincula automáticamente al arrancar; uno de nivel de paquete se convierte en una sugerencia que el administrador confirma al instalar. false por defecto."
+      },
+      managedBy: {
+        label: "Gestionado por",
+        helpText: "Procedencia del registro (ADR-0086 D3): quién es el propietario de este conjunto entre actualizaciones."
+      },
+      packageId: {
+        label: "ID de paquete",
+        helpText: "Id del paquete propietario de un conjunto distribuido con un paquete (ADR-0086 D3). Déjalo vacío para un conjunto creado en el entorno."
+      },
       systemPermissions: {
         label: "Permisos del sistema",
         helpText: "Lista de claves de capacidades del sistema"
@@ -1871,6 +2039,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "Descripción"
+      },
+      delegatable: {
+        label: "Delegable",
+        helpText: "Quienes la ocupan pueden delegar esta posición por sí mismos, con un plazo y un motivo (ADR-0091 D3). false por defecto: la delegación es solo para administradores."
       }
     }
   },
@@ -1918,6 +2090,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "Activo",
         helpText: "Activa/desactiva este agente"
+      },
+      surface: {
+        label: "Superficie",
+        helpText: "Superficie de producto a la que se vincula este agente (ADR-0063 §1). Solo se adjuntan las habilidades cuya propia superficie coincide — o es 'both' — y el conjunto de herramientas del agente es la unión de las de esas habilidades. 'ask' por defecto."
       },
       instructions: {
         label: "Instrucciones",
@@ -2028,6 +2204,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "Activo",
         helpText: "Activa/desactiva esta skill"
+      },
+      surface: {
+        label: "Superficie",
+        helpText: "Superficie de agente a la que se vincula esta habilidad (ADR-0063 §3). Vincularla a un agente con una superficie distinta falla de forma explícita al resolver, no se omite en silencio. 'ask' por defecto."
       },
       instructions: {
         label: "Instrucciones",

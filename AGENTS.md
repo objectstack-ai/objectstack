@@ -413,6 +413,13 @@ and posts a `Release:` line. Findings are filed unassigned; assign at the moment
 maintainer's own work under the shared account carries no claim comment and is indistinguishable
 from a dispatch — an accepted blind spot; per-seat identities are not introduced.
 
+**Every GitHub write leaves through `scripts/pm/`, as `objectstack-fleet[bot]`, behind the shared write
+gate.** `fleet-token.mjs` mints the App token from `OS_FLEET_APP_ID` / `OS_FLEET_INSTALLATION_ID` /
+`OS_FLEET_PRIVATE_KEY`; `write-pace.mjs` serialises and spaces every write verb fleet-wide; `issue-create`,
+`label-write`, `post-stamped` and `close-cards` own their writes; `with-fleet.sh -- <command…>` runs anything
+else behind the gate (`--read` for reads). ⛔ Never a bare `curl` / `fetch` / `gh api -X POST|PATCH|PUT|DELETE`
+write; never a token in a remote URL, a `git config` value on disk or a log line. Each header is the authority.
+
 **State on your PR that you did not set belongs to another actor — ask, never "correct"
 it.** Under one shared identity every other participant's write arrives unsigned: the PM
 flipping your draft to ready and arming auto-merge, a bot re-labelling, the platform

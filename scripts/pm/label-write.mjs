@@ -103,7 +103,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
+import { isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
   PM_EXCLUSIVE_STATE_LABELS,
@@ -345,6 +345,7 @@ async function rest(path, { method = 'GET', body = null } = {}) {
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch (e) {
+    if (paced) releaseWriteLease(); // ⏱ rule ④: no response will come, so the fleet's turn ends here
     return { status: 0, rateRemaining: null, json: null, detail: e?.message ?? 'fetch threw', call: `${method} ${path}` };
   }
   const rateRemaining = res.headers.get('x-ratelimit-remaining');
