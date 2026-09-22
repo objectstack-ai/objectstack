@@ -258,9 +258,11 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   `startDateField` as the key to declare (objectui#8170 corrected that
  *   screen's second clause: `titleField` is NOT required). So the loss is
  *   total rather than partial — every record, on every object — and the
- *   author is told at render time as well as here. This repo already records
- *   the same deletion one door over: the #13817 check in `../ui/view.zod.ts`
- *   names objectui#7029 as its runtime half.
+ *   author is told at render time as well as here. Both reads are identical
+ *   at the pin this repo builds against (`.objectui-sha` = `87af769e9`), so
+ *   this describes the console this repo SHIPS and not only objectui's head.
+ *   This repo already records the same deletion one door over: the #13817
+ *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → `startDateField || 'start_date'`, `endDateField || 'end_date'`,
  *   `progressField || 'progress'`, `dependenciesField || 'dependencies'` —
  *   fails CLOSED (`null` unless both dates resolve): a blank chart
