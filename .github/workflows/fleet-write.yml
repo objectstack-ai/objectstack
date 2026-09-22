@@ -1,0 +1,119 @@
+# Fleet write relay — the broker a cloud seat can reach.
+#
+# A cloud seat container cannot act as the fleet App `objectstack-fleet`: its
+# egress proxy replaces every `Authorization` header with the session's own
+# token and refuses the `/app/**` path a mint needs, so `scripts/pm/fleet-token.mjs`
+# cannot mint there and a minted token could not be used there. What the proxy
+# does pass is `POST /repos/objectstack-ai/objectstack/dispatches` with the
+# session token. So a seat packs ONE stroke — the same requests it would have
+# sent directly — into one `repository_dispatch`, and this workflow executes
+# it here as `objectstack-fleet[bot]` against the repository the payload names.
+#
+# The rule, the closed op list, the payload schema, the sender gate and the
+# executor's exit contract all live in `scripts/pm/fleet-write/`; each header
+# there is authoritative and this file is the invocation. Four steps, no
+# logic of its own: validate → mint → execute, with the checkout the scripts
+# need in front.
+#
+# ⛔ The token this run WRITES with is the App installation token step 3
+# mints — narrowed to the one target repository and to the permissions the
+# op table declares (`issues: write`, `pull-requests: write`, and the
+# `metadata: read` the sender gate's permission read needs) — and revoked by
+# that action's post step. The workflow's own `GITHUB_TOKEN` gets nothing
+# (`permissions: {}` below); the job grants it `contents: read` for the
+# checkout and nothing else, so the run's ONLY write path is the App token,
+# and it exists only inside the execute step's environment.
+#
+# The private key never reaches a script: `actions/create-github-app-token`
+# reads the organization secret and hands the executor a token through `env:`.
+# The executor prints no token, writes none to a file, and scrubs every line
+# it emits; the runner's own secret masking is the second net.
+#
+# Authorization is the TARGET repo's: the executor asks
+# `GET /repos/{payload.repo}/collaborators/{sender}/permission` for the login
+# GitHub resolved from the dispatching token (`github.event.sender.login`)
+# and refuses unless the answer is write, maintain or admin — a run failure
+# with zero writes. There is no sender allowlist to keep: a seat that can push
+# to a repository can write to it as the fleet, and one that cannot, cannot.
+#
+# ⛔ Only `repository_dispatch` with `types: [fleet-write]` starts this. No
+# push, no schedule, no manual dispatch: every run is a seat's stroke, named
+# after its request id so the seat's run-poller finds it by name.
+name: Fleet Write
+
+run-name: 'fleet-write ${{ github.event.client_payload.request_id }}'
+
+on:
+  repository_dispatch:
+    types: [fleet-write]
+
+# Nothing for the workflow's own token — see the header. The job re-grants
+# exactly the read the checkout needs.
+permissions: {}
+
+jobs:
+  relay:
+    name: Fleet write relay
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Pinned to the same major and spelling as every other setup-node in this
+      # repo, for the measured reason the sibling guards record: a setup-node
+      # major whose package-manager-cache default is on shells out to pnpm and
+      # kills the job in the SETUP step. This job installs no package manager:
+      # the three scripts are dependency-free and import sibling modules only.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Everything reaches the scripts through `env:`, never through `${{ }}`
+      # inside a `run:` line. A payload is seat-authored text, and an
+      # expression interpolated into a shell line is substituted before bash
+      # sees it; through `env:` it is inert data. The validator refuses an
+      # unknown key, an unknown op, a target outside the organization, a
+      # non-integer number, an over-cap string or an over-cap payload with
+      # every reason in the step summary and zero writes; on success it hands
+      # the target's NAME to the mint below through `$GITHUB_OUTPUT`.
+      - name: Validate the payload (closed schema, zero writes on refusal)
+        id: validate
+        env:
+          FLEET_WRITE_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+        run: node scripts/pm/fleet-write/validate.mjs --from-env --github-output
+
+      # The fleet identity, minted on the runner and never held by a seat:
+      # `OS_FLEET_APP_ID` is an organization variable, `OS_FLEET_PRIVATE_KEY`
+      # an organization secret (both set by the maintainer). `repositories`
+      # narrows the token to the ONE repository the payload named — the
+      # validator's output, never the payload read again here — and the
+      # `permission-*` inputs narrow it to what `scripts/pm/fleet-write/ops.mjs`
+      # declares. The action revokes the token in its post step.
+      - name: Mint the fleet App token, narrowed to the target and the op table
+        id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.OS_FLEET_APP_ID }}
+          private-key: ${{ secrets.OS_FLEET_PRIVATE_KEY }}
+          owner: objectstack-ai
+          repositories: ${{ steps.validate.outputs.repo_name }}
+          permission-issues: write
+          permission-pull-requests: write
+          permission-metadata: read
+
+      # The sender gate, then the actions in order, then the step summary —
+      # request id · sender and role · session · target · one row per request.
+      # The first failure stops the run and the summary says which later
+      # actions were NOT attempted. Exit codes: `scripts/pm/fleet-write/execute.mjs`.
+      - name: Execute the actions as the fleet (sender gate first, stop at the first failure)
+        env:
+          FLEET_WRITE_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+          FLEET_WRITE_SENDER: ${{ github.event.sender.login }}
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        run: node scripts/pm/fleet-write/execute.mjs
