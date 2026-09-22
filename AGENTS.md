@@ -757,15 +757,15 @@ Principles the wrapper encodes (its own output is the authority on detail):
 
 **`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against an
 implementation** — the props the spec zod schema declares vs the inputs the objectui
-registry config declares. A prop both sides declare and no renderer reads is, to this gate,
-perfect agreement. Its `spec-only` / `registry-only` / `missing` signals are real; just
-don't read it as proof anything renders. Its right-hand side is the **tracked repo-root
-`sdui.manifest.json`**, written by `node scripts/gen-sdui-manifest-node.mjs` beside
-`scripts/sdui-manifest.record.json` and held honest in the required lint job by
-`scripts/check-sdui-manifest.mjs` — so `lint.yml` runs this gate `--strict` against it on
-every PR. It still **exits 1** with no usable manifest and `check:generated` files it
-`EXTERNAL_INPUT_REQUIRED` because that aggregate hands it none. ⛔ Do not "fix" a red by
-re-adding a skip.
+registry config declares. Its `spec-only` / `registry-only` / `missing` signals are real;
+just don't read it as proof anything renders. Its right-hand side is the **tracked
+repo-root `sdui.manifest.json`** and its record `scripts/sdui-manifest.record.json`, which
+the required lint job's `scripts/check-sdui-manifest.mjs` checks OFFLINE only — existence,
+shape, sha256 vs the record, record pin vs `.objectui-sha`; its version-vs-pin leg runs
+only where an objectui checkout is in hand, so lint prints `NOT CHECKED` by design.
+`lint.yml` runs THIS gate `--strict` against it on every PR; it still **exits 1** with no
+usable manifest and `check:generated` files it `EXTERNAL_INPUT_REQUIRED` because that
+aggregate hands it none. ⛔ Do not "fix" a red by re-adding a skip.
 
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the wrapper reports that each run rather than staying silent.
