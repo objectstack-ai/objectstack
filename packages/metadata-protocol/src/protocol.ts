@@ -5873,7 +5873,7 @@ export class ObjectStackProtocolImplementation implements
      * `translation`, `email_template`): a draft authored env-wide — which is
      * what package/AI authoring writes, and what `PUT ?mode=draft` writes when no
      * active org is threaded — is looked up under `organization_id = <org>`,
-     * matches nothing, and answers `404 [no_draft] … nothing to publish` over a
+     * matches nothing, and answers `404 NO_DRAFT` — `… nothing to publish` — over a
      * row the console's own pending-changes list is showing. Measured on a cloud
      * rig: four AI-authored `view` drafts, visible in `sys_metadata` at
      * `state='draft'`, all four refused by the per-item door while the batch
@@ -5903,7 +5903,7 @@ export class ObjectStackProtocolImplementation implements
      * a package-stating publish resolves the scope of the draft it NAMED.
      * Without the dimension, probe 1 could match ANOTHER package's row in the
      * caller's org, name a scope the package-exact promote then finds empty,
-     * and answer `404 [no_draft]` over a publishable draft sitting env-wide.
+     * and answer `404 NO_DRAFT` over a publishable draft sitting env-wide.
      * Accepted cost, on the record: a caller stating a package no longer
      * discovers a no-package draft of the same `(type, name)` — it 404s and the
      * caller retries without `?package=`; that narrowing is the ruling, not a
@@ -20236,7 +20236,8 @@ export class ObjectStackProtocolImplementation implements
             //   `reverted[0].action === 'restored'`, `registerItem` called ZERO
             //   times, and the only trace anywhere is
             //   `[Protocol] registry write-through failed for fields/… :
-            //    [registry_type_not_canonical] …` on the server's stderr. The
+            //    Refusing to register a SchemaRegistry overlay entry …`
+            //   (`REGISTRY_TYPE_NOT_CANONICAL`) on the server's stderr. The
             //   receipt claims the pre-commit body is what the platform now
             //   serves. It is not, and for this class it cannot be: #9111's mint
             //   door refuses the entry and boot refuses it too, so the restored
