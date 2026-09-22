@@ -332,9 +332,10 @@ const QUOTATION_EXEMPTIONS = Object.freeze([
     witness: /controls objectstack 12966 and @objectstack\/spec 4997 on the same corpus/,
     why:
       'A hit COUNT in a recorded evidence sentence — 4997 occurrences of the '
-      + 'package name across a sibling corpus, beside its `objectstack 12966` '
-      + 'twin. Not a version, and no whitespace rule can tell a count from a '
-      + 'version when both sit one space after the name.',
+      + 'package name across a sibling corpus, beside the bare-word twin '
+      + 'counted at 12966 in the same clause. Not a version, and no whitespace '
+      + 'rule can tell a count from a version when both sit one space after '
+      + 'the name.',
   },
   {
     file: 'packages/spec/src/migrations/registry.ts',

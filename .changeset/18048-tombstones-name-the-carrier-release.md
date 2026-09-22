@@ -7,14 +7,15 @@ fix(spec,core): every ADR-0049 tombstone names the npm release that actually car
 
 Clause-②: no
 
-Thirty-six sites across fifteen files dated a removal to `@objectstack/spec 18`.
+Thirty-six sites across fifteen files dated a removal to the next npm major of
+`@objectstack/spec` — a bare **18** attached to the package name.
 There is no npm 18, and under ADR-0087's level ruling (Amended 2026-09-13) there
 will not be one as the carrier for a retirement: *"A tombstone names the npm
 release it ships in, ⛔ never the protocol major […] a retirement shipping
 `minor` lands in `17.x.y`"*. An author who met one of these was sent to a
 version that does not exist. A sibling repository had already hung a cleanup
-schedule on "the PR that pushes `@objectstack/spec` to 18" — an event that will
-never come.
+schedule on "the PR that pushes the spec package to its next major" — an event
+that will never come.
 
 **The number was determined per site from `packages/spec/CHANGELOG.md`, not
 pasted.** The sites split cleanly in two, and the two halves take different
