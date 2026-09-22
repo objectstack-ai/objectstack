@@ -141,7 +141,7 @@ import {
   resolveSweepRepo,
 } from './check-half-states.mjs';
 import { classifyHttp, parseOptions as parseLabelWriteOptions, runLabelWrite } from './label-write.mjs';
-import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
+import { isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
 import {
   EXIT_NOT_STORED as POST_STAMPED_EXIT_NOT_STORED,
   STAMP_TOKEN,
@@ -455,6 +455,7 @@ async function rest(path, { method = 'GET', body = null } = {}) {
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch (e) {
+    if (paced) releaseWriteLease(); // ⏱ rule ④: no response will come, so the fleet's turn ends here
     return { status: 0, rateRemaining: null, json: null, detail: e?.message ?? 'fetch threw', call: `${method} ${path}` };
   }
   const rateRemaining = res.headers.get('x-ratelimit-remaining');

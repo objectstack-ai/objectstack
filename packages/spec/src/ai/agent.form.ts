@@ -22,6 +22,14 @@ export const agentForm = defineForm({
         { field: 'role', required: true, colSpan: 2, helpText: 'Agent persona (e.g., "Customer Support Specialist")' },
         { field: 'avatar', colSpan: 1, helpText: 'Avatar image URL' },
         { field: 'active', colSpan: 1, helpText: 'Enable/disable this agent' },
+        // #19331 — `surface` is declared by AgentSchema and was offered by no
+        // control. An explicit `options` list rather than the derived enum: the
+        // two members are product surfaces, not words, and the copy has to say
+        // what the binding DOES (skill compatibility) rather than name it again.
+        { field: 'surface', type: 'select', colSpan: 1, helpText: "Product surface this agent binds (ADR-0063 §1). Only skills whose own surface matches — or is 'both' — attach, and the agent's tool set is the union of those skills' tools. Default 'ask'.", options: [
+          { label: 'Ask (conversational surfaces)', value: 'ask' },
+          { label: 'Build (authoring surfaces)', value: 'build' },
+        ] },
       ],
     },
     {

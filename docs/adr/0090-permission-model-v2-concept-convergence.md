@@ -443,6 +443,19 @@ alias tax on every API.
 >
 > Ruling: director seat, batch #139 item 1, maintainer 「同意」 2026-09-16 — letter **A**.
 
+> **Status (2026-09-20, #18374) — rule 4's third part is NOT delivered.** `performed_by` and
+> `on_behalf_of` ship (#18371); no **run id** is stamped and none is pending — no agent-run
+> concept exists on the request path (the MCP door is explicitly stateless), so no
+> server-constructed identifier grouping one agent task exists to carry, and the two correlation
+> ids that do travel it (`traceId` from the client's `traceparent`, `requestId` preferring the
+> client's `X-Request-Id`) are caller-controlled, which this envelope refuses in writing:
+> 「Server-constructed only, never client-supplied」. **Reopens when** task-scoped, time-boxed
+> agent grants land (the `agent` bullet above): the **grant id is the run id**, and the successor
+> wires it as the `performedBy.runId` sibling key —
+> `packages/spec/src/kernel/execution-context.zod.ts#performedBy` is a one-key object precisely so
+> a sibling can be added without re-shaping a shipped field; it reserves the room, ⛔ not the name.
+> Ruling: director seat, batch #195 item 2, maintainer 「同意」 2026-09-20 — letter **C**.
+
 ### D11 — OWD gains an external dimension (`externalSharingModel`)
 
 Portal and partner scenarios need the Salesforce insight: internal and external record baselines
