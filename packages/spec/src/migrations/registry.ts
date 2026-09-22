@@ -9686,6 +9686,52 @@ const step18: MigrationStep = {
         + 'package\'s manifest, and no registry listing. If any does, the correct answer is a '
         + 'deliberate republish under the new id, not an in-place edit.',
     },
+    // A D3 semantic TODO, not a D2 conversion, and the reason is the widening half.
+    // The mechanical part of this move is trivial in one direction — `01.1.1`
+    // becomes `1.1.1` — but the chain cannot know whether an author who wrote a
+    // leading zero meant the padded spelling of that version or a different one,
+    // and a version IS how a release is addressed: rewriting it would re-point
+    // whatever already installed the old string. The widening half needs no edit at
+    // all, which is why this entry prescribes a check rather than a rewrite.
+    {
+      id: 'manifest-version-semver-2-0-0',
+      surface: 'manifest.version — `ObjectStackManifest.version`, i.e. the `version:` key of '
+        + '`defineStack({ manifest })` and of a package manifest — and its three sibling '
+        + 'declarations `MetadataPluginManifestSchema.version` (`kernel/metadata-plugin.zod.ts`), '
+        + '`PluginRegistryEntrySchema.version` (`kernel/plugin-registry.zod.ts`) and '
+        + '`PluginMetadataSchema.version` (`kernel/plugin-validator.zod.ts`), plus the '
+        + '`PATCH /api/v1/packages/:id` door in `@objectstack/runtime`',
+      replacement: 'a SemVer 2.0.0 string matching `SEMVER_2_0_0_VERSION_PATTERN` '
+        + '(`kernel/version-grammar.ts`). ⭐ This is a WIDENING for almost every author: '
+        + 'prerelease and build suffixes are accepted for the first time, so `2.0.0-beta.1`, '
+        + '`17.0.0-rc.5`, `1.0.0+20230101` and `1.0.0-rc.1+exp.sha.5114f85` now pass a key that '
+        + 'refused all of them, and identifiers may carry either ASCII case. ⛔ The one thing '
+        + 'that stops being accepted is a leading zero in the numeric core: `01.1.1` becomes '
+        + '`1.1.1` — or a different version, if the padded form was standing in for one.',
+      reason:
+        'One concept — "the version of a package or plugin" — was judged by four different '
+        + 'grammars across ten carriers in two repositories, and the strictest of them, this '
+        + 'one, refused `2.0.0-beta.1`: the exact string a sibling declaration documented as an '
+        + 'example of itself. The contradiction was observable between doors on the same '
+        + 'resource, not merely between schema files — the build step refused a prerelease the '
+        + 'publish door accepted, while the install door parsed nothing at all. The maintainer '
+        + 'ruled one canon, and named it after the standard the repository already claimed in '
+        + "this key's own `.describe()`, in the generated reference docs, in the Studio help "
+        + 'text and in two ADRs: SemVer 2.0.0. Why the narrowing is not losslessly convertible: '
+        + 'a version is an identity. `01.1.1` and `1.1.1` are the same release to a reader and '
+        + 'different strings to every registry row, dependency declaration and installed '
+        + 'artifact that stored one of them, and which of the two an author meant is not '
+        + 'derivable from the metadata.',
+      acceptanceCriteria:
+        'Every `manifest.version` you author is a SemVer 2.0.0 string, and `defineStack` / '
+        + '`objectstack validate` / `os plugin build` report no `version` finding. The only '
+        + 'values that need touching are those with a leading zero in a numeric segment — the '
+        + 'in-repo authoring corpus measured ZERO of them, so most consumers have nothing to '
+        + 'change. For each one you do change, confirm nothing still addresses the old string: '
+        + 'no installed row, no `dependencies` range in another manifest, no registry listing. '
+        + 'Prove the widening separately and cheaply: a prerelease version that used to be '
+        + 'refused at build time now builds.',
+    },
     {
       id: 'memory-persistence-placeholder-refused',
       surface: 'memory driver config `persistence.path` (file persistence and the `auto` ' +
@@ -10225,6 +10271,44 @@ const step18: MigrationStep = {
         + '`dialect` key parses byte-identically to before — the retirement removes accepted shapes '
         + 'and adds none.',
     },
+    // The carrier nobody had named: a bare `z.string()` on a published schema,
+    // constraining nothing while its own siblings enforced a grammar. Its narrowing
+    // is the widest of the four by accept-set area and the least likely to be felt,
+    // because what it starts refusing is not a version at all.
+    {
+      id: 'package-manifest-version-grammar-enforced',
+      surface: 'PackageManifestSchema.version (`marketplace/package-version.zod.ts`) — the '
+        + '`version` key inside the manifest snapshot frozen into '
+        + '`sys_package_version.manifest_json` at publish time',
+      replacement: 'a SemVer 2.0.0 string matching `SEMVER_2_0_0_VERSION_PATTERN` '
+        + '(`kernel/version-grammar.ts`). This key was a bare `z.string()`, so it is the one '
+        + 'carrier where the grammar is entirely new: `latest`, `v1.0.0`, `1.0`, the empty '
+        + 'string, a trailing space and `2.0.0-beta.1extra!` were all accepted and sealed into '
+        + 'a published snapshot, and each is refused now. A dist-tag becomes the version it '
+        + 'pointed at (`latest` → `1.4.2`); a `v`-prefixed string drops the prefix (`v1.0.0` → '
+        + '`1.0.0`); a two-segment string gains its patch (`1.0` → `1.0.0`).',
+      reason:
+        'A downstream told "the spec validated it" got no validation at all from this carrier. '
+        + 'The sibling key it belongs to — `PackageVersionSchema.version`, the row this manifest '
+        + 'hangs off — enforced a grammar the whole time, so the SAME release was judged by a '
+        + 'rule in one field and by nothing in the adjacent one, and the unjudged value is the '
+        + 'one that got frozen and shipped. That is the shape Prime Directive #10 refuses: a '
+        + 'declaration advertising a constraint the runtime never applies. The canon ruling gave '
+        + 'every carrier of this concept one grammar, and a carrier with no grammar could not be '
+        + 'left out of it without keeping the hole open under a new name. Why a D3 semantic TODO '
+        + 'rather than a D2 conversion: the repairs above are one-directional guesses. `latest` '
+        + 'names whichever release was current when the snapshot was sealed, which is not '
+        + 'recoverable from the snapshot, and `1.0` may mean `1.0.0` or the newest `1.0.x` — a '
+        + 'transform that picked either would seal a different release under the same checksum.',
+      acceptanceCriteria:
+        'Every package your registry serves still installs, and `manifestJson.version` parses '
+        + 'for each one. The check is cheap and exhaustive: read `manifest_json` on each '
+        + '`sys_package_version` row and test its `version` against the grammar. A row that '
+        + 'fails was already carrying a value no other carrier would have accepted — confirm '
+        + 'what release it was meant to name before choosing the replacement, because the '
+        + 'snapshot cannot tell you, and republish rather than editing a frozen snapshot in '
+        + 'place. In this repository the measured count of such rows is zero.',
+    },
     {
       id: 'package-rollback-response-retired',
       surface:
@@ -10273,6 +10357,45 @@ const step18: MigrationStep = {
         + 'SDKs from the contract entry, and the route\'s handler emits the same '
         + 'bytes before and after — the retirement removes a false claim, not '
         + 'behaviour.',
+    },
+    // The published release row's half of the version canon. It moves in BOTH
+    // directions at once — gaining uppercase identifiers, losing the degenerate
+    // forms — which is why the prescription below has to state each separately
+    // rather than reading as one tightening.
+    {
+      id: 'package-version-row-semver-2-0-0',
+      surface: 'PackageVersionSchema.version (`marketplace/package-version.zod.ts`) — the '
+        + '`version` column of a `sys_package_version` row, and through '
+        + '`CreatePackageVersionRequestSchema.version`, which references it, the version a '
+        + 'draft release is created with',
+      replacement: 'a SemVer 2.0.0 string matching `SEMVER_2_0_0_VERSION_PATTERN` '
+        + '(`kernel/version-grammar.ts`). Two changes, opposite in direction. ⭐ WIDER: suffix '
+        + 'identifiers may now carry either ASCII case, because SemVer 2.0.0 is '
+        + 'case-preserving — `1.0.0-Beta.1` and `1.0.0+Build.5` are accepted where this key '
+        + 'used to demand lowercase, and the plugin boot path has always accepted them. ⛔ '
+        + 'NARROWER: the forms the standard forbids are refused — `01.1.1` (§2), `1.0.0-0123` '
+        + 'and `1.0.0-alpha..1` (§9), `1.0.0+.` (§10).',
+      reason:
+        "This key's own docstring advertised `2.0.0-beta.1` as an example of itself while a "
+        + 'sibling carrier of the same concept refused that exact string — the contradiction '
+        + 'the canon card was filed over. The lowercase restriction was the narrowest published '
+        + 'accept set of the four and had no standard behind it: it made a release row refuse a '
+        + 'version the runtime that loads the release accepts, so a publisher could be turned '
+        + 'away for a capitalisation the loader would never have noticed. Why the narrowing is '
+        + 'a D3 semantic TODO rather than a mechanical rewrite: a published version row is '
+        + 'immutable by contract — `manifestJson` and `checksum` freeze on transition to '
+        + '`published` — so a stored degenerate version is not edited in place at all. It is '
+        + 'republished under a version that sorts, and whether the old row should be deprecated '
+        + 'or left standing is a release decision the chain cannot make.',
+      acceptanceCriteria:
+        'Publishing and installing every release you have works unchanged. The widening needs '
+        + 'no action and can be confirmed cheaply: a mixed-case prerelease that used to be '
+        + 'refused at publish now creates a draft. For the narrowing, list your '
+        + '`sys_package_version` rows and check each `version` against the grammar — a leading '
+        + 'zero in a numeric segment, or a doubled or trailing dot in a suffix, are the only '
+        + 'shapes affected. Any row that fails stays readable and installable; what it can no '
+        + 'longer do is receive a NEW draft at that spelling, so cut the next release at a '
+        + 'version that sorts.',
     },
     {
       id: 'packages-list-pagination-retired',
@@ -10783,6 +10906,50 @@ const step18: MigrationStep = {
         + 'both barrels (`packages/core/src/security/security-scanner-retirement.pin.test.ts`), not '
         + 'by a grep: the name legitimately survives in the tombstone comments that explain the '
         + 'retirement.',
+    },
+    // The boot path's half of the version canon, and the one whose BOUND is the
+    // load-bearing fact: a widen-never-narrow ruling governs this key, and this
+    // entry narrows it on eight strings and nothing else. Registered as a D3
+    // semantic TODO rather than a D2 conversion because every one of the eight has
+    // more than one defensible repair and the chain can pick none of them: is
+    // `1.0.0-alpha..1` meant to be `1.0.0-alpha.1`, or `1.0.0-alpha`?
+    {
+      id: 'plugin-version-semver-2-0-0',
+      surface: 'plugin.version — `PluginSchema.version` (`kernel/plugin.zod.ts`), the key a '
+        + 'plugin object carries into `kernel.use()`, and the boot-path predicate that judges '
+        + 'the same string in `@objectstack/core` (`plugin-loader.ts`)',
+      replacement: 'a SemVer 2.0.0 string matching `SEMVER_2_0_0_VERSION_PATTERN` '
+        + '(`kernel/version-grammar.ts`). ⭐ Only EIGHT strings stop loading, all of them forms '
+        + 'the standard forbids: `01.1.1`, `1.01.1`, `1.1.01` (§2, a leading zero in a numeric '
+        + 'identifier — drop it); `1.0.0-0123`, `1.0.0-alpha..1`, `1.0.0-alpha..`, `1.0.0-.` '
+        + '(§9, a prerelease identifier that is empty or carries a leading zero — name it, or '
+        + 'remove the empty segment); `1.0.0+.` (§10, an empty build identifier — name it or '
+        + 'drop the `+` suffix). ⛔ Nothing else moves: every valid prerelease and build form '
+        + 'this key accepts today it still accepts, `1.0.0-alpha.1` and '
+        + '`1.0.0-rc.1+exp.sha.5114f85` included.',
+      reason:
+        'The canon ruling made one grammar serve every carrier of "the version of a package or '
+        + 'plugin", and named it after the standard: SemVer 2.0.0. This key had the widest of '
+        + 'the four accept sets, which is why it is the only one that narrows without also '
+        + 'widening. The narrowing is bounded deliberately, and the bound is what keeps the '
+        + 'earlier widen-never-narrow ruling on this path honoured rather than reversed: that '
+        + 'ruling\'s subject is what LOADS, and none of the eight is a valid prerelease. What '
+        + 'they have in common is that no precedence order exists for any of them — '
+        + '`dependency-resolver.ts` in `@objectstack/core` can place none of them in an order — '
+        + 'so a plugin versioned this way could be published and never compared against its own '
+        + 'successor, which is a worse outcome than the refusal. Why it is a D3 semantic TODO '
+        + 'and not a D2 conversion: each of the eight has several defensible repairs and the '
+        + 'metadata does not say which was meant, and a version is how a release is addressed — '
+        + 'rewriting one silently re-points whatever already resolved the old string.',
+      acceptanceCriteria:
+        'Every plugin you ship boots: `kernel.use(plugin)` resolves for each of them, on both '
+        + '`ObjectKernel` and `LiteKernel`. The only versions needing an edit are the eight '
+        + 'forms above — a `git grep` for a leading zero in a numeric segment and for a doubled '
+        + 'or trailing dot in a suffix finds them all, and the in-repo authoring corpus measured '
+        + 'ZERO producers of any of them. For each one you change, confirm nothing still '
+        + 'resolves the old string: no `dependencies` range in another manifest, no installed '
+        + 'row, no lockfile pin. ⛔ Do not repair one by widening the check back — the grammar '
+        + 'is the contract now, on nine carriers at once.',
     },
     {
       id: 'record-chatter-position-vocabulary-converged',
