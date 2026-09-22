@@ -3973,12 +3973,17 @@ export class ObjectQL implements IObjectQLEngine {
    * issued only for a caller that passes, in the middleware's own order: the
    * ADR-0103 engine-owned affordance gate and the ADR-0090 D12 delegated-admin
    * gate (both BEFORE any permission set resolves, both the middleware's own
-   * primitives), the fail-closed postures, the ADR-0066 D3 capability AND-gate
-   * for both principals, the `allowCreate`/`allowEdit` CRUD grant, the ADR-0090
-   * D10 delegator's independent grant, and the middleware's own step 2.5 FLS
-   * write gate over the keys THIS payload names. Each of those is pinned EQUAL
-   * to the registered middleware's, arm for arm. The gate says nothing about
-   * any refusal not in that list.
+   * primitives), the fail-closed postures (#3545's unresolvable posture and the
+   * D10 dangling delegator), the ADR-0066 D3 capability AND-gate for both
+   * principals, the `allowCreate`/`allowEdit` CRUD grant, the ADR-0090 D10
+   * delegator's independent grant, and the middleware's own step 2.5 FLS write
+   * gate over the keys THIS payload names. Each of those is pinned EQUAL to the
+   * registered middleware's, arm for arm, with ONE exception disclosed here
+   * because it is not pinned: a preview names no stored row, so on an UPDATE
+   * the D12 arm is handed no id and refuses a scope-holding delegate it cannot
+   * boundary-check, where the middleware — holding that id — can admit.
+   * NARROWER, never wider. The gate says nothing about any refusal not in that
+   * list.
    *
    * ⛔ A `true` here is NOT a promise that the write would succeed, and ⛔ no
    * enumeration of the distance to success is attempted — the middleware
@@ -3993,10 +3998,11 @@ export class ObjectQL implements IObjectQLEngine {
    *    curated-capability-name refusal and the ADR-0090 D5/D9 audience-anchor
    *    binding guard. And the ADR-0056 `publicFormGrant` scope, which admits
    *    create plus read-back on exactly the granted object and refuses
-   *    everything else — not asked because no caller can present that grant
-   *    here (only the public form-submit route constructs one, and it goes to
-   *    the real write, never to a preview) and because it has no extracted
-   *    primitive to call, so an arm would be a second spelling of its scope.
+   *    everything else — not asked because no wire caller and no constructor
+   *    in the tree presents that grant here (only the public form-submit route
+   *    constructs one, and it goes to the real write, never to a preview) and
+   *    because it has no extracted primitive to call, so an arm would be a
+   *    second spelling of its scope.
    *  - **Row-level and post-image refusals — the preview names no stored row.**
    *    The step 2.7 `using` pre-image, the ADR-0055 controlled-by-parent
    *    master-edit check (step 2.8), the RLS `check` post-image (step 3.6) and
@@ -4014,8 +4020,9 @@ export class ObjectQL implements IObjectQLEngine {
    *  - **The caller's own PREDICATE.** Step 2.9's anti-filter-oracle guard
    *    refuses an update whose `where` names a field the caller may not read.
    *    The preview carries no predicate, so that guard is never asked here.
-   *  - **After `next()`.** The #16608 fail-closed assertion that the insert
-   *    `check` seam really ran refuses a write that already executed, which no
+   *  - **After `next()`.** The fail-closed assertion that the engine honoured
+   *    `OperationContext.postHookWriteImageCheck` — that the insert `check`
+   *    seam really ran — refuses a write that already executed, which no
    *    preview can be asked about at all.
    *  - **The static `readonly` strip.** `insert()` strips an author-declared
    *    `readonly` reference field inside the write's executor, so the real

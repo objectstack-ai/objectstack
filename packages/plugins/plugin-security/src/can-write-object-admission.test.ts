@@ -294,7 +294,12 @@ describe('canWriteObject agrees with the engine middleware, case for case', () =
     { label: 'an explicit create grant', object: 'invoice', operation: 'insert', sets: [WRITER_SET], context: WRITER_CTX },
     { label: 'an explicit edit grant', object: 'invoice', operation: 'update', sets: [WRITER_SET], context: WRITER_CTX },
     { label: 'read but no write grant', object: 'invoice', operation: 'insert', sets: [READER_SET], context: WRITER_CTX },
-    { label: 'a superuser wildcard', object: 'ledger', operation: 'insert', sets: [ADMIN_SET], context: { ...WRITER_CTX, posture: 'PLATFORM_ADMIN' } },
+    // ⭐ The context NAMES the wildcard set, for the reason TENANT_ADMIN_CTX
+    // does: the harness resolves a set only when the context asks for it, so
+    // without the name this caller resolves to the baseline alone, both doors
+    // answer `false`, and the case agrees about something that is not a
+    // wildcard at all — green, and vacuous with respect to its own label.
+    { label: 'a superuser wildcard', object: 'ledger', operation: 'insert', sets: [ADMIN_SET], context: { ...WRITER_CTX, permissions: [ADMIN_FULL_ACCESS], posture: 'PLATFORM_ADMIN' } },
     // ⭐ W3 — the ADR-0066 D3 capability arm, the first class that leaked.
     { label: 'a required capability the caller LACKS', object: 'payroll_run', operation: 'insert', sets: [CAPLESS_SET], context: WRITER_CTX },
     { label: 'a required capability the caller HOLDS', object: 'payroll_run', operation: 'insert', sets: [CAPABLE_SET], context: WRITER_CTX },

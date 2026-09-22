@@ -5200,8 +5200,12 @@ export class SecurityPlugin implements Plugin {
    * capability AND-gate for both principals, the `allowCreate`/`allowEdit` CRUD
    * grant, the D10 delegator's independent grant, and the step 2.5 FLS write
    * gate over the keys THIS payload names. Each of those is pinned EQUAL to the
-   * registered middleware's, arm for arm. It means nothing about any refusal
-   * not in that list.
+   * registered middleware's, arm for arm, with ONE exception disclosed here
+   * because it is not pinned: a preview names no stored row, so on an UPDATE
+   * arm 3 is handed no id and refuses a scope-holding delegate it cannot
+   * boundary-check, where the middleware — holding that id — can admit.
+   * NARROWER, never wider. It means nothing about any refusal not in that
+   * list.
    *
    * ⛔ `true` never means "this write will succeed", and ⛔ what follows is not
    * an enumeration of the distance to success: the middleware refuses both
@@ -5216,10 +5220,11 @@ export class SecurityPlugin implements Plugin {
    *    ADR-0066 D1 curated-capability-name refusal and the ADR-0090 D5/D9
    *    audience-anchor binding guard. And the ADR-0056 `publicFormGrant` scope,
    *    which admits create plus read-back on exactly the granted object and
-   *    refuses everything else pre-resolution — not asked because no caller can
-   *    present the grant here (it is constructed only by the public form-submit
-   *    route, whose context goes to the real write, and the key is not in the
-   *    inbound `ENTRY_EXECUTION_CONTEXT_FIELDS` set) and because it has no
+   *    refuses everything else pre-resolution — not asked because no wire
+   *    caller and no constructor in the tree presents the grant here (it is
+   *    constructed only by the public form-submit route, whose context goes to
+   *    the real write, and the key is not in the inbound
+   *    `ENTRY_EXECUTION_CONTEXT_FIELDS` set) and because it has no
    *    extracted primitive, so an arm would be a SECOND SPELLING of its scope —
    *    the drift this method exists to avoid.
    *  - **Row-level and post-image refusals — the preview names no stored row.**
@@ -5232,8 +5237,9 @@ export class SecurityPlugin implements Plugin {
    *    therefore widen the caller class by nothing.
    *  - **The caller's own PREDICATE** — the anti-filter-oracle guard (2.9),
    *    which this method is handed none of.
-   *  - **After `next()`** — the #16608 fail-closed assertion that the insert
-   *    `check` seam really ran, which judges an executed write.
+   *  - **After `next()`** — the fail-closed assertion that the engine honoured
+   *    `OperationContext.postHookWriteImageCheck`, i.e. that the insert `check`
+   *    seam really ran, which judges an executed write.
    *  - **Outside the middleware entirely** — `readonlyWhen`, the static
    *    `readonly` strip and the validation rules themselves.
    *
@@ -5279,8 +5285,26 @@ export class SecurityPlugin implements Plugin {
         //    cannot boundary-check. That is NARROWER than the write path for a
         //    scope-holding delegate, never wider, and narrower is the safe
         //    direction for a gate whose whole job is to withhold.
+        //
+        //    ⭐ And the rows it supplies are SHALLOW COPIES, never the caller's
+        //    own objects. The gate stamps `granted_by` onto the rows it
+        //    materialises (its dual audit), and on an insert it materialises
+        //    the payload rows BY REFERENCE — while `validate()` hands this
+        //    method the caller's RAW payload, so passing it straight through
+        //    would let a PREVIEW write into the caller's own objects. The
+        //    decision cannot notice the copy: nothing reads `granted_by` back,
+        //    it is only ever written.
         if (this.delegatedAdminGate) {
-          await this.delegatedAdminGate.assert({ object: objectName, operation, context, data });
+          const shallow = (row: unknown) =>
+            row && typeof row === 'object' && !Array.isArray(row)
+              ? { ...(row as Record<string, unknown>) }
+              : row;
+          await this.delegatedAdminGate.assert({
+            object: objectName,
+            operation,
+            context,
+            data: Array.isArray(data) ? data.map(shallow) : shallow(data),
+          });
         }
       } catch (e) {
         // A refusal from either gate IS the admission answer — the write path's
