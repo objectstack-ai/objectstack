@@ -12243,7 +12243,8 @@ export function residueLines(
  * convenience. The review label deliberately names WHAT is reviewed, never a
  * model (maintainer, 2026-08-16: 「needs:fable-review 这个标签不好,下次模型升级怎么办」).
  *
- * ## A tier that is GONE is not a tier that is EXHAUSTED (#19544)
+ * ## A tier that is GONE is not a tier that is EXHAUSTED — and a SESSION not
+ * served one is neither of them (#19544, reversed by #19680)
  *
  * The exits below carry a QUOTA exemption: a tier that is exhausted comes
  * back, so the card waits out of the queue and the review is never downgraded
@@ -12254,15 +12255,31 @@ export function residueLines(
  * retirement is a maintainer ruling and ⛔ never a seat's reading — and when
  * the ruling lands, this VALUE is the one line that moves. The ceiling of the
  * ladder `tierLines` prints is DERIVED from it ({@link TIER_CEILING}) so the
- * two cannot drift apart. This value moved off the retired ceiling on the
- * maintainer's 2026-09-21 ruling — verbatim: 「fable 没有了」, answered with
- * 「改成 opus」 — which is why the docblocks below still name the retired tier
- * where they record what was ruled AT THE TIME; a record of what was served
- * then stays true. Rule text: `references/contract-review.md` 「降档保险丝」.
+ * two cannot drift apart.
+ *
+ * A THIRD case is what this line was once actually moved on, and it is neither
+ * of the two above. On 2026-09-21 two review dispatches died on their first
+ * request with an HTTP 429 quota refusal at this tier; that reading — ONE
+ * agent, temporarily, not authorized — was written in here as a retirement,
+ * and the skills moved with it. It is not a retirement. Maintainer,
+ * 2026-09-22, verbatim and untranslated (ruling record: issue comment
+ * 5771798588): 「复核档应该就是 fable 啊」 ·
+ * 「某个agent临时没有fable给的特殊授权，不应该改变skills」 ·
+ * 「fable 撤回卡 你来创建」.
+ *
+ * As one rule, and this docblock is its home — the PM skill points every tier
+ * value at this file, so there is nowhere else it could live: a tier word is
+ * RETIRED only by the maintainer's explicit ruling that NAMES a retirement; a
+ * 429, an exhausted quota or a missing authorization on one session is ⛔
+ * never a retirement; and a seat this tier is not served to renders the review
+ * through an isolated at-tier subagent or waits outside the queue — ⛔ never
+ * by editing this line. What one session is authorized for is a property of
+ * that session; this constant is a property of the lane's governance, and the
+ * two ⛔ never trade places.
  *
  * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
  */
-export const CONTRACT_REVIEW_TIER = 'claude-opus-5';
+export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
 
 /**
  * The globs that MANDATE a model tier for any card whose file surface touches
@@ -12506,15 +12523,23 @@ export function tierWordOf(modelId) {
 export const TIER_CEILING = tierWordOf(CONTRACT_REVIEW_TIER);
 
 /**
- * Tier family words this ladder once printed and must never print again.
+ * Tier family words a maintainer ruling has RETIRED — none today.
  *
  * ⛔ Not a tier table and ⛔ not an ordering — a RETIRED-SPELLING guard, the
  * same shape as the retired clause-② keys pinned further down. The self-test
  * asserts no rendering contains one, so the day a ceiling is written down by
  * hand again it reds instead of quietly outliving the harness that served it.
- * A word leaves this list only when a maintainer ruling brings the tier back.
+ *
+ * EMPTY is this list's correct steady state, ⛔ not a disabled guard. A word
+ * enters it only on the maintainer's explicit ruling that names a retirement
+ * and leaves it only on a ruling that brings the tier back — the conditions
+ * {@link CONTRACT_REVIEW_TIER}'s docblock states; the one entry this list held
+ * was written on a session's quota refusal, which is none of those. Because an
+ * empty list clears every rendering for free, the self-test proves the guard
+ * on a MUTATED copy — a list naming a word the ladder really prints has to red
+ * — so the green above it is measured rather than vacuous.
  */
-export const RETIRED_TIER_WORDS = Object.freeze(['fable']);
+export const RETIRED_TIER_WORDS = Object.freeze([]);
 
 /**
  * Place a card's file surface against the mandatory globs. Pure over its
@@ -25476,9 +25501,22 @@ function selfTest() {
   t('the ladder prints a ceiling DERIVED from the contract-review constant, so the two cannot drift apart', ladderLine.includes(`ceiling ${tierWordOf(CONTRACT_REVIEW_TIER)})`), ladderLine || 'no ladder line was rendered at all');
   t("…in the ladder's own vocabulary — the constant's FAMILY word, so a parseable id NEVER reaches the ladder verbatim", /^claude-[a-z]+-/.test(CONTRACT_REVIEW_TIER) && TIER_CEILING === tierWordOf(CONTRACT_REVIEW_TIER) && !ladderLine.includes(CONTRACT_REVIEW_TIER), ladderLine);
   t('tierWordOf reads the family out of an id, and hands an unreadable one back VERBATIM rather than guessing a word', tierWordOf('claude-example-9-9') === 'example' && tierWordOf('an-unfamiliar-shape') === 'an-unfamiliar-shape' && tierWordOf(null) === '');
-  t(`⛔ no RETIRED tier word survives in any live RULE — ladder, exits, clause-② note and suspicion line all read the constant (dirty: ${ladderRenderings.map((l, i) => RETIRED_TIER_WORDS.filter((w) => l.toLowerCase().includes(w)).map((w) => `${i}/${w}`).join(' ')).filter(Boolean).join(' ') || 'none'})`, ladderRenderings.every((l) => RETIRED_TIER_WORDS.every((w) => !l.toLowerCase().includes(w))));
+  // The guard is driven through ONE function so the live reading and its
+  // control run the same search. RETIRED_TIER_WORDS is EMPTY — no ruling has
+  // retired a tier word — so the live case below clears every rendering for
+  // free, and a case asserting only that green would pass just as happily on a
+  // search that had stopped matching anything. The non-vacuity case therefore
+  // moved off the LIVE list, where it could only ever count entries, and onto
+  // a MUTATED copy: feed the guard a word the ladder demonstrably prints and
+  // it must red. That is the invariant an empty list has to keep provable — a
+  // word still in the ladder can never be in this list.
+  const retiredWordHits = (words) =>
+    ladderRenderings.flatMap((l, i) => words.filter((w) => l.toLowerCase().includes(w)).map((w) => `${i}/${w}`));
+  t(`⛔ no RETIRED tier word survives in any live RULE — ladder, exits, clause-② note and suspicion line all read the constant (dirty: ${retiredWordHits(RETIRED_TIER_WORDS).join(' ') || 'none'})`, retiredWordHits(RETIRED_TIER_WORDS).length === 0);
   t('…and the guard is not reading an empty string — every rendering it clears still carries its own rule text', ladderRenderings.every((l) => l.includes('Model tier')) && ladderRenderings.some((l) => l.includes('Exits,')));
-  t('the retired-spelling guard is not vacuous — it names at least one word, and none of them is a tier still in the ladder', RETIRED_TIER_WORDS.length > 0 && !RETIRED_TIER_WORDS.includes(TIER_FLOOR) && !RETIRED_TIER_WORDS.includes(TIER_DEFAULT) && !RETIRED_TIER_WORDS.includes(TIER_CEILING));
+  t(`no tier word is RETIRED today — the list is empty and frozen, which is what "a temporary lack of authorization is not a retirement" looks like in data (holds: ${[...RETIRED_TIER_WORDS].join(', ') || 'none'})`, Array.isArray(RETIRED_TIER_WORDS) && RETIRED_TIER_WORDS.length === 0 && Object.isFrozen(RETIRED_TIER_WORDS));
+  t(`…and the guard is NOT vacuous, proved on a MUTATED copy: a list naming the ladder's own ceiling word (${TIER_CEILING}) REDS, so the green above is the empty list and not a broken search (mutated hits: ${retiredWordHits([TIER_CEILING]).join(' ') || 'NONE — the control never fired'})`, retiredWordHits([TIER_CEILING]).length > 0 && retiredWordHits(['a-word-no-rendering-prints']).length === 0);
+  t('…and the invariant that copy stands for: no tier word still in the ladder may ever enter the live list', [TIER_FLOOR, TIER_DEFAULT, TIER_CEILING].every((w) => !RETIRED_TIER_WORDS.includes(w)));
   // A sibling case further down pins the constant's CURRENT value to exactly
   // one site under these roots. What that case cannot see is a RETIRED id left
   // behind — it is not the current value, so nothing compares it to anything,
