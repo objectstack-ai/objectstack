@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 784 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 787 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1691,7 +1691,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 784 isomorphic pins', () => {
+  it('still declares all 787 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2276,7 +2276,14 @@ describe('ADR-0122 type-alias convention', () => {
     // carried both halves of the pair — which is also why only ONE of the three
     // was ever on this list. -1 converted to an `XParsed` pair; the Iso number
     // stays vacant (ids are claims about pins, not positions).
-    expect(pins).toHaveLength(784);
+    // 784 -> 787 is #17551's ADR-0021 dataset selection (api/analytics.zod.ts,
+    // module slot M11): `DatasetSelectionSchema` and the two nested directives
+    // `DatasetCompareToSchema` / `DatasetTotalsSchema`, the (RISE) case three
+    // times. The selection takes its seven shared members straight off
+    // `AnalyticsQuerySchema.shape` — already pinned isomorphic as Iso300 — and
+    // the four it adds carry no default, transform, catch or pipe, so no
+    // `XParsed` is declared and all three come here instead. +3 added.
+    expect(pins).toHaveLength(787);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
