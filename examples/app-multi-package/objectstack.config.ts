@@ -20,14 +20,22 @@ import ordersStack from './src/packages/orders/index.js';
  *
  * ## What `preserve` produces
  *
- * The composed stack the platform has always produced — every collection
- * flattened to the top level — PLUS `packages[]`, one entry per input stack,
- * each carrying that package ASSEMBLED (its manifest fields with the
- * collections it owns written over them). The flattened top level is what the
- * metadata service reads; `packages[]` is what `ObjectQL.registerApp`
- * registers, package by package, in dependency-topological order — which is
- * where per-package ownership comes from. Without the list, a two-package
- * artifact would install two package records owning nothing at all.
+ * `packages[]`, one entry per input stack, each carrying that package ASSEMBLED
+ * (its manifest fields with the collections it owns written over them) — and
+ * the artifact's own `manifest`, which is its identity. Each definition is
+ * serialized ONCE, under the package that owns it: a multi-package artifact
+ * carries no flattened copy of its collections at the top level (#14512,
+ * ADR-0130 D4's 2026-09-22 addendum).
+ *
+ * `packages[]` is what the metadata service's artifact door reads and what
+ * `ObjectQL.registerApp` registers, package by package, in
+ * dependency-topological order — which is where per-package ownership comes
+ * from. Without the list, a two-package artifact would install two package
+ * records owning nothing at all.
+ *
+ * An artifact built BEFORE that change carries both halves, and every reader
+ * still resolves either (D4's read-both rule), so upgrading the compiler does
+ * not invalidate an artifact already on disk.
  *
  * ## Why the module is listed FIRST
  *

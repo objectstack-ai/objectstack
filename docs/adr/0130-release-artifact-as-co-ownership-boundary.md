@@ -5,6 +5,10 @@
 ([#14487](https://github.com/objectstack-ai/objectstack/issues/14487)): the permission matrix
 §1.3(a) measures is **not** part of this boundary's payoff — permission sets stay whole in the
 `type: app` package.
+**D4's emitted shape amended by the 2026-09-22 addendum**
+([#14512](https://github.com/objectstack-ai/objectstack/issues/14512)): a multi-package artifact
+carries its metadata **once**, in `packages[]` — the flattened copy is no longer emitted beside
+it. D4's read-both rule and D7 are unchanged, so every artifact already on disk still loads.
 **Deciders**: ObjectStack maintainer, 2026-09-01, live PM chat, verbatim and untranslated:
 「立 ADR 起草卡派发」and 「14122 作为epic 任务集中跟踪」— approving the proposal in
 [#14122](https://github.com/objectstack-ai/objectstack/issues/14122) into the ADR-drafting lane
@@ -245,6 +249,11 @@ configurations that would have failed at the DB anyway, and it rejects them earl
 legibly.
 
 ### D4 — Artifact schema: `packages: [...]` is additive, and both shapes are read
+
+⚠️ **Amended 2026-09-22 (#14512) — see the addendum at the foot of this record.** "Additive" below
+describes the SCHEMA (the key is optional and `manifest` is retained) and the LOAD path (both
+shapes are read), and both still hold. What no longer holds is the EMITTED shape: a multi-package
+`composeStacks(…, { manifest: 'preserve' })` output carries its collections in `packages[]` only.
 
 `ObjectStackDefinitionSchema` gains an **optional** `packages` key carrying an array of
 manifests. `manifest` (singular, `packages/spec/src/stack.zod.ts`) is **retained**, and the load path reads
@@ -636,3 +645,75 @@ rediscovered:
   all-objects matrix at the environment-admin door. After a split the app package owns the sets
   but no objects, so where a *packaged* cross-module set's grants are authored is a UI question
   this record does not answer and #14488 inherits.
+
+---
+
+## Addendum (2026-09-22, #14512) — a multi-package artifact carries its metadata ONCE, in `packages[]`
+
+**Provenance.** Maintainer ruling, 2026-09-03, live PM chat with the director seat (decision batch
+#23), recorded on
+[#14512](https://github.com/objectstack-ai/objectstack/issues/14512#issuecomment-5528589044).
+Verbatim reply: 「同意」. It re-scopes the 2026-09-02 ruling of the same direction
+([#14512 comment 5518059994](https://github.com/objectstack-ai/objectstack/issues/14512#issuecomment-5518059994),
+also 「同意」) whose cost estimate — "an iteration change, not a shape adaptation" — a reader
+enumeration falsified: the reader surface was at least fourteen sites across three packages, and
+the one-fold option was measured dead. The ruling's own words for what stands:「B stands,
+re-scoped as a program: readers first, emitter last; the release is not held」.
+
+### What D4 said, and what this changes
+
+D4 above declares `packages` **additive**: the load path reads both shapes, and
+`composeStacks(…, { manifest: 'preserve' })` emitted the flattened collections **and** a package
+list carrying the same definitions a second time. That second half is what changes. A
+multi-package artifact now carries each object, view, flow, permission set and every other
+package-owned collection **once**, in the body of the package that owns it.
+
+**⛔ D4's read-both rule is untouched.** `packages` present → iterate it; `packages` absent →
+`manifest` as a single-element list. An artifact built before this change carries both halves and
+loads exactly as it did — which is why this is a producer change and not a format migration, and
+why no artifact on disk anywhere is invalidated by it.
+
+**D7 is untouched and is stated as a condition rather than trusted.** A single-package artifact
+keeps today's shape byte for byte: the emitter strips nothing unless the artifact carries **two or
+more** package entries.
+
+### Why the copy goes, rather than being compressed
+
+- **Size.** The reserved `{ ref, integrity }` external-segment position exists in D4 because
+  artifact size is a real constraint at 2.6 MB for a single package. Emitting every definition
+  twice moves in the opposite direction, and it did so in the same format that reserved the
+  position. Measured on `examples/app-multi-package` (two packages, three definitions):
+  8,223 → 5,328 bytes, −35%.
+- **One source of truth.** Two copies of one definition are not reconciled by anything. They are
+  measured to differ in content whenever composition merges or overrides an object, and which copy
+  a consumer saw depended on which reader it went through.
+
+### The order this landed in, which is the decision's substance
+
+**Readers first, emitter last.** Every reader of a top-level collection gained a `packages[]` path
+while the artifact stayed additive (#15004's acceptance probe, #15005 `@objectstack/runtime`,
+#15006 `@objectstack/cli`, #15007 `@objectstack/plugin-security`, #15229 `@objectstack/verify`,
+#15232 `@objectstack/plugin-dev`, and the `plugins` / `devPlugins` contract ruling #15219). The
+emitter is the last step, and the acceptance probe — which boots a two-package collection zoo
+through every load boundary in **both** shapes and fails if any subsystem sees an empty collection
+— is the mechanical criterion for calling the program done, ⛔ never a card-state reading of the
+blocker list.
+
+The failure mode that order exists to contain is a reader nobody enumerated, and it is SILENT:
+nothing throws, the collection is simply absent. ⛔ A missed reader is a new reader card, never a
+fallback bolted onto the emitter.
+
+### What is NOT decided here
+
+- ⛔ **Not a partly flattened artifact.** The emitter flips whole-artifact. A shape carrying some
+  collections flattened and others only in bodies is a new permanent shape and was refused by name
+  in the same ruling (option D).
+- ⛔ **Not the four envelope keys.** `packages`, `plugins`, `devPlugins` and `devLogins` are not
+  package-owned collections (#15219, #17556): they stay at the artifact's top level, where
+  `composeStacks` still concatenates them and the host reads them.
+- **Two compositions keep the additive shape, by construction rather than by choice**: one whose
+  input declares no `manifest` (nothing owns its collections — `manifest` is optional on the stack
+  schema), and one whose `packages`-carrying input also declares collections of its own (its
+  entries are carried untouched, so its own collections are attributed to no body). Stripping
+  either would delete metadata rather than a copy of it. Both remain readable by D4's read-both
+  rule, and neither is refused: a composition that was legal before this change stays legal.
