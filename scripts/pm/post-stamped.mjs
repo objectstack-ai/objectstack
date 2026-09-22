@@ -369,6 +369,19 @@
  * tool arguing with itself; a refusal prescribing what is already on the page is
  * that same tool telling the author to change nothing.
  *
+ * ⛔ And the route is BOTH HALVES, always, because a remedy is worth what
+ * FOLLOWING it does. A first cut of this rule named only the declaration —
+ * 「the same declaration OUTSIDE the quotation」 — and the author who did
+ * exactly that, pasting the quoted line back unchanged, was refused a second
+ * time by the ordinary text, which prescribed the declaration now standing in
+ * the prose. The circle had MOVED ONE STEP, not closed. The digits are what
+ * has to leave the quotation, so the remedy says so: declare the reading in the
+ * prose AND paste the quoted line without its stamp, or quote the placeholder
+ * form instead of digits. A quotation that KEEPS the digits is still a bare
+ * stamp there, and the refusal for the half-done body names the declaration
+ * that already reads rather than asking for it again — pinned as a CHAIN, from
+ * the filed repro to a body that posts, every step's text naming the next.
+ *
  * ## A quoted token is not a stamp — the carve-out's PARTNER check (#19091)
  *
  * The rule above is right and this file said so, and it landed without its
@@ -1372,28 +1385,67 @@ function quotedSpanRemedy(raw, spans, stamp, closed = null) {
   const text = String(raw ?? '');
   const hits = [];
   for (let at = text.indexOf(stamp); at !== -1; at = text.indexOf(stamp, at + 1)) hits.push(at);
-  if (hits.length === 0 || !hits.every((at) => insideQuotedSpan(spans, at))) return null;
-  const declarations = [];
+  if (hits.length === 0) return null;
+  const openers = [];
   const re = globalOf(QUOTED_TOKEN_RE);
   let m;
   while ((m = re.exec(text))) {
-    if (insideQuotedSpan(spans, m.index)) declarations.push([m.index, m.index + m[0].length]);
+    openers.push({ from: m.index, to: m.index + m[0].length, quoted: insideQuotedSpan(spans, m.index) });
   }
-  const declared = hits.every((at) => declarations.some(([from, to]) => at >= from && at < to));
-  const remedy =
-    (declared
-      ? `⚠️ The \`{{WAS:${stamp}}}\` you already wrote round it is inside that quotation too. Every `
-      : '⚠️ Every ') +
-    'occurrence of this stamp sits inside a QUOTED SPAN, where this tool renders text and substitutes ' +
-    'nothing' +
-    (declared
-      ? ' — so what stands there is a PICTURE of a declaration, not one, and re-typing it changes nothing. '
-      : ' — so writing either spelling there prints the token itself, not a time. ') +
-    'The route that works is the same declaration OUTSIDE the quotation' +
-    (closed ? `, once the value is one the quoted route takes at all: ${closed}` : ` — \`{{WAS:${stamp}}}\` in the prose beside it`) +
-    '; or, if the quotation is an EXAMPLE, quote the placeholder form (`YYYY-MM-DDThh:mmZ`) instead of ' +
-    'digits. Quoting changes what is rendered, never what was typed onto the board.';
-  return { text: remedy, declared };
+  // Each occurrence of the DIGITS is one of four things, and only the fourth
+  // leaves this remedy to the ordinary one.
+  let quotedDeclared = 0; // inside a `{{WAS:…}}` that is itself quoted: a picture of a declaration
+  let quotedBare = 0; //     inside a quotation with no opener round it: digits, plainly
+  let proseDeclared = 0; //  inside a `{{WAS:…}}` TOKEN outside every quotation: a real declaration
+  for (const at of hits) {
+    const opener = openers.find((o) => at >= o.from && at < o.to) ?? null;
+    if (insideQuotedSpan(spans, at)) {
+      if (opener) quotedDeclared += 1;
+      else quotedBare += 1;
+    } else if (opener && !opener.quoted) {
+      proseDeclared += 1;
+    } else {
+      return null; // a loose stamp in prose — the ordinary remedy is the right one
+    }
+  }
+  if (quotedDeclared + quotedBare === 0) return null;
+  // ⛔ BOTH halves, always. Naming only the declaration sends an author who
+  // pastes the quoted line back as it was straight into a second refusal, and
+  // that second one prescribes the declaration now standing in the prose — the
+  // circle, moved one step instead of closed.
+  const route = (alreadyDeclared) =>
+    'The DIGITS are what has to leave the quotation: ' +
+    (alreadyDeclared
+      ? 'keep the declaration where it is and paste the quoted line WITHOUT its stamp'
+      : `declare the reading in the PROSE beside it${
+          closed ? ` (once the value is one the quoted route takes at all: ${closed})` : ` with \`{{WAS:${stamp}}}\``
+        } AND paste the quoted line WITHOUT its stamp`) +
+    ' — or, if the quotation is an EXAMPLE, quote the placeholder form (`YYYY-MM-DDThh:mmZ`) instead of ' +
+    'digits. ⛔ A quotation that KEEPS the digits is still a bare stamp there, whatever spelling is ' +
+    'wrapped round them: quoting changes what is rendered, never what was typed onto the board.';
+  if (proseDeclared > 0) {
+    return {
+      text:
+        `⚠️ This reading is ALREADY declared in the prose, and that declaration reads — ⛔ re-typing it ` +
+        `changes nothing. What is left is ${
+          quotedDeclared > 0 ? 'the declaration-shaped text' : 'the same digits'
+        } standing inside a quotation, where this tool renders text and substitutes nothing, so what ` +
+        `stands there is digits on the board. ${route(true)}`,
+      declared: true,
+      proseDeclared: true,
+    };
+  }
+  return {
+    text:
+      (quotedDeclared > 0
+        ? `⚠️ The \`{{WAS:${stamp}}}\` you already wrote round it is inside that quotation too, so what ` +
+          'stands there is a PICTURE of a declaration, not one, and re-typing it changes nothing. '
+        : '⚠️ Every occurrence of this stamp sits inside a QUOTED SPAN, where this tool renders text and ' +
+          'substitutes nothing — so writing either spelling there prints the token itself, not a time. ') +
+      route(false),
+    declared: quotedDeclared > 0,
+    proseDeclared: false,
+  };
 }
 
 /**
@@ -1532,12 +1584,17 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
       seen.add(stamp);
       const closed = quotedRouteClosed(stamp, nowMs);
       const quoted = quotedSpanRemedy(raw, spans, stamp, closed);
-      const opener = quoted?.declared
-        ? `this body uses \`${STAMP_TOKEN}\` and also carries the stamp \`${stamp}\`, declared only inside ` +
-          'a quotation. The clock this act read and a time it did not stand on one board, and a quotation ' +
-          'does not take the second out of the contract. '
-        : `this body uses \`${STAMP_TOKEN}\` and also carries the bare stamp \`${stamp}\`. One of the ` +
-          'two clocks was read by this act and the other was typed; a reader cannot tell which. ';
+      const opener = quoted?.proseDeclared
+        ? `this body uses \`${STAMP_TOKEN}\` and also carries the stamp \`${stamp}\` inside a quotation, ` +
+          'beside a declaration of the SAME value in the prose. The declaration reads; the quoted digits ' +
+          'are not covered by it, because a quotation renders text and those digits stand on the board as ' +
+          'they were typed. '
+        : quoted?.declared
+          ? `this body uses \`${STAMP_TOKEN}\` and also carries the stamp \`${stamp}\`, declared only inside ` +
+            'a quotation. The clock this act read and a time it did not stand on one board, and a quotation ' +
+            'does not take the second out of the contract. '
+          : `this body uses \`${STAMP_TOKEN}\` and also carries the bare stamp \`${stamp}\`. One of the ` +
+            'two clocks was read by this act and the other was typed; a reader cannot tell which. ';
       refusals.push({
         kind: 'mixed',
         detail: quoted
@@ -3073,7 +3130,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the token contract: the two spellings, and nothing else': 9,
   'the refusals: every route that must not reach the board': 20,
   'the opener scan: every `{{` is a token this tool renders, or the body is refused': 35,
-  'the quoting spelling: Markdown code is a quotation, and a quotation is rendered as written': 60,
+  'the quoting spelling: Markdown code is a quotation, and a quotation is rendered as written': 67,
   'the stamp verdict: a quoted token is not a stamp, and the carve-out has a partner check': 63,
   'the calendar rule: a stamp shaped like an instant the calendar does not have': 34,
   'the direction check: a stamp no act can have read': 22,
@@ -3311,8 +3368,26 @@ export function selfTest() {
   t('⭐ THE FILED REPRO: a `{{WAS:…}}` DECLARED inside a fence, beside the token, is still refused', kinds(FENCED_DECLARATION, NOW_MS).join() === 'mixed');
   t('⭐ …and the remedy no longer prescribes the declaration that is ALREADY there — the circle the card measured', fencedRemedy.includes('Declare it with `{{WAS:2026-09-08T14:00Z}}`') === false);
   t('⭐ …it names what stands in the fence: a PICTURE of a declaration, so re-typing it changes nothing', fencedRemedy.includes('you already wrote round it is inside that quotation too') && fencedRemedy.includes('PICTURE of a declaration'));
-  t('⭐ …and prescribes the route that works — the same declaration OUTSIDE the quotation', fencedRemedy.includes('OUTSIDE the quotation'));
-  t('⭐ …which is measured, not asserted: the body that takes that route POSTS', stampRefusals('Record {{NOW}}, of {{WAS:2026-09-08T14:00Z}}.\n\n```\nabc1234\n```\n', NOW_MS).length === 0);
+  // ⭐ THE CHAIN, pinned end to end. A remedy is worth what FOLLOWING it does:
+  // the first patch of this card named 「the same declaration OUTSIDE the
+  // quotation」 and stopped there, so an author who declared the reading in the
+  // prose and pasted the quoted line back UNCHANGED was refused again — by the
+  // old circular text, prescribing the declaration now standing in the prose.
+  // The circle had moved one step instead of closing. Every step below names
+  // the next, and the last one posts.
+  const CHAIN_2 = 'Record {{NOW}}, read {{WAS:2026-09-08T14:00Z}}.\n\n```\nabc1234  2026-09-08T14:00Z\n```\n';
+  const CHAIN_2_TOKENISED = 'Record {{NOW}}, read {{WAS:2026-09-08T14:00Z}}.\n\n```\nabc1234  {{WAS:2026-09-08T14:00Z}}\n```\n';
+  const CHAIN_3 = 'Record {{NOW}}, read {{WAS:2026-09-08T14:00Z}}.\n\n```\nabc1234\n```\n';
+  const chain2Remedy = stampRefusals(CHAIN_2, NOW_MS)[0]?.detail ?? '';
+  t('⭐ STEP 1 — the repro\'s remedy names BOTH halves: declare in the prose AND paste the line without its stamp', fencedRemedy.includes('declare the reading in the PROSE beside it') && fencedRemedy.includes('paste the quoted line WITHOUT its stamp'));
+  t('⭐ STEP 2 — declaring in the prose while pasting the line unchanged is STILL refused: the digits never left', kinds(CHAIN_2, NOW_MS).join() === 'mixed');
+  t('⭐ …and that refusal ⛔ does NOT prescribe the declaration now standing in the prose — the circle, closed', chain2Remedy.includes('Declare it with `{{WAS:2026-09-08T14:00Z}}`') === false);
+  t('⭐ …it says the declaration ALREADY reads, and names the quoted occurrence as the one thing left', chain2Remedy.includes('ALREADY declared in the prose') && chain2Remedy.includes('keep the declaration where it is and paste the quoted line WITHOUT its stamp'));
+  t('⭐ …and its opener stops calling that value BARE, because a declaration of it reads in the prose', chain2Remedy.includes('beside a declaration of the SAME value in the prose') && chain2Remedy.includes('carries the bare stamp') === false);
+  t('⭐ STEP 3 — the body that did BOTH halves POSTS: the chain ends ACCEPTED, measured, not asserted', stampRefusals(CHAIN_3, NOW_MS).length === 0);
+  t('⛔ the TOKEN-WRAPPED variant of step 2 lands on the same remedy — a picture of a declaration is not one', stampRefusals(CHAIN_2_TOKENISED, NOW_MS)[0].detail.includes('ALREADY declared in the prose'));
+  t('⛔ …and every text in the chain says a quotation KEEPING the digits is still a bare stamp there', [fencedRemedy, chain2Remedy].every((d) => d.includes('still a bare stamp there')));
+  t('⛔ CONTROL: one LOOSE occurrence in prose still gets the ordinary remedy, with no quoted clause at all', stampRefusals('Verdict {{NOW}}.\n\nread 2026-09-08T14:00Z and `2026-09-08T14:00Z`.\n', NOW_MS)[0].detail.includes('Declare it with `{{WAS:2026-09-08T14:00Z}}`') && stampRefusals('Verdict {{NOW}}.\n\nread 2026-09-08T14:00Z and `2026-09-08T14:00Z`.\n', NOW_MS)[0].detail.includes('QUOTED SPAN') === false);
   t('⛔ THE CONTROL: a truly BARE stamp in the same fence is refused identically — no widening was bought', kinds(FENCED_BARE, NOW_MS).join() === 'mixed');
   t('⛔ …and the two are told APART in the text: nothing was written there to call a picture of one', stampRefusals(FENCED_BARE, NOW_MS)[0].detail.includes('you already wrote') === false);
   t('⛔ …and a declared stamp is no longer called BARE, which was the reader disagreeing with the board', fencedRemedy.includes('carries the bare stamp') === false && stampRefusals(FENCED_BARE, NOW_MS)[0].detail.includes('carries the bare stamp'));
