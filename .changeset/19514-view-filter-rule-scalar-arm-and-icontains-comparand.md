@@ -1,0 +1,53 @@
+---
+"@objectstack/spec": minor
+---
+
+fix(spec)!: the filter doors refuse the three shapes they already declared refused — a scalar operator's array, an `icontains` comparand the conformance table rejects, and an ungated `defaultFilters` (#19514)
+
+**BREAKING** — three accept-set narrowings on published authoring surfaces, each pulling the door back to what this package already declared somewhere an author's parse never reached. Shipped as `minor` under the repo's launch-window convention for accept-set narrowings. Stored metadata carrying any of these shapes keeps loading and keeps rendering exactly as it does today; what changes is that RE-SAVING it is refused, at the key that carries the mistake. The hand-migration prescriptions are registered under protocol major 18 as `view-filter-rule-scalar-operator-array-refused`, `filter-icontains-comparand-refused-at-parse` and `object-grid-default-filters-rule-array`.
+
+Direction set by objectui#9050's ruling C′, quoted untranslated: 「the differences are the protocol's to close」.
+
+## 1. A scalar operator carrying an ARRAY is refused
+
+`ViewFilterRuleSchema.value` has carried this sentence in its published description since the operator/value coupling landed: *the accepted SHAPE depends on the operator: `in` / `not_in` take an array, `between` takes exactly [min, max], **every other operator takes a scalar**.* The refinement that implements the coupling returned early for every operator that was neither a list operator nor `between`, so the entire scalar class was declared and never judged.
+
+⚠️ **This reverses a reading the code recorded**, and the reversal is the substance. The scalar-operator array was listed as deliberately accepted because it *"lowers to a bare `{ field: value }` deep-equality comparand, which every backend answers"*. Re-measured at source: the lowered `{ tags: ['a'] }` reaches `driver-sql`'s bare `{ field: value }` loop, which asserts the comparand against its own scalar-operator set; an array is none of the six accepted comparand types (`a string, number, bigint, boolean, null or Date`), so the comparand is refused with the withheld `INVALID_FILTER` / 400 envelope, and the in-memory matchers exclude every row for the same reason. **A stored view that passed the protocol selected nothing** — and unlike a 400, the in-memory answer reads as a true statement about the data.
+
+Two carve-outs are kept and pinned, because a narrowing that runs past the query path is the mirror-image defect: an **omitted** value still parses (`value` is optional), and the four **valueless** operators (`is_empty` / `is_not_empty` / `is_null` / `is_not_null`) still accept anything in the value position — they take their direction from the operator NAME, the lowering discards the value, and the ObjectUI client deliberately sends a truthy placeholder there.
+
+## 2. The `icontains` comparands the platform's own table declares refused
+
+`@objectstack/spec/data`'s `FILTER_TEXT_CASES` declares two REJECTION rows for the case-insensitive contains operator — an **empty** comparand and a **non-string** one, each `code: 'INVALID_FILTER'`. Every backend answers those rows. Nothing applied them at parse, on either vocabulary, so the protocol declared the refusal and then admitted the document that would hit it. Both doors now refuse: the `$` dialect's `FilterConditionSchema` and the view vocabulary's `icontains` arm.
+
+The predicate is **derived from the table, not transcribed beside it** — both doors call the published `isRefusedTextComparand` and `textComparandRefusalReason`, so a row added to `FILTER_TEXT_CASES` reaches both doors with no edit at either, and the reason an author reads at authoring time is byte-identical to the one three shipped consumer faces already show at query time. Scope is the one operator the table writes rows for: `$contains`, `$startsWith`, `$endsWith`, `$like` and `$ilike` are untouched, because widening by analogy is the table's decision and not a door's.
+
+One asymmetry between the two vocabularies, and it is a fact about them rather than an extra rule: a view rule's `value` is optional, so an **absent** comparand is left unjudged there; the `$` dialect has no absent, so an explicit `undefined` in a comparand slot is the refused non-string shape.
+
+## 3. `object-grid`'s `defaultFilters` carries `filter`'s declaration
+
+The key is described as *"Legacy base-filter fallback, read only when `filter` is absent"* — the same value in the same role as `filter`, read through the same lowering sink. `filter` converged on the `ViewFilterRule` array with the rest of its family; this key was not named by that ruling and kept `z.unknown()`, so the block had one declared door and one undeclared door onto one seam. A record-form fallback got a silent success receipt and a 400 at render, with nothing in between to say which of the two keys was the problem.
+
+⛔ **Narrowed, not retired.** Refusing the key outright is a removal of an accepted shape and needs its own ruling. The deprecation already stated in the description is unchanged: prefer `filter`.
+
+## FROM → TO
+
+| you wrote | write instead |
+|:--|:--|
+| `{ field: 'tags', operator: 'equals', value: ['a'] }` | `{ field: 'tags', operator: 'equals', value: 'a' }` — or `operator: 'in'` if membership was meant |
+| `{ field: 'name', operator: 'icontains', value: '' }` | delete the condition — every value contains the empty substring |
+| `{ field: 'name', operator: 'icontains', value: 42 }` | `value: '42'`, if a substring match on those two characters was really meant |
+| `{ name: { $icontains: '' } }` | delete the condition |
+| `{ name: { $icontains: 42 } }` | `{ name: { $icontains: '42' } }` |
+| `defaultFilters: { status: 'active' }` | `defaultFilters: [{ field: 'status', operator: 'equals', value: 'active' }]` — better, move it to `filter` and delete the key |
+| `defaultFilters: [['owner_id', '=', '{current_user_id}']]` | `defaultFilters: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }]` |
+
+Each refusal carries its own prescription at the key that raised it, so `os validate` / `os lint` make the sweep mechanical rather than by eye. Worth doing even where it looks unnecessary: **none of these shapes has ever returned filtered rows**, so re-check what each view is supposed to show rather than assuming the old result set was correct. The one to read closest is a one-element array — `value: ['won']` on `equals` and `operator: 'in'` with `value: ['won']` select the same rows, and only the author knows which the metadata meant.
+
+## Who is affected, measured
+
+Nothing in this repository authored any of the three shapes. Two fixtures pinned the old accept set and were re-judged rather than rewritten by rote: one asserted that a scalar-operator array parses (it pinned the reading paragraph 1 reverses), and one parsed an ObjectQL AST tuple array on `defaultFilters` to prove the key is HONOURED — that subject survives, on the rule array, with the tuple array's refusal pinned beside it. The full `@objectstack/spec` suite is green, and `check:api-surface` reports no export moved: no symbol is added, removed or renamed by this change.
+
+Clause-②: no (narrowing) — no key is added, removed or renamed, no exported symbol moves, and no new published vocabulary is introduced (the two operator sets the refusals name are the ones already exported, and the two the checks needed for themselves are deliberately module-private). Every one of the three accept sets narrows back to what this package had already declared: a published `.describe()` for the first, a published conformance table for the second, and the sibling key's own declaration for the third.
+
+<!-- adr-0087: registered view-filter-rule-scalar-operator-array-refused, filter-icontains-comparand-refused-at-parse, object-grid-default-filters-rule-array -->
