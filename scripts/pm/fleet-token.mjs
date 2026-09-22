@@ -611,8 +611,17 @@ export async function getFleetToken({ force = false } = {}, deps = {}) {
   const cached = force ? null : readCache(file);
   // The probe resolves the ids only, quietly: the mint's own resolve below
   // says where the inputs came from, once, on the run that actually mints.
-  const probe = await resolveInputs(env, { ...deps, log: () => {} }, { mint: false });
-  if (!force && !needsRefresh(cached, now(), { installationId: probe.installationId })) return { ...cached, fresh: false, file };
+  // A shell with neither OS_FLEET_* nor a session token can resolve nothing —
+  // but a fresh cache is still a fresh cache: it is served as is, matched
+  // against no installation because none was named. Measured: without this,
+  // `--print` in such a shell printed nothing and the caller sent `Bearer `.
+  let probe = null;
+  try {
+    probe = await resolveInputs(env, { ...deps, log: () => {} }, { mint: false });
+  } catch (e) {
+    if (!(e instanceof FleetTokenError) || force || needsRefresh(cached, now())) throw e;
+  }
+  if (!force && !needsRefresh(cached, now(), probe ? { installationId: probe.installationId } : {})) return { ...cached, fresh: false, file };
   const inputs = await resolveInputs(env, deps, { mint: true });
   return mintInstallationToken(inputs, { ...deps, env, file, recheck: force ? null : () => readCache(file) });
 }
@@ -628,7 +637,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the cache: 0600, refreshed five minutes early, keyed to the installation': 8,
   'the mint: what a fake platform answers, and what this tool does with it': 11,
   'redaction: a known token and a known key fed through every output path never come back out': 12,
-  'the CLI: --print prints the token alone, --export prints shell, --status prints neither': 8,
+  'the CLI: --print prints the token alone, --export prints shell, --status prints neither': 10,
   'the repository-variables route: read when the environment has none, environment wins, the key never lands anywhere': 11,
   'the wiring: the one POST is paced and leased, and the throttle roster names this file': 4,
 });
@@ -854,6 +863,14 @@ export async function selfTest() {
       t("a value with a quote in it survives eval's quoting", shellQuote("it's"), "'it'\\''s'");
       const missing = run(['--print'], { ...base, OS_FLEET_APP_ID: '', OS_FLEET_TOKEN_CACHE_FILE: join(dir, 'absent.json') });
       t('without the inputs and without a cache, --print exits 3 naming the variables and prints no token', [missing.status, missing.stderr.includes('OS_FLEET_APP_ID'), missing.stdout], [EXIT_PREREQUISITE, true, '']);
+      // A real shell: no inputs, no session token, the repository route OPEN —
+      // it throws before any request because there is no token to read with.
+      const bare = run(['--print'], { ...base, OS_FLEET_APP_ID: '', OS_FLEET_INSTALLATION_ID: '', GITHUB_TOKEN: '', GH_TOKEN: '', OS_FLEET_INPUTS_FROM_GITHUB: '' });
+      t('a shell with no inputs and no session token is still served a FRESH cache — the token, exit 0', [bare.status, bare.stdout], [0, `${TOKEN}\n`]);
+      const stale = join(dir, 'stale-cache.json');
+      writeCache(stale, { ...readCache(file), expires_at: new Date(Date.now() - 1000).toISOString() });
+      const bareStale = run(['--print'], { ...base, OS_FLEET_TOKEN_CACHE_FILE: stale, OS_FLEET_APP_ID: '', OS_FLEET_INSTALLATION_ID: '', GITHUB_TOKEN: '', GH_TOKEN: '', OS_FLEET_INPUTS_FROM_GITHUB: '' });
+      t('…but a STALE cache in that shell is exit 3 naming both routes, ⛔ never the expired token', [bareStale.status, bareStale.stdout, bareStale.stderr.includes('GITHUB_TOKEN')], [EXIT_PREREQUISITE, '', true]);
       t('an unrecognised flag is usage, ⛔ never a silent pass', run(['--pritn']).status, EXIT_USAGE);
     }
 
