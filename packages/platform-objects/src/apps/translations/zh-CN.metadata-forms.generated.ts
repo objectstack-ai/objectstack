@@ -225,33 +225,33 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "CEL 判定式——结果为 TRUE 时该字段必填（由服务端强制）"
       },
       enable: {
-        label: "Enable",
-        helpText: "Enable/disable system features"
+        label: "启用",
+        helpText: "启用或禁用系统功能"
       },
       "enable.trackHistory": {
-        label: "Track History"
+        label: "历史跟踪"
       },
       "enable.searchable": {
-        label: "Searchable"
+        label: "可搜索"
       },
       "enable.apiEnabled": {
-        label: "Api Enabled"
+        label: "已启用 API"
       },
       "enable.files": {
-        label: "Files"
+        label: "文件"
       },
       "enable.feeds": {
-        label: "Feeds"
+        label: "动态"
       },
       "enable.activities": {
-        label: "Activities"
+        label: "活动"
       },
       "enable.clone": {
-        label: "Clone"
+        label: "克隆"
       },
       validations: {
-        label: "Validations",
-        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+        label: "校验规则",
+        helpText: "对象级校验规则——由规则对象组成的数组，例如 [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。状态机转移表也在此声明（ADR-0020）"
       },
       datasource: {
         label: "数据源",
@@ -1370,8 +1370,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "标识与报表类型"
       },
       dataset_binding: {
-        label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        label: "数据集绑定",
+        description: "本报表渲染的语义层数据集。度量与行分别来自该数据集的度量与维度"
       },
       joined_blocks: {
         label: "关联对象",
@@ -1424,8 +1424,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "排序方向"
       },
       drilldown: {
-        label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        label: "下钻",
+        helpText: "点击聚合后的行/单元格，打开其底层记录"
       },
       blocks: {
         label: "分块",
@@ -1465,8 +1465,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "排序"
       },
       runtimeFilter: {
-        label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        label: "运行时筛选",
+        helpText: "渲染时的范围筛选，在查询时以 AND 方式并入"
       },
       chart: {
         label: "图表",

@@ -18,23 +18,6 @@
  */
 
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.object.fields.enable.activities.label": "1091422f7f3133d3",
-  "metadataForms.object.fields.enable.apiEnabled.label": "34396a2f6cfda5d5",
-  "metadataForms.object.fields.enable.clone.label": "48cbbe43b82f32c2",
-  "metadataForms.object.fields.enable.feeds.label": "669c64671f632139",
-  "metadataForms.object.fields.enable.files.label": "411069282de23f9a",
-  "metadataForms.object.fields.enable.helpText": "554c6b16fa1e3a5a",
-  "metadataForms.object.fields.enable.label": "fdecf828d4e86eed",
-  "metadataForms.object.fields.enable.searchable.label": "d8f50099e7217830",
-  "metadataForms.object.fields.enable.trackHistory.label": "7bc28212817b2c43",
-  "metadataForms.object.fields.validations.helpText": "1f6e59e364995ce8",
-  "metadataForms.object.fields.validations.label": "06fc6dd288348779",
-  "metadataForms.report.fields.drilldown.helpText": "778174eac8057764",
-  "metadataForms.report.fields.drilldown.label": "25ae77d240ced5f5",
-  "metadataForms.report.fields.runtimeFilter.helpText": "eb9ba8aeb55b7d40",
-  "metadataForms.report.fields.runtimeFilter.label": "90fe0e44293633fa",
-  "metadataForms.report.sections.dataset_binding.description": "54650ff5f09fd1bd",
-  "metadataForms.report.sections.dataset_binding.label": "34d97a3093d6fc56",
   "objects.sys_account._actions.link_social.params.provider.options.apple": "cfdc41e15ed6699b",
   "objects.sys_account._actions.link_social.params.provider.options.discord": "12f931cc062e76ae",
   "objects.sys_account._actions.link_social.params.provider.options.facebook": "7eea009178f5b807",

@@ -554,11 +554,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
   '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 30,
   '⭐ #19344: the remedy names a path the ruleset actually offers': 5,
+  '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 23;
+const SELF_TEST_BATTERY_FLOOR = 24;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -857,6 +858,11 @@ export function recordVerdict({ pair, recognisers, cardNote = null }) {
     // ⛔ never quoted back — a refusal that quotes it lands the identifier in
     // one more artifact, which is the thing `AGENTS.md` forbids of a comment.
     servedIsIdentifier: located.served?.state === 'read' && recognisers.isModelIdentifierToken(located.served.value),
+    // ⭐ A record reached through the 纯重生成 carry names an OLDER head, so the
+    // clear says which head was reviewed and over how many certified hops: ⛔ a
+    // verdict may not deny its own evidence (#15406).
+    carriedFrom: located.carriedFrom ?? null,
+    carriedHops: located.carriedHops ?? 0,
   };
   if (located.state === 'unsigned') return { state: 'unsigned', ...found };
   if (!recognisers.servedTierStands(located.served)) return { state: 'below-tier', ...found };
@@ -1277,6 +1283,14 @@ export function renderGuardVerdict(verdict) {
           (entry.record.served?.stamps
             ? ` on a stamp control of ${entry.record.served.stamps.atTier}/${entry.record.served.stamps.total}.`
             : ' (no stamp control declared, which the rule permits).'),
+        ...(entry.record.carriedFrom
+          ? [
+              `           ⭐ that record names head \`${String(entry.record.carriedFrom).slice(0, 12)}\`, carried forward over ` +
+                `${entry.record.carriedHops} certified PURE-REGENERATION hop(s) —`,
+              '           re-run on the COMMITTED trees by this build (`git diff --name-only`, no `merge=os-regen` path left),',
+              '           ⛔ never on the `Regen-provenance:` line being present (maintainer 2026-09-20).',
+            ]
+          : []),
         '           ⚠️ EXISTENCE and PROVENANCE, never the verdict: whether that record reads PASS is precondition ①',
         '           of the landing check and stays human. This leg measures what produced it, not what it concluded.',
       );
@@ -1516,7 +1530,7 @@ export function renderGuardVerdict(verdict) {
  * still governs everything the verdict is derived FROM; it never governed
  * things the verdict merely mentions.
  */
-export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [] }) {
+export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null, baseRef = null }) {
   const { governed, unattributed } = decomposeGovernedWork(rows);
   if (governed.length === 0 && unattributed.length === 0) {
     return guardVerdict({ event, governed, unattributed, apiCalls: 0, lifted });
@@ -1604,7 +1618,12 @@ export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComm
       // locations this leg READS are the locations `--template` STATES, because
       // both are this list. The cross-tool pin drives exactly this loop.
       const numbers = { pr: entry.pr, card: card.card };
-      const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null };
+      // ⭐ `runGit` and `baseRef` let the imported reader re-run the 纯重生成
+      // test on two COMMITTED trees when this head moved past its record —
+      // the base being what separates the merge commit's carry-over from a hand
+      // edit. ⛔ Either one absent is a REFUSAL, never a pass: the reader
+      // answers `unreadable` and this leg refuses on it.
+      const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null, runGit, baseRef };
       let unreadable = null;
       for (const thread of recognisers.threads) {
         const number = numbers[thread.number];
@@ -2078,8 +2097,8 @@ export function groupExitCode({ governed, size, carrier }) {
 
 // ── git (diff decomposition; zero API) ──────────────────────────────────────
 
-function git(root, args) {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+function git(root, args, input) {
+  return execFileSync('git', args, { cwd: root, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
 /** Is `rev` an object this checkout actually has? A missing sha is a hard failure, never an empty diff. */
@@ -2453,7 +2472,8 @@ async function main() {
   const fetchLabels = makeLabelReader(reader);
   const fetchComments = makeCommentReader(reader);
 
-  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPull, fetchComments, lifted });
+  const runGit = (args, input) => git(repoRoot, args, input);
+  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPull, fetchComments, lifted, runGit, baseRef: context.baseSha ?? null });
   // The SIZE leg (#19036): every queued pull request, through the same pull
   // reader the governed leg reads heads with. `merge_group` only, '' on the
   // other leg, so the `pull_request` output is byte-identical to what it was.
@@ -4054,6 +4074,8 @@ export async function selfTest() {
     loaderThrows = false,
     event = EVENT_MERGE_GROUP,
     pr = 70,
+    runGit = null,
+    baseRef = null,
   } = {}) => {
     tierApiCalls = 0;
     tierThreadsRead = [];
@@ -4069,6 +4091,8 @@ export async function selfTest() {
         return n === pr ? comments : cardComments;
       },
       loadRecognisers: async () => { if (loaderThrows) throw new Error('loader exploded'); return recognisers; },
+      runGit,
+      baseRef,
     });
   };
 
@@ -4417,6 +4441,50 @@ export async function selfTest() {
     governedPathsIn([REF_A]).length === 1 && governedPathsIn([RULES_PATH]).length === 1,
   );
 
+
+  // ⭐ Nothing is re-implemented here: the carry lives in the IMPORTED reader
+  // and this leg supplies only the git it reads two COMMITTED trees with. ⛔ Its
+  // absence REFUSES — a `Regen-provenance:` line certifies nothing by existing.
+  battery('⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head');
+  const REGEN_PROV = { id: 901, created_at: '2026-09-13T13:30:00Z', body: `Regen-provenance: 900 · \`${REF_OLD}\` → \`${REF_HEAD}\` · \`git diff --name-only\` → (empty)` };
+  const onOldHead = [recordComment({ sha: REF_OLD.slice(0, 12) }), REGEN_PROV];
+  const QBASE = 'b'.repeat(40); // the merge group's base sha, which is what main brought
+  const qgit = (spec) => (args) => {
+    if (args[0] === 'merge-base') return `mb-${args[2]}\n`;
+    if (args[0] === 'check-attr') return spec.attrs;
+    if (args[0] === 'rev-parse') return `${REF_OLD}\n`;
+    const [, , , a, b] = args; // diff -z --name-only A B
+    return a === REF_OLD && b === REF_HEAD ? spec.moved : (spec.own?.[b] ?? '');
+  };
+  const qRegen = { moved: 'packages/spec/api-surface/ui.txt\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0' };
+  const qCarry = { moved: 'packages/spec/api-surface/ui.txt\0AGENTS.md\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0AGENTS.md\0merge\0unspecified\0', own: {} };
+  const qHand = { moved: 'AGENTS.md\0', attrs: 'AGENTS.md\0merge\0unspecified\0', own: { [REF_HEAD]: 'AGENTS.md\0' } };
+  // (ii) an edit SLIPPED IN beside the regeneration: a generated path moved, and
+  // so did one of this pull request's own, which its delta at the NEW head names.
+  const qSlipped = { moved: 'packages/spec/api-surface/ui.txt\0scripts/pm/x.mjs\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0scripts/pm/x.mjs\0merge\0unspecified\0', own: { [REF_HEAD]: 'scripts/pm/x.mjs\0' } };
+  const gitPure = qgit(qRegen);
+  const gitHand = qgit(qSlipped);
+  const carried = await tierRun({ comments: onOldHead, runGit: gitPure, baseRef: QBASE });
+  assert('⭐ a-record-on-an-OLDER-head-CARRIES-when-the-move-is-a-certified-pure-regeneration', carried.exitCode === EXIT_CLEAR && carried.entries[0].record.state === 'stands' && carried.entries[0].record.carriedHops === 1, JSON.stringify(carried.entries[0].record));
+  assert('and-the-CLEAR-names-the-head-actually-reviewed-and-says-it-re-ran-on-the-committed-trees', /carried forward over 1 certified PURE-REGENERATION hop/.test(renderGuardVerdict(carried)) && /COMMITTED trees/.test(renderGuardVerdict(carried)) && /never on the `Regen-provenance:` line being present/.test(renderGuardVerdict(carried)), renderGuardVerdict(carried));
+  const handMoved = await tierRun({ comments: onOldHead, runGit: gitHand, baseRef: QBASE });
+  assert('⛔ (ii) an-EDIT-SLIPPED-IN-beside-the-regeneration-refuses-exactly-as-an-uncarried-old-head-does', handMoved.exitCode === EXIT_REFUSED_UNAPPROVED && handMoved.entries[0].record.state === 'absent');
+  // ⭐ WHICH path is named by the reader that owns the reason; at the queue the
+  // refusal surfaces as an absent record, so the name is asserted at its source.
+  const { unexplainedPathsBetween } = await import(RECOGNISER_SOURCES.tier);
+  assert('…and-the-reader-NAMES-the-slipped-in-path-rather-than-the-generated-one-beside-it', unexplainedPathsBetween(gitHand, { from: REF_OLD, to: REF_HEAD, base: QBASE }).join() === 'scripts/pm/x.mjs', unexplainedPathsBetween(gitHand, { from: REF_OLD, to: REF_HEAD, base: QBASE }).join());
+  const blindTree = await tierRun({ comments: onOldHead, runGit: () => { throw new Error('fatal: bad object'); }, baseRef: QBASE });
+  assert('⛔ a-tree-this-build-cannot-reach-is-UNREADABLE-exit-4-never-clean', blindTree.exitCode === EXIT_REFUSED_UNREADABLE && blindTree.entries[0].record.state === 'unreadable');
+  assert('⛔ and-a-run-with-NO-git-reader-refuses-too-the-line-alone-certifies-nothing', (await tierRun({ comments: onOldHead, baseRef: QBASE })).exitCode === EXIT_REFUSED_UNREADABLE);
+  // ⭐ the carry-over arm at the queue: the merge group's OWN base is what
+  // separates what main brought from what this pull request changed.
+  const carryOver = await tierRun({ comments: onOldHead, runGit: qgit(qCarry), baseRef: QBASE });
+  assert('⭐ a-merge-forward-carrying-another-PRs-hand-written-path-beside-the-regeneration-CLEARS', carryOver.exitCode === EXIT_CLEAR && carryOver.entries[0].record.state === 'stands', JSON.stringify(carryOver.entries[0].record));
+  const resolved = await tierRun({ comments: onOldHead, runGit: qgit(qHand), baseRef: QBASE });
+  assert('⛔ the-SAME-path-hand-resolved-so-the-new-head-no-longer-holds-what-main-brought-REFUSES', resolved.exitCode === EXIT_REFUSED_UNAPPROVED && resolved.entries[0].record.state === 'absent');
+  assert('⛔ and-a-group-whose-BASE-this-build-could-not-read-is-UNREADABLE-never-clean', (await tierRun({ comments: onOldHead, runGit: qgit(qCarry) })).exitCode === EXIT_REFUSED_UNREADABLE);
+  assert('⛔ CONTROL-the-ordinary-old-head-refusal-is-unmoved-where-no-line-claims-the-exception', (await tierRun({ comments: [recordComment({ sha: REF_OLD.slice(0, 12) })], runGit: gitPure, baseRef: QBASE })).exitCode === EXIT_REFUSED_UNAPPROVED);
+  assert('⛔ CONTROL-a-record-on-the-CURRENT-head-still-clears-without-reading-any-tree', (await tierRun({ comments: [recordComment()], runGit: () => { throw new Error('no tree may be read when the record is already on this head'); } })).exitCode === EXIT_CLEAR);
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so

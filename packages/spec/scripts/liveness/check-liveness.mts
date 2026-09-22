@@ -183,6 +183,7 @@ import {
   BatchEndpointsConfigSchema,
   CrudEndpointsConfigSchema,
   MetadataEndpointsConfigSchema,
+  RestApiConfigSchema,
   RouteGenerationConfigSchema,
 } from '../../src/api/rest-server.zod';
 import { SubscriptionSchema } from '../../src/api/realtime.zod';
@@ -270,7 +271,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'realtime_subscription', 'sharing_rule', 'connector', 'analytics_cube'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'rest_api', 'realtime_subscription', 'sharing_rule', 'connector', 'analytics_cube'];
 
 // Authorable metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -411,10 +412,22 @@ const PENDING_GOVERNANCE: Record<string, string> = {};
 // mount) would silently cover a dead key. That is #4956's shape, in the file
 // written to end it. Rooting on the four sub-schemas instead puts every one of
 // the ten keys at a drillable depth, so each carries its own falsifiable
-// verdict. `RestApiConfigSchema` (the fifth sub-object, `api`) is deliberately
-// NOT enrolled here: its consumption seam is still validate-only and is the
-// subject of its own card, so a census of it would be recording a half that is
-// about to move. Like `query`, `qa` and `manifest`, there is no registry to
+// verdict. `RestApiConfigSchema` (the fifth sub-object, `api`) is enrolled
+// SEPARATELY, as `rest_api`, and a round later than the four: when they landed
+// its consumption seam was still validate-only, so a census of it would have
+// been recording a half that was about to move. That half HAS moved, and the
+// fence it justified has expired — `RestServer.normalizeConfig` now BUILDS the
+// `api` block from `parseDeclaredApiConfig`'s output instead of discarding it
+// (packages/rest/src/rest-server.ts#normalizeConfig: "the asymmetry is gone and
+// all five now build from their parsed output"), and that change is released
+// rather than in flight. So the fifth sub-object carries its own ledger, taken
+// on the settled seam, rather than a back-fill into the four.
+// ⛔ Its ledger type name is `rest_api`, NEVER `api`: `api.json` is a DIFFERENT
+// surface (`ApiEndpointSchema`, the registered `api` metadata type, with real
+// consumers in the matcher, executor, policy chain and mapping layer), so
+// filing these verdicts there would publish one file's measurement under
+// another's name. One spelling, two unrelated meanings, inside packages/spec.
+// Like `query`, `qa` and `manifest`, there is no registry to
 // fold any of these back onto — the override IS their governance.
 // `realtime_subscription` is the FIFTH category and the narrowest one yet: a
 // TRANSPORT-PROTOCOL surface. `SubscriptionSchema` (src/api/realtime.zod.ts) is
@@ -462,6 +475,7 @@ const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   metadata_endpoints: MetadataEndpointsConfigSchema,
   batch_endpoints: BatchEndpointsConfigSchema,
   route_generation: RouteGenerationConfigSchema,
+  rest_api: RestApiConfigSchema,
   realtime_subscription: SubscriptionSchema,
 };
 

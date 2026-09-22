@@ -5821,6 +5821,109 @@ const step18: MigrationStep = {
         'and that anonymous sign-up now answers 403 SELF_REGISTRATION_CLOSED.',
     },
     {
+      id: 'automation-runs-cursor-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'api.listRuns cursor — the pagination query parameter of '
+        + 'GET /api/automation/:name/runs declared by ListRunsRequestSchema, its slot on '
+        + 'IAutomationService.listRuns, and its option on all three @objectstack/client run-list '
+        + 'surfaces (automation.runs.list, automation.listRuns, environment().automation.listRuns). '
+        + 'The limit parameter of the same door is NOT part of this retirement and is unchanged, '
+        + 'default(20) included',
+      replacement:
+        'a wider `limit` — this door does read it, bounded to 1..100, and it is spent as the run '
+        + "store's history window. There is no replacement for `cursor` itself, deliberately: "
+        + 'nothing ever minted one, so no caller holds a value to carry over, and the response '
+        + '`nextCursor` it would have paired with has never been emitted. Read the response '
+        + '`hasMore` to learn whether the window was short — it is now computed from the engine '
+        + 'rather than the constant `false` it used to be, so for the first time it answers the '
+        + 'question a caller reaching for a cursor was actually asking',
+      reason:
+        'ADR-0049 enforce-or-remove (director seat, decision batch #204 item 2, maintainer '
+        + '「204 同意」 2026-09-21, letter C of three for this door; letter A — build a cursor '
+        + 'protocol for a 100-row window — and letter B — retire the key and leave the '
+        + '`hasMore` lie standing — were both considered and refused). `cursor` was declared on '
+        + 'the request, VALIDATED at the boundary, forwarded into a `cursor?: string` slot on '
+        + 'the service contract, and read by no implementation: the engine never looked at the '
+        + 'option, and no emit site has ever written the response half `nextCursor`, so a caller '
+        + 'looping until the cursor ran out re-read the first and only window forever with no '
+        + 'error. '
+        + '⭐ The `limit` half of this door was NOT retired, and the distinction is the ruling, '
+        + 'not an oversight. The sibling `/packages` door retired its `limit` with its `cursor` '
+        + '(#17667, decision batch #126 item 1) because nothing read it; the parent ruling '
+        + 'explicitly does not transfer here. On this door `limit` is read end to end — the '
+        + 'boundary enforces the declared 1..100 range off the schema itself, the service takes '
+        + 'it as an option, and the engine spends it as `RunStore.listHistory`\'s window — and '
+        + "the Console's flow-runs page sends it today. Retiring it would have been a "
+        + 'regression, and its `.default(20)` stays with it. '
+        + 'The same card computes `hasMore`, which is the half a bare retirement would have left '
+        + 'lying. `GET /api/automation/:name/runs` shipped a literal `hasMore: false` beside a '
+        + 'list the engine had already truncated with `.slice(0, limit)`, so a caller asking for '
+        + 'one row of a thousand was handed one row and told that was all of them. The engine '
+        + 'now reports truncation to the door through a new optional contract member, '
+        + '`IAutomationService.listRunsPage`, which returns `{ runs, hasMore }`: it over-reads '
+        + 'its history source by exactly one row and compares the merged, filtered, ordered set '
+        + 'to the caller\'s window. The over-read is what makes the answer sound — '
+        + '`runs.length === limit` cannot tell a flow with exactly `limit` runs from one with '
+        + 'ten thousand, and `RunStore.listHistory`\'s signature is deliberately unchanged '
+        + 'because over-reading is expressible in the `limit` it already takes. '
+        + 'There IS a tombstone: the request schema is non-strict, so a bare deletion would have '
+        + 'made Zod SILENTLY STRIP whatever a generated client kept sending — a clean parse and '
+        + "a parameter that never takes effect, which is this card's own defect re-created one "
+        + 'layer down (ADR-0104). `cursor` is therefore a `retiredKey()`, typed `never` for tsc '
+        + 'and raising the prescription at any parse, and is registered in '
+        + 'RETIRED_KEYS_BY_MAJOR[18]. There is NO D2 conversion: a conversion rewrites an '
+        + 'authored source or a stored `sys_metadata` row, and this shape is HTTP-only — nobody '
+        + 'authors a `ListRunsRequest` and nothing persists one. The `os migrate meta` house '
+        + 'sentence is therefore correctly absent from the prescription. There is no '
+        + '`acceptRetiredDefaultResidue` stage either: `cursor` carried no default, so it '
+        + 'materialized into no artifact and there is no residue to accept. '
+        + 'The SDK half is part of the retirement rather than a follow-up: `@objectstack/client` '
+        + 'declared `cursor` and appended it on all three run-list surfaces, so retiring the key '
+        + 'in the schema alone would have left the one generated client this repo ships typing it '
+        + '`string` and sending it into a route that silently drops it — the ADR-0104 shape the '
+        + 'tombstone exists to prevent, re-created one layer down. The same call was made when '
+        + '#6361 retired the notifications `cursor`: the client dropped the option and recorded '
+        + 'the removal in its docblock. ADR-0049 / ADR-0087, #19543.',
+      acceptanceCriteria:
+        'No caller sends `cursor` to `GET /api/automation/:name/runs`, and that is true of every '
+        + 'channel this repo ships rather than of the schema alone. Writing it on a '
+        + '`ListRunsRequest` is a `tsc` error (the input type is `never`), and any value reaching a '
+        + 'parse raises the prescription rather than a generic unrecognized-key issue. The option is '
+        + 'gone from `IAutomationService.listRuns`, so an implementation can no longer declare a slot '
+        + 'for it. ⭐ It is also gone from the SDK, which is the channel most callers actually reach '
+        + 'this door through: `@objectstack/client` no longer declares `cursor` on '
+        + '`automation.runs.list`, `automation.listRuns` or '
+        + '`client.environment(id).automation.listRuns`, and no longer appends `?cursor=` on any of '
+        + 'the three — so the key cannot be smuggled past the retired schema by an untyped caller. '
+        + 'Without that half the retirement would have re-created its own defect one layer down: '
+        + 'the schema typing the key `never` while the shipped client typed it `string` and sent it, '
+        + 'silently dropped by a route that no longer reads it (ADR-0104). '
+        + '⚠️ ONE wire behaviour CHANGES and must be verified as such, because it reverses a '
+        + 'decision recorded under #7300: a repeated `?cursor=a&cursor=b` used to answer '
+        + '`400 VALIDATION_FAILED` with a `details.fields[]` entry naming `cursor`, and now '
+        + 'answers `200` with the key ignored like any other unrecognised query name. #7300 '
+        + 'validated the key rather than deciding it, so that a future cursor implementation '
+        + 'would not be the one to discover the type was unenforced; this ruling decides it '
+        + 'instead — there will be no cursor implementation on this door — so the refusal would '
+        + 'be validating a key the contract no longer has. This route declares no closed query '
+        + 'set (AGENTS.md route-ownership rule 5), so an unrecognised name has never been refused here '
+        + 'on its own account. '
+        + '⚠️ `hasMore` also changes, from a constant to an answer: a request whose window is '
+        + 'shorter than the matching run set now receives `hasMore: true` where it previously '
+        + 'received `false`. A caller that treated `false` as "this is the whole history" was '
+        + 'always wrong and is now told so. ⚠️ Read the new `false` with one qualification: '
+        + 'unfiltered it is exact, but under `?status=` it means "no further match inside the '
+        + 'window that was scanned" rather than "none exists", because the durable history '
+        + 'source has no status slot and the window is taken before the filter is applied. '
+        + 'Pushing the filter down is a store-contract change this card did not scope. '
+        + '`nextCursor` stays absent — nothing mints one — and '
+        + '`limit` behaves exactly as it did, including its `.default(20)`. '
+        + 'A deployment whose automation service does not implement `listRunsPage` answers `501` '
+        + 'naming the member, and ⛔ never a `200` carrying an invented `hasMore`.',
+    },
+    {
       id: 'autonumber-default-unique-organization',
       surface: '`fields.<name>.unique` on a `type: \'autonumber\'` field when the author OMITS the key — '
         + 'the contract default moves from `false` (no index) to `\'organization\'` (one holder per '
@@ -10201,7 +10304,7 @@ const step18: MigrationStep = {
         + 'GET /api/v1/packages declared by ListInstalledPackagesRequestSchema. The same entry '
         + 'covers the limit default: the request schema no longer declares default(50)',
       replacement:
-        'the `status` and `type` filters — this route answers the whole installed set and has '
+        'the `status`, `type` and `enabled` filters — this route answers the whole installed set and has '
         + 'no page 2. There is no replacement for `cursor`, deliberately: nothing ever minted '
         + 'one, so no caller holds a value to carry over, and the response `nextCursor` it '
         + 'would have paired with was never emitted. Callers that looped on it were re-reading '
@@ -10215,7 +10318,7 @@ const step18: MigrationStep = {
         + 'item 1, maintainer 「同意」 2026-09-13, route 2 of three; routes 1 — build paging — '
         + 'and 3 — refuse unknown names — were considered and refused). `limit` and `cursor` '
         + 'were declared on the request and honoured on neither: the serving door filters on '
-        + '`status` and `type` and then returns every remaining row, and no emit site has ever '
+        + '`status`, `type` and `enabled` and then returns every remaining row, and no emit site has ever '
         + 'written the response half `nextCursor`. `limit` is the sharper of the two because '
         + "the repo's own ingress rule names it as the parameter whose silent drop is worst, "
         + 'and it is the silent-WIDENING half that was live: a caller asking for one row was '
@@ -10638,6 +10741,97 @@ const step18: MigrationStep = {
         + 'declared shapes (a type-only change — the parameter widens). A stored kind item that '
         + 'still carries `globs` keeps serving as stored data; clear it by deleting the key from '
         + 'the source manifest and republishing.',
+    },
+    {
+      id: 'plugin-security-scan-result-surface-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface: 'the plugin-security scan-result family: the defs '
+        + 'KernelSecurityScanResult and KernelSecurityVulnerability '
+        + '(kernel/plugin-security-advanced.zod.ts), their two authorable carriers on '
+        + 'PluginSecurityManifest — scanResults and vulnerabilities — and the sibling '
+        + 'verdict block PluginQualityMetrics.securityScan (kernel/plugin-registry.zod.ts)',
+      replacement:
+        'nothing to re-declare — delete the keys and every import of the two types. Plugin '
+        + 'security scanning is not a platform capability and there is no replacement schema. '
+        + 'What the platform does still enforce, and what to reach for instead: `permissions` and '
+        + '`sandbox` on the same PluginSecurityManifest are unchanged, and artifact provenance is '
+        + 'answered by `verifyPluginArtifactIntegrity` and the plugin signature verifier — which '
+        + 'tell you an artifact is the one its publisher signed, and never that it is safe. For '
+        + 'dependency vulnerabilities use the tools built for it against your own project (npm '
+        + 'audit / pnpm audit, Dependabot, the GitHub Advisory Database, OSV) and treat an '
+        + 'unaudited third-party plugin as untrusted code. A publisher who used scanResults to '
+        + 'advertise diligence keeps the surviving securityContact and vulnerabilityDisclosure '
+        + 'blocks, which are contact terms rather than a verdict.',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-07 on #15932 (director seat, decision batch #65, adopted verbatim 「同意」). '
+        + 'This is the second half of the scanner retirement — issue 14919, a number since '
+        + 'DELETED from the board, landed as PR #15930. That card retired PluginSecurityScanner — a '
+        + '@objectstack/core class that shipped as a SECURITY control and could not fail, whose '
+        + 'verdict was status "passed" for every plugin it was ever handed. The SCHEMAS the '
+        + 'scanner fed survived it, and the scanner had been their only importer of any kind (a '
+        + 'type-only import in packages/core/src/security/security-scanner.ts), so the family went '
+        + 'from one type-only importer to zero consumers while staying fully published: 27 '
+        + 'authorable rows across kernel.json, six api-surface exports, two authorable defaults '
+        + 'and two json-schema manifest keys. An author could write any of it, be accepted, and '
+        + 'get nothing — declared-not-enforced, Prime Directive #10, one layer out from the class '
+        + 'removed for the same reason. The census was taken on origin/main after that removal landed, '
+        + 'with a lit control (five hits for PluginSecurityManifest inside the declaring module) '
+        + 'proving the file greppable, and found no .parse or .safeParse site against either '
+        + 'schema anywhere in packages/**. securityScan is the sharpest member: scanResults '
+        + 'published a report, but securityScan.passed published a VERDICT, so a plugin could '
+        + 'declare itself clean with nothing behind it. Route: the two defs leave the build whole '
+        + '(RETIRED_DEFS_BY_MAJOR[18]) because nothing parses them and a prescription nobody can '
+        + 'receive is not worth its cost; the three authorable keys are retiredKey() tombstones '
+        + '(RETIRED_KEYS_BY_MAJOR[18]) because both carrying shapes are non-strict, where a bare '
+        + 'deletion is a silent strip (ADR-0104). Why this entry and not a D2 conversion: a plugin '
+        + 'security manifest and a plugin registry entry are package artifacts a publisher ships, '
+        + 'never stack collection members and never stored sys_metadata rows, so the conversion '
+        + 'chain has no seam that would see one — the disposition the sibling '
+        + 'kernel-plugin-security-durations-unit-in-key entry already records for this same '
+        + 'manifest. No deprecation window (maintainer 2026-08-27: 「项目在创业阶段，用户也很少，短期不考虑渐进」). '
+        + 'Scope note, recorded rather than acted on: PluginSecurityManifest.vulnerabilities is a '
+        + 'forced consequence rather than a name the ruling listed — it was the last authorable '
+        + 'referent of KernelSecurityVulnerability and could not outlive the def. Two neighbours '
+        + 'the ruling made CONDITIONAL are deliberately untouched here because the repository the '
+        + 'condition names, objectstack-ai/cloud, is not reachable from the session that executed '
+        + 'this: the marketplace "scanning" status stays exactly as it is — unremoved, and NOT '
+        + 'recorded as checked. Its two siblings were MEASURED rather than assumed, and the '
+        + 'record is corrected here: both were ALREADY GONE when that ruling was written. The '
+        + 'incident "malware" type was a member of system/IncidentCategory, and the whole '
+        + 'incident-response family was retired by #15513 (maintainer ruling 2026-09-05 — two '
+        + 'days BEFORE the 2026-09-07 ruling that made it conditional); see '
+        + 'incident-response-family-retired. And marketplace-admin.zod.ts was deleted outright '
+        + 'with the cloud subpath (#16526); see cloud-subpath-retired. Verified on this tree by '
+        + 'shape: both files return zero tree entries and no *.zod.ts names malware at all, '
+        + 'against a lit control where "scanning" still returns a live declaration in '
+        + 'marketplace.zod.ts. So the conditional question is ONE enum member wide, not three, '
+        + 'and the objectstack-ai/cloud producer grep it still owes is that much smaller. '
+        + '⚠️ The out-of-repo consumer population is NOT MEASURED. @objectstack/spec is published, '
+        + 'so this removal is breaking for consumers no download, dependent or source telemetry '
+        + 'was consulted for — accepted as an input to the ruling, exactly as that retirement states '
+        + 'of its own three exports, and not a reason to soften the removal. #15932, PR #15930 '
+        + '(for the deleted issue 14919), ADR-0049, ADR-0087.',
+      acceptanceCriteria:
+        'No source imports KernelSecurityScanResult, KernelSecurityVulnerability or either '
+        + 'Schema from @objectstack/spec/kernel: both defs are absent from the built kernel '
+        + 'barrel and from api-surface/kernel.json, so a TypeScript consumer gets the refusal at '
+        + 'compile time at the import site rather than a missing runtime value. Authoring '
+        + 'PluginSecurityManifest.scanResults, PluginSecurityManifest.vulnerabilities or '
+        + 'PluginQualityMetrics.securityScan fails to compile (input type `never`) and fails to '
+        + 'parse with the tombstone prescription naming that key — verified by refusal pins that '
+        + 'assert the issue code, the path naming WHICH key was refused, and the prescription '
+        + 'text, plus a positive pin that the surrounding manifest still parses and grows no such '
+        + 'property. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
+        + 'nothing ever read any of these keys, so deleting one removes no check that was running. '
+        + 'A publisher who believed a declared scanResults entry gated anything was never getting '
+        + 'that gate; the remediation is to audit with a real tool, not to find a replacement key. '
+        + 'The surviving neighbours must still parse and still be exported — permissions, sandbox, '
+        + 'policy, codeSigning, certifications, securityContact and vulnerabilityDisclosure on the '
+        + 'manifest, testCoverage/documentationScore/codeQuality/conformanceTests on the quality '
+        + 'metrics, and the separately-declared SecurityScanResultSchema / '
+        + 'SecurityVulnerabilitySchema in kernel/plugin-security.zod.ts, which this change does '
+        + 'not touch.',
     },
     {
       id: 'plugin-security-scanner-retired',
@@ -13462,7 +13656,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `api/package-api.zod.ts`.
     //
     // `GET /api/v1/packages` declared a window it has never applied. The serving
-    // door filters on `status` / `type` and returns every remaining row, so a
+    // door filters on `status` / `type` / `enabled` and returns every remaining row, so a
     // caller asking for one row was handed the whole table together with a
     // `hasMore: false` that agreed with it — the silent-widening half of the
     // ingress rule that names this exact parameter as the one whose drop is worst.
@@ -13489,6 +13683,35 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `api/ListNotificationsRequest:cursor` (#6361) already took for the same
     // shape one route over.
     'api/ListInstalledPackagesRequest:limit',
+    // #19543 — ADR-0049 enforce-or-remove (director seat, decision batch #204
+    // item 2, maintainer 「204 同意」 2026-09-21, letter C for this door). The
+    // prescription is `RUNS_LIST_CURSOR_REMOVED` in `api/automation-api.zod.ts`.
+    //
+    // ⭐ `cursor` retires ALONE here, and the asymmetry with the sibling
+    // `/packages` retirement is the whole point of the ruling. On that door both
+    // `limit` and `cursor` were decorative, so both went (#17667,
+    // `api/ListInstalledPackagesRequest:limit` / `:cursor`). On THIS door `limit`
+    // is read end to end — boundary bounds check, service option, then the run
+    // store's history window — and the Console's flow-runs page sends it today, so
+    // retiring it would have been a regression rather than a narrowing. The card's
+    // own body called it "declared, never read"; that sentence is false and was
+    // measured false before this entry was written.
+    //
+    // What made `cursor` retirable is the response half: no emit site has ever
+    // written `nextCursor`, and the only ordering this door has is a required but
+    // non-unique `startedAt` timestamp that nothing ever minted a resume point
+    // from — so nothing could ever have minted a value for a caller to send back.
+    // A caller looping "until the cursor runs out" re-read the first and only
+    // window forever.
+    //
+    // Same registration shape as the `/packages` pair: major 18 (the removal ships
+    // on the 17.x line as a minor; the prescription lives at the major boundary
+    // where `migrate meta` users look), and NO D2 conversion, because a conversion
+    // rewrites an authored source or a stored `sys_metadata` row and this shape is
+    // HTTP-only — nobody authors a `ListRunsRequest` and nothing persists one. The
+    // D3 semantic entry `automation-runs-cursor-retired` carries the record to
+    // `spec-changes.json`, the generated upgrade guide and `os migrate meta`.
+    'api/ListRunsRequest:cursor',
     // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
     // executing the #14369 liveness census (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
@@ -14833,6 +15056,74 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (`packages/core/src/health-monitor.ts`), never authored. See
     // `kernel-plugin-health-report-durations-unit-in-key`.
     'kernel/PluginHealthReport:metrics.uptime',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). `PluginQualityMetrics.securityScan` is
+    // the scan-result family's sibling on the plugin registry entry, named by the
+    // ruling alongside it: a last-scan date, per-severity vulnerability counts and a
+    // `passed` boolean, read by no scanner, registry, installer or UI. The census put
+    // every reference in `packages/spec/src/kernel/plugin-registry.test.ts` — the
+    // spec's own self-test and nothing else.
+    //
+    // It is the sharper half of the family for an author: `scanResults` published a
+    // report, but `securityScan.passed` published a VERDICT, so a plugin could ship
+    // `passed: true` with nothing at all behind it and a consumer reading the
+    // registry entry had no way to tell that from a real result.
+    //
+    // Tombstoned with `retiredKey()`: `PluginQualityMetricsSchema` is a plain
+    // `z.object`, so a bare deletion would strip an authored block in silence
+    // (ADR-0104). The key carried NO default of its own — the defaults inside it
+    // (`critical`/`high`/`medium`/`low = 0`, `passed = false`) fired only for an
+    // author who wrote the block — so `acceptRetiredDefaultResidue` is not owed:
+    // there is no value a released toolchain materialized into an artifact whose
+    // author never typed the key.
+    //
+    // No D2 conversion: a plugin registry entry is a published package artifact, not
+    // a stack collection member or a stored `sys_metadata` row. The ledger channel is
+    // `plugin-security-scan-result-surface-retired`.
+    'kernel/PluginQualityMetrics:securityScan',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). `PluginSecurityManifest.scanResults`
+    // published an array of `KernelSecurityScanResult` on the authorable surface with
+    // zero authors and zero parsers: no `.parse`/`.safeParse` site existed anywhere
+    // against the scan-result schemas, so a publisher could declare a clean scan on a
+    // plugin manifest, be accepted, and get nothing — the declared-not-enforced shape
+    // Prime Directive #10 names, one layer out from the runtime scanner that PR
+    // #15930 removed for the same reason (that PR closed issue 14919, a number since
+    // deleted from the board and no longer resolving).
+    //
+    // Tombstoned with `retiredKey()`, not deleted: `PluginSecurityManifestSchema` is a
+    // plain `z.object`, not `.strict()`, so a bare deletion would strip an authored
+    // key in silence (ADR-0104) — swapping an inert declaration for an invisible one.
+    // The value type leaves this build entirely (`RETIRED_DEFS_BY_MAJOR[18]`,
+    // `kernel/KernelSecurityScanResult`).
+    //
+    // No D2 conversion: a security manifest is a package artifact a publisher ships,
+    // never a stack collection member and never a stored `sys_metadata` row, so the
+    // chain has no seam that would see one — the disposition the sibling
+    // `vulnerabilityDisclosure.responseTime` entry on this same schema already
+    // records. The prescription an author meets is the tombstone itself; the ledger
+    // channel is `plugin-security-scan-result-surface-retired`.
+    'kernel/PluginSecurityManifest:scanResults',
+    // #15932 — ADR-0049 enforce-or-remove, decision batch #65.
+    // `PluginSecurityManifest.vulnerabilities` was an array of
+    // `KernelSecurityVulnerability` and is this retirement's FORCED CONSEQUENCE
+    // rather than a name the ruling listed: it was the last authorable referent of a
+    // def the ruling retires by name, so it cannot survive the def, and keeping the
+    // def alive only to carry it would be keeping the retired family alive under a
+    // second name. It is inert on its own terms too — nothing ever wrote the list and
+    // nothing ever read it, so declaring a known vulnerability against a plugin
+    // warned nobody and blocked no install.
+    //
+    // ⚠️ This is the ONE key outside the four names the #15932 dispatch fenced
+    // (`KernelSecurityScanResult`, `KernelSecurityVulnerability`,
+    // `PluginSecurityManifest.scanResults`, `PluginQualityMetrics.securityScan`), and
+    // it is reported as such on the card and in the landing PR rather than absorbed
+    // silently. It is not a neighbour retired by proximity — the fence's stated
+    // concern — it is a referent of a named retiree.
+    //
+    // Tombstoned with `retiredKey()` for the reason its `scanResults` sibling records
+    // (non-strict shape, ADR-0104 silent strip). No D2 conversion, same reasoning.
+    'kernel/PluginSecurityManifest:vulnerabilities',
     // #15678 (stack card 3/6 of #14478) — ruling B.
     // `PluginSecurityManifest.vulnerabilityDisclosure.responseTime` said "Expected
     // response time in hours" in prose and nothing else. Renamed to
@@ -17312,6 +17603,60 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // keeps emitting — see `18.kernel__PluginStartupResult__health.ts`. Route 3;
     // the D3 semantic entry `startup-orchestrator-retired` carries the record.
     'kernel/HealthStatus',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). `KernelSecurityScanResult` declared a
+    // complete scan report — timestamp, scanner name/version, a passed/failed/warning
+    // status, vulnerability and code-issue lists, dependency findings, license
+    // compliance and a six-number summary — and no layer ever emitted, stored, parsed
+    // or read one. Its only importer of any kind was `PluginSecurityScanner`, a
+    // type-only import from `packages/core/src/security/security-scanner.ts`, and
+    // PR #15930 deleted that file (it closed issue 14919, a number since deleted
+    // from the board and no longer resolving); the census after it landed put every remaining
+    // reference inside the declaring module itself, against a lit control (five hits
+    // for `PluginSecurityManifest` in the same file), so the zero is a reading.
+    //
+    // Whole-def retirement, not a tombstone: nothing parses this def, so there is no
+    // author to hand a prescription to and no `${defKey}:${name}` key leaving a live
+    // shape. `RETIRED_DEFS_BY_MAJOR[18]` plus the semantic entry
+    // `plugin-security-scan-result-surface-retired` ARE the declaration — the
+    // #11825 shape (its sibling in the pair this tree usually cites, issue 8715, is
+    // a number deleted from the board; 11825 is the half that still resolves).
+    // The two authorable carriers that pointed here,
+    // `PluginSecurityManifest.scanResults` and `.vulnerabilities`, are separately
+    // tombstoned and registered in `RETIRED_KEYS_BY_MAJOR[18]`.
+    //
+    // No D2 conversion: a plugin security manifest is a package artifact a publisher
+    // ships, never a stack collection member and never a stored `sys_metadata` row,
+    // so the conversion chain has no seam that would see one (the sibling
+    // `kernel/PluginSecurityManifest:vulnerabilityDisclosure.responseTime` entry
+    // records the same reasoning for the same schema).
+    'kernel/KernelSecurityScanResult',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). The other half of the scan-result
+    // family: a CVE-shaped vulnerability record (severity, CVSS score, affected and
+    // fixed versions, exploit/patch availability, remediation, disclosure dates) that
+    // nothing ever constructed, validated or consulted. It reached this build through
+    // exactly three referents, all now gone — `KernelSecurityScanResult.vulnerabilities`
+    // and `.dependencyVulnerabilities[].vulnerability` (that def leaves in the same
+    // change) and `PluginSecurityManifest.vulnerabilities` (tombstoned). Retired
+    // together with `KernelSecurityScanResult` because declaring a vulnerability
+    // vocabulary with no scan to carry it reads as a capability, which is the
+    // ADR-0049 shape.
+    //
+    // Whole-def retirement for the reason its sibling entry records, and the same
+    // disposition: `RETIRED_DEFS_BY_MAJOR[18]` plus
+    // `plugin-security-scan-result-surface-retired`, no D2 conversion, no tombstone
+    // of its own. Its two authorable defaults —
+    // `KernelSecurityVulnerability:exploitAvailable = false` and
+    // `:patchAvailable = false` — leave `authorable-defaults/kernel.json` with the
+    // def; nothing ever parsed this schema, so no released toolchain ever
+    // materialized either value into an artifact and there is no residue to accept.
+    //
+    // ⛔ NOT in scope, and deliberately untouched: the unprefixed
+    // `SecurityVulnerabilitySchema` / `SecurityScanResultSchema` pair in the sibling
+    // module `kernel/plugin-security.zod.ts`. Those are separate defs with their own
+    // self-test and are outside this ruling.
+    'kernel/KernelSecurityVulnerability',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of

@@ -3,11 +3,18 @@
 /**
  * Dimension display-label resolution (ADR-0021).
  *
- * Analytics groups by the raw stored value of a dimension field. For two field
- * kinds that value is NOT human-readable:
+ * Analytics groups by the raw stored value of a dimension field. In two cases
+ * that value is NOT human-readable:
  *
- *  - **select** — grouped by the stored option `value` (e.g. `backlog`), but the
- *    user-facing text is the option `label` (e.g. `Backlog`).
+ *  - **a field that declares a non-empty `options` list** — grouped by the
+ *    stored option `value` (e.g. `backlog`), but the user-facing text is the
+ *    matching option `label` (e.g. `Backlog`). The condition is the declared
+ *    list itself (`Array.isArray(meta.options) && meta.options.length > 0`),
+ *    never the field's `type` — `options` is optional on every field in the
+ *    spec schema, so naming types here would be wrong in both directions: it
+ *    would miss fields that DO resolve, and promise resolution for ones that
+ *    declare no options (a free-input `tags` field). `select` is the usual
+ *    author of such a list, not the test for one.
  *  - **the reference class** (`REFERENCE_VALUE_TYPES`: `lookup`,
  *    `master_detail`, `user`, `tree`) — grouped by the foreign-key `id` (e.g.
  *    `8eqtuKI4G9IhUsPS`), but the user-facing text is the related record's

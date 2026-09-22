@@ -125,6 +125,48 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // `datasets[].object`. The door controls that prove each one fires live in
   // `runtime-gate.dataset-writes.test.ts`.
   dataset: 'datasets',
+  // [#19542] The three rows the ADR-0049 ruling 「declared ⇒ honoured; not
+  // honourable ⇒ retired」 needs for its groups A and C. `action` and `hook`
+  // above were already here and INERT — the gate filters by `runtimeTypes`
+  // before it consults this table, so a row with no declaring rule dispatches
+  // nothing — and the same ruling crosses their rules in this commit, which is
+  // what lights those two rows rather than any edit to them.
+  //
+  // ⛔ NOT mappings ahead of their rules (the `seed: 'data'` failure above).
+  // Each key below names a collection some rule crossed in THIS commit reads
+  // with the written item as the finding's SUBJECT:
+  //
+  // - `reports` — `validatePresetComparands` and `validateEmptyCombinators`
+  //   scan it as a first-class authored-filter surface (`{ key: 'reports',
+  //   kind: 'report' }`), and the suite member `validateChartBindings` opens
+  //   with `recordsOf(stack.reports)` and resolves each report's dataset
+  //   binding against `stack.datasets`, a collection the snapshot carries.
+  // - `emailTemplates` / `mappings` — `lintLivenessProperties` walks them
+  //   through its own `TYPE_COLLECTIONS` rows, with `checkItem(type, item, …)`
+  //   making the written item the subject. ⚠️ That rule is LEDGER-DRIVEN and
+  //   `continue`s on an empty warn map: both ledgers carry 0 warn keys today,
+  //   so these two rows are wired-and-silent BY CONSTRUCTION until a property
+  //   needs a row. The ruling dispatched the wiring and ⛔ no ledger
+  //   population («the empty warn maps stay empty until a real property needs
+  //   a row»), so this is the ruled end state, not a half-landing.
+  //
+  //   ⚠️ Read the size of that proof honestly, because it is smaller than the
+  //   others on this table: since those two rules judge NOTHING at this door,
+  //   no behavioural case can tell a right key from a wrong one, and a
+  //   `mapping: 'mapping'` typo — the `seed: 'data'` shape exactly — leaves
+  //   every group C door case GREEN. What catches it is one string assertion,
+  //   `each stack key is the collection the crossed rules actually read` in
+  //   `runtime-gate.inert-type-writes.test.ts`, measured by ablating both keys.
+  //   A table pin, not a door reading. ⛔ Do not delete that assertion as
+  //   redundant with the door cases — for these two rows it is the only proof.
+  //
+  // ⛔ `skill` is deliberately NOT here, and its absence is a measured reading
+  // rather than an omission — see the `validateAiToolReferences` member in
+  // `reference-integrity-suite.ts`, which carries the measurement and the
+  // reason, and the DARK pin that holds this row absent.
+  report: 'reports',
+  email_template: 'emailTemplates',
+  mapping: 'mappings',
   // [#19143 above, #19370 here] `position` / `app` — the two collections only
   // `security-role-word` judges. They arrive together with that rule's
   // crossing, never ahead of it: `DEFAULT_METADATA_TYPE_REGISTRY` declares both
@@ -147,15 +189,60 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // and cancels, and a write's own collection already holds exactly one member
   // — its own item — so `positions[0]` IS this write and name-keying it would
   // say nothing the index does not (the `pages` reading in
-  // `runtime-gate.derived-name-keys.test.ts`). Eight of the twelve mappings
+  // `runtime-gate.derived-name-keys.test.ts`). Eleven of the fifteen mappings
   // above name a non-context key for the same reason — counted off this table,
   // where only `objects`, `permissions`, `books` and `datasets` are context
-  // collections. ⛔ Do not add a context row
+  // collections. (This sentence read «eight of the twelve» when the card that
+  // added the two rows above wrote it. That card is numbered 19370 — written
+  // WITHOUT the citation sigil on purpose, because it NO LONGER RESOLVES: it
+  // and its PR were filed by an account since banned, so both answer 404 while
+  // their work is landed and unaffected. A dead number dressed as a live link
+  // is the dangling reference `check:issue-citations` exists to refuse, so it
+  // is spelled as what it is: a historical card id. The live record is the
+  // merge commit `a227afa415f596269ed36aae0a0631c84270ccc9`, which carries
+  // that card's whole diff and is where its reasoning can still be read.
+  // ⛔ Do not re-point it at a rebuild — unlike its sibling below it has none,
+  // and guessing an upstream is how a dangling reference becomes a wrong one.
+  //
+  // «eight of the twelve» was true of the table it was written against;
+  // #19542's three rows landed in the same merge, so the count is restated
+  // against the merged table rather than left describing a table nobody has.
+  // It was briefly restated as «twelve of the sixteen», counted while #19542
+  // still carried a fourth row for `skill` — that row was withdrawn and the
+  // count with it. The reasoning the sentence carries is unchanged throughout,
+  // and the figure is arithmetic over the rows above: ⛔ recount them rather
+  // than adjusting it.)
+  // ⛔ Do not add a context row
   // "for symmetry": `RuntimeStackContext`'s set is bounded by what the wired
   // rules RESOLVE (measured, not projected), and every member of it costs the
   // publish door one indexed `sys_metadata` read per write.
   position: 'positions',
   app: 'apps',
+  // [#19568] `datasource` — the THIRD row bridging `lintLivenessProperties`,
+  // beside `email_template` / `mapping` above, and the last
+  // `allowRuntimeCreate: true` type whose classification was open.
+  //
+  // ⛔ NOT a mapping ahead of its rule (the `seed: 'data'` failure above).
+  // `lint-liveness-properties.ts` has carried `{ type: 'datasource', key:
+  // 'datasources' }` in its own `TYPE_COLLECTIONS` since #4487, so the key
+  // named here is the key that rule really opens on — and unlike the two group
+  // C rows, that is proved BEHAVIOURALLY rather than by a string assertion:
+  // `runtime-gate.datasource-writes.test.ts` drives the rule through its
+  // ledger-directory seam over a stack built at `stackKeyForType('datasource')`
+  // itself, so a `datasource: 'datasource'` typo reds a door-shaped case.
+  //
+  // ⚠️ MEASURED, and the reading this row records: the datasource ledger is 12
+  // props / 0 warn keys, so the rule is dispatched here and judges NOTHING
+  // today — the `email_template` / `mapping` end state exactly, and the same
+  // ⛔ no-ledger-population fence applies (zero pull; the wiring is the whole
+  // deliverable). The day a datasource property earns an `authorWarn` row the
+  // door lights up with no second edit here.
+  //
+  // ⛔ NOT a `RuntimeStackContext` row, for the `position` / `app` reason one
+  // paragraph up: the rule judges each written item against the ledger on its
+  // own, resolves nothing into a sibling, and a write's own collection already
+  // holds exactly one member — its own item.
+  datasource: 'datasources',
 };
 
 /**

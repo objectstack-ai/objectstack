@@ -466,8 +466,42 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // checks every script-node callable and every declared predicate the flow
     // carries, against the live object universe — the same parse `os build`
     // runs, now at the door Studio/REST/MCP authors actually use.
+    //
+    // [#19542] `action` and `hook` join under the ADR-0049 ruling 「declared ⇒
+    // honoured; not honourable ⇒ retired」. Both types declare
+    // `allowRuntimeCreate: true`, so Studio, REST `/meta` and an MCP/AI author
+    // may mint one — and both already had their `TYPE_TO_STACK_KEY` row, inert
+    // because no rule declared them here. This rule is the bridge the
+    // measurement named for each: `recordsOf(stack.actions)` →
+    // `checkAction('stack', action)` judges the written action's own `visible`
+    // / `disabled` CEL, and `recordsOf(stack.hooks)` judges the written hook's
+    // own `condition` — the WRITTEN item is the subject in both, not a
+    // resolution universe for someone else's reference.
+    //
+    // It needs only `objects` to resolve `record.<field>`, and that is the one
+    // collection every snapshot carries, so RUNTIME_NEEDS_FULL_SNAPSHOT does
+    // not apply. A predicate whose `object` is outside the write's package
+    // closure degrades to syntax-only rather than to a false verdict (`check`
+    // passes `fields: undefined`), which is the safe direction.
+    //
+    // ⛔ The action/hook BODY rules (`validateActionBodyWrites`,
+    // `validateHookBodyWrites`, `validateReadonly{Action,Hook}Writes`) do NOT
+    // cross with them: they parse authored JS through typescript/sucrase, the
+    // two dependencies `runtime-lazy-deps.test.ts` pins off the kernel boot
+    // path outright (tier 1), and an action/hook write is exactly the snapshot
+    // that would carry a body for them to parse.
+    //
+    // ⛔ Nor do `validateActionNameRefs` / `validateActionDispatchContract`:
+    // they read `stack.actions` as a resolution UNIVERSE for a view's button
+    // wiring, so an action write can only make a reference resolve — it can
+    // only REMOVE findings, which the gate's differential already discards.
+    //
+    // MEASURED over the shipped corpus at the door's own snapshot shape before
+    // crossing: 79 actions and 6 hooks (showcase 70/4, todo 8/1, crm 1/1) →
+    // 0 differential findings, with lit synthetic probes refused per type in
+    // `runtime-gate.inert-type-writes.test.ts`.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow'],
+    runtimeTypes: ['flow', 'action', 'hook'],
     run: (stack) =>
       validateStackExpressions(stack).map((i) => ({
         severity: i.severity ?? 'error',
@@ -715,8 +749,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-preset-comparands.ts',
+    // [#19542] `report` joins under the ADR-0049 ruling. `reports` is already
+    // one of this rule's declared scan surfaces (`{ key: 'reports', kind:
+    // 'report' }`), walked by `walkAuthoredFilters` into `reports[i]…` paths,
+    // so the written report is the subject; the type declares
+    // `allowRuntimeCreate: true` and had no `runtimeTypes` row anywhere, which
+    // is the declared-not-enforced state the ruling resolves. Arm 2 binds
+    // field types from `objects` / `datasets` and stays silent where they are
+    // absent, exactly as it does for the five types already listed.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['dashboard', 'view', 'object', 'page', 'flow'],
+    runtimeTypes: ['dashboard', 'view', 'object', 'page', 'flow', 'report'],
     run: (stack) => validatePresetComparands(stack),
   },
   // #5330 — the LITERAL empty combinators (`$and: []`, `$or: []`, `$not: {}`,
@@ -740,8 +782,23 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // `page`, `dashboard`) is a one-line `runtimeTypes` edit once #4463 P2
     // opens them at the gate. Making that call here would widen the gate's
     // dispatch surface on this rule's authority, which is P2's decision.
+    //
+    // [#19542] `report` is that edit, taken on the ADR-0049 ruling's authority
+    // rather than this rule's, and taken for ONE type only. It crosses TOGETHER
+    // with `validatePresetComparands` above and for #7220's reason: both judge
+    // the SAME authored filter literal on the SAME `{ key: 'reports' }`
+    // surface, so an author refused for a bad preset comparand and waved
+    // through for a literal `$and: []` on the same report could not predict
+    // the door. ⛔ The other four filter-carrying types are untouched here —
+    // this card is the six `allowRuntimeCreate` types, not P2's remainder.
+    //
+    // MEASURED over the shipped report corpus at the door's own snapshot shape
+    // before crossing, and NON-VACUOUSLY: 9 reports (showcase 4, todo 5), of
+    // which 5 carry an authored filter key this rule and its sibling walk
+    // (`runtimeFilter`, one of them nested under `blocks[]`) — 0 findings, with
+    // lit synthetic probes refused per arm.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow'],
+    runtimeTypes: ['flow', 'report'],
     run: (stack) => validateEmptyCombinators(stack),
   },
   // The reference-integrity suite (#3583 §5 D5) — itself a registry, of the
@@ -844,8 +901,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // crossing, at the door's own snapshot shape: 11 datasets
     // (platform-objects 5, showcase 4, crm 1, todo 1) — 0 findings, with a lit
     // synthetic probe refused.
+    // [#19542] `report` joins under the ADR-0049 ruling, and the same
+    // granularity mechanism keeps it NARROW: this entry says which WRITES
+    // dispatch the suite, the suite's own per-member `runtimeTypes` says which
+    // MEMBERS judge that snapshot. A `report` write reaches exactly
+    // `validateChartBindings`. Every other member keeps its declaration.
+    //
+    // ⛔ `skill` is NOT here. It was crossed in an earlier revision of this
+    // card and is held out on a measurement: `validateAiToolReferences`
+    // resolves into `stack.tools` and `stack.actions`, neither of which the
+    // per-write snapshot carries, so the shipped corpus's own AI-exposed
+    // stack-level action reads as unresolved at the door and the rule ships a
+    // false advisory into Studio. The member carries the measurement; the type
+    // takes the ruling's group B treatment of `tool`, the same universe
+    // obstacle read from the other side.
+    //
+    // ⛔ `action` and `hook` are deliberately NOT here, although this card
+    // crosses both types on `validateStackExpressions` above. The suite carries
+    // the four body-writes members, which parse authored JS through
+    // typescript/sucrase — and an action/hook write is precisely the snapshot
+    // that WOULD carry a body for them to parse, so dispatching the suite on
+    // those two types is the one crossing that turns `runtime-lazy-deps.test.ts`
+    // tier 1 («the parsers load NEVER») from a standing fact into a red. The
+    // measurement that named their bridge named `validateStackExpressions`, a
+    // CEL-only rule, for exactly this reason.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view', 'object', 'dataset'],
+    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`
@@ -1310,8 +1391,53 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/lint-liveness-properties.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
+    // [#19542] Group C of the ADR-0049 ruling — `email_template` and `mapping`,
+    // the two types whose only named candidate is this rule. Both declare
+    // `allowRuntimeCreate: true` and had no `runtimeTypes` row anywhere, so the
+    // only door a Studio/REST/MCP author has ran no authoring rule at all on
+    // them; this crossing is what honours the declaration.
+    //
+    // RUNTIME_OBJECT_ADVISORY_VOLUME — the reason that held this entry back —
+    // is about the OBJECT write door («~8 findings per object write … rendered
+    // in Studio since #4717»), and `object` is deliberately NOT declared below.
+    // The two types that are declared judge one flat collection each, so that
+    // reason does not reach them; it still holds for every type left off.
+    //
+    // ⚠️ MEASURED, and the report's first reading: this rule is LEDGER-DRIVEN
+    // and `continue`s on an empty warn map. `packages/spec/liveness/
+    // email_template.json` is 13 props / 0 warn keys and `mapping.json` is 7 /
+    // 0 (lit control, same script, same dir: `tool.json` 6/1, `object.json`
+    // 35/1), so these two writes dispatch this rule and it judges NOTHING
+    // today. That is the ruled end state, not a half-landing: the ruling
+    // dispatched the wiring and ⛔ no ledger population («the empty warn maps
+    // stay empty until a real property needs a row — zero pull, the wiring is
+    // the whole deliverable»). `runtime-gate.inert-type-writes.test.ts` pins
+    // both halves — that the rule is dispatched, and that it is silent — so
+    // the day a ledger row lands the door lights up with no second edit here.
+    //
+    // [#19568] `datasource` joins them, on a reading rather than by
+    // inheritance: it was outside the ten types the ADR-0049 ruling graded, so
+    // its group had to be measured. Both arms the card offered were tested
+    // against the ruling's own criteria. RETIREMENT is refuted — that arm is
+    // for a declaration 「no stack collection exists to create into」, and
+    // `ObjectStackDefinitionSchema.datasources` is a first-class collection a
+    // Studio/REST/MCP author really mints into (ADR-0015 Addendum,
+    // `origin: 'runtime'`). The `skill` HOLD-OUT is refuted too, and that is
+    // the one worth stating: `skill` was held back because
+    // `validateAiToolReferences` resolves into `stack.tools` / `stack.actions`
+    // — collections the door's snapshot does not carry — so the door's verdict
+    // differed from the whole-stack verdict and wiring it would have shipped a
+    // FALSE advisory into Studio. This rule resolves into nothing: it judges
+    // each written item's own top-level keys against its type's ledger, so the
+    // door's verdict and the whole-stack verdict are the same value by
+    // construction (pinned as a door-vs-stack comparison, not as an argument).
+    //
+    // ⚠️ MEASURED, same instrument, same run as the two above:
+    // `packages/spec/liveness/datasource.json` is 12 props / 0 warn keys, so
+    // this third type is dispatched and silent exactly as they are. The fence
+    // is inherited with the shape: ⛔ no ledger-population work, zero pull.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['email_template', 'mapping', 'datasource'],
     run: (stack) =>
       lintLivenessProperties(stack).map((f) => ({
         severity: 'warning' as const,

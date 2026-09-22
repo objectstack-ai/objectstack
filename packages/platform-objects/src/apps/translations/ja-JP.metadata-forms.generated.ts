@@ -225,101 +225,101 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "CEL 述語 — TRUE の場合フィールドは必須（サーバー側で強制）"
       },
       enable: {
-        label: "Enable",
-        helpText: "Enable/disable system features"
+        label: "有効化",
+        helpText: "システム機能の有効/無効"
       },
       "enable.trackHistory": {
-        label: "Track History"
+        label: "履歴追跡"
       },
       "enable.searchable": {
-        label: "Searchable"
+        label: "検索可能"
       },
       "enable.apiEnabled": {
-        label: "Api Enabled"
+        label: "API 有効"
       },
       "enable.files": {
-        label: "Files"
+        label: "ファイル"
       },
       "enable.feeds": {
-        label: "Feeds"
+        label: "フィード"
       },
       "enable.activities": {
-        label: "Activities"
+        label: "アクティビティ"
       },
       "enable.clone": {
-        label: "Clone"
+        label: "クローン"
       },
       validations: {
-        label: "Validations",
-        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+        label: "検証ルール",
+        helpText: "オブジェクトレベルの検証ルール — ルールオブジェクトの配列。例: [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。ステートマシンの遷移テーブルもここで宣言します（ADR-0020）"
       },
       datasource: {
         label: "データソース",
         helpText: "対象データソース ID（既定: \"default\"）"
       },
       lifecycle: {
-        label: "Lifecycle",
-        helpText: "Data lifecycle contract (ADR-0057): how long rows live and how space is reclaimed. Leave empty for permanent record semantics. Non-record classes require at least one bounding policy (retention, TTL, or rotation)."
+        label: "データライフサイクル",
+        helpText: "データライフサイクルのコントラクト（ADR-0057）: 行をどれだけ保持し、容量をどう回収するか。空欄の場合は永続的な record セマンティクスになります。record 以外のクラスは、少なくとも 1 つの境界ポリシー（保持期間、TTL、ローテーション）を宣言する必要があります。"
       },
       "lifecycle.class": {
-        label: "Class",
-        helpText: "Persistence contract for the rows of this object"
+        label: "ライフサイクルクラス",
+        helpText: "このオブジェクトの行の永続化コントラクト"
       },
       "lifecycle.retention": {
-        label: "Retention",
-        helpText: "Age-based retention window"
+        label: "保持期間",
+        helpText: "行の経過時間にもとづく保持ウィンドウ"
       },
       "lifecycle.retention.maxAge": {
-        label: "Max Age",
-        helpText: "Rows older than this (by created_at) are reaped. Duration literal: h/d/w/y, e.g. \"30d\""
+        label: "最大経過時間",
+        helpText: "これより古い行（created_at 基準）は削除されます。期間リテラル: h/d/w/y、例: \"30d\""
       },
       "lifecycle.ttl": {
-        label: "Ttl",
-        helpText: "Per-row TTL expiry"
+        label: "TTL 期限切れ",
+        helpText: "行ごとの TTL による期限切れ"
       },
       "lifecycle.ttl.field": {
-        label: "Field",
-        helpText: "Timestamp field the TTL is measured from (e.g. expires_at)"
+        label: "タイムスタンプフィールド",
+        helpText: "TTL の起点となるタイムスタンプフィールド（例: expires_at）"
       },
       "lifecycle.ttl.expireAfter": {
-        label: "Expire After",
-        helpText: "Rows expire this long after the field, e.g. \"1d\""
+        label: "期限切れまでの期間",
+        helpText: "行はこのフィールドの時刻からこの期間が経過すると期限切れになります。例: \"1d\""
       },
       "lifecycle.storage": {
-        label: "Storage",
-        helpText: "Physical rotation for high-frequency telemetry (SQLite: O(1) shard DROP)"
+        label: "ストレージ",
+        helpText: "高頻度テレメトリー向けの物理ローテーション（SQLite: O(1) のシャード DROP）"
       },
       "lifecycle.storage.strategy": {
-        label: "Strategy",
-        helpText: "Storage strategy"
+        label: "戦略",
+        helpText: "ストレージ戦略"
       },
       "lifecycle.storage.shards": {
-        label: "Shards",
-        helpText: "Shards retained; total window = shards × unit"
+        label: "シャード数",
+        helpText: "保持するシャード数。合計ウィンドウ = シャード数 × 単位"
       },
       "lifecycle.storage.unit": {
-        label: "Unit",
-        helpText: "Time width of one shard"
+        label: "シャード単位",
+        helpText: "シャード 1 つあたりの時間幅"
       },
       "lifecycle.archive": {
-        label: "Archive",
-        helpText: "Cold-store hand-off (audit class). Rows are never hot-deleted before the archive copy succeeded."
+        label: "アーカイブ",
+        helpText: "コールドストレージへの引き渡し（audit クラス）。アーカイブのコピーが成功する前に、行がホット側から削除されることはありません。"
       },
       "lifecycle.archive.after": {
-        label: "After",
-        helpText: "Archive rows older than this — must equal retention.maxAge"
+        label: "アーカイブ対象の経過時間",
+        helpText: "これより古い行をアーカイブします — retention.maxAge と一致している必要があります"
       },
       "lifecycle.archive.to": {
-        label: "To",
-        helpText: "Target datasource name for cold storage"
+        label: "アーカイブ先データソース",
+        helpText: "コールドストレージ用の対象データソース名"
       },
       "lifecycle.archive.keep": {
-        label: "Keep",
-        helpText: "How long the archive keeps rows (empty = forever), e.g. \"7y\""
+        label: "アーカイブ保持期間",
+        helpText: "アーカイブが行を保持する期間（空欄 = 無期限）。例: \"7y\""
       },
       "lifecycle.reclaim": {
-        label: "Reclaim",
-        helpText: "Reclaim driver space after sweeps (default on for non-record classes)"
+        label: "容量の回収",
+        helpText: "スイープ後にドライバーの容量を回収します（record 以外のクラスでは既定で有効）"
       }
     }
   },
@@ -1370,8 +1370,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "ID とレポートタイプ。"
       },
       dataset_binding: {
-        label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        label: "データセットのバインド",
+        description: "このレポートがレンダリングするセマンティックレイヤーのデータセット。メジャーと行は、それぞれこのデータセットのメジャーとディメンションから取得します。"
       },
       joined_blocks: {
         label: "結合ブロック",
@@ -1424,8 +1424,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "並び方向"
       },
       drilldown: {
-        label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        label: "ドリルダウン",
+        helpText: "集計された行/セルをクリックして、元になったレコードを開きます"
       },
       blocks: {
         label: "ブロック",
@@ -1465,8 +1465,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "並び順"
       },
       runtimeFilter: {
-        label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        label: "実行時フィルター",
+        helpText: "レンダリング時のスコープフィルター。クエリ時に AND で結合されます"
       },
       chart: {
         label: "チャート",
@@ -1774,7 +1774,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       variables: {
         label: "変数",
-        helpText: "[{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
+        helpText: "例: [{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
       },
       fromOverride: {
         label: "送信者オーバーライド",

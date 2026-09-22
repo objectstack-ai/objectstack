@@ -180,24 +180,40 @@
  *
  * ## ⭐ The census's OWN round trip is the census's own problem
  *
- * A declared type's text is stored whitespace-collapsed, and the door rule above
- * is read off it by re-parsing it as a synthetic alias
- * (`type CensusReceiver = <the stored text>;`). A type literal may separate its
- * members by a NEWLINE alone -- legal TypeScript -- and the collapse turns that
- * separator into nothing, so the synthesis does not parse. Through
+ * The door rule above is read off a declared type by re-parsing its text as a
+ * synthetic alias (`type CensusReceiver = <the stored text>;`). That text used
+ * to be stored whitespace-collapsed, and a type literal may separate its members
+ * by a NEWLINE alone -- legal TypeScript, which a collapse turns into no
+ * separator at all, so the synthesis did not parse. Through
  * {@link parseSourceFile} that did not fail the SITE: it ended the process, so
  * one receiver's unanswerable question became no answer for any site, under a
  * refusal naming `census-receiver-type.ts`, a file that does not exist in the
  * tree.
  *
- * ⇒ The synthesis goes through `parseDerivedText` instead, which hands the
- *   verdict back rather than ending the run -- and the verdict is ACTED ON, never
- *   swallowed. The site is classified `type-text-not-round-trippable`, an
- *   UNDEFENDED arm: printed against its own file and line with the parse failure
- *   under it, carried per site in `--json`, counted under ENFORCEMENT in both
- *   artefacts, and REFUSED by `check-tenant-audit-census.mjs` -- which is the
- *   reading CI takes, since `lint.yml` invokes the gate and never this
- *   generator.
+ * ⇒ Two repairs, in that order, and the second is the one that removes the
+ *   defect rather than localising it.
+ *
+ *   1. The synthesis goes through `parseDerivedText`, which hands the verdict
+ *      back rather than ending the run -- and the verdict is ACTED ON, never
+ *      swallowed. The site is classified `type-text-not-round-trippable`, an
+ *      UNDEFENDED arm: printed against its own file and line with the parse
+ *      failure under it, carried per site in `--json`, counted under
+ *      ENFORCEMENT in both artefacts, and REFUSED by
+ *      `check-tenant-audit-census.mjs` -- which is the reading CI takes, since
+ *      `lint.yml` invokes the gate and never this generator.
+ *   2. ⭐ The text is no longer collapsed when it is STORED. {@link declaredTypesIn}
+ *      keeps a declared type exactly as the source spells it, so the newline
+ *      separator survives and the alias parses. The collapse was never needed
+ *      there: every reader of that text either scans it for identifiers or
+ *      re-parses it, and the one place a single line is actually required -- the
+ *      artefacts -- already collapses at the point of RENDER.
+ *
+ * ⚠️ So what remains on the refusing arm is a text this tool derived and cannot
+ * read back for some reason OTHER than the collapse. ⛔ That is a defect in this
+ * module, never a style to be corrected in the corpus: a refusal that told the
+ * author to restyle legal TypeScript was asking the tree to work around the
+ * instrument, and the arm is kept as the alarm for the next such defect rather
+ * than as a standing instruction.
  *
  * ⛔ The exchange is a loud process exit for a loud per-site refusal, ⛔ never for
  * a quiet subtraction: localising the failure into an exit 0 would be the same
@@ -492,24 +508,129 @@ function unwrap(n) {
   return n;
 }
 
+/**
+ * The node kinds that OPEN a lexical scope for the names declared under them.
+ *
+ * Deliberately the SYNTACTIC scopes rather than a resolver's idea of them: this
+ * module has no type checker, and a chain of enclosing nodes is a fact it can
+ * read off the tree it already parsed. `var` is the one binding this list is
+ * wrong about -- it is function-scoped and recorded here at its block -- and the
+ * file-wide tier in {@link scopedNames} is what keeps that from LOSING a site.
+ */
+function opensScope(node) {
+  return ts.isSourceFile(node)
+    || ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)
+    || ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node)
+    || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node)
+    || ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCaseBlock(node)
+    || ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node)
+    || ts.isCatchClause(node);
+}
+
+/**
+ * The lexical scopes enclosing a node, innermost first.
+ *
+ * A parameter's own scope is the FUNCTION (its `parent`), while a `const` in a
+ * body belongs to that body's block -- so a receiver inside the body walks
+ * block, then function, then outwards, and finds the parameter exactly where a
+ * reader would look for it.
+ */
+function scopeChainOf(node) {
+  const chain = [];
+  for (let p = node.parent; p; p = p.parent) if (opensScope(p)) chain.push(p);
+  return chain;
+}
+
+/**
+ * ⭐ Names declared in ONE file, resolved by SCOPE rather than by spelling.
+ *
+ * A bare-name map answers "what is `engine` in this file?", and a file may
+ * contain several. Two parameters named `engine` in different functions are two
+ * declarations; keyed on the identifier alone they are one, and the first typed
+ * one decides for both. Measured, that is not one failure but three, and only
+ * the first of them is loud:
+ *
+ *   • a `Map.delete(k)` in the second function scored as an ENGINE WRITE and
+ *     admitted to the certified tenancy population -- an over-count,
+ *   • the SAME pair in the other declaration order: a real engine write scored
+ *     `platform-type` and subtracted under a DEFENDED arm, which prints nothing
+ *     and is counted nowhere -- the silent direction this census must never
+ *     fail in, and
+ *   • both sites refused together when the winning entry is one the door rule
+ *     cannot place.
+ *
+ * ⇒ Two tiers, in this order. The LEXICAL tier is the answer: the innermost
+ *   enclosing scope that declares the name wins, which is what the language
+ *   does. The FILE-WIDE tier is a floor, not a second opinion -- it holds
+ *   exactly what the bare-name map held before, and it is consulted only when
+ *   no enclosing scope declares the name at all. ⛔ So no receiver that resolved
+ *   before stops resolving: a repair that traded a false placement for a LOST
+ *   engine write would be the expensive direction wearing the other costume.
+ */
+function scopedNames() {
+  const byScope = new Map(); // scope node -> Map<name, entry>
+  const flat = new Map(); // name -> entry -- the file-wide tier
+  const scopeMap = (declNode) => {
+    const scope = scopeChainOf(declNode)[0] ?? null;
+    let m = byScope.get(scope);
+    if (!m) { m = new Map(); byScope.set(scope, m); }
+    return m;
+  };
+  return {
+    /** Record a declaration, first TYPED spelling winning within each tier. */
+    note(declNode, name, entry) {
+      const m = scopeMap(declNode);
+      if (!(m.has(name) && m.get(name).type)) m.set(name, entry);
+      if (!(flat.has(name) && flat.get(name).type)) flat.set(name, entry);
+    },
+    /** Record a declaration that OVERRIDES whatever was there (destructuring). */
+    set(declNode, name, entry) {
+      scopeMap(declNode).set(name, entry);
+      flat.set(name, entry);
+    },
+    /** The declaration `name` refers to AT `node` -- lexical tier, then the floor. */
+    lookup(name, node) {
+      if (node) {
+        for (const scope of scopeChainOf(node)) {
+          const hit = byScope.get(scope)?.get(name);
+          if (hit) return hit;
+        }
+      }
+      return flat.get(name);
+    },
+  };
+}
+
 /** Declared types visible in ONE file, keyed the way a receiver spells itself. */
 export function declaredTypesIn(sf) {
   const thisProps = new Map();
-  const locals = new Map();
+  const locals = scopedNames();
   const fnReturns = new Map();
   // `TypeName -> member -> declared type` for shapes declared in THIS file, so
   // `deps.getDataEngine()` and `opts.engine` resolve without a type checker.
   const shapes = new Map();
   // Identifiers imported from a `node:` builtin -- never an engine.
   const builtins = new Set();
+  // ⭐ The declared type text is stored EXACTLY as the source spells it. It is
+  // re-parsed later as a synthetic type alias to read the door rule off it, and
+  // a type literal may separate its members by a newline alone -- legal
+  // TypeScript, which a whitespace collapse turns into no separator at all. The
+  // collapse belongs at the PRESENTATION boundary, where `runCensus` and
+  // `cell()` already apply it, never at the one where the text is stored to be
+  // read back. `init` is a different thing and keeps its collapse: it is a
+  // diagnostic, truncated to 120 characters, and nothing ever re-parses it.
+  const entryOf = (typeNode, initializer) => ({
+    type: typeNode ? typeNode.getText(sf) : null,
+    init: initializer ? initializer.getText(sf).replace(/\s+/g, ' ').slice(0, 120) : null,
+    node: initializer ?? null,
+    literal: initializer && ts.isStringLiteralLike(initializer) ? initializer.text : null,
+  });
   const note = (map, key, typeNode, initializer) => {
     if (map.has(key) && map.get(key).type) return;
-    map.set(key, {
-      type: typeNode ? typeNode.getText(sf).replace(/\s+/g, ' ') : null,
-      init: initializer ? initializer.getText(sf).replace(/\s+/g, ' ').slice(0, 120) : null,
-      node: initializer ?? null,
-      literal: initializer && ts.isStringLiteralLike(initializer) ? initializer.text : null,
-    });
+    map.set(key, entryOf(typeNode, initializer));
+  };
+  const noteLocal = (declNode, key, typeNode, initializer) => {
+    locals.note(declNode, key, entryOf(typeNode, initializer));
   };
   const visit = (n) => {
     if (ts.isImportDeclaration(n) && ts.isStringLiteralLike(n.moduleSpecifier)
@@ -524,14 +645,14 @@ export function declaredTypesIn(sf) {
       for (const mem of members) {
         if (!mem.name || !ts.isIdentifier(mem.name)) continue;
         const t = ts.isMethodSignature(mem) ? mem.type : mem.type;
-        if (t) m.set(mem.name.text, t.getText(sf).replace(/\s+/g, ' '));
+        if (t) m.set(mem.name.text, t.getText(sf));
       }
       shapes.set(n.name.text, m);
     }
     if (ts.isPropertyDeclaration(n) && ts.isIdentifier(n.name)) note(thisProps, n.name.text, n.type, n.initializer);
     if (ts.isParameter(n) && ts.isIdentifier(n.name)) {
       if (ts.isConstructorDeclaration(n.parent) && n.modifiers?.length) note(thisProps, n.name.text, n.type, n.initializer);
-      note(locals, n.name.text, n.type, n.initializer);
+      noteLocal(n, n.name.text, n.type, n.initializer);
     }
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)) {
       // `const getData = (): IDataEngine | undefined => …` -- the RETURN type is
@@ -540,19 +661,19 @@ export function declaredTypesIn(sf) {
       if (!n.type && init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.type) {
         note(fnReturns, n.name.text, init.type, null);
       }
-      note(locals, n.name.text, n.type, n.initializer);
+      noteLocal(n, n.name.text, n.type, n.initializer);
     }
     // `const { engine, cryptoProvider } = deps;` -- the member's declared type on
     // the base's own shape. Losing these loses REAL engine sites, which is the
     // one direction a census must never fail in.
     if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name)) {
       const baseText = n.type ? n.type.getText(sf)
-        : (n.initializer && ts.isIdentifier(n.initializer) ? locals.get(n.initializer.text)?.type : null);
+        : (n.initializer && ts.isIdentifier(n.initializer) ? locals.lookup(n.initializer.text, n)?.type : null);
       for (const el of n.name.elements) {
         if (!ts.isIdentifier(el.name)) continue;
         const prop = el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : el.name.text;
         const mt = memberTypeOfShapes(baseText, prop, shapes);
-        if (mt) locals.set(el.name.text, { type: mt, init: null, node: null });
+        if (mt) locals.set(n, el.name.text, { type: mt, init: null, node: null });
         else if (n.initializer && ts.isAwaitExpression(n.initializer)
                  && ts.isCallExpression(n.initializer.expression)
                  && n.initializer.expression.expression.kind === ts.SyntaxKind.ImportKeyword
@@ -645,14 +766,14 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
   }
   if (ts.isIdentifier(r)) {
     if (decls.builtins.has(r.text)) return { kind: 'other', type: `node: builtin ${r.text}`, how: 'node-import' };
-    return fromEntry(decls.locals.get(r.text), r.text);
+    return fromEntry(decls.locals.lookup(r.text, r), r.text);
   }
   // `opts.engine`, `this.options.persistence` -- resolved through the shape the
   // base's own declared type gives the member.
   if (ts.isPropertyAccessExpression(r)) {
     const baseText = ts.isPropertyAccessExpression(r.expression) && r.expression.expression.kind === ts.SyntaxKind.ThisKeyword
       ? decls.thisProps.get(r.expression.name.text)?.type
-      : ts.isIdentifier(r.expression) ? decls.locals.get(r.expression.text)?.type : null;
+      : ts.isIdentifier(r.expression) ? decls.locals.lookup(r.expression.text, r.expression)?.type : null;
     const mt = memberTypeOf(baseText, r.name.text, decls);
     if (mt) {
       const t = nameOf(mt);
@@ -674,7 +795,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
     if (ts.isPropertyAccessExpression(callee)) {
       const baseText = callee.expression.kind === ts.SyntaxKind.ThisKeyword
         ? null
-        : ts.isIdentifier(callee.expression) ? decls.locals.get(callee.expression.text)?.type : null;
+        : ts.isIdentifier(callee.expression) ? decls.locals.lookup(callee.expression.text, callee.expression)?.type : null;
       const mt = memberTypeOf(baseText, callee.name.text, decls);
       if (mt) {
         const t = nameOf(mt);
@@ -757,7 +878,7 @@ export const NON_ENGINE_REASONS = Object.freeze({
   'ledger-row': 'an `UNTYPED_RECEIVERS` row says what the receiver is',
   'type-not-in-corpus': '⚠️ UNDEFENDED -- no declaration of that name exists in the TRACKED corpus (untracked, generated, or a dependency\'s)',
   'anonymous-type': '⚠️ UNDEFENDED -- the declared type is an inline literal, so there is no name for the index to be keyed on',
-  'type-text-not-round-trippable': '⚠️ UNDEFENDED -- the declared type text, stored whitespace-collapsed, does not re-parse as a type alias, so the door rule could not be read off it at all',
+  'type-text-not-round-trippable': '⚠️ UNDEFENDED -- this tool derived a type text it cannot re-parse as a type alias, so the door rule could not be read off it at all -- a defect in the census, not a fact about the corpus',
 });
 
 /**
@@ -809,11 +930,13 @@ export function typeTextDeclaresEngineDoor(typeText, origin) {
  *
  * Three verdicts, not two: the text states a write door, it states none, or the
  * census could not read back the text it stored -- and the third is the one this
- * reader exists to keep distinguishable. The stored spelling is
- * whitespace-collapsed, a type literal may separate its members by a newline
- * alone, and a collapsed member list with no separators is not a parseable type
- * alias. That is a fact about THIS TOOL's re-serialisation: the source it came
- * from parsed, and this module read it.
+ * reader exists to keep distinguishable. The source the text came from parsed
+ * and this module read it, so a synthesis of it that does not parse is a fact
+ * about THIS TOOL's re-serialisation and never about the corpus. The collapse
+ * that used to make it fail on a newline-separated type literal is gone --
+ * {@link declaredTypesIn} stores the text as written -- and the verdict stays
+ * because "this tool could not read its own derived text" needs somewhere to
+ * land whatever the next cause turns out to be.
  *
  * ⇒ so the synthesis goes through `parseDerivedText`, whose failure comes BACK
  *   ({@link https://github.com/objectstack-ai/objectstack/issues/19077}). ⛔ It is
@@ -825,7 +948,7 @@ export function typeTextDeclaresEngineDoor(typeText, origin) {
  * verb is never synthesised, never parsed, and cannot reach this arm -- the
  * repair's reach is exactly the defect's reach.
  *
- * @param {string} typeText  The stored, whitespace-collapsed declared type text.
+ * @param {string} typeText  The declared type text, as {@link declaredTypesIn} stored it.
  * @param {ts.SourceFile} origin  The tree that text was read out of, as
  *   `parseSourceFile` returned it. `parseDerivedText` refuses an origin this
  *   process never certified, so an unreadable SOURCE cannot reach the returnable
@@ -1153,7 +1276,7 @@ function elevationOf(value, sf, decls, depth = 0) {
     const bare = unwrapLiteral(n);
     if (!bare) return null;
     if (ts.isObjectLiteralExpression(bare)) return bare;
-    if (ts.isIdentifier(bare)) return unwrapLiteral(decls?.locals.get(bare.text)?.node) ?? null;
+    if (ts.isIdentifier(bare)) return unwrapLiteral(decls?.locals.lookup(bare.text, bare)?.node) ?? null;
     return null;
   };
 
@@ -1200,10 +1323,13 @@ function elevationOf(value, sf, decls, depth = 0) {
  * the page anchors this mechanism exists to stop rotting, and it rots INVISIBLY,
  * because a stale row still excuses a site.
  *
- * ⭐ `engine: true` rows are COUNTED into the census. Eleven of the sites below
- * are real engine writes reached through an `any`, and eleven is 5% of this
- * population -- a ledger that could only subtract would be a ledger that can only
- * shrink the truth.
+ * ⭐ `engine: true` rows are COUNTED into the census: the sites they name are
+ * real engine writes reached through an `any`, and they are a percent-scale
+ * share of this population -- a ledger that could only subtract would be a
+ * ledger that can only shrink the truth. ⛔ The share is not quoted as a figure
+ * here, for the reason the corpus-scale split gives: a number repeated into a
+ * comment rots where nothing can see it, and this ledger shrinks every time the
+ * classifier learns to read a receiver it used to need a row for.
  */
 export const UNTYPED_RECEIVERS = [
   // ── Real engine writes, reached through an erased receiver ──────────────────
@@ -1214,28 +1340,10 @@ export const UNTYPED_RECEIVERS = [
     what: '`ql: any` seed helper writing `MEMBER_OBJECT` (= `SystemObjectName.MEMBER`, an enum member, so the name is not a readable literal)',
   },
   {
-    file: 'packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts',
-    receiver: '(engine as any)',
-    engine: true,
-    what: 'the ObjectQL engine behind an `as any`, writing the declared email-template rows',
-  },
-  {
     file: 'packages/plugins/plugin-security/src/claim-seed-ownership.ts',
     receiver: 'ql',
     engine: true,
     what: '`ql: any` seed helper writing `schema.name` -- a runtime object name off the registered schema',
-  },
-  {
-    file: 'packages/plugins/plugin-sharing/src/sharing-plugin.ts',
-    receiver: 'engine',
-    engine: true,
-    what: '`engine: any` sharing backfill writing a runtime `object`',
-  },
-  {
-    file: 'packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts',
-    receiver: 'engine',
-    engine: true,
-    what: '`engine: any` bootstrap writing `subscriptionsObject`',
   },
   {
     file: 'packages/services/service-settings/src/settings-service-plugin.ts',
@@ -1245,6 +1353,12 @@ export const UNTYPED_RECEIVERS = [
   },
 
   // ── Not the data engine. Same three verb names, different mechanism ─────────
+  {
+    file: 'packages/plugins/plugin-auth/src/auth-manager.ts',
+    receiver: 'db',
+    engine: false,
+    what: 'the better-auth adapter the vendor bound to the SCIM transaction (`const db = context.database`) -- `update({ model, where, update })`, a keyword object, not `(object, data, options)`',
+  },
   {
     file: 'packages/plugins/plugin-auth/src/two-factor-reenrollment-verified-reset.ts',
     receiver: 'adapter',
@@ -1326,7 +1440,7 @@ export function resolveObjectNameArg(a0, sf, decls) {
   if (a0 == null) return { kind: 'absent', name: null };
   if (ts.isStringLiteralLike(a0)) return { kind: 'literal', name: a0.text };
   if (ts.isIdentifier(a0)) {
-    const entry = decls.locals.get(a0.text);
+    const entry = decls.locals.lookup(a0.text, a0);
     if (entry?.literal) return { kind: 'const-literal', name: entry.literal };
     if (OBJECT_PARAM_NAMES.has(a0.text) && entry?.type?.trim() === 'string') {
       return { kind: 'object-name-parameter', name: a0.getText(sf) };
@@ -1622,10 +1736,10 @@ export function renderUndefendedSubtractions(census, heading, { withRows = true 
   out.push('must not be spelled the same way as «read it, not an engine».');
   out.push('');
   out.push('⚠️ One arm here says something else again: `type-text-not-round-trippable` is a');
-  out.push('receiver whose declared type the census STORED whitespace-collapsed and could');
-  out.push('not read back — the source parsed, the re-serialisation of it did not, so the');
-  out.push('door rule could never be read off it. That is a fault in this tool rather than');
-  out.push('a fact about the corpus, and it is the one row here that also fails the gate.');
+  out.push('receiver whose declared type THIS TOOL derived and then could not read back —');
+  out.push('the source parsed, the re-serialisation of it did not, so the door rule could');
+  out.push('never be read off it. That is a fault in this tool rather than a fact about the');
+  out.push('corpus, and it is the one row here that also fails the gate.');
   out.push('');
   out.push('| what | count |', '| :--- | ---: |');
   out.push(`| write calls subtracted with no defensible reason | **${rows.reduce((n, r) => n + r.count, 0)}** |`);
@@ -2155,22 +2269,24 @@ export function selfTest() {
 
   // ── ⭐⭐ THE CENSUS'S OWN ROUND TRIP, in both directions (#19077) ──────────
   // A type literal may separate its members by a NEWLINE alone -- legal
-  // TypeScript. The census stores a declared type whitespace-collapsed, so that
-  // separator becomes NOTHING and the synthetic alias it re-parses is not a
-  // parseable type alias. Through `parseSourceFile` that did not fail this
+  // TypeScript. The census USED TO store a declared type whitespace-collapsed,
+  // so that separator became NOTHING and the synthetic alias it re-parses was
+  // not a parseable type alias. Through `parseSourceFile` that did not fail this
   // receiver: it ended the process, and every other site in the corpus lost its
   // verdict with it. ⭐ Both cases below run the REAL round trip -- the source is
-  // parsed, `declaredTypesIn` collapses the declared type exactly as the census
-  // does, and the resolver reads the door off the stored text.
+  // parsed, `declaredTypesIn` stores the declared type exactly as the census
+  // does, and the resolver reads the door off the stored text. The NEWLINE case
+  // is the one that MOVED: it is placed now, on the same rule and off the same
+  // text, because the separator survives storage.
   const NEWLINE_DOOR = '{\n'
     + '  insert(object: string, data: unknown): Promise<void>\n'
     + '  find(object: string, query: unknown): Promise<void>\n'
     + '}';
   const SEMICOLON_DOOR = '{ insert(object: string, data: unknown): Promise<void>;'
     + ' find(object: string, query: unknown): Promise<void>; }';
-  t('⭐⭐ a receiver whose inline literal separates its members by a NEWLINE is CLASSIFIED, not a takedown',
-    resolveInline(NEWLINE_DOOR), 'other/type-text-not-round-trippable');
-  t('⭐ LIT CONTROL: the SEMICOLON spelling of the SAME literal is still PLACED -- the collapse is the defect, not the shape',
+  t('⭐⭐ a receiver whose inline literal separates its members by a NEWLINE is PLACED -- storage no longer eats the separator',
+    resolveInline(NEWLINE_DOOR), `engine/${INLINE_ENGINE_TYPE}`);
+  t('⭐ LIT CONTROL: the SEMICOLON spelling of the SAME literal is PLACED too -- the collapse was the defect, not the shape',
     resolveInline(SEMICOLON_DOOR), `engine/${INLINE_ENGINE_TYPE}`);
   t('⛔ the arm is DECLARED undefended, so the site lands in both artefacts instead of dropping out in silence',
     String(UNDEFENDED_REASONS.includes('type-text-not-round-trippable')), 'true');
@@ -2206,6 +2322,112 @@ export function selfTest() {
     reasonOf('{\n  find(object: string): Promise<void>\n  count(object: string): Promise<number>\n}'.replace(/\s+/g, ' '), 'e/as', []),
     'anonymous-type');
 
+  // ── ⭐⭐ ROUTE ①, AT EVERY STORAGE SITE ────────────────────────────────────
+  // `resolveInline` above drives ONE of the sites that store a declared type.
+  // These drive the other two shapes a receiver reaches its type through -- a
+  // parameter annotation, and a member of an interface declared in the same file
+  // -- because a repair applied at one storage site and not the other is a
+  // repair whose reach nobody measured.
+  /** Every write call's receiver verdict in a synthetic source, in source order. */
+  const verdictsIn = (source, indexNames = []) => {
+    const sf = parseSourceFile('selftest.ts', source);
+    const decls = declaredTypesIn(sf);
+    const index = new Map(indexNames.map((n) => [n, { decls: ['probe.ts'], verbs: ['insert', 'update', 'delete'] }]));
+    const out = [];
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+          && WRITE_VERBS.includes(node.expression.name.text)) {
+        const res = resolveReceiver(node.expression.expression, sf, decls, index);
+        out.push(res.kind === 'other'
+          ? `other/${nonEngineReason(res, new Set(), sf).reason}`
+          : `${res.kind}/${res.type ?? ''}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return out.join(' | ');
+  };
+  const WRITE = "insert('sys_user', {}, { context: { isSystem: true } })";
+  t('⭐⭐ a NEWLINE-separated literal on a PARAMETER annotation is placed -- a storage site the inline probe never reaches',
+    verdictsIn(`export function w(e: ${NEWLINE_DOOR}) {\n  e.${WRITE};\n}\n`),
+    `engine/${INLINE_ENGINE_TYPE}`);
+  t('⭐⭐ …and the same literal reached through an interface MEMBER, the other one',
+    verdictsIn(`interface Deps {\n  engine: ${NEWLINE_DOOR};\n}\nexport function w(d: Deps) {\n  d.engine.${WRITE};\n}\n`),
+    `engine/${INLINE_ENGINE_TYPE}`);
+  t('⛔ a NEWLINE literal whose write verb is NOT a door is READ and rejected, never refused as unreadable',
+    verdictsIn('export function w(e: {\n  delete(key: string): void\n  find(object: string): Promise<void>\n}) {\n'
+      + "  e.delete('k');\n}\n"),
+    'other/anonymous-type');
+
+  // ── ⭐⭐ ONE NAME, TWO DECLARATIONS ────────────────────────────────────────
+  // `locals` was keyed on the bare identifier, so a file's several `engine`s
+  // were ONE entry and the first TYPED one decided for all of them. Measured,
+  // that is three failures rather than one, and which one you get depends on
+  // declaration order -- so all three are pinned, not just the refusal the card
+  // was filed on. The quiet one is the expensive one: a real engine write
+  // subtracted under `platform-type`, an arm that DEFENDS the subtraction, so it
+  // prints nothing and is counted nowhere.
+  const twoEngines = (first, second) =>
+    `export function a(engine: ${first}) {\n  engine.${WRITE};\n}\n`
+    + `export function b(engine: ${second}) {\n  engine.delete('k');\n}\n`;
+  t('⭐⭐ two parameters sharing a name in different scopes are TWO declarations -- the Map is not scored an engine write',
+    verdictsIn(twoEngines('IProbeEngine', 'Map<string, number>'), ['IProbeEngine']),
+    'engine/IProbeEngine | other/platform-type');
+  t('⭐⭐ …and in the other declaration order, the real engine write is no longer subtracted as a language global',
+    verdictsIn(`export function a(engine: Map<string, number>) {\n  engine.delete('k');\n}\n`
+      + `export function b(engine: IProbeEngine) {\n  engine.${WRITE};\n}\n`, ['IProbeEngine']),
+    'other/platform-type | engine/IProbeEngine');
+  t('⛔ FLOOR: a name NO enclosing scope declares still resolves file-wide, so nothing that resolved before stops',
+    verdictsIn(`function shape(engine: IProbeEngine) { return engine; }\nexport function w() {\n  engine.${WRITE};\n}\n`,
+      ['IProbeEngine']),
+    'engine/IProbeEngine');
+
+  // The same conflation decided two OTHER questions, and both are verdicts the
+  // artefacts carry: WHICH object a site writes, and whether it is elevated.
+  /** Every write call's object-name verdict, in source order. */
+  const objectNamesIn = (source) => {
+    const sf = parseSourceFile('selftest.ts', source);
+    const decls = declaredTypesIn(sf);
+    const out = [];
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+          && WRITE_VERBS.includes(node.expression.name.text)) {
+        const a = resolveObjectNameArg(node.arguments[0], sf, decls);
+        out.push(`${a.kind}:${a.name}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return out.join(' | ');
+  };
+  t('⭐ an object name held in a const is read from the scope the SITE is in, not from the last one in the file',
+    objectNamesIn('declare const e: any;\n'
+      + "export function a() {\n  const object = 'sys_user';\n  e.insert(object, {}, {});\n}\n"
+      + "export function b() {\n  const object = 'sys_role';\n  e.insert(object, {}, {});\n}\n"),
+    'const-literal:sys_user | const-literal:sys_role');
+
+  /** Every write call's elevation verdict, in source order. */
+  const elevationsIn = (source) => {
+    const sf = parseSourceFile('selftest.ts', source);
+    const decls = declaredTypesIn(sf);
+    const out = [];
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+          && WRITE_VERBS.includes(node.expression.name.text)) {
+        const ctx = tenantContextOf(node, sf, decls);
+        out.push(ctx.carries ? String(ctx.system) : 'NO-CONTEXT');
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return out.join(' | ');
+  };
+  t('⭐ an elevation const is read from the scope the SITE is in -- two context consts are two contexts',
+    elevationsIn('declare const e: any;\n'
+      + "export function a() {\n  const CTX = { isSystem: true } as const;\n  e.insert('o', {}, { context: CTX });\n}\n"
+      + "export function b() {\n  const CTX = { isSystem: false } as const;\n  e.insert('o', {}, { context: CTX });\n}\n"),
+    'true | false');
+
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name} -- ${c.detail}`);
   if (failed.length > 0) {
@@ -2223,10 +2445,13 @@ export function selfTest() {
     + 'the index and a subtraction that NAMES the unplaceable type out of it -- and the door '
     + 'rule read off a type with no NAME at all, placing an inline literal that states a write '
     + 'door while still subtracting one that states none -- and the census\'s OWN round trip in both '
-    + 'directions: a receiver whose inline literal separates its members by a newline is CLASSIFIED '
-    + 'under a declared arm with the parse verdict attached, the semicolon spelling of the same '
-    + 'literal is still PLACED, and a genuinely unparseable text is still refused and still places '
-    + 'nothing).',
+    + 'directions: a receiver whose inline literal separates its members by a NEWLINE is PLACED at '
+    + 'every storage site, on the same rule as the semicolon spelling of the same literal, while a '
+    + 'genuinely unparseable text is still refused and still places nothing -- and one NAME with two '
+    + 'declarations is two declarations in every direction it used to be one: the Map is not scored '
+    + 'an engine write, the real engine write is not subtracted as a language global, the object '
+    + 'name and the elevation are read from the site\'s own scope, and a name no enclosing scope '
+    + 'declares still resolves file-wide so nothing that resolved before stops).',
   );
   return 0;
 }
@@ -2307,12 +2532,12 @@ function main(argv) {
   // spelling both of them import.
   for (const u of notRoundTrippableSites(c)) {
     process.stderr.write(`::error::[type-text-not-round-trippable] ${u.file}:${u.line} \`${u.receiver}\`.${u.verb}() -- `
-      + `SUBTRACTED from the certified population: the census stored this receiver's declared type `
-      + `whitespace-collapsed and cannot re-parse it as a type alias, so the door rule could not be read `
-      + `off it and the census cannot say whether this site is an engine write at all. The SOURCE parsed; `
-      + `what did not is this tool's own re-serialisation of \`${u.type}\`. Give the receiver a NAMED type `
-      + `the engine type index can be keyed on, or spell the literal's members with \`;\` separators so the `
-      + `stored text round-trips.\n`);
+      + `SUBTRACTED from the certified population: this tool cannot re-parse the declared type it derived `
+      + `for this receiver, so the door rule could not be read off it and the census cannot say whether `
+      + `this site is an engine write at all. The SOURCE parsed; what did not is this tool's own `
+      + `re-serialisation of \`${u.type}\`. ⛔ Nothing is wrong with the code at this site and nothing `
+      + `here asks you to restyle it -- this is a defect in the census's own reading, and the parse `
+      + `verdict below is the report to file against it.\n`);
     if (u.derivedFailure?.report) process.stderr.write(u.derivedFailure.report);
   }
   return c.unledgered.length === 0 && c.staleLedgerRows.length === 0
