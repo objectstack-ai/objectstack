@@ -1226,19 +1226,31 @@ const battery = (name) => {
 let selfTestReachedVerdict = false;
 
 /**
- * The write transports this throttle is wired into — the census. Seven: the
+ * The write transports this throttle is wired into — the census. Nine: the
  * five board tools, the token minter (its one POST creates no content, but a
- * write verb is a write verb and the roster below is mechanical), and the
- * card-creation door.
+ * write verb is a write verb and the roster below is mechanical), the
+ * card-creation door, and the two halves of the fleet-write relay — the
+ * seat-side dispatcher (its one POST is the `repository_dispatch` that
+ * carries a stroke) and the runner-side executor (the writes that stroke asked
+ * for, paced on the runner's own log).
+ *
+ * Spelled REPO-RELATIVE, because the dispatch derivation reads every
+ * separator-bearing literal in a gate's source as a path lead: a bare
+ * `fleet-write/dispatch.mjs` resolves to nothing from the repo root and
+ * prints as a dead lead, while `scripts/pm/fleet-write/dispatch.mjs` is a
+ * live one — so a card touching any roster file now names this gate, which is
+ * the right answer (this self-test reads those files).
  */
 export const WIRED_WRITE_TOOLS = Object.freeze([
-  'post-stamped.mjs',
-  'label-write.mjs',
-  'close-cards.mjs',
-  'sweep-closed-cards.mjs',
-  'sweep-stale-finding.mjs',
-  'fleet-token.mjs',
-  'issue-create.mjs',
+  'scripts/pm/post-stamped.mjs',
+  'scripts/pm/label-write.mjs',
+  'scripts/pm/close-cards.mjs',
+  'scripts/pm/sweep-closed-cards.mjs',
+  'scripts/pm/sweep-stale-finding.mjs',
+  'scripts/pm/fleet-token.mjs',
+  'scripts/pm/issue-create.mjs',
+  'scripts/pm/fleet-write/dispatch.mjs',
+  'scripts/pm/fleet-write/execute.mjs',
 ]);
 
 /**
@@ -1654,7 +1666,8 @@ export async function selfTest() {
     // input, and a throttle every write path loads must stay a throttle.
     const { maskComments } = await import('../js-comment-mask.mjs');
     const read = (p) => readFileSync(p, 'utf8');
-    const sources = new Map(WIRED_WRITE_TOOLS.map((n) => [n, read(join(PM_DIR, n))]));
+    const REPO_ROOT = resolve(PM_DIR, '../..');
+    const sources = new Map(WIRED_WRITE_TOOLS.map((n) => [n, read(join(REPO_ROOT, n))]));
     t('every wired tool imports this throttle', WIRED_WRITE_TOOLS.filter((n) => !sources.get(n).includes("write-pace.mjs")), []);
     t('…calls `paceWrite` before its write', WIRED_WRITE_TOOLS.filter((n) => !sources.get(n).includes('paceWrite(')), []);
     t('…and `noteResponse` after it', WIRED_WRITE_TOOLS.filter((n) => !sources.get(n).includes('noteResponse(')), []);
@@ -1662,15 +1675,14 @@ export async function selfTest() {
 
     // The closed set: an EIGHTH write path in this directory reds here, which
     // is the only way a new one cannot land unpaced.
-    const names = spawnSync('git', ['ls-files', '--', 'scripts/pm'], { cwd: resolve(PM_DIR, '../..'), encoding: 'utf8' })
+    const names = spawnSync('git', ['ls-files', '--', 'scripts/pm'], { cwd: REPO_ROOT, encoding: 'utf8' })
       .stdout.split('\n')
       .map((l) => l.trim())
       .filter((l) => l.endsWith('.mjs'))
-      .map((l) => l.slice('scripts/pm/'.length))
-      .filter((n) => n !== 'write-pace.mjs');
+      .filter((n) => n !== 'scripts/pm/write-pace.mjs');
     t('git listed this directory', names.length > 5);
-    t('⛔ the roster IS the set of files that issue a write verb — an eighth one reds here', writeVerbFiles(PM_DIR, names, read, maskComments), [...WIRED_WRITE_TOOLS].sort());
-    t('this throttle issues no write of its own', writeVerbFiles(PM_DIR, ['write-pace.mjs'], read, maskComments), []);
+    t('⛔ the roster IS the set of files that issue a write verb — an eighth one reds here', writeVerbFiles(REPO_ROOT, names, read, maskComments), [...WIRED_WRITE_TOOLS].sort());
+    t('this throttle issues no write of its own', writeVerbFiles(REPO_ROOT, ['scripts/pm/write-pace.mjs'], read, maskComments), []);
   }
 
   // ── the floor, BEFORE the verdict ─────────────────────────────────────────
@@ -1705,7 +1717,7 @@ export async function selfTest() {
     `✓ write-pace self-test: ${cases.length} cases pass across ${declared.length} batteries — the per-token key that ` +
       'never carries the token, the gap remainder, the 41st refusal and its prescription, the stop marker a 429 writes, ' +
       'the prune that keeps a long retry-after alive, the lease that kept one write in flight across real processes, ' +
-      'the batch gap one process announced and two others obeyed, the shell door, and the seven write transports ' +
+      'the batch gap one process announced and two others obeyed, the shell door, and the nine write transports ' +
       'that call both halves.',
   );
   selfTestReachedVerdict = true;

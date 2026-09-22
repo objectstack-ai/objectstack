@@ -333,7 +333,7 @@ describe('[#8441] [GUARD] a catalogued code reaches the caller unchanged — red
         const r = await protocol.publishPackageDrafts({ packageId: PKG });
 
         expect(byName(r.failed, 'acct_api').code).toBe('NOT_OVERRIDABLE');
-        expect(byName(r.failed, 'acct_api').error).toContain('[not_overridable]');
+        expect(byName(r.failed, 'acct_api').error).toContain("Metadata type 'api' is not draftable");
         // The sibling declared code on the SAME array — the reason the issue
         // says this limb must be filtered rather than deleted.
         expect(byName(r.failed, 'acct_view').code).toBe('BATCH_ABORTED');
@@ -348,7 +348,7 @@ describe('[#8441] [GUARD] a catalogued code reaches the caller unchanged — red
         const r = await protocol.revertCommit({ commitId: 'c1' });
 
         expect(r.failed[0].code).toBe('VERSION_NOT_FOUND');
-        expect(r.failed[0].error).toContain('[version_not_found]');
+        expect(r.failed[0].error).toContain('No history row at version 99');
     });
 
     /**
@@ -523,7 +523,7 @@ describe('[#8441] what replaces an uncatalogued code, and what stays absent', ()
         // disagree only about the vocabulary. That is the honest hard case: the
         // substitution has to preserve the meaning, not merely erase the code.
         const refusalWithDialect = () => Object.assign(
-            new Error('[item_locked] Cannot overlay this item: the package is read-only.'),
+            new Error('Cannot overlay this item: the package is read-only.'),
             { code: '42501', status: 403 },
         );
         const { protocol } = makeKernel({
@@ -536,7 +536,7 @@ describe('[#8441] what replaces an uncatalogued code, and what stays absent', ()
         const r = await protocol.publishPackageDrafts({ packageId: PKG });
 
         // #8333's rule: DECLARED 4xx, so the authored sentence survives whole.
-        expect(r.failed[0].error).toContain('[item_locked]');
+        expect(r.failed[0].error).toContain('the package is read-only');
         expect(r.failed[0].error).toContain('the package is read-only.');
         // #8441's rule: not a catalog member, so the status's standard code.
         expect(r.failed[0].code).toBe('PERMISSION_DENIED');

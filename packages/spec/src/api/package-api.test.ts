@@ -153,7 +153,7 @@ describe('the /packages doors declare the query parameters they execute (#17667)
 // ==========================================
 
 describe('PackageInstallRequestSchema', () => {
-  it('should accept a minimal install request', () => {
+  it('should accept a minimal install request — and leave an absent `enableOnInstall` UNDEFINED', () => {
     const result = PackageInstallRequestSchema.parse({
       manifest: {
         id: 'com.acme.crm',
@@ -162,7 +162,13 @@ describe('PackageInstallRequestSchema', () => {
         type: 'plugin',
       },
     });
-    expect(result.enableOnInstall).toBe(true);
+    // ⭐ [#19273] This assertion read `toBe(true)` while the declaration spelled
+    // `.default(true)`, and it was the lit control proving absence really was
+    // erased at parse time. The declaration is `optional()` now — 「缺省 = 保持，
+    // 有旗 = 设置」 — so the absence survives the parse and the door's three-way
+    // read has a third state to see. The full matrix, with the flip-trigger it
+    // was registered under, is in `package-install-one-authority.test.ts`.
+    expect(result.enableOnInstall).toBeUndefined();
   });
 
   it('should accept full install request with platform version', () => {

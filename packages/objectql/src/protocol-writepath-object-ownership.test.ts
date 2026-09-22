@@ -318,7 +318,7 @@ describe('#4636 — cloud#970 counter-example: a freshly created app stays edita
             name: 'myapp_invoice',
             packageId: APP_PKG,
             item: objectBody('myapp_invoice'),
-        })).rejects.toThrow(/not_overridable/);
+        })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
 
         // The mechanism, stated so a future reader does not have to re-derive
         // it: with no `_provenance`, `applyProtection` defaults the row to
