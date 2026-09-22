@@ -16,6 +16,19 @@ import { MAJOR_MINOR_PATCH_VERSION_PATTERN } from './version-grammar';
  * Plugin Vendor Information
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
+
+const SECURITY_SCAN_RETIRED =
+  '`PluginQualityMetrics.securityScan` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — the block declared a last-scan date, per-severity vulnerability '
+  + 'counts and a `passed` verdict, and no scanner, registry, installer or UI ever produced '
+  + 'or read one, so a plugin could publish `passed: true` with nothing at all behind it. '
+  + 'Delete the key. There is no replacement key: plugin security scanning is not a platform '
+  + 'capability, and the scan-result family this block mirrored was retired with it. The '
+  + 'sibling quality metrics — `testCoverage`, `documentationScore`, `codeQuality` and '
+  + '`conformanceTests` — are unchanged. Audit dependencies with a tool built for it (npm '
+  + 'audit, pnpm audit, Dependabot, the GitHub Advisory Database, OSV).';
+
 export const PluginVendorSchema = lazySchema(() => z.object({
   /**
    * Vendor identifier (reverse domain notation)
@@ -71,18 +84,15 @@ export const PluginQualityMetricsSchema = lazySchema(() => z.object({
   codeQuality: z.number().min(0).max(100).optional(),
   
   /**
-   * Security scan status
+   * Tombstone: the plugin security-scan status is RETIRED (#15932, ADR-0049
+   * enforce-or-remove), with the `plugin-security-advanced` scan-result family
+   * it mirrored. Not a bare deletion: `PluginQualityMetricsSchema` is not
+   * `.strict()`, so zod would strip an authored key in silence (ADR-0104).
+   * The key itself carried no default, so there is no materialized residue in
+   * previously built artifacts to accept (the inner defaults only ever fired
+   * for an author who wrote the block).
    */
-  securityScan: z.object({
-    lastScanDate: z.string().datetime().optional(),
-    vulnerabilities: z.object({
-      critical: z.number().int().min(0).default(0),
-      high: z.number().int().min(0).default(0),
-      medium: z.number().int().min(0).default(0),
-      low: z.number().int().min(0).default(0),
-    }).optional(),
-    passed: z.boolean().default(false),
-  }).optional(),
+  securityScan: retiredKey(SECURITY_SCAN_RETIRED),
   
   /**
    * Conformance test results
