@@ -1226,22 +1226,6 @@ export class SecurityPlugin implements Plugin {
     this.metadata = metadata;
     this.ql = ql;
 
-    // [#18682] Fill the engine's readable-fields seam. A validation rule that
-    // reads one hop through a reference field has to tell a related column the
-    // caller MAY read but which is empty (evaluate it as `null`) from one the
-    // caller may NOT read (refuse the write). A driver returns both as the same
-    // missing key, so the engine cannot derive it from the rows and asks here —
-    // `getReadableFields` is computed from schema + context and is explicitly
-    // "immune to an all-null column … and to an empty result set".
-    //
-    // Feature-detected on the engine, like every other optional seam this plugin
-    // fills: an older ObjectQL simply does not offer it, and this plugin must
-    // keep booting against one.
-    if (typeof (ql as any).registerReadableFieldsResolver === 'function') {
-      (ql as any).registerReadableFieldsResolver(
-        (object: string, context: unknown) => this.getReadableFields(object, context as any),
-      );
-    }
 
     // [#11968] Bind the invalidation epoch to the ENGINE's seam when the wired
     // engine exposes one. Resolved here, once, rather than probed per request:

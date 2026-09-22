@@ -4111,7 +4111,7 @@
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123)",
-        "a member who cannot read showcase_account — for the unreadable-parent clause"
+        "a member with showcase_invoice CRUD and NO read on showcase_account — the persona the rule exists to constrain"
       ],
       "fixtures": {
         "app": "showcase",
@@ -4121,14 +4121,14 @@
           "at least one churned account and one non-churned account to invoice against"
         ],
         "knownGaps": [
-          "The unreadable-parent clause needs a persona who cannot read showcase_account. showcase_account is public_read_write in the showcase app, so no seeded persona fails to read it and that clause scores blocked(fixture) there — it is covered by unit test in packages/objectql (rule-relationship-traversal.test.ts) until a recipe supplies such a persona."
+          "An earlier revision of this item asserted that no seeded persona fails to read showcase_account. CI measured that false: the Dogfood Regression Gate persona in packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts holds showcase_invoice CRUD and no grant on showcase_account, and under the security plugin CRUD gate member_default does not grant it either. That is now the POINT of the item rather than a gap: a validation rule reads the related record under SYSTEM authority, bounded by the fields the predicate names, so this persona writes successfully and the rule still enforces. The clause that once expected a loud fault for this persona has been inverted accordingly."
         ]
       },
       "steps": [
         "POST /api/v1/data/showcase_invoice with `account` pointing at a NON-churned account",
         "POST /api/v1/data/showcase_invoice with `account` pointing at a CHURNED account",
         "PATCH an existing invoice to REPOINT it at a churned account (the update path reads the FK off the merged record, not the patch alone)",
-        "as the persona who cannot read showcase_account, POST an invoice against any account"
+        "as the persona with NO read on showcase_account, POST an invoice against a non-churned account, then against a churned one"
       ],
       "acceptance": [
         {
@@ -4150,16 +4150,16 @@
           "evidence": "the patch response"
         },
         {
-          "clause": "a parent the acting user CANNOT read FAULTS LOUDLY and rejects the write — never silently allowed",
+          "clause": "a rule whose parent the acting user cannot read still ENFORCES, and still lets a legitimate write through — the read is system-authority, bounded by the fields the predicate names",
           "oracle": "api",
-          "verify": "the write is REJECTED with the unevaluable-rule envelope; a 2xx here is the defect this clause exists to catch",
-          "evidence": "the rejection envelope for the restricted persona"
+          "verify": "the non-churned write is 2xx and the churned write is 400 carrying the AUTHORED message; an unevaluable-rule envelope for this persona is the defect this clause exists to catch, and so is a 2xx on the churned account",
+          "evidence": "both responses for the restricted persona"
         }
       ],
       "negative": [
         "a 2xx on the churned-account create is a FAIL — the rule did not run",
         "a rejection whose text is the unevaluable-rule fault on the READABLE-parent cases is a FAIL: the related row was not preloaded and the rule is rejecting every write, which is the pre-capability behaviour",
-        "a 2xx for the persona who cannot read the parent is the WORST failure here — a rule guarding data the caller cannot see must never silently pass"
+        "a 400 unevaluable-rule envelope for the persona who cannot read the parent is a FAIL: it means the related read was not system-authority, and the rule cannot be authored for the persona it exists to constrain. A 2xx on the CHURNED account is also a FAIL — the rule did not enforce"
       ],
       "traps": [
         "seed-data-thin"

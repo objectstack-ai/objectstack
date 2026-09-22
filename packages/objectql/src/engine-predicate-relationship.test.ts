@@ -135,22 +135,6 @@ describe('#18682 — engine-produced relationship bindings', () => {
 
   const relatedReads = () => d.calls.filter((c) => c.object === 'crm_account');
 
-  it('reads the related row under the ACTING USER, never as system', async () => {
-    // Captured at the middleware seam — the same one RLS and sharing compose on,
-    // so this is the context the security layer would actually judge.
-    const seen: any[] = [];
-    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-      if (opCtx?.objectName === 'crm_account' || opCtx?.object === 'crm_account') seen.push(opCtx);
-      await next();
-    });
-    await engine.insert('crm_opportunity', { name: 'A', amount: 10, account: 'acc_d' }, { context: ACTING } as any);
-    expect(seen.length).toBeGreaterThan(0);
-    const ctx = seen[0].context ?? seen[0].executionContext;
-    // ⭐ The ruled difference from `parent`, which reads `{ isSystem: true }`.
-    expect(ctx?.isSystem).toBeFalsy();
-    expect(ctx?.userId).toBe('u1');
-  });
-
   it('projects id plus only the fields the rules name — not the whole row', async () => {
     await engine.insert('crm_opportunity', { name: 'A', amount: 10, account: 'acc_d' }, { context: ACTING } as any);
     const fields = [...(relatedReads()[0].ast?.fields ?? [])].sort();
@@ -202,26 +186,69 @@ describe('#18682 — engine-produced relationship bindings', () => {
     ).resolves.toBeTruthy();
   });
 
-  it('REFUSES when the acting user may not read the related field — every spelling', async () => {
-    // The security plugin is not in this composition, so the seam is filled by
-    // hand with the answer that plugin would give.
-    (engine as any).registerReadableFieldsResolver(async () => ['id', 'name']);
-    for (const condition of [
-      "record.account.type == 'partner'",
-      "has(record.account.type) && record.account.type == 'partner'",
-      "record.account.?type.orValue('') == 'partner'",
-    ]) {
+  // ⭐ The ruled read authority: a validation rule's output is a pass/fail the
+  // SYSTEM enforces, so the related row is read under system authority and the
+  // rule is authorable for exactly the persona it exists to constrain. Bounded
+  // by the PROJECTION, never by the caller.
+  it('reads the related row under SYSTEM authority', async () => {
+    const seen: any[] = [];
+    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      if (opCtx?.objectName === 'crm_account' || opCtx?.object === 'crm_account') seen.push(opCtx);
+      await next();
+    });
+    await engine.insert('crm_opportunity', { name: 'A', amount: 10, account: 'acc_d' }, { context: ACTING } as any);
+    const ctx = seen[0].context ?? seen[0].executionContext;
+    expect(ctx?.isSystem).toBe(true);
+    // …and the acting identity is carried through, so audit still sees who wrote.
+    expect(ctx?.userId).toBe('u1');
+  });
+
+  // ⛔ The bound on the elevation. A predicate that names a column the related
+  // object does not declare must NOT put that name into a system-authority
+  // query — the projection is the whole of what limits an elevated read.
+  it('never smuggles an UNDECLARED field into the system read set', async () => {
+    engine.registry.registerObject({
+      name: 'crm_opportunity',
+      fields: {
+        name: { type: 'text' }, amount: { type: 'number' },
+        account: { type: 'lookup', reference: 'crm_account' },
+      },
+      validations: [{ name: 'sneaky', type: 'script', severity: 'error', message: 'x',
+        condition: "record.account.not_a_column == 'x'" }],
+    } as any, 'test-package');
+    d.calls.length = 0;
+    await expect(
+      engine.insert('crm_opportunity', { name: 'A', amount: 1, account: 'acc_p' }, { context: ACTING } as any),
+    ).rejects.toThrow(/declares no 'not_a_column'/);
+    // The read either never happened or never named the column.
+    for (const call of d.calls.filter((c) => c.object === 'crm_account')) {
+      expect(call.ast?.fields ?? []).not.toContain('not_a_column');
+    }
+  });
+
+  // The refusal is about the WRITE, never about the value. A caller can infer a
+  // value by observing refusals — an accepted, deliberately narrow channel — so
+  // nothing may make the refusal more informative than "this rule refused".
+  it('never echoes the related VALUE in the refusal', async () => {
+    await expect(
+      engine.insert('crm_opportunity', { name: 'A', amount: 50000, account: 'acc_p' }, { context: ACTING } as any),
+    ).rejects.toThrow(/Partner accounts are capped/);
+    try {
       engine.registry.registerObject({
         name: 'crm_opportunity',
         fields: {
           name: { type: 'text' }, amount: { type: 'number' },
           account: { type: 'lookup', reference: 'crm_account' },
         },
-        validations: [{ name: 'guarded', type: 'script', severity: 'error', message: 'fired', condition }],
+        validations: [{ name: 'sneaky', type: 'script', severity: 'error', message: 'x',
+          condition: "record.account.not_a_column == 'x'" }],
       } as any, 'test-package');
-      await expect(
-        engine.insert('crm_opportunity', { name: 'A', amount: 1, account: 'acc_p' }, { context: ACTING } as any),
-      ).rejects.toThrow(/could not be evaluated/);
+      await engine.insert('crm_opportunity', { name: 'A', amount: 1, account: 'acc_p' }, { context: ACTING } as any);
+    } catch (e) {
+      const text = JSON.stringify((e as any).fields ?? (e as Error).message);
+      // 'partner' / 'P' / 's' are the stored values on acc_p.
+      expect(text).not.toContain('partner');
+      expect(text).not.toContain('"s"');
     }
   });
 

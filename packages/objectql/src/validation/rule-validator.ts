@@ -542,32 +542,43 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
 export type RelatedUnavailableReason =
   /** The record stores no reference — the FK is null/empty, so there is no row. */
   | 'no-reference'
-  /** The acting user may not read the related object, or the read was refused. */
+  /** The related read failed outright. */
   | 'unreadable'
-  /** One or more of the FIELDS the predicate names are not readable by this user. */
-  | 'field-unreadable'
-  /** A reference is stored but the row it names does not exist (or the read threw). */
+  /**
+   * The predicate names a column the RELATED object does not declare. A real
+   * authoring fault, and deliberately distinct from a column that exists and is
+   * empty: the latter evaluates as `null`, this one refuses.
+   */
+  | 'undeclared-field'
+  /** A reference is stored but the row it names does not exist. */
   | 'unresolved';
 
 /**
  * [#18682] What the engine resolved for ONE reference field a predicate reads
  * through.
  *
- * ⭐ Why this is a discriminated record and not just `row | null`: the permission
- * verdict must be decided by the ENGINE, BEFORE evaluation, and it must not
- * depend on which CEL operator the author happened to write. Handing CEL an
- * absent key delegates the verdict to key-absence semantics, and `has(...)`,
- * `.?` and `orValue(...)` all read an absent key as an ordinary `false`/default
- * — so a field the caller may not read would quietly stop the rule firing. The
- * engine therefore says WHY a row is unusable and {@link checkPredicate} turns
- * that into a refusal, rather than letting the expression discover it.
+ * ⭐ Why this is a discriminated record and not just `row | null`: the verdict
+ * must be decided by the ENGINE, BEFORE evaluation, and it must not depend on
+ * which CEL operator the author happened to write. Handing CEL an absent key
+ * delegates the verdict to key-absence semantics, and `has(...)`, `.?` and
+ * `orValue(...)` all read an absent key as an ordinary `false`/default — so a
+ * genuine fault would quietly stop the rule firing. The engine therefore says
+ * WHY a row is unusable and {@link checkPredicate} turns that into a refusal,
+ * rather than letting the expression discover it.
  *
- * It also separates the two absences #6457 taught us to keep apart: a field that
- * is READABLE but legitimately empty is materialised to `null` on `row` (so the
- * predicate evaluates), while a field that is NOT readable makes the whole
+ * It also separates the two absences #6457 taught us to keep apart: a column the
+ * related object DECLARES but which is empty is materialised to `null` on `row`
+ * (so the predicate evaluates), while a column it does not declare makes the
  * binding unavailable (so the predicate refuses). Before this split both arrived
  * as "the key is missing" and the verdict depended on which columns a driver
  * happened to echo.
+ *
+ * ⚠️ The related row is read under SYSTEM authority — a validation rule's output
+ * is a pass/fail the system enforces, not data handed to the caller. The read is
+ * bounded by its PROJECTION (only the columns the predicate names, intersected
+ * with the related object's declared fields), never by the caller. ⛔ This
+ * applies to validation rules alone; RLS and UI predicates are out of the
+ * capability entirely.
  */
 export interface RelatedFieldBinding {
   /** The object this reference field points at — named in the refusal text. */
@@ -579,8 +590,8 @@ export interface RelatedFieldBinding {
   readonly row?: Record<string, unknown>;
   /** Why `row` is absent. Present iff `row` is absent. */
   readonly unavailable?: RelatedUnavailableReason;
-  /** For `field-unreadable`: the named fields this caller may not read. */
-  readonly unreadableFields?: readonly string[];
+  /** For `undeclared-field`: the named fields the related object does not declare. */
+  readonly undeclaredFields?: readonly string[];
 }
 
 /** Reference FIELD name → what the engine resolved for it. */
@@ -3036,15 +3047,14 @@ function traversalRefusal(
           + ' so there is no related record to read. Guard the rule on the reference being set,'
           + ' or make the reference required.',
       };
-    case 'field-unreadable': {
-      const denied = (binding.unreadableFields ?? []).map((n) => `'${n}'`).join(', ') || columns;
+    case 'undeclared-field': {
+      const missing = (binding.undeclaredFields ?? []).map((n) => `'${n}'`).join(', ') || columns;
       return {
-        summary: `cannot read ${denied} on '${binding.object}' as this user`,
+        summary: `'${binding.object}' declares no ${missing}`,
         detail:
-          ` The rule reads ${denied} through ${on}. The acting user may not read`
-          + ` ${denied} on '${binding.object}', so the rule has no verdict and the write is`
-          + ' rejected rather than allowed on an unchecked rule. Grant read on those fields, or'
-          + ' rewrite the rule to read only data this caller can see.',
+          ` The rule reads ${missing} through ${on}, but '${binding.object}' declares no such`
+          + ` field. Fix the rule's condition, or declare ${missing} on '${binding.object}' —`
+          + ` ⛔ not on the object carrying this rule.`,
       };
     }
     case 'unresolved':
@@ -3057,11 +3067,10 @@ function traversalRefusal(
     case 'unreadable':
     default:
       return {
-        summary: `cannot read '${binding.object}' as this user`,
+        summary: `could not read '${binding.object}'`,
         detail:
-          ` The rule reads ${columns} through ${on}, and the acting user may not read`
-          + ` '${binding.object}'. The rule has no verdict, so the write is rejected rather than`
-          + ' allowed on an unchecked rule. Grant read on that object, or rewrite the rule.',
+          ` The rule reads ${columns} through ${on}, and that read failed. The rule has no`
+          + ' verdict, so the write is rejected rather than allowed on an unchecked rule.',
       };
   }
 }

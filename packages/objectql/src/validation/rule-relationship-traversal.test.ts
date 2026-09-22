@@ -45,9 +45,9 @@ const opportunity = {
 const row = (r: Record<string, unknown>) => ({ object: 'crm_account', row: r });
 /** The engine could not make the parent readable for this caller. */
 const unavailable = (
-  reason: 'no-reference' | 'unreadable' | 'field-unreadable' | 'unresolved',
-  unreadableFields?: string[],
-) => ({ object: 'crm_account', unavailable: reason, unreadableFields });
+  reason: 'no-reference' | 'unreadable' | 'undeclared-field' | 'unresolved',
+  undeclaredFields?: string[],
+) => ({ object: 'crm_account', unavailable: reason, undeclaredFields });
 
 const evaluate = (
   data: Record<string, unknown>,
@@ -139,7 +139,7 @@ describe('#18682 — the three acceptance outcomes (ADR-0137 D2)', () => {
   // never silently false either.
   it('FAULTS LOUDLY and rejects when the related row is unreadable (null)', () => {
     expect(() =>
-      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: unavailable('unreadable') }),
+      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: unavailable('unresolved') }),
     ).toThrow(ValidationError);
   });
 
@@ -149,7 +149,7 @@ describe('#18682 — the three acceptance outcomes (ADR-0137 D2)', () => {
 
   it('the fault is reported AS a fault, naming the unevaluable rule', () => {
     try {
-      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: unavailable('unreadable') });
+      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: unavailable('unresolved') });
       throw new Error('expected a ValidationError');
     } catch (e) {
       const err = e as ValidationError;
@@ -166,7 +166,7 @@ describe('#18682 — the three acceptance outcomes (ADR-0137 D2)', () => {
     expect(() =>
       evaluate(
         { name: 'A', amount: 50000, account: 'acc_1' },
-        { account: unavailable('unreadable') },
+        { account: unavailable('unresolved') },
       ),
     ).toThrow(ValidationError);
   });
@@ -269,8 +269,8 @@ describe('#18682 — the refusal names the RELATED object, not the referencing o
   // declare", which on a traversal is false in every clause — the field IS
   // declared, on the related object — and sent the author to the wrong file.
   const cases: Array<[string, ReturnType<typeof unavailable>, string[]]> = [
-    ['unreadable object', unavailable('unreadable'), ["may not read", "'crm_account'"]],
-    ['unreadable field', unavailable('field-unreadable', ['type']), ["may not read", "'type'"]],
+    ['read failed', unavailable('unreadable'), ['could not read', "'crm_account'"]],
+    ['undeclared related field', unavailable('undeclared-field', ['type']), ['declares no', "'type'"]],
     ['no reference stored', unavailable('no-reference'), ['no related record']],
     ['related row gone', unavailable('unresolved'), ['could not be read']],
   ];
@@ -305,10 +305,10 @@ describe('#18682 — the permission verdict does not depend on the CEL operator'
     ['plain member access', "record.account.type == 'partner'"],
     ['has() guard', "has(record.account.type) && record.account.type == 'partner'"],
     ['optional selection', "record.account.?type.orValue('') == 'partner'"],
-  ])('refuses an unreadable parent — %s', (_name, condition) => {
+  ])('refuses a genuinely faulted parent — %s', (_name, condition) => {
     expect(() =>
       evaluateValidationRules(guarded(condition) as any, { name: 'A', account: 'acc_1' }, 'insert',
-        { related: { account: unavailable('field-unreadable', ['type']) } as never }),
+        { related: { account: unavailable('undeclared-field', ['type']) } as never }),
     ).toThrow(ValidationError);
   });
 });

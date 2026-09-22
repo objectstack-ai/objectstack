@@ -3935,30 +3935,6 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.debug('Registered held-file resolver for sys_file hydration');
   }
 
-  /**
-   * [#18682] "Which fields of this object may this caller READ?" — supplied by
-   * the security plugin, never derived here.
-   *
-   * A predicate that reads one hop through a reference field must distinguish a
-   * related column the caller MAY read but which is empty (evaluate it as
-   * `null`) from one the caller may NOT read (refuse the write). A driver
-   * returns both as the same missing key, so the answer cannot come from the
-   * rows — it has to come from schema + context, which is what
-   * `ISecurityService.getReadableFields` answers.
-   *
-   * The engine declares the seam and `@objectstack/plugin-security` fills it,
-   * the same handover {@link registerHeldFileResolver} makes to storage. Left
-   * unwired (an embedding with no security plugin) every declared field is
-   * readable by construction, which is exactly the behaviour such a composition
-   * has today.
-   */
-  private _readableFieldsResolver?: (object: string, context: unknown) => Promise<string[] | undefined>;
-
-  /** Wire the readable-fields question (#18682). Last registration wins. */
-  registerReadableFieldsResolver(fn: (object: string, context: unknown) => Promise<string[] | undefined>): void {
-    this._readableFieldsResolver = fn;
-    this.logger.debug('Registered readable-fields resolver for predicate relationship traversal');
-  }
 
   /**
    * [#11968] The engine-seam write epoch — the invalidation substrate of the
@@ -6958,8 +6934,10 @@ export class ObjectQL implements IObjectQLEngine {
     type Resolved = {
       object: string;
       byId: Map<string, Record<string, unknown>>;
-      /** Set when NO row of this field is usable, whatever the id. */
-      blocked?: { reason: 'unreadable' | 'field-unreadable'; unreadableFields?: string[] };
+      /** Named fields the RELATED object does not declare. */
+      undeclared?: string[];
+      /** Set when the read itself failed, whatever the id. */
+      blocked?: boolean;
     };
     const resolved = new Map<string, Resolved>();
 
@@ -6968,30 +6946,19 @@ export class ObjectQL implements IObjectQLEngine {
       if (!target) continue;
       const named = [...namedFields];
 
-      // ── Readability is decided HERE, from schema + context, never from the
-      // rows. `getReadableFields` is explicitly "immune to an all-null column
-      // (which a driver may omit from every row) and to an empty result set",
-      // which is exactly the ambiguity that must not reach the predicate: a
-      // column the caller MAY read but which is empty has to evaluate as
-      // `null`, while a column the caller may NOT read has to refuse. Both
-      // arrive from a driver as the same missing key, so the answer cannot be
-      // derived from the data (#6457, one root over and fail-CLOSED).
-      let readable: string[] | undefined;
-      if (this._readableFieldsResolver) {
-        try {
-          readable = await this._readableFieldsResolver(target, context);
-        } catch {
-          // No answer is not a denial; fall through to the read, which is
-          // itself gated by the security middleware and refuses if it must.
-          readable = undefined;
-        }
-      }
-      if (readable) {
-        const denied = named.filter((n) => !readable!.includes(n));
-        if (denied.length > 0) {
-          resolved.set(fk, { object: target, byId: new Map(), blocked: { reason: 'field-unreadable', unreadableFields: denied } });
-          continue;
-        }
+      // ── The READ SET is the intersection of "what the predicate names" and
+      // "what the related object DECLARES", and it is computed here so that it
+      // can never be anything else. A predicate naming a column the related
+      // object does not declare must not put that name into a system-authority
+      // query: the read is elevated, so its projection is the whole of what
+      // bounds it. An undeclared name is also a real authoring fault and is
+      // reported as one rather than silently dropped.
+      const targetSchema = this._registry.getObject(target) as { fields?: Record<string, unknown> } | undefined;
+      const declared = targetSchema?.fields;
+      const undeclared = declared ? named.filter((n) => !(n in declared)) : [];
+      if (undeclared.length > 0) {
+        resolved.set(fk, { object: target, byId: new Map(), undeclared });
+        continue;
       }
 
       const ids = new Set<string>();
@@ -7004,33 +6971,50 @@ export class ObjectQL implements IObjectQLEngine {
       }
       if (ids.size === 0) { resolved.set(fk, { object: target, byId: new Map() }); continue; }
       try {
+        // ⭐ SYSTEM authority, and ONLY for this seam.
+        //
+        // A validation rule's output is a pass/fail the SYSTEM enforces, not
+        // data handed to the caller — categorically unlike an access-control
+        // rule, which is why RLS predicates are excluded from this capability
+        // altogether. Reading as the acting user instead made the rule
+        // unauthorable for exactly the persona it exists to constrain: a member
+        // with CRUD on the child and no read on the parent faulted on every
+        // write, so a legitimate business rule could not ship.
+        //
+        // What bounds the elevation is the PROJECTION, not the caller: only the
+        // columns this predicate names, intersected with the related object's
+        // declared fields above. ⛔ Never the whole row.
+        //
+        // The accepted cost, recorded so nobody widens it by accident: a caller
+        // can INFER a value they cannot see by observing which writes refuse.
+        // The value itself never appears — not in the row handed to CEL beyond
+        // the predicate's own use of it, and not in the refusal text, which
+        // names the field and the rule and never the value.
         const query: EngineQueryOptions = {
           where: { id: { $in: [...ids] } },
           fields: [...new Set(['id', ...named])],
-          context: context as EngineQueryOptions['context'],
+          context: { ...(context as Record<string, unknown> ?? {}), isSystem: true } as EngineQueryOptions['context'],
         };
         const related = await this.find(target, query) as Array<Record<string, unknown>>;
         const byId = new Map<string, Record<string, unknown>>();
-        // Materialise the NAMED fields to `null` — but only the ones this caller
-        // may actually read. With a readable set in hand that is exact; without
-        // one (no security plugin in this composition) every declared field is
-        // readable by construction, which is the pre-plugin behaviour.
-        const fillable = readable ? named.filter((n) => readable!.includes(n)) : named;
+        // Materialise the named DECLARED columns to `null`. A driver omits a key
+        // whose value is `undefined`, so without this a legitimately-empty
+        // parent column would fault and refuse a valid write — #6457's trap, one
+        // root over and on a fail-CLOSED seam. A column the related object does
+        // not declare never reaches here (it was reported above), so a real
+        // "this field does not exist" fault stays distinguishable from a null.
         for (const row of Array.isArray(related) ? related : []) {
           if (row?.id == null) continue;
           const copy: Record<string, unknown> = { ...row };
-          for (const name of fillable) if (!(name in copy)) copy[name] = null;
+          for (const name of named) if (!(name in copy)) copy[name] = null;
           byId.set(String(row.id), copy);
         }
         resolved.set(fk, { object: target, byId });
       } catch (err) {
-        // A refusal from the security layer is a real answer: this caller may
-        // not read the related object. Recorded as such so the predicate refuses
-        // with a sentence naming it, rather than faulting on a missing key.
-        this.logger?.warn?.('predicate relationship read refused or failed — the rule will reject the write', {
+        this.logger?.warn?.('predicate relationship read failed — the rule will reject the write', {
           object: target, field: fk, error: err,
         });
-        resolved.set(fk, { object: target, byId: new Map(), blocked: { reason: 'unreadable' } });
+        resolved.set(fk, { object: target, byId: new Map(), blocked: true });
       }
     }
     if (resolved.size === 0) return unbound;
@@ -7039,10 +7023,11 @@ export class ObjectQL implements IObjectQLEngine {
       if (!row) return undefined;
       const binding: Record<string, RelatedFieldBinding> = {};
       for (const [fk, entry] of resolved) {
-        if (entry.blocked) {
-          binding[fk] = { object: entry.object, unavailable: entry.blocked.reason, unreadableFields: entry.blocked.unreadableFields };
+        if (entry.undeclared) {
+          binding[fk] = { object: entry.object, unavailable: 'undeclared-field', undeclaredFields: entry.undeclared };
           continue;
         }
+        if (entry.blocked) { binding[fk] = { object: entry.object, unavailable: 'unreadable' }; continue; }
         const value = row[fk];
         if (value == null || Array.isArray(value) || typeof value === 'object') {
           binding[fk] = { object: entry.object, unavailable: 'no-reference' };
