@@ -2288,6 +2288,147 @@ class StackTriggerCapabilityRequiredError extends StackRefusalError {
 }
 
 /**
+ * [ADR-0112 · #16348] The COMPOSITION half of the refusal family above. `composeStacks`
+ * refuses six authored-entity conflicts, every one of them carrying the
+ * literal `composeStacks conflict:` message prefix, and until this change
+ * every one threw `new Error(message)` with `code` and `status` both
+ * `undefined` — the silent shape the `defineStack` family shed one screen up,
+ * in this same file. Two refusal families that are the same thing to an author
+ * and two different things to a consumer is the asymmetry these six close.
+ *
+ * The envelope is the SAME one — {@link StackRefusalError}: `status: 422`, an
+ * unprocessable authored entity rather than a server fault, and the findings
+ * the site collected on `issues`, one entry per finding. The granularity is
+ * the one the per-stack family landed with and the triage reading that set it:
+ * ONE code per refusal site, never a shared `STACK_COMPOSE_CONFLICT`
+ * catch-all. The `boot-refusal` class in the dispatcher vocabulary was already
+ * at one-row-per-refusal granularity when that reading was taken, and
+ * {@link StackCrossReferenceError} is an instance of that granularity rather
+ * than an exception to it.
+ *
+ * ⭐ Why every member spells `STACK_COMPOSE_*` instead of continuing the
+ * per-stack family's `STACK_<subject>_<condition>`: what these six refuse is a
+ * disagreement BETWEEN stacks, a condition `defineStack` cannot raise at all —
+ * each input is legal on its own, and the fix is always in the composition or
+ * in one of the two authors' packages, never in a single malformed stack. A
+ * bare `STACK_OBJECT_CONFLICT` would read as "this stack's object is
+ * malformed" and send a consumer to the wrong half of the artifact.
+ * {@link StackCrossReferenceError} is the deliberate exception in the other
+ * direction: its two raise sites (the per-stack pass and the ARTIFACT pass
+ * inside {@link composeStacks}) share one code because they are one rule
+ * family evaluated over two scopes, so the code names the rule and the message
+ * header names the pass.
+ *
+ * ⛔ The seventh bare `Error` in this file stays bare, and that is a reading
+ * rather than an omission: `composeStacks internal error: no source stack
+ * recorded for composed object …` inside
+ * {@link collectComposedActionKeyCollisions} is the code discovering its own
+ * bookkeeping is inconsistent, not an authored entity being refused. A 422
+ * would tell an author their stack is unprocessable when the defect is ours.
+ * Whether it takes a 500-class envelope of its own is a separate decision.
+ *
+ * Every member is registered in the ADR-0112 ledger under `@objectstack/spec`
+ * (the #16404 ruling: a `code` that ships in `dist` is the published face,
+ * door or no door — a consumer's `catch (e) { switch (e.code) }` pins the
+ * spelling the moment it ships). `door: 'none'`, re-measured on the tree this
+ * landed against: `composeStacks` occurs 7 times in non-test
+ * `packages/runtime/src` + `packages/rest/src` source, all of them doc
+ * comments or message prose in one file and NONE of them a call site, with
+ * `defineStack` lighting the same probe 31 times across 8 files as the
+ * positive control. The only non-test caller on the tree is an example's
+ * `objectstack.config.ts`, which is authoring time by construction.
+ *
+ * ⛔ Module-local like every member above, and for the same reason:
+ * `packages/spec/src/index.ts` re-exports this module with `export *`, so an
+ * exported class would widen the published api-surface, while the ADR-0112
+ * contract is the `code` / `status` pair every reader takes structurally.
+ *
+ * Message text is byte-for-byte what each bare `Error` carried. This adds the
+ * machine-readable half; it rewords no sentence, and the message-substring
+ * pins across this repo read the prose they always did.
+ */
+class StackComposeKeyConflictError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_KEY_CONFLICT';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeKeyConflictError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #16348] `functions` is authored in the map form by one stack and the
+ * array form by another — {@link composeFunctions}. The two shapes are merged
+ * in kind and never converted, so the refusal is about the SHAPE, which is
+ * what the code says; a same-shape duplicate name is its sibling below.
+ */
+class StackComposeFunctionsShapeConflictError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_FUNCTIONS_SHAPE_CONFLICT';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeFunctionsShapeConflictError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #16348] Two stacks define a handler under the same name —
+ * {@link composeFunctions}. Handlers resolve by name at boot, so composing
+ * them would let one silently shadow the other.
+ */
+class StackComposeFunctionConflictError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_FUNCTION_CONFLICT';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeFunctionConflictError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #16348] Under `objectConflict: 'merge'`, a later stack declares an
+ * object-level collection the composed object already carries with a
+ * DIFFERENT value — {@link refuseUnmergeableCollections}. Only `fields` is
+ * shallow-merged; every other collection would be replaced wholesale.
+ * Spelled for the collection, not the object: the object itself composes fine,
+ * one of its collections does not.
+ */
+class StackComposeCollectionConflictError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_COLLECTION_CONFLICT';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeCollectionConflictError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #16348] The same object name is defined by more than one stack under the
+ * DEFAULT `objectConflict: 'error'` strategy — {@link mergeObjects}. The
+ * message names the two options that resolve it; the refusal is the strategy
+ * doing its job, which is why it carries the same envelope as the rest rather
+ * than a distinct class of its own.
+ */
+class StackComposeObjectConflictError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_OBJECT_CONFLICT';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeObjectConflictError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #16348] Two stacks declare the same action key — the collision
+ * `defineStack` refuses within one stack, arriving one composition step later
+ * ({@link collectComposedActionKeyCollisions}). `issues` carries exactly what
+ * that walk collected: one entry per colliding key, naming every declaring
+ * stack and site, the same list the message renders as `✗` lines.
+ */
+class StackComposeActionKeyCollisionError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_ACTION_KEY_COLLISION';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeActionKeyCollisionError', message, issues);
+  }
+}
+
+/**
  * Seed data → object references (#18202, ARTIFACT-SCOPED — see
  * {@link DefineStackOptions.artifactObjects}).
  *
@@ -3424,9 +3565,11 @@ function composeSingleValue(
     const held = (stacks[holder] as Record<string, unknown>)[key];
     if (deepEqualAuthored(held, value)) continue;
 
-    throw new Error(
-      `composeStacks conflict: top-level key '${key}' is declared with different values by ` +
-        `${stackLabel(stacks[holder], holder)} and ${stackLabel(stacks[i], i)}.\n` +
+    const finding =
+      `top-level key '${key}' is declared with different values by ` +
+      `${stackLabel(stacks[holder], holder)} and ${stackLabel(stacks[i], i)}.`;
+    throw new StackComposeKeyConflictError(
+      `composeStacks conflict: ${finding}\n` +
         `composeStacks does not pick a winner for single-valued top-level configuration: ` +
         `overriding would silently drop whichever declaration lost — a stricter setting ` +
         `(an 'api.enforceProjectMembership' 403 gate, a 'server.security.rateLimit' budget), ` +
@@ -3434,6 +3577,7 @@ function composeSingleValue(
         `against — and deep-merging would produce a value neither stack declared.\n` +
         `Fix: make the two '${key}' declarations identical, or remove it from every stack ` +
         `except the one that should own it.`,
+      [finding],
     );
   }
 
@@ -3473,14 +3617,17 @@ function composeFunctions(
   const arrayForm = declaring.filter((d) => Array.isArray(d.value));
   if (arrayForm.length !== 0 && arrayForm.length !== declaring.length) {
     const mapSide = declaring.find((d) => !Array.isArray(d.value))!;
-    throw new Error(
-      `composeStacks conflict: top-level key 'functions' is declared in the map form by ` +
-        `${stackLabel(stacks[mapSide.index], mapSide.index)} and in the array form by ` +
-        `${stackLabel(stacks[arrayForm[0].index], arrayForm[0].index)}.\n` +
+    const finding =
+      `top-level key 'functions' is declared in the map form by ` +
+      `${stackLabel(stacks[mapSide.index], mapSide.index)} and in the array form by ` +
+      `${stackLabel(stacks[arrayForm[0].index], arrayForm[0].index)}.`;
+    throw new StackComposeFunctionsShapeConflictError(
+      `composeStacks conflict: ${finding}\n` +
         `The two shapes cannot be merged without losing information (an array entry carries ` +
         `'packageId', the map entry does not).\n` +
         `Fix: author 'functions' in the same shape in both stacks — the map form ` +
         `({ my_handler: fn }) is preferred.`,
+      [finding],
     );
   }
 
@@ -3488,12 +3635,15 @@ function composeFunctions(
   const claim = (name: string, index: number): void => {
     const first = seen.get(name);
     if (first !== undefined) {
-      throw new Error(
-        `composeStacks conflict: function '${name}' is defined by both ` +
-          `${stackLabel(stacks[first], first)} and ${stackLabel(stacks[index], index)}.\n` +
+      const finding =
+        `function '${name}' is defined by both ` +
+        `${stackLabel(stacks[first], first)} and ${stackLabel(stacks[index], index)}.`;
+      throw new StackComposeFunctionConflictError(
+        `composeStacks conflict: ${finding}\n` +
           `Handlers are resolved by name at boot, so one would silently shadow the other.\n` +
           `Fix: rename one of them (prefix it with its package, e.g. 'crm_${name}'), or ` +
           `declare it in exactly one stack.`,
+        [finding],
       );
     }
     seen.set(name, index);
@@ -3775,10 +3925,12 @@ function refuseUnmergeableCollections(
     }
     if (deepEqualAuthored(held[key], value)) continue;
 
-    throw new Error(
-      `composeStacks conflict: object '${name}' is defined in multiple stacks and its '${key}' ` +
-        `is declared with different values by ${stackLabel(stacks[holder], holder)} and ` +
-        `${stackLabel(stacks[index], index)}.\n` +
+    const finding =
+      `object '${name}' is defined in multiple stacks and its '${key}' ` +
+      `is declared with different values by ${stackLabel(stacks[holder], holder)} and ` +
+      `${stackLabel(stacks[index], index)}.`;
+    throw new StackComposeCollectionConflictError(
+      `composeStacks conflict: ${finding}\n` +
         `objectConflict: 'merge' shallow-merges 'fields' only. Any other object-level collection ` +
         `(${[...objectCollectionKeys()].join(', ')}) is not merged: the later declaration would ` +
         `replace the earlier one wholesale, silently dropping every entry ` +
@@ -3786,6 +3938,7 @@ function refuseUnmergeableCollections(
         `Fix: declare '${key}' on '${name}' in exactly one of the two stacks, make the two ` +
         `declarations identical, or use { objectConflict: 'override' } to hand the whole object ` +
         `to the later stack.`,
+      [finding],
     );
   }
 }
@@ -3853,11 +4006,14 @@ function mergeObjects(
       }
 
       switch (strategy) {
-        case 'error':
-          throw new Error(
-            `composeStacks conflict: object '${obj.name}' is defined in multiple stacks. ` +
+        case 'error': {
+          const finding = `object '${obj.name}' is defined in multiple stacks.`;
+          throw new StackComposeObjectConflictError(
+            `composeStacks conflict: ${finding} ` +
               `Use { objectConflict: 'override' } or { objectConflict: 'merge' } to resolve.`,
+            [finding],
           );
+        }
         case 'override': {
           // Replace in-place in the result array
           const idx = result.indexOf(existing);
@@ -4404,7 +4560,10 @@ export function composeStacks(
   //    would make every bound action collide with itself.
   const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner);
   if (actionCollisions.length > 0) {
-    throw new Error(formatComposedActionKeyCollisions(actionCollisions));
+    throw new StackComposeActionKeyCollisionError(
+      formatComposedActionKeyCollisions(actionCollisions),
+      actionCollisions,
+    );
   }
 
   // 7. Bind every standalone action to its object — ONCE. Each input built by
