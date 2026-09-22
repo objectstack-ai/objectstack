@@ -17,10 +17,11 @@
  * reasoning but a correction of one of its readings: an array on a scalar
  * operator was recorded here as accepted because it 「lowers to a bare
  * deep-equality comparand, which every backend answers」, and re-measurement
- * found the opposite — `driver-sql` refuses the comparand with `INVALID_FILTER`
- * and the in-memory matchers exclude every row, so a view that PASSED the
- * protocol selected nothing. The pins below carry both directions of that arm,
- * and the carve-outs (an absent value, the four valueless operators) keep their
+ * found the opposite — `driver-sql` AND `driver-memory` both refuse the
+ * comparand with `INVALID_FILTER`, and `@objectstack/formula`'s matcher, the one
+ * backend that answers the shape at all, excludes every row, so a view that
+ * PASSED the protocol selected nothing. The pins below carry both directions of
+ * that arm, and the carve-outs (an absent value, the four valueless operators) keep their
  * own pins, because the #5685 side of this file is what stops a narrowing from
  * running on past the query path.
  *
