@@ -41,14 +41,25 @@ The cost is bounded by construction: one hop, only the fields a rule actually
 names, one batched read per reference field per write, and nothing at all when
 no rule traverses.
 
-### Permission semantics — absent, loudly
+### Read authority — system, bounded by the projection
 
-The related rows are read under the **acting user**, through the engine's own
-read path, so the referenced object's CRUD gate, RLS and FLS all apply. A row
-or a field the caller may not read therefore does not arrive: the stored id
-stays, the traversal faults, and the write is **rejected**. A rule that guards
-data the caller cannot see never silently passes — and never silently fails
-either.
+The related row is read under **system authority**. A validation rule's output
+is a pass/fail the *system* enforces, not data handed to the caller — which is
+why RLS predicates are excluded from this capability altogether. Reading as the
+acting user instead made the rule unauthorable for exactly the persona it exists
+to constrain: a member with CRUD on the child and no read on the parent faulted
+on every write.
+
+What bounds the elevation is the **projection**, not the caller: only the
+columns the predicate names, intersected with the related object's declared
+fields. A column the related object does not declare never enters the query, and
+is refused as the authoring fault it is — distinct from a column that exists and
+is empty, which evaluates as `null`.
+
+⚠️ **The accepted cost, stated plainly.** A caller can *infer* a related value
+they cannot see by observing which writes are refused. The value itself never
+appears — the refusal names the field and the rule, never the value — and the
+channel is deliberately no wider than "this rule refused this write".
 
 ### Two shapes are refused at authoring time, with a prescription
 
@@ -64,9 +75,8 @@ an object-valued field traverses today and keeps traversing.
 
 ### Scope
 
-Object validation rules (`script` / `cross_field`) — the seam that is
-fail-closed, and therefore the only one where an unreadable related field can
-produce the loud refusal the permission rule above requires. The field-level
+Object validation rules (`script` / `cross_field`) — and the system-authority
+read is confined to that one seam. The field-level
 `requiredWhen` / `readonlyWhen` / option `visibleWhen` predicates fail **open**
 and are deliberately not covered here; RLS predicates are out too. Depth is one
 hop.

@@ -307,7 +307,17 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
 
     const firstId = async (object: string) =>
       String((await ql.find(object, { limit: 1, context: SYS }))?.[0]?.id ?? '');
-    seed.accountId = await firstId('showcase_account');
+    // [#18682] NOT `firstId`: `showcase_invoice` now carries a real business
+    // rule — an invoice may not be issued against a CHURNED account — so an
+    // arbitrary first account makes this file's "admin control payload is
+    // VALID" assertion depend on seed ordering. The control has to be a payload
+    // the platform actually accepts, so the account is chosen to satisfy the
+    // rule rather than by position.
+    seed.accountId = String(
+      (await ql.find('showcase_account', {
+        where: { status: { $ne: 'churned' } }, limit: 1, context: SYS,
+      }))?.[0]?.id ?? '',
+    );
     seed.productId = await firstId('showcase_product');
     seed.projectId = await firstId('showcase_project');
     seed.invoiceId = await firstId('showcase_invoice');
