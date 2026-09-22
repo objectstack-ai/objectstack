@@ -12,7 +12,7 @@ import { ObjectListViewSchema } from '../ui/view.zod';
 import { EvaluatedExpressionInputSchema, TemplateExpressionInputSchema, type EvaluatedExpression, type EvaluatedExpressionInput } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { strictObject } from '../shared/strict-object';
+import { closedObject, strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { retiredKey } from '../shared/retired-key';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
@@ -858,8 +858,15 @@ const lifecycleOnlyWhenSchema = z.record(
     z.string(),
     z.number(),
     z.boolean(),
-    z.object({ $in: z.array(z.union([z.string(), z.number()])).min(1) }).strict(),
-    z.object({ $null: z.boolean() }).strict(),
+    // [#19581] `closedObject` — not `strictObject` — because the curated
+    // message these two arms render is pinned as written
+    // (`union-author-message-pins.test.ts`, "class B: bare `.strict()`"), and
+    // routing them through the `strictObject` error map would reword it. All
+    // the wrapper does is make the unknown-key refusal terminal for the arm
+    // that raised it, which is what keeps this union reporting `invalid_union`
+    // instead of collapsing onto whichever arm zod judged closest.
+    closedObject(z.object({ $in: z.array(z.union([z.string(), z.number()])).min(1) }).strict()),
+    closedObject(z.object({ $null: z.boolean() }).strict()),
   ]),
 );
 

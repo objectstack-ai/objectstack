@@ -350,10 +350,113 @@ export function strictObjectError<T extends z.ZodRawShape>(
 }
 
 /**
+ * [#19581] An unknown key is a TERMINAL refusal of the surface that raised it —
+ * restored here because zod stopped treating it as one.
+ *
+ * ## What moved, measured on both lines
+ *
+ * From zod 4.5.0 the `unrecognized_keys` issue carries `continue: true`
+ * (`v4/core/schemas.js`, both the shape-phase and the `handleCatchall` push;
+ * absent on 4.4.3). The vendor states the intent in the line above it: the
+ * issue *"describes the shape of the input, not the validity of the parsed
+ * value, so it never aborts. The parse still fails; the schema's own checks
+ * just get to run first, and an enclosing intersection can reconcile the key
+ * against a sibling operand."*
+ *
+ * That is a reasonable general-purpose posture and it is not this repo's.
+ * Here a closed shape is a contract (Prime Directive #12): a key the surface
+ * does not declare is not shape information awaiting reconciliation, it is the
+ * refusal. Two things follow from the flag, and both were measured on this
+ * codebase with the same bodies and `packages/spec/node_modules/zod` repointed
+ * per line, the swap proven on disk before either reading was believed:
+ *
+ * 1. **The surface's own checks now run after it.** `runChecks` reads
+ *    `util.aborted(payload)` once, on entry, so a continuable unknown-key issue
+ *    lets every `.refine()` / `.superRefine()` on the same object fire and add
+ *    a SECOND, contradictory complaint about a body that was already refused.
+ * 2. **Every union containing that surface loses its envelope.**
+ *    `handleUnionResults` — byte-identical on 4.4.3, 4.5.0 and 4.6.1, so not
+ *    itself the change — returns a single non-aborted member's issues
+ *    UNWRAPPED instead of pushing `invalid_union`:
+ *
+ *    ```js
+ *    const nonaborted = results.filter((r) => !util.aborted(r));
+ *    if (nonaborted.length === 1) { final.value = nonaborted[0].value; return nonaborted[0]; }
+ *    ```
+ *
+ *    A member whose only complaint is an unknown key is now that one member, so
+ *    the union's message becomes THAT branch's prescription — chosen by zod's
+ *    "which branch got furthest" heuristic rather than by the door's own branch
+ *    rule. On `ViewMetadataSchema` the observable effect was a `viewKind` +
+ *    `config` ViewItem body being answered with the CONTAINER branch's
+ *    *"wrap it: `defineView({ list: … })`"*, and a retirement prescription that
+ *    names the retired member never being reached at all.
+ *
+ * ## Why it is applied at `_zod.parse` and not as a check
+ *
+ * The flag has to be settled BEFORE `runChecks` computes `isAborted`, which
+ * rules out a `.check()` — a check runs after the parse and cannot retroactively
+ * gate its siblings. A check would also be worse in a second way: `util.extend`
+ * refuses to overwrite a key on any object carrying checks, so adding one here
+ * would break `.extend()` on every closed shape in the package.
+ *
+ * ⛔ **It cannot move the acceptance face.** It only rewrites a flag on an issue
+ * that has already been raised; a body with no issues never reaches it, and no
+ * issue is added, removed or re-coded. What changes is which competing
+ * complaint an author reads, and whether the union keeps its envelope.
+ */
+const markUnknownKeyRefusalTerminal = <P extends { issues: Array<{ code?: string }> }>(payload: P): P => {
+  for (const issue of payload.issues) {
+    if (issue.code === 'unrecognized_keys') (issue as { continue?: boolean }).continue = false;
+  }
+  return payload;
+};
+
+/**
+ * [#19581] The `ZodObject` variant {@link closedObject} builds.
+ *
+ * It is a constructor rather than an instance-level patch because
+ * `util.clone()` rebuilds through `inst._zod.constr`: `.strict()`, `.strip()`,
+ * `.extend()`, `.refine()` and `.omit()` all clone, so an instance-level wrap
+ * would survive exactly until the first derived schema. Declaring it here makes
+ * every descendant carry it by construction.
+ *
+ * `_zod.def` is untouched, so the emitted JSON Schema, the authorable surface
+ * and `instanceof z.ZodObject` (trait-based) are all byte-identical.
+ */
+const ZodClosedObject = z.core.$constructor<any, any>('ZodClosedObject', (inst: any, def: any) => {
+  (z.ZodObject as unknown as { init: (i: unknown, d: unknown) => void }).init(inst, def);
+  const parse = inst._zod.parse;
+  inst._zod.parse = (payload: any, ctx: any) => {
+    const done = parse(payload, ctx);
+    return done instanceof Promise
+      ? done.then(markUnknownKeyRefusalTerminal)
+      : markUnknownKeyRefusalTerminal(done);
+  };
+});
+
+/**
+ * [#19581] Re-declare a closed object schema so its unknown-key refusal is
+ * terminal — see {@link markUnknownKeyRefusalTerminal}.
+ *
+ * Exported for the closed shapes that do NOT come through {@link strictObject}
+ * — a bare `z.object(…).strict()` whose curated message is pinned as written
+ * and must not be re-routed through the `strictObject` error map.
+ */
+export function closedObject<S extends z.ZodTypeAny>(schema: S): S {
+  return new (ZodClosedObject as unknown as new (def: unknown) => S)(
+    (schema as unknown as { _zod: { def: unknown } })._zod.def,
+  );
+}
+
+/**
  * A `.strict()` object whose unknown-key error names the surface, echoes the
  * offending key, and suggests the closest declared key — with the candidate
  * list read from `shape` rather than transcribed alongside it.
+ *
+ * [#19581] Built as a {@link closedObject}, so the refusal is terminal for this
+ * surface on every zod line.
  */
 export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptions, shape: T) {
-  return z.object(shape, { error: strictObjectError(options, shape) }).strict();
+  return closedObject(z.object(shape, { error: strictObjectError(options, shape) }).strict());
 }

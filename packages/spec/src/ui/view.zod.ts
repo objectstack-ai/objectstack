@@ -51,7 +51,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { strictObject, strictObjectError } from '../shared/strict-object';
+import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
@@ -3157,7 +3157,7 @@ const FormFieldBaseSchema = lazySchema(() => {
   visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
   };
-  return z.object(shape, {
+  const base = z.object(shape, {
     error: strictObjectError({
       ...VISIBILITY_STRICT_OPTIONS,
       // #8202 — this shape names ITSELF. The shared table's `'this view/page
@@ -3193,6 +3193,22 @@ const FormFieldBaseSchema = lazySchema(() => {
       aliases: { disabled: 'readonly' },
     }, shape),
   });
+  // [#19581] Sealed HERE, on the open base, rather than on the `.strict()`
+  // extension below. Three instruments read these two declarations and all
+  // three keep reading them unchanged this way: the literal `z.object(shape,
+  // { error: strictObjectError(…) })` above is still the expression the
+  // strictness ledger's AST reader counts as this file's one `authorable`
+  // strip site (see this schema's docblock), `FormFieldSchema`'s expression
+  // below is still the composition `declaration-map` unwinds to reach
+  // `FormFieldBaseSchema`, and `closedObject` reaches the extension anyway —
+  // `util.clone()` rebuilds through `_zod.constr`, so `.extend()` and
+  // `.strict()` both carry the seal forward. Sealing an OPEN shape is a no-op
+  // by itself (it has no unknown key to refuse); the extension is where it
+  // bites, and without it that member is the only non-aborted arm of the
+  // `z.union([z.string(), FormFieldSchema])` a section's `fields` uses, so zod
+  // returns its issues unwrapped instead of the `invalid_union` this door's
+  // diagnosis is built on.
+  return closedObject(base);
 });
 
 /**

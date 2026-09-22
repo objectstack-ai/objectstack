@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { closedObject } from '../shared/strict-object';
 import { assertListComparandShapes } from './filter-comparand-shape';
 import { normalizeFilterComparandTypes } from './filter-comparand-type';
 import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './date-range-presets';
@@ -1993,14 +1994,22 @@ const normalizedMemberSchema = (position: string) =>
  * package's own tests (swept with `FilterConditionSchema`'s 20+ call sites as
  * the positive control), so the narrowing has no measured internal caller.
  */
+/*
+ * [#19581] `closedObject` states for the GROUP branch what `abort: true` states
+ * for the field branch above: its refusal is terminal, so it cannot become the
+ * member union's lone continuable spokesman. Same lesson, same union, other
+ * arm — from zod 4.5.0 an `unrecognized_keys` issue is continuable, so without
+ * this a bad operand inside a legitimate group reports the group's raw
+ * `Unrecognized key: "c"` instead of the union's own `Not a valid $and member`.
+ */
 export const NormalizedFilterSchema: z.ZodType<NormalizedFilter, NormalizedFilter> = z.lazy(() =>
-  z.object({
+  closedObject(z.object({
     $and: z.array(normalizedMemberSchema('$and member')).optional(),
 
     $or: z.array(normalizedMemberSchema('$or member')).optional(),
 
     $not: normalizedMemberSchema('$not operand').optional(),
-  }).strict()
+  }).strict())
 );
 
 // ============================================================================
