@@ -14,7 +14,7 @@
 - ⛔ 永不据它判没挂上而重挂 —— 重挂踢队重排。
 - 推送重折已挂 auto-merge 的 PR 可静默掉挂,无字段说明 ⇒ 重折后重发,再按队列 ref 探。
 - 成功序列读伴随不读次序:`removed_from_merge_queue` 与 `merged` 同秒或数秒内到,次序实测不定。
-- 真被踢是其后无 `merged`、几分钟后 PR 仍 open。
+- 真被踢是其后无 `merged`、几分钟后 PR 仍 open;两种退出的 actor 同为 `github-merge-queue[bot]`。
 - 不在 `origin/main` 上是二义读数:在队列里等 / 没入队,两者处置相反。
 - ⇒ 落地检查恒两个读数:队列成员资格 和 `origin/main`,缺一不可。
 - `origin/main` 按内容读(grep 本 PR 的产物),⛔ 不按 head sha 祖先性、不按 `merged` 布尔。
@@ -61,7 +61,6 @@
 - 回读 `auto_merge` 非空本接口给不了:`pull_request_read` 与 `fields` 枚举都无该成员。
 - 效果读数 = 下列阳性探针、timeline 入队事件、最终落地;队列分支仅在场时算。
 - 队列 ref 答 BUILD 不答成员资格:`gh-readonly-queue/*` 只在存在时有意义,即有 build 在跑。
-- ⛔ 它的缺席不是任何方向的读数。
 - 阳性探针 ①:`update_pull_request_branch` 回已入队分支不能更新 = 在队。
 - 它正常返回则顺带逼出暗冲突;它不踢已挂 PR,只是永不入队。
 - 阳性探针 ②:`merge_pull_request` 回 405 `Pull Request is in the merge queue` = 在队。
@@ -243,6 +242,7 @@
 - ⇒ ⛔ 读成功而标签空或缺席不读作没有标签:按 `data-name=` 确认,否则整集作 UNKNOWN。
 - 可达时优先加法端点;⛔ 单读与单次即时读回都不决断。
 - ⇒ union-write 欠一次延迟确认;必需标签(如 `skip-changeset`)其后每次触碰重核。
+- objectui labeler 带 `sync-labels: true`:PR 标签按路径整集重算,手打的下次 push 即失,⛔ 不重挂。
 - `list_issues` 永不返回 assignees:`fields` 枚举无此成员,不传也没有。
 - 已认领卡与空闲卡响应逐字节相同,清单只是候选名单 ⇒ 认领前必须过完整 `issue_read`。
 - `comments` 计数会多读:实测 1 而列表与 timeline 双 0 ⇒ 线程空否读那两条,⛔ 不读计数。
@@ -301,8 +301,8 @@
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
 - 两仓 CI 并发组都按 PR 号不按 head:重跑过期 head 取消当前 head 的 run ⇒ 重跑是写不是读。
 - CI 红了先取完整日志归档再下结论:断言文本只在归档里,直读工具拿不到。
-- `get_check_run` 回空 `output.text`;`get_job_logs` 无论 `tail_lines` 只回尾部的 service-container teardown。
-- ⇒ 两者都答不了到底挂在哪;`GET /actions/jobs/{id}/logs` 被出口代理拒绝,CONNECT 403。
+- `get_check_run` 回空 `output.text`;`get_job_logs` 带 `tail_lines` 只回尾部的 service-container teardown。
+- ⇒ 改带 `return_content: true` 整份日志回包(2026-09-20 一 job)⇒ REST 腿被拒只是该腿的读数。
 - 失败 step 名免下载即得:`actions_get method=get_workflow_job`。
 - check-run annotations 端点带退出码与失败命令,是免归档的第二条便宜读。
 - 真实断言文本走 run 日志归档:`actions_get method=get_workflow_run_logs_url` 后下载解压。
@@ -345,6 +345,7 @@
 - 改侧 · 裸 REST `PATCH /pulls` 恒追加一条裸页脚并保留既有页脚,差恰 58 字节,与尾部无关。
 - 尾部已是 `---` 加页脚块也照追加,重送复现 ⇒ 建侧的不追加判据 ⛔ 不外推到改侧。
 - 同路送无页脚正文存回恰一条(平台裸形)⇒ 该格处方是不送页脚,⛔ 不是不重送正文。
+- 该追加按面不按路由:`PATCH /issues/{n}` 打在 PR 上同样 +58 追加裸页脚,而 draft 位不动。
 - 页脚两拼写:裸版与 session-URL 版都要剥,漏剥的卡在正文中段,而 58 字节差照常。
 - ⇒ 代价是归属:裸形无 session id,按此剥净的 PR 正文不载明哪个会话写的;另置见 AGENTS.md。
 - 第四形:建 PR 两通道同判 —— 送出体尾部不是 `---` 加页脚块时,追加一条同形页脚。
@@ -411,7 +412,7 @@
 - MCP `issue_write create` 落库丢掉正文尾部的署名页脚块,正文其余部分完好。
 - MCP `issue_write` update 送尾部横线加页脚块则两者同被吃掉,而调用照常回 id 与 url。
 - 建卡走 REST `POST /issues`:带页脚存活,无页脚合成恰一条(+58);回读后 `PATCH` 重送逐字节存下。
-- issue 正文 `PATCH` 识别按整块:送全块或不送页脚都存回恰一条,已有页脚归一末尾不复制。
+- 真 issue 正文 `PATCH` 识别按整块:送全块或不送页脚都存恰一条,已有页脚归一末尾不复制。
 - 无横线的裸页脚不算页脚:它被保留而整块另追加,总数二 ⇒ 恒一条只对上行两输入成立。
 - 该格两空:MCP 送裸页脚、`title`/`labels` 单字段 `issue_write` 是否动页脚,均未实测。
 - issue `PATCH` 同体带 `labels` 与 `type` 回 500 且零写入;拆两次写各 200,已带 type 的卡未实测。
