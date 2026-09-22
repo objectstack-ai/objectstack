@@ -324,8 +324,41 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
   // halves. Readers were converted first (every one resolves `packages[]`);
   // this is the emitter that stops feeding the flat copy.
 
-  const withObjects = (manifest: Record<string, unknown>, object: string): ObjectStackDefinition =>
-    raw({ manifest, objects: [{ name: object, label: object, fields: {} }], apps: [{ name: `${object}_app`, label: object }] });
+  const withObjects = (manifest: Record<string, unknown>, object: string, field = 'a'): ObjectStackDefinition =>
+    raw({
+      manifest,
+      objects: [{ name: object, label: object, fields: { [field]: { type: 'text', label: field } } }],
+      apps: [{ name: `${object}_app`, label: object }],
+    });
+
+  /**
+   * The criterion, as a function of the COMPOSITION rather than of one fixture:
+   * does the union across the package bodies reproduce what the pick-one
+   * composition flattens?
+   *
+   * ⚠️ It is spelled once and applied to BOTH a disjoint and a COLLIDING
+   * fixture, because a criterion asserted only where it holds cannot fail. The
+   * first shape of this block asserted it on the disjoint fixture alone and was
+   * blind to the case that matters: composition RECONCILES two packages'
+   * same-named objects, and the reconciled copy lives only in the flattened
+   * half (review of PR #19666).
+   */
+  const bodiesReproduceFlattened = (
+    stacks: ObjectStackDefinition[],
+    key: 'objects' | 'apps' | 'actions',
+    objectConflict?: 'merge' | 'override',
+  ): boolean => {
+    // The SAME conflict strategy on both sides — otherwise the flattened half
+    // is composed under a rule the preserve run never used, and a colliding
+    // fixture would die in the default strategy's refusal instead of being
+    // measured.
+    const preserved = composeStacks(stacks, { manifest: 'preserve', ...(objectConflict ? { objectConflict } : {}) });
+    const bodies = (preserved.packages ?? []).map((p) => p.manifest as Record<string, unknown>);
+    const fromBodies = bodies.flatMap((b) => (b[key] as unknown[]) ?? []);
+    const flattened = (composeStacks(stacks, objectConflict ? { objectConflict } : undefined) as unknown as Record<string, unknown>)[key] as unknown[] ?? [];
+    const norm = (items: unknown[]): string => JSON.stringify(items.map((i) => JSON.stringify(i)).sort());
+    return norm(fromBodies) === norm(flattened);
+  };
 
   it('#14512 — a multi-package artifact carries its collections ONCE, in the package bodies', () => {
     const stacks = [withObjects(crmManifest, 'crm_account'), withObjects(cpqManifest, 'cpq_quote')];
@@ -339,14 +372,70 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
     // And nothing lost: the union across the bodies is exactly what the
     // pick-one composition flattens, which is the criterion that makes this a
     // copy REMOVAL rather than a narrowing of what the artifact carries.
-    const bodies = (preserved.packages ?? []).map((p) => p.manifest as Record<string, unknown>);
-    const byDefault = composeStacks(stacks);
-    expect(bodies.flatMap((b) => (b.objects as { name: string }[]) ?? [])).toEqual(byDefault.objects);
-    expect(bodies.flatMap((b) => (b.apps as { name: string }[]) ?? [])).toEqual(byDefault.apps);
+    expect(bodiesReproduceFlattened(stacks, 'objects')).toBe(true);
+    expect(bodiesReproduceFlattened(stacks, 'apps')).toBe(true);
 
     // The envelope is untouched — `manifest` above, and `packages` itself.
     expect(preserved.manifest?.id).toBe('com.example.crm.cpq');
     expect(idsOf(preserved)).toEqual(['com.example.crm', 'com.example.crm.cpq']);
+  });
+
+  it.each(['merge', 'override'] as const)(
+    "#14512 — keeps the flattened copy when `objectConflict: '%s'` RECONCILED two packages' object",
+    (strategy) => {
+      // ⭐ The case the first shape of this block could not see. Both packages
+      // declare `crm_account`; composition reconciles them into ONE object and
+      // the package bodies keep the two unreconciled halves, so the flattened
+      // copy is not a copy of anything the bodies carry. Deleting it would hand
+      // a consumer two conflicting partial objects where it receives one
+      // reconciled object today.
+      const stacks = [withObjects(crmManifest, 'crm_account', 'from_crm'), withObjects(cpqManifest, 'crm_account', 'from_cpq')];
+      const preserved = composeStacks(stacks, { manifest: 'preserve', objectConflict: strategy });
+
+      // The criterion is FALSE here — asserted, so the helper above is
+      // exercised in the direction that can fail.
+      expect(bodiesReproduceFlattened(stacks, 'objects', strategy)).toBe(false);
+
+      // …so the emitter keeps today's additive shape, and what it keeps is the
+      // RECONCILED object, byte-for-byte what the pick-one composition built.
+      expect(preserved.objects).toEqual(composeStacks(stacks, { objectConflict: strategy }).objects);
+      expect((preserved.objects ?? []).map((o) => o.name)).toEqual(['crm_account']);
+
+      // The bodies still carry their own halves, and the package list is intact.
+      const bodies = (preserved.packages ?? []).map((p) => p.manifest as Record<string, unknown>);
+      expect(bodies.flatMap((b) => (b.objects as { name: string }[]) ?? []).map((o) => o.name))
+        .toEqual(['crm_account', 'crm_account']);
+      expect(idsOf(preserved)).toEqual(['com.example.crm', 'com.example.crm.cpq']);
+    },
+  );
+
+  it('#14512 — keeps the flattened copy when a package binds an action onto a SIBLING package\'s object', () => {
+    // The second way the two halves diverge without any name colliding:
+    // `mergeActionsIntoObjects` binds a standalone action onto the object it
+    // names, including an object another package owns. The composed object
+    // carries that echo; the owning package's body does not.
+    const owner = raw({
+      manifest: crmManifest,
+      objects: [{ name: 'crm_account', label: 'Account', fields: { a: { type: 'text', label: 'a' } } }],
+    });
+    const binder = raw({
+      manifest: cpqManifest,
+      actions: [{ name: 'quote_account', label: 'Quote', objectName: 'crm_account', type: 'script', body: { language: 'js', source: 'return 1;' } }],
+    });
+    const stacks = [owner, binder];
+
+    expect(bodiesReproduceFlattened(stacks, 'objects')).toBe(false);
+
+    const preserved = composeStacks(stacks, { manifest: 'preserve' });
+    const boundOnTop = (preserved.objects ?? []).find((o) => o.name === 'crm_account');
+    expect((boundOnTop?.actions ?? []).map((a) => a.name)).toEqual(['quote_account']);
+
+    // The owning package's body carries the object WITHOUT the echo — which is
+    // precisely why the flattened copy may not be deleted here.
+    const ownerBody = (preserved.packages ?? [])
+      .map((p) => p.manifest as Record<string, unknown>)
+      .find((b) => b.id === 'com.example.crm');
+    expect(((ownerBody?.objects as Array<{ actions?: unknown[] }>)?.[0].actions ?? [])).toEqual([]);
   });
 
   it('#14512 — keeps the flattened copy when an input has NO manifest to own its collections', () => {

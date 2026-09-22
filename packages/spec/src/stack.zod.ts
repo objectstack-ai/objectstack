@@ -4023,6 +4023,133 @@ function packagesCarryEveryInputCollection(
 }
 
 /**
+ * A deterministic serialization with object keys sorted, so two copies of one
+ * definition that differ only in key order compare equal.
+ *
+ * Mirrors `stableIdentity` in `@objectstack/runtime`'s `artifact-collections.ts`
+ * — the reader that resolves these same collections back out of an artifact —
+ * for the reason the two must not disagree: this function decides whether a
+ * copy may be dropped, and that one decides what the dropped copy would have
+ * contributed. ⛔ Never throws: a cycle encodes as `[circular]` and a callable
+ * as `[function]`, because composition runs on the boot path of an `os dev`
+ * config as well as over parsed JSON, and the alternative to a wrong answer
+ * here is a build that dies inside a de-duplication helper. A callable
+ * collapses to one token, so two DIFFERENT handlers compare equal — that is
+ * safe in this direction only: `functions` is compared as a whole record and a
+ * disagreement there is answered by KEEPING the flattened copy.
+ * @internal
+ */
+function stableCollectionIdentity(value: unknown): string {
+  const seen = new WeakSet<object>();
+  const encode = (v: unknown): unknown => {
+    if (typeof v === 'function') return '[function]';
+    if (typeof v === 'bigint') return `${v}n`;
+    if (v === null || typeof v !== 'object') return v;
+    if (seen.has(v as object)) return '[circular]';
+    seen.add(v as object);
+    if (Array.isArray(v)) return v.map(encode);
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(v as Record<string, unknown>).sort()) {
+      out[key] = encode((v as Record<string, unknown>)[key]);
+    }
+    return out;
+  };
+  try {
+    return JSON.stringify(encode(value)) ?? 'undefined';
+  } catch {
+    return '[unserializable]';
+  }
+}
+
+/**
+ * Does `packages` REPRODUCE the flattened collections this composition would
+ * otherwise carry — every item, unaltered? (ADR-0130 D4 option B, #14512.)
+ *
+ * ## Why attribution is not enough, measured
+ *
+ * {@link packagesCarryEveryInputCollection} proves every INPUT's collections
+ * reached a body. That is a different claim from the one the strip needs,
+ * because {@link assemblePackageBody} folds the **input** stack while the
+ * flattened top level holds the **composed** result, and composition is not
+ * always a concatenation:
+ *
+ * - `objectConflict: 'merge'` / `'override'` RECONCILE two packages'
+ *   same-named objects into one. The copy this strip would delete is the
+ *   reconciled one; the bodies hold the two unreconciled halves. Measured on a
+ *   two-package `merge` composition: the artifact's registration-path reader
+ *   answers ONE object carrying both packages' fields with the flattened copy
+ *   present, and TWO conflicting partial objects with it gone.
+ * - {@link mergeActionsIntoObjects} binds a standalone action onto the object
+ *   it names, INCLUDING an object a sibling package owns. The composed object
+ *   carries that echo; the owning package's body does not.
+ *
+ * Neither is a shape difference — the collections' declarations are identical
+ * on both sides — and neither is refused: both compose legally today. So the
+ * emitter asks the question it actually depends on, per collection, and keeps
+ * the additive shape whenever the answer is no.
+ *
+ * ## The comparison, and its granularity
+ *
+ * Multiset equality over {@link stableCollectionIdentity}, per key: every item
+ * the flattened half carries must be carried by exactly one body, and no body
+ * may carry an item the flattened half does not. ⛔ Not array-ORDER equality:
+ * a `packages`-carrying artifact registers in dependency-topological order
+ * (ADR-0130 D5), and a resolved collection's order is package order rather
+ * than the flattened array's, so requiring order here would keep the copy in
+ * cases where nothing at all is lost. What it does refuse is content: an item
+ * altered, added or reconciled in the flattened half fails the test.
+ *
+ * A collection key carried as a RECORD (`functions`, `datasources` in its
+ * record spelling) is compared whole, against the bodies merged in package
+ * order with the first declaration winning. A key the bodies carry and the
+ * flattened half does not fails too — the conservative direction, since the
+ * strip may only ever remove a copy of something.
+ * @internal
+ */
+function packagesReproduceComposedCollections(
+  artifact: Record<string, unknown>,
+  entries: readonly ArtifactPackage[],
+): boolean {
+  const bodies = entries.map((entry) => (entry as { manifest?: unknown }).manifest)
+    .filter((body): body is Record<string, unknown> => body !== null && typeof body === 'object');
+  if (bodies.length !== entries.length) return false;
+
+  for (const key of packageOwnedCollectionKeys()) {
+    const top = artifact[key];
+    const declared = bodies.map((body) => body[key]).filter((value) => value !== undefined);
+    if (top === undefined && declared.length === 0) continue;
+    if (top === undefined) return false;
+
+    if (Array.isArray(top) || declared.some((value) => Array.isArray(value))) {
+      if (!Array.isArray(top)) return false;
+      const fromBodies = declared.flatMap((value) => (Array.isArray(value) ? value : [value]));
+      if (fromBodies.length !== top.length) return false;
+      const left = top.map(stableCollectionIdentity).sort();
+      const right = fromBodies.map(stableCollectionIdentity).sort();
+      for (let i = 0; i < left.length; i += 1) if (left[i] !== right[i]) return false;
+      continue;
+    }
+
+    if (top !== null && typeof top === 'object') {
+      const merged: Record<string, unknown> = {};
+      for (const value of declared) {
+        if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+        for (const [entryKey, entryValue] of Object.entries(value as Record<string, unknown>)) {
+          if (!(entryKey in merged)) merged[entryKey] = entryValue;
+        }
+      }
+      if (stableCollectionIdentity(merged) !== stableCollectionIdentity(top)) return false;
+      continue;
+    }
+
+    // A scalar is not a shape any collection key declares; nothing here can
+    // establish that a body reproduces it, so the copy stays.
+    return false;
+  }
+  return true;
+}
+
+/**
  * Fold ONE input stack into the assembled package body the artifact carries
  * (ADR-0130 D4; #14242 B).
  *
@@ -4358,26 +4485,30 @@ export function composeStacks(
     throw new Error(formatComposedActionKeyCollisions(actionCollisions));
   }
 
-  // 7. `manifest: 'preserve'` — a MULTI-package artifact carries each
-  //    definition ONCE, under the package that owns it, so the flattened copy
-  //    is not emitted at all (ADR-0130 D4 addendum 2026-09-22, maintainer
-  //    ruling batch #23). AFTER steps 3b and 6, which read the composed
-  //    collections to refuse an artifact nobody should be able to build: the
-  //    emitted shape narrows, the refusals do not.
-  if (opts.manifest === 'preserve') {
-    const entries = Array.isArray(composed.packages) ? (composed.packages as ArtifactPackage[]) : [];
-    if (packagesCarryEveryInputCollection(stacks, entries)) {
-      for (const key of packageOwnedCollectionKeys()) delete composed[key];
-    }
-  }
-
-  // 8. Bind every standalone action to its object — ONCE. Each input built by
+  // 7. Bind every standalone action to its object — ONCE. Each input built by
   //    `defineStack` already carries its own bound actions on its objects (the
   //    echo step 6 steps around), and the surviving objects reach here as-is,
   //    so the merge appends only what an object does not already carry by
-  //    identity (#14847): the other inputs' actions bound to it. A stripped
-  //    multi-package artifact reaches it with neither `objects` nor `actions`,
-  //    where it is the identity function — the per-package binding is each
-  //    body's own, performed by the `defineStack` that built that input.
-  return mergeActionsIntoObjects(composed as ObjectStackDefinition);
+  //    identity (#14847): the other inputs' actions bound to it.
+  const artifact = mergeActionsIntoObjects(composed as ObjectStackDefinition) as Record<string, unknown>;
+
+  // 8. `manifest: 'preserve'` — a MULTI-package artifact carries each
+  //    definition ONCE, under the package that owns it, so the flattened copy
+  //    is not emitted at all (ADR-0130 D4 addendum 2026-09-22, maintainer
+  //    ruling batch #23).
+  //
+  //    LAST, and that position is load-bearing: what may be deleted is what
+  //    step 7 actually produced, so the reproduction test below reads the
+  //    FINAL composed collections rather than an earlier draft of them. Steps
+  //    3b and 6 keep reading the flattened collections before this point —
+  //    the emitted shape narrows, the refusals do not.
+  if (opts.manifest === 'preserve') {
+    const entries = Array.isArray(artifact.packages) ? (artifact.packages as ArtifactPackage[]) : [];
+    if (packagesCarryEveryInputCollection(stacks, entries)
+      && packagesReproduceComposedCollections(artifact, entries)) {
+      for (const key of packageOwnedCollectionKeys()) delete artifact[key];
+    }
+  }
+
+  return artifact as ObjectStackDefinition;
 }
