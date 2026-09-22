@@ -289,7 +289,7 @@ function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T 
     const refusal = metaUrlSpellingRefusal(request.type);
     if (refusal) {
         const err = new Error(
-            `[invalid_request] '${request.type}' is not a recognised spelling of metadata type `
+            `'${request.type}' is not a recognised spelling of metadata type `
             + `'${refusal.declared}'. Address it as '${refusal.declared}' or '${refusal.hint}'. `
             + `Refused rather than treated as a plugin-registered type, because forwarding an unrecognised `
             + `spelling of a declared type would create a second namespace under type='${request.type}'.`,
@@ -2304,8 +2304,8 @@ function carryCatalogedErrorCode(target: Error, source: unknown): void {
  * met. It is the inverse and bounded question: **did we author this sentence
  * for a caller?** A producer that declared 4xx has said the failure is the
  * caller's to fix and has written the remedy into the message — the
- * self-correcting refusals `SysMetadataRepository` raises (`[item_locked]`,
- * `[writable_package_required]`, `[no_draft]`, …) are exactly that, and they
+ * self-correcting refusals `SysMetadataRepository` raises (`ITEM_LOCKED`,
+ * `WRITABLE_PACKAGE_REQUIRED`, `NO_DRAFT`, …) are exactly that, and they
  * must survive intact. Everything else is withheld by DEFAULT, so a dialect
  * this repo has never run is handled correctly without anyone having enumerated
  * it.
@@ -2639,7 +2639,7 @@ export function seedRequestValidationError(zodIssues: unknown): Error {
     // refusal thread it onto `seedApplied.issues` beside the headline, so
     // the author's curated per-key prose still arrives exactly once.
     const err = new Error(
-        `[invalid_metadata] the published seed bodies failed spec validation: `
+        `The published seed bodies failed spec validation: `
         + metadataIssueHeadline(issues),
     );
     (err as any).code = 'INVALID_METADATA';
@@ -8201,7 +8201,7 @@ export class ObjectStackProtocolImplementation implements
         if (readState === 'draft') {
             if (item === undefined) {
                 const err: any = new Error(
-                    `[no_draft] No pending draft exists for ${request.type}/${request.name}.`,
+                    `No pending draft exists for ${request.type}/${request.name}.`,
                 );
                 err.code = 'NO_DRAFT';
                 err.status = 404;
@@ -13521,7 +13521,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private static codeOnlyCreateError(type: string): Error {
         const err = new Error(
-            `[not_creatable] Metadata type '${type}' is code-only: the metadata-type registry declares `
+            `Metadata type '${type}' is code-only: the metadata-type registry declares `
             + `allowRuntimeCreate=false and allowOrgOverride=false, so it cannot be created through the `
             + `runtime metadata API (PUT /api/v1/meta/${type}/:name) on any kernel.`
             + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
@@ -13540,7 +13540,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private static codeOnlyOverrideError(type: string, name: string): Error {
         const err = new Error(
-            `[not_overridable] Metadata item '${type}/${name}' is provided by a code package and its type is `
+            `Metadata item '${type}/${name}' is provided by a code package and its type is `
             + `code-only (allowRuntimeCreate=false, allowOrgOverride=false), so it cannot be overlaid through `
             + `the runtime metadata API on any kernel.`
             + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
@@ -13636,7 +13636,7 @@ export class ObjectStackProtocolImplementation implements
         if (this.isOverlayAllowed(type)) return null;
         if (!this.STATIC_REGISTRY_TYPES.has(singular) && !this.STATIC_REGISTRY_TYPES.has(type)) return null;
         const err: any = new Error(
-            `[not_overridable] Metadata item '${type}/${name}' cannot be written org-scoped `
+            `Metadata item '${type}/${name}' cannot be written org-scoped `
             + `(organization '${organizationId}'). `
             + `The metadata-type registry declares allowOrgOverride=false for '${singular}', so the platform has `
             + `no per-org channel for it: boot hydration loads env-wide rows only, so this row would be absent `
@@ -14023,7 +14023,7 @@ export class ObjectStackProtocolImplementation implements
         const canonical = canonicalMetaType(entry.type);
         if (canonical !== entry.type) {
             const err: any = new Error(
-                `[audit_type_not_canonical] Refusing to write a sys_metadata_audit row under the `
+                `Refusing to write a sys_metadata_audit row under the `
                 + `non-canonical metadata type '${entry.type}' (canonical: '${canonical}') for `
                 + `'${entry.name}'. ADR-0010's trail is keyed on (type, name) and read back through `
                 + `the '/meta' boundary, which folds — a row filed under '${entry.type}' is a row no `
@@ -14090,7 +14090,7 @@ export class ObjectStackProtocolImplementation implements
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
         const err = new Error(
-            `[item_locked] ${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
+            `${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
             + `${reason} — See ADR-0010 §3.3.`,
         );
         (err as any).code = 'ITEM_LOCKED';
@@ -14158,7 +14158,7 @@ export class ObjectStackProtocolImplementation implements
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
         const err = new Error(
-            `[item_locked] ${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
+            `${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
             + `${reason} — See ADR-0010 §3.3.`,
         );
         (err as any).code = 'ITEM_LOCKED';
@@ -14451,7 +14451,7 @@ export class ObjectStackProtocolImplementation implements
         name: string, rowPackageId: string, ownerPackageId: string,
     ): Error {
         const err: any = new Error(
-            `[object_overlay_package_mismatch] Cannot layer object '${name}': the overlay is bound to package `
+            `Cannot layer object '${name}': the overlay is bound to package `
             + `'${rowPackageId}', but the object is owned by package '${ownerPackageId}'. `
             + `An object has exactly one registry entry, so it can carry exactly one overlay layer — bind the `
             + `customization to '${ownerPackageId}', or have '${rowPackageId}' extend the object instead. `
@@ -14609,7 +14609,7 @@ export class ObjectStackProtocolImplementation implements
         const canonicalType = canonicalMetaType(type);
         if (canonicalType !== type) {
             const err: any = new Error(
-                `[registry_type_not_canonical] Refusing to register a SchemaRegistry overlay entry under `
+                `Refusing to register a SchemaRegistry overlay entry under `
                 + `the non-canonical metadata type '${type}' (canonical: '${canonicalType}'). The registry `
                 + `holds exactly one plain key per (type, name) and every reader addresses it through the `
                 + `'/meta' boundary, which folds — an entry minted under '${type}' is a second namespace no `
@@ -15298,7 +15298,7 @@ export class ObjectStackProtocolImplementation implements
     private refuseUngrammaticalMetaItemName(request: { type: string, name: string }): void {
         if (METADATA_ITEM_NAME_PATTERN.test(request.name)) return;
         const err = new Error(
-            `[invalid_request] ${JSON.stringify(request.name)} is not a legal metadata item name. `
+            `${JSON.stringify(request.name)} is not a legal metadata item name. `
             + `Item names are lowercase snake_case segments, optionally dot-qualified — `
             + `/^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$/ — e.g. 'crm_lead' or 'crm_lead.pipeline'. `
             + `No slashes, spaces, uppercase, empty segments, or leading/trailing dots. `
@@ -15387,7 +15387,7 @@ export class ObjectStackProtocolImplementation implements
         // Exemption 2 — the namespace predates this write.
         if (await this.metaTypeNamespaceExists(unrecognised.type)) return;
         const err = new Error(
-            `[invalid_request] '${unrecognised.type}' is not a metadata type. The platform declares `
+            `'${unrecognised.type}' is not a metadata type. The platform declares `
             + `no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one `
             + `either — so this write would mint a sys_metadata namespace under `
             + `type='${unrecognised.type}' that nothing reads and nothing serves. Address a real `
@@ -15460,10 +15460,10 @@ export class ObjectStackProtocolImplementation implements
         // failure and break that convention. The structural twin is
         // {@link rollbackMetaItem}'s own opening guard — same class, same
         // position, a malformed REQUEST ENVELOPE rather than an off-spec
-        // document — which is `[invalid_request]`/400.
+        // document — which is `INVALID_REQUEST`/400.
         if (!request.item) {
             const err: any = new Error(
-                `[invalid_request] saveMetaItem requires an 'item' body for '${request.type}/${request.name}'. `
+                `saveMetaItem requires an 'item' body for '${request.type}/${request.name}'. `
                 + `Send the metadata document as the request body, or wrap it as {"item": {...}} / {"metadata": {...}}. `
                 + `An explicitly null item is refused rather than persisted as an empty document.`,
             );
@@ -15702,7 +15702,7 @@ export class ObjectStackProtocolImplementation implements
                     );
                 }
                 const err = new Error(
-                    `[not_overridable] Metadata item '${request.type}/${request.name}' is provided by a code package `
+                    `Metadata item '${request.type}/${request.name}' is provided by a code package `
                     + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
                     + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. `
                     + `See docs/adr/0005-metadata-customization-overlay.md.`
@@ -15857,7 +15857,7 @@ export class ObjectStackProtocolImplementation implements
                         // circle. See {@link destructiveChangeRemedy}.
                         const summary = issues.slice(0, 3).map((i) => i.message).join('; ');
                         const err = new Error(
-                            `[destructive_change] ${request.type}/${request.name} would drop or transform existing data: ${summary}`
+                            `${request.type}/${request.name} would drop or transform existing data: ${summary}`
                             + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '')
                             + ` — ${destructiveChangeRemedy(request.writeFace, request.name)}`
                         );
@@ -15895,7 +15895,7 @@ export class ObjectStackProtocolImplementation implements
                 && 'code' in it && 'overlay' in it && 'overlayScope' in it && 'effective' in it;
             if (looksLikeLayeredEnvelope) {
                 const err = new Error(
-                    `[invalid_metadata] ${request.type}/${request.name}: the request body is a layered read `
+                    `${request.type}/${request.name}: the request body is a layered read `
                     + `envelope ({ code, overlay, overlayScope, effective }), not a metadata body. `
                     + `Unwrap and send the effective/overlay document instead — the layered shape is read-only `
                     + `(GET ?layers=true) and must never be persisted.`
@@ -15992,7 +15992,7 @@ export class ObjectStackProtocolImplementation implements
                         // resubmitting the same body cannot help.
                         const first = result.conflicts[0]!;
                         const err = new Error(
-                            `[flow_conversion_conflict] ${request.type}/${request.name}: conversion refused — `
+                            `${request.type}/${request.name}: conversion refused — `
                             + `'${first.token}' at ${first.path} is a live name in this environment `
                             + `(${result.conflicts.length} conflict(s)). ${first.message}`
                         );
@@ -16045,7 +16045,7 @@ export class ObjectStackProtocolImplementation implements
                     // with it. `err.issues` below is unconditional — the split
                     // decides only what the SENTENCE repeats.
                     const err = new Error(
-                        `[invalid_metadata] ${request.type}/${request.name} failed spec validation: `
+                        `${request.type}/${request.name} failed spec validation: `
                         + specValidationFindings(request.writeFace, issues)
                     );
                     (err as any).code = 'INVALID_METADATA';
@@ -16456,7 +16456,7 @@ export class ObjectStackProtocolImplementation implements
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 const conflict = new Error(
-                    `[metadata_conflict] ${request.type}/${request.name} has been modified since you loaded it. `
+                    `${request.type}/${request.name} has been modified since you loaded it. `
                     + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                 );
                 (conflict as any).code = 'METADATA_CONFLICT';
@@ -16855,7 +16855,7 @@ export class ObjectStackProtocolImplementation implements
                 // this line changed, not assumed: every refusal this `try` can
                 // receive declares 4xx — `saveMetaItem`'s spec rejection
                 // (422 `INVALID_METADATA`), `SysMetadataRepository`'s
-                // `[item_locked]` / `[writable_package_required]` (403 / 422) —
+                // `ITEM_LOCKED` / `WRITABLE_PACKAGE_REQUIRED` (403 / 422) —
                 // so each is still quoted verbatim and still names the fix.
                 //
                 // ⚠️ The old fallback was `String(e)`, which is itself a
@@ -16956,7 +16956,7 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * Promote the pending draft overlay to the live (`active`) row.
-     * Records a history event with `op='publish'`. 404 (`[no_draft]`)
+     * Records a history event with `op='publish'`. 404 (`NO_DRAFT`)
      * when there is nothing to publish.
      */
     async publishMetaItem(request: {
@@ -17344,7 +17344,7 @@ export class ObjectStackProtocolImplementation implements
         if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)
             && !ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularType)) {
             const err: any = new Error(
-                `[not_overridable] Metadata type '${request.type}' is not draftable — no overlay/runtime-create permission.`,
+                `Metadata type '${request.type}' is not draftable — no overlay/runtime-create permission.`,
             );
             err.code = 'NOT_OVERRIDABLE';
             err.status = 403;
@@ -17467,7 +17467,7 @@ export class ObjectStackProtocolImplementation implements
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 const conflict: any = new Error(
-                    `[metadata_conflict] ${request.type}/${request.name} published row advanced while you held the draft. `
+                    `${request.type}/${request.name} published row advanced while you held the draft. `
                     + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                 );
                 conflict.code = 'METADATA_CONFLICT';
@@ -18998,7 +18998,7 @@ export class ObjectStackProtocolImplementation implements
         // composition `resolveActiveOrganizationId` makes real.
         if (request.organizationId && request.allTenants === true) {
             const err = new Error(
-                `[tenant_scope_required] Refusing to uninstall '${request.packageId}':`
+                `Refusing to uninstall '${request.packageId}':`
                 + ` organizationId ('${request.organizationId}') and allTenants: true are mutually exclusive —`
                 + ` one scopes the uninstall to a single tenant, the other clears every tenant's rows.`
                 + ` — pass organizationId alone to scope it, or allTenants: true alone to confirm the cross-tenant uninstall.`
@@ -19013,7 +19013,7 @@ export class ObjectStackProtocolImplementation implements
         // affirmative `true` does.
         if (!request.organizationId && request.allTenants !== true) {
             const err = new Error(
-                `[tenant_scope_required] Refusing to uninstall '${request.packageId}' with no organization scope:`
+                `Refusing to uninstall '${request.packageId}' with no organization scope:`
                 + ` an uninstall that names neither an organization nor an explicit cross-tenant intent would delete`
                 + ` EVERY organization's rows for this package.`
                 + ` — pass organizationId to scope it, or allTenants: true to confirm the cross-tenant uninstall.`
@@ -20185,7 +20185,7 @@ export class ObjectStackProtocolImplementation implements
         }
         const row = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
         if (!row) {
-            const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);
+            const err: any = new Error(`No commit '${request.commitId}'.`);
             err.code = 'COMMIT_NOT_FOUND';
             err.status = 404;
             throw err;
@@ -20593,10 +20593,10 @@ export class ObjectStackProtocolImplementation implements
                 // field carried `SQLITE_ERROR: no such table: sys_metadata`.
                 //
                 // Every authored refusal this `try` can receive declares 4xx —
-                // `SysMetadataRepository`'s `[version_not_found]` 404 (measured
-                // end to end and still quoted whole), `[no_draft]` 404,
-                // `[version_not_restorable]` 409, `[item_locked]` 403,
-                // `[writable_package_required]` 422 — so the self-correcting
+                // `SysMetadataRepository`'s `VERSION_NOT_FOUND` 404 (measured
+                // end to end and still quoted whole), `NO_DRAFT` 404,
+                // `VERSION_NOT_RESTORABLE` 409, `ITEM_LOCKED` 403,
+                // `WRITABLE_PACKAGE_REQUIRED` 422 — so the self-correcting
                 // sentences survive and only the driver line is withheld.
                 // [#8441] …and the `code` limb beside it, which #8333 left
                 // alone as a different field with a different rule. Measured
@@ -20709,7 +20709,7 @@ export class ObjectStackProtocolImplementation implements
         }
         const target = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
         if (!target) {
-            const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);
+            const err: any = new Error(`No commit '${request.commitId}'.`);
             err.code = 'COMMIT_NOT_FOUND';
             err.status = 404;
             throw err;
@@ -20753,7 +20753,7 @@ export class ObjectStackProtocolImplementation implements
                 // sys_metadata` reached the field.
                 //
                 // This `try` wraps exactly one call, and `revertCommit` throws
-                // only refusals it declared — `[commit_not_found]` 404
+                // only refusals it declared — `COMMIT_NOT_FOUND` 404
                 // (measured, still quoted whole) and the lock/authorization
                 // 4xx above it; its PER-ITEM failures never throw at all, they
                 // are collected into its own `failed[]` (P11).
@@ -20772,8 +20772,8 @@ export class ObjectStackProtocolImplementation implements
     /**
      * Restore the body recorded at history `toVersion` as the new
      * live row. Writes a history event with `op='revert'`. 404
-     * (`[version_not_found]`) when the target version doesn't exist;
-     * 409 (`[version_not_restorable]`) when the target is a delete
+     * (`VERSION_NOT_FOUND`) when the target version doesn't exist;
+     * 409 (`VERSION_NOT_RESTORABLE`) when the target is a delete
      * tombstone (no body to bring back).
      */
     async rollbackMetaItem(request: {
@@ -20792,7 +20792,7 @@ export class ObjectStackProtocolImplementation implements
     }> {
         if (!Number.isFinite(request.toVersion) || request.toVersion < 1) {
             const err: any = new Error(
-                `[invalid_request] rollbackMetaItem requires a positive integer 'toVersion' (got ${request.toVersion}).`,
+                `rollbackMetaItem requires a positive integer 'toVersion' (got ${request.toVersion}).`,
             );
             err.code = 'INVALID_REQUEST';
             err.status = 400;
@@ -20807,7 +20807,7 @@ export class ObjectStackProtocolImplementation implements
         // the very top: that is the position {@link saveMetaItem} documents for
         // this exact pair, calling this method's opening guard its structural
         // twin — a malformed request envelope is refused before its type key is
-        // canonicalised, and both refusals are `[invalid_request]`/400 anyway.
+        // canonicalised, and both refusals are `INVALID_REQUEST`/400 anyway.
         //
         // What the fold reaches here, measured rather than assumed:
         //
@@ -20825,7 +20825,7 @@ export class ObjectStackProtocolImplementation implements
         //    `external_catalog`, `translation`), which stayed plural through
         //    the manifest map and so took the PERMISSIVE PLUGIN branch — the
         //    #7894 shape, one verb over.
-        //  • the `[not_overridable]` refusal, the two ADR-0010 audit rows and
+        //  • the `NOT_OVERRIDABLE` refusal, the two ADR-0010 audit rows and
         //    both receipt sentences, which read `request.type` and so reported
         //    the CALLER's spelling for a row written under the canonical one.
         //    `recordMetadataAudit` re-folds through `PLURAL_TO_SINGULAR`
@@ -20854,7 +20854,7 @@ export class ObjectStackProtocolImplementation implements
         if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)
             && !ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularType)) {
             const err: any = new Error(
-                `[not_overridable] Metadata type '${request.type}' is not revertable — no overlay/runtime-create permission.`,
+                `Metadata type '${request.type}' is not revertable — no overlay/runtime-create permission.`,
             );
             err.code = 'NOT_OVERRIDABLE';
             err.status = 403;
@@ -20991,7 +20991,7 @@ export class ObjectStackProtocolImplementation implements
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 const conflict: any = new Error(
-                    `[metadata_conflict] ${request.type}/${request.name} advanced during rollback. `
+                    `${request.type}/${request.name} advanced during rollback. `
                     + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                 );
                 conflict.code = 'METADATA_CONFLICT';
@@ -21350,7 +21350,7 @@ export class ObjectStackProtocolImplementation implements
                 .mergesOverlayAtRead(request.type);
             if (artifactBacked && !overlayAllowed && !legacyOverlayRemoval) {
                 const err = new Error(
-                    `[not_overridable] Metadata item '${request.type}/${request.name}' is provided by a code package `
+                    `Metadata item '${request.type}/${request.name}' is provided by a code package `
                     + `and the type has not opted into per-org overlay writes. `
                     + `See docs/adr/0005-metadata-customization-overlay.md.`
                 );
@@ -21360,7 +21360,7 @@ export class ObjectStackProtocolImplementation implements
             }
             if (!artifactBacked && !overlayAllowed && !runtimeCreateAllowed) {
                 const err = new Error(
-                    `[not_creatable] Metadata type '${request.type}' does not allow runtime creation or deletion.`
+                    `Metadata type '${request.type}' does not allow runtime creation or deletion.`
                 );
                 (err as any).code = 'NOT_CREATABLE';
                 (err as any).status = 403;
@@ -21560,7 +21560,7 @@ export class ObjectStackProtocolImplementation implements
             } catch (err: any) {
                 if (err instanceof ConflictError) {
                     const conflict = new Error(
-                        `[metadata_conflict] ${request.type}/${request.name} has been modified since you loaded it. `
+                        `${request.type}/${request.name} has been modified since you loaded it. `
                         + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                     );
                     (conflict as any).code = 'METADATA_CONFLICT';
@@ -22395,16 +22395,17 @@ export class ObjectStackProtocolImplementation implements
         // `rest-server-meta-references-refusal-envelope.test.ts` — and the
         // producer-side ORDER by `protocol.reference-target-unanswerable.test.ts`.
         //
-        // ⛔ And it opens with NO bracketed tag. The `[item_locked]`-style tags
-        // this file writes elsewhere are lowercase restatements of the throw's OWN
-        // declared `code`, so the wire carries the same token on the `code` axis;
-        // this refusal's code is `NOT_IMPLEMENTED`, so an `[unanswerable_target]`
-        // opener restated nothing the envelope carries and nothing ever read it.
-        // #12975 (2026-08-29) rules that `error` is HUMAN LANGUAGE while `code` is
-        // the MACHINE TOKEN, and since #15685 this prose reaches the operator
-        // VERBATIM — so the tag was the first thing they read. What separates this
-        // refusal from the route's other 501 is the sentence itself, not a tag.
-        // Its absence is pinned by `protocol.reference-target-unanswerable.test.ts`.
+        // ⛔ And it opens with NO bracketed tag — as no refusal this file raises
+        // does any more. The lowercase `[item_locked]`-style openers this producer
+        // once wrote were restatements of the throw's OWN declared `code`, so the
+        // wire already carried the same token on the `code` axis; they are gone,
+        // and `protocol.bracketed-refusal-opener-absence.test.ts` pins their
+        // absence across the whole family. #12975 (2026-08-29) rules that `error` is HUMAN
+        // LANGUAGE while `code` is the MACHINE TOKEN, and since #15685 this prose
+        // reaches the operator VERBATIM — so an opener is the first thing they
+        // read. What separates this refusal from the route's other 501 is the
+        // sentence itself, not a tag. Its absence is pinned here too, by
+        // `protocol.reference-target-unanswerable.test.ts`.
         if (REFERENCE_SITES.unanswerableTargetTypes.includes(singularTarget)) {
             const owner = targetName.includes('.') ? targetName.slice(0, targetName.indexOf('.')) : '<object>';
             const err = new Error(
