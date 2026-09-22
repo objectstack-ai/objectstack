@@ -45,6 +45,13 @@
  *      be re-labelled with a code of its own choosing.
  */
 
+// [#17551] The dynamic `import()`s below are paid HERE, at module scope, so the
+// transform lands during COLLECTION rather than inside a clocked window
+// (`pnpm check:test-source-alias`; this package resolves the specifier through
+// `dist/`). The dynamic calls stay where they are — this only decides where the
+// first load is paid.
+import '@objectstack/spec/api';
+
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import type { Logger } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '@objectstack/service-analytics';
