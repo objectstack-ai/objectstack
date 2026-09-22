@@ -176,9 +176,13 @@ describe('checkViewCompleteness — layout bindings', () => {
     // reporting that something is missing.
     expect(f.message).toContain('calendar.startDateField');
     expect(f.fix).toContain('startDateField');
-    // Severity is deliberately untouched here. Whether a renderer that
-    // refuses BY NAME still deserves WARNING under ADR-0078 §1 is #16577's
-    // question; correcting false prose does not answer it.
+    // Severity is untouched because it is already RULED, not because the
+    // question is open: #16577 ruled B (comment `5634033966`, card closed
+    // `completed` 2026-09-11) — a `calendar` route that refuses BY NAME
+    // stays warning-class under ADR-0078 §1, on the reasoning that BOTH
+    // doors are loud, `os validate` and render. That is the reading the
+    // assertions above re-measure, so this pin carries the ruling's
+    // evidence rather than standing in for a pending one.
     expect(f.severity).toBe('warning');
   });
 

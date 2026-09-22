@@ -227,10 +227,18 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *
  * Either way the author asked for a surface that does not render, while
  * authoring reports success: WARNING, not error (ADR-0078 §1). ⚠️ The
- * rubric's other half — refuse what renders NOTHING — is what [#16577] is
- * asking of this route now that some of these renderers answer with a
- * refusal. This table records what was measured and deliberately does not
- * pre-empt that ruling: nothing here moves a severity.
+ * rubric's other half — refuse what renders NOTHING — was put to [#16577]
+ * for the `type: 'calendar'` route and is SETTLED, not pending: ruled B
+ * (director seat, comment `5634033966`; the card closed `completed` on
+ * 2026-09-11), the route STAYS warning-class and is carried at `warning` by
+ * the table below. The ruling turns on BOTH doors being loud — loud at
+ * `os validate` (this warning) and loud at render (objectui#7029 deleted the
+ * `'start_date'` / `'end_date'` floors; `ObjectCalendar.getCalendarConfig`
+ * returns `null` and the named refusal screen is reachable) — which is
+ * exactly what the `calendar` row below now measures. So this table moves no
+ * severity because the severity is already RULED, and the corrected row is
+ * the evidence that ruling rests on. ⛔ Reopening it takes a new ruling,
+ * not a re-read; a row going stale is a reason to re-measure the ROW.
  *
  * Every entry names its measured renderer binding. The verify-then-enforce
  * gate this table sits behind (the audit's Tier-A had named only the first
@@ -256,7 +264,12 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   flat `startDateField`, and the `if (!calendarConfig)` arm renders the
  *   "Calendar configuration required" refusal screen, which names
  *   `startDateField` as the key to declare (objectui#8170 corrected that
- *   screen's second clause: `titleField` is NOT required). So the loss is
+ *   screen's second clause: `titleField` is NOT required). ⚠️ That literal
+ *   is the text RENDERED at the pin: objectui#10101 landed AFTER the pin and
+ *   moved it into a `tt('calendar.configRequired', …)` default, so on
+ *   objectui's head a non-English locale renders other words for the same
+ *   screen. Harmless for the console this repo ships — and the pin citation
+ *   below is what reds when the pin moves past it. So the loss is
  *   total rather than partial — every record, on every object — and the
  *   author is told at render time as well as here. Both reads are identical
  *   at the pin this repo builds against (`.objectui-sha` = `87af769e9`), so
