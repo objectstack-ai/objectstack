@@ -309,6 +309,20 @@ export const EXIT_USAGE = 2;
 export const EXIT_TREE = 3; // the tree reading failed; the dist/ reading passed
 export const EXIT_BOTH = 4;
 
+/**
+ * Which spelling the TREE reading probes. The dist reading always uses the
+ * positional marker; this is the ONLY place the two are allowed to diverge, so
+ * it is a named function and not an inline fallback -- inline, the wiring is
+ * invisible to the self-test, and the wiring is exactly what the split is.
+ *
+ * Nullish coalescing, never `||`: an empty source marker must stay empty and be
+ * refused upstream, not silently fall back to the emitted spelling, which is the
+ * defect this whole split exists to remove.
+ */
+export function treeReadingMarker({ marker, sourceMarker }) {
+  return sourceMarker ?? marker;
+}
+
 /** The one place the two readings are combined into a status. */
 export function exitCodeFor({ distOk, treeOk }) {
   if (distOk && treeOk) return EXIT_OK;
@@ -750,7 +764,7 @@ function run(argv) {
   // wrote. `--source-marker` is how they are told apart; without it the tree
   // reading falls back to the positional marker, which is correct exactly when
   // the build does not re-spell the literal.
-  const treeMarker = sourceMarker ?? marker;
+  const treeMarker = treeReadingMarker({ marker, sourceMarker });
   if (sourceMarker !== null) {
     console.log(`  tree reading probes the SOURCE spelling ${JSON.stringify(sourceMarker)} (--source-marker)`);
   }
@@ -795,7 +809,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'whole-tree accounting: the pure table': 26,
   'porcelain parsing': 3,
   'whole-tree accounting: a real git tree': 7,
-  'argv: the correct invocation is the only one': 16,
+  'argv: the correct invocation is the only one': 19,
   'the two-marker split: source spelling vs emitted spelling': 9,
 });
 
@@ -1025,6 +1039,9 @@ function selfTest() {
       ['omitting --source-marker leaves it null, never empty', parseArgs(['pkg', 'mk']).sourceMarker === null],
       ['a blank marker is still refused', typeof parseArgs(['pkg', '  ']).usage === 'string'],
       ['a third positional is still refused', typeof parseArgs(['pkg', 'mk', 'extra']).usage === 'string'],
+      ['without --source-marker the tree reading probes the positional marker', treeReadingMarker({ marker: 'emitted', sourceMarker: null }) === 'emitted'],
+      ['with --source-marker the tree reading probes THAT spelling', treeReadingMarker({ marker: 'emitted', sourceMarker: 'written' }) === 'written'],
+      ['the wiring is nullish-coalescing, so an empty source marker does NOT fall back', treeReadingMarker({ marker: 'emitted', sourceMarker: '' }) === ''],
     ];
     for (const [label, ok] of argvCases) check(label, ok);
     const exitCases = [
