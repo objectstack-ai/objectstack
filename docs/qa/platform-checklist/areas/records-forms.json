@@ -4100,6 +4100,83 @@
           "ref": "#sweep-2026-08-30"
         }
       ]
+    },
+    {
+      "id": "records-forms.predicate-relationship-traversal",
+      "title": "A validation rule reads a parent field one hop through a lookup",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)",
+        "a member who cannot read showcase_account — for the unreadable-parent clause"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_invoice — carries the script validation no_invoice_for_churned_account, whose condition reads record.account.status one hop through the `account` lookup (examples/app-showcase/src/data/objects/invoice.object.ts)",
+          "showcase_account — the referenced object; its `status` select carries the value 'churned' (examples/app-showcase/src/data/objects/account.object.ts)",
+          "at least one churned account and one non-churned account to invoice against"
+        ],
+        "knownGaps": [
+          "The unreadable-parent clause needs a persona who cannot read showcase_account. showcase_account is public_read_write in the showcase app, so no seeded persona fails to read it and that clause scores blocked(fixture) there — it is covered by unit test in packages/objectql (rule-relationship-traversal.test.ts) until a recipe supplies such a persona."
+        ]
+      },
+      "steps": [
+        "POST /api/v1/data/showcase_invoice with `account` pointing at a NON-churned account",
+        "POST /api/v1/data/showcase_invoice with `account` pointing at a CHURNED account",
+        "PATCH an existing invoice to REPOINT it at a churned account (the update path reads the FK off the merged record, not the patch alone)",
+        "as the persona who cannot read showcase_account, POST an invoice against any account"
+      ],
+      "acceptance": [
+        {
+          "clause": "the write PASSES when the parent field does not trip the rule — the traversal resolves, it does not fault",
+          "oracle": "api",
+          "verify": "2xx and the row is readable; the response carries no validation error, and in particular no 'could not be evaluated' fault",
+          "evidence": "the create response and the read-back"
+        },
+        {
+          "clause": "the write is REFUSED when the parent field trips the rule, carrying the AUTHORED message, not a fault",
+          "oracle": "api",
+          "verify": "400 VALIDATION_FAILED naming the rule no_invoice_for_churned_account, with the authored sentence about reactivating the account — a refusal that reads 'could not be evaluated' is a FAIL, not a pass",
+          "evidence": "the rejection envelope"
+        },
+        {
+          "clause": "a REPOINT on update is judged against the account the write lands on",
+          "oracle": "api",
+          "verify": "the PATCH onto a churned account is refused even though the patch alone carries no status, because the FK is read off the merged record",
+          "evidence": "the patch response"
+        },
+        {
+          "clause": "a parent the acting user CANNOT read FAULTS LOUDLY and rejects the write — never silently allowed",
+          "oracle": "api",
+          "verify": "the write is REJECTED with the unevaluable-rule envelope; a 2xx here is the defect this clause exists to catch",
+          "evidence": "the rejection envelope for the restricted persona"
+        }
+      ],
+      "negative": [
+        "a 2xx on the churned-account create is a FAIL — the rule did not run",
+        "a rejection whose text is the unevaluable-rule fault on the READABLE-parent cases is a FAIL: the related row was not preloaded and the rule is rejecting every write, which is the pre-capability behaviour",
+        "a 2xx for the persona who cannot read the parent is the WORST failure here — a rule guarding data the caller cannot see must never silently pass"
+      ],
+      "traps": [
+        "seed-data-thin"
+      ],
+      "source": [
+        "examples/app-showcase/src/data/objects/invoice.object.ts (no_invoice_for_churned_account)",
+        "packages/objectql/src/validation/rule-validator.ts (checkPredicate, hydrateRelated, collectPredicateRelationships)",
+        "packages/formula/src/relationship-traversal.ts (which hops a predicate names)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-22",
+          "change": "initial — ADR-0136 D2.4 acceptance for predicate relationship traversal; the capability's three ruled outcomes (passes / refuses / faults loudly on an unreadable parent)",
+          "ref": "claude/issue-18682-predicate-relationship-traversal"
+        }
+      ]
     }
   ]
 }
