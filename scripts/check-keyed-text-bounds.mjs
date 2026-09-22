@@ -1276,8 +1276,14 @@ function main() {
     + `Family read off the emitter: ${result.family.join(', ')}. `
     + `Allowlist: ${pending} pending, ${unboundable} unboundable, all rows still real. `
     + `${unclassified} unclassified field(s), none of them keyed. `
-    + `Authoring shape: 0 literal-shaped declarations across all ${result.counts.files} files — every `
-    + 'declaration is `ObjectSchema.create`.',
+    // ⚠️ Reported as what was SCANNED, never as "every declaration is the factory".
+    // The real tree holds no literal-shaped declaration, so this zero has no
+    // floor under it and a dead detector prints the identical line — measured by
+    // ablating the scan, which left this line claiming a clean tree while an
+    // unbounded keyed text column sat in it unjudged. The liveness proof is the
+    // `--self-test` battery's synthetic fixtures, not this number.
+    + `Authoring shape: ${result.counts.files} file(s) scanned for a non-factory declaration, `
+    + '0 found (this zero is not a floor — `--self-test` is what proves the scan can fire).',
   );
   console.log(provenanceLine(result.counts));
   return 0;
