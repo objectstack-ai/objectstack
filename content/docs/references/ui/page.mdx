@@ -216,7 +216,7 @@ View filter rule
 | **source** | `string` | optional | Source object name for the page |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | optional | Columns shown by the page. Blank = all object fields. Defined directly on the page (no view inheritance). |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Default sort order for the page, defined directly on the page. |
-| **filterBy** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Always-on page filter (base filter). |
+| **filterBy** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Always-on page filter (base filter). |
 | **levels** | `integer` | optional | Number of hierarchy levels to display |
 | **sourceView** | `string` | optional | @deprecated Legacy named-view inheritance. Define columns/sort/filterBy on the page instead. |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
@@ -274,7 +274,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object to query |
 | **view** | `string` | optional | Named view to apply |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in ComponentPropsMap shares; AND-combined with the filter of the named view. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in ComponentPropsMap shares; AND-combined with the filter of the named view. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order |
 | **limit** | `integer` | optional | Max records to display |
 

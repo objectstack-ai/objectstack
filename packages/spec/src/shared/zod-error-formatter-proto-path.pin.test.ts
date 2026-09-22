@@ -135,7 +135,7 @@ describe("zod renders a refusal whose path names an Object.prototype member (the
     // the path the issue named. On 4.4.3 every one of these three throws
     // `TypeError: Cannot read properties of undefined (reading 'push')`.
     const tree = z.treeifyError(result.error);
-    const assignments = ownValue(tree.properties, 'assignments');
+    const assignments = ownValue(ownValue(tree, 'properties'), 'assignments');
     expect(ownValue(ownValue(assignments, 'properties'), '__proto__')).toEqual({
       errors: [refusal],
     });
@@ -159,7 +159,7 @@ describe("zod renders a refusal whose path names an Object.prototype member (the
     const error = errorAtPath(['__proto__', 'polluted']);
 
     const tree = z.treeifyError(error);
-    const treeNode = ownValue(tree.properties, '__proto__');
+    const treeNode = ownValue(ownValue(tree, 'properties'), '__proto__');
     expect(ownValue(ownValue(treeNode, 'properties'), 'polluted')).toEqual({
       errors: [MESSAGE],
     });
@@ -177,7 +177,7 @@ describe("zod renders a refusal whose path names an Object.prototype member (the
       const error = errorAtPath(['config', member]);
 
       const tree = z.treeifyError(error);
-      const treeParent = ownValue(tree.properties, 'config');
+      const treeParent = ownValue(ownValue(tree, 'properties'), 'config');
       expect(ownValue(ownValue(treeParent, 'properties'), member)).toEqual({
         errors: [MESSAGE],
       });
@@ -204,7 +204,7 @@ describe("zod renders a refusal whose path names an Object.prototype member (the
     const error = errorAtPath(['assignments', 'ordinary']);
 
     const tree = z.treeifyError(error);
-    const parent = ownValue(tree.properties, 'assignments');
+    const parent = ownValue(ownValue(tree, 'properties'), 'assignments');
     expect(ownValue(ownValue(parent, 'properties'), 'ordinary')).toEqual({
       errors: [MESSAGE],
     });
