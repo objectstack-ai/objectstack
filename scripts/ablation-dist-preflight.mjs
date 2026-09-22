@@ -795,11 +795,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'whole-tree accounting: the pure table': 26,
   'porcelain parsing': 3,
   'whole-tree accounting: a real git tree': 7,
+  'argv: the correct invocation is the only one': 16,
+  'the two-marker split: source spelling vs emitted spelling': 9,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 3;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -892,16 +894,16 @@ function selfTest() {
     ['present: planted source alone -> mutate leg, green', { mode: 'present', gitReadable: true, files: [f('src/a.ts', false, true)] }, true, 'mutate'],
     ['present: plant + leaked artifact -> mutate leg, green but both listed', { mode: 'present', gitReadable: true, files: [f('src/a.ts', false, true), f('gen/base.json', false, false)] }, true, 'mutate'],
     // The measured incident: restore leg, only the build-written artifact left.
-    ['absent: leaked artifact after restore -> RESTORE leg, RED', { mode: 'absent', gitReadable: true, files: [f('gen/base.json', false, true)] }, false, 'restore'],
-    ['present: leaked artifact after a delete-ablation restore -> RESTORE leg, RED', { mode: 'present', gitReadable: true, files: [f('gen/base.json', true, true)] }, false, 'restore'],
+    ['absent: leaked artifact after restore -> INDETERMINATE, RED', { mode: 'absent', gitReadable: true, files: [f('gen/base.json', false, true)] }, false, 'indeterminate'],
+    ['present: leaked artifact after a delete-ablation restore -> INDETERMINATE, RED', { mode: 'present', gitReadable: true, files: [f('gen/base.json', true, true)] }, false, 'indeterminate'],
     // absent mode is ALSO a delete-ablation's mutate leg: the guard's literal left the tree.
     ['absent: deleted guard -> mutate leg, green', { mode: 'absent', gitReadable: true, files: [f('src/a.ts', true, false)] }, true, 'mutate'],
     ['absent: deleted guard + leaked artifact -> mutate leg, green', { mode: 'absent', gitReadable: true, files: [f('src/a.ts', true, false), f('gen/base.json', false, false)] }, true, 'mutate'],
     // An untracked path is dirty too -- a sharded artifact gains FILES, and `git add -A` takes them.
-    ['absent: untracked path at the restore leg is RED', { mode: 'absent', gitReadable: true, files: [f('gen/new-shard.json', false, false, true)] }, false, 'restore'],
+    ['absent: an untracked path is dirt this marker cannot explain -> INDETERMINATE, RED', { mode: 'absent', gitReadable: true, files: [f('gen/new-shard.json', false, false, true)] }, false, 'indeterminate'],
     // A marker present on BOTH sides never identifies a mutation in either mode.
-    ['absent: marker on both sides does not explain the dirt', { mode: 'absent', gitReadable: true, files: [f('gen/base.json', true, true)] }, false, 'restore'],
-    ['present: marker on neither side does not explain the dirt', { mode: 'present', gitReadable: true, files: [f('gen/base.json', false, false)] }, false, 'restore'],
+    ['absent: marker on both sides does not explain the dirt -> INDETERMINATE', { mode: 'absent', gitReadable: true, files: [f('gen/base.json', true, true)] }, false, 'indeterminate'],
+    ['present: marker on neither side does not explain the dirt -> INDETERMINATE', { mode: 'present', gitReadable: true, files: [f('gen/base.json', false, false)] }, false, 'indeterminate'],
   ];
   for (const [label, input, expectedOk, expectedLeg] of treeCases) {
     const got = treeVerdict(input);
@@ -918,7 +920,7 @@ function selfTest() {
   {
     const red = treeVerdict({ mode: 'absent', gitReadable: true, files: [f('packages/spec/authorable-surface/data.json', false, true)] });
     const named = red.paths.includes('packages/spec/authorable-surface/data.json');
-    check('a red restore leg names the leaked path', named);
+    check('a red tree reading names the leaked path', named);
   }
 
   // ---- porcelain parsing ---------------------------------------------------
@@ -992,7 +994,7 @@ function selfTest() {
 
     const gitChecks = [
       ['git leg: mutate leg is green and lists BOTH files', mutateLeg.ok === true && mutateLeg.leg === 'mutate' && mutateLeg.paths.length === 2],
-      ['git leg: per-path restore leaves the tree RED', restoreLeg.ok === false && restoreLeg.leg === 'restore'],
+      ['git leg: per-path restore leaves the tree RED', restoreLeg.ok === false && restoreLeg.leg === 'indeterminate'],
       ['git leg: the RED names the leaked baseline', restoreLeg.paths.includes('generated-baseline.json')],
       ['git leg: the per-path diff is EMPTY on that same unrestored tree', perPathDiffAtRestore === ''],
       ['git leg: whole-tree restore is green', cleanLeg.ok === true && cleanLeg.paths.length === 0],
@@ -1002,6 +1004,100 @@ function selfTest() {
     for (const [label, ok] of gitChecks) check(label, ok);
   } finally {
     rmSync(repo, { recursive: true, force: true });
+  }
+
+
+  // ---- argv: the correct invocation is the only one -------------------------
+  battery('argv: the correct invocation is the only one');
+  // `argv.includes('--absent')` plus a `startsWith('--')` filter discarded every
+  // unrecognised flag in silence, so a mistyped `--absnet` ran the OPPOSITE mode
+  // and printed a verdict indistinguishable from a real one.
+  {
+    const argvCases = [
+      ['--absent selects the absent mode', parseArgs(['pkg', 'mk', '--absent']).mode === 'absent'],
+      ['no flag selects the present mode', parseArgs(['pkg', 'mk']).mode === 'present'],
+      ['a mistyped --absnet is REFUSED, not discarded', typeof parseArgs(['pkg', 'mk', '--absnet']).usage === 'string'],
+      ['the unknown-option refusal names the real options', /--source-marker=<text>/.test(parseArgs(['pkg', 'mk', '--absnet']).usage ?? '')],
+      ['a marker written as a flag is refused, not silently dropped', typeof parseArgs(['pkg', '--weird-marker']).usage === 'string'],
+      ['--source-marker=<text> parses, spaces and quotes included', parseArgs(['pkg', 'mk', "--source-marker=label: 'Operator'"]).sourceMarker === "label: 'Operator'"],
+      ['--source-marker with a SPACE is refused and names the = spelling', /=<the spelling the SOURCE carries>/.test(parseArgs(['pkg', 'mk', '--source-marker', 'x']).usage ?? '')],
+      ['a blank --source-marker= is refused', typeof parseArgs(['pkg', 'mk', '--source-marker=  ']).usage === 'string'],
+      ['omitting --source-marker leaves it null, never empty', parseArgs(['pkg', 'mk']).sourceMarker === null],
+      ['a blank marker is still refused', typeof parseArgs(['pkg', '  ']).usage === 'string'],
+      ['a third positional is still refused', typeof parseArgs(['pkg', 'mk', 'extra']).usage === 'string'],
+    ];
+    for (const [label, ok] of argvCases) check(label, ok);
+    const exitCases = [
+      ['both readings pass -> 0', exitCodeFor({ distOk: true, treeOk: true }) === EXIT_OK],
+      ['the dist reading alone fails -> 1', exitCodeFor({ distOk: false, treeOk: true }) === EXIT_DIST],
+      ['the tree reading alone fails -> 3, NOT the dist code', exitCodeFor({ distOk: true, treeOk: false }) === EXIT_TREE && EXIT_TREE !== EXIT_DIST],
+      ['both fail -> 4', exitCodeFor({ distOk: false, treeOk: false }) === EXIT_BOTH],
+      ['no reading shares a code with usage', ![EXIT_OK, EXIT_DIST, EXIT_TREE, EXIT_BOTH].includes(EXIT_USAGE)],
+    ];
+    for (const [label, ok] of exitCases) check(label, ok);
+  }
+
+  // ---- the two-marker split: source spelling vs emitted spelling ------------
+  battery('the two-marker split: source spelling vs emitted spelling');
+  // The measured shape. A DELETE ablation on a package whose build re-spells the
+  // literal: the author writes `label: 'Operator'`, `tsup` emits
+  // `label:"Operator"`. The spelling that makes the dist reading true is NOT the
+  // spelling the tree reading can see, so before the split this exact tree --
+  // a correct mutate leg -- was told "restore leg ... 1 path still differs from
+  // HEAD", i.e. to restore the very mutation being measured.
+  const split = mkdtempSync(join(tmpdir(), 'ablation-preflight-split-'));
+  try {
+    const git = (...args) => execFileSync('git', args, { cwd: split, env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+    const SRC_SPELLING = "label: 'Operator'";
+    const EMITTED = 'label:"Operator"';
+    const srcPath = join(split, 'skill.form.ts');
+    const genPath = join(split, 'authorable-surface.json');
+
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'selftest@objectstack.invalid');
+    git('config', 'user.name', 'ablation selftest');
+    writeFileSync(srcPath, `export const form = { rows: [{ ${SRC_SPELLING} }] };\n`);
+    writeFileSync(genPath, '{"labels":["Operator"]}\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base');
+
+    const readWith = (marker, sourceMarker = null) => {
+      const st = readTreeStatus(split);
+      const files = st.gitReadable ? markerPresence(split, st.entries, sourceMarker ?? marker) : [];
+      return treeVerdict({ mode: 'absent', gitReadable: st.gitReadable, gitError: st.gitError, files, sourceMarker });
+    };
+
+    // 1. DELETE ablation, mutate leg: the label entry leaves the source.
+    writeFileSync(srcPath, 'export const form = { rows: [{}] };\n');
+    const emittedOnly = readWith(EMITTED);
+    const withSource = readWith(EMITTED, SRC_SPELLING);
+
+    // 2. restore the source, leave the build-written artifact dirty -- the
+    //    measured incident. It must STILL refuse, and passing the new flag must
+    //    not turn the refusal off, or the flag is a way to disable the catch.
+    git('checkout', 'HEAD', '--', 'skill.form.ts');
+    writeFileSync(genPath, '{"labels":[]}\n');
+    const leakedPlain = readWith(EMITTED);
+    const leakedWithSource = readWith(EMITTED, SRC_SPELLING);
+
+    // 3. restore the artifact too.
+    git('checkout', 'HEAD', '--', 'authorable-surface.json');
+    const clean = readWith(EMITTED, SRC_SPELLING);
+
+    const splitChecks = [
+      ['the emitted spelling alone cannot see the mutation -> INDETERMINATE, RED', emittedOnly.ok === false && emittedOnly.leg === 'indeterminate'],
+      ['... and it does NOT call that tree a restore leg', emittedOnly.leg !== 'restore'],
+      ['... and it names the --source-marker remedy', emittedOnly.msg.includes('--source-marker=')],
+      ['--source-marker makes the SAME tree a green MUTATE leg', withSource.ok === true && withSource.leg === 'mutate'],
+      ['... naming the path the ablation touched', withSource.paths.includes('skill.form.ts')],
+      ['a leaked artifact after restore still REFUSES', leakedPlain.ok === false && leakedPlain.paths.includes('authorable-surface.json')],
+      ['... and --source-marker does NOT switch that refusal off', leakedWithSource.ok === false && leakedWithSource.paths.includes('authorable-surface.json')],
+      ['... and the refusal says the named source marker is not what moved', leakedWithSource.msg.includes('is not the spelling that moved')],
+      ['only a whole-tree restore is a green RESTORE leg', clean.ok === true && clean.leg === 'restore' && clean.paths.length === 0],
+    ];
+    for (const [label, ok] of splitChecks) check(label, ok);
+  } finally {
+    rmSync(split, { recursive: true, force: true });
   }
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
