@@ -97,6 +97,24 @@
  * and ⑤ FOR TESTS, under the same parse rule as the two above. Reads are
  * never leased, never gapped, never counted — `isWriteMethod()` is the gate.
  *
+ * ## ⚠️ How far "fleet-wide" reaches: one filesystem, and no further
+ *
+ * Every rule above is enforced through this log and the lease beside it, so
+ * the fleet it covers is the set of processes that share that path. On a host
+ * where every session shares a home — a developer's machine — that is the
+ * whole fleet. Inside one cloud container it is the seat and every subagent it
+ * fans out into worktrees, which is the shape of the incident above: one
+ * seat's fan-out, each process pacing itself.
+ *
+ * ACROSS CONTAINERS IT IS NOT SHARED, and there is no shared volume to point
+ * it at (maintainer, 2026-09-22). So N containers writing at once are N
+ * independently paced streams against ONE identity, and neither the lease nor
+ * the hourly budget sees the other N−1. What the platform does share is the
+ * installation's own counter — `x-ratelimit-used` on every response — which is
+ * the candidate signal for a cross-container rule; it is unmeasured, so
+ * nothing here acts on it yet. Until then the knob is this file's own
+ * overrides, set conservatively per container.
+ *
  * ⛔ What a 403/429 does is rule ③ and NOT a retry loop. The git-retry
  * convention (2 s / 4 s / 8 s / 16 s) is for a transport that dropped a packet;
  * a secondary-limit refusal is the platform saying this IDENTITY is writing
