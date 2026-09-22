@@ -267,6 +267,29 @@ export function strictObjectDeclarations(): readonly StrictObjectDeclaration[] {
 }
 
 /**
+ * [#19581] A {@link strictObjectError} map, plus the handle that BUILDS its
+ * unknown-key half without invoking it.
+ *
+ * The map is deliberately deferred (see the comment inside `strictObjectError`),
+ * and until zod 4.5 "deferred" and "built the moment a key is rejected" were the
+ * same instant: `safeParse` finalized every issue through the schema's error map
+ * before it returned. From 4.6 the failure result carries `error` as a lazy
+ * getter (`failure()` in `v4/core/parse.js`) whose stated purpose is to stop the
+ * result pinning the parsed value, so finalization — and with it this build —
+ * slides to whenever some consumer first reads `.error`.
+ *
+ * ⛔ That is not a message change: the prescription an author reads is
+ * byte-identical on both lines, measured. What moves is WHEN this module reaches
+ * across the `field → strict-object → suggestions → field` import cycle, from
+ * "inside the parse that refused the key" to "wherever the error object is first
+ * read". The cycle is the whole reason the build is deferred at all, so the
+ * moment it happens is a property worth keeping, not an implementation detail —
+ * which is why {@link markUnknownKeyRefusalTerminal} primes it on the refusal
+ * path and `strict-object.test.ts` pins that it has happened by then.
+ */
+type PrimableErrorMap = z.core.$ZodErrorMap & { prime: () => void };
+
+/**
  * Register an authoring surface and build its unknown-key error map, **without
  * closing the shape** — the half of {@link strictObject} that a schema whose
  * door is one level up needs on its own (#6619).
@@ -310,16 +333,7 @@ export function strictObjectError<T extends z.ZodRawShape>(
   // than making each of them prove it is not in a loop. Same shape as the
   // deferred map `data/object.zod.ts` already carries for its TDZ problem.
   let build: z.core.$ZodErrorMap | undefined;
-  const error: z.core.$ZodErrorMap = (issue) => {
-    // A retired VALUE FORM is rejected before the unknown-key map is even
-    // consulted: `issue.code` here is `invalid_type` (the input is not an
-    // object), so `strictUnknownKeyError` would return undefined and zod's
-    // bare "expected object, received string" would be all the author sees.
-    if (retiredForms && issue.code === 'invalid_type') {
-      const prescription =
-        typeof issue.input === 'string' ? retiredForms[issue.input] : undefined;
-      if (prescription) return prescription;
-    }
+  const buildMap = (): z.core.$ZodErrorMap =>
     // The table is recorded ONCE, below, with its `shape` — the strong record
     // the audit reads. Between #5483 and #5593 a second, transcription-shaped
     // registry existed for the 44 call sites that predated this helper, and
@@ -327,7 +341,7 @@ export function strictObjectError<T extends z.ZodRawShape>(
     // `strictObject` surface would not be judged twice (the second time against
     // `knownKeys` rather than the shape). #5593 migrated the last of those call
     // sites and deleted the registry, so the suppression went with it.
-    return (build ??= strictUnknownKeyError({
+    (build ??= strictUnknownKeyError({
       surface,
       // Declared-but-unwritable keys (tombstones) are excluded — see
       // `acceptsNothing`. They stay in the SHAPE, so writing one still raises
@@ -341,7 +355,26 @@ export function strictObjectError<T extends z.ZodRawShape>(
       aliases,
       guidance,
       guidanceSets,
-    }))(issue);
+    }));
+
+  const error: z.core.$ZodErrorMap = (issue) => {
+    // A retired VALUE FORM is rejected before the unknown-key map is even
+    // consulted: `issue.code` here is `invalid_type` (the input is not an
+    // object), so `strictUnknownKeyError` would return undefined and zod's
+    // bare "expected object, received string" would be all the author sees.
+    if (retiredForms && issue.code === 'invalid_type') {
+      const prescription =
+        typeof issue.input === 'string' ? retiredForms[issue.input] : undefined;
+      if (prescription) return prescription;
+    }
+    return buildMap()(issue);
+  };
+
+  // [#19581] The handle that settles WHEN the reach across the import cycle
+  // happens — see `PrimableErrorMap`. Building is idempotent, so a caller may
+  // prime as often as it likes; the map is still constructed once.
+  (error as PrimableErrorMap).prime = () => {
+    buildMap();
   };
 
   declarationStore().push({ options, shape });
@@ -404,16 +437,39 @@ export function strictObjectError<T extends z.ZodRawShape>(
  * that has already been raised; a body with no issues never reaches it, and no
  * issue is added, removed or re-coded. What changes is which competing
  * complaint an author reads, and whether the union keeps its envelope.
+ *
+ * ⚠️ **A hoisted `function` declaration, for the reason `declarationStore()`
+ * above is one** — it runs from inside a constructor `strictObject` can reach
+ * while this module is still initializing, so a `const` arrow would be in its
+ * temporal dead zone exactly when it is first needed.
+ *
+ * It also primes the surface's unknown-key map, because from zod 4.6 a failed
+ * `safeParse` finalizes its issues only when `.error` is read — see
+ * {@link PrimableErrorMap}. Priming is confined to the refusal path: a clean
+ * parse raises no `unrecognized_keys` issue, so a shape nobody has written a
+ * bad key on still never reaches across the import cycle.
  */
-const markUnknownKeyRefusalTerminal = <P extends { issues: Array<{ code?: string }> }>(payload: P): P => {
+function markUnknownKeyRefusalTerminal<P extends { issues: Array<{ code?: string }> }>(
+  inst: { _zod: { def: { error?: unknown } } },
+  payload: P,
+): P {
+  let refused = false;
   for (const issue of payload.issues) {
-    if (issue.code === 'unrecognized_keys') (issue as { continue?: boolean }).continue = false;
+    if (issue.code === 'unrecognized_keys') {
+      (issue as { continue?: boolean }).continue = false;
+      refused = true;
+    }
+  }
+  if (refused) {
+    const prime = (inst._zod.def.error as Partial<PrimableErrorMap> | undefined)?.prime;
+    if (typeof prime === 'function') prime();
   }
   return payload;
-};
+}
 
 /**
- * [#19581] The `ZodObject` variant {@link closedObject} builds.
+ * [#19581] The `ZodObject` variant {@link closedObject} builds, owned by a
+ * HOISTED function declaration.
  *
  * It is a constructor rather than an instance-level patch because
  * `util.clone()` rebuilds through `inst._zod.constr`: `.strict()`, `.strip()`,
@@ -423,17 +479,39 @@ const markUnknownKeyRefusalTerminal = <P extends { issues: Array<{ code?: string
  *
  * `_zod.def` is untouched, so the emitted JSON Schema, the authorable surface
  * and `instanceof z.ZodObject` (trait-based) are all byte-identical.
+ *
+ * ⚠️ **Deliberately not a module-level `const` — the same load-bearing reason
+ * {@link declarationStore} is not one, and it is not a hypothetical here.**
+ * `strictObject` runs at MODULE SCOPE for schemas inside the
+ * `field → strict-object → suggestions → field` cycle, and it now reaches this
+ * constructor on every call. Held in a `const`, that call lands in the
+ * constructor's temporal dead zone whenever the loader enters this module
+ * second: under `OS_EAGER_SCHEMAS=1` — how `build-schemas.ts` runs — importing
+ * the package root died with `ReferenceError: Cannot access 'ZodClosedObject'
+ * before initialization`, raised from `data/field-value.zod.ts`'s own
+ * module-scope `strictObject(…)` before a single schema was built. Built on
+ * first use behind a hoisted function, it is reachable from the first
+ * instruction of module evaluation instead.
+ *
+ * ⚠️ Nothing in an ordinary `vitest run` sees this: `lazySchema` defers every
+ * schema body behind a Proxy, so no schema is constructed at import time and
+ * the whole suite stays GREEN — the same instrument gap `declarationStore`
+ * documents. The eager import is the instrument that answers it, and
+ * `strict-object.test.ts` runs one in a subprocess.
  */
-const ZodClosedObject = z.core.$constructor<any, any>('ZodClosedObject', (inst: any, def: any) => {
-  (z.ZodObject as unknown as { init: (i: unknown, d: unknown) => void }).init(inst, def);
-  const parse = inst._zod.parse;
-  inst._zod.parse = (payload: any, ctx: any) => {
-    const done = parse(payload, ctx);
-    return done instanceof Promise
-      ? done.then(markUnknownKeyRefusalTerminal)
-      : markUnknownKeyRefusalTerminal(done);
-  };
-});
+function closedObjectConstructor(): new (def: unknown) => unknown {
+  const self = closedObjectConstructor as unknown as { ctor?: new (def: unknown) => unknown };
+  return (self.ctor ??= z.core.$constructor<any, any>('ZodClosedObject', (inst: any, def: any) => {
+    (z.ZodObject as unknown as { init: (i: unknown, d: unknown) => void }).init(inst, def);
+    const parse = inst._zod.parse;
+    inst._zod.parse = (payload: any, ctx: any) => {
+      const done = parse(payload, ctx);
+      return done instanceof Promise
+        ? done.then((settled: any) => markUnknownKeyRefusalTerminal(inst, settled))
+        : markUnknownKeyRefusalTerminal(inst, done);
+    };
+  }) as unknown as new (def: unknown) => unknown);
+}
 
 /**
  * [#19581] Re-declare a closed object schema so its unknown-key refusal is
@@ -444,7 +522,7 @@ const ZodClosedObject = z.core.$constructor<any, any>('ZodClosedObject', (inst: 
  * and must not be re-routed through the `strictObject` error map.
  */
 export function closedObject<S extends z.ZodTypeAny>(schema: S): S {
-  return new (ZodClosedObject as unknown as new (def: unknown) => S)(
+  return new (closedObjectConstructor() as unknown as new (def: unknown) => S)(
     (schema as unknown as { _zod: { def: unknown } })._zod.def,
   );
 }
