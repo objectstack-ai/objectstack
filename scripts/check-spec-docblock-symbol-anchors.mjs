@@ -231,6 +231,83 @@ export const CENSUS_17065 = {
 };
 
 /**
+ * ⚠️ THE RE-CENSUS (#17242) -- the DECLINED residual, taken again and
+ * CLASSIFIED. `CENSUS_17065` above is frozen at its own sha and is ⛔ not
+ * restated or corrected here; the two are separate readings of one surface.
+ *
+ * ⭐ THIS RECORD EXISTS AS DATA BECAUSE THIS GATE CANNOT RE-DERIVE IT. The
+ * classification below needs a checkout of the sibling objectui repo, which
+ * this gate is deliberately not given -- the same reason its cross-repo
+ * anchors are reported rather than judged. `--list-unresolvable` enumerates
+ * the residual; only an outside reading can say what the rows ARE.
+ *
+ * ## The population grew, and the instrument did NOT move it
+ *
+ * The declined count read 183 at the `CENSUS_17065` sha, 217 two days later,
+ * and 467 here. The shared resolver was rewritten between the second and third
+ * readings, so this tree was swept with BOTH resolvers: they return the
+ * identical 467, declined-by-shape included. ⇒ the growth is real population,
+ * ⛔ NOT instrument drift, and the three numbers are comparable. The old
+ * resolver also reproduced `commentProseLineCitations` and `declinedCitations`
+ * verbatim at the `CENSUS_17065` sha, which is what licenses that comparison.
+ *
+ * ## ⭐ What the residual IS -- the headline, and it is not rot
+ *
+ * Every declined citation was bound against the sibling objectui checkout and
+ * against this repo under a spec-relative base. 463 of 467 name a file that
+ * REALLY EXISTS. ⇒ this residual is a SPELLING population -- abbreviated
+ * cross-repo and package-relative citations -- ⛔ not the stale-citation rot
+ * its headline number suggests, and ⛔ not the shape #17591 measured on the
+ * bare-path axis. Identical split against objectui's main and against the
+ * `.objectui-sha` pin, so it does not depend on which sibling tree is read.
+ *
+ * ## Tense -- the defect cell is EMPTY
+ *
+ * A citation naming no tracked file is a defect ONLY when the surrounding
+ * sentence is LIVE-TENSE. Of the four that bind nowhere, one is a retirement
+ * record naming a file in the cloud repo in prose, and three are continuations
+ * inside dated re-reads at a named objectui pin. ⇒ ZERO live-tense defects.
+ *
+ * ## ⛔ THE TRAP, measured -- repairing the PATH alone turns this gate RED
+ *
+ * The obvious cleanup is to rewrite a package-relative citation to its
+ * repo-root spelling so it resolves. That makes the path TRACKED, which moves
+ * the citation out of the declined set and into the judged one -- where a line
+ * number is exactly what this gate refuses. One such repair was performed on a
+ * single citation in `packages/spec/src/shared/union-author-message-pins.test.ts`
+ * and this gate went from green to one hard finding, then was restored.
+ *
+ * ⇒ the path is only HALF the repair; the citation must also leave ANCHOR
+ * FORM. A round that "works the residual down" by fixing spellings alone lands
+ * one finding per repair.
+ */
+export const RECENSUS_17242 = {
+  measuredOn: 'fa29803417cbb4853f4dbb54ae7a830457e11bb8',
+  tsFilesTotal: 1518,
+  commentProseLineCitations: 473,
+  trackedTargetLineCitations: 6,
+  declinedCitations: 467,
+  declinedFiles: 39,
+  declinedByShape: { 'bare-filename': 144, continuation: 191, 'directory-qualified': 132 },
+  /* Same tree, the resolver `CENSUS_17065` was taken with. Equal by both
+   * readings -- the control that makes 183 -> 467 a population statement. */
+  declinedUnderPreviousResolver: 467,
+  /* ⭐ The split #17242 filed as NOT MEASURED. Continuations are attributed to
+   * the antecedent they inherit, which for 34 of them is named in prose rather
+   * than in a preceding citation. */
+  namingAnExistingObjectuiFile: 408,
+  namingAnExistingFileHere: 55,
+  bindingInNeitherRepo: 4,
+  /* The tense axis, over the whole residual. `record` and `dated-measurement`
+   * are both correct historical prose; only `live` can carry a defect, and it
+   * carries none because every live-tense row names a file that exists. */
+  liveTenseCitations: 300,
+  historicalRecordCitations: 38,
+  datedMeasurementCitations: 129,
+  liveTenseDefects: 0,
+};
+
+/**
  * ⚠️ THE DAY-ONE RESIDUAL -- the findings the census enumerated, pinned.
  *
  * This is NOT an exemption list and NOT a softening of the grammar. Every row
