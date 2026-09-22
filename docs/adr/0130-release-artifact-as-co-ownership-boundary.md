@@ -684,9 +684,21 @@ more** package entries.
   twice moves in the opposite direction, and it did so in the same format that reserved the
   position. Measured on `examples/app-multi-package` (two packages, three definitions):
   8,223 → 5,328 bytes, −35%.
-- **One source of truth.** Two copies of one definition are not reconciled by anything. They are
-  measured to differ in content whenever composition merges or overrides an object, and which copy
-  a consumer saw depended on which reader it went through.
+- **One source of truth.** Two copies of one definition, and nothing that keeps them equal once
+  they are written. They are measured to differ whenever composition merges or overrides an object,
+  and which copy a consumer sees is decided by the reader it goes through rather than by the
+  artifact.
+
+  ⚠️ **Stated precisely, because the imprecise version is load-bearing in the wrong direction**
+  (PR #19666 review, 2026-09-22): where the two halves differ today, the flattened copy is the
+  RECONCILED one and the platform's own reader deterministically prefers it —
+  `resolveArtifactCollections` claims by name from the top level first, so a merged object is
+  answered once, merged, and its two unmerged halves are dropped. The divergence this record
+  objects to is therefore not "the reader picks arbitrarily"; it is that **one definition is
+  serialized twice with nothing reconciling the copies**, which is a standing invitation for a
+  producer, a hand-edit or a future reader to disagree with that preference. It also bounds what
+  the emitter may do: dropping the flattened half is only ever legitimate where it is a COPY, and
+  where composition reconciled something it is not.
 
 ### The order this landed in, which is the decision's substance
 
@@ -711,9 +723,23 @@ fallback bolted onto the emitter.
 - ⛔ **Not the four envelope keys.** `packages`, `plugins`, `devPlugins` and `devLogins` are not
   package-owned collections (#15219, #17556): they stay at the artifact's top level, where
   `composeStacks` still concatenates them and the host reads them.
-- **Two compositions keep the additive shape, by construction rather than by choice**: one whose
-  input declares no `manifest` (nothing owns its collections — `manifest` is optional on the stack
-  schema), and one whose `packages`-carrying input also declares collections of its own (its
-  entries are carried untouched, so its own collections are attributed to no body). Stripping
-  either would delete metadata rather than a copy of it. Both remain readable by D4's read-both
-  rule, and neither is refused: a composition that was legal before this change stays legal.
+- **Three conditions hold the emitter to a copy-removal, and a composition failing any one of them
+  keeps the additive shape** — by construction rather than by choice, since stripping there would
+  delete metadata rather than a copy of it:
+
+  1. **two or more package entries** (D7 above);
+  2. **every input's collections attributed to a body** — an input declaring no `manifest` has no
+     package that could own its collections (`manifest` is optional on the stack schema), and an
+     input that already carries `packages` contributes those entries untouched, so its own
+     collections are attributed to no body either;
+  3. **the bodies reproduce the flattened collections, item for item.** Composition is not always a
+     concatenation: `objectConflict: 'merge'` / `'override'` RECONCILE two packages' same-named
+     objects into one, and `mergeActionsIntoObjects` binds a standalone action onto an object a
+     SIBLING package owns. In both cases the flattened half carries a definition no body carries,
+     so it is not a copy. Condition 2 cannot see this — it reads the INPUT stacks, while what the
+     strip deletes is the COMPOSED result. Measured on a two-package `merge` composition: the
+     registration-path reader answers one reconciled object with the flattened half present, and
+     two conflicting partial objects with it gone (PR #19666 review, 2026-09-22).
+
+  Every one of those shapes stays readable by D4's read-both rule, and none is refused: a
+  composition that was legal before this change stays legal.

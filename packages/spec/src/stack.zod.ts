@@ -3233,12 +3233,21 @@ export const ComposeStacksOptionsSchema = lazySchema(() => z.object({
    * (ADR-0130 D4's 2026-09-22 addendum, batch #23), READERS FIRST: every reader
    * resolves `packages[]` before this emitter stopped feeding the flat copy.
    *
-   * Two conditions hold it to a copy-removal, both in
-   * {@link packagesCarryEveryInputCollection}: at least TWO package entries
-   * (ADR-0130 D7 — a single-package artifact is byte-identical to before), and
-   * every input's collections attributed to a body. An input with no `manifest`
-   * has no package to own its collections, so such a composition keeps the
-   * flattened shape rather than losing them.
+   * THREE conditions hold it to a copy-removal, and a composition failing any
+   * one of them keeps today's additive shape — which every reader still reads:
+   *
+   * 1. at least TWO package entries (ADR-0130 D7 — a single-package artifact is
+   *    byte-identical to before);
+   * 2. every input's collections attributed to a body
+   *    ({@link packagesCarryEveryInputCollection}) — an input with no
+   *    `manifest` has no package that could own its collections;
+   * 3. the bodies REPRODUCE the flattened collections, item for item
+   *    ({@link packagesReproduceComposedCollections}) — composition sometimes
+   *    RECONCILES (`objectConflict: 'merge'` / `'override'` fold two packages'
+   *    same-named objects into one; a standalone action binds onto a sibling
+   *    package's object), and the reconciled copy lives in the flattened half
+   *    alone. Condition 2 cannot see that: it reads the INPUT stacks, and what
+   *    the strip deletes is the COMPOSED result.
    *
    * @default 'last'
    */
@@ -4173,10 +4182,14 @@ function packagesReproduceComposedCollections(
  * {@link ObjectStackDefinitionSchema}'s `packages` key parses against it, so a
  * body this function builds and a body the load path accepts cannot drift.
  *
- * ⚠️ This body is the artifact's ONLY copy of the collections it carries, for
- * a multi-package artifact (#14512, ADR-0130 D4 addendum 2026-09-22): the
- * flattened top level is no longer emitted beside it, so a consumer reads the
- * definitions here or not at all. Every reader in the platform resolves
+ * ⚠️ This body is the artifact's ONLY copy of the collections it carries,
+ * whenever the bodies reproduce what the flattened half would have held
+ * (#14512, ADR-0130 D4 addendum 2026-09-22): the flattened top level is then
+ * not emitted beside it, and a consumer reads the definitions here or not at
+ * all. Where composition RECONCILED something the bodies do not carry — a
+ * merged or overridden object, an action bound onto a sibling package's object
+ * — the flattened half stays and this body is one of two copies, exactly as
+ * before {@link composeStacks} learned to drop it. Every reader in the platform resolves
  * `packages[]` — the reader half of the same ruling — and D4's read-both rule
  * still reads an artifact already on disk that carries both halves. What
  * `packages` gives is per-package OWNERSHIP at registration, which is the whole

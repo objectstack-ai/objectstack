@@ -25,7 +25,16 @@ import ordersStack from './src/packages/orders/index.js';
  * the artifact's own `manifest`, which is its identity. Each definition is
  * serialized ONCE, under the package that owns it: a multi-package artifact
  * carries no flattened copy of its collections at the top level (#14512,
- * ADR-0130 D4's 2026-09-22 addendum).
+ * ADR-0130 D4's 2026-09-22 addendum). This project is that shape — its two
+ * packages own different objects, so the package bodies carry everything the
+ * flattened half would have.
+ *
+ * ⚠️ A composition that RECONCILES something keeps the flattened half instead,
+ * because there it is not a copy: `objectConflict: 'merge'` / `'override'` fold
+ * two packages' same-named objects into one, and a standalone action binds onto
+ * an object a sibling package owns. Neither is refused and both stay readable —
+ * the emitter drops the flattened collections only when the bodies reproduce
+ * them item for item.
  *
  * `packages[]` is what the metadata service's artifact door reads and what
  * `ObjectQL.registerApp` registers, package by package, in
