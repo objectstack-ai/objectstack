@@ -160,6 +160,20 @@ const SCANNED_EXTENSIONS = Object.freeze([
 // `pnpm-lock.yaml` names every workspace package and holds no prose.
 const SKIPPED_BASENAMES = Object.freeze(['pnpm-lock.yaml']);
 
+// THE DETECTOR IS NOT ITS OWN CORPUS. This file documents the class in its
+// header and holds the adversarial fixtures in its self-test table, so it
+// cites the bad form dozens of times BY NECESSITY — an instrument that reds on
+// its own fixtures cannot ship. The exclusion is by file identity, derived
+// below, never a path pattern anyone else can land inside.
+//
+// ⛔ That is a hole unless something watches it, so the exclusion comes with a
+// compensating control in the opposite direction: this file MUST still contain
+// at least `SELF_FIXTURE_FLOOR` citations above the published major. Gut the
+// fixtures — the one edit the exclusion would otherwise hide — and the gate
+// REDS on itself instead of going quietly green.
+const SELF_PATH = 'scripts/check-future-spec-major.mjs';
+const SELF_FIXTURE_FLOOR = 12;
+
 // ── The matcher ────────────────────────────────────────────────────────────
 //
 // GAP is the whole false-positive bound, so it is spelled out rather than
@@ -391,7 +405,7 @@ function readSpecMajor(readFile) {
  * @param ledger the QUOTATION_EXEMPTIONS to evaluate against
  * @param manifestRaw the text of packages/spec/package.json, or null
  */
-function runAllChecks(files, ledger, manifestRaw) {
+function runAllChecks(files, ledger, manifestRaw, selfPath = null) {
   const problems = [];
   const readFile = (rel) => (rel === SPEC_MANIFEST ? manifestRaw : null);
   const spec = readSpecMajor(readFile);
@@ -408,10 +422,15 @@ function runAllChecks(files, ledger, manifestRaw) {
   const census = new Map();
   const live = [];
   const exemptHits = ledger.map(() => []);
+  let selfFixtures = 0;
 
   for (const { file, text } of files) {
     if (!text.includes(PKG)) continue;
     for (const f of findCitations(text)) {
+      if (selfPath !== null && file === selfPath) {
+        if (f.major > spec.major) selfFixtures += 1;
+        continue;
+      }
       const key = f.dotted ? `${f.major}.x (dotted)` : `${f.major} (bare)`;
       const bucket = census.get(key) ?? { sites: 0, files: new Set() };
       bucket.sites += 1;
@@ -436,6 +455,17 @@ function runAllChecks(files, ledger, manifestRaw) {
     problems.push(
       `not one of the ${files.length} scanned files mentions \`${PKG}\` — in THIS repository that `
       + 'is a broken reader, not a clean tree. Every verdict below would be vacuous.',
+    );
+  }
+
+  if (selfPath !== null && files.some((f) => f.file === selfPath) && selfFixtures < SELF_FIXTURE_FLOOR) {
+    problems.push(
+      `${selfPath} holds ${selfFixtures} citation(s) above the published major, below the floor of `
+      + `${SELF_FIXTURE_FLOOR}. This file is excluded from its own scan because its header documents `
+      + 'the class and its self-test table holds the adversarial fixtures — both cite the bad form by '
+      + 'necessity. Gutting those fixtures is the one edit that exclusion would otherwise hide, so the '
+      + 'floor watches it from the other side. Restore the fixtures, or re-pin SELF_FIXTURE_FLOOR '
+      + 'deliberately and say why.',
     );
   }
 
@@ -516,6 +546,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'R2 — a witness that matches nothing → RED (self-invalidating)': 1,
   'R2 — a ledger entry covering more citations than pinned → RED': 1,
   'the class is DERIVED — the same corpus is green once the tree reaches 18': 1,
+  'the detector excludes its OWN source, which must cite the pattern → GREEN': 1,
+  'the detector\'s own source stripped of its fixtures → RED (instrument gutted)': 1,
   'an empty corpus → RED, never a green skip (#4690)': 1,
   'a corpus that never mentions the package → RED (broken reader)': 1,
   'an unreadable spec manifest → RED': 1,
@@ -526,7 +558,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // duplicate-label refusal: two rows sharing a label collapse to ONE key above,
 // so the roster falls below this number; the table cross-check names WHICH
 // label collided.
-const SELF_TEST_BATTERY_FLOOR = 27;
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 const MANIFEST_17 = JSON.stringify({ name: PKG, version: '17.4.0' });
 const MANIFEST_18 = JSON.stringify({ name: PKG, version: '18.0.0' });
@@ -749,6 +781,28 @@ function selfTest() {
       expect: 'green',
     },
     {
+      label: 'the detector excludes its OWN source, which must cite the pattern → GREEN',
+      files: [{
+        file: SELF_PATH,
+        text: Array.from(
+          { length: SELF_FIXTURE_FLOOR },
+          (_, i) => `// fixture ${i}: removed in @objectstack/spec 18 (ADR-0049).`,
+        ).join('\n'),
+      }],
+      selfPath: SELF_PATH,
+      expect: 'green',
+    },
+    {
+      label: 'the detector\'s own source stripped of its fixtures → RED (instrument gutted)',
+      files: [{
+        file: SELF_PATH,
+        text: '// removed in @objectstack/spec 18 (ADR-0049).\n// and nothing else.\n',
+      }],
+      selfPath: SELF_PATH,
+      expect: 'red',
+      wants: [/below the floor of 12/, /the one edit that exclusion would otherwise hide/],
+    },
+    {
       label: 'an empty corpus → RED, never a green skip (#4690)',
       files: [],
       expect: 'red',
@@ -784,6 +838,7 @@ function selfTest() {
         c.files,
         c.ledger ?? [],
         'manifest' in c ? c.manifest : MANIFEST_17,
+        c.selfPath ?? null,
       ));
     } catch (err) {
       console.error(`  ✗ ${c.label}\n      threw: ${err.message}`);
@@ -929,7 +984,9 @@ function main() {
   let manifestRaw = null;
   try { manifestRaw = readFileSync(manifestPath, 'utf8'); } catch { manifestRaw = null; }
 
-  const { problems, census, specMajor } = runAllChecks(files, QUOTATION_EXEMPTIONS, manifestRaw);
+  const { problems, census, specMajor } = runAllChecks(
+    files, QUOTATION_EXEMPTIONS, manifestRaw, SELF_PATH,
+  );
 
   if (process.argv.includes('--census')) {
     const rows = [...census.entries()].sort((a, b) => a[0].localeCompare(b[0], 'en', { numeric: true }));
@@ -958,7 +1015,9 @@ function main() {
     + `  ${scanned} scanned file(s), ${mentioning} mentioning \`${PKG}\`\n`
     + `  control — bare \`${PKG}\` ${specMajor}: ${atMajor?.sites ?? 0} site(s) / `
     + `${atMajor?.files.size ?? 0} file(s), all legitimate and all read by this same matcher\n`
-    + `  ${QUOTATION_EXEMPTIONS.length} witnessed quotation exemption(s), every witness still matching`,
+    + `  ${QUOTATION_EXEMPTIONS.length} witnessed ledger entr(y|ies), every witness still matching\n`
+    + `  ${SELF_PATH} is excluded from its own scan and still carries at least `
+    + `${SELF_FIXTURE_FLOOR} citation(s) above ${specMajor} — its fixtures are intact`,
   );
 }
 
