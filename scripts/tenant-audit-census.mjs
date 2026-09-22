@@ -1736,10 +1736,10 @@ export function renderUndefendedSubtractions(census, heading, { withRows = true 
   out.push('must not be spelled the same way as «read it, not an engine».');
   out.push('');
   out.push('⚠️ One arm here says something else again: `type-text-not-round-trippable` is a');
-  out.push('receiver whose declared type the census STORED whitespace-collapsed and could');
-  out.push('not read back — the source parsed, the re-serialisation of it did not, so the');
-  out.push('door rule could never be read off it. That is a fault in this tool rather than');
-  out.push('a fact about the corpus, and it is the one row here that also fails the gate.');
+  out.push('receiver whose declared type THIS TOOL derived and then could not read back —');
+  out.push('the source parsed, the re-serialisation of it did not, so the door rule could');
+  out.push('never be read off it. That is a fault in this tool rather than a fact about the');
+  out.push('corpus, and it is the one row here that also fails the gate.');
   out.push('');
   out.push('| what | count |', '| :--- | ---: |');
   out.push(`| write calls subtracted with no defensible reason | **${rows.reduce((n, r) => n + r.count, 0)}** |`);
