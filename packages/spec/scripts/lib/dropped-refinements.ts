@@ -94,6 +94,9 @@ import {
   projectableRefinementsOf,
   zodDefOf,
 } from './refinement-projection';
+// The generator's THIRD projection attempt. The detector owes the same ladder
+// for the same reason it owes the same `override` — see `projectOrNull`.
+import { projectByPruningUnionBranches } from './union-branch-projection';
 
 /** File name of the committed ledger, resolved against the package root. */
 export const DROPPED_REFINEMENTS_BASELINE_FILE = 'dropped-refinements.baseline.json';
@@ -134,8 +137,17 @@ export interface RefinementSite {
   /**
    * `dropped` — removing the refinements leaves the projection byte-identical.
    * `projected` — the projection changed, so the rule DID reach a reader.
-   * `undecidable` — the node has no JSON form in either io direction, so the
-   * comparison has no two sides. Reported, never counted as a gap.
+   * `undecidable` — no rung of the generator's own projection ladder gives this
+   * node a JSON form, so the comparison has no two sides.
+   *
+   * ⛔ `undecidable` is NOT a third way to be fine. A node can be undecidable
+   * here and PUBLISHED all the same — its export reaches the file through a
+   * route this comparison could not reproduce — and such a node states nothing
+   * about its rule while holding zero ledger rows, which is the ratchet's own
+   * blind spot rather than an absence of gap. Since #18670's second acceptance
+   * item the ladder carries the generator's third rung so far fewer nodes land
+   * here, and the ones that still do are counted: see
+   * {@link DroppedRefinementsEntry.undecidableSites}.
    */
   readonly verdict: 'dropped' | 'projected' | 'undecidable';
   /**
@@ -229,8 +241,15 @@ function withoutCustomChecks(schema: z.ZodType): z.ZodType | null {
   return stripped;
 }
 
+/** One side of the differential: which ladder rung answered, and what it said. */
+interface LadderReading {
+  /** `output` / `input` — a strict pass; `pruned` — the branch-dropping pass. */
+  readonly rung: 'output' | 'input' | 'pruned';
+  readonly text: string;
+}
+
 /**
- * `toJSONSchema` in the generator's own io ladder, or `null` when neither side
+ * `toJSONSchema` in the generator's own io ladder, or `null` when no rung of it
  * has a JSON form.
  *
  * ⭐ It projects through `projectPublishedJsonSchema` — the SAME call the
@@ -248,15 +267,27 @@ function withoutCustomChecks(schema: z.ZodType): z.ZodType | null {
  * `projected` behind a green ledger while the published file went wide in
  * silence. The helper's own docblock carries that measurement.
  */
-function projectOrNull(schema: z.ZodType): string | null {
+function projectOrNull(schema: z.ZodType): LadderReading | null {
   for (const io of ['output', 'input'] as const) {
     try {
-      return JSON.stringify(projectPublishedJsonSchema(schema, { io }));
+      return { rung: io, text: JSON.stringify(projectPublishedJsonSchema(schema, { io })) };
     } catch {
       // Try the other direction — the generator does the same, for the same reason.
     }
   }
-  return null;
+  // THIRD rung — the generator's own third attempt (#16431 (a)), owed here for
+  // the same reason the `override` is. A node whose every io direction refuses
+  // over one unrepresentable member still REACHES the published file when that
+  // member sits in a union position: `build-schemas.ts` drops the branch and
+  // publishes the rest. Stopping the ladder at two rungs therefore asked a
+  // different question than "what does the published file say about this rule"
+  // — it asked what a projection nobody publishes says — and answered
+  // `undecidable`, which is the one verdict the ledger does not count. Measured
+  // on `data/NormalizedFilter`: the three record nodes carrying the `$`-prefix
+  // ban published as bare objects, held ZERO ledger rows, and no repair of them
+  // could ever have deleted a row.
+  const pruned = projectByPruningUnionBranches(schema);
+  return pruned ? { rung: 'pruned', text: JSON.stringify(pruned.schema) } : null;
 }
 
 /** One node's raw differential and the verdict adjudicated from it. */
@@ -306,7 +337,16 @@ function readProjection(schema: z.ZodType): NodeProjectionReading {
   const before = projectOrNull(schema);
   const after = projectOrNull(stripped);
   if (before === null || after === null) return { verdict: 'undecidable', projectionMoved: false };
-  if (before === after) return { verdict: 'dropped', projectionMoved: false };
+  // ⛔ Two rungs are not two readings of one question. A differential whose
+  // sides were answered by different passes compares a pruned projection with
+  // an unpruned one, and the bytes then differ over the branches one side
+  // dropped — a `projected` verdict earned by the ladder rather than by the
+  // rule. Nothing observed reaches here (a `custom` check cannot change which
+  // types a subtree carries, so both sides refuse and survive alike), which is
+  // exactly why it is written down: the day it stops holding, this reads
+  // `undecidable` and is counted, instead of reading `projected` and vanishing.
+  if (before.rung !== after.rung) return { verdict: 'undecidable', projectionMoved: false };
+  if (before.text === after.text) return { verdict: 'dropped', projectionMoved: false };
   const stated = projectableRefinementsOf(schema).length;
   const total = customChecksOf(schema).length;
   return { verdict: total === stated ? 'projected' : 'dropped', projectionMoved: true };

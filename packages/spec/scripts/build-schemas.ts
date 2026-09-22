@@ -3582,6 +3582,58 @@ if (hasDroppedRefinementProblems(droppedRefinementProblems)) {
   process.exit(1);
 }
 
+// ⭐ #18670 item 2 — the ratchet's OWN blind spot, held at zero.
+//
+// A site reaches this census only from the successful-emit path above, so every
+// entry here describes a PUBLISHED file. An `undecidable` site is therefore a
+// node that is published and whose rule the comparison could not read: it holds
+// no ledger row, it is named in no `x-dropped-refinements`, and no repair of it
+// could ever delete a row. That is strictly worse than a declared gap — the gap
+// is real and the instrument built to count it cannot see it — so it is refused
+// rather than reported, on the same principle as every ratchet above: growth is
+// a reviewed line in a diff, never a number that moved.
+//
+// This population was NINE sites when the item was ruled, all of them nodes the
+// published file reaches through `projectByPruningUnionBranches` while the
+// detector's ladder stopped at the two strict rungs. Giving the detector the
+// generator's own third rung took it to ZERO and turned those nine into
+// ordinary `dropped` rows, which is the reading this check now pins.
+const undecidableEntries = refinementCensus.filter((entry) => entry.undecidable.length > 0);
+if (undecidableEntries.length > 0) {
+  const undecidableTotal = undecidableEntries.reduce((sum, entry) => sum + entry.undecidable.length, 0);
+  console.error(
+    `\n❌ ${undecidableTotal} PUBLISHED refinement site(s) across ${undecidableEntries.length} schema(s) ` +
+      `carry a rule this build could not adjudicate (#18670 item 2):`,
+  );
+  for (const entry of undecidableEntries) {
+    console.error(`     + ${entry.defKey}  (${entry.undecidable.length} site(s))`);
+    for (const site of entry.undecidable) {
+      console.error(`         ${site.path === '' ? '<the export itself>' : site.path}  (${site.nodeType})`);
+    }
+  }
+  console.error(
+    `\n   These files ARE published, so the rule is enforced by the runtime and the file says\n` +
+      `   nothing about it — the same gap ${DROPPED_REFINEMENTS_BASELINE_FILE} exists to hold. What is\n` +
+      `   different, and worse, is that an undecidable site holds NO ledger row: it is invisible to\n` +
+      `   the ratchet, absent from \`x-dropped-refinements\`, and no repair of it can delete a row.\n` +
+      `   ⛔ Leaving it uncounted is the one outcome this check exists to refuse.\n\n` +
+      `   Two remedies, in order of preference:\n\n` +
+      `     1. TEACH THE LADDER. \`projectOrNull\` in scripts/lib/dropped-refinements.ts must project\n` +
+      `        the way THIS generator does, or it answers a question about a file nobody publishes.\n` +
+      `        It carries three rungs — output, input, and the branch-pruning pass — because those\n` +
+      `        are the three attempts the emit loop above makes. If your export reaches its file by\n` +
+      `        a fourth route, the ladder owes that route too, and the site becomes an ordinary\n` +
+      `        \`dropped\` row you declare in the ledger.\n` +
+      `     2. GIVE THE LEDGER AN \`undecidable\` ROW SHAPE. If a site genuinely cannot be judged,\n` +
+      `        the population stops being empty and needs recording rather than refusing — an entry\n` +
+      `        shape of its own, ratcheted in both directions like \`sites\`. That is a decision about\n` +
+      `        what the ledger counts, ⛔ not a refactor: take it, don't assume it.\n\n` +
+      `   ⛔ Do not delete or weaken the refinement to clear this line, and ⛔ do not stop\n` +
+      `   publishing the export — the rule is correct and the file is wanted.`,
+  );
+  process.exit(1);
+}
+
 // The accepted population, reported in full on every run — the same discipline
 // as the never-published ledger above, and for the same reason: a population
 // that passes in silence is the silence this ratchet was built to end.
@@ -3602,8 +3654,9 @@ if (droppedSiteTotal > 0) {
       `     the refinement, and ⛔ never an open-ended translator over the whole population.`,
   );
   console.log(
-    `     Also measured this run: ${projectedSiteTotal} refinement site(s) DID reach the file, ` +
-      `${undecidableSiteTotal} had no JSON form on either side to compare.`,
+    `     Also measured this run: ${projectedSiteTotal} refinement site(s) DID reach the file, and ` +
+      `${undecidableSiteTotal} published site(s) could not be adjudicated — a population the check\n` +
+      `     above holds at zero, so this figure is a reading of it and not a tolerance.`,
   );
 }
 
