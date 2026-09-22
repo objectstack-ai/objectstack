@@ -14235,8 +14235,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // connected upstream the author meant to allow with a large `requestTimeoutMs`
     // — breaking the very promise the key makes. (undici's `connectTimeout` needs a
     // custom dispatcher: Node-only, and a new subsystem underneath every connector.)
-    // `requestTimeoutMs` — live since PR #19388, and the lit control for every
-    // census above — is the bound the platform can keep.
+    // `requestTimeoutMs` — the lit control for every census above — is the bound
+    // the platform can keep. Its live record is cited as the code rather than as a
+    // card number on purpose: the PR that made it live has been DELETED from the
+    // board (probed: minted, absent, and the web endpoint 404s), so the only
+    // durable anchor is `integration/connector-fetch-policy.ts`, where
+    // `connectorFetchOptions()` maps the key onto `resilientFetch`'s per-attempt
+    // `timeoutMs`, pinned by `connector-fetch-policy.test.ts`.
     //
     // Tombstoned with `retiredKey()`: `ConnectorSchema` is a non-strict `z.object`,
     // so a bare deletion would be a silent strip (ADR-0104). No def leaves with it —

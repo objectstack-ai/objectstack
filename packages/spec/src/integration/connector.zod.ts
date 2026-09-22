@@ -576,8 +576,11 @@ const ERROR_MAPPING_RETIRED =
 //
 // `requestTimeoutMs` is the replacement and the lit control for every reading
 // above — same schema, same census, same files — because it resolves to a real
-// read (`opts.timeoutMs`, `resilientFetch`'s per-attempt deadline) since #19388.
-// Bound the connect phase at a provider or gateway that can see it.
+// read. The live record is in the tree, not in a card number:
+// `integration/connector-fetch-policy.ts` maps it onto `opts.timeoutMs`,
+// `resilientFetch`'s per-attempt deadline, and `connector-fetch-policy.test.ts`
+// pins that mapping. Bound the connect phase at a provider or gateway that can
+// see it.
 //
 // `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
 // strip (ADR-0104); the tombstone below makes the removal audible in the two

@@ -8992,8 +8992,9 @@ const connectorErrorMappingRemoved: MetadataConversion = {
  * And it is not implementable where it was declared: a connector's outbound
  * call is a WHATWG `fetch`, whose only cancellation surface is one
  * `AbortSignal` over the whole operation, so nothing there observes the connect
- * phase. `requestTimeoutMs` — live since #19388, the lit control for every
- * reading above — is the bound the platform can keep.
+ * phase. `requestTimeoutMs` — the lit control for every reading above, live at
+ * `integration/connector-fetch-policy.ts` where it becomes `resilientFetch`'s
+ * per-attempt `timeoutMs` — is the bound the platform can keep.
  *
  * A pure lossless delete: the key never had an effect to preserve, so there is
  * no value to rewrite into anything.
