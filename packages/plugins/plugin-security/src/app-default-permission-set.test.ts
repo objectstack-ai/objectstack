@@ -165,30 +165,44 @@ describe('appSecurityPluginOptions over `packages[]` (ADR-0130 D4, #15007)', () 
       },
     });
 
-  /** Today's emitted shape: flattened top level PLUS `packages[]`. */
-  const additive = () => composeStacks([addonStack(), coreStack()], { manifest: 'preserve' });
+  /** Today's emitted shape: `packages[]` only (#14512's emitter half). */
+  const optionB = () => composeStacks([addonStack(), coreStack()], { manifest: 'preserve' }) as unknown as Record<string, unknown>;
 
-  /** The ruled shape: `packages[]` only. */
-  const optionB = () => {
-    const composed = additive() as unknown as Record<string, unknown>;
+  /**
+   * The LEGACY shape: flattened top level PLUS `packages[]` — every
+   * multi-package artifact built before #14512, which D4's read-both rule still
+   * reads off disk. Synthesized here for the same reason option B used to be:
+   * the shape the producer does not emit is the one a fixture has to build.
+   */
+  const additive = () => {
     const owned = new Set(PACKAGE_OWNED_KEYS);
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(composed)) if (!owned.has(key)) out[key] = value;
+    const flattened = composeStacks([addonStack(), coreStack()]) as unknown as Record<string, unknown>;
+    const out: Record<string, unknown> = { ...optionB() };
+    for (const [key, value] of Object.entries(flattened)) if (owned.has(key)) out[key] = value;
     return out;
   };
 
   it('CONTROL — the additive shape really does carry the flattened copy', () => {
     // Without this, the option-B case below could pass because the fixture
     // never had a flattened level to lose.
-    const composed = additive() as unknown as Record<string, unknown>;
+    const composed = additive();
     expect(Array.isArray(composed.permissions)).toBe(true);
     expect((composed.permissions as unknown[]).length).toBeGreaterThan(0);
     expect((composed.packages as unknown[]).length).toBe(2);
     expect(PACKAGE_OWNED_KEYS).toContain('permissions');
   });
 
+  it('CONTROL — and the shape the producer emits today carries no flattened copy', () => {
+    // The other half of the same control: option B is what `composeStacks`
+    // returns now, not a fixture that strips it, so a producer that started
+    // emitting the flat copy again would be red here.
+    const composed = optionB();
+    expect(composed.permissions).toBeUndefined();
+    expect((composed.packages as unknown[]).length).toBe(2);
+  });
+
   it('the additive shape answers exactly what it answered before this card', () => {
-    expect(appSecurityPluginOptions(additive())).toEqual({ fallbackPermissionSet: CORE_PROFILE });
+    expect(appSecurityPluginOptions(additive() as never)).toEqual({ fallbackPermissionSet: CORE_PROFILE });
   });
 
   it('OPTION B — the flattened level is gone and the packaged declaration is still resolved', () => {
