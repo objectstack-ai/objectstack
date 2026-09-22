@@ -1436,6 +1436,44 @@ jobs:
       - name: Card-closure helper self-test
         run: pnpm check:pm-close-cards
 
+      # Fleet-write relay self-tests — the same family and the same split as
+      # the steps above, in three files because the relay has three halves.
+      # The LIVE paths are a `repository_dispatch` from a seat, a workflow run
+      # here (`fleet-write.yml`) and writes as the fleet App on a target repo,
+      # none of which CI runs on a pull request; the offline halves are what CI
+      # can hold, and `check:self-test-wired` requires them because
+      # `fleet-write.yml` runs two of the scripts.
+      #
+      # What the validator's self-test instruments is the closed schema a clean
+      # tree cannot exercise: an unknown envelope or per-action key refused BY
+      # NAME, an op outside the closed list, a target outside the organization,
+      # a numeric string where an integer is required, byte caps, the platform's
+      # own `client_payload` ceilings pinned with their source, and — by
+      # construction over every request every op can spell — that no row reaches
+      # a merge, a review, a ref, contents, a workflow, a release or an
+      # organization endpoint, and none issues a whole-set PUT.
+      - name: Fleet-write payload validator self-test
+        run: pnpm check:pm-fleet-write-validate
+
+      # The executor's self-test drives a fake platform through the sender gate
+      # (write, maintain and admin pass; read, triage, none and a stranger are
+      # refused with ZERO writes), every op as the request the table declares,
+      # stop at the first failure with later actions untouched, the idempotent
+      # 404 on a directed label DELETE, the GraphQL ops behind a node-id read,
+      # one summary row per request, and a known token that comes back out of
+      # NO summary line, log line or error.
+      - name: Fleet-write executor self-test
+        run: pnpm check:pm-fleet-write-execute
+
+      # The seat-side dispatcher's self-test pins the transport selector that
+      # never guesses (an explicit OS_FLEET_TRANSPORT wins; `auto` is dispatch
+      # only under the cloud discriminator and direct without it), the session
+      # on the envelope, ONE paced dispatch per stroke, a run found by its
+      # request id and waited to its conclusion under an injected clock, and
+      # both ceilings answered UNCONFIRMED and never retried.
+      - name: Fleet-write dispatcher self-test
+        run: pnpm check:pm-fleet-write-dispatch
+
       # Board-snapshot archiver self-test (#17390) — same family and the same
       # split as every step around it. The LIVE run reads the whole board over
       # REST and commits the result to an orphan branch, so it is not a thing
