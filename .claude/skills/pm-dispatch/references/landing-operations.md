@@ -12,7 +12,6 @@
 - 更硬的旁证是查上一单的实现体完好:`git grep` 带引号精确名对 `origin/main` 与实现文件。
 - 锚点断言的正确措辞:断言 `pnpm --filter @objectstack/spec check:authorable-surface` 绿即可。
 - `baseRev` 允许滞后,是一行提示不是错误;⛔ 禁为凑相等手改锚点。
-- ⛔ 不得要求 `baseRev == merge-base`。
 
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
@@ -28,6 +27,7 @@
 - Tier H(其余受管面)者:四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后认领席落地。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 再读 `mergeable_state`:`dirty` ⇒ 先 merge `origin/main` 再挂;生成物在面上按 A 的固定序。
+- 挂 auto-merge 的同一动作里重测生成物漂移,⛔ 不复用更早的零;非零 ⇒ 按 A 的固定序。
 - ready + 全绿 ≠ 已入队:队列从不主动拉 PR,入队是显式动作。
 - 零 `enqueued` 事件按序查三条:① `mergeable_state` 是否 `dirty`。
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `platform-readings.md`。

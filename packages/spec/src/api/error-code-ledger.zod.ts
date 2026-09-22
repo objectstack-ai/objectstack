@@ -1279,7 +1279,8 @@ export const ERROR_CODE_LEDGER = {
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
     'EXTERNAL_WRITE_FORBIDDEN',
-    // [#16449] The eight rows below are `door: 'none'` codes — raised at
+    // [#16449] The eight rows below — through `STACK_TRIGGER_CAPABILITY_REQUIRED`
+    // — are `door: 'none'` codes — raised at
     // authoring / boot, before any HTTP boundary exists — registered under the
     // #16404 ruling (door or no door; see the header). Each ships in this
     // package's `dist`, so its spelling is the face a consumer's
@@ -1308,6 +1309,29 @@ export const ERROR_CODE_LEDGER = {
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
     'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
     'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers`
+    // [#16348] The COMPOSITION half of the same family, and `door: 'none'` on
+    // the same reading: the six `composeStacks` refusals, one code per raise
+    // site, every one `status: 422` (`StackRefusalError`, `stack.zod.ts`), the
+    // findings the site collected on `issues`. Every message carries the
+    // literal `composeStacks conflict:` prefix, which is how the family is
+    // located — five of the six raise inside helper functions, not in
+    // `composeStacks`' own body. Raised where `defineStack` is: `os validate` /
+    // `os build` and a hand-written `objectstack.config.ts`, before any HTTP
+    // boundary exists (measured: zero `composeStacks` CALL sites under
+    // `packages/runtime/src` + `packages/rest/src` — 7 non-test occurrences,
+    // all doc comments or message prose in one file; positive control
+    // `defineStack`, same two trees, 31 occurrences across 8 files).
+    // ⛔ NOT registered, and the absence is load-bearing: the seventh bare
+    // `Error` in that file, `composeStacks internal error: no source stack
+    // recorded for composed object …`, is an internal-bookkeeping invariant
+    // rather than an authored-entity refusal — a 422 would blame the author
+    // for our defect. Its disposition is its own decision.
+    'STACK_COMPOSE_ACTION_KEY_COLLISION',        // two stacks declare the same action key — the collision `defineStack` refuses within one stack, one composition step later
+    'STACK_COMPOSE_COLLECTION_CONFLICT',         // under `objectConflict: 'merge'`, an object-level collection other than `fields` is declared with different values by two stacks
+    'STACK_COMPOSE_FUNCTION_CONFLICT',           // two stacks define a handler under the same name; handlers resolve by name at boot
+    'STACK_COMPOSE_FUNCTIONS_SHAPE_CONFLICT',    // `functions` authored in the map form by one stack and the array form by another
+    'STACK_COMPOSE_KEY_CONFLICT',                // a single-valued top-level key is declared with different values by two stacks
+    'STACK_COMPOSE_OBJECT_CONFLICT',             // the same object name is defined by more than one stack under the default `objectConflict: 'error'`
   ],
 } as const satisfies Record<string, readonly string[]>;
 
