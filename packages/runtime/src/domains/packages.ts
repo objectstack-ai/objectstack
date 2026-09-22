@@ -78,7 +78,7 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 // copies of them. ⛔ A hand-written semver regex here would be a SECOND grammar
 // for the version key on this one surface: the `PATCH /packages/:id` door
 // further down judges the same key and keeps no copy of its own either — it
-// references `MAJOR_MINOR_PATCH_VERSION_PATTERN`, the same constant
+// references `SEMVER_2_0_0_VERSION_PATTERN`, the same constant
 // `ManifestSchema`'s own `version` field references (`@objectstack/spec`
 // `kernel/version-grammar.ts`). Both doors therefore read ONE declaration, and
 // a change to that declaration reaches both of them with no edit to this file.
@@ -89,7 +89,7 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 // `manifestIdRefusal` is imported for exactly one limb: the fallback when a
 // failed parse somehow carries no issue. Even that limb then prints the
 // DECLARATION's own sentence rather than a second one invented here.
-import { ManifestSchema, MAJOR_MINOR_PATCH_VERSION_PATTERN, manifestIdRefusal } from '@objectstack/spec/kernel';
+import { ManifestSchema, SEMVER_2_0_0_VERSION_PATTERN, manifestIdRefusal } from '@objectstack/spec/kernel';
 // [#17672] The repo's ONE message for a single-valued query parameter supplied
 // more than once, from the module whose header is the authority on the rule
 // (`packages/rest/src/query-multiplicity.ts`). Imported, never restated: this
@@ -1767,8 +1767,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (patch.name !== undefined && patch.name === '') {
                 return { handled: true, response: deps.error('name must not be empty', 400) };
             }
-            if (patch.version !== undefined && !MAJOR_MINOR_PATCH_VERSION_PATTERN.test(patch.version)) {
-                return { handled: true, response: deps.error('version must be semantic (e.g. 1.0.0)', 400) };
+            if (patch.version !== undefined && !SEMVER_2_0_0_VERSION_PATTERN.test(patch.version)) {
+                return { handled: true, response: deps.error('version must be a SemVer 2.0.0 string (e.g. 1.0.0, 2.0.0-beta.1)', 400) };
             }
             if (patch.name === undefined && patch.description === undefined && patch.version === undefined) {
                 return { handled: true, response: deps.error('Body { name?, description?, version? } — nothing to update', 400) };

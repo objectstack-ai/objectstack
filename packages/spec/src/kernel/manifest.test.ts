@@ -20,8 +20,25 @@ describe('ManifestSchema', () => {
       expect(() => ManifestSchema.parse(manifest)).not.toThrow();
     });
 
+    /**
+     * The key enforces SemVer 2.0.0 — the standard, not a three-segment core.
+     *
+     * ⭐ `1.0.0-beta` used to sit in the invalid list below, under a test named
+     * 「should enforce semantic versioning」 that refused a semantic version. It
+     * is one, and the sibling `PackageVersionSchema.version`'s own docstring has
+     * always advertised `2.0.0-beta.1` as an example of the same concept. The
+     * card that moved it recorded that contradiction; this list is where it
+     * stops being true.
+     */
     it('should enforce semantic versioning', () => {
-      const validVersions = ['0.0.1', '1.0.0', '1.2.3', '10.20.30'];
+      const validVersions = [
+        '0.0.1', '1.0.0', '1.2.3', '10.20.30',
+        // Prerelease and build metadata are PARTS of a semantic version.
+        '1.0.0-beta', '2.0.0-beta.1', '17.0.0-rc.5', '1.0.0-alpha.1',
+        '1.0.0+20230101', '1.0.0-rc.1+exp.sha.5114f85',
+        // SemVer 2.0.0 is case-preserving.
+        '1.0.0-Beta.1', '1.0.0+Build.5',
+      ];
       validVersions.forEach(version => {
         const manifest = {
           id: 'com.test.app',
@@ -32,7 +49,15 @@ describe('ManifestSchema', () => {
         expect(() => ManifestSchema.parse(manifest)).not.toThrow();
       });
 
-      const invalidVersions = ['1.0', '1', 'v1.0.0', '1.0.0-beta'];
+      const invalidVersions = [
+        '1.0', '1', 'v1.0.0', 'latest', '',
+        // The forms SemVer 2.0.0 forbids — refused here for the first time.
+        // §2 leading zeroes in the numeric core; §9 empty and leading-zero
+        // prerelease identifiers; §10 empty build identifier.
+        '01.1.1', '1.01.1', '1.1.01',
+        '1.0.0-0123', '1.0.0-alpha..1', '1.0.0-alpha..', '1.0.0-.',
+        '1.0.0+.',
+      ];
       invalidVersions.forEach(version => {
         const manifest = {
           id: 'com.test.app',

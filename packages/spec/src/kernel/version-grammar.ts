@@ -1,87 +1,98 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Version grammars for "the version of a package or plugin" — one declaration
- * per accept set, referenced by every carrier that constrains the string
- * instead of restated at each one.
+ * The version grammar for "the version of a package or plugin" — ONE
+ * declaration, referenced by every carrier that constrains the string instead
+ * of restated at each one.
  *
- * Eight in-repo carriers used to spell one of these three patterns out as a
- * regex literal of their own. Three accept sets written eight times is three
- * accept sets that drift eight ways, and the count was still growing: three of
- * the eight were published schema declarations with no parse caller at all,
- * added by authors who copied a neighbour's literal. Each now references the
- * pattern it already enforced.
+ * ## One concept, one accept set, one name
  *
- * A ninth in-repo carrier of the same concept spelled no regex at all:
- * `PackageManifestSchema.version` (`marketplace/package-version.zod.ts`) is a
- * bare `z.string()`, and it is deliberately left that way here.
+ * Ten carriers of this concept across two repositories once judged the same
+ * string by four different rules, and the strictest of them refused
+ * `2.0.0-beta.1` — the very string a sibling declaration documented as an
+ * example of itself. An author met a different verdict at every door: refused
+ * at `os plugin build`, accepted at publish, refused again in the Studio form,
+ * accepted with no check at all at install.
  *
- * ⚠️ These three are NOT interchangeable — they are three different accept
- * sets, and the names say which. Referencing the wrong one moves a published
- * accept set. Pick by what the carrier judges today, never by which name reads
- * best:
+ * Collapsing those literals onto three exported constants removed the drift but
+ * not the disagreement: three accept sets is still three answers to one
+ * question, and two of the three names described accept sets no standard
+ * defines. The canon is now the standard the repository had been claiming all
+ * along — SemVer 2.0.0 — and {@link SEMVER_2_0_0_VERSION_PATTERN} is the whole
+ * of it.
  *
- * | pattern | `1.2.3` | `2.0.0-beta.1` | `1.0.0-Beta.1` | `1.0.0+20230101` |
- * |:--|:--|:--|:--|:--|
- * | {@link MAJOR_MINOR_PATCH_VERSION_PATTERN}        | ✅ | ❌ | ❌ | ❌ |
- * | {@link SEMVER_SHAPED_VERSION_PATTERN}            | ✅ | ✅ | ✅ | ✅ |
- * | {@link SEMVER_SHAPED_LOWERCASE_VERSION_PATTERN}  | ✅ | ✅ | ❌ | ✅ |
+ * ## What that costs, in both directions
  *
- * ⛔ **None of the three is a SemVer 2.0.0 conformance check**, and none is
- * named as one. Two of them accept forms SemVer 2.0.0 forbids (leading zeroes
- * in the numeric core, empty and leading-zero identifiers) and one refuses
- * forms it requires. Need ordering, precedence or a standards-compliant
- * verdict? None of these is that predicate — `dependency-resolver.ts` in
- * `@objectstack/core` parses and COMPARES versions and is the module to extend.
+ * The move widens most carriers and narrows a fringe on all of them, and both
+ * halves are deliberate:
  *
- * ⚠️ A `RegExp` is a shared mutable object. None of these carries the `g` or
- * `y` flag, so `.test()` is stateless and the sharing is safe; ⛔ do not add
- * one of those flags to a pattern on this page.
+ * - Carriers that refused every prerelease and all build metadata now accept
+ *   them — `2.0.0-beta.1`, `17.0.0-rc.5`, `1.0.0+20230101`,
+ *   `1.0.0-rc.1+exp.sha.5114f85`. That is what the key's own prose has said
+ *   since it was written, and what this repository's own releases need: it cuts
+ *   prereleases of its own packages, while the key that describes a package
+ *   could not express one.
+ * - Identifiers stay case-PRESERVING. SemVer 2.0.0 admits either ASCII case, so
+ *   `1.0.0-Beta.1` is valid here and the one carrier that used to refuse it no
+ *   longer does.
+ * - Every carrier now refuses the forms SemVer 2.0.0 forbids: leading zeroes in
+ *   the numeric core (§2 — `01.1.1`), empty or leading-zero prerelease
+ *   identifiers (§9 — `1.0.0-0123`, `1.0.0-alpha..1`), and empty build-metadata
+ *   identifiers (§10 — `1.0.0+.`).
+ *
+ * ⭐ The narrowing is bounded, and the bound is the load-bearing property:
+ * **no valid prerelease the plugin boot path accepts today is refused.** What
+ * it stops accepting is exactly the set of strings no ordering exists for —
+ * `dependency-resolver.ts` in `@objectstack/core` can place none of them in a
+ * precedence order, so admitting them produced versions that could be published
+ * and never compared.
+ *
+ * ## Using it
+ *
+ * ⭐ Unlike the three constants it replaces, this pattern IS a SemVer 2.0.0
+ * conformance check — it is semver.org's own published expression, and it is
+ * named for what it decides. It still decides SHAPE and nothing else: ordering
+ * and precedence are a different question, and `dependency-resolver.ts` in
+ * `@objectstack/core` is the module that parses and COMPARES versions.
+ *
+ * ⚠️ A `RegExp` is a shared mutable object. This one carries neither the `g`
+ * nor the `y` flag, so `.test()` is stateless and the sharing is safe; ⛔ do
+ * not add either flag to it.
+ *
+ * ⛔ A version RANGE is not a version and is not judged here. `engines.platform`
+ * (`kernel/manifest.zod.ts`) and `versionRange`
+ * (`marketplace/package-version.zod.ts`) admit a leading range operator and
+ * carry their own declarations.
  */
 
 /**
- * Three numeric segments and nothing else — `major.minor.patch`, no
- * prerelease suffix and no build suffix.
+ * SemVer 2.0.0, exactly — semver.org's published regular expression, in its
+ * form without named capture groups.
  *
- * Accepts `1.2.3`; refuses `2.0.0-beta.1`, `1.0.0+20230101`, `v1.0.0`, `1.0`.
- * Accepts `01.1.1`: `\d+` has always admitted a leading zero here.
+ * `major.minor.patch`, each a numeric identifier carrying no leading zero, plus
+ * an optional `-prerelease` of dot-separated non-empty identifiers (numeric ones
+ * carrying no leading zero) and an optional `+build` of dot-separated non-empty
+ * identifiers. Identifiers are case-PRESERVING: `1.0.0-Beta.1` is valid.
+ *
+ * | string | verdict |
+ * |:--|:--|
+ * | `1.2.3`, `2.0.0-beta.1`, `1.0.0-Beta.1`, `1.0.0+20230101` | accepted |
+ * | `01.1.1` (§2), `1.0.0-0123` and `1.0.0-alpha..1` (§9), `1.0.0+.` (§10) | refused |
+ * | `v1.0.0`, `1.0`, `latest`, the empty string | refused |
  *
  * Carriers: `ManifestSchema.version` (`kernel/manifest.zod.ts`),
  * `MetadataPluginManifestSchema.version` (`kernel/metadata-plugin.zod.ts`),
  * `PluginRegistryEntrySchema.version` (`kernel/plugin-registry.zod.ts`),
- * `PluginMetadataSchema.version` (`kernel/plugin-validator.zod.ts`), and the
- * `PATCH /api/v1/packages/:id` door in `@objectstack/runtime`.
+ * `PluginMetadataSchema.version` (`kernel/plugin-validator.zod.ts`),
+ * `PluginSchema.version` (`kernel/plugin.zod.ts`),
+ * `PackageVersionSchema.version` and `PackageManifestSchema.version`
+ * (`marketplace/package-version.zod.ts`), `PluginLoader.isSemverVersion`
+ * (`@objectstack/core`, the boot path) and the `PATCH /api/v1/packages/:id`
+ * door (`@objectstack/runtime`).
+ *
+ * The accept set is pinned witness by witness in `version-grammar.test.ts`;
+ * move a cell there and you have moved a published accept set on every carrier
+ * above, in one visible edit.
  */
-export const MAJOR_MINOR_PATCH_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
-
-/**
- * `major.minor.patch` with an optional `-prerelease` and an optional `+build`
- * suffix, identifiers in either ASCII case.
- *
- * A strict SUPERSET of SemVer 2.0.0: it accepts every SemVer-valid string, and
- * additionally accepts forms SemVer 2.0.0 forbids — leading zeroes in the
- * numeric core (`01.1.1`), leading-zero and empty prerelease identifiers
- * (`1.0.0-0123`, `1.0.0-alpha..1`), and degenerate build metadata (`1.0.0+.`).
- * Those are accepted DELIBERATELY; `plugin.test.ts` and
- * `plugin-loader.test.ts` pin them as accepted.
- *
- * Carriers: `PluginSchema.version` (`kernel/plugin.zod.ts`) and
- * `PluginLoader.isSemverShapedVersion` (`@objectstack/core`,
- * `plugin-loader.ts`) — the boot path. Those two converged on one spelling
- * under #16365 and now reference one declaration, so they cannot drift apart
- * again. The comment block above `PluginSchema.version` is the record of why
- * this accept set is what it is; read it before changing this line.
- */
-export const SEMVER_SHAPED_VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/;
-
-/**
- * {@link SEMVER_SHAPED_VERSION_PATTERN} with the suffix identifiers restricted
- * to LOWERCASE ASCII — `1.0.0-beta.1` is accepted, `1.0.0-Beta.1` is not.
- *
- * Strictly inside {@link SEMVER_SHAPED_VERSION_PATTERN}: nothing that passes
- * this pattern can fail the boot path's.
- *
- * Carrier: `PackageVersionSchema.version`
- * (`marketplace/package-version.zod.ts`), the published release row.
- */
-export const SEMVER_SHAPED_LOWERCASE_VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9.-]+)?(\+[a-z0-9.-]+)?$/;
+export const SEMVER_2_0_0_VERSION_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;

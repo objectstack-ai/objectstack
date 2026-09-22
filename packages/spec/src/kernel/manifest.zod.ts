@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
-import { MAJOR_MINOR_PATCH_VERSION_PATTERN } from './version-grammar';
+import { SEMVER_2_0_0_VERSION_PATTERN } from './version-grammar';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { formatSuggestion } from '../shared/suggestions.zod';
@@ -407,12 +407,23 @@ export const ManifestSchema = strictObject({
     .describe('Default datasource for all objects in this package'),
 
   /**
-   * Package version following semantic versioning (major.minor.patch).
+   * Package version — **SemVer 2.0.0**, the whole grammar: `major.minor.patch`
+   * with an optional `-prerelease` and an optional `+build` suffix.
+   *
+   * Identifiers are case-preserving, so `1.0.0-Beta.1` is valid. The forms the
+   * standard forbids are refused: a leading zero in the numeric core
+   * (`01.1.1`), an empty or leading-zero prerelease identifier
+   * (`1.0.0-alpha..1`, `1.0.0-0123`), an empty build identifier (`1.0.0+.`).
+   *
+   * ⛔ Not a version RANGE — `engines.platform` is that, and it carries its own
+   * declaration.
    *
    * @example "1.0.0"
    * @example "2.1.0"
+   * @example "2.0.0-beta.1"
+   * @example "1.0.0-rc.1+exp.sha.5114f85"
    */
-  version: z.string().regex(MAJOR_MINOR_PATCH_VERSION_PATTERN).describe('Package version (semantic versioning)'),
+  version: z.string().regex(SEMVER_2_0_0_VERSION_PATTERN).describe('Package version (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1, 1.0.0+20230101)'),
   
   /** 
    * Type of the package in the ObjectStack ecosystem.

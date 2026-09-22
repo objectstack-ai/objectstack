@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { PluginCapabilityManifestSchema } from './plugin-capability.zod';
-import { MAJOR_MINOR_PATCH_VERSION_PATTERN } from './version-grammar';
+import { SEMVER_2_0_0_VERSION_PATTERN } from './version-grammar';
 
 /**
  * # Plugin Registry Protocol
@@ -156,7 +156,7 @@ export const PluginRegistryEntrySchema = lazySchema(() => z.object({
   /**
    * Current version
    */
-  version: z.string().regex(MAJOR_MINOR_PATCH_VERSION_PATTERN),
+  version: z.string().regex(SEMVER_2_0_0_VERSION_PATTERN),
   
   /**
    * Plugin display name
