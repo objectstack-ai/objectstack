@@ -321,7 +321,7 @@
   },
   "dependencies": {
     "pg-connection-string": "^2.14.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.1"
   },
   "peerDependencies": {
     "ai": "^7.0.0"
