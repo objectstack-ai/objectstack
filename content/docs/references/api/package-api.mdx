@@ -47,7 +47,7 @@ Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries, at the stage the registry records it |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -89,7 +89,7 @@ Installed package row whose manifest is the assembled package body
 | **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
-| **functions** | `any` | optional | Named handler functions, as they survived the record JSON projection |
+| **functions** | `Record<string, string \| { handler?: string; effect?: Enum<'pure' \| 'writes'> }> \| { name: string; handler?: string; packageId?: string; effect?: Enum<'pure' \| 'writes'> }[]` | optional | Named handler functions, lowered to the refs a JSON document carries |
 | **datasourceMapping** | `{ namespace?: string; package?: string; objectPattern?: string; default?: boolean; … }[]` | optional | Centralized datasource routing rules for packages/namespaces/objects |
 | **translations** | `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>[]` | optional | I18n Translation Bundles |
 | **objectExtensions** | `{ extend: string; fields?: Record<string, object>; label?: string; pluralLabel?: string; … }[]` | optional | Extensions to objects owned by other packages |
@@ -113,7 +113,7 @@ Installed package row whose manifest is the assembled package body
 | **agents** | `{ name: string; label: string; avatar?: string; role: string; … }[]` | optional | AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents |
 | **tools** | `{ name: string; label: string; description: string; parameters: Record<string, any>; … }[]` | optional | AI Tool metadata records — optional refinement layer, never required: the default path is skills referencing platform tools or materialised action_`<name>` tools (ADR-0109) |
 | **skills** | `{ name: string; label: string; description?: string; surface?: Enum<'ask' \| 'build' \| 'both'>; … }[]` | optional | AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063) |
-| **hooks** | `any` | optional | Object lifecycle hooks, as they survived the record JSON projection |
+| **hooks** | `{ name: string; label?: string; object: string \| string[]; events: Enum<'beforeFind' \| 'afterFind' \| 'beforeInsert' \| 'afterInsert' \| 'beforeUpdate' \| …>[]; … }[]` | optional | Object Lifecycle Hooks, as a JSON document carries them |
 | **mappings** | `{ name: string; label?: string; sourceFormat?: Enum<'csv' \| 'json' \| 'xml' \| 'sql'>; targetObject: string; … }[]` | optional | Data Import/Export Mappings |
 | **analyticsCubes** | `{ name: string; title?: string; description?: string; sql: string; … }[]` | optional | Analytics Semantic Layer Cubes |
 | **connectors** | `{ name: string; label: string; type: Enum<'saas' \| 'database' \| 'file_storage' \| 'message_queue' \| 'api' \| 'custom'>; description?: string; … }[]` | optional | External System Connectors. A provider-bound entry (has `provider`: openapi/mcp/rest) is materialized into a live, dispatchable connector at boot and referenced by flows via `connector_action`; credentials are `auth.credentialRef` references, never inline secrets. An entry with no `provider` is a catalog descriptor only (NOT dispatchable) — set `enabled: false` on deliberate descriptors. Unknown provider / unresolvable credentialRef / name conflict ⇒ hard boot error (ADR-0097). |
@@ -208,7 +208,7 @@ Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries, at the stage the registry records it |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -303,7 +303,7 @@ Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries, at the stage the registry records it |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -345,7 +345,7 @@ Installed package row whose manifest is the assembled package body
 | **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
-| **functions** | `any` | optional | Named handler functions, as they survived the record JSON projection |
+| **functions** | `Record<string, string \| { handler?: string; effect?: Enum<'pure' \| 'writes'> }> \| { name: string; handler?: string; packageId?: string; effect?: Enum<'pure' \| 'writes'> }[]` | optional | Named handler functions, lowered to the refs a JSON document carries |
 | **datasourceMapping** | `{ namespace?: string; package?: string; objectPattern?: string; default?: boolean; … }[]` | optional | Centralized datasource routing rules for packages/namespaces/objects |
 | **translations** | `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>[]` | optional | I18n Translation Bundles |
 | **objectExtensions** | `{ extend: string; fields?: Record<string, object>; label?: string; pluralLabel?: string; … }[]` | optional | Extensions to objects owned by other packages |
@@ -369,7 +369,7 @@ Installed package row whose manifest is the assembled package body
 | **agents** | `{ name: string; label: string; avatar?: string; role: string; … }[]` | optional | AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents |
 | **tools** | `{ name: string; label: string; description: string; parameters: Record<string, any>; … }[]` | optional | AI Tool metadata records — optional refinement layer, never required: the default path is skills referencing platform tools or materialised action_`<name>` tools (ADR-0109) |
 | **skills** | `{ name: string; label: string; description?: string; surface?: Enum<'ask' \| 'build' \| 'both'>; … }[]` | optional | AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063) |
-| **hooks** | `any` | optional | Object lifecycle hooks, as they survived the record JSON projection |
+| **hooks** | `{ name: string; label?: string; object: string \| string[]; events: Enum<'beforeFind' \| 'afterFind' \| 'beforeInsert' \| 'afterInsert' \| 'beforeUpdate' \| …>[]; … }[]` | optional | Object Lifecycle Hooks, as a JSON document carries them |
 | **mappings** | `{ name: string; label?: string; sourceFormat?: Enum<'csv' \| 'json' \| 'xml' \| 'sql'>; targetObject: string; … }[]` | optional | Data Import/Export Mappings |
 | **analyticsCubes** | `{ name: string; title?: string; description?: string; sql: string; … }[]` | optional | Analytics Semantic Layer Cubes |
 | **connectors** | `{ name: string; label: string; type: Enum<'saas' \| 'database' \| 'file_storage' \| 'message_queue' \| 'api' \| 'custom'>; description?: string; … }[]` | optional | External System Connectors. A provider-bound entry (has `provider`: openapi/mcp/rest) is materialized into a live, dispatchable connector at boot and referenced by flows via `connector_action`; credentials are `auth.credentialRef` references, never inline secrets. An entry with no `provider` is a catalog descriptor only (NOT dispatchable) — set `enabled: false` on deliberate descriptors. Unknown provider / unresolvable credentialRef / name conflict ⇒ hard boot error (ADR-0097). |
