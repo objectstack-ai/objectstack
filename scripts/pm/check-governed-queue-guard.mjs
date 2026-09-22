@@ -554,11 +554,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
   '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 30,
   '⭐ #19344: the remedy names a path the ruleset actually offers': 5,
+  '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 7,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 23;
+const SELF_TEST_BATTERY_FLOOR = 24;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -858,8 +859,8 @@ export function recordVerdict({ pair, recognisers, cardNote = null }) {
     // one more artifact, which is the thing `AGENTS.md` forbids of a comment.
     servedIsIdentifier: located.served?.state === 'read' && recognisers.isModelIdentifierToken(located.served.value),
     // ⭐ A record reached through the 纯重生成 carry names an OLDER head, so the
-    // clear must say which head was reviewed and over how many certified hops.
-    // ⛔ A verdict may not deny its own evidence (#15406).
+    // clear says which head was reviewed and over how many certified hops: ⛔ a
+    // verdict may not deny its own evidence (#15406).
     carriedFrom: located.carriedFrom ?? null,
     carriedHops: located.carriedHops ?? 0,
   };
@@ -1617,10 +1618,9 @@ export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComm
       // locations this leg READS are the locations `--template` STATES, because
       // both are this list. The cross-tool pin drives exactly this loop.
       const numbers = { pr: entry.pr, card: card.card };
-      // ⭐ `runGit` is what lets the imported reader re-run the 纯重生成 test on
-      // the two COMMITTED trees when this head moved past its record. ⛔ Its
-      // absence is never a pass: the reader answers `unreadable` and this leg
-      // REFUSES, exactly as it does for a thread it could not read.
+      // ⭐ `runGit` lets the imported reader re-run the 纯重生成 test on two
+      // COMMITTED trees when this head moved past its record. ⛔ Its absence is
+      // never a pass: the reader answers `unreadable` and this leg REFUSES.
       const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null, runGit };
       let unreadable = null;
       for (const thread of recognisers.threads) {
@@ -2470,15 +2470,8 @@ async function main() {
   const fetchLabels = makeLabelReader(reader);
   const fetchComments = makeCommentReader(reader);
 
-  const verdict = await runGuard({
-    event: context.event,
-    rows,
-    fetchReviews,
-    fetchPull,
-    fetchComments,
-    lifted,
-    runGit: (args, input) => git(repoRoot, args, input),
-  });
+  const runGit = (args, input) => git(repoRoot, args, input);
+  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPull, fetchComments, lifted, runGit });
   // The SIZE leg (#19036): every queued pull request, through the same pull
   // reader the governed leg reads heads with. `merge_group` only, '' on the
   // other leg, so the `pull_request` output is byte-identical to what it was.
@@ -4079,6 +4072,7 @@ export async function selfTest() {
     loaderThrows = false,
     event = EVENT_MERGE_GROUP,
     pr = 70,
+    runGit = null,
   } = {}) => {
     tierApiCalls = 0;
     tierThreadsRead = [];
@@ -4094,6 +4088,7 @@ export async function selfTest() {
         return n === pr ? comments : cardComments;
       },
       loadRecognisers: async () => { if (loaderThrows) throw new Error('loader exploded'); return recognisers; },
+      runGit,
     });
   };
 
@@ -4442,6 +4437,25 @@ export async function selfTest() {
     governedPathsIn([REF_A]).length === 1 && governedPathsIn([RULES_PATH]).length === 1,
   );
 
+
+  // ⭐ Nothing is re-implemented here: the carry lives in the IMPORTED reader
+  // and this leg supplies only the git it reads two COMMITTED trees with. ⛔ Its
+  // absence REFUSES — a `Regen-provenance:` line certifies nothing by existing.
+  battery('⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head');
+  const REGEN_PROV = { id: 901, created_at: '2026-09-13T13:30:00Z', body: `Regen-provenance: 900 · \`${REF_OLD}\` → \`${REF_HEAD}\` · \`git diff --name-only\` → (empty)` };
+  const onOldHead = [recordComment({ sha: REF_OLD.slice(0, 12) }), REGEN_PROV];
+  const gitPure = (args) => (args[0] === 'diff' ? 'packages/spec/api-surface/ui.txt\0' : args[0] === 'check-attr' ? 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0' : `${REF_OLD}\n`);
+  const gitHand = (args) => (args[0] === 'diff' ? 'AGENTS.md\0' : 'AGENTS.md\0merge\0unspecified\0');
+  const carried = await tierRun({ comments: onOldHead, runGit: gitPure });
+  assert('⭐ a-record-on-an-OLDER-head-CARRIES-when-the-move-is-a-certified-pure-regeneration', carried.exitCode === EXIT_CLEAR && carried.entries[0].record.state === 'stands' && carried.entries[0].record.carriedHops === 1, JSON.stringify(carried.entries[0].record));
+  assert('and-the-CLEAR-names-the-head-actually-reviewed-and-says-it-re-ran-on-the-committed-trees', /carried forward over 1 certified PURE-REGENERATION hop/.test(renderGuardVerdict(carried)) && /COMMITTED trees/.test(renderGuardVerdict(carried)) && /never on the `Regen-provenance:` line being present/.test(renderGuardVerdict(carried)), renderGuardVerdict(carried));
+  const handMoved = await tierRun({ comments: onOldHead, runGit: gitHand });
+  assert('⛔ a-HAND-WRITTEN-path-in-the-range-refuses-exactly-as-an-uncarried-old-head-does', handMoved.exitCode === EXIT_REFUSED_UNAPPROVED && handMoved.entries[0].record.state === 'absent');
+  const blindTree = await tierRun({ comments: onOldHead, runGit: () => { throw new Error('fatal: bad object'); } });
+  assert('⛔ a-tree-this-build-cannot-reach-is-UNREADABLE-exit-4-never-clean', blindTree.exitCode === EXIT_REFUSED_UNREADABLE && blindTree.entries[0].record.state === 'unreadable');
+  assert('⛔ and-a-run-with-NO-git-reader-refuses-too-the-line-alone-certifies-nothing', (await tierRun({ comments: onOldHead })).exitCode === EXIT_REFUSED_UNREADABLE);
+  assert('⛔ CONTROL-the-ordinary-old-head-refusal-is-unmoved-where-no-line-claims-the-exception', (await tierRun({ comments: [recordComment({ sha: REF_OLD.slice(0, 12) })], runGit: gitPure })).exitCode === EXIT_REFUSED_UNAPPROVED);
+  assert('⛔ CONTROL-a-record-on-the-CURRENT-head-still-clears-without-reading-any-tree', (await tierRun({ comments: [recordComment()], runGit: () => { throw new Error('no tree may be read when the record is already on this head'); } })).exitCode === EXIT_CLEAR);
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
