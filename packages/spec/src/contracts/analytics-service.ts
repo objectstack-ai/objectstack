@@ -144,93 +144,33 @@ export interface CubeMeta {
 /**
  * Compare-to directive (ADR-0021): runs a time-shifted second query and
  * attaches `<measure>__compare` columns to each row.
+ *
+ * [#17551] Re-exported from the zod source (`DatasetCompareToSchema`,
+ * api/analytics.zod.ts) instead of a hand-written interface — the same move
+ * `AnalyticsQuery` above made for the same reason, taken here BEFORE a mirror
+ * could drift rather than after. The members are unchanged: `kind` is the
+ * closed pair the executor implements and `dimension` is optional and
+ * resolved by that executor.
  */
-export interface DatasetCompareTo {
-    /** previousPeriod = equal-length window immediately before; previousYear = same window −1y. */
-    kind: 'previousPeriod' | 'previousYear';
-    /**
-     * The time dimension (by name) whose `dateRange` is shifted.
-     *
-     * **Optional since #5011, resolved by the EXECUTOR — not by any consumer.**
-     * When omitted the executor takes the selection's shiftable time dimensions
-     * (its own long-standing criterion: a `timeDimensions` entry carrying a
-     * `dateRange`) and:
-     *
-     * - exactly one candidate → that one is shifted;
-     * - zero candidates → throws, saying a comparison needs a dated window;
-     * - two or more → throws, listing the candidates by name so the author can
-     *   pick one.
-     *
-     * The ambiguous and empty cases are LOUD by design. A consumer must never
-     * paper over them by guessing a dimension (PD #12): the resolution rule
-     * lives at the producer of the comparison — the executor — precisely so
-     * every caller gets the same answer or the same error.
-     */
-    dimension?: string;
-}
+export type { DatasetCompareTo } from '../api/analytics.zod.js';
 
 /**
  * A presentation's selection against a dataset (ADR-0021). Report/dashboard
  * widgets bind to a dataset and pick dimensions/measures BY NAME; this is the
  * wire shape a preview/query endpoint posts.
+ *
+ * [#17551, ruled] Re-exported from the zod source (`DatasetSelectionSchema`,
+ * api/analytics.zod.ts). It was a hand-written interface here, which is why
+ * four of its eleven members — `runtimeFilter`, `dateGranularity`,
+ * `compareTo`, `totals` — were published and enforced by nothing on the
+ * wire: `POST /analytics/dataset/query` could only door the seven whose
+ * declarations coincided with `AnalyticsQuery`'s, and the rest travelled into
+ * the executor unrefused (#17550 is the measured consequence). The schema is a
+ * transcription of the text this interface already published; the members, their
+ * types and their documentation live there now, in ONE place, and this name is
+ * that declaration re-exported — ⛔ never a second declaration beside it.
  */
-export interface DatasetSelection {
-    /** Dimension names from the dataset. */
-    dimensions?: string[];
-    /** Measure names from the dataset (may include derived measures). */
-    measures: string[];
-    /** Presentation-scope filter, ANDed with the dataset's intrinsic filter at render. */
-    runtimeFilter?: FilterCondition;
-    /** Optional time-dimension windows passed through to the runtime. */
-    timeDimensions?: AnalyticsQuery['timeDimensions'];
-    /**
-     * Presentation-scope date bucketing (framework#3588). Applies to every
-     * selected dimension the dataset declares as a `date` dimension, so a
-     * widget can bucket a trend by month without the dataset having to declare
-     * that granularity for every consumer.
-     *
-     * Precedence, per dimension: an explicit `timeDimensions` entry for that
-     * dimension wins, then this selection-level granularity, then the dataset
-     * dimension's own `dateGranularity` default. Unset leaves each dimension on
-     * its dataset default (which may be no bucketing at all — grouping by the
-     * raw column).
-     */
-    dateGranularity?: 'day' | 'week' | 'month' | 'quarter' | 'year';
-    /**
-     * Result ordering, applied by key in insertion order (`{ revenue: 'desc' }`).
-     *
-     * Every key must be a selected dimension, a selected measure, or a
-     * `<measure>__compare` column; anything else is rejected rather than
-     * silently ignored. Ordering is applied AFTER measure-scoped filters are
-     * merged, `compareTo` columns are attached, and derived measures are
-     * evaluated — so a derived measure (e.g. a win-rate ratio) is a valid sort
-     * key even though no single SQL statement computes it.
-     */
-    order?: Record<string, 'asc' | 'desc'>;
-    /**
-     * Max rows to return, applied after `order`. When `limit` is set without
-     * `order`, rows are ordered by the selected dimensions ascending first, so
-     * the truncated window is deterministic rather than an arbitrary subset.
-     */
-    limit?: number;
-    offset?: number;
-    /** Compare-to directive — runs a shifted query and attaches `<measure>__compare`. */
-    compareTo?: DatasetCompareTo;
-    /**
-     * Server-side totals (matrix subtotals + grand total). Each grouping is a
-     * subset of `dimensions` to additionally aggregate by; the selection is
-     * re-run grouped only by those dimensions, so every total is the measure's
-     * TRUE aggregate over the underlying rows — an `avg` total is the average
-     * over all rows, not an average of bucket averages (the ADR-0021
-     * governance line that forbids client-side re-aggregation). `[]` requests
-     * the grand total. A matrix report asks for
-     * `{ groupings: [rowDims, columnDims, []] }`. Results arrive on
-     * `AnalyticsResult.totals` in request order. `order`/`limit`/`offset` do
-     * not apply to totals queries — totals always cover the full selection.
-     */
-    totals?: { groupings: string[][] };
-    timezone?: string;
-}
+export type { DatasetSelection } from '../api/analytics.zod.js';
 
 export interface IAnalyticsService {
     /**
