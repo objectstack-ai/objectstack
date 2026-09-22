@@ -19,7 +19,7 @@
 - `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**. Use this (not `visible`) when the action should stay discoverable but locked in the current state.
 - `confirmText` — set for any destructive or irreversible operation.
 - `successMessage` / `errorMessage` — author-controlled toast copy on success / failure. Always set `successMessage` for non-obvious outcomes; without it the UI shows a generic "Action completed" toast.
-- `undoable: true` — on a single-record update, offers an **Undo** in the success toast (and `Ctrl+Z`); the runtime snapshots prior values and restores them.
+- `undoable: true` — offers an **Undo** in the success toast (and `Ctrl+Z`). Legal on exactly two shapes: `operation: 'update'`, where the framework runtime snapshots the prior values and restores them, and `type: 'api'`, where the console does. On any other action it is refused at parse time.
 
 Predicates are **bare CEL** — `record.status == "converted"`, evaluated against
 the current record. `record.<field>` resolves identically on every surface
