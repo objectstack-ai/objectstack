@@ -25541,12 +25541,12 @@ function selfTest() {
     });
   }
   t(`${SKILL_RULEBOOK_ROOT} spells NO model id at all — ${skillRulebookFiles.length} file(s) read, and a RETIRED id left there is caught HERE, where a current-value pin cannot see it (found: ${skillIdSpellings.join(', ') || 'none'})`, skillRulebookFiles.length > 0 && skillIdSpellings.length === 0);
-  // The rulebook half of the same coupling: the skill names the constant, and
-  // its downgrade fuse carries the case the quota exemption never had.
+  // The rulebook half of the same coupling: the skill names the constant. Its
+  // downgrade-fuse section is retired (maintainer 2026-09-22 「降档保险丝 不留」,
+  // #19061 comment 5772289798), so the guard below reds if that text creeps back.
   const fuseRules = readFileSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/contract-review.md'), 'utf8');
   t('the rulebook names the contract-review tier by its CONSTANT, so a retirement moves the value and the prose follows', fuseRules.includes('`CONTRACT_REVIEW_TIER`'));
-  t('…and its fuse keeps the quota exemption pointed at DISPATCH, never at the review', /额度耗尽豁免[^\n]*⛔[^\n]*不及复核/.test(fuseRules));
-  t('…and carries the case it never had: a RETIRED tier is not an exhausted one, and it is a maintainer ruling, ⛔ never a seat\'s reading', /档位退役[^\n]*≠[^\n]*耗尽[^\n]*维护者裁决[^\n]*⛔[^\n]*非席位读数/.test(fuseRules));
+  t('the rulebook no longer carries the retired 降档保险丝 lines (maintainer 2026-09-22 「降档保险丝 不留」, #19061 comment 5772289798)', !/额度耗尽豁免[^\n]*不及复核/.test(fuseRules) && !/档位退役[^\n]*≠[^\n]*耗尽/.test(fuseRules));
 
   // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
   //
