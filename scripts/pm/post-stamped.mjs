@@ -817,7 +817,7 @@ import {
   stampSpan,
   threadReadField,
 } from './check-half-states.mjs';
-import { readClause2Line } from './check-clause2-carriers.mjs';
+import { readClause2Line } from './clause2-line.mjs';
 import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -1766,7 +1766,7 @@ export function keyedLineRefusalText(rows) {
   return (
     `post-stamped: REFUSED — ${rows.length} keyed line(s) in this \`Claim:\` cannot be read by the checker that owns them. Nothing was written.\n` +
     rows.map((r, i) => `  ${i + 1}. [${r.key}] ${r.why}\n      line:  ${r.line}\n      write: ${CLAIM_KEY_SPELLINGS[r.key]}`).join('\n') +
-    '\n\n  `claimSeatNumber` and `h50ThreadReadMismatch` (`check-half-states.mjs`) and `readClause2Line` (`check-clause2-carriers.mjs`)\n' +
+    '\n\n  `claimSeatNumber` and `h50ThreadReadMismatch` (`check-half-states.mjs`) and `readClause2Line` (`clause2-line.mjs`)\n' +
     '  are imported HERE, so this IS the row they would file — hours earlier, and on your own claim rather than on someone\n' +
     '  else\'s post. ⛔ No flag turns it off: a line those readers cannot read is a half-state, not a formatting preference.'
   );
