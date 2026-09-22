@@ -1239,23 +1239,22 @@ export class SecurityPlugin implements Plugin {
     // as "resolve nothing", which makes a traversing rule refuse in preview.
     if (typeof (ql as any).registerWriteGateProbe === 'function') {
       (ql as any).registerWriteGateProbe(
-        async (object: string, operation: 'insert' | 'update', context: any): Promise<boolean> => {
-          if (context?.isSystem) return true;
-          if (!context?.userId) return false;
-          try {
-            const meta = await this.getObjectSecurityMeta(object);
-            const sets = await this.resolvePermissionSetsForContext(context);
-            return this.permissionEvaluator.checkObjectPermission(
-              operation, object, sets, { isPrivate: meta.isPrivate },
-            );
-          } catch (e) {
-            this.logger.warn?.(
-              `[security] validate() write-gate probe failed for object '${object}' — denying (fail-closed)`,
-              e instanceof Error ? e : new Error(String(e)),
-            );
-            return false;
-          }
-        },
+        (object: string, operation: 'insert' | 'update', context: any): Promise<boolean> =>
+          this.canWriteObject(object, operation, context),
+      );
+    } else {
+      // Absence must be loud. This engine takes middleware — so its write path
+      // IS gated — but exposes no seam for the preview to ask the same
+      // question, which means `validate()` there answers a traversing rule for
+      // callers the write path would refuse. Functional degradation, not
+      // durability: the deployment is visibly older than this plugin, and the
+      // remedy is the version bump.
+      ctx.logger.warn(
+        '[security] this ObjectQL exposes no write-gate seam (registerWriteGateProbe), so the '
+        + 'write PREVIEW (validate() / the dryRun import) cannot ask whether the caller could '
+        + 'perform the write. A validation rule that reads through a reference field will be '
+        + 'answered there for callers the real write path refuses. Upgrade @objectstack/objectql '
+        + 'to a version that offers the seam.',
       );
     }
 
@@ -5094,6 +5093,117 @@ export class SecurityPlugin implements Plugin {
     } catch (e) {
       this.logger.error?.(
         `[security] canReadObject could not resolve the object-level read admission for ` +
+          `'${objectName}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return false;
+    }
+  }
+
+  /**
+   * [#18682] Whether `context` may CREATE or UPDATE `object` at all — the
+   * object-level WRITE admission, and the exact sibling of
+   * {@link canReadObject}.
+   *
+   * ## Why it exists
+   *
+   * `ObjectQL.validate()` is a write PREVIEW that runs no middleware for its
+   * target object, by design: it executes nothing. A validation rule that reads
+   * one hop through a reference field is evaluated there against a related row
+   * fetched under SYSTEM authority, and the accepted cost of that elevation is
+   * an inference channel bounded to callers who could perform the write — a
+   * bound the real path gets for free, because the middleware's write gate
+   * refuses long before any rule is evaluated. The preview has no such gate, so
+   * it asks this.
+   *
+   * ## The arms, in the middleware's own order — ⛔ the CRUD grant is not the gate
+   *
+   * A probe that checked only `isSystem`, a principal and the CRUD grant admits
+   * two classes the write path refuses: a caller holding `allowCreate` but not a
+   * D3 `requiredPermissions` capability, and an `onBehalfOf` context naming a
+   * delegator that does not exist. Both were measured reaching the preview while
+   * `insert()` refused them. So the arms are the middleware's, in its order:
+   *
+   *   1. `isSystem` → admit (the total bypass);
+   *   2. no permission sets resolved → admit (the middleware guards its whole
+   *      CRUD gate with `if (permissionSets.length > 0)`);
+   *   3. `secMeta.unresolved` → DENY (#3545);
+   *   4. ADR-0066 D3/⑤ `requiredPermissions` capability AND-gate for the WRITE
+   *      CRUD class, checked BEFORE the grant, for the caller AND (D10) the
+   *      delegator;
+   *   5. the `allowCreate` / `allowEdit` CRUD grant for the operation asked;
+   *   6. ADR-0090 D10 — the delegator must independently hold the same grant;
+   *      a dangling delegator denies.
+   *
+   * The equality with the registered middleware is pinned as an EQUIVALENCE
+   * (`can-write-object-admission.test.ts`) rather than asserted here, for the
+   * same reason `canReadObject`'s is: two doors that merely agree today drift
+   * the first time one of them grows an arm.
+   *
+   * Fails CLOSED: a throw anywhere denies, and callers must treat a throw as a
+   * denial too.
+   *
+   * ⛔ Object-level ONLY. `true` never means "this write will succeed" — record
+   * scope, field-level security, `readonlyWhen` and the rules themselves are all
+   * still ahead of it. Nothing here may be used to widen.
+   */
+  async canWriteObject(object: string, operation: 'insert' | 'update', context?: any): Promise<boolean> {
+    const objectName = String(object ?? '');
+    if (!objectName) return false;
+    // 1. System operations bypass.
+    if (context?.isSystem) return true;
+
+    try {
+      const permissionSets = await this.resolvePermissionSetsForContext(context);
+      // 2. No sets resolved → no permission-set restriction applies.
+      if (permissionSets.length === 0) return true;
+
+      const { isPrivate, unresolved, requiredPermissions } =
+        await this.getObjectSecurityMeta(objectName);
+      // 3. [#3545] Posture unresolvable → deny.
+      if (unresolved) return false;
+
+      // [ADR-0090 D10] Resolve the delegator ONCE — arms 4 and 6 both need it,
+      // and a dangling link denies before either runs.
+      let delegatorSets: PermissionSet[] | null = null;
+      if (context?.onBehalfOf?.userId) {
+        const del = await resolveDelegatorContext(this.ql, context);
+        if (del.kind === 'missing') return false;
+        if (del.kind === 'resolved') {
+          delegatorSets = await this.resolvePermissionSetsForContext(del.context);
+        }
+      }
+
+      // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
+      //    principals.
+      const required = requiredCapsForOperation(requiredPermissions, operation);
+      if (required.length > 0) {
+        const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+        if (required.some((cap) => !held.has(cap))) return false;
+        if (delegatorSets && delegatorSets.length > 0) {
+          const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
+          if (required.some((cap) => !delHeld.has(cap))) return false;
+        }
+      }
+
+      // 5. The object-level CRUD grant for the operation asked.
+      if (!this.permissionEvaluator.checkObjectPermission(operation, objectName, permissionSets, { isPrivate })) {
+        return false;
+      }
+
+      // 6. [ADR-0090 D10] The delegator must independently grant the same write.
+      if (
+        delegatorSets &&
+        delegatorSets.length > 0 &&
+        !this.permissionEvaluator.checkObjectPermission(operation, objectName, delegatorSets, { isPrivate })
+      ) {
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      this.logger.error?.(
+        `[security] canWriteObject could not resolve the object-level write admission for ` +
           `'${objectName}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
         e instanceof Error ? e : new Error(String(e)),
       );

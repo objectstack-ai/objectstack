@@ -387,8 +387,10 @@ export interface EvaluateRulesOptions {
   /**
    * [#18682] The related records this write's predicates read ONE HOP through a
    * reference field — `record.crm_account.type` on an opportunity. Keyed by the
-   * reference FIELD name; the value is the related row, or `null` when it could
-   * not be read.
+   * reference FIELD name; the value is a {@link RelatedFieldBinding}, which
+   * either carries the related row or says WHY it has none. ⛔ Not `row | null`:
+   * the reason is what lets the refusal name the related object and column
+   * instead of leaving CEL to discover a missing key.
    *
    * Only the engine owns a driver, so it resolves these and hands them over —
    * the same division of labour `parent` follows, and like `parent` the read is
@@ -463,8 +465,8 @@ export function needsPriorRecord(
  * ## Scope: `script` / `cross_field`, including inside `conditional`
  *
  * These are the rules {@link checkPredicate} evaluates, and they are fail-CLOSED
- * (#4649) — the one policy under which an unreadable related field produces the
- * loud refusal the permission rule requires. The field-level `requiredWhen` /
+ * (#4649) — the one policy under which a rule that cannot be evaluated refuses
+ * the write instead of waving it through. The field-level `requiredWhen` /
  * `readonlyWhen` / option `visibleWhen` predicates are deliberately NOT
  * collected here: they fail OPEN, so a rule that could not be evaluated would
  * silently not enforce their gate — the opposite of what this capability's
@@ -3042,8 +3044,9 @@ function traversalRefusal(
       return {
         summary: `cannot read ${columns} through ${on}: the related record was not found`,
         detail:
-          ` The rule reads ${columns} through ${on}, but the referenced record could not be`
-          + ' read — it may have been deleted, or it may be outside this caller\'s visibility.',
+          ` The rule reads ${columns} through ${on}, but no record with that id exists — it`
+          + ' has most likely been deleted, leaving the reference dangling. This read is made'
+          + ' under system authority, so it is NOT a question of what the caller may see.',
       };
     case 'unreadable':
     default:

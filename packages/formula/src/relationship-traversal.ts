@@ -90,8 +90,8 @@ function isRootId(node: unknown, root: string): boolean {
  * only the plain one would be trivially side-stepped. That matters most for the
  * OPTIONAL forms: `has(...)`, `.?` and `[?]` read a missing key as an ordinary
  * `false`/default, so an author reaching for a null-safe spelling would have
- * turned "the acting user may not read this column" into a quiet non-firing
- * rule. The engine decides readability before evaluation precisely so the
+ * turned "this related column could not be resolved" into a quiet non-firing
+ * rule. The engine decides resolvability before evaluation precisely so the
  * verdict cannot depend on which operator was written — and this function is
  * what makes the analysis see every operator in the first place.
  *

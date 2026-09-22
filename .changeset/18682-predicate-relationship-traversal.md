@@ -2,6 +2,7 @@
 '@objectstack/formula': minor
 '@objectstack/lint': minor
 '@objectstack/objectql': minor
+'@objectstack/plugin-security': minor
 ---
 
 A validation rule can read one hop through a lookup — `record.account.type` on an opportunity resolves the owning account's field instead of faulting (#18682)
@@ -73,6 +74,21 @@ Both fault at evaluation today, so neither removes anything that works:
 
 A field that is **not** reference-typed is untouched: `record.address.city` on
 an object-valued field traverses today and keeps traversing.
+
+### `@objectstack/plugin-security` gains `canWriteObject`
+
+The object-level WRITE admission — the sibling of the existing `canReadObject`,
+and the same six arms in the middleware's own order: system bypass, no resolved
+permission sets, unresolvable posture, the ADR-0066 D3 `requiredPermissions`
+capability AND-gate for both principals, the CRUD grant, and the ADR-0090 D10
+delegator check. It exists for doors that must ask "could this caller perform
+this write" without running the engine middleware — the write preview is the
+first — and an equivalence suite pins its answer EQUAL to the registered
+middleware's, case for case, so the two cannot drift.
+
+⛔ Object-level only. `true` never means the write will succeed: record scope,
+field-level security, `readonlyWhen` and the rules themselves are all still
+ahead of it.
 
 ### Scope
 

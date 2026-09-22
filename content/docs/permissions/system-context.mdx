@@ -101,6 +101,7 @@ that silently does not happen.
 | 4 | Field-level security returns **all** fields | plugin-security | Get: every column readable. Lose: field masking | `packages/plugins/plugin-security/src/security-plugin.ts#computeReadableFields` |
 | 5 | Export permission granted unconditionally | plugin-security | Get: `canExport` is `true` | `packages/plugins/plugin-security/src/security-plugin.ts#canExport` |
 | 6 | Object-level read admission granted unconditionally | plugin-security | Get: `canReadObject` is `true`. This is the OBJECT-level half of a read — "may this caller read this object at all" — which the doors that bypass this middleware ask before they compile a statement of their own; `getReadFilter` is its row-level half, and the two are not interchangeable | `packages/plugins/plugin-security/src/security-plugin.ts#canReadObject` |
+| 6b | Object-level WRITE admission granted unconditionally | plugin-security | Get: `canWriteObject` is `true`. The WRITE twin of the object-level read admission above, asked by the write PREVIEW (`ObjectQL.validate()`), which runs no middleware for its target object and so has no gate of its own. It exists because a validation rule that reads one hop through a reference field is evaluated against a related row fetched under system authority, and that elevation is bounded to callers who could perform the write. An equivalence suite pins the answer EQUAL to the registered middleware's, case for case, including the ADR-0066 D3 capability arm and the ADR-0090 D10 delegator arm that a bare CRUD-grant check misses | `packages/plugins/plugin-security/src/security-plugin.ts#canWriteObject` |
 | 7 | Write bypass = `true`, effective write scope = `org` | plugin-security | Get: widest write scope without holding any capability | `packages/plugins/plugin-security/src/security-plugin.ts#start` |
 | 8 | Metadata-plane schema masking exempt (ADR-0106 D4) | metadata-core | Get: unmasked object schema. Note: the exemption is a **caller** property — it short-circuits before the security service is consulted | `packages/metadata-core/src/object-schema-fls.ts#isObjectSchemaMaskExempt` |
 | 9 | `explain()` may target a principal other than the caller | plugin-security | Get: no `manage_users` / delegated-admin check | `packages/plugins/plugin-security/src/security-plugin.ts#explainAccessForCaller` |
@@ -362,7 +363,7 @@ still holds equal to the census on every pull request:
 | — carry the flag onward only (rows 64–67 above) | 4 | ✅ |
 | Packages containing at least one elevation read | **20** | ✅ |
 | Files containing at least one elevation read | 45 | ✅ |
-| — the distinct symbols those reads live in — what this page anchors | 91 | ✅ |
+| — the distinct symbols those reads live in — what this page anchors | 92 | ✅ |
 | — of those files, the ones holding more than one read in one symbol | 9 | ✅ |
 
 The six rows marked — are a **dated decomposition, not a live claim**: they were
