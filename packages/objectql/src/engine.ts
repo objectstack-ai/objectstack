@@ -210,7 +210,8 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import type { RelatedRecordBinding } from './validation/rule-validator.js';
+import { collectPredicateRelationships, evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -6887,6 +6888,99 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#18682] Resolve the related rows this object's PREDICATE rules read one
+   * hop through a reference field, for a whole batch of rows at once.
+   *
+   * Returns a per-row lookup the validation seams hand to
+   * `evaluateValidationRules` as `related`. When no rule traverses anything the
+   * schema says so up front and this costs NOTHING — no query, no closure work
+   * — which is what bounds the N+1: one hop, only the fields a rule names, one
+   * batched read per reference field per write, and only when a rule asks.
+   *
+   * ## Read as the ACTING USER, deliberately unlike `parent`
+   *
+   * {@link resolveMasterDetailParent} reads as SYSTEM because a master-detail
+   * lock is a property of the header's state, not of the caller's visibility of
+   * it. This read is the opposite case: the value lands in a predicate whose
+   * verdict the caller can observe through the accept/reject of their own
+   * write, so it goes through the engine's own `find` path under the caller's
+   * context and the referenced object's CRUD gate, RLS and FLS all apply. A row
+   * — or a field — the caller may not read therefore does not arrive.
+   *
+   * ## An unresolved row is left ABSENT, and that is the loud answer
+   *
+   * No id, row gone, refused by the security layer, read threw: all four leave
+   * the field unbound. The stored id stays in the record, the traversal faults
+   * with `No such key`, and an unevaluable validation predicate REJECTS the
+   * write (#4649). ⛔ Never silently true, and never silently false — the two
+   * verdicts a security-relevant absence must not be allowed to pick between.
+   *
+   * The projection always names `id` alongside the fields the rules read:
+   * the map below is keyed on `row.id`, and a projection that omitted it would
+   * build an EMPTY map and leave every row unbound (#7537's shape, one seam
+   * over).
+   */
+  private async resolvePredicateRelated(
+    schema: any,
+    rows: ReadonlyArray<Record<string, unknown> | undefined | null>,
+    context: unknown,
+  ): Promise<((row: Record<string, unknown> | undefined | null) => RelatedRecordBinding | undefined)> {
+    const unbound = () => undefined;
+    const wanted = collectPredicateRelationships(schema);
+    if (wanted.size === 0) return unbound;
+
+    const fields = (schema?.fields ?? {}) as Record<string, unknown>;
+    // fk field -> (id -> related row)
+    const resolved = new Map<string, Map<string, Record<string, unknown>>>();
+
+    for (const [fk, namedFields] of wanted) {
+      const target = referenceTargetOf(fields[fk]);
+      if (!target) continue;
+      const ids = new Set<string>();
+      for (const row of rows) {
+        const value = row?.[fk];
+        // A multi-value reference cannot be one hop: `record.<fk>.<field>` on a
+        // list has no single related record to read, so it is left unbound and
+        // the predicate faults rather than picking an element.
+        if (value == null || Array.isArray(value) || typeof value === 'object') continue;
+        ids.add(String(value));
+      }
+      if (ids.size === 0) continue;
+      try {
+        const related = await this.find(target, {
+          where: { id: { $in: [...ids] } },
+          fields: [...new Set(['id', ...namedFields])],
+          context,
+        } as any) as Array<Record<string, unknown>>;
+        const byId = new Map<string, Record<string, unknown>>();
+        for (const row of Array.isArray(related) ? related : []) {
+          if (row?.id != null) byId.set(String(row.id), row);
+        }
+        resolved.set(fk, byId);
+      } catch (err) {
+        // Left unbound on purpose — see the docblock. Logged at `warn` because
+        // the write is still REJECTED downstream, loudly, in the caller's own
+        // response: nothing is silently lost here.
+        this.logger?.warn?.('predicate relationship lookup failed — the related field stays unbound and the rule will reject the write', {
+          object: target, field: fk, error: err,
+        });
+      }
+    }
+    if (resolved.size === 0) return unbound;
+
+    return (row) => {
+      if (!row) return undefined;
+      const binding: Record<string, Record<string, unknown> | null> = {};
+      for (const [fk, byId] of resolved) {
+        const value = row[fk];
+        if (value == null || Array.isArray(value) || typeof value === 'object') { binding[fk] = null; continue; }
+        binding[fk] = byId.get(String(value)) ?? null;
+      }
+      return binding;
+    };
+  }
+
+  /**
    * [#6457] Make a resolved master-detail header TOTAL over the MASTER
    * object's declared fields, so a `parent.<field>` predicate is evaluable
    * whatever subset of columns the driver echoed back.
@@ -11292,12 +11386,16 @@ export class ObjectQL implements IObjectQLEngine {
         const insertParentForRow = hasParentScopedRequiredWhen(schemaForValidation as any)
           ? await this.resolveMasterDetailParents(schemaForValidation, null, rows)
           : undefined;
+        // [#18682] The related rows this object's predicate rules read one hop
+        // through a reference field. Batched across the whole insert, and free
+        // when no rule traverses. Read under the CALLER's context, not system.
+        const insertRelatedForRow = await this.resolvePredicateRelated(schemaForValidation, rows, opCtx.context);
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
             validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
-            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]) });
+            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]) });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
@@ -12620,6 +12718,12 @@ export class ObjectQL implements IObjectQLEngine {
                // field is read-only for this record's state, so the incoming
                // change is ignored (the persisted value is kept).
                const preRoWhen = hookContext.input.data as Record<string, unknown>;
+               // [#18682] The reference FK a predicate traverses may come from
+               // the PATCH or from the stored row, so the id is read off the
+               // same merged view `evaluateValidationRules` will evaluate.
+               const relatedForUpdate = (await this.resolvePredicateRelated(
+                   updateSchema, [{ ...(priorRecord ?? {}), ...preRoWhen }], opCtx.context,
+               ))({ ...(priorRecord ?? {}), ...preRoWhen });
                // [#4889] A `parent`-scoped predicate ("once the header invoice
                // is Paid, its lines are frozen") needs the master-detail header
                // bound as `parent`. Only the engine can fetch it, so the strip
@@ -12708,7 +12812,7 @@ export class ObjectQL implements IObjectQLEngine {
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
                assertNoStrictDrops();
-               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent });
+               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate });
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
@@ -12897,10 +13001,22 @@ export class ObjectQL implements IObjectQLEngine {
                // the payload-only evaluation covers format / json_schema /
                // non-prior conditional at zero fetch cost.
                const bulkEvalUser = this.buildEvalUser(opCtx.context);
+               // [#18682] One batched resolution for the whole matched set, off
+               // the same merged view each row will be evaluated as. The
+               // no-prior branch below needs none: `needsPriorRecord` counts a
+               // traversing rule, so an object with one never reaches it.
+               const bulkPatch = hookContext.input.data as Record<string, unknown>;
+               const bulkRelatedForRow = rulesNeedRows
+                   ? await this.resolvePredicateRelated(
+                       updateSchema,
+                       (priorRows ?? []).map((r) => ({ ...(r ?? {}), ...bulkPatch })),
+                       opCtx.context,
+                     )
+                   : undefined;
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row) });
+                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }) });
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));

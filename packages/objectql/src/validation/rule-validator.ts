@@ -437,7 +437,16 @@ export function needsPriorRecord(
 ): boolean {
   const rules = objectSchema?.validations;
   const ruleNeeds = Array.isArray(rules) && rules.some((r) => ruleNeedsPrior(r));
-  return !!(ruleNeeds || fieldsNeedPrior(objectSchema?.fields));
+  // [#18682] A rule that reads ONE HOP through a reference field needs the
+  // prior row too, and for a reason the `previous`-reading rules do not share:
+  // the hop is taken from the foreign KEY, and a PATCH that does not touch that
+  // key does not carry it. Without the prior row the engine has no id to
+  // resolve, the related field arrives absent, and the rule faults and rejects
+  // a write it should have accepted. Counting it here is what keeps the bulk
+  // path's no-prior branch unreachable for such an object — the same argument
+  // #4977 makes for `parent`, which is bound only on the per-row branch.
+  const traverses = collectPredicateRelationships(objectSchema).size > 0;
+  return !!(ruleNeeds || traverses || fieldsNeedPrior(objectSchema?.fields));
 }
 
 /**
