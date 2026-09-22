@@ -2847,7 +2847,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   bulkActions: z.array(z.unknown()).optional().describe('Bulk action names shown on selection'),
   batchActions: z.array(z.unknown()).optional().describe('Alternate spelling the renderer reads FIRST (`batchActions ?? bulkActions`)'),
   bulkActionDefs: z.array(z.unknown()).optional().describe('Inline bulk-action definitions (full defs, not names)'),
-  navigation: z.unknown().optional().describe('Row-click navigation config ({ mode: page | drawer | modal | split | none })'),
+  navigation: z.unknown().optional().describe('Row-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema'),
   editable: z.boolean().optional().describe('Enable inline cell editing'),
   singleClickEdit: z.boolean().optional().describe('Enter cell edit on single click (default true when editable)'),
   resizable: z.boolean().optional().describe('Allow column resize (read before `resizableColumns`)'),
@@ -3650,7 +3650,7 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
   mapStyle: z.string().optional()
     .describe('MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record'),
   navigation: z.unknown().optional()
-    .describe('Marker-click navigation config ({ mode: page | drawer | modal | split | popover | none })'),
+    .describe('Marker-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema'),
   enableClustering: z.boolean().optional()
     .describe('Group nearby markers into clusters. Absent, the renderer clusters only above 100 markers'),
 }));
@@ -3777,7 +3777,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
   gantt: GanttConfigSchema.optional()
     .describe('Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored'),
   navigation: z.unknown().optional()
-    .describe('Task-click navigation config ({ mode: page | drawer | modal | split | popover | none }); renderer default `drawer`'),
+    .describe('Task-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema; renderer default `drawer`'),
   label: I18nLabelSchema.optional()
     .describe('Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object\'s own label'),
   skipWeekends: z.boolean().optional()
@@ -3936,7 +3936,7 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
   tree: TreeConfigSchema.optional()
     .describe('Tree/hierarchy configuration, the author face — the same block `ListViewSchema.tree` declares: { parentField?, labelField?, fields?, defaultExpandedDepth? }. `parentField` auto-detects from the object schema when omitted'),
   navigation: z.unknown().optional()
-    .describe('Row-click navigation config ({ mode: page | drawer | modal | split | popover | none })'),
+    .describe('Row-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema'),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectTreeProps = z.input<typeof ObjectTreePropsSchema>;
