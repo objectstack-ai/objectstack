@@ -24,7 +24,10 @@ import {
   ObjectKanbanPropsSchema,
 } from './component.zod';
 import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
-import { GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema, ListColumnSchema, ListViewSchema } from './view.zod';
+import {
+  GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema, ListColumnSchema, ListViewSchema,
+  TimelineConfigSchema, DEFAULT_VIEW_ROW_LIMIT,
+} from './view.zod';
 import { FieldSchema } from '../data/field.zod';
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { strictObjectDeclarations } from '../shared/strict-object';
@@ -279,18 +282,19 @@ describe('PageAccordionProps variant (#6776)', () => {
 // sweep once read as declared-but-unenforced. It has a live cross-repo consumer:
 // objectui's `PageAccordionRenderer` renders `{item.icon && <LazyIcon
 // name={item.icon} …/>}` inside the `AccordionTrigger`
-// (`packages/components/src/renderers/layout/containers.tsx:919-925`), and the
+// (`packages/components/src/renderers/layout/containers.tsx:1069-1075`), and the
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
-// the Studio block designer at `:966` (the `items` input, documented as
+// the Studio block designer at `:1116` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `53ded82bf`. Re-derived at that pin
-// 2026-09-08: `containers.tsx` is byte-identical to the one at `a472b0716`
-// (and, through it, to `00d3f09c5` — the last hop on which either anchor
-// moved, both by exactly one line, `918-924` to `919-925` and `965` to `966`),
-// so NO anchor moved here — the icon block still spans `919-925` and the
-// registration input still lands on `:966`. Both were re-READ at the new pin
-// rather than inferred from that identity, because identity preserves a wrong
-// anchor as faithfully as a right one (#10274).
+// builds against — `.objectui-sha` = `87af769e9`. Re-derived at that pin
+// 2026-09-20: `containers.tsx` is NO LONGER byte-identical to the one at
+// `53ded82bf` (300 insertions, 100 deletions), so both anchors were re-READ
+// rather than carried — the icon block MOVED `919-925` to `1069-1075` with its
+// seven lines byte-identical, and the registration input MOVED `966` to `1116`
+// with its LINE rewritten (it now declares `of: 'object'` and carries a longer
+// description, and no longer carries a `label`), while the member list this
+// pin cites is unchanged. Identity preserves a wrong
+// anchor as faithfully as a right one, which is why neither was carried (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving that read point from scratch
 // after the sweep proposed retiring the key. This block plus the `.describe()`
@@ -369,17 +373,18 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same bare declaration a liveness sweep reads as declared-but-unenforced.
 // objectui's `PageTabsRenderer` renders `{item.icon && <LazyIcon
 // name={item.icon} …/>}` inside the `TabsTrigger`
-// (`packages/components/src/renderers/layout/containers.tsx:730-736`), and the
+// (`packages/components/src/renderers/layout/containers.tsx:853-859`), and the
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
-// Studio block designer at `:789` (the `items` input, documented as
+// Studio block designer at `:912` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `53ded82bf`. Re-derived
-// at that pin 2026-09-08: `containers.tsx` is byte-identical to the one at
-// `a472b0716` (and, through it, to `00d3f09c5` — the last hop on which either
-// anchor moved, both by exactly one line, `729-735` to `730-736` and `788` to
-// `789`), so NO anchor moved here — the icon block still spans `730-736` and
-// the registration input still lands on `:789`. Both were re-READ at the new
-// pin, never inferred (#10274).
+// the pin this repo builds against — `.objectui-sha` = `87af769e9`. Re-derived
+// at that pin 2026-09-20: `containers.tsx` is NO LONGER byte-identical to the
+// one at `53ded82bf` (300 insertions, 100 deletions), so both anchors were
+// re-READ rather than carried — the icon block MOVED `730-736` to `853-859`
+// with its seven lines byte-identical, and the registration input MOVED `789`
+// to `912` with its LINE rewritten (it now declares `of: 'object'` and carries
+// a longer description, and no longer carries a `label`), while the member list
+// this pin cites is unchanged. Never inferred (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving the accordion's read point
 // after the sweep proposed retiring it. This block plus the `.describe()` it
@@ -3357,13 +3362,17 @@ describe('#7751 — object-* block props schemas', () => {
 // #16503 — the spec half of objectui#8172 (decision batch #68, 2026-09-07,
 // option A: the contract declares the capability that already ships, is
 // documented and is in use). Measured at the objectui pin this repo builds
-// against (`.objectui-sha` = `53ded82bf`; all four anchors re-READ at that pin
-// 2026-09-08 — every `plugin-kanban` file below is byte-identical to the one at
-// `a472b0716`, and none moved): `plugin-kanban/src/ObjectKanban.tsx:264`
-// queries `$top: schema.limit ?? DEFAULT_KANBAN_LIMIT` (100, `:71`),
-// `plugin-kanban/src/index.tsx:395-398` maps `limit: 'limit'` in
-// `OBJECT_KANBAN_DATA_SOURCE`, `plugin-kanban/src/types.ts:134` declares
-// `KanbanSchema.limit?: number`, and `content/docs/plugins/plugin-kanban.mdx`
+// against (`.objectui-sha` = `87af769e9`; all four anchors re-READ at that pin
+// 2026-09-20 — this hop moved every one of them and renamed one face outright,
+// so none is carried): `plugin-kanban/src/ObjectKanban.tsx:676`
+// queries `$top: resolveRowLimit(schema.limit, DEFAULT_KANBAN_LIMIT)` (100,
+// `:84`; the bare `??` became `resolveRowLimit` in objectui#9925, which drops
+// and reports a cap the contract refuses),
+// `plugin-kanban/src/index.tsx:447-450` maps `limit: 'limit'` in
+// `OBJECT_KANBAN_DATA_SOURCE`, ⚠️ `KanbanSchema` is RETIRED at this pin and
+// `plugin-kanban/src/types.ts` declares the member no more — the published
+// twin is `ObjectKanbanSchema`, declaring `limit?: number` at
+// `packages/types/src/objectql.ts:3735` — and `content/docs/plugins/plugin-kanban.mdx`
 // teaches `limit: 250` with a Properties row. The strict map refused the key by
 // name — the same `unrecognized_keys` verdict as the `bogusProp` control — so an
 // author following the published docs wrote a node the save gate rejected.
@@ -3424,12 +3433,16 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // on the React-host `kanban-ui` block). Unlike `limit` above — a key four
 // objectui faces already implemented, so the spec was the half that was wrong
 // — `quickAdd` was FORWARDED and never read: at the pin this repo builds
-// against (`.objectui-sha` = `53ded82bf`) `ObjectKanban.tsx:931` spreads the
+// against (`.objectui-sha` = `87af769e9`; re-READ there 2026-09-20, every
+// anchor MOVED with its cited text byte-identical) `ObjectKanban.tsx:1563`
+// spreads the
 // authored bag into `KanbanRenderer` and `KanbanImpl` gates the affordance on
-// `quickAdd && onQuickAdd` (`:355`, `:368`), while `onQuickAdd` is a
+// `quickAdd && onQuickAdd` (`KanbanImpl.tsx:621`, `:634` — the file is spelled
+// here because those two ranges are NOT in `ObjectKanban.tsx`), while
+// `onQuickAdd` is a
 // host-supplied FUNCTION no producer puts on an `object-kanban` node
-// (`ObjectKanban.tsx` names neither half: 0 each, against 6 for the sibling
-// `onCardClick` in the same file).
+// (`ObjectKanban.tsx` names neither half: 0 each re-counted at this pin,
+// against 11 for the sibling `onCardClick` in the same file).
 describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
   const kanban = ComponentPropsMap['object-kanban'];
 
@@ -3486,15 +3499,18 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // #9881 and #9972 recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `53ded82bf`, re-derived there 2026-09-08. Both files in
-// this chain, `resolve-icon.ts` and `button.tsx`, are byte-identical to the
-// ones at `a472b0716` and, through it, to `00d3f09c5`, so no anchor moved;
-// every one below was still re-READ at the new pin rather than inferred from
-// that identity (#10274). The hop
+// `.objectui-sha` = `87af769e9`, re-derived there 2026-09-20. Both files in
+// this chain moved on this hop — `resolve-icon.ts` +203/-7 and `button.tsx`
+// +6/-11 against `53ded82bf` — so no anchor below is carried and every one
+// was re-READ (#10274). ⚠️ `resolveIcon` itself was rewritten: its tail no
+// longer indexes `lucide-react`'s `icons` record, it asks `recordIconName`
+// for the kebab-case name and hands the pair to `lazyIconComponent`, so the
+// glyph arrives lazily. What an author may write did not change with it. The
+// earlier hop
 // onto `00d3f09c5` was the one that changed this record's SUBSTANCE and not
 // merely its line numbers: `resolve-icon.ts` was restructured (110
 // insertions), so `resolveIcon` no longer PascalCases and maps inline — it
-// delegates to the `describeIconLookup` seam (`:117-120`), and the tokeniser
+// delegates to the `describeIconLookup` seam (now `:302-305`), and the tokeniser
 // splits on hyphen, underscore AND whitespace (`/[-_\s]+/`), where this record
 // used to say "splits on `-` only". That sentence was true when written and
 // was false by then, which is exactly why a citation refresh re-READS instead
@@ -3516,11 +3532,13 @@ describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
   it('accepts an icon on a button — the value objectui resolves through the lucide `icons` map', () => {
     // objectui `packages/components/src/renderers/form/button.tsx:43` hands the
     // name to the shared `resolveIcon`
-    // (`packages/components/src/renderers/action/resolve-icon.ts:129-132`),
-    // which delegates to `describeIconLookup` (`:117-120`): that PascalCases
-    // through `toPascalCase` (`:100-105`, splitting on hyphen, underscore or
-    // whitespace) and applies the one-entry rename map (`:90-92`) before the
-    // lookup in `icons` from `lucide-react`; `button.tsx:72` / `:74`
+    // (`packages/components/src/renderers/action/resolve-icon.ts:322-328`),
+    // which delegates to `describeIconLookup` (`:302-305`): that PascalCases
+    // through `toPascalCase` (`:153-158`, splitting on hyphen, underscore or
+    // whitespace) and applies the one-entry rename map (`:143-145`) before the
+    // lookup, which at this pin runs through `recordIconName` +
+    // `lazyIconComponent` rather than indexing `icons` from `lucide-react`
+    // directly; `button.tsx:72` / `:74`
     // draw it either side of the label per `iconPosition`.
     const result = button.safeParse({ label: 'Save', icon: 'arrow-right' });
     expect(result.success).toBe(true);
@@ -3782,5 +3800,113 @@ describe('the three #18305 object blocks — key sets derived from the renderers
 
   it('object-chart is STILL deliberately absent — the three rows did not sweep it in', () => {
     expect((ComponentPropsMap as Record<string, unknown>)['object-chart']).toBeUndefined();
+  });
+});
+
+// #19228 — two authorable row bounds land on one `object-timeline` node, and
+// the react tier's own precedence sentence was narrower than the guard it
+// names. ⛔ This card picks NO precedence and changes no `.default()`; these
+// pins only hold the two structural facts the repair rests on, measured
+// first-hand at the objectui pin `87af769e9` on 2026-09-21T06:30-06:40Z.
+describe('row caps on the object-bound blocks — what #19228 recorded', () => {
+  const timeline = ComponentPropsMap['object-timeline'];
+  const kanban = ComponentPropsMap['object-kanban'];
+
+  it('leaves the ELEMENT-face `limit` undefaulted — the fact that keeps the gate arm alive', () => {
+    // `ElementDataSourceGate` lowers a bound view's cap into this key only
+    // when it does not already carry a USABLE one
+    // (`ElementDataSourceGate.tsx:316-331`, `!fromView || !isUsableRowLimit`).
+    // An applied default here would make every parsed node carry a usable cap
+    // and kill that arm outright — the failure #19228 feared, on the schema it
+    // would actually happen to. ⛔ Do not "fix" a red here by deleting the pin.
+    for (const [label, schema] of [['object-kanban', kanban], ['object-timeline', timeline]] as const) {
+      const parsed = schema.parse({ objectName: 'task' }) as Record<string, unknown>;
+      expect(Object.prototype.hasOwnProperty.call(parsed, 'limit'), label).toBe(false);
+    }
+
+    // LIT CONTROL, same instrument (a Zod applied default, observed through
+    // `parse`): the VIEW-face sibling DOES materialize one, so the zeros above
+    // are a reading rather than a parse that never ran.
+    const viewSide = TimelineConfigSchema.parse({ startDateField: 'start_date', titleField: 'name' }) as { limit?: number };
+    expect(viewSide.limit).toBe(DEFAULT_VIEW_ROW_LIMIT);
+  });
+
+  it('materializes the NESTED `timeline.limit` on a node whose flat `limit` stays absent', () => {
+    // The shape the record is about: one strictObject, two authorable row
+    // caps, and an applied default on the nested one. ⚠️ Faces, because this
+    // card keeps confusing them: the NESTED key asserted below is the ELEMENT
+    // face, and at the pin no renderer reads it on any route. The
+    // route-dependent one is a VIEW document's `timeline.limit`, a different
+    // key on a different document, which `ObjectView.tsx:1725` flattens onto
+    // a generated node's FLAT `limit`. Neither is asserted here: this pin is
+    // about the PARSE, which is the only half a schema owns.
+    const result = timeline.safeParse({
+      objectName: 'task',
+      timeline: { startDateField: 'start_date', titleField: 'name' },
+    });
+    expect(result.success).toBe(true);
+    const data = (result.success ? result.data : undefined) as
+      { limit?: unknown; timeline?: { limit?: unknown } } | undefined;
+    expect(data?.timeline?.limit).toBe(DEFAULT_VIEW_ROW_LIMIT);
+    expect(Object.prototype.hasOwnProperty.call(data ?? {}, 'limit')).toBe(false);
+
+    // CONTROL — the node is still strict, so the acceptance above is not the
+    // verdict of a map that has stopped refusing anything.
+    const control = timeline.safeParse({ objectName: 'task', zzUnlikelyBogusKey__: 1 });
+    expect(control.success).toBe(false);
+    expect(JSON.stringify(control.error?.issues)).toContain('unrecognized_keys');
+  });
+
+  it('admits only caps the binding gate calls usable — the SUBSET that makes 「unset」 the whole rule', () => {
+    // ⛔ Not a prose pin. The published sentence says a bound view's
+    // `pagination.pageSize` fills this key only when it is UNSET, and this is
+    // the structural fact that makes that true rather than narrow:
+    // `ElementDataSourceGate`'s guard is `!isUsableRowLimit(authored)` with
+    // `isUsableRowLimit = typeof v === 'number' && Number.isInteger(v) && v > 0`.
+    // This key's accept set is a SUBSET of that predicate — ⛔ NOT the same
+    // set; `2 ** 53 + 2` separates them, and the case below pins it. Subset is
+    // the direction the sentence needs: it makes 「set but not usable」 empty
+    // across the whole accept set, so the guard has exactly two outcomes.
+    //
+    // ⚠️ What this pin can and cannot catch, because the two sides are not
+    // symmetric here:
+    //  · SPEC side — reds. A `.nullable()`, a `0` sentinel, dropping `.int()`
+    //    or adding a `.default()` each fail a specific expect below.
+    //  · GATE side — ⛔ CANNOT red. `usableToTheGate` is a TRANSCRIPTION of
+    //    `isUsableRowLimit` as it read at objectui pin `87af769e9`, not an
+    //    import — nothing here resolves into objectui. A rewrite of that
+    //    predicate at objectui HEAD leaves this test green. It is re-read on
+    //    a PIN BUMP, by hand, and that is the only thing that refreshes it.
+    const usableToTheGate = (v: unknown): boolean =>
+      typeof v === 'number' && Number.isInteger(v) && v > 0;
+
+    // ACCEPTED by the schema ⇒ usable to the gate ⇒ the view's cap does NOT land.
+    for (const cap of [1, 25, 100, 5000]) {
+      const r = kanban.safeParse({ objectName: 'x', limit: cap });
+      expect(r.success, `accept ${cap}`).toBe(true);
+      expect(usableToTheGate((r.success ? r.data : {} as never).limit), `usable ${cap}`).toBe(true);
+    }
+
+    // REFUSED by the schema ⇒ never reaches the gate from a valid document,
+    // which is why the displaced-and-reported arm is not in the describe.
+    for (const cap of [0, -1, 2.5, '100', null]) {
+      expect(kanban.safeParse({ objectName: 'x', limit: cap }).success, `refuse ${JSON.stringify(cap)}`).toBe(false);
+      expect(usableToTheGate(cap), `gate also rejects ${JSON.stringify(cap)}`).toBe(false);
+    }
+
+    // ⛔ The sets are NOT equal, and this is the witness. `2 ** 53 + 2` is
+    // refused here (zod 4's `.int()` enforces SAFE integers, `too_big`) while
+    // `Number.isInteger` calls it usable. Subset, not coincidence — if this
+    // case ever flips, the docblock sentence built on the subset direction
+    // has to be re-derived rather than reworded.
+    const beyondSafe = 2 ** 53 + 2;
+    expect(kanban.safeParse({ objectName: 'x', limit: beyondSafe }).success).toBe(false);
+    expect(usableToTheGate(beyondSafe)).toBe(true);
+
+    // UNSET — accepted, and the one state the gate treats as unauthored.
+    const unset = kanban.safeParse({ objectName: 'x' });
+    expect(unset.success).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(unset.success ? unset.data : {}, 'limit')).toBe(false);
+    expect(usableToTheGate(undefined)).toBe(false);
   });
 });

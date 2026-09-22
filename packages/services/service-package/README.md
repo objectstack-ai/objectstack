@@ -38,7 +38,7 @@ const packages = kernel.getService<PackageService>('package')!;
 
 await packages.publish({
   manifest: {
-    id: 'crm',
+    id: 'com.example.crm',
     type: 'app',
     version: '1.2.0',
     name: 'CRM Package',
@@ -51,9 +51,9 @@ await packages.publish({
   },
 });
 
-const latest = await packages.get('crm'); // defaults to 'latest'
+const latest = await packages.get('com.example.crm'); // defaults to 'latest'
 const all    = await packages.list();
-await packages.delete('crm', '1.0.0');
+await packages.delete('com.example.crm', '1.0.0');
 ```
 
 ## Key Exports

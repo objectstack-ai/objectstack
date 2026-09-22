@@ -1425,17 +1425,60 @@ describe('ObjectStackClient.automation', () => {
         expect(result.runs).toHaveLength(1);
     });
 
-    it('should list runs with pagination options', async () => {
+    it('should list runs with a window', async () => {
         const { client, fetchMock } = createMockClient({
             success: true,
             data: { runs: [], hasMore: false },
         });
 
-        await client.automation.runs.list('my_flow', { limit: 5, cursor: 'abc' });
+        // `limit` is the whole query surface of this door now. It used to be
+        // pinned here alongside `cursor=abc`; that half moved to the absence
+        // pin below when #19543 retired the key.
+        await client.automation.runs.list('my_flow', { limit: 5 });
         expect(fetchMock).toHaveBeenCalledWith(
-            'http://localhost:3000/api/v1/automation/my_flow/runs?limit=5&cursor=abc',
+            'http://localhost:3000/api/v1/automation/my_flow/runs?limit=5',
             expect.any(Object),
         );
+    });
+
+    it('[#19543] never puts a `cursor` on the query string — on ANY of the three run-list surfaces', async () => {
+        // This test used to assert the OPPOSITE — it pinned the URL
+        // `…/runs?limit=5&cursor=abc`, i.e. that the SDK produced the key. That
+        // is what made the parameter harmful rather than inert: `cursor` was
+        // accepted at the boundary and read by nothing, so a caller paginating
+        // by the published contract re-read the first window forever with no
+        // error. #19543 retires it, and the assertion inverts on the same input.
+        //
+        // The type surface is the enforced channel — `list({ cursor })` is a
+        // TS2353 excess-property error, which a runtime assertion cannot reach.
+        // This pins the RUNTIME half, which tsc cannot: an untyped caller
+        // (plain JS, a `Record` spread, a hand-built options object) must not
+        // smuggle the parameter through. The same shape #6361 left behind one
+        // door over.
+        //
+        // All THREE surfaces are swept, because all three appended it and a
+        // caller reaching the door through any of them was equally misled.
+        const smuggled = { limit: 5, cursor: 'abc' };
+
+        const a = createMockClient({ success: true, data: { runs: [], hasMore: false } });
+        await a.client.automation.runs.list('my_flow', smuggled as unknown as { limit?: number });
+
+        const b = createMockClient({ success: true, data: { runs: [], hasMore: false } });
+        await b.client.automation.listRuns('my_flow', smuggled as unknown as { limit?: number });
+
+        const c = createMockClient({ success: true, data: { runs: [], hasMore: false } });
+        await c.client.environment('proj-alpha').automation.listRuns(
+            'my_flow', smuggled as unknown as { limit?: number },
+        );
+
+        for (const [label, m] of [['runs.list', a], ['listRuns', b], ['environment().listRuns', c]] as const) {
+            const url = m.fetchMock.mock.calls[0][0] as string;
+            // The over-block guard: the window the caller DID ask for still
+            // arrives, so this pins a retirement and not a dead door.
+            expect(url, `${label} dropped the limit it was given`).toContain('limit=5');
+            expect(url, `${label} still appends a retired cursor`).not.toContain('cursor');
+            expect(url, `${label} leaked the cursor value`).not.toContain('abc');
+        }
     });
 
     it('should get a single run', async () => {

@@ -291,3 +291,95 @@ describe('object-graph — a non-record entry in `stack.objects` (#15494)', () =
     expect(resolveFieldPath(g, 'b', 'n')).toMatchObject({ kind: 'ok' });
   });
 });
+
+/**
+ * [#19289] A `{ type: 'user' }` field with no `reference` is TRAVERSABLE — the
+ * third defect found by the implicit-target census, and the widest-reaching of
+ * the four.
+ *
+ * `RELATIONSHIP_FIELD_TYPES` admits `user`, so `resolveFieldPath` hops through
+ * one. The slice's `reference` came from `referenceCarrierOf`, which answers
+ * what the CARRIER says — and `IMPLICIT_REFERENCE_TARGETS`
+ * (`packages/spec/src/data/field-value.zod.ts`) declares a `user` field's
+ * target "a CONSTANT OF THE TYPE", with metadata authored without `reference`
+ * "fully specified, not under-specified". So a spec-complete field answered
+ * `hop-untargeted`.
+ *
+ * ## Why that is the SILENT class, not a false positive
+ *
+ * `hop-untargeted` is `isUnjudgeable`, and `describeFieldPathVerdict` returns
+ * `undefined` for it — "the graph could not answer". Every rule in this package
+ * that resolves a field PATH therefore STOPPED JUDGING any path through an
+ * author's "responsible person" column, reporting nothing at all. That is the
+ * failure mode `isUnjudgeable`'s own docblock says this family exists to end:
+ * "a missed report is silence".
+ *
+ * The repair is not an arbiter swap at the call — `graphFieldOf` synthesized
+ * `{ reference: def.reference }` and threw `type` away before the arbiter could
+ * see it. The field is now passed through whole.
+ */
+describe('[#19289] object-graph — a `user` field takes its target from the TYPE', () => {
+  const implicitStack = {
+    objects: [
+      {
+        name: 'crm_task',
+        fields: {
+          subject: { type: 'text', label: 'Subject' },
+          // Spec-complete: no `reference`, because the type supplies it.
+          assignee: { type: 'user', label: 'Assignee' },
+          // The same field, with the constant materialized by hand.
+          assignee_explicit: { type: 'user', label: 'Assignee', reference: 'sys_user' },
+          // ⛔ The boundary: `lookup` has no constant, so it stays untargeted.
+          orphan: { type: 'lookup', label: 'Orphan' },
+        },
+      },
+      { name: 'sys_user', fields: { name: { type: 'text' }, email: { type: 'email' } } },
+    ],
+  };
+  const implicitGraph = indexObjectGraph(implicitStack);
+
+  it('THE DEFECT: `assignee.email` RESOLVES — it is no longer `hop-untargeted`', () => {
+    const verdict = resolveFieldPath(implicitGraph, 'crm_task', 'assignee.email');
+    expect(verdict).toMatchObject({ kind: 'ok', object: 'sys_user', field: 'email' });
+    // The load-bearing half: an unjudgeable verdict is what made every
+    // consuming rule fall silent, so this is what actually ended.
+    expect(isUnjudgeable(verdict)).toBe(false);
+  });
+
+  it('the two legal spellings of one fully-specified field resolve identically', () => {
+    expect(resolveFieldPath(implicitGraph, 'crm_task', 'assignee.email'))
+      .toEqual(resolveFieldPath(implicitGraph, 'crm_task', 'assignee_explicit.email'));
+  });
+
+  it('a MISS through the implicit hop is now REPORTED, where it used to be swallowed', () => {
+    // The other direction, and the one that proves judgement resumed rather
+    // than merely changing shape: a typo'd leaf beyond the hop produces a real
+    // finding instead of silence.
+    const verdict = resolveFieldPath(implicitGraph, 'crm_task', 'assignee.emial');
+    expect(verdict).toMatchObject({ kind: 'field-unknown', object: 'sys_user', field: 'emial' });
+    expect(isUnjudgeable(verdict)).toBe(false);
+  });
+
+  it('control: `lookup` with no carrier is STILL `hop-untargeted` — only `user` has a constant', () => {
+    const verdict = resolveFieldPath(implicitGraph, 'crm_task', 'orphan.x');
+    expect(verdict).toMatchObject({ kind: 'hop-untargeted' });
+    expect(isUnjudgeable(verdict)).toBe(true);
+  });
+
+  it('control: an EXPLICIT carrier still wins over the constant', () => {
+    // `reference` MATERIALIZES the constant for `user`; where an author named a
+    // different object the arbiter returns what they wrote, unchanged. The
+    // module fixture above relies on this (`owner` → `crm_person`).
+    expect(resolveFieldPath(graph, 'crm_opportunity', 'account.owner.email'))
+      .toMatchObject({ kind: 'ok', object: 'crm_person', field: 'email' });
+  });
+
+  it('control: an UNREADABLE carrier still REFUSES at index time', () => {
+    // `referenceTargetOf` reads the carrier through `referenceCarrierOf` before
+    // it judges the type, so #13053's refusal is untouched — the implicit
+    // target is not a fallback that swallows a broken carrier.
+    const broken = { objects: [{ name: 'crm_task', fields: { assignee: { type: 'user', reference: { object: 'sys_user' } } } }] };
+    expect(() => indexObjectGraph(broken)).toThrow(TypeError);
+    expect(() => indexObjectGraph(broken)).toThrow(/`reference` is an object/);
+  });
+});

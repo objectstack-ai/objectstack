@@ -38,6 +38,10 @@ export const appForm = defineForm({
         { field: 'icon', type: 'text', colSpan: 1, helpText: 'Lucide icon name (e.g. "users", "briefcase")' },
         { field: 'active', type: 'boolean', colSpan: 1 },
         { field: 'isDefault', type: 'boolean', colSpan: 1, helpText: 'Make this the default app for new users' },
+        // #19331 — `hidden` is declared by AppSchema and was offered by no
+        // control. The copy carries the boundary the key's own contract draws:
+        // it moves the app between two navigation surfaces and gates nothing.
+        { field: 'hidden', type: 'boolean', colSpan: 1, helpText: 'Keep this app out of the App Switcher — the shell surfaces it from the avatar menu instead. Navigation only: a hidden app stays fully routable and permission-checked.' },
       ],
     },
     {
@@ -45,7 +49,22 @@ export const appForm = defineForm({
       description: 'Sidebar items and area grouping.',
       fields: [
         { field: 'navigation', type: 'composite', helpText: 'Nav tree — recursive structure' },
-        { field: 'areas', type: 'repeater', helpText: 'Group items into collapsible areas' },
+        {
+          field: 'areas',
+          type: 'repeater',
+          helpText: 'Group items into collapsible areas',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'id', label: 'ID' },
+            { field: 'label', label: 'Label' },
+            { field: 'icon', label: 'Icon' },
+            { field: 'description', label: 'Description' },
+            { field: 'navigation', label: 'Navigation' },
+          ],
+        },
         // `homePageId` removed: tombstoned in 17.0.0 (#4667, #4709, ADR-0049) —
         // an app's landing page IS its first `navigation` item by `order`, and
         // the root landing follows `isDefault`. Reorder the nav instead.

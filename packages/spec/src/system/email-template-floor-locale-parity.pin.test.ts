@@ -29,11 +29,12 @@
  * and turbo's input hashing both see the escape.
  *
  * ⛔ Scope: the VALUE, not the resolver. This asserts two literals agree. It
- * asserts nothing about the ladder's shape — the exact `(name, locale)` match
- * and its single retry rung are a settled ruling, and changing them is not this
- * pin's business. Renaming either constant turns this red on purpose: the
- * docblock names `DEFAULT_TEMPLATE_LOCALE` specifically, so a rename is an edit
- * to the published claim and has to be made in both places.
+ * asserts nothing about the ladder's shape — the exact `(name, locale)` match,
+ * the one retry rung a call that NAMES a locale gets, and the lowest-tag rung
+ * reachable only by a call that names NO locale are a settled ruling, and
+ * changing them is not this pin's business. Renaming either constant turns this
+ * red on purpose: the docblock names `DEFAULT_TEMPLATE_LOCALE` specifically, so
+ * a rename is an edit to the published claim and has to be made in both places.
  *
  * ⛔ A missing or unreadable declaration is a FAILURE, never a silent pass —
  * that is the whole failure mode a text-reading pin has to defend against.

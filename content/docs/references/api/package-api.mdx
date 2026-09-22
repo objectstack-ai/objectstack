@@ -47,7 +47,7 @@ Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries, at the stage the registry records it |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -64,7 +64,7 @@ Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -89,7 +89,7 @@ Installed package row whose manifest is the assembled package body
 | **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
-| **functions** | `any` | optional | Named handler functions, as they survived the record JSON projection |
+| **functions** | `Record<string, string \| { handler?: string; effect?: Enum<'pure' \| 'writes'> }> \| { name: string; handler?: string; packageId?: string; effect?: Enum<'pure' \| 'writes'> }[]` | optional | Named handler functions, lowered to the refs a JSON document carries |
 | **datasourceMapping** | `{ namespace?: string; package?: string; objectPattern?: string; default?: boolean; … }[]` | optional | Centralized datasource routing rules for packages/namespaces/objects |
 | **translations** | `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>[]` | optional | I18n Translation Bundles |
 | **objectExtensions** | `{ extend: string; fields?: Record<string, object>; label?: string; pluralLabel?: string; … }[]` | optional | Extensions to objects owned by other packages |
@@ -113,7 +113,7 @@ Installed package row whose manifest is the assembled package body
 | **agents** | `{ name: string; label: string; avatar?: string; role: string; … }[]` | optional | AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents |
 | **tools** | `{ name: string; label: string; description: string; parameters: Record<string, any>; … }[]` | optional | AI Tool metadata records — optional refinement layer, never required: the default path is skills referencing platform tools or materialised action_`<name>` tools (ADR-0109) |
 | **skills** | `{ name: string; label: string; description?: string; surface?: Enum<'ask' \| 'build' \| 'both'>; … }[]` | optional | AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063) |
-| **hooks** | `any` | optional | Object lifecycle hooks, as they survived the record JSON projection |
+| **hooks** | `{ name: string; label?: string; object: string \| string[]; events: Enum<'beforeFind' \| 'afterFind' \| 'beforeInsert' \| 'afterInsert' \| 'beforeUpdate' \| …>[]; … }[]` | optional | Object Lifecycle Hooks, as a JSON document carries them |
 | **mappings** | `{ name: string; label?: string; sourceFormat?: Enum<'csv' \| 'json' \| 'xml' \| 'sql'>; targetObject: string; … }[]` | optional | Data Import/Export Mappings |
 | **analyticsCubes** | `{ name: string; title?: string; description?: string; sql: string; … }[]` | optional | Analytics Semantic Layer Cubes |
 | **connectors** | `{ name: string; label: string; type: Enum<'saas' \| 'database' \| 'file_storage' \| 'message_queue' \| 'api' \| 'custom'>; description?: string; … }[]` | optional | External System Connectors. A provider-bound entry (has `provider`: openapi/mcp/rest) is materialized into a live, dispatchable connector at boot and referenced by flows via `connector_action`; credentials are `auth.credentialRef` references, never inline secrets. An entry with no `provider` is a catalog descriptor only (NOT dispatchable) — set `enabled: false` on deliberate descriptors. Unknown provider / unresolvable credentialRef / name conflict ⇒ hard boot error (ADR-0097). |
@@ -135,11 +135,14 @@ Installed package row whose manifest is the assembled package body
 
 ## GetInstalledPackageRequest
 
+Get installed package request
+
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Package identifier |
+| **version** | `string` | optional | Scope the read to this exact installed version; `latest` or omitted reads the installed row |
 
 
 ---
@@ -205,7 +208,7 @@ Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries, at the stage the registry records it |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -254,7 +257,7 @@ Installed package with runtime lifecycle state
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -300,7 +303,7 @@ Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries, at the stage the registry records it |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -317,7 +320,7 @@ Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -342,7 +345,7 @@ Installed package row whose manifest is the assembled package body
 | **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
 | **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
-| **functions** | `any` | optional | Named handler functions, as they survived the record JSON projection |
+| **functions** | `Record<string, string \| { handler?: string; effect?: Enum<'pure' \| 'writes'> }> \| { name: string; handler?: string; packageId?: string; effect?: Enum<'pure' \| 'writes'> }[]` | optional | Named handler functions, lowered to the refs a JSON document carries |
 | **datasourceMapping** | `{ namespace?: string; package?: string; objectPattern?: string; default?: boolean; … }[]` | optional | Centralized datasource routing rules for packages/namespaces/objects |
 | **translations** | `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>[]` | optional | I18n Translation Bundles |
 | **objectExtensions** | `{ extend: string; fields?: Record<string, object>; label?: string; pluralLabel?: string; … }[]` | optional | Extensions to objects owned by other packages |
@@ -366,7 +369,7 @@ Installed package row whose manifest is the assembled package body
 | **agents** | `{ name: string; label: string; avatar?: string; role: string; … }[]` | optional | AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents |
 | **tools** | `{ name: string; label: string; description: string; parameters: Record<string, any>; … }[]` | optional | AI Tool metadata records — optional refinement layer, never required: the default path is skills referencing platform tools or materialised action_`<name>` tools (ADR-0109) |
 | **skills** | `{ name: string; label: string; description?: string; surface?: Enum<'ask' \| 'build' \| 'both'>; … }[]` | optional | AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063) |
-| **hooks** | `any` | optional | Object lifecycle hooks, as they survived the record JSON projection |
+| **hooks** | `{ name: string; label?: string; object: string \| string[]; events: Enum<'beforeFind' \| 'afterFind' \| 'beforeInsert' \| 'afterInsert' \| 'beforeUpdate' \| …>[]; … }[]` | optional | Object Lifecycle Hooks, as a JSON document carries them |
 | **mappings** | `{ name: string; label?: string; sourceFormat?: Enum<'csv' \| 'json' \| 'xml' \| 'sql'>; targetObject: string; … }[]` | optional | Data Import/Export Mappings |
 | **analyticsCubes** | `{ name: string; title?: string; description?: string; sql: string; … }[]` | optional | Analytics Semantic Layer Cubes |
 | **connectors** | `{ name: string; label: string; type: Enum<'saas' \| 'database' \| 'file_storage' \| 'message_queue' \| 'api' \| 'custom'>; description?: string; … }[]` | optional | External System Connectors. A provider-bound entry (has `provider`: openapi/mcp/rest) is materialized into a live, dispatchable connector at boot and referenced by flows via `connector_action`; credentials are `auth.credentialRef` references, never inline secrets. An entry with no `provider` is a catalog descriptor only (NOT dispatchable) — set `enabled: false` on deliberate descriptors. Unknown provider / unresolvable credentialRef / name conflict ⇒ hard boot error (ADR-0097). |
@@ -398,8 +401,9 @@ List installed packages request
 | :--- | :--- | :--- | :--- |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional | Filter by package status |
 | **enabled** | `boolean` | optional | Filter by enabled state |
-| **limit** | `integer` | optional (default: `50`) | Maximum number of packages to return |
-| **cursor** | `string` | optional | Cursor for pagination |
+| **type** | `string` | optional | Filter by the installed manifest's `type` — exact match, unmatched values select nothing |
+| **limit** | `never` | optional | [REMOVED] `limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the serving door filters on `status` / `type` / `enabled` and then returns every remaining row, so no page was ever withheld and no continuation token was ever minted. `limit` also declared `.default(50)`, so a reader of the published schema was entitled to believe an unparameterised list is capped at 50 rows; it has never been capped at all, and nothing parses a query string through this schema, so that default has never been stamped onto anything. Delete the key. This route is NOT paginated — it answers the whole installed set, which is a bounded table of tens of rows, and `hasMore` on the response is a constant `false` that is now true by construction. Filter with `status`, `type` and `enabled` instead of asking for a window. A first-class package cursor, if one is ever designed, will be a response-minted opaque token, not this key. |
+| **cursor** | `never` | optional | [REMOVED] `limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the serving door filters on `status` / `type` / `enabled` and then returns every remaining row, so no page was ever withheld and no continuation token was ever minted. `limit` also declared `.default(50)`, so a reader of the published schema was entitled to believe an unparameterised list is capped at 50 rows; it has never been capped at all, and nothing parses a query string through this schema, so that default has never been stamped onto anything. Delete the key. This route is NOT paginated — it answers the whole installed set, which is a bounded table of tens of rows, and `hasMore` on the response is a constant `false` that is now true by construction. Filter with `status`, `type` and `enabled` instead of asking for a window. A first-class package cursor, if one is ever designed, will be a response-minted opaque token, not this key. |
 
 
 ---
@@ -447,7 +451,7 @@ List installed packages response
 | **packages** | `({ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … } \| … +1 more)[]` | ✅ | Installed packages |
 | **total** | `integer` | optional | Total matching packages |
 | **nextCursor** | `string` | optional | Cursor for the next page |
-| **hasMore** | `boolean` | ✅ | Whether more packages are available |
+| **hasMore** | `boolean` | ✅ | Whether more packages are available — this door serves one page, so always `false` |
 
 
 ---
@@ -491,7 +495,7 @@ Install package request
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install (AUTHORING stage: `objects` are glob patterns) |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install |
+| **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install — honoured at POST /api/v1/packages: `true` enables the installed row, `false` disables it, and ABSENT keeps the row's current lifecycle state (a fresh install lands enabled) |
 | **overwrite** | `boolean` | optional | Overwrite an already-installed package id instead of answering 409 Conflict |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for marketplace installation |
@@ -500,7 +504,7 @@ Install package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -544,7 +548,7 @@ Install package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -605,7 +609,7 @@ Structured plugin permission grants (ADR-0025 §3.2)
 | **externalId** | `string \| string[]` | optional (default: `"name"`) | Field (or composite list of fields) matched for the uniqueness check |
 | **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Conflict resolution strategy |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
-| **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale |
+| **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn |
 | **records** | `Record<string, any>[]` | ✅ | Data records |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -654,7 +658,7 @@ Install package request
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install (AUTHORING stage: `objects` are glob patterns) |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install |
+| **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install — honoured at POST /api/v1/packages: `true` enables the installed row, `false` disables it, and ABSENT keeps the row's current lifecycle state (a fresh install lands enabled) |
 | **overwrite** | `boolean` | optional | Overwrite an already-installed package id instead of answering 409 Conflict |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for marketplace installation |
@@ -663,7 +667,7 @@ Install package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -796,7 +800,7 @@ Upgrade package request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -891,7 +895,7 @@ Resolve dependencies request
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -971,11 +975,14 @@ Resolve dependencies response
 
 ## UninstallPackageApiRequest
 
+Uninstall package request
+
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Package identifier |
+| **keepData** | `boolean` | optional | Preserve object tables and remove metadata only; on the wire, `?keepData=true` or `?keepData=1` |
 
 
 ---

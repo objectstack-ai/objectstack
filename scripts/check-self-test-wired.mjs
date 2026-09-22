@@ -64,9 +64,28 @@
  *
  * ## Population, and the one thing it deliberately over-selects
  *
- * A script is IN when a workflow names it -- directly, or through a root
- * `package.json` alias a workflow names -- and its code, with comments masked,
- * contains the literal `--self-test`. The mask is load-bearing in both
+ * A script is IN when a workflow names it -- directly, through a root
+ * `package.json` alias a workflow names, or through a LOCAL COMPOSITE ACTION a
+ * workflow `uses:` (#19229) -- and its code, with comments masked, contains the
+ * literal `--self-test`.
+ *
+ * The third source landed because the first two made a directory boundary into
+ * a coverage boundary. This gate's subject is "a script CI RUNS whose self-test
+ * CI must run too", and a step inside `.github/actions/**` is run by CI in the
+ * calling job exactly as an inline one is. With the corpus rooted at
+ * `.github/workflows` alone, moving a step into a composite action dropped its
+ * script out of the population -- and the scope line still counted confidently,
+ * because every `#4690` floor here fires on an EMPTY population, never on one
+ * that is complete-minus-one. That is the same failure mode #15414 records one
+ * paragraph down, arriving through a different door.
+ *
+ * ⛔ The action corpus is read from the tree, not followed out of a `uses:`
+ * line. Every `action.yml` under `.github/actions/` is read whether a workflow
+ * reaches it or not, which is the safe direction here: this gate asks whether a
+ * self-test is RUN anywhere in CI, so a reachability rule could only ever
+ * SUBTRACT members -- and it would subtract them silently. An unreferenced
+ * action's steps are dead code, which is a different finding and a different
+ * gate's. The mask is load-bearing in both
  * directions: `pnpm check:platform-checklist` appears in `lint.yml` only inside
  * a comment (it is maintainer-run by ruling), and counting that would fabricate
  * a member; a gate's header naming its own flag is likewise prose, not code.
@@ -97,8 +116,9 @@
  * merely implied by the operators.
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { readFileSync, readdirSync, existsSync, statSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
@@ -106,6 +126,12 @@ import { maskComments } from './js-comment-mask.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const WORKFLOW_DIR = '.github/workflows';
+// The SECOND corpus root (#19229) -- local composite actions. Absent is a real
+// state and never a refusal: a repo may hold no composite action at all. What
+// keeps it from going quiet on a repo that DOES is the live battery below.
+const ACTION_DIR = '.github/actions';
+/** The file names GitHub accepts for a local action, in the order it resolves them. */
+const ACTION_FILES = ['action.yml', 'action.yaml'];
 
 // The token every gate in this farm writes when it names a path belonging to a
 // maintainer rather than to the landing author (#8435). Declared per gate by
@@ -433,6 +459,25 @@ function walkScripts(dir, root = ROOT, out = []) {
 }
 
 /**
+ * Every `action.yml` / `action.yaml` under `<root>/.github/actions/`, as paths
+ * relative to the REPO root -- the spelling a finding names, so a reader can
+ * open the file the attribution points at.
+ *
+ * Walked rather than read one level deep, because a local action may be nested
+ * (`uses: ./.github/actions/a/b`). A missing directory answers `[]`: absence is
+ * a real state for this root, never a broken reader (#19229).
+ */
+function walkActionFiles(dir, root, out = []) {
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return out;
+  for (const entry of readdirSync(dir).sort()) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) walkActionFiles(full, root, out);
+    else if (ACTION_FILES.includes(entry)) out.push(relative(root, full).split(sep).join('/'));
+  }
+  return out;
+}
+
+/**
  * ⛔ THE `#4690` FLOORS, as a pure function over a COMPLETED reading (#15414).
  *
  * Held here, and applied by `collectPopulation` below, because TWO gates
@@ -511,9 +556,11 @@ export function collectPopulation({ root = ROOT } = {}) {
     named: new Map(),
     selfTested: new Map(),
     workflows: [],
+    actions: [],
     population: [],
     packageLocal: [],
     workflowDir: WORKFLOW_DIR,
+    actionDir: ACTION_DIR,
     sourceOf,
     ...over,
   });
@@ -539,6 +586,16 @@ export function collectPopulation({ root = ROOT } = {}) {
     .sort()
     .map((name) => ({ name, text: readFileSync(join(workflowDir, name), 'utf8') }));
 
+  // The composite action corpus (#19229). Named by its REPO-RELATIVE path
+  // rather than by a bare file name: `action.yml` is the same string in every
+  // action directory, and an attribution a reader cannot open is not an
+  // attribution. Kept in its own array so the `#4690` floors above keep asking
+  // about the WORKFLOW corpus, which is the one this tree cannot legally be
+  // without.
+  const actions = walkActionFiles(join(root, ACTION_DIR), root)
+    .sort()
+    .map((name) => ({ name, text: readFileSync(join(root, name), 'utf8') }));
+
   let pkgScripts = null;
   try {
     pkgScripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts ?? {};
@@ -546,7 +603,9 @@ export function collectPopulation({ root = ROOT } = {}) {
     return blank('the root package.json could not be read or parsed.', { files, walked, sources, rootCarriers, workflows });
   }
 
-  const { named, selfTested } = collectInvocations(workflows, pkgScripts);
+  // ONE corpus into the extraction: a step CI runs is a step CI runs, whichever
+  // of the two files it is written in.
+  const { named, selfTested } = collectInvocations([...workflows, ...actions], pkgScripts);
 
   // The population's SECOND source: the package-local gate lane (#15342).
   //
@@ -604,9 +663,11 @@ export function collectPopulation({ root = ROOT } = {}) {
     named,
     selfTested,
     workflows,
+    actions,
     population,
     packageLocal,
     workflowDir: WORKFLOW_DIR,
+    actionDir: ACTION_DIR,
     sourceOf,
   };
   return { ...reading, refusal: refusalFor({ ...reading, pkgScriptCount: Object.keys(pkgScripts).length }) };
@@ -623,7 +684,7 @@ function main() {
   // sibling gate consumes the SAME answer rather than a second one (#15414).
   const read = collectPopulation();
   if (read.refusal) refuse(read.refusal);
-  const { files, carriers, named, selfTested, population, packageLocal, workflows, sourceOf } = read;
+  const { files, carriers, named, selfTested, population, packageLocal, workflows, actions, sourceOf } = read;
 
   const findings = [
     ...auditPopulation({ carriers, named, selfTested, ledger: SELF_TEST_RUN_OTHERWISE }),
@@ -634,7 +695,8 @@ function main() {
   const scope =
     `  scope: ${files.length} file(s) under scripts/, ${carriers.size} carrying \`--self-test\` in code ` +
     `(comments masked, ${packageLocal.length} of them package-local gate(s) CI names by path); ` +
-    `${population.length} of those are run by ${workflows.length} workflow(s); ` +
+    `${population.length} of those are run by ${workflows.length} workflow(s) and ` +
+    `${actions.length} composite action(s); ` +
     `${wired.length} have their self-test run through the flag, ${SELF_TEST_RUN_OTHERWISE.length} through a recorded route.`;
 
   if (findings.length > 0) {
@@ -705,12 +767,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'ledger hygiene': 9,
   'live ledger': 4,
   'the exported population': 8,
+  // #19229: the composite-action corpus. A firing control (a self-test wired
+  // ONLY inside an action counts as wired), a dark control (with the action
+  // file gone the same tree reports it unwired), the absence case that must NOT
+  // become a refusal, and the live reading that keeps the root from going quiet.
+  'the composite action corpus': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the registry's own size is pinned too. Adding a battery raises
 // this number; removing one is the same ⛔ deliberate edit as lowering a count.
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1177,6 +1244,102 @@ function selfTest() {
       'a population member has no entry in `sources` — the consumer indexes `sources` BY member to run '
         + 'its prefilter, so a gap there is a crash or a silently unfiltered script',
     );
+  }
+
+  // ── The composite action corpus (#19229) ────────────────────────────────
+  //
+  // A step written in `.github/actions/**` is run by CI in the calling job
+  // exactly as an inline step is, so a `--self-test` executed there is WIRED.
+  // Rooting the corpus at `.github/workflows` alone made that a coverage
+  // boundary: the script dropped out of `selfTested` and this gate reported it
+  // unwired, while a scope line counted confidently past the gap.
+  //
+  // Driven on a fixture tree rather than on the repo, because the repo cannot
+  // hold the defect on purpose. The dark control is the same tree with the
+  // action file removed -- it is what makes the firing control a reading about
+  // the second root rather than about the fixture.
+  battery('the composite action corpus');
+  {
+    const fixtureRoots = [];
+    const makeRoot = (files) => {
+      const dir = mkdtempSync(join(tmpdir(), 'check-self-test-wired-'));
+      fixtureRoots.push(dir);
+      for (const [rel, contents] of Object.entries(files)) {
+        const full = join(dir, rel);
+        mkdirSync(dirname(full), { recursive: true });
+        writeFileSync(full, contents);
+      }
+      return dir;
+    };
+    const GATE_SOURCE = "if (process.argv.includes('--self-test')) { process.exit(0); }\n";
+    const CALLER_WF = `name: Lint
+on: [push]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - run: node scripts/g.mjs
+      - uses: ./.github/actions/fixture-gate
+`;
+    const ACTION_YML = `name: Fixture gate
+description: runs the gate's own self-test
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: node scripts/g.mjs --self-test
+`;
+    const BASE = { 'scripts/g.mjs': GATE_SOURCE, 'package.json': '{"scripts":{"noop":"true"}}\n', '.github/workflows/lint.yml': CALLER_WF };
+    try {
+      // ⭐ FIRING control.
+      const withAction = collectPopulation({
+        root: makeRoot({ ...BASE, '.github/actions/fixture-gate/action.yml': ACTION_YML }),
+      });
+      ok(
+        withAction.refusal === null && withAction.population.includes('scripts/g.mjs'),
+        `the fixture tree did not produce a population (${withAction.refusal ?? 'empty'}), so the cases below prove nothing (#4690)`,
+      );
+      ok(
+        withAction.selfTested.has('scripts/g.mjs'),
+        'a `--self-test` CI runs INSIDE a composite action does not count as run. The step executes in the '
+          + 'calling job exactly as an inline one does, so this gate would demand a wiring that is already there (#19229)',
+      );
+      ok(
+        [...(withAction.selfTested.get('scripts/g.mjs') ?? [])].join('|') === '.github/actions/fixture-gate/action.yml',
+        'the attribution does not name the action FILE. `action.yml` is the same string in every action '
+          + 'directory, so a bare file name is an attribution a reader cannot open',
+      );
+      ok(
+        withAction.actions.length === 1 && withAction.actionDir === ACTION_DIR,
+        `the reading does not carry its second corpus root, got ${withAction.actions.length} action(s) under ${withAction.actionDir}`,
+      );
+      // ⭐ DARK control: the SAME tree with the action file gone. The script is
+      // still named by the workflow, so this is not a refusal — it is the
+      // finding the firing control must be absent from.
+      const withoutAction = collectPopulation({ root: makeRoot(BASE) });
+      ok(
+        withoutAction.refusal === null
+          && withoutAction.actions.length === 0
+          && !withoutAction.selfTested.has('scripts/g.mjs')
+          && auditPopulation({
+            carriers: withoutAction.carriers,
+            named: withoutAction.named,
+            selfTested: withoutAction.selfTested,
+            ledger: [],
+          }).length === 1,
+        'with no composite action behind it the same tree is NOT reported unwired, so the case above is '
+          + 'passing for some other reason than the second root being read',
+      );
+      // The live reading, so the root cannot go quiet on the repo it guards.
+      const liveActions = collectPopulation().actions;
+      ok(
+        liveActions.length > 0 && liveActions.every((a) => a.name.startsWith(`${ACTION_DIR}/`)),
+        'this repo holds composite actions and the shared reading sees none — a corpus root that stopped '
+          + 'being read, which absence-is-not-a-refusal cannot tell apart from a repo that has none (#19229)',
+      );
+    } finally {
+      for (const dir of fixtureRoots) rmSync(dir, { recursive: true, force: true });
+    }
   }
 
   // ── The floor: every declared battery RAN, and ran its cases ─────────────

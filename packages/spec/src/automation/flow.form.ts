@@ -35,14 +35,58 @@ export const flowForm = defineForm({
           type: 'repeater',
           required: true,
           helpText: '⚠️ Consider using Flow Designer visual editor instead of JSON',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'id', label: 'ID' },
+            { field: 'type', label: 'Node Type' },
+            { field: 'label', label: 'Label' },
+            { field: 'config', label: 'Configuration' },
+            { field: 'connectorConfig', label: 'Connector Action' },
+            { field: 'position', label: 'Canvas Position' },
+            { field: 'timeoutMs', label: 'Timeout (ms)' },
+            { field: 'inputSchema', label: 'Input Schema' },
+            { field: 'waitEventConfig', label: 'Wait Event' },
+            { field: 'boundaryConfig', label: 'Boundary Event' },
+          ],
         },
         {
           field: 'edges',
           type: 'repeater',
           required: true,
           helpText: 'Connections between nodes — use Flow Designer for easier editing',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'id', label: 'ID' },
+            { field: 'source', label: 'From Node' },
+            { field: 'target', label: 'To Node' },
+            { field: 'condition', label: 'Condition' },
+            { field: 'type', label: 'Connection Type' },
+            { field: 'label', label: 'Label' },
+            { field: 'isDefault', label: 'Default Path' },
+          ],
         },
-        { field: 'variables', type: 'repeater', helpText: 'Flow variables (inputs/outputs)' },
+        {
+          field: 'variables',
+          type: 'repeater',
+          helpText: 'Flow variables (inputs/outputs)',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'name', label: 'Name' },
+            { field: 'type', label: 'Type' },
+            { field: 'isInput', label: 'Input' },
+            { field: 'isOutput', label: 'Output' },
+            { field: 'defaultValue', label: 'Default Value' },
+          ],
+        },
       ],
     },
     {
@@ -57,6 +101,12 @@ export const flowForm = defineForm({
         { field: 'version', colSpan: 1, helpText: 'Version number (auto-incremented)' },
         { field: 'runAs', colSpan: 1, helpText: 'Execute as system (admin) or user (current user permissions)' },
         { field: 'errorHandling', type: 'composite', colSpan: 2, helpText: 'What to do when a node fails (fail, retry, continue)' },
+        // #19331 — both messages are declared by FlowSchema and were offered by
+        // no control. The copy states the reach the runtime actually gives them:
+        // they ride AutomationResult for EVERY terminal run, not only screen
+        // flows, and the screen-flow UI is the surface that renders them.
+        { field: 'successMessage', type: 'text', colSpan: 2, helpText: 'Message carried on the run result when the flow completes; the screen-flow UI shows it as a toast instead of a generic "Done".' },
+        { field: 'errorMessage', type: 'text', colSpan: 2, helpText: 'Message carried on the run result when the flow fails; the screen-flow UI shows it as a toast instead of the raw error.' },
       ],
     },
   ],

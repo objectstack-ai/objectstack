@@ -15,6 +15,7 @@
     "ConnectorConflictResolution (type)",
     "ConnectorConflictResolutionSchema (const)",
     "ConnectorDescriptor (interface)",
+    "ConnectorFetchPolicy (interface)",
     "ConnectorFieldMapping (type)",
     "ConnectorFieldMappingParsed (type)",
     "ConnectorFieldMappingSchema (const)",
@@ -57,6 +58,7 @@
     "HealthCheckConfig (type)",
     "HealthCheckConfigParsed (type)",
     "HealthCheckConfigSchema (const)",
+    "ResilientFetchOptions (interface)",
     "ResolvedConnectorAuth (type)",
     "RetryConfig (type)",
     "RetryConfigParsed (type)",
@@ -70,6 +72,7 @@
     "WebhookEventSchema (const)",
     "WebhookSignatureAlgorithm (type)",
     "WebhookSignatureAlgorithmSchema (const)",
+    "connectorFetchOptions (function)",
     "defineConnector (function)",
     "isConnectorUpstreamUnavailable (function)"
   ]

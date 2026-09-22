@@ -606,7 +606,7 @@ unchanged returns the same `400`.
   "success": false,
   "error": {
     "code": "INVALID_REQUEST",
-    "message": "[invalid_request] 'viewes' is not a recognised spelling of metadata type 'view'. Address it as 'view' or 'views'. Refused rather than treated as a plugin-registered type, because forwarding an unrecognised spelling of a declared type would create a second namespace under type='viewes'.",
+    "message": "'viewes' is not a recognised spelling of metadata type 'view'. Address it as 'view' or 'views'. Refused rather than treated as a plugin-registered type, because forwarding an unrecognised spelling of a declared type would create a second namespace under type='viewes'.",
     "httpStatus": 400
   }
 }
@@ -657,7 +657,7 @@ the type segment, and the exemption below decides whether it fires at all.
   "success": false,
   "error": {
     "code": "INVALID_REQUEST",
-    "message": "[invalid_request] 'fieldz' is not a metadata type. The platform declares no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one either — so this write would mint a sys_metadata namespace under type='fieldz' that nothing reads and nothing serves. Address a real metadata type; GET /api/v1/meta/types lists the ones this deployment carries.",
+    "message": "'fieldz' is not a metadata type. The platform declares no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one either — so this write would mint a sys_metadata namespace under type='fieldz' that nothing reads and nothing serves. Address a real metadata type; GET /api/v1/meta/types lists the ones this deployment carries.",
     "httpStatus": 400
   }
 }

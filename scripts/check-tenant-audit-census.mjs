@@ -136,7 +136,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'A DRIFT': 5,
   'B PROSE': 4,
   '⭐ THE SPLIT': 9,
-  'census refusals': 5,
+  'census refusals': 7,
   'refusals': 1,
 });
 
@@ -222,6 +222,7 @@ import {
   END_MARKER,
   PAGE,
   corpusScaleRows,
+  notRoundTrippableSites,
   renderCountsFile,
   renderGeneratedRegion,
   runCensus,
@@ -587,10 +588,21 @@ function firstDifference(committed, expected) {
 /**
  * ⭐ Check C -- the refusals the CENSUS raises, given an exit.
  *
- * `runCensus()` reports two failures about the TREE rather than about the
+ * `runCensus()` reports three failures about the RUN rather than about the
  * artefacts: a write call site whose receiver is erased and that none of the
- * three placement rules reaches (`census.unledgered`), and an `UNTYPED_RECEIVERS`
- * row that no longer matches any call in the corpus (`census.staleLedgerRows`).
+ * three placement rules reaches (`census.unledgered`), an `UNTYPED_RECEIVERS`
+ * row that no longer matches any call in the corpus (`census.staleLedgerRows`),
+ * and a receiver whose declared type the census stored whitespace-collapsed and
+ * cannot read back ({@link notRoundTrippableSites}).
+ *
+ * ⭐ The third one is why this function is load-bearing rather than tidy. That
+ * class used to end the whole process inside `runCensus` -- `parseSourceFile`
+ * refuses by `process.exit`, so this gate died with it and CI went red. It is now
+ * localised to the one site, which is the repair; but a localisation that let CI
+ * go GREEN would have traded a loud takedown for a quiet subtraction, and the
+ * subtraction is the thing the census exists not to do in silence. ⇒ the site is
+ * declared in both artefacts AND refused here. ⛔ Neither half alone is the
+ * repair.
  *
  * The generator's own `main()` prints both and exits 1 -- but `lint.yml` invokes
  * THIS gate and never the generator, so until this function existed those two
@@ -626,6 +638,17 @@ export function censusRefusals(census) {
       + 'places this site, so the census cannot say whether it is an engine write at all and the '
       + 'page certifies a population with a hole in it. Rule on what the receiver is, then add an '
       + '`UNTYPED_RECEIVERS` row in `scripts/tenant-audit-census.mjs` saying so.',
+    );
+  }
+  for (const u of notRoundTrippableSites(census)) {
+    problems.push(
+      `[type-text-not-round-trippable] ${u.file}:${u.line} \`${u.receiver}\`.${u.verb}() -- this tool `
+      + `cannot re-parse the declared type it derived for this receiver, so the door rule could not be `
+      + `read off it and the census cannot say whether this site is an engine write at all: `
+      + `\`${u.type}\`. The SOURCE parsed -- what did not is the census's own re-serialisation of a `
+      + 'fragment of it, so this is a fault in the tool and not a fact about the corpus. ⛔ Nothing is '
+      + 'wrong with the code at this site and nothing here asks you to restyle it: file this against '
+      + 'the census, with the located parse verdict the generator prints under the site.',
     );
   }
   for (const r of census.staleLedgerRows ?? []) {
@@ -954,7 +977,7 @@ export function selfTest() {
     what: 'a ledger row whose write call left the tree',
   };
   const refuse = (unledgered, staleLedgerRows) =>
-    censusRefusals({ ...census, unledgered, staleLedgerRows });
+    censusRefusals({ ...census, unledgered, staleLedgerRows, undefendedSubtractions: [] });
 
   t('a census that could not place a receiver is a finding',
     refuse([unplaceableSite], []).some((p) => p.startsWith('[untyped-receiver]')));
@@ -964,6 +987,32 @@ export function selfTest() {
     refuse([], [orphanedRow]).some((p) => p.startsWith('[stale-ledger-row]')));
   t('the stale-row refusal names the row it could not match',
     refuse([], [orphanedRow]).some((p) => p.includes(orphanedRow.file) && p.includes(orphanedRow.receiver)));
+
+  // ⭐ The third class (#19077): a receiver whose stored type text the census
+  // cannot read back. Localising it is the repair; letting CI go green on it
+  // would be the same floor drop in a different costume, so it is refused HERE
+  // as well as declared in both artefacts.
+  const notRoundTrippable = {
+    file: 'packages/services/service-fixture/src/seed.ts',
+    line: 71,
+    receiver: 'engine',
+    verb: 'insert',
+    reason: 'type-text-not-round-trippable',
+    type: '{ insert(object: string, data: unknown): Promise<void> find(object: string): Promise<void> }',
+    names: [],
+    doorShaped: false,
+  };
+  const refuseUndefended = (undefendedSubtractions) =>
+    censusRefusals({ ...census, unledgered: [], staleLedgerRows: [], undefendedSubtractions });
+
+  t('⭐ a receiver whose stored type text does not round-trip is a finding, not a silent subtraction',
+    refuseUndefended([notRoundTrippable]).some((p) => p.startsWith('[type-text-not-round-trippable]')));
+  t('the round-trip refusal names the site AND the text that could not be read back',
+    refuseUndefended([notRoundTrippable]).some(
+      (p) => p.includes(`${notRoundTrippable.file}:${notRoundTrippable.line}`) && p.includes(notRoundTrippable.type)));
+  t('⛔ CONTROL: a subtraction on a DIFFERENT undefended arm is declared but NOT refused',
+    refuseUndefended([{ ...notRoundTrippable, reason: 'type-not-in-corpus' }]).length === 0,
+    refuseUndefended([{ ...notRoundTrippable, reason: 'type-not-in-corpus' }]).join(' | '));
 
   // ⛔ ...and the control, without which all four cases above are equally passed
   // by a function that simply reports everything it is handed: a census that

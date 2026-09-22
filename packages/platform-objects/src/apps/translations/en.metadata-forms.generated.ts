@@ -56,6 +56,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Description",
         helpText: "Developer documentation"
       },
+      nameField: {
+        label: "Name Field",
+        helpText: "Field whose value titles each record (e.g. \"name\", \"subject\"). ADR-0079 canonical pointer — read by record display, ObjectQL search and related-record previews."
+      },
       isSystem: {
         label: "Is System",
         helpText: "System object (protected from deletion; defaults sharing to public)"
@@ -257,6 +261,26 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Datasource",
         helpText: "Target datasource ID (default: \"default\")"
       },
+      ownership: {
+        label: "Ownership",
+        helpText: "Record-ownership model. Absent resolves to user."
+      },
+      sharingModel: {
+        label: "Sharing Model",
+        helpText: "Org-Wide Default record visibility for internal users. A custom object that omits it resolves to private at runtime (ADR-0090 D1)."
+      },
+      managedBy: {
+        label: "Managed By",
+        helpText: "Lifecycle bucket: platform (user CRUD), config (admin authored), system-data (platform-defined schema with admin/user-writable data), engine-owned (no user writes), append-only (audit), better-auth (identity). UI clients derive their CRUD affordances from it, so it decides what a user is offered on records of this object."
+      },
+      editMode: {
+        label: "Edit Mode",
+        helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling."
+      },
+      fileAccessDelegate: {
+        label: "File Access Delegate",
+        helpText: "Kernel service that authorizes downloads of files owned by this object's media fields, instead of testing whether the caller can read the owning row. For objects whose access is mediated by a service. Fails closed."
+      },
       lifecycle: {
         label: "Lifecycle",
         helpText: "Data lifecycle contract (ADR-0057): how long rows live and how space is reclaimed. Leave empty for permanent record semantics. Non-record classes require at least one bounding policy (retention, TTL, or rotation)."
@@ -384,6 +408,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Placeholder",
         helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
       },
+      inlineHelpText: {
+        label: "Inline Help Text",
+        helpText: "Always-visible help shown below the input, unlike `placeholder`, which disappears once a value is entered."
+      },
       minLength: {
         label: "Min Length",
         helpText: "Minimum character length"
@@ -416,9 +444,51 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Scale",
         helpText: "Number of decimal digits"
       },
+      step: {
+        label: "Step",
+        helpText: "Step increment for the slider (default 1). Renderer-only: the write path does not reject a value off the step grid."
+      },
+      maxSize: {
+        label: "Max Size",
+        helpText: "Maximum permitted file size in BYTES (positive integer). Enforced server-side on write against the stored file size — a file with no recorded size cannot fail it."
+      },
+      dimensions: {
+        label: "Dimensions",
+        helpText: "Vector dimensionality — an integer from 1 to 10000 (e.g. 1536 for OpenAI embeddings)."
+      },
+      language: {
+        label: "Language",
+        helpText: "Editor language for syntax highlighting (e.g. javascript, python, sql)."
+      },
+      autonumberFormat: {
+        label: "Autonumber Format",
+        helpText: "Literal text plus a {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens in the business time zone, and {field_name} interpolation. The counter resets per rendered prefix. Omitted on an autonumber field it defaults to {0000}."
+      },
+      referenceVia: {
+        label: "Reference Via",
+        helpText: "Makes this text field the id half of a polymorphic pointer: names the SIBLING field on the same object that holds the target object name, per row (ADR-0052 §5). snake_case; text fields only, and mutually exclusive with `reference`."
+      },
       options: {
         label: "Options",
         helpText: "Available options (label/value pairs)"
+      },
+      "options.label": {
+        label: "Label"
+      },
+      "options.value": {
+        label: "Value"
+      },
+      "options.description": {
+        label: "Description"
+      },
+      "options.color": {
+        label: "Color"
+      },
+      "options.default": {
+        label: "Default"
+      },
+      "options.visibleWhen": {
+        label: "Visible When"
       },
       reference: {
         label: "Reference",
@@ -432,9 +502,41 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Related List Filter",
         helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
       },
+      displayField: {
+        label: "Display Field",
+        helpText: "Field shown as each candidate's label in the picker. Omitted, the referenced object's own title field is used."
+      },
+      descriptionField: {
+        label: "Description Field",
+        helpText: "Secondary field shown under the label in the quick-select popover."
+      },
+      allowCreate: {
+        label: "Allow Create",
+        helpText: "Let the user create a record from the typed text when the picker finds no match. Best for objects whose only required field is the display field."
+      },
+      lookupPageSize: {
+        label: "Lookup Page Size",
+        helpText: "Rows per page in the record-picker dialog — a positive integer; default 10."
+      },
+      relatedListTitle: {
+        label: "Related List Title",
+        helpText: "Title for this relationship's related list on the parent's detail page."
+      },
+      inlineTitle: {
+        label: "Inline Title",
+        helpText: "Title for the inline master-detail grid on the parent record."
+      },
+      inlineAmountField: {
+        label: "Inline Amount Field",
+        helpText: "Numeric child field summed for the inline grid total."
+      },
       expression: {
         label: "Expression",
         helpText: "CEL expression to calculate this field (makes it read-only)"
+      },
+      returnType: {
+        label: "Return Type",
+        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression."
       },
       summaryOperations: {
         label: "Summary Operations",
@@ -483,6 +585,22 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       maskingRule: {
         label: "Masking Rule",
         helpText: "Partial masking: preset ('phone', 'id_card', 'bank_account', 'email', 'name') or {\"keepHead\": n, \"keepTail\": m}. Masked for callers not holding this field's requiredPermissions"
+      },
+      internal: {
+        label: "Internal",
+        helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched."
+      },
+      trackHistory: {
+        label: "Track History",
+        helpText: "Render this field's value changes as entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."
+      },
+      widget: {
+        label: "Widget",
+        helpText: "Form widget override — names a registered field component, looked up as `field:` plus this name, to render the field instead of the type default. An unregistered name degrades to the type renderer."
+      },
+      ackPlaintextMasking: {
+        label: "Acknowledge plaintext at rest",
+        helpText: "Affirm that this generic password field's plaintext-at-rest, masked-on-read contract is intended, silencing the author-time warning (ADR-0100). No effect on any other type."
       }
     }
   },
@@ -796,6 +914,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Description",
         helpText: "Page description for navigation"
       },
+      source: {
+        label: "Source",
+        helpText: "Page source text. For kind 'html' (alias 'jsx') it is constrained JSX compiled to the component tree at save time — parsed, never executed. For kind 'react' it is real React executed at render by the trusted runtime."
+      },
       object: {
         label: "Object",
         helpText: "Bound object (for Record pages)"
@@ -817,12 +939,21 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Initial value (defaults to a type-appropriate empty value)"
       },
       "variables.source": {
-        label: "Source",
+        label: "Written By",
         helpText: "Component (by id) that writes this variable — e.g. an element:record_picker"
       },
       regions: {
         label: "Regions",
         helpText: "Layout regions (header, main, sidebar, footer) with components"
+      },
+      "regions.name": {
+        label: "Region"
+      },
+      "regions.width": {
+        label: "Width"
+      },
+      "regions.components": {
+        label: "Components"
       },
       interfaceConfig: {
         label: "Interface Config",
@@ -843,6 +974,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "interfaceConfig.sort": {
         label: "Sort",
         helpText: "Default sort order for the page, defined directly on the page."
+      },
+      "interfaceConfig.sort.field": {
+        label: "Field"
+      },
+      "interfaceConfig.sort.order": {
+        label: "Direction"
       },
       "interfaceConfig.levels": {
         label: "Levels",
@@ -974,6 +1111,57 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Widgets",
         helpText: "Dashboard widgets with position and sizing"
       },
+      "widgets.id": {
+        label: "Widget ID"
+      },
+      "widgets.title": {
+        label: "Title"
+      },
+      "widgets.description": {
+        label: "Description"
+      },
+      "widgets.type": {
+        label: "Visualization Type"
+      },
+      "widgets.chartConfig": {
+        label: "Chart Configuration"
+      },
+      "widgets.colorVariant": {
+        label: "Color Variant"
+      },
+      "widgets.requiresObject": {
+        label: "Requires Object"
+      },
+      "widgets.requiresService": {
+        label: "Requires Service"
+      },
+      "widgets.filter": {
+        label: "Filter"
+      },
+      "widgets.compareTo": {
+        label: "Compare To"
+      },
+      "widgets.dataset": {
+        label: "Dataset"
+      },
+      "widgets.dimensions": {
+        label: "Dimensions"
+      },
+      "widgets.values": {
+        label: "Values"
+      },
+      "widgets.layout": {
+        label: "Layout"
+      },
+      "widgets.options": {
+        label: "Options"
+      },
+      "widgets.filterBindings": {
+        label: "Filter Bindings"
+      },
+      "widgets.suppressWarnings": {
+        label: "Suppress Warnings"
+      },
       dateRange: {
         label: "Date Range",
         helpText: "Default date range selector"
@@ -981,6 +1169,36 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       globalFilters: {
         label: "Global Filters",
         helpText: "Filters applied to all widgets"
+      },
+      "globalFilters.name": {
+        label: "Name"
+      },
+      "globalFilters.field": {
+        label: "Field"
+      },
+      "globalFilters.object": {
+        label: "Object"
+      },
+      "globalFilters.label": {
+        label: "Label"
+      },
+      "globalFilters.type": {
+        label: "Input Type"
+      },
+      "globalFilters.options": {
+        label: "Options"
+      },
+      "globalFilters.optionsFrom": {
+        label: "Options From"
+      },
+      "globalFilters.defaultValue": {
+        label: "Default Value"
+      },
+      "globalFilters.scope": {
+        label: "Scope"
+      },
+      "globalFilters.targetWidgets": {
+        label: "Target Widgets"
       }
     }
   },
@@ -1030,6 +1248,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Is Default",
         helpText: "Make this the default app for new users"
       },
+      hidden: {
+        label: "Hidden",
+        helpText: "Keep this app out of the App Switcher — the shell surfaces it from the avatar menu instead. Navigation only: a hidden app stays fully routable and permission-checked."
+      },
       navigation: {
         label: "Navigation",
         helpText: "Nav tree — recursive structure"
@@ -1037,6 +1259,21 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       areas: {
         label: "Areas",
         helpText: "Group items into collapsible areas"
+      },
+      "areas.id": {
+        label: "ID"
+      },
+      "areas.label": {
+        label: "Label"
+      },
+      "areas.icon": {
+        label: "Icon"
+      },
+      "areas.description": {
+        label: "Description"
+      },
+      "areas.navigation": {
+        label: "Navigation"
       },
       defaultAgent: {
         label: "Default Agent",
@@ -1097,6 +1334,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Variant",
         helpText: "Button style (primary=blue, danger=red, ghost=transparent)"
       },
+      mode: {
+        label: "Mode",
+        helpText: "Semantic mode of the action. Read today by the AI human-in-the-loop heuristic only — no renderer branches on it."
+      },
+      order: {
+        label: "Order",
+        helpText: "Sort order within a location group — lower sorts higher, and the record header takes the first as its primary button. Unset keeps registration order."
+      },
       target: {
         label: "Target",
         helpText: "URL, flow name, or API endpoint to call"
@@ -1133,6 +1378,72 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Params",
         helpText: "User input parameters (show form before executing)"
       },
+      "params.name": {
+        label: "Name"
+      },
+      "params.field": {
+        label: "Field"
+      },
+      "params.objectOverride": {
+        label: "Object Override"
+      },
+      "params.label": {
+        label: "Label"
+      },
+      "params.type": {
+        label: "Type"
+      },
+      "params.required": {
+        label: "Required"
+      },
+      "params.options": {
+        label: "Options"
+      },
+      "params.placeholder": {
+        label: "Placeholder"
+      },
+      "params.helpText": {
+        label: "Help Text"
+      },
+      "params.defaultValue": {
+        label: "Default Value"
+      },
+      "params.multiple": {
+        label: "Multiple"
+      },
+      "params.accept": {
+        label: "Accepted Types"
+      },
+      "params.maxSize": {
+        label: "Max Size (bytes)"
+      },
+      "params.reference": {
+        label: "Reference Object"
+      },
+      "params.defaultFromRow": {
+        label: "Default From Row"
+      },
+      "params.carryOver": {
+        label: "Carry Over"
+      },
+      "params.visible": {
+        label: "Visible When"
+      },
+      "params.requiresFeature": {
+        label: "Requires Feature"
+      },
+      operation: {
+        label: "Operation",
+        helpText: "Declarative single-record field write: 'update' applies `patch`, merged under the collected `params`, to the current record AS THE CALLER — never system-elevated, so the caller's permissions, the object's hooks and its validations all fire as for a user edit."
+      },
+      undoable: {
+        label: "Undoable",
+        helpText: "Offer an Undo affordance after this update succeeds. The undo captures the prior value of every field the action writes — the merged bag, `patch` under the collected `params`. An action with no `operation` declares no write set, so there is nothing to capture."
+      },
+      execution: {
+        label: "Execution",
+        helpText: "The bulk dispatch contract this action's body is written for: 'perRecord' sends one dispatch per selected row carrying that row's recordId; 'aggregate' sends ONE dispatch for the whole selection, with every id in params._selectedIds. Omitted, the action is dispatched per record."
+      },
       confirmText: {
         label: "Confirm Text",
         helpText: "Confirmation message (e.g., \"Are you sure?\")"
@@ -1144,6 +1455,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       refreshAfter: {
         label: "Refresh After",
         helpText: "Refresh the list/page after action completes"
+      },
+      openIn: {
+        label: "Open In",
+        helpText: "Where to open a static `target` URL — 'self' navigates in place, 'new-tab' opens a new browser tab. Omitted, an absolute or external URL opens in a new tab and a relative one navigates in place."
+      },
+      opensInNewTab: {
+        label: "Opens In New Tab",
+        helpText: "Open the action RESULT in a new tab: the renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. Distinct from `openIn`, which routes a static URL target."
+      },
+      newTabUrl: {
+        label: "New-tab URL",
+        helpText: "Direct new-tab URL template, with a {recordId} placeholder. Set together with `opensInNewTab` the renderer navigates the pre-opened tab here immediately and posts nothing — so the endpoint must enforce auth itself."
       },
       locations: {
         label: "Locations",
@@ -1160,6 +1483,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       disabled: {
         label: "Disabled",
         helpText: "CEL expression: disable when condition is true"
+      },
+      requiresFeature: {
+        label: "Requires Feature",
+        helpText: "Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
       },
       ai: {
         label: "Ai",
@@ -1234,6 +1561,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Order",
         helpText: "Sort keys, most significant first (a rows/columns dimension or a values measure). Time dimensions are chronological by default."
       },
+      "order.by": {
+        label: "Order By"
+      },
+      "order.direction": {
+        label: "Direction"
+      },
       drilldown: {
         label: "Drilldown",
         helpText: "Click an aggregated row/cell to open the underlying records"
@@ -1241,6 +1574,39 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       blocks: {
         label: "Blocks",
         helpText: "Dataset-bound sub-reports (joined report only)"
+      },
+      "blocks.name": {
+        label: "Name"
+      },
+      "blocks.label": {
+        label: "Label"
+      },
+      "blocks.description": {
+        label: "Description"
+      },
+      "blocks.type": {
+        label: "Block Type"
+      },
+      "blocks.chart": {
+        label: "Chart"
+      },
+      "blocks.dataset": {
+        label: "Dataset"
+      },
+      "blocks.rows": {
+        label: "Rows"
+      },
+      "blocks.columns": {
+        label: "Columns"
+      },
+      "blocks.values": {
+        label: "Values"
+      },
+      "blocks.runtimeFilter": {
+        label: "Runtime Filter"
+      },
+      "blocks.order": {
+        label: "Order"
       },
       runtimeFilter: {
         label: "Runtime Filter",
@@ -1302,9 +1668,48 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Dimensions",
         helpText: "Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity"
       },
+      "dimensions.name": {
+        label: "Name"
+      },
+      "dimensions.label": {
+        label: "Label"
+      },
+      "dimensions.field": {
+        label: "Field"
+      },
+      "dimensions.type": {
+        label: "Type"
+      },
+      "dimensions.dateGranularity": {
+        label: "Date Granularity"
+      },
       measures: {
         label: "Measures",
         helpText: "Each: name, aggregate, field (optional for count), and display format/currency"
+      },
+      "measures.name": {
+        label: "Name"
+      },
+      "measures.label": {
+        label: "Label"
+      },
+      "measures.aggregate": {
+        label: "Aggregate"
+      },
+      "measures.field": {
+        label: "Field"
+      },
+      "measures.filter": {
+        label: "Filter"
+      },
+      "measures.format": {
+        label: "Format"
+      },
+      "measures.currency": {
+        label: "Currency"
+      },
+      "measures.derived": {
+        label: "Derived From"
       }
     }
   },
@@ -1345,13 +1750,79 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Nodes",
         helpText: "⚠️ Consider using Flow Designer visual editor instead of JSON"
       },
+      "nodes.id": {
+        label: "ID"
+      },
+      "nodes.type": {
+        label: "Node Type"
+      },
+      "nodes.label": {
+        label: "Label"
+      },
+      "nodes.config": {
+        label: "Configuration"
+      },
+      "nodes.connectorConfig": {
+        label: "Connector Action"
+      },
+      "nodes.position": {
+        label: "Canvas Position"
+      },
+      "nodes.timeoutMs": {
+        label: "Timeout (ms)"
+      },
+      "nodes.inputSchema": {
+        label: "Input Schema"
+      },
+      "nodes.waitEventConfig": {
+        label: "Wait Event"
+      },
+      "nodes.boundaryConfig": {
+        label: "Boundary Event"
+      },
       edges: {
         label: "Edges",
         helpText: "Connections between nodes — use Flow Designer for easier editing"
       },
+      "edges.id": {
+        label: "ID"
+      },
+      "edges.source": {
+        label: "From Node"
+      },
+      "edges.target": {
+        label: "To Node"
+      },
+      "edges.condition": {
+        label: "Condition"
+      },
+      "edges.type": {
+        label: "Connection Type"
+      },
+      "edges.label": {
+        label: "Label"
+      },
+      "edges.isDefault": {
+        label: "Default Path"
+      },
       variables: {
         label: "Variables",
         helpText: "Flow variables (inputs/outputs)"
+      },
+      "variables.name": {
+        label: "Name"
+      },
+      "variables.type": {
+        label: "Type"
+      },
+      "variables.isInput": {
+        label: "Input"
+      },
+      "variables.isOutput": {
+        label: "Output"
+      },
+      "variables.defaultValue": {
+        label: "Default Value"
       },
       status: {
         label: "Status",
@@ -1368,6 +1839,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       errorHandling: {
         label: "Error Handling",
         helpText: "What to do when a node fails (fail, retry, continue)"
+      },
+      successMessage: {
+        label: "Success Message",
+        helpText: "Message carried on the run result when the flow completes; the screen-flow UI shows it as a toast instead of a generic \"Done\"."
+      },
+      errorMessage: {
+        label: "Error Message",
+        helpText: "Message carried on the run result when the flow fails; the screen-flow UI shows it as a toast instead of the raw error."
       }
     }
   },
@@ -1504,6 +1983,22 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Label",
         helpText: "Display label for admins"
       },
+      description: {
+        label: "Description",
+        helpText: "Human-readable description shown in Setup (persisted as sys_permission_set.description)."
+      },
+      isDefault: {
+        label: "Is Default",
+        helpText: "App baseline for the everyone position (ADR-0090 D5): an app-level set is auto-bound at boot; a package-level set becomes an install-time suggestion an admin confirms. Default false."
+      },
+      managedBy: {
+        label: "Managed By",
+        helpText: "Record provenance (ADR-0086 D3): who owns this set across upgrades."
+      },
+      packageId: {
+        label: "Package Id",
+        helpText: "Owning package id for a package-shipped set (ADR-0086 D3). Leave empty for an environment-authored set."
+      },
       systemPermissions: {
         label: "System Permissions",
         helpText: "List of system capability keys"
@@ -1544,6 +2039,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       description: {
         label: "Description"
+      },
+      delegatable: {
+        label: "Delegatable",
+        helpText: "Holders may delegate this position themselves, time-boxed and with a reason (ADR-0091 D3). Default false — delegation is admin-only."
       }
     }
   },
@@ -1591,6 +2090,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       active: {
         label: "Active",
         helpText: "Enable/disable this agent"
+      },
+      surface: {
+        label: "Surface",
+        helpText: "Product surface this agent binds (ADR-0063 §1). Only skills whose own surface matches — or is 'both' — attach, and the agent's tool set is the union of those skills' tools. Default 'ask'."
       },
       instructions: {
         label: "Instructions",
@@ -1702,6 +2205,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Active",
         helpText: "Enable/disable this skill"
       },
+      surface: {
+        label: "Surface",
+        helpText: "Agent surface this skill binds to (ADR-0063 §3). Binding it to an agent whose surface disagrees is a hard failure at resolve time, not a silent skip. Default 'ask'."
+      },
       instructions: {
         label: "Instructions",
         helpText: "Instructions for AI — tell it how to use these tools together"
@@ -1713,6 +2220,15 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       triggerConditions: {
         label: "Trigger Conditions",
         helpText: "Programmatic conditions (e.g., objectName == \"case\")"
+      },
+      "triggerConditions.field": {
+        label: "Context Field"
+      },
+      "triggerConditions.operator": {
+        label: "Operator"
+      },
+      "triggerConditions.value": {
+        label: "Value"
       }
     }
   }

@@ -8,7 +8,8 @@ import { UpgradePlanSchema } from '../kernel/package-upgrade.zod';
 import { PackageArtifactSchema } from '../kernel/package-artifact.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
 import { ArtifactReferenceSchema } from '../marketplace/marketplace.zod';
-import { AssembledPackageBodySchema } from '../stack.zod';
+import { retiredKey } from '../shared/retired-key';
+import { RecordStagePackageBodySchema } from '../stack.zod';
 
 /**
  * # Package API Protocol
@@ -76,15 +77,9 @@ export type PackagePathParams = z.input<typeof PackagePathParamsSchema>;
  * The body half is deliberately typed `Record<string, unknown>`; the reason is
  * recorded at `AssembledPackageBodySchema` and is not repeated here. The RUNTIME
  * schema still carries the manifest's every field plus every collection's full
- * declaration, so a wrong-shaped body is refused exactly as it is there — with
- * the one measured exception {@link AssembledPackageRecordBodySchema} states
- * and pins.
- */
-/**
- * The assembled package body AS THE REGISTRY RECORDS IT — the same declaration,
- * with the two collections that have no JSON form left unchecked.
+ * declaration, so a wrong-shaped body is refused exactly as it is there.
  *
- * ## Why this exists at all, measured rather than assumed
+ * ## The row's manifest is the RECORD stage, not the assembled one
  *
  * `SchemaRegistry.installPackage` does not store the caller's object; it stores
  * `toRecordManifest(manifest)`, a structural JSON projection that DROPS
@@ -96,37 +91,34 @@ export type PackagePathParams = z.input<typeof PackagePathParamsSchema>;
  * - `hooks` — a `z.custom()` branch (a lifecycle handler).
  *
  * Those same two are the reason `AssembledPackageBodySchema` has NO JSON Schema
- * at all: `z.toJSONSchema` refuses a function and a custom type, which is also
- * why `ArtifactPackageSchema` and `ObjectStackDefinitionSchema` publish none.
- * Embedding the body verbatim in the two published response schemas below made
- * BOTH of them disappear from `json-schema/api/`, which the build's own
- * disappearance ratchet refuses and whose only other remedy is retiring two
- * published defs. `build-schemas.ts` names the remedy taken here instead:
+ * at all: `z.toJSONSchema` refuses a function and a custom type, and embedding
+ * the body verbatim in the two published response schemas below made BOTH of
+ * them disappear from `json-schema/api/`, which the build's own disappearance
+ * ratchet refuses. `build-schemas.ts` names the remedy taken here:
  * «make it emit — narrow the unrepresentable member».
  *
- * ⛔ The override set is NOT hand-picked, and must never become so. It is the
- * measured set of shape members with no JSON form, pinned key-by-key in
- * `./package-api.test.ts`: a new collection with no JSON form reddens there,
- * naming itself, instead of silently unpublishing these responses again.
+ * ⚠️ ⛔ Those two members are NOT why `ArtifactPackageSchema` and
+ * `ObjectStackDefinitionSchema` publish no JSON Schema — an earlier version of
+ * this docblock said they were, and it is false. `src/stack.zod.ts` is not one
+ * of the subpath namespaces `build-schemas.ts` walks, so neither schema is ever
+ * reached by the emit loop; repairing the two branches would not make either
+ * appear. What the narrowing below buys is this file's own two responses, which
+ * ARE in the emit loop.
  *
- * ⚠️ What `unknown` costs, stated plainly: on THIS surface those two keys are
- * accepted without being checked. It is a widening from today, where both are
- * refused outright by `ManifestSchema`'s strict close while the door really can
- * serve them — so the declaration moves from wrong to incomplete, never from
- * checked to tolerant. Every other key, `objects` included, is checked at the
- * assembled stage exactly as `AssembledPackageBodySchema` declares it. The
- * ARTIFACT surface is untouched and keeps both collections fully declared.
+ * ⭐ The narrowing is a DECLARATION rather than a hole. Until #17518 these two
+ * keys were `z.unknown().optional()` here — accepted without being checked —
+ * and that hole is what `RecordStagePackageBodySchema` replaces: the registry
+ * record stage, declared in `../stack.zod` beside the assembled and artifact
+ * stages, is the assembled body with both collections lowered and
+ * `functions[].handler` optional. ⛔ Never widen either key back to `unknown`
+ * to make a row fit: a row that parses through neither declared stage is a
+ * producer defect, and the record stage exists to keep saying so. The set of
+ * members that need the treatment is MEASURED, never hand-picked — pinned
+ * key-by-key in `./package-api.test.ts`, so a new collection with no JSON form
+ * reddens there, naming itself.
  */
-const AssembledPackageRecordBodySchema = lazySchema(() =>
-  (AssembledPackageBodySchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
-    functions: z.unknown().optional()
-      .describe('Named handler functions, as they survived the record JSON projection'),
-    hooks: z.unknown().optional()
-      .describe('Object lifecycle hooks, as they survived the record JSON projection'),
-  }).describe('One package as assembled, as the registry RECORDS it (JSON only)'));
-
 export const AssembledInstalledPackageSchema = lazySchema(() => InstalledPackageSchema.extend({
-  manifest: AssembledPackageRecordBodySchema.describe('The ASSEMBLED package body this row carries'),
+  manifest: RecordStagePackageBodySchema.describe('The ASSEMBLED package body this row carries, at the stage the registry records it'),
 }).describe('Installed package row whose manifest is the assembled package body'));
 export type AssembledInstalledPackage = z.input<typeof AssembledInstalledPackageSchema>;
 /** Post-parse shape of {@link AssembledInstalledPackage} — defaults applied, transforms run (ADR-0122). */
@@ -184,7 +176,52 @@ export type InstalledPackageAtEitherStageParsed = z.infer<typeof InstalledPackag
 // ==========================================
 
 /**
+ * One prescription, two keys — `limit` and `cursor` were the two halves of a
+ * pagination capability `GET /api/v1/packages` has never had, so they retire
+ * together and raise the same string.
+ *
+ * Tombstoned rather than deleted for the ADR-0104 reason these request schemas
+ * keep paying for: this object is not `.strict()`, so a bare deletion makes Zod
+ * SILENTLY STRIP whatever a generated client keeps sending — a clean parse and
+ * a parameter that never takes effect, which is this card's own defect moved
+ * one layer down. `retiredKey()` types the key as `never` (so `tsc` refuses it
+ * at the authoring site) and raises this text at parse time.
+ */
+const PACKAGES_LIST_PAGINATION_REMOVED =
+  '`limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 '
+  + '(ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the '
+  + 'serving door filters on `status` / `type` / `enabled` and then returns every remaining row, so '
+  + 'no page was ever withheld and no continuation token was ever minted. `limit` also '
+  + 'declared `.default(50)`, so a reader of the published schema was entitled to believe '
+  + 'an unparameterised list is capped at 50 rows; it has never been capped at all, and '
+  + 'nothing parses a query string through this schema, so that default has never been '
+  + 'stamped onto anything. Delete the key. This route is NOT paginated — it answers the '
+  + 'whole installed set, which is a bounded table of tens of rows, and `hasMore` on the '
+  + 'response is a constant `false` that is now true by construction. Filter with '
+  + '`status`, `type` and `enabled` instead of asking for a window. A first-class package cursor, if '
+  + 'one is ever designed, will be a response-minted opaque token, not this key.';
+
+/**
  * Query parameters for listing installed packages.
+ *
+ * ⭐ The contract this declaration is being held to: every key here is one the
+ * serving door — `handlePackagesRequest`'s `parts.length === 0 && m === 'GET'`
+ * branch in `packages/runtime/src/domains/packages.ts` — actually reads, and
+ * every key that door reads is here. #17667 moved it in BOTH directions
+ * (maintainer ruling 2026-09-13, decision batch #126 item 1, route 2): `type`
+ * was executed and undeclared, `limit` / `cursor` were declared and never
+ * executed.
+ *
+ * ⭐ The `enabled` leg is closed too, so the symmetry above holds for every
+ * key without exception: item 2 of the same ruling made that door read
+ * `enabled` (`readEnabledFilter`, the filter line beside the `status` one).
+ * ⛔ Do not "close" it the other way by deleting `enabled` — the ruling
+ * chose to implement that key, not to retire it, and the door reads it.
+ *
+ * ⛔ Never add a key here that the door does not read. A declared-and-ignored
+ * query parameter fails undetectably: the caller is answered `200` with the
+ * unfiltered set and nothing in the status, headers or body distinguishes that
+ * from a request served as asked.
  */
 export const ListInstalledPackagesRequestSchema = lazySchema(() => z.object({
   /** Filter by package status */
@@ -193,12 +230,21 @@ export const ListInstalledPackagesRequestSchema = lazySchema(() => z.object({
   /** Filter by enabled state */
   enabled: z.boolean().optional()
     .describe('Filter by enabled state'),
-  /** Maximum number of packages to return */
-  limit: z.number().int().min(1).max(100).default(50)
-    .describe('Maximum number of packages to return'),
-  /** Cursor for pagination */
-  cursor: z.string().optional()
-    .describe('Cursor for pagination'),
+  /**
+   * Filter by the installed manifest's `type`.
+   *
+   * ⭐ DECLARED BECAUSE THE DOOR ALREADY EXECUTES IT, not the other way round:
+   * the list branch filters `manifest.type === query.type` on any non-empty
+   * value it is given. Declared as an open string rather than a closed
+   * vocabulary because that is what the door compares — `ManifestSchema.type`
+   * is not a shared enum, and a narrower declaration here would state a
+   * rejection this wire does not perform. An unmatched value is not an error;
+   * it selects nothing.
+   */
+  type: z.string().optional()
+    .describe('Filter by the installed manifest\'s `type` — exact match, unmatched values select nothing'),
+  limit: retiredKey(PACKAGES_LIST_PAGINATION_REMOVED),
+  cursor: retiredKey(PACKAGES_LIST_PAGINATION_REMOVED),
 }).describe('List installed packages request'));
 export type ListInstalledPackagesRequest = z.input<typeof ListInstalledPackagesRequestSchema>;
 /** Post-parse shape of {@link ListInstalledPackagesRequest} — defaults applied, transforms run (ADR-0122). */
@@ -212,7 +258,14 @@ export const ListInstalledPackagesResponseSchema = lazySchema(() => BaseResponse
     packages: z.array(InstalledPackageAtEitherStageSchema).describe('Installed packages'),
     total: z.number().int().optional().describe('Total matching packages'),
     nextCursor: z.string().optional().describe('Cursor for the next page'),
-    hasMore: z.boolean().describe('Whether more packages are available'),
+    // The door sends a constant `false` here, and since #17667 removed the
+    // request half that is TRUE BY CONSTRUCTION rather than merely convenient:
+    // with no `limit` and no `cursor` to ask with, nothing can request a page,
+    // so there is never a next one to announce and `nextCursor` stays absent.
+    // ⛔ Do not "fix" the constant back into a computed value without first
+    // restoring a request-side way to ask for a page — a `true` nobody can act
+    // on is the same defect this card closed, pointing the other way.
+    hasMore: z.boolean().describe('Whether more packages are available — this door serves one page, so always `false`'),
   }),
 }).describe('List installed packages response'));
 export type ListInstalledPackagesResponse = z.input<typeof ListInstalledPackagesResponseSchema>;
@@ -224,9 +277,31 @@ export type ListInstalledPackagesResponseParsed = z.infer<typeof ListInstalledPa
 // ==========================================
 
 /**
- * Request for getting a single installed package.
+ * Request for getting a single installed package — path parameter plus the one
+ * query parameter this door honours.
+ *
+ * ⭐ `version` is DECLARED BECAUSE THE DOOR ALREADY EXECUTES IT (#17416 made it
+ * honoured; #17667 makes the declaration say so). Until now this was
+ * `PackagePathParamsSchema` — path params only — so a `?version=` the handler
+ * acts on was invisible to anything generated from the contract.
  */
-export const GetInstalledPackageRequestSchema = lazySchema(() => PackagePathParamsSchema);
+export const GetInstalledPackageRequestSchema = lazySchema(() => PackagePathParamsSchema.extend({
+  /**
+   * Scope the read to one installed version.
+   *
+   * What the door does, exactly: the id is resolved FIRST, so an unknown id
+   * still answers `404 Package '<id>' not found` whether or not `?version=`
+   * rode along; only then is the version compared, by exact string equality
+   * against the row's `manifest.version` (falling back to the
+   * `installedVersion` mirror). A mismatch is a `404` naming the installed
+   * version. The literal `latest` means "whatever is installed" and is
+   * therefore equivalent to omitting the key — it is NOT a dist-tag lookup,
+   * and there is no semver-range matching at this door. Repeating the
+   * parameter is a `400`.
+   */
+  version: z.string().optional()
+    .describe('Scope the read to this exact installed version; `latest` or omitted reads the installed row'),
+}).describe('Get installed package request'));
 export type GetInstalledPackageRequest = z.input<typeof GetInstalledPackageRequestSchema>;
 
 /**
@@ -282,9 +357,70 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
   settings: z.record(z.string(), z.unknown()).optional()
     .describe('User-provided settings at install time'),
 
-  /** Whether to enable immediately after install */
-  enableOnInstall: z.boolean().default(true)
-    .describe('Whether to enable immediately after install'),
+  /**
+   * Whether to enable the package immediately after install.
+   *
+   * ## ⭐ THREE STATES, and absence is one of them — that is why it is
+   * `optional()` and NOT `.default(true)`
+   *
+   * - `true`  — the row is ENABLED after this install, existing or fresh.
+   * - `false` — the row is DISABLED after this install: present-but-not-active,
+   *   and the disable survives a restart.
+   * - ABSENT  — the row KEEPS ITS CURRENT LIFECYCLE STATE. No lifecycle call is
+   *   made at all, so a package an operator disabled stays disabled across an
+   *   upgrade or a re-install. A FRESH id has no state to keep and lands
+   *   ENABLED, which is the registry's own new-row value, ⛔ not a default
+   *   this declaration applies.
+   *
+   * ⭐ 「缺省 = 保持，有旗 = 设置」 — ruled in maintainer batch #157 item 5
+   * letter C and implemented at the door (`packages/runtime/src/domains/packages.ts`),
+   * which reads the raw body and makes NO lifecycle call when the key is
+   * absent. The declaration followed in batch #210 item 4 letter A.
+   *
+   * ⛔ `.default(true)` is what this key may never go back to, and the reason
+   * is mechanical rather than stylistic: a default RESOLVES absence at parse
+   * time, so a parsed request that omitted the key becomes byte-identical to
+   * one that set `true`, and the third state stops existing on the published
+   * surface while the door still honours it — 「declared ≠ enforced」 on a
+   * contract this repo does not own both ends of.
+   *
+   * ⛔ Nor may the key be made to MEAN nothing in the name of making absence
+   * visible: the `true` and `false` arms are unchanged by that ruling and are
+   * re-read as such in `package-install-one-authority.test.ts`.
+   *
+   * ## ⭐ THE ONE AUTHORITY for this key, and the map to the other two
+   *
+   * `enableOnInstall` is declared in three published schemas. This one is the
+   * authority, because it is the request contract of the door that HONOURS it:
+   * `POST /api/v1/packages` moves the registry row through the same registry
+   * flip and durable state write `PATCH /packages/:id/enable` and
+   * `PATCH /packages/:id/disable` use.
+   *
+   * The other two are re-read here so a reader never has to guess which of
+   * three identical-looking declarations governs:
+   *
+   * - `InstallPackageRequestSchema` (`src/kernel/package-registry.zod.ts`) —
+   *   **a COPY of this key**, restated on the in-process protocol primitive
+   *   `ObjectStackProtocol.installPackage`. Same type, same optionality, same
+   *   meaning; its own implementation does not read it, and this door does not
+   *   forward it down that seam. Held to this declaration by
+   *   `package-install-one-authority.test.ts`, not by an import: the authority
+   *   sits above `kernel/` in the module graph, so a `…Schema.shape.…`
+   *   reference from there is a cycle that dies under `OS_EAGER_SCHEMAS=1`.
+   * - `MarketplaceInstallRequestSchema` (`src/marketplace/marketplace.zod.ts`)
+   *   — **not this key at all**. That request's subject is a marketplace
+   *   listing, its door is the control plane's `POST /api/v1/marketplace/install`,
+   *   and its `enableOnInstall` is what a caller asks the marketplace channel
+   *   to request on its behalf, one translation upstream of this one. It stays
+   *   a declaration of its own and says why at its own site. Its 缺省 cell moved
+   *   with the other two so the matrix stays readable as one row per state, ⛔
+   *   not because the key was folded.
+   *
+   * ⛔ Never unify the three silently, in either direction: two of them are
+   * one commitment and the third is a different party's.
+   */
+  enableOnInstall: z.boolean().optional()
+    .describe('Whether to enable immediately after install — honoured at POST /api/v1/packages: `true` enables the installed row, `false` disables it, and ABSENT keeps the row\'s current lifecycle state (a fresh install lands enabled)'),
 
   /**
    * Opt back in to overwriting an already-installed package id.
@@ -607,9 +743,32 @@ export type PackageRollbackRequestParsed = z.infer<typeof PackageRollbackRequest
 // ==========================================
 
 /**
- * Request for uninstalling a package.
+ * Request for uninstalling a package — path parameter plus the one query
+ * parameter this door honours.
+ *
+ * ⭐ `keepData` is DECLARED BECAUSE THE DOOR ALREADY EXECUTES IT (#17667).
+ * Until now this was `PackagePathParamsSchema` — path params only — so the one
+ * option that decides whether a tenant's object tables survive an uninstall
+ * was declared by no request schema anywhere in the spec.
  */
-export const UninstallPackageApiRequestSchema = lazySchema(() => PackagePathParamsSchema);
+export const UninstallPackageApiRequestSchema = lazySchema(() => PackagePathParamsSchema.extend({
+  /**
+   * Remove the package's metadata but PRESERVE its object tables.
+   *
+   * Omitted or false is the destructive default: storage is torn down with the
+   * metadata. The door reads this off the query string and passes
+   * `keepData: true` through to `deletePackage`.
+   *
+   * ⚠️ On the wire the door recognises exactly two spellings — `?keepData=true`
+   * and `?keepData=1`. Any other value, `?keepData=yes` included, is read as
+   * absent and the tables are DROPPED. Declared as a boolean because that is
+   * the option's meaning and the shape the protocol layer receives; the two
+   * accepted encodings are stated here rather than widened, because widening
+   * the door's own comparison is a runtime change this declaration is not.
+   */
+  keepData: z.boolean().optional()
+    .describe('Preserve object tables and remove metadata only; on the wire, `?keepData=true` or `?keepData=1`'),
+}).describe('Uninstall package request'));
 export type UninstallPackageApiRequest = z.input<typeof UninstallPackageApiRequestSchema>;
 
 /**

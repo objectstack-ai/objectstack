@@ -1307,10 +1307,24 @@ const actionObject = () => strictObject({
   // Single-record update actions only. When true, the runtime captures the
   // record's prior field values and offers an "Undo" affordance on the success
   // toast (backed by the client UndoManager) to restore them. `operation:
-  // 'update'` is the DECLARED form of such an action (#14092): its `patch`
-  // names exactly the fields written, so the capture is exact rather than
-  // inferred from a handler's side effects — the anchor this flag lacked.
-  undoable: z.boolean().optional().describe("Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the declared form of that action — its `patch` names exactly the fields whose prior values are captured."),
+  // 'update'` is the DECLARED form of such an action (#14092), and it is the
+  // ONE member the operation enum carries — so there is one capture rule, not
+  // one per operation. The set is the write bag `{ ...patch, ...params }`
+  // (contract point 4, `patch` UNDER `params`), which is what the executor
+  // reads back: `executeDeclarativeUpdateAction` keys `undoData` off
+  // `Object.keys(data)`, `data` being that merged bag — NOT `patch` alone.
+  // Naming `patch` alone here is what let a consumer build a half-restore and
+  // report it as a full undo.
+  // A SECOND shape is fulfilled, by a different runtime: `type: 'api'`, which
+  // the pinned console snapshots — its two readers gate the undo envelope on
+  // `action.undoable` alone and never read `action.operation`, and they are the
+  // whole recorded evidence for this key's `live` liveness verdict. That is why
+  // the published `ReassignLeadAction` example (api + undoable, no `operation`)
+  // is legal. Those two are the closed fulfillable set; everything else —
+  // `script` / `url` and the dormant `flow` / `modal` / `form` without
+  // `operation: 'update'` — has no reader at all and is refused below rather
+  // than silently accepted.
+  undoable: z.boolean().optional().describe("Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the one declared operation and the declared form of that action: what the undo captures is the prior value of EVERY field the action writes — the merged write bag, `patch` UNDER the collected `params`, not `patch` alone. An action with no `operation` declares no write set here, but `type: 'api'` is fulfilled by the console, which builds the undo envelope from `undoable` alone. Those two shapes — `operation: 'update'` and `type: 'api'` — are the whole fulfillable set; on a registered action `undoable` beside any other shape is refused, because nothing would anchor the capture."),
 
   /**
    * Result Dialog — describe how to render the API response on success.
@@ -1989,6 +2003,44 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + '(behavior is unchanged — the lone key was never read). For a STATIC url action, new-tab '
     + 'behavior is `openIn: "new-tab"`, not this pair.',
   path: ['newTabUrl'],
+}).refine((data) => {
+  // `undoable` is fulfilled by TWO runtimes, not one, and only on two shapes:
+  // `operation: 'update'`, where the framework runtime snapshots the merged
+  // write bag (contract point 5 on that key), and `type: 'api'`, where the
+  // pinned console snapshots — its readers gate the undo envelope on
+  // `action.undoable` alone and never read `action.operation`, and they are
+  // the whole recorded evidence for this key's `live` liveness verdict.
+  // Every other combination — `script` / `url` and the dormant `flow` /
+  // `modal` / `form` without `operation: 'update'` — has no reader at all:
+  // the flag parses clean and no Undo ever appears, the declared-but-inert
+  // shape this file rejects at author time (ADR-0078).
+  //
+  // A BLANKET requirement of `operation: 'update'` is deliberately NOT the
+  // rule: it would refuse the published `ReassignLeadAction` example
+  // (`type: 'api'` + `undoable`, no `operation`) at import time and every
+  // console api action with undo. Writing "`type: 'api'` is fulfilled by the
+  // console" into the contract is the point — the spec is the contract for
+  // every runtime including the console, and a closed table of fulfillable
+  // combinations is what the declared-is-delivered rule asks for.
+  //
+  // `type` has already been defaulted to `'script'` by the time a refinement
+  // sees the object (the #13897 asymmetry), so the default route needs no
+  // `undefined` arm here. The rule lives on `ActionSchema`'s chain alone, as
+  // the #7428 refusal beside it does — an inline action is not a registered
+  // action and has no console reader to speak for.
+  if (data.undoable === true && data.operation !== 'update' && data.type !== 'api') {
+    return false;
+  }
+  return true;
+}, {
+  message:
+    '`undoable: true` has no runtime that can fulfil it on this action. An Undo is captured on '
+    + "exactly two shapes: `operation: 'update'`, where the framework runtime snapshots the prior "
+    + "value of every field the write bag touches, and `type: 'api'`, which the console snapshots. "
+    + 'On any other action the flag parses clean and no Undo ever appears. Add '
+    + "`operation: 'update'` with a `patch` for a declarative single-record write, or make this a "
+    + "`type: 'api'` action calling an endpoint of your own — otherwise drop `undoable`.",
+  path: ['undoable'],
 }).superRefine(refuseDeclarativeUpdateContradictions)
   .transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 

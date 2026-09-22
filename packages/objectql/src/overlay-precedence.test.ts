@@ -75,6 +75,27 @@ const validReport = {
 
 function makeProtocol(opts: { environmentId?: string } = {}) {
     const registry = new SchemaRegistry({ multiTenant: false });
+    // [#19542] The live resolution universe the runtime publish gate reads
+    // (`engine.registry.listItems`). `find` is mocked to `[]` below and nothing
+    // is read back, so without this seed the universe is permanently EMPTY —
+    // and since the report door opened, `validReport` binds a dataset that has
+    // to resolve against something. `ReportSchema` refines `dataset` to
+    // REQUIRED, so dropping the binding is not an option: a report either binds
+    // a dataset this tenant has, or it is not a valid report.
+    //
+    // ⛔ Not a relaxation of anything this file pins: the whitelist and hash
+    // assertions are untouched, and a report binding a dataset nobody declares
+    // is still refused at the door. This gives the fixture a tenant to be valid
+    // IN. Same pattern as `protocol.dashboard-dataset-publish-gate.test.ts`,
+    // and the same reason `validDashboard` above carries `widgets: []` — these
+    // fixtures exist to be ACCEPTED, so they must be authorable.
+    registry.registerItem('dataset', {
+        name: 'invoice_metrics',
+        label: 'Invoice Metrics',
+        object: 'invoice',
+        dimensions: [{ name: 'month', label: 'Month', field: 'invoice_date', type: 'date' }],
+        measures: [{ name: 'amount_sum', label: 'Amount', aggregate: 'sum', field: 'amount' }],
+    });
     const mockEngine: any = {
         registry,
         find: vi.fn().mockResolvedValue([]),

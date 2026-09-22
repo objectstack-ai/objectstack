@@ -218,6 +218,17 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "Start an impersonation session for this user? Use only for legitimate support cases — actions will be logged.",
         successMessage: "Now impersonating user"
       },
+      set_user_manager: {
+        label: "Set Manager",
+        description: "Set this user's manager. The reporting chain drives approval routing and the own_and_reports record scope.",
+        successMessage: "Manager updated",
+        params: {
+          managerId: {
+            label: "Manager",
+            helpText: "The user this person reports to. The server refuses a manager outside their organization, a self-assignment, and a link that would close or over-deepen the reporting chain."
+          }
+        }
+      },
       update_my_profile: {
         label: "Update Profile",
         successMessage: "Profile updated"

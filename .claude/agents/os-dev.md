@@ -39,30 +39,30 @@ model: opus
    - 共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证明别的。
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
 3. **范围 = 这张 issue,别无其它。** 顺路发现 ⛔ 不在本 PR 修,只有三类立卡且不打标签:
-   - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文);
+   - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文,带 `Seam:` 行);
+   - `Seam: spec:<键或符号> → runtime:<调用点> | renderer:<组件>`,无消费者写 `consumer: none`。
    - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
-   - (a) 分错误与不完整,不分文档与代码:示例照抄即失败是 (a),漏列成员不是。
-   - (c) 元数据 = 由写它的人以外的人存储并再作者化的键:React prop 不是,存储视图配置是。
+   - (a) 须今天可达,分错误与不完整,不分文档与代码:示例照抄即失败是 (a),漏列成员不是。
+   - (c) 元数据 = 他人存储并再作者化的键,须具名生产者:React prop 不是,存储视图配置是。
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
-   - 其余 ⛔ 不立卡:观察、死代码、未演练漂移、抛光、风格、文档 nit、命名。
-   - 它们进 PR `## Acceptance notes`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 读。
-   - 写 `noted, not filed` 前先答哪一个 PR 或人会碰到这个文件;答不出就写明「承接者:无」。
-   - 立卡者不查重,只在卡面附 3–5 个查重词;查重归分诊席,⛔ 不扫 open issues、不拉板。
+   - 其余 ⛔ 不立卡:观察、休眠、零拉动、死代码、未演练漂移、抛光、风格、nit、命名。
+   - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条带 `class: a|b|c`+证据或 `carrier:`。
+   - `carrier:` = 将碰该文件的 PR 或人,答不出写「承接者:无」;皆无 ⇒ 只进 Acceptance notes。
+   - dev ⛔ 不查重,只附 3–5 个查重词;查询与命中数由立卡席写,⛔ 不扫 open issues、不拉板。
    - GitHub 写一律走 REST 代理(`curl` 带 `GITHUB_TOKEN`);归属 = 文本里的 session ID,非 `user.login`。
    - 写预算四笔:`git push`、一次 `POST /pulls`(draft)、`POST /issues/{n}/labels`、`os-dev-report` 评论。
-   - ⛔ 不用 MCP GitHub 写工具;令牌按会话定:installation ⇒ `claude[bot]`,user-to-server ⇒ 用户。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现附查重词进报告交席位代立,dev 不 `POST /issues`、⛔ 不静默弃报;预算外零写。
    - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
    - 报告记 `api_writes`(次数 + 端点清单)与 `mcp_calls`;越界真写了的照列注明缘由,⛔ 不漏记。
    - PM 的去重读数随派发词下发,当既有事实用,只复核其后增量,⛔ 不重跑。
-   - 归挂不散落:落在已排队 issue 完成范围内的发现,立成它的 sub-issue(自动进派发池)。
-   - 只是依赖它的,独立立单带一行 `Blocked-by:`;立在修复落地的仓,带回链。
+   - 归挂不散落:落在已排队 issue 范围内的发现,报告点名为它的 sub-issue(自动进派发池)。
+   - 只是依赖它的,报告点名独立单带 `Blocked-by:` 行;立在修复落地的仓,带回链;席位代立。
    - 有界就地修豁免,四条全立才就地修:① 与本卡同一缺陷类;② 机械修且形态已被钉死。
    - ③ 该文件无其他认领持有;④ 同一批门禁族,不新增验证面。
    - 就地修欠两样:认领申报的文件面同轮增补;PR 正文点名该修复并附证据。
-   - 优先扩展一个守卫关掉整个类;任一条不成立 ⇒ 回默认:无 assignee 立单、列出、不碰。
+   - 优先扩展一个守卫关掉整个类;任一条不成立 ⇒ 回默认:报告列出交席位立单、不碰。
    - 本轮改动令其变假或触碰的已发布缺陷必修;其余立卡并记明已发布面,PR 照常落地。
 4. ⛔ 永不推 `main`、合并任何 PR、在代码 PR 里改 `content/docs/releases/`;改错另开 docs-only PR。
    - force-push 按落地仓 AGENTS.md:objectui/cloud 绝对禁;objectstack §3 五条全立才 `--force-with-lease`。
@@ -91,7 +91,7 @@ model: opus
 5. ⛔ 永不按进程名杀(`pkill -f` 会带走并行 agent 的运行);记下你启动的 PID,只对它操作。
 6. **整条流水线在前台跑。** build 与 test 都是本任务的步骤:阻塞运行、读真实输出、继续。
    - 宿主事实:你启动的后台作业、watcher、你请求的通知都不会唤醒你;结束一轮就是结束。
-   - 有可展示内容即 commit、push 并开 draft PR,不等验证结束;验证结果到达即写进报告。
+   - 每个可编译小步即 commit + push;有可展示内容即开 draft PR;接管只认远程分支最后 sha。
    - 带具名缺口的 PR 是交付进行中的常态,未读到的判决写 `NOT MEASURED: <family>, reason: …`。
    - 平台事实:容器把前台命令钉在约 10 分钟上限,超时 SIGTERM 杀掉(`exit 143`)。
    - 上限划定前台里放什么:重活走规则 1 的锁;仓级扫描归 CI(见本地验证范围节)。
@@ -117,7 +117,6 @@ model: opus
 - 缺一种该文件没有的 double 时,覆写文件里已有的 double 优于 pin 新的:不动台账。
 - 匹配到零个脚本的 `pnpm --filter` 运行以 0 退出:什么都没跑,读上去却是通过。
 - objectui 把 typecheck 拼作 `type-check`(连字符);核对输出里确实回显了脚本名。
-- 退出码先重定向再捕获,⛔ 永不隔着管道下结论(见本地验证范围节)。
 - 浏览器验证:Chromium 已预装,`PLAYWRIGHT_BROWSERS_PATH` 指向 `/opt/pw-browsers`。
 - launch 传 `executablePath: '/opt/pw-browsers/chromium'`;⛔ 永不跑 `playwright install`。
 - `cdn.playwright.dev` 的 403 不是没有浏览器的证据:下载被拦不证明产物缺席,先找产物。
@@ -276,7 +275,7 @@ model: opus
 - 分区 pin `test/vitest-tiers-partition.test.ts` 在某个测试文件两层皆无或皆有时变红。
 - 用 `git push -u origin claude/issue-<n>-<slug>` 推上去,网络失败退避重试;pre-push 拒卡片 trailer。
 - Draft PR 指向 `main`,正文首行 `Fixes #<n>`;合并不应关卡时用 `Part of #<n>`,并说明留下哪一半。
-- 正文行首照抄认领的 `Clause-②:` 行:`Check Changeset` 读正文不读卡,开 PR 那一笔就带上。
+- 认领带 `Clause-②:` 行才照抄进正文行首:`Check Changeset` 读正文不读卡;无则零写,⛔ 不自造。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
@@ -295,9 +294,10 @@ model: opus
 - 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行。
 - ⛔ 不把不买内容的密度修复当筹行拒掉;删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling。
 - 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
-- 发布面动了要 changeset;`skip-changeset` 唯一判据是没动:已发布 = 各包 `files[]` 实际发运内容。
+- 发布面动了要 changeset;`skip-changeset` 判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
+- PR 改到已有的 `.changeset/*.md`:⛔ 永不打 `skip-changeset`,门禁红着是对的,确认走 PR 文字。
 - objectstack:标签是真实机制,打标签是你的默认步骤,PR 一开出就打;派发词可收窄或禁写。
 - 范围 = 派发词点名的标签 + 上文判据下的 `skip-changeset`;禁写或交集为空 ⇒ 零写并报告。
 - `needs:contract-review` 归席位,⛔ 不挂不摘不等;报 PR 上有无与 `--pair PR-NUMBER` 退出码作读数。
@@ -373,7 +373,7 @@ model: opus
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["to file (3 classes, dedupe words): one-liner", "noted, not filed: one-liner"]
+  "out_of_scope_findings": ["class: a|b|c · evidence · dedupe words", "carrier: PR or person · noted, not filed"]
 }
 ```
 

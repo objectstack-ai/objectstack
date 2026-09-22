@@ -177,7 +177,10 @@
  * workflow facts into a dispatch prompt (four of six required-context names
  * lived in a different file than claimed). So this script embeds NO list of
  * checks and NO map from paths to checks: every run re-reads
- * `.github/workflows/*.yml`, resolves each `check:*` script through
+ * `.github/workflows/*.yml`, follows each `uses: ./.github/actions/…`
+ * into that action's `runs:` steps (#19229 — a command executed through a
+ * composite action runs on the runner exactly as an inline one does, so it is
+ * derived exactly as one), resolves each `check:*` script through
  * package.json, and scans the check scripts' own sources for the path
  * literals they operate on. When the farm grows, the next run sees it.
  *
@@ -702,7 +705,7 @@ const maskedHashCommentBody = memoiseMask((source) =>
 // remembered, not a property of this module. The line below makes it the module's own
 // declaration, read fresh on every run and held to a subset of what this file really spells
 // — see `declaredInheritedPopulation`.
-// dispatch-gates: inherited-population .github/workflows -- the workflow directory this tool readdirs; every other module-body literal here is a package-manifest join base or a tier glob, not a path this file opens (#11556)
+// dispatch-gates: inherited-population .github/workflows .github/actions -- the two trees this tool opens: the workflow directory it readdirs and the composite actions those workflows `uses:` (#19229); every other module-body literal here is a package-manifest join base or a tier glob, not a path this file opens (#11556)
 
 // ---------------------------------------------------------------------------
 // Extraction — pure functions over file contents, self-testable offline.
@@ -2127,8 +2130,14 @@ function tailBeforeRedirection(tail, nextChar) {
  * subtree"), so a hint added for this card's convenience would fail the very
  * gate the card is about.
  */
-export function extractCheckInvocations(workflowText, workflowFile) {
+export function extractCheckInvocations(workflowText, workflowFile, { via = null } = {}) {
   const out = [];
+  // WHERE the step this invocation came out of is written (#19229). `null` is
+  // an inline step of the workflow itself; a path is the composite action file
+  // the caller `uses:`. The WORKFLOW attribution never moves — CI schedules the
+  // caller — so this rides alongside as provenance a reader can go check, the
+  // same split `readEdge` keeps for a read's spelling.
+  const withVia = (inv) => (via === null ? inv : { ...inv, viaAction: via });
   for (const { text: raw, envVariables: stepEnv } of runCommandSteps(workflowText)) {
     // ONE joined text for all three matchers, so no two of them can disagree
     // about where a command ends — the discipline `discoverFamilies` follows
@@ -2146,14 +2155,14 @@ export function extractCheckInvocations(workflowText, workflowFile) {
     // `process.env`, which no reader of the command line can see.
     const carriedEnv = envNamesNotSpelledInCommand(cmd, stepEnv);
     for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
-      out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile, envVariables: carriedEnv });
+      out.push(withVia({ check: m[2], filter: m[1] ?? null, workflow: workflowFile, envVariables: carriedEnv }));
     }
     for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
       const script = m[1];
       // The KEY is (script, args), never the path alone — `renderedArgv`'s
       // docblock carries the measurement and the classification it applies.
       const argv = renderedArgv(tailBeforeRedirection(m[2], cmd[m.index + m[0].length]));
-      out.push({
+      out.push(withVia({
         check: argv ? `${script} ${argv.args}` : script,
         script,
         filter: null,
@@ -2178,7 +2187,7 @@ export function extractCheckInvocations(workflowText, workflowFile) {
         // follows in `discoverFamilies`, and `ciOnlyMeasurement`). Before the
         // key carried the argv there was nothing here to read it off.
         selfTest: Boolean(argv) && argv.args.split(/[ \t]+/).includes('--self-test'),
-      });
+      }));
     }
     for (const m of cmd.matchAll(SELF_TEST_INVOCATION)) {
       const script = m[1];
@@ -2187,7 +2196,7 @@ export function extractCheckInvocations(workflowText, workflowFile) {
       // twice, not a second family. The skip is what keeps the two matchers
       // from disagreeing; the split into two families is done by the key.
       if (nodePath.basename(script).includes('check-')) continue;
-      out.push({
+      out.push(withVia({
         // The flag is part of the KEY because it is part of the runnable
         // command: `node scripts/pm/bare-root-worklist.mjs` on its own prints
         // a worklist and exits 0. A dev pasting the key without it runs
@@ -2199,10 +2208,182 @@ export function extractCheckInvocations(workflowText, workflowFile) {
         direct: true,
         selfTest: true,
         envVariables: carriedEnv,
-      });
+      }));
     }
   }
   return out;
+}
+
+// ── Following a command OUT of a workflow and into a composite action ────────
+//
+// Everything above reads a `run:` step out of a workflow file. That was the
+// whole population until composite actions started carrying runner-executed
+// commands, and the gap it left was measured rather than argued (#19229): six
+// gates in this repo root their population at `.github/workflows` and NONE of
+// them reads `.github/actions/**`, while every one prints a scope line that
+// reads as coverage. The positive control on the tree that filed it:
+// `.github/actions/setup-pnpm/action.yml` already carried SIX `run:` steps, so
+// the zero was a reading and not an empty query.
+//
+// A command GitHub executes through `uses: ./.github/actions/NAME` is executed
+// on the runner exactly as an inline one is, in the caller's job, under the
+// caller's triggers. So it is derived exactly as an inline one is: the steps of
+// the action are read into the CALLING workflow's invocation set, keeping the
+// caller's file name as the attribution, because the caller is what CI
+// schedules and what a `paths:` filter narrows. ⛔ The action file is NOT a
+// second workflow with triggers of its own — an action declares no `on:` block
+// at all, so attributing an invocation to it would invent a schedule nobody
+// wrote.
+//
+// ⚠️ SCOPE, and the direction each boundary fails in:
+//
+//   - Only a LOCAL action is followed (`uses: ./…`). A third-party action's
+//     steps are not in this tree, so nothing here could read them and no gate
+//     in this repo claims to audit them.
+//   - Only `./.github/actions/**` is followed, which is where GitHub's own
+//     convention puts them and where every local action in this repo lives.
+//     A local action landing outside that tree would be followed by nothing —
+//     a MISSING lead, never a fabricated one — and it is refused deliberately:
+//     the declared inherited population at the top of this file has to stay
+//     exactly equal to the trees this module really opens, and a follow that
+//     could open any directory a workflow names could not be declared at all.
+//   - A `uses:` naming a directory with no `action.yml`/`action.yaml` in it is
+//     UNRESOLVED and reported, never skipped. GitHub fails such a job outright,
+//     so on a tree where it happens the derivation must say so rather than
+//     derive a smaller answer and print it as a whole one (#4690).
+//   - The follow is RECURSIVE with a visited set, because an action may itself
+//     `uses:` a sibling action; a one-hop follow would re-open this card's own
+//     blind spot one level down.
+//
+// ⛔ What is deliberately NOT extended here, stated because an unstated
+// omission is the shape this card is about: the always-runs tail
+// (`alwaysRunSteps`) and the job-filtered tail (`jobFilteredSteps`) below still
+// read the workflow's own `jobs:` structure only. A composite action has no
+// `jobs:`, so those two walks find nothing in it and their rows are UNDER-
+// reported rather than wrong — the safe direction, and the same one
+// `extractTriggerPaths` takes for `paths-ignore:`. The size of that deferral is
+// measured by this file's own `--self-test` so it goes loud the day it grows.
+
+/** The tree local composite actions live in — the one extra tree this module opens. */
+export const COMPOSITE_ACTION_DIR = '.github/actions';
+
+/**
+ * A step that `uses:` a LOCAL composite action under `.github/actions/`.
+ *
+ * Matched on the `uses:` line rather than parsed, for the reason
+ * `extractTriggerPaths` states at length: this script is dependency-free by
+ * design and runs from a bare checkout before `pnpm install`. The value may be
+ * quoted either way and may carry a trailing comment; a local `uses:` takes no
+ * `@ref` (GitHub resolves it inside the checked-out tree), so a value carrying
+ * one is not this shape and is left alone.
+ */
+const LOCAL_COMPOSITE_USES =
+  /^[ \t]*(?:-[ \t]+)?uses:[ \t]*(['"]?)\.\/(\.github\/actions\/[\w.-]+(?:\/[\w.-]+)*)\1[ \t]*(?:#.*)?$/gm;
+
+/**
+ * Every local composite action a text `uses:`, in declaration order, deduped —
+ * as repo-relative DIRECTORY paths (`.github/actions/half-state-patrol`).
+ *
+ * Works on a workflow and on an action alike, which is what makes the follow
+ * below recursive without a second reader.
+ */
+export function localCompositeActionUses(text) {
+  const out = [];
+  for (const m of String(text ?? '').matchAll(LOCAL_COMPOSITE_USES)) {
+    if (!out.includes(m[2])) out.push(m[2]);
+  }
+  return out;
+}
+
+/**
+ * The body of an action file's top-level `runs:` block — the steps a composite
+ * action executes, and nothing else in the file.
+ *
+ * Narrowed to `runs:` rather than handing the whole file to the matchers, so a
+ * `run:` line appearing inside a top-level `description:` block scalar or an
+ * input default is not read as a step nobody wrote. The walk is the same
+ * indentation walk the three `on:` readers above use.
+ *
+ * ⛔ NOT gated on `using: composite`. A `node20` or `docker` action's `runs:`
+ * block declares no `run:` step, so it contributes nothing either way, and a
+ * gate on the `using:` value would be a second thing to keep true about a file
+ * this function already reads correctly.
+ */
+export function compositeActionRunsBlock(actionText) {
+  const lines = String(actionText ?? '').split('\n');
+  const body = [];
+  let inRuns = false;
+  for (const line of lines) {
+    if (line.trim() === '' || /^[ \t]*#/.test(line)) {
+      if (inRuns) body.push(line);
+      continue;
+    }
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    if (indent === 0) {
+      if (inRuns) break;
+      inRuns = /^runs:\s*$/.test(line.trim());
+      continue;
+    }
+    if (inRuns) body.push(line);
+  }
+  return body.join('\n');
+}
+
+/**
+ * Follow every local composite action a workflow reaches, recursively.
+ *
+ * `readAction` is a parameter rather than a filesystem call so this whole walk
+ * is a pure function over text that `--self-test` drives offline — the same
+ * discipline every extractor above keeps. It is handed a repo-relative
+ * directory and answers `{ file, text }` for the action file inside it, or
+ * `null` when there is none.
+ *
+ * @param {string} workflowText
+ * @param {(dir: string) => ({ file: string, text: string } | null)} readAction
+ * @returns {{ steps: {action: string, dir: string, text: string}[], unresolved: string[] }}
+ *   `steps[].text` is the action's `runs:` body, ready for the same matchers a
+ *   workflow's own text goes through; `unresolved` names every `uses:` target
+ *   with no action file behind it.
+ */
+export function followCompositeActions(workflowText, readAction) {
+  const steps = [];
+  const unresolved = [];
+  const seen = new Set();
+  const queue = localCompositeActionUses(workflowText);
+  while (queue.length > 0) {
+    const dir = queue.shift();
+    if (seen.has(dir)) continue;
+    seen.add(dir);
+    const found = readAction(dir);
+    if (found === null || found === undefined) {
+      unresolved.push(dir);
+      continue;
+    }
+    steps.push({ action: found.file, dir, text: compositeActionRunsBlock(found.text) });
+    // An action may `uses:` a sibling. Queued from the WHOLE action text rather
+    // than from the `runs:` body alone, so a `uses:` written beside the steps
+    // still enters the walk.
+    for (const next of localCompositeActionUses(found.text)) {
+      if (!seen.has(next)) queue.push(next);
+    }
+  }
+  return { steps, unresolved };
+}
+
+/**
+ * The filesystem half of `followCompositeActions`, rooted at this checkout.
+ *
+ * Both extensions GitHub accepts are probed, in the order GitHub resolves them.
+ */
+export function compositeActionReader(root = ROOT) {
+  return (dir) => {
+    for (const name of ['action.yml', 'action.yaml']) {
+      const rel = `${dir}/${name}`;
+      const abs = nodePath.join(root, rel);
+      if (existsSync(abs)) return { file: rel, text: readFileSync(abs, 'utf8') };
+    }
+    return null;
+  };
 }
 // ── The "always runs" tail: the steps CI runs whatever your diff is (#13333) ─
 //
@@ -2675,6 +2856,92 @@ export function jobFilteredSteps(entries, paths) {
       if (steps.length === 0) continue;
       counts.named += 1;
       rows.push({ workflow: file, job: job.name, outputs: job.outputs, hits, dropped: job.dropped, steps });
+    }
+  }
+  return { rows, counts };
+}
+
+/**
+ * Does this `run:` line invoke a TypeScript type-check PROGRAM?
+ *
+ * Two spellings, both read as ARGV TOKENS and never as substrings, because the
+ * substring reading over-matches on this very tree: an `echo` about a
+ * `tsc-built package` and the lane aggregator's own `console.log` about a
+ * `type-check lane` each carry the word and neither runs anything.
+ *
+ *   - `tsc` as a token together with `--noEmit`, `-p` or `--project`;
+ *   - `run` followed by `typecheck` or `type-check` — the task or script name,
+ *     whoever runs it (`turbo run typecheck`, `pnpm --filter X run typecheck`).
+ *
+ * ⛔ The MISSES are silent, every one — `pnpm typecheck`, `pnpm -r typecheck`
+ * and `node --run typecheck` carry no `run` token; `tsc --build`, `tsc -b`,
+ * `vue-tsc` and `tsgo` are not this vocabulary. So the producer SIZES its walk,
+ * and the live control pins the required aggregate's lanes BY NAME.
+ */
+export function isTypeCheckInvocation(command) {
+  if (typeof command !== 'string') return false;
+  const tokens = command.split(/\s+/).filter((t) => t !== '').map((t) => t.replace(/^['"]+|['"]+$/g, ''));
+  if (tokens.includes('tsc') && tokens.some((t) => ['--noEmit', '-p', '--project'].includes(t) || t.startsWith('--project='))) return true;
+  return tokens.some((t, i) => t === 'run' && ['typecheck', 'type-check'].includes(tokens[i + 1]));
+}
+
+/**
+ * ⭐ The TYPE-CHECK LANES CI runs — every step whose `run:` invokes a
+ * TypeScript type-check program, read from the SAME workflow entries the two
+ * blocks above read, so no block can describe a different revision of a
+ * workflow than the families printed beside it.
+ *
+ * ## The measured failure (#19172)
+ *
+ * A dev derived this tool's families for a PR, ran all 82 green, and shipped a
+ * red on the required `TypeScript Type Check` context: `packages/spec`'s own
+ * `typecheck` exited 2 on two TS7016 errors one added import line introduced.
+ *
+ * ⛔ What was missing was NOT the steps. Measured: all four rows this walk
+ * returns were already rows of the always-runs tail — same workflow, job, step
+ * and command, 4 of its 33. Missing was a NAME for them and any disclosure at
+ * all on `--commands`, where a dispatch order is built. ⭐ And that absence did
+ * not read as one: the derivation DOES emit `check:type-check-coverage` and
+ * `check:type-check-debt` for a TypeScript-touching path — on that PR's paths,
+ * 2 of 70 commands matched a `typecheck` grep, both of them those LEDGER gates.
+ * So a reader greps the one word they would grep, finds something, and stops.
+ *
+ * Claimed for a row: this step's `run:` invokes a type-check program, read off
+ * the argv of the SPLICED command text (`joinLineContinuations`, the reading
+ * `jobFilteredSteps` takes — an unspliced split drops a continued invocation
+ * silently). ⛔ NOT claimed: the step's INTENT — `alwaysRunLines` refuses that
+ * classification and the reason carries unchanged. ⛔ NOT runnable and ⛔ never
+ * in `--commands`: every row is CI's own shell over its whole-workspace filters.
+ *
+ * A job or step carrying an `if:` is KEPT and MARKED, never excluded: the two
+ * blocks above drop a conditional because each claims CI definitely runs the
+ * step, and this one claims only that the lane exists — a lane a reader cannot
+ * see because it MIGHT be skipped is the absence this block was filed on.
+ */
+export function typeCheckLaneSteps(entries) {
+  const rows = [];
+  const counts = { prWorkflows: 0, nonPullRequestWorkflows: 0, steps: 0, runLines: 0, conditional: 0 };
+  for (const { file, text } of entries) {
+    if (!declaresPullRequestTrigger(text)) {
+      counts.nonPullRequestWorkflows += 1;
+      continue;
+    }
+    counts.prWorkflows += 1;
+    for (const job of extractJobBlocks(text)) {
+      for (const step of extractStepBlocks(job.text)) {
+        const lines = runCommandTexts(step.text)
+          .flatMap((c) => joinLineContinuations(c).split('\n'))
+          .map((l) => l.trim())
+          .filter((l) => l !== '');
+        if (lines.length === 0) continue;
+        counts.steps += 1;
+        counts.runLines += lines.length;
+        const commands = lines.filter((l) => isTypeCheckInvocation(l));
+        if (commands.length === 0) continue;
+        const conditional = Boolean(job.if) || Boolean(step.if);
+        if (conditional) counts.conditional += 1;
+        rows.push({ workflow: file, job: job.name, step: step.name, commands, conditional });
+      }
     }
   }
   return { rows, counts };
@@ -5886,57 +6153,81 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  *
  * ## The census, measured on this tree
  *
- * 3,513 top-level VALUE declarations over the 230 tracked JS/TS files under
- * `scripts/`. 64 identifiers match the predicate; 58 carry at least one string
- * literal; the whole set moves 14 hints, across 6 files:
+ * Re-measured with the `DEFERRED` arm in place, over the objectstack-ai/objectstack
+ * tree at `e6a03e6491`. The METHOD, which this block used to leave implicit: run
+ * `topLevelDecls` over every tracked JS/TS file under `scripts/`, keep the
+ * non-callable declarations, test each name against the predicate, and price
+ * the arm by diffing `extractWatchHints` against a build of this module whose
+ * predicate matches nothing. Attribution is the regex engine's own — leftmost
+ * position first, then alternation order.
  *
- *   scripts/check-doc-authoring.mjs       SKIP_PATHS, SKIP_FILES,
+ * 4,697 top-level VALUE declarations over the 287 tracked JS/TS files under
+ * `scripts/`. 75 identifiers match the predicate; 66 carry at least one string
+ * literal; the whole set moves 24 hints, across 8 files:
+ *
+ *   scripts/check-issue-citations.mjs     DEFERRED_SURFACES                 8
+ *   scripts/check-doc-authoring.mjs       SKIP_DIRS, SKIP_PATHS, SKIP_FILES,
  *                                         PACKAGES_PROSE_EXCLUDED           6
  *   scripts/check-refd-timer-probe.mjs    EXCLUDED_DIRS                     4
- *   scripts/check-corpus-claim-drift.mjs  SKIP_SUBTREES                     1
- *   scripts/check-role-word.mjs           SKIP_SUBTREES                     1
+ *   scripts/pm/measurement-claim-triage.mjs  EXCLUDED, SKIP_DIRS            2
+ *   scripts/check-corpus-claim-drift.mjs  SKIP_DIRS, SKIP_SUBTREES          1
+ *   scripts/check-role-word.mjs           SKIP_DIRS, SKIP_SUBTREES          1
  *   scripts/check-keyed-text-bounds.mjs   SKIP_DIRS                         1
- *   scripts/pm/check-half-states.mjs      H36_SHARED_PREFIX_NOISE           1
+ *   scripts/pm/check-half-states.mjs      H36_SHARED_PATH_NOISE,
+ *                                         H36_SHARED_PREFIX_NOISE           1
  *
  * Each was read against the gate that declares it, and each is an exclusion in
  * that gate's own words: "whole subtrees skipped by path", "generated
  * subtrees, excluded by PATH under ROOTS", "generated from spec/frontmatter —
  * not hand-authored, don't police", "directories `git ls-files` can still name
- * that hold no authored source", and — for `PACKAGES_PROSE_EXCLUDED`, the one
- * that is a bare string rather than a list — the `continue` in the gate's own
- * `descend` that skips it.
+ * that hold no authored source", "deliberately OUT, each with the reading that
+ * put it out", and — for `PACKAGES_PROSE_EXCLUDED`, the one that is a bare
+ * string rather than a list — the `continue` in the gate's own `descend` that
+ * skips it.
  *
- * ## What the 14 cost, which is not 14
+ * ## What the 24 cost, which is not 24
  *
- * EIGHT of them change no derivation at all, because the gate ALSO declares the
- * containing root as an inclusion population and `hintCovers` still reaches the
- * path through that. Measured per hint, probing under each dropped hint against
- * the surviving set: all six of check-doc-authoring's (`.claude/**`, `docs/**`,
- * `content/**` and `packages/**` are its `ROOT_WATCH_HINTS`) and both
- * `content/docs/references` (covered by `content/docs`). That gate's own
- * self-test already said so from the other side — every `SKIP_PATHS` entry must
- * sit UNDER a declared root — so the exclusion hints were pure duplication.
+ * THIRTEEN of them change no derivation at all, because the gate ALSO declares
+ * the containing root as an inclusion population and `hintCovers` still reaches
+ * the path through that. Measured per hint, probing under each dropped hint
+ * against the surviving set: all six of check-doc-authoring's (`.claude/**`,
+ * `docs/**`, `content/**` and `packages/**` are its `ROOT_WATCH_HINTS`), both
+ * `content/docs/references` (covered by `content/docs`), and the five test
+ * globs of the deferred table (covered by check-issue-citations' own
+ * `packages/**`). That gate's own self-test already said so from the other
+ * side — every `SKIP_PATHS` entry must sit UNDER a declared root — so those
+ * exclusion hints were pure duplication.
  *
- * SIX really leave a derivation, and every one of them is a lead that was
+ * ELEVEN really leave a derivation, and every one of them is a lead that was
  * false: `node_modules`, `dist`, `coverage` and `.turbo` off
- * check-refd-timer-probe's skip set, and `.changeset` twice — off
+ * check-refd-timer-probe's skip set; `.changeset` twice — off
  * check-keyed-text-bounds' `SKIP_DIRS` and off the noise floor the card was
- * filed on. The changeset pair is what a dev actually saw: a card that has not
- * written its changeset yet is told which families it will owe once it does,
- * and that projection carried FOUR fabricated rows, 16 -> 12 — including
+ * filed on; the two gate paths measurement-claim-triage declares it skips; and
+ * `scripts/**`, `docs/adr/**` and `.changeset/**` off `DEFERRED_SURFACES`,
+ * which is what the `DEFERRED` arm retired. The changeset pair is what a dev
+ * actually saw when #15753 was filed: a card that has not written its
+ * changeset yet is told which families it will owe once it does, and that
+ * projection carried FOUR fabricated rows, 16 -> 12 — including
  * `check-half-states.mjs --format=markdown --provenance="$PROVENANCE"`, the
  * networked half-state-patrol sweep, advertised to every card in the tree as a
- * gate its changeset would trigger.
+ * gate its changeset would trigger. The deferred table is that same reading
+ * one gate over, and it is why this arm exists: `surfaceFor` opens by
+ * returning `null` for every deferred glob, so `check:issue-citations` was
+ * offered to a changeset path as a gate it triggers while the gate looks at
+ * nothing there.
  *
  * ## The predicate: what the census kept, and what it retired
  *
  * `DENY`/`DENIED` was measured and REMOVED. It matched exactly one declaration
  * on this tree and that one is a false positive — an HTTP fixture, not an
  * exclusion list — and "deny" in this tree names AUTHORIZATION vocabulary
- * (`DENY_CODE`), never a path skip list. Matches for the surviving
- * alternatives, first-match attribution: SKIP 47, EXCLUDED 9, NOISE 2,
- * SKIPPED 2, EXCLUSION 2, EXCLUSIONS 1, EXCLUDES 1, and EXCLUDE / IGNORE /
- * IGNORED 0. The three zero-scoring arms are kept deliberately and the reason is
+ * (`DENY_CODE`), never a path skip list. `DEFERRED` was measured and ADDED: it
+ * matches two declarations on this tree, `DEFERRED_SURFACES` and
+ * `DEFERRED_GLOBS` in `check-issue-citations.mjs`, and both are that gate's
+ * own exclusion table. Matches for the surviving alternatives, first-match
+ * attribution: SKIP 54, EXCLUDED 10, EXCLUSION 4, NOISE 2, SKIPPED 2,
+ * DEFERRED 2, EXCLUSIONS 1, and EXCLUDE / EXCLUDES / IGNORE / IGNORED 0. The
+ * four zero-scoring arms are kept deliberately and the reason is
  * the direction this predicate fails in: over-matching DROPS a hint (a missing
  * lead — one card, one CI round), while under-matching KEEPS a wrong one (a
  * fabricated lead pasted into every dispatch prompt whose surface brushes it).
@@ -5959,14 +6250,16 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  * is not reached — `check-test-completeness.mjs` has the one instance on this
  * tree, and it costs nothing today because every literal in it is a bare
  * directory word the admission rule already refuses. camelCase spellings are
- * not reached either: the anchor is the SCREAMING_SNAKE segment, and the four
- * camelCase near-misses on this tree (`scripts/docs-audit/affected-docs.mjs`)
- * are counters and note strings, not populations. Both are the direction that
+ * not reached either: the anchor is the SCREAMING_SNAKE segment, and the seven
+ * camelCase near-misses on this tree (five in
+ * `scripts/docs-audit/affected-docs.mjs`, one in
+ * `scripts/check-type-check-coverage.mjs`, one here) are counters, note strings
+ * and memo caches, not populations. Both are the direction that
  * drops LESS, which is the direction a widening of this rule may not silently
  * take.
  */
 const EXCLUSION_DECL_NAME =
-  /(?:^|_)(?:NOISE|SKIP|SKIPPED|EXCLUDE|EXCLUDED|EXCLUDES|EXCLUSION|EXCLUSIONS|IGNORE|IGNORED)(?:_|$)/;
+  /(?:^|_)(?:NOISE|SKIP|SKIPPED|DEFERRED|EXCLUDE|EXCLUDED|EXCLUDES|EXCLUSION|EXCLUSIONS|IGNORE|IGNORED)(?:_|$)/;
 
 /** `topLevelDecls` classifies self-tests for its OTHER caller; this one has no stake in it. */
 const NO_SELF_TEST_STARTS = new Set();
@@ -9176,9 +9469,22 @@ export function governedReadCensus({ files = null, read = null } = {}) {
  * governed read reds until it is classified here. A row whose `declared` flag
  * changes reds, in both directions: a declaration added is a floor to lower,
  * a declaration deleted is this card's defect coming back.
+ *
+ * ## The fourth row: a gate whose SUBJECT is a published skill
+ *
+ * `scripts/check-skill-top-level-keys.mjs` reconciles the top-level key
+ * enumeration in the published platform skill against the stack schema, so
+ * the governed file is its input, not a fixture; it spells that path in its
+ * module body and is MATCHED for it the same way the two undeclared rows
+ * above are, so `declared` is false for the same reason.
  */
 export const GOVERNED_READ_FLOOR = Object.freeze([
   Object.freeze({ script: 'scripts/check-commit-card-trailers.mjs', file: '.claude/agents/os-dev.md', declared: false }),
+  Object.freeze({
+    script: 'scripts/check-skill-top-level-keys.mjs',
+    file: 'skills/objectstack-platform/SKILL.md',
+    declared: false,
+  }),
   Object.freeze({
     script: 'scripts/pm/check-expected-skips.mjs',
     file: '.claude/skills/pm-dispatch/SKILL.md',
@@ -11663,6 +11969,43 @@ export function jobFilteredStepLines(rows, counts) {
 }
 
 /**
+ * The type-check lanes, rendered — printed on EVERY run, like the two step
+ * blocks around it and for the same reason: it is not about the card's paths,
+ * and the family list provably does not cover it (#19172). Rows carry the JOB
+ * NAME, which is what CI and a red check call it. ⭐ Absence renders LOUD
+ * instead of vanishing — a tree whose pull-request workflows yield no lane is a
+ * recogniser that has rotted, not a farm with nothing left to disclose.
+ */
+export function typeCheckLaneLines(rows, counts) {
+  const { prWorkflows = 0, steps = 0, runLines = 0 } = counts ?? {};
+  const walked = `${steps} command-carrying step(s) / ${runLines} spliced \`run:\` line(s) across ${prWorkflows} pull-request workflow(s)`;
+  if (rows.length === 0) {
+    return [
+      'Type-check lanes — ⊘ NOT MEASURED, and THE SOURCE OF TRUTH CAME BACK EMPTY.',
+      `  Walked ${walked}, and not one line in them invokes a TypeScript type-check program.`,
+      '  ⛔ Read that as a BROKEN READ, never as a tree without type checking: this block names what CI runs, so a reading of zero',
+      '    is a statement about this walk. It is printed rather than dropped because a missing block looks exactly like a covered surface.',
+    ];
+  }
+  const lines = [
+    `Type-check lanes — ${rows.length} CI step(s) run a TypeScript type-check PROGRAM and ⊘ NOT ONE of them is measured by anything above.`,
+    `  Walked ${walked} to find them: the DENOMINATOR, so a recogniser that stops spelling a lane shows as a dip rather than as silence.`,
+    '  ⛔ NOT the `check:type-check-coverage` / `check:type-check-debt` families the matched block may carry: those ratchet a LEDGER and a',
+    '    lane reds on a per-package `tsc` program instead — finding those two in a grep for `typecheck` is the false reassurance this block',
+    '    exists to break. NOT runnable as spelled either: CI\'s own shell over CI\'s whole-workspace filters, OUTSIDE the runnable total, and',
+    '    a row marked conditional MAY be skipped. ⇒ What a card owes instead: `pnpm --filter <pkg> run typecheck` for every package whose',
+    '    TypeScript this diff changes what a program can SEE — one added import or one new root-level declaration is enough.',
+  ];
+  for (const row of rows) {
+    lines.push(`  - [${row.workflow} · ${row.job}] ${row.step}${row.conditional ? '   (conditional — CI may skip it)' : ''}`);
+    for (const command of row.commands.slice(0, ALWAYS_RUN_COMMAND_CAP)) lines.push(`      ${command}`);
+    const elided = row.commands.length - ALWAYS_RUN_COMMAND_CAP;
+    if (elided > 0) lines.push(`      … ${elided} more line(s) — read the step in ${row.workflow}`);
+  }
+  return lines;
+}
+
+/**
  * The whole-tree channel, rendered (#14189) — its own heading, identical on
  * every card, printed ABOVE the reconciliation because its commands are inside
  * that total.
@@ -11899,6 +12242,41 @@ export function residueLines(
  * gate's accept set is the maintainer's decision, not a refresh-time
  * convenience. The review label deliberately names WHAT is reviewed, never a
  * model (maintainer, 2026-08-16: 「needs:fable-review 这个标签不好,下次模型升级怎么办」).
+ *
+ * ## A tier that is GONE is not a tier that is EXHAUSTED — and a SESSION not
+ * served one is neither of them (#19544, reversed by #19680)
+ *
+ * The exits below carry a QUOTA exemption: a tier that is exhausted comes
+ * back, so the card waits out of the queue and the review is never downgraded
+ * and never self-reviewed. A tier that has been RETIRED never comes back, and
+ * the two cases differ on WHO MAY ACT: a seat reading 「⛔ 不许降档」 onto a
+ * vanished tier holds its whole lane forever, and a seat picking the
+ * replacement itself is the silent downgrade the fuse exists to stop. So a
+ * retirement is a maintainer ruling and ⛔ never a seat's reading — and when
+ * the ruling lands, this VALUE is the one line that moves. The ceiling of the
+ * ladder `tierLines` prints is DERIVED from it ({@link TIER_CEILING}) so the
+ * two cannot drift apart.
+ *
+ * A THIRD case is what this line was once actually moved on, and it is neither
+ * of the two above. On 2026-09-21 two review dispatches died on their first
+ * request with an HTTP 429 quota refusal at this tier; that reading — ONE
+ * agent, temporarily, not authorized — was written in here as a retirement,
+ * and the skills moved with it. It is not a retirement. Maintainer,
+ * 2026-09-22, verbatim and untranslated (ruling record: issue comment
+ * 5771798588): 「复核档应该就是 fable 啊」 ·
+ * 「某个agent临时没有fable给的特殊授权，不应该改变skills」 ·
+ * 「fable 撤回卡 你来创建」.
+ *
+ * As one rule, and this docblock is its home — the PM skill points every tier
+ * value at this file, so there is nowhere else it could live: a tier word is
+ * RETIRED only by the maintainer's explicit ruling that NAMES a retirement; a
+ * 429, an exhausted quota or a missing authorization on one session is ⛔
+ * never a retirement; and a seat this tier is not served to renders the review
+ * through an isolated at-tier subagent or waits outside the queue — ⛔ never
+ * by editing this line. What one session is authorized for is a property of
+ * that session; this constant is a property of the lane's governance, and the
+ * two ⛔ never trade places.
+ *
  * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
  */
 export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
@@ -11981,9 +12359,10 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  *
  * The sanctioned exits from a mandate — the one-line-class mechanical-edit
  * downgrade (a card CONTENT judgment, like clause ②), the measured quota
- * exemption (fable unavailable ⇒ opus, never lower) and the proactive
- * low-headroom downgrade — are claim-time judgments, not properties of the
- * file surface. This tool states the mandate; the seat records any exit and
+ * exemption (the mandated tier EXHAUSTED ⇒ the default tier, never lower — a
+ * tier that is RETIRED is not exhausted and is a maintainer ruling instead,
+ * ⛔ never a seat's reading) and the proactive low-headroom downgrade — are
+ * claim-time judgments, not properties of the file surface. This tool states the mandate; the seat records any exit and
  * its reason in the claim comment. ONE exit is path-shaped, and so it IS
  * encoded: the one-line-class downgrade does not exist for a surface under
  * `skills/**` — the 2026-09-10 ruling's 必须, because a closed enumeration
@@ -12112,6 +12491,57 @@ export const TIER_FLOOR = 'sonnet';
 export const TIER_DEFAULT = 'opus';
 
 /**
+ * The FAMILY word inside a model id — `claude-<family>-<version>` ⇒ `family`.
+ *
+ * The ladder the claim comment quotes is written in family words (`sonnet`,
+ * `opus`), while {@link CONTRACT_REVIEW_TIER} is a full model id, so the
+ * ceiling has to cross between the two vocabularies somewhere. It crosses
+ * HERE, by derivation, because the alternative — writing the ceiling's word
+ * down beside the constant — is the second value site the constant's own
+ * docblock refuses, and it is exactly how the ladder came to read 「ceiling
+ * fable」 for a tier the harness had stopped serving.
+ *
+ * An id this cannot read returns VERBATIM rather than throwing or guessing: a
+ * ladder printing the whole model id is louder than one printing a family word
+ * nobody ruled, and `--tier` runs on every dispatch, so a model id in an
+ * unfamiliar shape must not take the tool down. Both directions are pinned.
+ */
+export function tierWordOf(modelId) {
+  const m = /^claude-([a-z]+)-/.exec(String(modelId ?? ''));
+  return m === null ? String(modelId ?? '') : m[1];
+}
+
+/**
+ * The ladder's CEILING — the contract-review tier, in the ladder's vocabulary.
+ *
+ * ⛔ Not a constant of its own: derived from {@link CONTRACT_REVIEW_TIER} so a
+ * retirement ruling moves ONE line and the ladder follows. The day the ceiling
+ * and the default read the same word is not a bug — it is what a retired
+ * ceiling falling to the default LOOKS like, and the ladder says so rather
+ * than keeping a tier nobody can be dispatched at.
+ */
+export const TIER_CEILING = tierWordOf(CONTRACT_REVIEW_TIER);
+
+/**
+ * Tier family words a maintainer ruling has RETIRED — none today.
+ *
+ * ⛔ Not a tier table and ⛔ not an ordering — a RETIRED-SPELLING guard, the
+ * same shape as the retired clause-② keys pinned further down. The self-test
+ * asserts no rendering contains one, so the day a ceiling is written down by
+ * hand again it reds instead of quietly outliving the harness that served it.
+ *
+ * EMPTY is this list's correct steady state, ⛔ not a disabled guard. A word
+ * enters it only on the maintainer's explicit ruling that names a retirement
+ * and leaves it only on a ruling that brings the tier back — the conditions
+ * {@link CONTRACT_REVIEW_TIER}'s docblock states; the one entry this list held
+ * was written on a session's quota refusal, which is none of those. Because an
+ * empty list clears every rendering for free, the self-test proves the guard
+ * on a MUTATED copy — a list naming a word the ladder really prints has to red
+ * — so the green above it is measured rather than vacuous.
+ */
+export const RETIRED_TIER_WORDS = Object.freeze([]);
+
+/**
  * Place a card's file surface against the mandatory globs. Pure over its
  * inputs, so the self-test can drive every branch offline.
  *
@@ -12174,7 +12604,7 @@ export function tierLines(result) {
   if (!mandatory) {
     return [
       `Model tier — no path-derived mandate: the surface hits none of the ${declared} declared glob(s), derived here, not recalled.`,
-      `  The tier stays the PM's per-card judgment call (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling fable).`,
+      `  The tier stays the PM's per-card judgment call (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING}).`,
       clause2,
       ...suspicion,
     ];
@@ -12195,7 +12625,8 @@ export function tierLines(result) {
     `Model tier — MANDATORY: ${tier} (derived from the file surface, not recalled).`,
     ...hits.map((h) => `  - ${h.path} ⇢ '${h.glob}' — ${h.why}`),
     `  Exits, each recorded with its reason in the claim comment's \`Container & model\` line: ${oneLineExit};` +
-      ' the measured quota exemption (fable unavailable ⇒ opus, never lower); the proactive low-headroom downgrade.',
+      ` the measured quota exemption (the mandated tier EXHAUSTED ⇒ ${TIER_DEFAULT}, never lower — a tier that is` +
+      " RETIRED is a maintainer ruling instead, ⛔ never a seat's reading); the proactive low-headroom downgrade.",
     clause2,
     ...suspicion,
   ];
@@ -12328,10 +12759,29 @@ function discoverFamiliesPass(tree) {
   // families it is printed beside, and the whole point of the tail is that it
   // states what the family list does not cover.
   const workflowEntries = [];
+  // The composite actions the workflows reach, read ONCE for the whole pass and
+  // keyed by the action file, so a helper two workflows `uses:` is opened once
+  // and cannot arrive as two revisions of itself (#19229).
+  const readAction = compositeActionReader();
+  const compositeActionFiles = new Set();
+  const unresolvedCompositeUses = [];
   for (const wf of workflows) {
     const text = readFileSync(nodePath.join(wfDir, wf), 'utf8');
-    workflowEntries.push({ file: wf, text });
+    // The steps this workflow executes THROUGH a composite action. They are
+    // derived under the caller's name because the caller is what CI schedules;
+    // the action file rides along as `viaAction` provenance. See
+    // `followCompositeActions` for the boundaries and the direction each fails
+    // in.
+    const followed = followCompositeActions(text, readAction);
+    for (const dir of followed.unresolved) {
+      unresolvedCompositeUses.push(`.github/workflows/${wf} uses ./${dir}, which holds no action.yml`);
+    }
+    workflowEntries.push({ file: wf, text, composites: followed.steps });
     invocations.push(...extractCheckInvocations(text, wf));
+    for (const step of followed.steps) {
+      compositeActionFiles.add(step.action);
+      invocations.push(...extractCheckInvocations(step.text, wf, { via: step.action }));
+    }
     triggerPathsByWorkflow.set(wf, extractTriggerPaths(text));
     for (const pop of jobPathPopulations(text, wf)) {
       for (const check of pop.checks) {
@@ -12344,6 +12794,14 @@ function discoverFamiliesPass(tree) {
     }
   }
   if (invocations.length === 0) throw new Error('no check:* invocations found in any workflow');
+  // A `uses: ./…` with no action file behind it is a job GitHub refuses to
+  // start, so a derivation that quietly dropped it would be describing a CI
+  // this repo does not have. Loud, naming every one (#4690).
+  if (unresolvedCompositeUses.length > 0) {
+    throw new Error(
+      `composite action(s) named by a workflow but absent from the tree:\n  ${unresolvedCompositeUses.join('\n  ')}`,
+    );
+  }
 
   // Dedupe by (check, workflow); resolve each to script files + watch hints.
   const byCheck = new Map();
@@ -12352,6 +12810,11 @@ function discoverFamiliesPass(tree) {
     if (!byCheck.has(key)) byCheck.set(key, { ...inv, workflows: new Set(), files: [], hints: [] });
     const merged = byCheck.get(key);
     merged.workflows.add(inv.workflow);
+    // The composite action file this invocation was read out of, when it was
+    // not written inline (#19229). A SET because one family may be reached both
+    // ways, and the union is the honest answer to "where is this command
+    // written".
+    if (inv.viaAction) (merged.viaActions ??= new Set()).add(inv.viaAction);
     // INTERSECTION, not union (#15761). `argvVariables` needs no merge — argv
     // is part of the KEY, so every invocation under one key spells the same
     // one. `env:` is NOT part of the key, so two workflows can run the same
@@ -12770,7 +13233,11 @@ function discoverFamiliesPass(tree) {
       ? { variables: workflowValues, envVariables: [...entry.envValues] }
       : null;
   }
-  return { byCheck, workflows, workflowEntries };
+  // `compositeActions` is the reading that makes this pass's new tree a
+  // MEASUREMENT rather than a capability nobody can size (#19229): the action
+  // files really opened on this run, sorted. A zero here on a tree that holds
+  // composite actions is a follow that stopped following.
+  return { byCheck, workflows, workflowEntries, compositeActions: [...compositeActionFiles].sort() };
 }
 
 /**
@@ -13100,6 +13567,10 @@ export function outsideBlockNames({
     // that renders it, like the three above, so the name cannot outlive the
     // heading.
     ...(jobFilteredJobs > 0 ? [`the ${jobFilteredJobs} path-scheduled CI job(s)`] : []),
+    // UNCONDITIONAL, like the unreachable listing and the tail below it: its
+    // block prints on every run, at zero rows as loudly as at four (#19172). ⛔
+    // So no count — a name sized off a row array goes missing on the empty walk.
+    'the type-check lanes',
     'the always-runs tail',
   ];
 }
@@ -14068,7 +14539,7 @@ function notMeasuredEvidenceTerm(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, size = null, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
+export function derivationJson({ paths, size = null, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} }, typeCheckLanes = { rows: [], counts: {} } }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -14134,6 +14605,10 @@ export function derivationJson({ paths, size = null, matchedRows, kindGroups, pe
     // for) and a consumer that had to recount it could name a set the rows do
     // not contain.
     jobFilteredSteps: { jobs: jobFiltered.rows, counts: jobFiltered.counts },
+    // IN this document and ⛔ NOT in `commands` (#19172), on the disposition of
+    // the key above it: these are CI's own type-check programs, not families.
+    // `counts` is the walk's DENOMINATOR — an empty `lanes` is not a bare tree.
+    typeCheckLanes: { lanes: typeCheckLanes.rows, counts: typeCheckLanes.counts },
     counts,
   };
 }
@@ -14157,13 +14632,13 @@ export function derivationJson({ paths, size = null, matchedRows, kindGroups, pe
  * and the declared WIDE population was not mentioned in it at all. It reads
  * `outsideBlockNames` now, with the counts this function already holds (#16795).
  */
-function machineReadableOutput(mode, { paths, size = null, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
+function machineReadableOutput(mode, { paths, size = null, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} }, typeCheckLanes = { rows: [], counts: {} } }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, size, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters, jobFiltered }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, size, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters, jobFiltered, typeCheckLanes }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
@@ -14257,6 +14732,24 @@ function machineReadableOutput(mode, { paths, size = null, matchedRows, kindGrou
       );
     }
     console.error('      ⇒ Run without --commands/--json to see each step printed as CI spells it.');
+  }
+  // ⭐ The SEVENTH thing stdout deliberately omits (#19172) — and the lane this
+  // card was filed on, because `--commands` disclosed it in no form at all. It
+  // is stated at BOTH zero and non-zero: an omitted heading reads as a clearance.
+  if (typeCheckLanes.rows.length) {
+    console.error(
+      `  + ${typeCheckLanes.rows.length} CI step(s) run a TYPE-CHECK PROGRAM and are ${mode === 'json' ? 'under typeCheckLanes, not in commands' : 'NOT above'} —` +
+        " CI's own shell over CI's whole-workspace filters, so there is no local invocation to hand you." +
+        ` Walked ${typeCheckLanes.counts?.steps ?? 0} step(s) / ${typeCheckLanes.counts?.runLines ?? 0} run: line(s) to find them.`,
+    );
+    for (const row of typeCheckLanes.rows) {
+      const more = row.commands.length > 1 ? `   (+${row.commands.length - 1} more lane line(s) in this step)` : '';
+      console.error(`      ⊘ NOT MEASURED — [${row.workflow} · ${row.job}] ${row.commands[0]}${more}${row.conditional ? '   (conditional)' : ''}`);
+    }
+    console.error('      ⛔ pnpm check:type-check-coverage and pnpm check:type-check-debt are NOT these, whichever list they are in:'
+      + ' they ratchet a ledger. What this card owes is `pnpm --filter <pkg> run typecheck` per package whose TypeScript it touches.');
+  } else {
+    console.error(`  + ⊘ TYPE-CHECK LANES: ${typeCheckLanes.counts?.steps ?? 0} step(s) walked across ${typeCheckLanes.counts?.prWorkflows ?? 0} pull-request workflow(s), NONE found — read that as a broken read, never as a tree without type checking.`);
   }
   // The FOURTH thing stdout deliberately omits (#14880), on stderr for exactly
   // the reason the three above are: the block is prose, and prose in the stream
@@ -14466,6 +14959,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
     return recon.ok ? 0 : 1;
   }
 
+  // The SAME entries, for the reason the `jobFiltered` line states — and BELOW
+  // the `--ran` return, which renders no block of it (#19172).
+  const typeCheckLanes = typeCheckLaneSteps(workflowEntries);
+
   if (mode !== 'human') {
     machineReadableOutput(mode, {
       paths,
@@ -14477,6 +14974,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
       widePopulationRows,
       rosters,
       jobFiltered,
+      typeCheckLanes,
       counts: {
         discovered: byCheck.size,
         workflows: workflows.length,
@@ -14784,6 +15282,13 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
     console.log('');
     for (const line of jobFilteredOut) console.log(line);
   }
+
+  // The type-check lanes (#19172), directly above the tail because the tail is
+  // where these steps otherwise dissolve: one row among thirty-three, unnamed
+  // and unclassified by contract. The heading IS the repair — the rows were
+  // never missing, the name was.
+  console.log('');
+  for (const line of typeCheckLaneLines(typeCheckLanes.rows, typeCheckLanes.counts)) console.log(line);
 
   // The always-runs tail prints on every run for the same reason and with the
   // same standing: it is not about the card's paths either, and the family list
@@ -15165,7 +15670,7 @@ export function repoIdentity({ cwd = ROOT } = {}) {
  * a single family, which is what makes this list the right filter and raw
  * commit distance the wrong one.
  */
-export const DERIVATION_SURFACE = ['.github/workflows', 'package.json', 'scripts'];
+export const DERIVATION_SURFACE = ['.github/workflows', '.github/actions', 'package.json', 'scripts'];
 
 /**
  * How far behind `DEFAULT_BASE_REF` this checkout is — and whether that matters.
@@ -17145,7 +17650,7 @@ function selfTest() {
   t('and a declaration AFTER it is unaffected — the span closes where the statement does', multilineHints.includes('packages/core/src'));
   // The named spellings, one case each, so a narrowing of the predicate is
   // visible here rather than only in the live census.
-  for (const word of ['SKIP', 'EXCLUDE', 'EXCLUDED', 'EXCLUSIONS', 'IGNORE']) {
+  for (const word of ['SKIP', 'EXCLUDE', 'EXCLUDED', 'EXCLUSIONS', 'IGNORE', 'DEFERRED']) {
     const named = `const ${word}_PATHS = ['packages/skipped/src'];`;
     t(`\`${word}\` names an exclusion too — the predicate is the convention, not one constant`, !extractWatchHints(named).includes('packages/skipped/src'));
   }
@@ -20154,6 +20659,197 @@ function selfTest() {
   t('the flow-sequence spelling is read too', extractTriggerPaths("on:\n  pull_request:\n    paths: ['a/**', \"b/c\"]\n").join('|') === 'a/**|b/c');
   t('pull_request_target is not mistaken for pull_request', extractTriggerPaths("on:\n  pull_request_target:\n    paths:\n      - 'x/**'\n").length === 0);
 
+  // ── Derivation THROUGH a composite action (#19229) ─────────────────────────
+  //
+  // The card: six gates root their population at `.github/workflows` and none
+  // reads `.github/actions/**`, so a command executed through a composite
+  // action was audited by nothing while every scope line read as coverage. The
+  // repair is `followCompositeActions` + the `viaAction` provenance it carries;
+  // these cases are the firing control and the dark control for it.
+  //
+  // ⛔ The repair the card REFUSES, recorded here because this is where someone
+  // would take it: re-pointing the four live-specimen CONTROL assertions below
+  // at a different value-bearing family. That turns the pin green while leaving
+  // the derivation blind, which is the declaration-without-an-assertion shape
+  // this whole file exists to refuse.
+  const compositeCallerWf = [
+    'name: Fixture',
+    'on:',
+    '  pull_request: {}',
+    'jobs:',
+    '  sweep:',
+    '    runs-on: ubuntu-latest',
+    '    steps:',
+    '      - uses: actions/checkout@v7',
+    '      - name: Through the action',
+    '        uses: ./.github/actions/fixture-gate',
+    '',
+  ].join('\n');
+  const compositeActionYml = [
+    'name: Fixture gate',
+    'description: >-',
+    '  A description whose folded body mentions run: and must never be read as a step.',
+    'runs:',
+    '  using: composite',
+    '  steps:',
+    '    - name: Run the gate',
+    '      shell: bash',
+    '      run: |',
+    '        node scripts/check-nul-bytes.mjs',
+    '        pnpm check:agent-model-declared',
+    '',
+  ].join('\n');
+  const compositeReader = (files) => (dir) =>
+    (Object.hasOwn(files, dir) ? { file: `${dir}/action.yml`, text: files[dir] } : null);
+  t(
+    'a local composite `uses:` is read out of a workflow, in its repo-relative spelling',
+    localCompositeActionUses(compositeCallerWf).join('|') === '.github/actions/fixture-gate',
+  );
+  t(
+    'the quoted spellings and a trailing comment are read too, and a repeat is read once',
+    localCompositeActionUses(
+      [
+        "      - uses: './.github/actions/a'",
+        '      - uses: "./.github/actions/b"   # why',
+        '      - uses: ./.github/actions/a',
+      ].join('\n'),
+    ).join('|') === '.github/actions/a|.github/actions/b',
+  );
+  t(
+    'a third-party action and a local path outside .github/actions are NOT followed — a missing lead, never a fabricated one',
+    localCompositeActionUses(
+      ['      - uses: actions/checkout@v7', '      - uses: ./tools/some-action', '      - uses: ./.github/workflows/x.yml'].join('\n'),
+    ).length === 0,
+  );
+  t(
+    "an action's `runs:` body is what is read — a `run:` mentioned in a top-level description block scalar is not a step",
+    runCommandSteps(compositeActionRunsBlock(compositeActionYml)).length === 1
+      && !compositeActionRunsBlock(compositeActionYml).includes('description'),
+  );
+  // ⭐ THE FIRING CONTROL. The caller invokes no check of its own; both families
+  // exist only because the action's steps were read, and both are attributed to
+  // the CALLER, which is what CI schedules.
+  const compositeFollowed = followCompositeActions(
+    compositeCallerWf,
+    compositeReader({ '.github/actions/fixture-gate': compositeActionYml }),
+  );
+  const compositeVia = compositeFollowed.steps.flatMap((s) =>
+    extractCheckInvocations(s.text, 'fixture.yml', { via: s.action }));
+  t(
+    'the caller itself invokes no check family, so the families below can only come from the action',
+    extractCheckInvocations(compositeCallerWf, 'fixture.yml').length === 0,
+  );
+  t(
+    '⭐ a command executed THROUGH a composite action is derived exactly as an inline one is'
+      + ` (${compositeVia.map((i) => i.check).join(', ') || 'none'})`,
+    compositeVia.map((i) => i.check).sort().join('|')
+      === 'check:agent-model-declared|scripts/check-nul-bytes.mjs',
+  );
+  t(
+    '…attributed to the CALLING workflow, with the action file carried beside it as provenance',
+    compositeVia.length > 0
+      && compositeVia.every((i) => i.workflow === 'fixture.yml'
+        && i.viaAction === '.github/actions/fixture-gate/action.yml'),
+  );
+  t(
+    'and an INLINE invocation carries no viaAction at all, so the two spellings stay legible',
+    extractCheckInvocations('    - run: node scripts/check-nul-bytes.mjs\n', 'fixture.yml')
+      .every((i) => i.viaAction === undefined),
+  );
+  // ⭐ THE DARK CONTROL, both halves: with the action file gone the families
+  // disappear (so they really came from it), and the absence is REPORTED rather
+  // than skipped — GitHub refuses to start a job whose `uses: ./…` resolves to
+  // nothing, so a derivation that dropped it quietly would describe a CI this
+  // repo does not have.
+  const compositeDark = followCompositeActions(compositeCallerWf, compositeReader({}));
+  t(
+    'the dark control fires — with no action file behind the `uses:`, not one family is derived',
+    compositeDark.steps.length === 0
+      && compositeDark.steps.flatMap((s) => extractCheckInvocations(s.text, 'fixture.yml')).length === 0,
+  );
+  t(
+    '…and the absence is NAMED, never skipped (#4690)',
+    compositeDark.unresolved.join('|') === '.github/actions/fixture-gate',
+  );
+  // An action may `uses:` a sibling. A one-hop follow would re-open this card's
+  // own blind spot one level down, so the walk recurses — and terminates on a
+  // cycle rather than spinning, which a fixture asserts rather than a comment.
+  const nestedOuter = ['runs:', '  using: composite', '  steps:', '    - uses: ./.github/actions/inner', ''].join('\n');
+  const nestedInner = ['runs:', '  using: composite', '  steps:', '    - shell: bash', '      run: node scripts/check-nul-bytes.mjs', ''].join('\n');
+  const nested = followCompositeActions(
+    '      - uses: ./.github/actions/outer\n',
+    compositeReader({ '.github/actions/outer': nestedOuter, '.github/actions/inner': nestedInner }),
+  );
+  t(
+    'the follow recurses — a gate an action reaches through a SECOND action is derived too',
+    nested.steps.map((s) => s.dir).join('|') === '.github/actions/outer|.github/actions/inner'
+      && nested.steps.flatMap((s) => extractCheckInvocations(s.text, 'fixture.yml')).length === 1,
+  );
+  const cyclicA = ['runs:', '  using: composite', '  steps:', '    - uses: ./.github/actions/b', ''].join('\n');
+  const cyclicB = ['runs:', '  using: composite', '  steps:', '    - uses: ./.github/actions/a', ''].join('\n');
+  t(
+    'and a cycle terminates with each action read exactly once, rather than spinning',
+    followCompositeActions(
+      '      - uses: ./.github/actions/a\n',
+      compositeReader({ '.github/actions/a': cyclicA, '.github/actions/b': cyclicB }),
+    ).steps.map((s) => s.dir).join('|') === '.github/actions/a|.github/actions/b',
+  );
+  // ── LIVE: the card's own positive control, re-taken here ───────────────────
+  //
+  // Fixtures cannot prove the live derivation opens the tree at all. The card's
+  // control is `.github/actions/setup-pnpm/action.yml` and its `run:` steps —
+  // audited by nothing on the day the card was filed, and read by the discovery
+  // pass now. A zero here is a follow that stopped following.
+  const liveComposites = discoverFamilies().compositeActions ?? [];
+  t(
+    `⭐ the live discovery really opens the composite action tree (${liveComposites.join(', ') || 'none'})`,
+    liveComposites.length > 0 && liveComposites.includes('.github/actions/setup-pnpm/action.yml'),
+  );
+  const liveCompositeRunSteps = liveComposites.reduce(
+    (n, rel) => n + runCommandSteps(compositeActionRunsBlock(readFileSync(nodePath.join(ROOT, rel), 'utf8'))).length,
+    0,
+  );
+  t(
+    `…and really reads the steps in it — ${liveCompositeRunSteps} \`run:\` step(s) that no gate rooted at`
+      + ' .github/workflows could see, which is the card\'s positive control',
+    liveCompositeRunSteps > 0,
+  );
+  // ── The BOUNDARY, measured rather than assumed ─────────────────────────────
+  //
+  // A script path that reaches the command through a step `env:` value is
+  // derived by NEITHER spelling — written inline in a workflow, or written in a
+  // composite action. That is one blind spot and it is not this one: the
+  // composite follow makes an action's step read EXACTLY like an inline step,
+  // including where an inline step is already not derived. Pinned so nobody
+  // reads a green follow as coverage of the env-carried class, and so the day
+  // that class is closed it is closed for both spellings at once.
+  const envCarriedStep = [
+    '      - name: Run the sweep',
+    '        shell: bash',
+    '        env:',
+    '          SWEEPER: ${{ steps.sources.outputs.root }}/scripts/pm/check-half-states.mjs',
+    '        run: node "$SWEEPER" --format=markdown',
+    '',
+  ].join('\n');
+  const envCarriedAction = ['runs:', '  using: composite', '  steps:', envCarriedStep].join('\n');
+  t(
+    'an env-carried script path is derived by neither spelling — the composite follow closes the ACTION'
+      + ' boundary, not the env-carrier one',
+    extractCheckInvocations(envCarriedStep, 'fixture.yml').length === 0
+      && followCompositeActions('      - uses: ./.github/actions/c\n', compositeReader({ '.github/actions/c': envCarriedAction }))
+        .steps.flatMap((s) => extractCheckInvocations(s.text, 'fixture.yml')).length === 0,
+  );
+  // The second declared deferral, sized rather than described: the always-runs
+  // tail walks `jobs:` and a composite action has none, so its rows still
+  // under-report by exactly the composite steps the follow now reads. Under-
+  // reporting is the safe direction (a MISSING lead), and this number is what
+  // makes the deferral honest instead of merely convenient.
+  t(
+    `the always-runs tail still reads no composite step — ${liveCompositeRunSteps} step(s) deferred, a`
+      + ' MISSING lead and never a fabricated one; when this number matters, extend that walk',
+    alwaysRunSteps(discoverFamilies().workflowEntries).rows.every((r) => r.workflow.endsWith('.yml')),
+  );
+
   // ── The SCHEDULED-ONLY routing question, measured and answered ZERO (#14899)
   //
   // The card: the derivation named `node scripts/pm/check-half-states.mjs` —
@@ -20220,9 +20916,15 @@ function selfTest() {
   for (const f of readdirSync(wfDirLive).filter((x) => /\.ya?ml$/.test(x))) {
     eventsOfWorkflow.set(f, declaredTriggerEvents(readFileSync(nodePath.join(wfDirLive, f), 'utf8')));
   }
+  // ⚠️ The specimen lost its SCHEDULE on 2026-09-21 (ruling #208 on #19491,
+  // executed by #19497: the patrol is `workflow_dispatch`-only now, and no line
+  // of the sweeper was edited for it). Both cases below are re-pointed at the
+  // fact each was always about — the PR-time trigger, and the withholding class
+  // — and ⛔ nothing is added: pinning the absence of the schedule would be a
+  // new ratchet, which this file may not grow without the maintainer's word.
   t(
-    '⭐ the card\'s own specimen declares a pull_request trigger beside its schedule — half-state-patrol.yml is not a workflow no PR runs',
-    ['schedule', 'workflow_dispatch', 'pull_request'].every((e) => (eventsOfWorkflow.get('half-state-patrol.yml') ?? []).includes(e)),
+    '⭐ the card\'s own specimen declares a pull_request trigger beside its workflow_dispatch — half-state-patrol.yml is not a workflow no PR runs',
+    ['workflow_dispatch', 'pull_request'].every((e) => (eventsOfWorkflow.get('half-state-patrol.yml') ?? []).includes(e)),
   );
   t(
     'and a genuinely scheduled-only workflow reads as one, so the predicate is not answering `pull_request` to everything (stale.yml)',
@@ -20275,10 +20977,9 @@ function selfTest() {
   // 3m09s it measured is gone without any scheduled-only rule existing.
   const sweepEntry = triggerFamilies.find((e) => e.check.startsWith('scripts/pm/check-half-states.mjs'));
   t(
-    'the card\'s specimen is still discovered, still reached only through its patrol, and still classified VALUE-BEARING — not withheld for being scheduled',
+    'the card\'s specimen is still discovered, still reached only through its patrol, and still classified VALUE-BEARING — withheld by that class and by nothing else',
     Boolean(sweepEntry)
       && [...sweepEntry.workflows].join('|') === 'half-state-patrol.yml'
-      && isScheduled('half-state-patrol.yml')
       && reachesPRTime(sweepEntry.workflows)
       && Boolean(sweepEntry.notRunnable)
       && !sweepEntry.ciOnly,
@@ -22079,10 +22780,16 @@ function selfTest() {
   const ownPopulation = ownDeclared?.population ?? [];
   t('this module declares what a follower inherits', (ownDeclared?.reason ?? '').length > 0);
   t(
-    'it declares exactly the workflow tree it readdirs',
-    ownPopulation.length === 1 && ownPopulation[0] === '.github/workflows',
+    'it declares exactly the two trees it opens — the workflow directory it readdirs and the composite actions those workflows use',
+    ownPopulation.length === 2
+      && ownPopulation[0] === '.github/workflows'
+      && ownPopulation[1] === '.github/actions',
   );
   t('so a follower still reaches the workflow files this tool really opens', covers(ownPopulation, '.github/workflows/lint.yml'));
+  t(
+    '…and the composite action files it really opens through them (#19229)',
+    covers(ownPopulation, '.github/actions/setup-pnpm/action.yml'),
+  );
   // The four fabricating classes the card measured, each pinned as SPELLED but
   // NOT INHERITED — the two halves have to be asserted together, because the
   // literal disappearing from the file would also pass "not inherited" while
@@ -22188,7 +22895,7 @@ function selfTest() {
       '.github/workflows/scaffold-e2e.yml:23 no-check-families',
       'scripts/cli-build-prerequisite.mjs:111 inherited-population',
       'scripts/pm/check-expected-skips.mjs:131 self-test-reads',
-      'scripts/pm/dispatch-gates.mjs:705 inherited-population',
+      'scripts/pm/dispatch-gates.mjs:708 inherited-population',
     ].join(' · '),
     censusRows.join(' · '),
   );
@@ -23899,30 +24606,14 @@ function selfTest() {
   // filter is `packages/**` and already covered them; it gains the right
   // PROVENANCE, and it is what this case exists to keep honest.
   const CLASS_SEVENTH = 'check:dual-build-cjs-loads';
-  // ⭐ THE EIGHTH, and it is the same question answered a second time by a gate
-  // that did not exist when the seventh was recorded. `check:api-surface-declarations`
-  // (#16045) walks the spec `exports` map to the packed `.d.ts` of every entry
-  // point and snapshots the declaration text it finds there, so that export
-  // surface is its subject in exactly the sense the six and the seventh are. It
-  // is declared here for one reason: the edge ALREADY gave it a population on
-  // the run that landed it, before any list named it — which is the ruling's
-  // question ("does the next gate of this class get covered automatically")
-  // answered live for a second time, by a family nobody wired in.
-  const CLASS_EIGHTH = 'check:api-surface-declarations';
   t(
     `and every family the edge gives a population to really re-derives from an export surface` +
       ` (${[...new Set(manifestInherited.map(([c]) => c))].join(' · ') || 'none'})`,
-    manifestInherited.every(
-      ([c]) => EXPORT_SURFACE_SIX.includes(c) || c === CLASS_SEVENTH || c === CLASS_EIGHTH,
-    ),
+    manifestInherited.every(([c]) => EXPORT_SURFACE_SIX.includes(c) || c === CLASS_SEVENTH),
   );
   t(
     `⭐ and a SEVENTH live gate the card never named is covered by the same edge (${CLASS_SEVENTH})`,
     manifestInherited.some(([c]) => c === CLASS_SEVENTH),
-  );
-  t(
-    `⭐ …and an EIGHTH, added after that reading was taken (${CLASS_EIGHTH})`,
-    manifestInherited.some(([c]) => c === CLASS_EIGHTH),
   );
 
   // Additive BY CONSTRUCTION, the claim the wiring comment makes: the manifest
@@ -24789,6 +25480,73 @@ function selfTest() {
   t('the frame-sync COPIES table is readable and non-empty, so the pin below is not vacuous', frameProbe.status === 0 && Array.isArray(frameFiles) && frameFiles.length > 0);
   t(`every frame-sync-enforced copy is fable-mandated (unmandated: ${frameFiles.filter((f) => !deriveTier([f]).mandatory).join(', ') || 'none'})`, frameFiles.length > 0 && frameFiles.every((f) => deriveTier([f]).tier === CONTRACT_REVIEW_TIER));
   t('the SKILL.md main file and the dev-agent definition are declared in their own right, not only via the frame table', MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md') && MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/agents/os-dev.md'));
+
+  // ── The ladder's CEILING and the constant, pinned TOGETHER (#19544) ───────
+  //
+  // The ceiling used to be a WORD written beside the constant, and the pair
+  // drifted in the one direction nothing could see: the harness stopped
+  // serving the tier, the constant kept naming it, and the ladder went on
+  // printing its family word as a LIVE rule for a tier no dispatch could
+  // reach. The ceiling is derived now, so these cases hold the RENDERING
+  // against the constant rather than against a remembered word — write the
+  // ceiling by hand again and they red, whichever half was edited.
+  // The provenance ROWS (`  - <path> ⇢ '<glob>' — <why>`) are excluded from the
+  // retired-word guard below, and deliberately: several of them quote a
+  // maintainer ruling verbatim, and a record of what was ruled AT THE TIME
+  // stays true however the tier moves afterwards. What the guard covers is the
+  // rules — the ladder, the exits, the clause-② note, the suspicion line.
+  const liveRuleText = (rendered) => rendered.split('\n').filter((l) => !/^\s+- /.test(l)).join('\n');
+  const ladderRenderings = [plainLines, mandLines, catalogLines, tierLines(fableOf(['packages/spec/src/api/error-code-ledger.zod.ts'])).join('\n')].map(liveRuleText);
+  const ladderLine = plainLines.split('\n').find((l) => l.includes('The tier stays')) ?? '';
+  t('the ladder prints a ceiling DERIVED from the contract-review constant, so the two cannot drift apart', ladderLine.includes(`ceiling ${tierWordOf(CONTRACT_REVIEW_TIER)})`), ladderLine || 'no ladder line was rendered at all');
+  t("…in the ladder's own vocabulary — the constant's FAMILY word, so a parseable id NEVER reaches the ladder verbatim", /^claude-[a-z]+-/.test(CONTRACT_REVIEW_TIER) && TIER_CEILING === tierWordOf(CONTRACT_REVIEW_TIER) && !ladderLine.includes(CONTRACT_REVIEW_TIER), ladderLine);
+  t('tierWordOf reads the family out of an id, and hands an unreadable one back VERBATIM rather than guessing a word', tierWordOf('claude-example-9-9') === 'example' && tierWordOf('an-unfamiliar-shape') === 'an-unfamiliar-shape' && tierWordOf(null) === '');
+  // The guard is driven through ONE function so the live reading and its
+  // control run the same search. RETIRED_TIER_WORDS is EMPTY — no ruling has
+  // retired a tier word — so the live case below clears every rendering for
+  // free, and a case asserting only that green would pass just as happily on a
+  // search that had stopped matching anything. The non-vacuity case therefore
+  // moved off the LIVE list, where it could only ever count entries, and onto
+  // a MUTATED copy: feed the guard a word the ladder demonstrably prints and
+  // it must red. That is the invariant an empty list has to keep provable — a
+  // word still in the ladder can never be in this list.
+  const retiredWordHits = (words) =>
+    ladderRenderings.flatMap((l, i) => words.filter((w) => l.toLowerCase().includes(w)).map((w) => `${i}/${w}`));
+  t(`⛔ no RETIRED tier word survives in any live RULE — ladder, exits, clause-② note and suspicion line all read the constant (dirty: ${retiredWordHits(RETIRED_TIER_WORDS).join(' ') || 'none'})`, retiredWordHits(RETIRED_TIER_WORDS).length === 0);
+  t('…and the guard is not reading an empty string — every rendering it clears still carries its own rule text', ladderRenderings.every((l) => l.includes('Model tier')) && ladderRenderings.some((l) => l.includes('Exits,')));
+  t(`no tier word is RETIRED today — the list is empty and frozen, which is what "a temporary lack of authorization is not a retirement" looks like in data (holds: ${[...RETIRED_TIER_WORDS].join(', ') || 'none'})`, Array.isArray(RETIRED_TIER_WORDS) && RETIRED_TIER_WORDS.length === 0 && Object.isFrozen(RETIRED_TIER_WORDS));
+  t(`…and the guard is NOT vacuous, proved on a MUTATED copy: a list naming the ladder's own ceiling word (${TIER_CEILING}) REDS, so the green above is the empty list and not a broken search (mutated hits: ${retiredWordHits([TIER_CEILING]).join(' ') || 'NONE — the control never fired'})`, retiredWordHits([TIER_CEILING]).length > 0 && retiredWordHits(['a-word-no-rendering-prints']).length === 0);
+  t('…and the invariant that copy stands for: no tier word still in the ladder may ever enter the live list', [TIER_FLOOR, TIER_DEFAULT, TIER_CEILING].every((w) => !RETIRED_TIER_WORDS.includes(w)));
+  // A sibling case further down pins the constant's CURRENT value to exactly
+  // one site under these roots. What that case cannot see is a RETIRED id left
+  // behind — it is not the current value, so nothing compares it to anything,
+  // and it reads to a grepping seat as a live tier rule. So this one asks the
+  // rulebook root a different question: does it spell a model id AT ALL? The
+  // skill's own rule is 「本文不写模型名」, and a retirement is the moment that
+  // promise pays for itself — the tree needs no edit, so it cannot go stale.
+  const walkFilesUnder = (dir, out = []) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const abs = nodePath.join(dir, entry.name);
+      if (entry.isDirectory()) walkFilesUnder(abs, out);
+      else if (entry.isFile()) out.push(abs);
+    }
+    return out;
+  };
+  const SKILL_RULEBOOK_ROOT = '.claude/skills/pm-dispatch';
+  const skillRulebookFiles = walkFilesUnder(nodePath.join(ROOT, SKILL_RULEBOOK_ROOT));
+  const skillIdSpellings = [];
+  for (const abs of skillRulebookFiles) {
+    readFileSync(abs, 'utf8').split('\n').forEach((line, i) => {
+      if (/\bclaude-[a-z]+-\d[\w.-]*/.test(line)) skillIdSpellings.push(`${nodePath.relative(ROOT, abs)}:${i + 1}`);
+    });
+  }
+  t(`${SKILL_RULEBOOK_ROOT} spells NO model id at all — ${skillRulebookFiles.length} file(s) read, and a RETIRED id left there is caught HERE, where a current-value pin cannot see it (found: ${skillIdSpellings.join(', ') || 'none'})`, skillRulebookFiles.length > 0 && skillIdSpellings.length === 0);
+  // The rulebook half of the same coupling: the skill names the constant. Its
+  // downgrade-fuse section is retired (maintainer 2026-09-22 「降档保险丝 不留」,
+  // #19061 comment 5772289798), so the guard below reds if that text creeps back.
+  const fuseRules = readFileSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/contract-review.md'), 'utf8');
+  t('the rulebook names the contract-review tier by its CONSTANT, so a retirement moves the value and the prose follows', fuseRules.includes('`CONTRACT_REVIEW_TIER`'));
+  t('the rulebook no longer carries the retired 降档保险丝 lines (maintainer 2026-09-22 「降档保险丝 不留」, #19061 comment 5772289798)', !/额度耗尽豁免[^\n]*不及复核/.test(fuseRules) && !/档位退役[^\n]*≠[^\n]*耗尽/.test(fuseRules));
 
   // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
   //
@@ -26367,6 +27125,43 @@ function selfTest() {
     outsideBlockCounts(familyReconciliation({ jobFilteredRows: [{}, {}] })).jobFilteredJobs === 2,
   );
 
+  // ── Type-check lanes (#19172): the negatives are the live over-matches a SUBSTRING reading produces here ──
+  t('a `tsc --noEmit` or `-p <config>` invocation is a lane',
+    isTypeCheckInvocation('pnpm --filter @objectstack/spec exec tsc --noEmit') && isTypeCheckInvocation('npx tsc -p tsconfig.test.json'));
+  t('a `run typecheck` task is a lane whoever runs it',
+    isTypeCheckInvocation("pnpm exec turbo run typecheck --filter='./packages/*'") && isTypeCheckInvocation("pnpm --filter './examples/*' run typecheck"));
+  t('⛔ the two LEDGER families are NOT lanes — the substitution this block exists to break',
+    !isTypeCheckInvocation('pnpm check:type-check-coverage') && !isTypeCheckInvocation('pnpm check:type-check-debt'));
+  t('⛔ nor is prose that merely carries the word, which is both live over-matches',
+    !isTypeCheckInvocation('echo "::error::Compiled test files found. A tsc-built package is"')
+      && !isTypeCheckInvocation('console.log(`::error::type-check lane ${id} concluded ${result}.`);'));
+  const laneWf = tailWf.replace('run: pnpm check:engine-double-contract', "run: pnpm exec turbo run typecheck --filter='./packages/*'")
+    .replace('run: pnpm check:console-pin', 'run: pnpm --filter @objectstack/spec exec tsc --noEmit');
+  const laneFix = typeCheckLaneSteps([{ file: 'fixture.yml', text: laneWf }]);
+  t('a lane in an unconditional job is a row, and one in a CONDITIONAL job is KEPT and marked',
+    laneFix.rows.some((r) => r.job === 'gates' && !r.conditional)
+      && laneFix.rows.some((r) => r.job === 'conditional-job' && r.conditional) && laneFix.counts.conditional === 1,
+    laneFix.rows.map((r) => `${r.job}:${r.conditional}`).join(' · '));
+  t('a workflow with no pull_request trigger contributes no lane and is sized rather than dropped',
+    typeCheckLaneSteps([{ file: 'p.yml', text: 'on:\n  push:\njobs:\n  t:\n    steps:\n      - run: pnpm run typecheck' }]).counts.nonPullRequestWorkflows === 1);
+  const laneLines = typeCheckLaneLines(laneFix.rows, laneFix.counts);
+  t('the heading sizes the surface and the block prints the narrowed prescription',
+    laneLines[0].includes('2 CI step(s)') && laneLines.some((l) => l.includes('pnpm --filter <pkg> run typecheck')));
+  t('⭐ an EMPTY walk renders LOUD rather than dropping the block',
+    typeCheckLaneLines([], { prWorkflows: 7 })[0].includes('CAME BACK EMPTY')
+      && typeCheckLaneLines([], { prWorkflows: 7 }).some((l) => l.includes('7 pull-request workflow(s)')));
+  t('the closing enumeration names the block UNCONDITIONALLY, so an empty walk cannot hide it',
+    outsideBlockNames({}).includes('the type-check lanes'));
+  // ⭐ THE POSITIVE CONTROL, live, pinned BY NAME and ⛔ never by row count: a
+  // count stays green while three of four lanes vanish. `Type Check · debt
+  // ledger` is deliberately absent — its only `run:` IS the ledger family.
+  const liveLanes = typeCheckLaneSteps(liveWorkflows);
+  const liveLaneJobs = liveLanes.rows.map((r) => r.job);
+  t('LIVE: every lane behind the required aggregate is found BY NAME, and no ledger family is mistaken for one',
+    ['Type Check · source gates', 'Type Check · workspace', 'Type Check · consumer gates'].every((j) => liveLaneJobs.includes(j))
+      && liveLanes.rows.every((r) => r.commands.every((c) => !c.includes('check:type-check'))),
+    `${liveLaneJobs.join(' · ')} - walked ${liveLanes.counts.steps} step(s) / ${liveLanes.counts.runLines} run line(s)`);
+
   // ── The seam between this tool and its caller (#13462) ────────────────────
   //
   // Unit half first: the split and the footer are pure, so their edge cases are
@@ -26521,6 +27316,7 @@ function selfTest() {
       'the 1 declared WIDE-population famil(ies)',
       'the 3 pending-changeset famil(ies)',
       'the unreachable listing',
+      'the type-check lanes',
       'the always-runs tail',
     ]) {
       t(`and it names "${name}" — every block printed below it, not a subset`, namesOutside(outsideLine, [name]));
@@ -26531,7 +27327,7 @@ function selfTest() {
     // output meets the blocks in the order this line promised them.
     t('and spells them in the order they are PRINTED below, as one phrase', (outsideLine ?? '').includes(
       'The 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
-        + ' the unreachable listing and the always-runs tail below are each OUTSIDE it, each with its own count.',
+        + ' the unreachable listing, the type-check lanes and the always-runs tail below are each OUTSIDE it, each with its own count.',
     ));
     // The THREE counts are the lengths of the arrays that RENDER those blocks,
     // so the enumeration cannot name a block the run did not print: at zero rows
@@ -26545,7 +27341,7 @@ function selfTest() {
     // pending family the sentence pointed below at a heading that is not there
     // (#16795). It is conditional on its own count now, like the two above it.
     t('nor the pending-changeset block, whose heading is absent at zero too', !(noBlocksLine ?? '').toLowerCase().includes('pending-changeset'));
-    t('...while still naming the two blocks that print unconditionally', namesOutside(noBlocksLine, ['the unreachable listing', 'the always-runs tail']));
+    t('...while still naming the three blocks that print unconditionally', namesOutside(noBlocksLine, ['the unreachable listing', 'the type-check lanes', 'the always-runs tail']));
     // ...and the CONTROL for that pair: a run with pending families and nothing
     // else names the third block and neither of the other two, so the case
     // above cannot be passing because the name went away for good.
@@ -26566,6 +27362,7 @@ function selfTest() {
       'the 1 declared WIDE-population famil(ies)',
       'the 1 pending-changeset famil(ies)',
       'the unreachable listing',
+      'the type-check lanes',
       'the always-runs tail',
     ])));
     // ...and the SHORT-harvest warning is conditional, on the rule the ⛔
@@ -27608,7 +28405,7 @@ function selfTest() {
     }
     t('and spells them in PRINT order, as the one phrase the human lane spells', ranAllBlocks.includes(
       'the 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
-        + ' the unreachable listing, the 4 path-scheduled CI job(s) and the always-runs tail are each outside the derived total',
+        + ' the unreachable listing, the 4 path-scheduled CI job(s), the type-check lanes and the always-runs tail are each outside the derived total',
     ));
     // The NEGATIVE: at zero rows those three blocks are not printed by the run
     // this sentence points at, so naming them would send a reader to headings
@@ -27621,7 +28418,7 @@ function selfTest() {
         && !ranNoBlocks.toLowerCase().includes('pending-changeset')
         && !ranNoBlocks.toLowerCase().includes('path-scheduled'),
     );
-    t('...while still naming the two that print unconditionally', ranNoBlocks.includes('the unreachable listing and the always-runs tail'));
+    t('...while still naming the three that print unconditionally', ranNoBlocks.includes('the unreachable listing, the type-check lanes and the always-runs tail'));
 
     // ── Lane 2: the `--commands` / `--json` stderr accounting ───────────────
     //
@@ -27698,7 +28495,7 @@ function selfTest() {
         && !commandsNoBlocks.toLowerCase().includes('pending-changeset')
         && !commandsNoBlocks.toLowerCase().includes('path-scheduled'),
     );
-    t('...while still naming the two that print unconditionally', commandsNoBlocks.includes('the unreachable listing and the always-runs tail'));
+    t('...while still naming the three that print unconditionally', commandsNoBlocks.includes('the unreachable listing, the type-check lanes and the always-runs tail'));
     // ⛔ And the stream stays a STREAM: the accounting is stderr-only, so a
     // consumer redirecting stdout gets commands with no prose in front of them.
     // That is the property the whole mode exists for, and a disclaimer that

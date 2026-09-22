@@ -132,6 +132,83 @@
  *   gate does not descend into one: a comparand is data, and a stricter reading
  *   here would invent a contract no backend agrees with.
  *
+ * ## Refused BY RULING, 2026-09-20: a BLANK `$between` ENDPOINT (#19071)
+ *
+ * The runtime twin of the schema door's 2026-09-17 rule (#18012). That ruling
+ * wrote "BOTH are required NON-BLANK: an empty string, null and undefined are
+ * refused, and the refusal names the blank side" into the PUBLISHED endpoint
+ * contract (`RANGE_ENDPOINT_DESCRIPTION`, `./filter.zod.ts`) and enforced it at
+ * the schema door alone. This door went on lowering `{ $between: ['', ''] }`
+ * unchanged, so one published sentence had two truth values depending on which
+ * door a caller came through — and the door that passed it is the one an
+ * embedder reaches by handing a lowered filter straight to a driver, where the
+ * range stops bounding on the blank side while still reading as a complete
+ * range. Ruled 2026-09-20 (#19071, option A): the implementation follows the
+ * declaration.
+ *
+ * The scope is the SCHEMA door's notion of blank, ⛔ not a second one invented
+ * here — two doors disagreeing IS the defect:
+ *
+ * - **`''` and `undefined`** are refused, naming the blank side (MIN / MAX and
+ *   the index) and carrying the schema door's own prescription.
+ * - **`null`** keeps {@link nullRangeBoundError}, which prescribes the null
+ *   PREDICATE: an author who wrote `null` was reaching for absence, an author
+ *   who left a bound empty was reaching for a bound. Two blank spellings, two
+ *   intents, two remedies; ⛔ do not unify them. It is checked FIRST, so a pair
+ *   that is `null` on one side and blank on the other keeps the 2026-08-31
+ *   message it has always had.
+ * - **A whitespace-only endpoint is NOT judged**, because the schema door does
+ *   not judge one: `RangeOperatorSchema.safeParse({ $between: [' ', 'M'] })`
+ *   answers `success: true`, pinned deliberately in `filter.test.ts`. ⛔ A trim
+ *   here would re-open the very split this ruling closes, in the opposite
+ *   direction, and narrow a published face further than any ruling has.
+ * - **Falsiness is untouched**: `[0, 0]` and `['0', '9']` are ranges, and a
+ *   falsy `$in` / `$nin` MEMBER stays a value — #13357's rows stand, because
+ *   this ruling is about range ENDPOINTS and those are about VALUES.
+ *
+ * ## Refused BY RULING, 2026-08-11: a `{ $field }` `$between` ENDPOINT (#7596)
+ *
+ * The OLDEST of the endpoint rulings and the last to reach this door. #7596
+ * removed `FieldReferenceSchema` from both endpoint unions under ADR-0049
+ * enforce-or-remove, because no backend ever resolved one in a list position:
+ * `matches-filter.ts` leaves the list unresolved and orders against the raw
+ * reference OBJECT, so it silently matches nothing, and both SQL faces refuse
+ * the position with `INVALID_FILTER` / 400. The published endpoint contract
+ * has said so verbatim ever since — "A { $field } reference is NOT an endpoint
+ * shape" (`RANGE_ENDPOINT_DESCRIPTION`, `./filter.zod.ts`).
+ *
+ * It shipped at the SCHEMA door alone. This door went on lowering
+ * `{ $between: [{ $field: 'a' }, 'M'] }` unchanged — one published sentence
+ * with two truth values, decided by which door a caller came through, and the
+ * door that passed it is the one an embedder reaches by handing a lowered
+ * filter straight to a driver. Measured again under #19377 before the change;
+ * closed here the way #19071 closed the blank spelling one endpoint over.
+ *
+ * The scope is the `$between` ENDPOINT position and nothing wider:
+ *
+ * - **Recognised by SHAPE** — a non-array object carrying a `$field` key,
+ *   which is the schema door's own `isFieldReferenceShape` test, so the two
+ *   doors cannot drift over what counts as a reference. ⛔ Not the comparand
+ *   TYPE door's stricter `typeof value.$field === 'string'`: that door steps
+ *   around references on purpose and refuses `{ $field: 42 }` as a plain
+ *   object, and what this refusal has to name is the shape the author WROTE.
+ * - **The reference stays legal in the four ORDERING slots** — #5222's
+ *   shipped capability, and the alternative this refusal prescribes: a
+ *   column-to-column range is its two bounds written separately,
+ *   `{ $gte: { $field: 'a' }, $lte: { $field: 'b' } }`, which every face
+ *   already answers.
+ * - **`$in` / `$nin` MEMBERS are NOT judged here.** #7596 rules a reference
+ *   out of those positions too and `SET_MEMBER_DESCRIPTION` publishes that
+ *   rule, but this door still lowers such a member unchanged. That is a
+ *   SECOND split over a different published sentence, needing its own wording
+ *   and its own ruling; ⛔ absorbing it silently here is the exact move this
+ *   card's family exists to refuse.
+ * - **Checked LAST among the endpoint carve-outs**, after arity, `null` and
+ *   blank. Every pair that already carried a refusal keeps the message it
+ *   had — `[{ $field: 'a' }, null]` still answers with the 2026-08-31 null
+ *   prescription — so this check changes the verdict only for pairs this door
+ *   accepts today.
+ *
  * ## Refusal envelope
  *
  * Every refusal carries `code: 'INVALID_FILTER'` and `status: 400` (ADR-0112
@@ -202,6 +279,28 @@ function isFilterNode(value: unknown): value is Record<string, unknown> {
     && !Array.isArray(value)
     && !(value instanceof Date)
   );
+}
+
+/**
+ * Is `value` shaped like a `{ $field: … }` reference? — the #7596 endpoint
+ * carve-out's recogniser.
+ *
+ * SHAPE only, and the referenced NAME is never consulted, not even its type:
+ * the point is to recognise what the author WROTE so the refusal can name it,
+ * which has to happen for any `{ $field: … }` and not only for one whose
+ * referent would have resolved.
+ *
+ * Spelled exactly as the schema door's `isFieldReferenceShape`
+ * (`./filter.zod.ts`) spells it, rather than imported — `filter.zod.ts`
+ * imports THIS module and the reverse edge would be a cycle, the same argument
+ * {@link LIST_COMPARAND_OPERATORS} records. ⛔ Deliberately NOT routed through
+ * {@link isFilterNode}, whose `Date` arm this predicate does not carry: the
+ * two doors then answer identically by construction rather than by argument.
+ * `filter-comparand-shape.test.ts` reads both doors on one input set so they
+ * cannot drift apart anyway.
+ */
+function isFieldReferenceShape(value: unknown): boolean {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && '$field' in value;
 }
 
 /** `string` / `number` / `null` / `object` … — the word the message uses. */
@@ -372,6 +471,86 @@ function nullRangeBoundError(
 }
 
 /**
+ * A `$between` bound that is BLANK — the empty string or `undefined`, at
+ * either end. Refused BY RULING, 2026-09-20 (#19071); see the module note's
+ * third "Refused BY RULING" section.
+ *
+ * Its own message rather than an arm of {@link nullRangeBoundError}: that one
+ * prescribes the null PREDICATE, which is the wrong remedy for a bound the
+ * author simply did not type. This one is the schema door's
+ * `blankRangeBoundMessage` (`./filter.zod.ts`) carrying the same two
+ * prescriptions — write the bound you meant, or, if only one side was ever
+ * bounded, drop `$between` for the scalar comparison that says so — in this
+ * door's own #5346/#5348 wording contract: operator, field, position, the
+ * named side, authoring spellings, front-loaded and inside the 500-char client
+ * bound. Reconciled by pin, as the null pair is.
+ *
+ * The received value is described in WORDS rather than previewed: `undefined`
+ * inside an array renders as `null` through `JSON.stringify`, which would show
+ * an author the one spelling this message is not about.
+ */
+function blankRangeBoundError(
+  context: string | undefined,
+  field: string,
+  bound: unknown,
+  index: number,
+  path: string,
+): Error {
+  const spellings = LIST_COMPARAND_OPERATORS.get('$between') ?? [];
+  return invalidFilterComparandError(
+    context,
+    `Operator "$between" on field "${field}" requires two non-blank bounds. Received ` +
+    `${bound === undefined ? 'undefined' : 'an empty string'} at ${path}[${index}] ` +
+    `(the ${index === 0 ? 'MIN' : 'MAX'} bound). A blank endpoint is compared as a value, so ` +
+    `the range stops bounding on that side. Write the bound you meant; for a genuinely ` +
+    `one-sided range use {"$gte": min} / {"$lte": max}. Authoring spellings: ` +
+    `${spellings.join(', ')}. The filter was NOT applied, and an unapplied filter would have ` +
+    `returned the UNFILTERED result set.`,
+  );
+}
+
+/**
+ * A `$between` bound that is a `{ $field }` REFERENCE — refused BY RULING,
+ * 2026-08-11 (#7596), implemented at this door under #19377; see the module
+ * note's fourth "Refused BY RULING" section.
+ *
+ * Its own message rather than an arm of any of the three above: those
+ * prescribe a VALUE (a bound the author did not type, or the null predicate),
+ * and the author who wrote a reference was reaching for a column-to-column
+ * comparison — a capability the platform HAS, one operator over. The remedy is
+ * therefore a different filter, not a different literal, and the message
+ * spends its budget saying so.
+ *
+ * The received reference is NOT previewed. Its position is already named to
+ * the index and the side, and the 500-char client bound (#5423) buys more as
+ * the two-bound spelling than as an echo of what the author is looking at.
+ *
+ * The schema door's twin is `listPositionFieldReferenceMessage`
+ * (`./filter.zod.ts`), reconciled by pin, as the null and blank pairs are —
+ * and like that one it ⛔ does NOT offer the in-memory evaluator as an escape:
+ * `matchesFilter` does not resolve a list member either, it fails silently
+ * instead of loudly, so naming it would send an author to the one path whose
+ * answer is a wrong row set rather than an error.
+ */
+function fieldReferenceRangeBoundError(
+  context: string | undefined,
+  field: string,
+  index: number,
+  path: string,
+): Error {
+  const spellings = LIST_COMPARAND_OPERATORS.get('$between') ?? [];
+  return invalidFilterComparandError(
+    context,
+    `Operator "$between" on field "${field}" does not accept a { "$field": … } reference as an ` +
+    `endpoint (at ${path}[${index}], the ${index === 0 ? 'MIN' : 'MAX'} bound). No evaluation ` +
+    `path resolves one inside a list. Write a literal bound, or range column-to-column as two ` +
+    `bounds: {"$gte": {"$field": "a"}, "$lte": {"$field": "b"}}. Authoring spellings: ` +
+    `${spellings.join(', ')}. The filter was NOT applied, and an unapplied filter would have ` +
+    `returned the UNFILTERED result set.`,
+  );
+}
+
+/**
  * A `null` comparand of `$gt` / `$gte` / `$lt` / `$lte` — refused BY RULING,
  * 2026-09-01 (#14080); see the module note's second "Refused BY RULING"
  * section.
@@ -493,6 +672,28 @@ function assertFieldListComparands(
       const nullBound = comparand.indexOf(null);
       if (nullBound !== -1) {
         throw nullRangeBoundError(context, field, comparand, nullBound, `${path}.${op}`);
+      }
+      // Then the BLANK carve-out (2026-09-20 ruling, #19071) — exactly the two
+      // spellings the schema door refuses as blank, so the two doors answer one
+      // question the same way. Strict equality against `''` and `undefined`:
+      // ⛔ no trim, because a whitespace-only endpoint PASSES the schema door
+      // and narrowing further here would re-open the split in the other
+      // direction; and `0` / `'0'` / `false` are endpoints, not blanks.
+      const blankBound = comparand.findIndex((bound) => bound === '' || bound === undefined);
+      if (blankBound !== -1) {
+        throw blankRangeBoundError(
+          context, field, comparand[blankBound], blankBound, `${path}.${op}`,
+        );
+      }
+      // Then the `{ $field }` REFERENCE carve-out (2026-08-11 ruling, #7596,
+      // reaching this door under #19377) — LAST, so every pair that already
+      // carried a refusal keeps the message it had, and only a pair this door
+      // accepts today can reach it. Shape, not value: `{ $field: 42 }` is the
+      // shape the author wrote and is named as such, one step before the TYPE
+      // door would have called it a plain object.
+      const referenceBound = comparand.findIndex(isFieldReferenceShape);
+      if (referenceBound !== -1) {
+        throw fieldReferenceRangeBoundError(context, field, referenceBound, `${path}.${op}`);
       }
       continue;
     }

@@ -812,7 +812,7 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     'Organization (tenant) scope for the promotion. The implementation resolves '
     + 'the draft through the org partition (ADR-0005), so a draft '
     + 'authored org-scoped must be published under the same scope or the lookup '
-    + 'answers 404 `[no_draft]`. Absent = environment-wide.',
+    + 'answers 404 `NO_DRAFT`. Absent = environment-wide.',
   ),
   actor: z.string().optional().describe(
     'Identity recorded on the `op=\'publish\'` history event. On the REST door '

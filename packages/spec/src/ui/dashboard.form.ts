@@ -63,7 +63,35 @@ export const dashboardForm = defineForm({
       label: 'Widgets',
       description: 'Cards and charts placed on the grid.',
       fields: [
-        { field: 'widgets', type: 'repeater', required: true, helpText: 'Dashboard widgets with position and sizing' },
+        {
+          field: 'widgets',
+          type: 'repeater',
+          required: true,
+          helpText: 'Dashboard widgets with position and sizing',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'id', label: 'Widget ID' },
+            { field: 'title', label: 'Title' },
+            { field: 'description', label: 'Description' },
+            { field: 'type', label: 'Visualization Type' },
+            { field: 'chartConfig', label: 'Chart Configuration' },
+            { field: 'colorVariant', label: 'Color Variant' },
+            { field: 'requiresObject', label: 'Requires Object' },
+            { field: 'requiresService', label: 'Requires Service' },
+            { field: 'filter', label: 'Filter' },
+            { field: 'compareTo', label: 'Compare To' },
+            { field: 'dataset', label: 'Dataset' },
+            { field: 'dimensions', label: 'Dimensions' },
+            { field: 'values', label: 'Values' },
+            { field: 'layout', label: 'Layout' },
+            { field: 'options', label: 'Options' },
+            { field: 'filterBindings', label: 'Filter Bindings' },
+            { field: 'suppressWarnings', label: 'Suppress Warnings' },
+          ],
+        },
       ],
     },
     {
@@ -73,7 +101,27 @@ export const dashboardForm = defineForm({
       collapsed: true,
       fields: [
         { field: 'dateRange', type: 'composite', helpText: 'Default date range selector' },
-        { field: 'globalFilters', type: 'repeater', helpText: 'Filters applied to all widgets' },
+        {
+          field: 'globalFilters',
+          type: 'repeater',
+          helpText: 'Filters applied to all widgets',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'name', label: 'Name' },
+            { field: 'field', label: 'Field' },
+            { field: 'object', label: 'Object' },
+            { field: 'label', label: 'Label' },
+            { field: 'type', label: 'Input Type' },
+            { field: 'options', label: 'Options' },
+            { field: 'optionsFrom', label: 'Options From' },
+            { field: 'defaultValue', label: 'Default Value' },
+            { field: 'scope', label: 'Scope' },
+            { field: 'targetWidgets', label: 'Target Widgets' },
+          ],
+        },
       ],
     },
     {

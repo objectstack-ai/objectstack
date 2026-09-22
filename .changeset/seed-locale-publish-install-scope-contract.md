@@ -1,0 +1,13 @@
+---
+"@objectstack/spec": patch
+---
+
+`Seed.locale` now states its own bound: the publish and install paths do not filter by locale — they load every dataset and warn. Wording only; ⛔ no behaviour changed.
+
+The loader evaluates this axis against `SeedLoaderConfig.locale`, which only the boot path supplies (`AppPlugin` reads the app's declared `i18n.defaultLocale`, #16595). Three publish/install-time request builders — package apply, draft publish and marketplace install — are handed no stack config and pass no locale, so a `locale`-scoped dataset reaching one of them is loaded for **every** locale and `warnOnUnresolvedLocaleScope` names each one it let through. That was already the published contract: `content/docs/data-modeling/seed-data.mdx` declared it verbatim for the embedding-host case. What it was not was discoverable from the key itself — an author reading `SeedSchema.locale` had no way to learn where the axis stops, and the ledger row's note still ended with a to-do.
+
+- **The `.describe()` and TSDoc carry the bound.** Both ship to consumers — `src/**/*.zod.ts` and `dist` are in this package's `files[]`, measured with `npm pack --dry-run` — so the sentence reaches an author's editor rather than only a docs page they may never open.
+- **The liveness ledger row records a DECISION, not a to-do.** `packages/spec/liveness/seed.json`'s `locale` note ended 「Filed as its own card」. That card was ruled 2026-09-10 (option A 「不扩散」 — publish and install are locale-neutral acts, 「无违约、非缺陷」, because the docs page had already declared this bound and the runtime warns by name). The note now cites the ruling and states what would reopen it.
+- **⛔ Deliberately not done.** Making the three call sites pass a locale, and turning the warning into a refusal, were both explicitly not ruled. The first would give one concept two sources of truth — the app's declared locale versus the platform default — and would silently stop loading a dataset that loads today; the second would turn a succeeding published path into a failing one. Neither buys safety while measured usage is zero.
+
+⚠️ **The reading this rests on, and its reach.** Real first-party seed data using `locale`, measured repo-wide 2026-09-22 against `1f53b0b685`: **zero**. A structural scan of all 49 `defineSeed` call sites found 24 in real app data under `examples/` and none declaring the key; the scan is self-lit, because the same pass does find the two `locale`-declaring call sites on the docs page. That reach is **this repo only** — cloud, hotcrm and external customer apps stay unmeasured. A measured use of `locale`-scoped seed data in any of them reopens the decision.

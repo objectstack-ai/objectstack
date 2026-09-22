@@ -610,3 +610,184 @@ describe('assignment value envelope — an evaluated slot requires what the engi
     expect(ExpressionSchema.safeParse(BLANK_SOURCE).success).toBe(true);
   });
 });
+
+/**
+ * `AssignmentConfigSchema.assignments` — the `__proto__` half of #17852,
+ * filed on its own as #18847 and folded back into this ruling once PR #18688
+ * released this file (maintainer ruling A/narrow, comment 5725370319).
+ *
+ * `__proto__` ONLY. This slot's key type is `z.string().min(1)` — no
+ * grammar — so unlike `ObjectSchema.fields` there is no key-refusal half to
+ * add: `constructor` and `prototype` are legal flow-VARIABLE names today and
+ * this ruling does not narrow that accept set. `__proto__` is refused for the
+ * same structural reason as the sibling slot: `z.record()`'s open-key branch
+ * skips it before any key schema — including `.min(1)` — ever runs.
+ */
+describe('AssignmentConfigSchema.assignments — __proto__ pre-parse guard, constructor/prototype UNCHANGED (#17852 / #18847)', () => {
+  it('refuses `assignments` carrying a `__proto__` own key, named at `assignments.__proto__`', () => {
+    // `JSON.parse` is what makes `__proto__` an OWN enumerable key — an
+    // object literal's `{ __proto__: ... }` sets the actual prototype
+    // instead, and would never reach `z.record()`'s open-key loop as a key
+    // at all.
+    const config = JSON.parse('{"assignments":{"total":"{amount}","__proto__":"{evil}"}}');
+    const result = AssignmentConfigSchema.safeParse(config);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.path.join('.') === 'assignments.__proto__');
+    expect(issue).toBeDefined();
+    expect(issue?.code).toBe('custom');
+    expect(issue?.message).toMatch(/__proto__/);
+  });
+
+  it('refuses `assignments` that is `__proto__` ALONE — no sibling key masks the drop', () => {
+    const config = JSON.parse('{"assignments":{"__proto__":"{evil}"}}');
+    const result = AssignmentConfigSchema.safeParse(config);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.some((i) => i.path.join('.') === 'assignments.__proto__')).toBe(true);
+  });
+
+  it.each(['constructor', 'prototype'])(
+    'PRESERVATION: `%s` remains a legal flow-variable name — no ruling narrowed this slot\'s accept set',
+    (name) => {
+      const result = AssignmentConfigSchema.safeParse({ assignments: { [name]: '{x}' } });
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect((result.data.assignments as Record<string, unknown> | undefined)?.[name]).toBe('{x}');
+    },
+  );
+
+  it('an absent `assignments` key still parses (the slot stays optional)', () => {
+    expect(AssignmentConfigSchema.safeParse({}).success).toBe(true);
+  });
+
+  it('an ordinary `assignments` map with no reserved names still parses', () => {
+    expect(AssignmentConfigSchema.safeParse({ assignments: { total: '{amount}' } }).success).toBe(true);
+  });
+});
+
+/**
+ * `AssignmentConfigSchema`'s OWN `.catchall()` — the third `__proto__` site
+ * of the #17852 family and the one maintainer ruling A-narrow (comment
+ * 5725370319) said would be «its own card when measured» (#19151).
+ *
+ * Different parser, different depth from the `assignments` guard above:
+ * `z.record()`'s open-key branch skips `__proto__` above the KEY schema,
+ * `handleCatchall` skips it above the CATCHALL schema (zod 4.4.3,
+ * `v4/core/schemas.js` — the two `continue`s are one function apart). Neither
+ * guard covers the other, and this object's top-level keys are an authoring
+ * surface for flow-variable names BY DESIGN (the schema's own docblock:
+ * «its top-level keys may be variables»), so the drop landed on data an
+ * author wrote on purpose.
+ *
+ * The pins below assert BEHAVIOUR, not field presence: an authored top-level
+ * `__proto__` must be refused LOUDLY — told apart here from the two silent
+ * outcomes it could otherwise have (silently dropped, silently kept).
+ */
+describe('AssignmentConfigSchema — top-level __proto__ refused at the catchall (#19151)', () => {
+  /**
+   * The three outcomes an authored key can meet, discriminated by one
+   * function so a test cannot accidentally assert the wrong one. A bare
+   * `success === false` would pass for a schema that refused EVERY config,
+   * and a bare key check would pass for one that kept the key and reported
+   * success — the defect and its over-correction both.
+   */
+  function classify(config: unknown, key: string): 'refused' | 'silently-dropped' | 'silently-kept' {
+    const result = AssignmentConfigSchema.safeParse(config);
+    if (!result.success) return 'refused';
+    return Object.prototype.hasOwnProperty.call(result.data as object, key)
+      ? 'silently-kept'
+      : 'silently-dropped';
+  }
+
+  // `JSON.parse` is what makes `__proto__` an OWN enumerable key — an object
+  // literal's `{ __proto__: ... }` sets the actual prototype instead and
+  // never reaches `handleCatchall`'s `for (const key in input)` as a key at
+  // all. Stored flow metadata arrives through exactly this door.
+  const AUTHORED = '{"total":"{amount}","__proto__":"{evil}","other":1}';
+
+  it('REFUSES it — neither silently dropped nor silently kept', () => {
+    expect(classify(JSON.parse(AUTHORED), '__proto__')).toBe('refused');
+  });
+
+  it('names the key and locates it at the document root', () => {
+    const result = AssignmentConfigSchema.safeParse(JSON.parse(AUTHORED));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.path.join('.') === '__proto__');
+    expect(issue).toBeDefined();
+    expect(issue?.code).toBe('custom');
+    expect(issue?.message).toContain('__proto__');
+    // The refusal names the parser that would have dropped it. An author sent
+    // to `z.record()` here would go looking at `assignments`, a different slot
+    // with a different guard.
+    expect(issue?.message).toContain('catchall');
+    expect(issue?.message).toContain('assignment');
+  });
+
+  it('refuses a config that is `__proto__` ALONE — no sibling key masks the drop', () => {
+    expect(classify(JSON.parse('{"__proto__":"{evil}"}'), '__proto__')).toBe('refused');
+  });
+
+  it('CONTROL — the same parse WITHOUT the guard silently drops it, on this exact zod', () => {
+    // The instrument can see the defect: an unguarded object of the same
+    // shape accepts the document and returns a different one. Without this
+    // leg the pin above could be green because nothing ever reached the
+    // catchall at all.
+    const Unguarded = z.object({ assignments: z.record(z.string().min(1), z.unknown()).optional() })
+      .catchall(z.unknown());
+    const result = Unguarded.safeParse(JSON.parse(AUTHORED));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(Object.keys(result.data)).toEqual(['total', 'other']);
+  });
+
+  it.each(['constructor', 'prototype', 'toString'])(
+    'PRESERVATION: `%s` remains a legal TOP-LEVEL variable name — only `__proto__` is refused',
+    (name) => {
+      // These reach the catchall unskipped and round-trip intact, so no
+      // ruling narrows them. The guard refusing them would be a narrowing
+      // nobody ordered.
+      expect(classify(JSON.parse(JSON.stringify({ [name]: '{x}', keep: 1 })), name)).toBe('silently-kept');
+    },
+  );
+
+  it('PRESERVATION: every previously accepted shape still parses', () => {
+    expect(AssignmentConfigSchema.safeParse({}).success).toBe(true);
+    expect(AssignmentConfigSchema.safeParse({ assignments: {} }).success).toBe(true);
+    expect(AssignmentConfigSchema.safeParse({ assignments: { total: '{amount}' } }).success).toBe(true);
+    // The bare legacy config (no `assignments` wrapper) — the shape that makes
+    // this top level an authoring surface in the first place.
+    expect(AssignmentConfigSchema.safeParse({ decision: 'approved', digest: { dialect: 'cel' } }).success).toBe(true);
+    // The canonical map's CEL envelope, and its malformed counterpart.
+    expect(AssignmentConfigSchema.safeParse({ assignments: { d: { dialect: 'cel', source: 'a + b' } } }).success).toBe(true);
+    expect(AssignmentConfigSchema.safeParse({ assignments: { d: { dialect: 'cel' } } }).success).toBe(false);
+  });
+
+  it('leaves the `assignments` slot\'s OWN guard and prescriptions untouched', () => {
+    // Two guards, two depths: the nested one still fires at its own path, and
+    // the array-form prescription still rides the record's `invalid_type`.
+    const nested = AssignmentConfigSchema.safeParse(JSON.parse('{"assignments":{"__proto__":"{evil}"}}'));
+    expect(nested.success).toBe(false);
+    if (nested.success) return;
+    expect(nested.error.issues.some((i) => i.path.join('.') === 'assignments.__proto__')).toBe(true);
+    expect(AssignmentConfigSchema.safeParse({ assignments: [{ variable: 'digest', value: 1 }] }).error!.issues[0]!.message)
+      .toBe(ASSIGNMENT_ARRAY_FORM_PRESCRIPTION);
+  });
+
+  it('the JSON projection is UNCHANGED — the guard adds no structure the Studio or the ledger can see', () => {
+    // The wrapper is a `z.preprocess` pipe, which every spec walker resolves
+    // through (`pipeAuthorableSide`). If it did not, the expression ledger
+    // would lose `assignments.*` and the authorable surface would lose the
+    // `assignments` row — silently, in both cases.
+    const json = z.toJSONSchema(AssignmentConfigSchema, {
+      target: 'draft-2020-12', io: 'input', unrepresentable: 'any',
+    }) as { type?: string; properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
+    expect(json.type).toBe('object');
+    expect(Object.keys(json.properties ?? {})).toEqual(['assignments']);
+    expect(json.properties?.assignments?.additionalProperties?.xExpression).toBe('value');
+    const projected = getSchemalessNodeConfigJsonSchemas().assignment as
+      { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
+    expect(projected.properties?.assignments?.additionalProperties?.xExpression).toBe('value');
+  });
+});

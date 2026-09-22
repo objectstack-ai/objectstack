@@ -186,10 +186,25 @@ export const CompatibilityMatrixEntrySchema = lazySchema(() => z.object({
   migrationComplexity: z.enum(['trivial', 'simple', 'moderate', 'complex', 'major']).optional(),
   
   /**
-   * Estimated migration time in hours
+   * Estimated migration time
+   *
+   * Renamed from `estimatedMigrationTime` (#18669, ruling A, decision batch #151
+   * item 4). The unit of a duration-shaped number lives in the key NAME, and it
+   * is restated in the `.describe()` the published reference page renders — this
+   * key used to name it in a source JSDoc alone, a channel that stops at this
+   * file, so the page published a bare number beside `migrationComplexity`'s
+   * named scale. The value type is unchanged.
    */
-  estimatedMigrationTime: z.number().optional(),
-  
+  estimatedMigrationTimeHours: z.number().optional().describe('Estimated migration time in hours'),
+
+  /** Tombstone for the rename above (#18669, ruling A, decision batch #151 item 4). */
+  estimatedMigrationTime: retiredKey(
+    '`CompatibilityMatrixEntry.estimatedMigrationTime` was renamed to '
+    + '`estimatedMigrationTimeHours` in @objectstack/spec 17 — the unit of a duration-shaped '
+    + 'number lives in the key name, not only in prose. Rename the key to '
+    + '`estimatedMigrationTimeHours`; the value (hours) is unchanged.',
+  ),
+
   /**
    * Migration script available
    */

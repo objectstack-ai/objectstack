@@ -147,6 +147,22 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const WORKFLOW_DIR = '.github/workflows';
 
 /**
+ * The SECOND corpus root the shared reader derives this gate's population from
+ * (#19229) — local composite actions.
+ *
+ * Declared here for both of the reasons the workflow root is, and for a third
+ * that is this card's: a step written in `.github/actions/**` is run by CI in
+ * the calling job exactly as an inline step is, so it decides which self-tests
+ * are in the population. A gate that reads a corpus and names only half of it
+ * to the dispatch derivation is derived onto the wrong cards — and silently,
+ * which is the shape #19229 measured across six gates at once.
+ *
+ * PINNED against `read.actionDir` in `main()` below, exactly as `WORKFLOW_DIR`
+ * is: a live coupling rather than a decoration.
+ */
+const ACTION_DIR = '.github/actions';
+
+/**
  * POPULATION DECLARATION — the `scripts/` corpus this gate's verdict is ABOUT,
  * in the subtree spelling `scripts/pm/dispatch-gates.mjs` compares in.
  *
@@ -312,11 +328,11 @@ function main() {
   // replaced was a second walk that agreed for a while and then quietly did not.
   const read = collectPopulation();
   if (read.refusal) refuse(read.refusal);
-  if (read.workflowDir !== WORKFLOW_DIR) {
+  if (read.workflowDir !== WORKFLOW_DIR || read.actionDir !== ACTION_DIR) {
     refuse(
-      `the shared population was read from \`${read.workflowDir}\`, but this gate declares ` +
-        `\`${WORKFLOW_DIR}\` to the dispatch derivation. One of the two moved, and a gate naming a ` +
-        'corpus it no longer depends on is derived onto the wrong cards in silence.',
+      `the shared population was read from \`${read.workflowDir}\` + \`${read.actionDir}\`, but this gate ` +
+        `declares \`${WORKFLOW_DIR}\` + \`${ACTION_DIR}\` to the dispatch derivation. One of them moved, and a ` +
+        'gate naming a corpus it no longer depends on is derived onto the wrong cards in silence.',
     );
   }
   const { population, packageLocal, sources } = read;
@@ -415,7 +431,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'innocent output': 4,
   'prefilter reads CODE, never prose': 5,
   'end to end on the real defect site': 5,
-  'the population is imported, never re-walked': 8,
+  'the population is imported, never re-walked': 9,
   'the scripts/ population is declared here': 6,
 });
 
@@ -569,9 +585,15 @@ function selfTest() {
         + 'terms for every member, and its VALUE is a measurement of that file, deliberately not pinned here',
     );
     ok(
-      live.workflowDir === WORKFLOW_DIR,
+      live.workflowDir === WORKFLOW_DIR && live.actionDir === ACTION_DIR,
       'the shared reader derives the population from a corpus root this gate does not declare, so the '
         + 'dispatch derivation would name this gate for the wrong cards',
+    );
+    ok(
+      Array.isArray(live.actions) && live.actions.length > 0,
+      'the shared reading carries no composite action at all, on a repo that holds them — the second '
+        + 'corpus root stopped being read, and absence-is-not-a-refusal cannot tell that apart from a '
+        + 'repo that has none (#19229)',
     );
 
     // Own-source. The needles are ASSEMBLED: spelled out, they would be found

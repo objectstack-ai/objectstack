@@ -490,9 +490,52 @@ export const MarketplaceInstallRequestSchema = lazySchema(() => z.object({
   settings: z.record(z.string(), z.unknown()).optional()
     .describe('User-provided settings at install time'),
 
-  /** Whether to enable immediately after install */
-  enableOnInstall: z.boolean().default(true)
-    .describe('Whether to enable immediately after install'),
+  /**
+   * Whether the marketplace channel should enable the package immediately
+   * after it installs it.
+   *
+   * ## This declaration STAYS — it is not the platform install door's key
+   *
+   * Same words, a different commitment, and the difference is the SUBJECT of
+   * the request it sits on. This request names a marketplace LISTING
+   * (`listingId`, `version`, `licenseKey`, `tenantId`); the platform install
+   * door's request (`PackageInstallRequestSchema`, `src/api/package-api.zod.ts`)
+   * names a MANIFEST. They are not two spellings of one body — nothing can
+   * send one where the other is expected.
+   *
+   * The doors differ too. This one is the control plane's
+   * `POST /api/v1/marketplace/install`; a runtime mounts `/api/v1/marketplace/*`
+   * only as a read-only proxy to the configured control plane
+   * (`MarketplaceProxyPlugin`, `docs/design/marketplace-publishing.md` §4.2).
+   * That channel resolves the artefact and validates the licence, and only
+   * then maps what it holds into a platform install (§4.3) — so this key is
+   * what a caller asks the MARKETPLACE to request on its behalf, one
+   * translation upstream of the door key, not the door key itself.
+   *
+   * ⛔ So it is deliberately NOT folded into the install door's contract. The
+   * two are owned by different parties on different release cadences — this
+   * declaration was `cloud/MarketplaceInstallRequest` before it moved into
+   * this namespace (`scripts/lib/renamed-defs.ts`) — and one shared
+   * declaration would let a narrowing at the platform door silently narrow a
+   * control-plane contract that no PR in this repo can even see.
+   * `src/api/package-install-one-authority.test.ts` pins the difference that
+   * carries this reading, so a later fold cannot be a silent one.
+   *
+   * ## ⭐ Why the 缺省 cell moved here too, on a key that is NOT the door's
+   *
+   * `true` asks the channel to enable, `false` asks it not to, and ABSENT asks
+   * it to leave the package's lifecycle state where it is — a fresh install
+   * lands enabled. That is the same three-state reading the platform door was
+   * ruled onto (batch #157 item 5 letter C, carried onto the declarations by
+   * batch #210 item 4 letter A), and the consistency pin holds all three
+   * declarations to one row per state. ⛔ It is a matrix that moved, not a
+   * fold: what this request means by 「enable」 is still one translation
+   * upstream of the door, and a `.default(true)` here would re-introduce a
+   * value the caller never wrote — this time into a control-plane contract no
+   * PR in this repo can see the other end of.
+   */
+  enableOnInstall: z.boolean().optional()
+    .describe('Whether to enable immediately after install — the marketplace channel\'s own install option, not the platform install-door key (api/PackageInstallRequest); `true` asks the channel to enable, `false` not to, and ABSENT leaves the package\'s current lifecycle state alone'),
 
   /** Artifact reference (resolved from listing version, or provided directly) */
   artifactRef: ArtifactReferenceSchema.optional()

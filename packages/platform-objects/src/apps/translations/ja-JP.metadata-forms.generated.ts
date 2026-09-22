@@ -56,6 +56,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "説明",
         helpText: "開発者向けドキュメント"
       },
+      nameField: {
+        label: "レコードタイトル項目",
+        helpText: "各レコードのタイトルに使う項目（例: \"name\"、\"subject\"）。ADR-0079 の正規ポインタで、レコード表示・ObjectQL 検索・関連レコードのプレビューが参照します。"
+      },
       isSystem: {
         label: "システム組み込み",
         helpText: "システムオブジェクト（削除から保護。共有の既定は公開）"
@@ -109,8 +113,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "新規レコードの既定値（JSON リテラル）"
       },
       "fields.placeholder": {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+        label: "プレースホルダー",
+        helpText: "空の入力欄の内側に表示されるヒント文言。値を入力すると消えます"
       },
       "fields.maxLength": {
         label: "最大長",
@@ -121,12 +125,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "最小文字数"
       },
       "fields.valueDomain": {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+        label: "値ドメイン",
+        helpText: "書き込む値が属していなければならない標準。メンバー以外の値を含む書き込みは拒否されます"
       },
       "fields.rows": {
-        label: "Rows",
-        helpText: "Inline editor height (text rows)"
+        label: "行数",
+        helpText: "インライン編集欄の高さ（テキスト行数）"
       },
       "fields.min": {
         label: "最小値",
@@ -165,44 +169,44 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "対象オブジェクト名。tree フィールドでは省略可能で、指定する場合はこのオブジェクト自身でなければなりません（ツリーは同一オブジェクト内の階層です — 別のオブジェクトへリンクする場合は lookup を使います）"
       },
       "fields.lookupFilters": {
-        label: "Lookup Filters",
-        helpText: "Filter rules applied to the picker ({field, operator, value})"
+        label: "Lookup フィルター",
+        helpText: "ピッカーに適用されるフィルタールール（{field, operator, value}）"
       },
       "fields.deleteBehavior": {
-        label: "Delete Behavior",
-        helpText: "What happens when the referenced record is deleted"
+        label: "削除動作",
+        helpText: "参照先レコード削除時の動作"
       },
       "fields.multiple": {
         label: "複数選択",
         helpText: "複数レコードの選択を許可"
       },
       "fields.expression": {
-        label: "Expression",
-        helpText: "CEL formula expression"
+        label: "式",
+        helpText: "CEL 数式"
       },
       "fields.returnType": {
         label: "戻り値の型",
         helpText: "公式の結果型"
       },
       "fields.summaryOperations": {
-        label: "Summary Operations",
-        helpText: "Roll-up: which child object, which field, which aggregation"
+        label: "集計操作",
+        helpText: "ロールアップ：どの子オブジェクトの、どのフィールドを、どの集計関数で"
       },
       "fields.summaryOperations.object": {
-        label: "Object",
-        helpText: "Source child object name"
+        label: "オブジェクト",
+        helpText: "集計元の子オブジェクト名"
       },
       "fields.summaryOperations.field": {
-        label: "Field",
-        helpText: "Field on the child object to aggregate (ignored for count)"
+        label: "フィールド",
+        helpText: "集計対象となる子オブジェクトのフィールド（count では無視）"
       },
       "fields.summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "関数",
+        helpText: "集計関数"
       },
       "fields.autonumberFormat": {
-        label: "Autonumber Format",
-        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
+        label: "自動採番フォーマット",
+        helpText: "例: \"INV-{0000}\"。日付トークン {YYYY}/{MM}/{DD} と {field_name} の補間に対応"
       },
       "fields.language": {
         label: "言語",
@@ -213,113 +217,133 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "レコードのアクティビティタイムラインでこのフィールドを要約する"
       },
       "fields.visibleWhen": {
-        label: "Visible When",
-        helpText: "CEL predicate — field is shown only when TRUE"
+        label: "表示条件",
+        helpText: "CEL 述語 — TRUE の場合のみフィールドを表示"
       },
       "fields.readonlyWhen": {
-        label: "Readonly When",
-        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
+        label: "読み取り専用条件",
+        helpText: "CEL 述語 — TRUE の場合フィールドは読み取り専用（サーバー側で強制）"
       },
       "fields.requiredWhen": {
-        label: "Required When",
-        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
+        label: "必須条件",
+        helpText: "CEL 述語 — TRUE の場合フィールドは必須（サーバー側で強制）"
       },
       enable: {
-        label: "Enable",
-        helpText: "Enable/disable system features"
+        label: "有効化",
+        helpText: "システム機能の有効/無効"
       },
       "enable.trackHistory": {
-        label: "Track History"
+        label: "履歴追跡"
       },
       "enable.searchable": {
-        label: "Searchable"
+        label: "検索可能"
       },
       "enable.apiEnabled": {
-        label: "Api Enabled"
+        label: "API 有効"
       },
       "enable.files": {
-        label: "Files"
+        label: "ファイル"
       },
       "enable.feeds": {
-        label: "Feeds"
+        label: "フィード"
       },
       "enable.activities": {
-        label: "Activities"
+        label: "アクティビティ"
       },
       "enable.clone": {
-        label: "Clone"
+        label: "クローン"
       },
       validations: {
-        label: "Validations",
-        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+        label: "検証ルール",
+        helpText: "オブジェクトレベルの検証ルール — ルールオブジェクトの配列。例: [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。ステートマシンの遷移テーブルもここで宣言します（ADR-0020）"
       },
       datasource: {
         label: "データソース",
         helpText: "対象データソース ID（既定: \"default\"）"
       },
+      ownership: {
+        label: "所有権モデル",
+        helpText: "レコードの所有権モデル。未設定の場合は user として解決されます。"
+      },
+      sharingModel: {
+        label: "共有モデル",
+        helpText: "社内ユーザー向けの組織既定のレコード可視性（OWD）。カスタムオブジェクトで省略した場合、実行時は private として解決されます（ADR-0090 D1）。"
+      },
+      managedBy: {
+        label: "ライフサイクル区分",
+        helpText: "ライフサイクル区分: platform（ユーザーによる CRUD）、config（管理者が記述）、system-data（プラットフォーム定義のスキーマで、データは管理者／ユーザーが書き込み可）、engine-owned（エンジン所有、ユーザー書き込み不可）、append-only（監査）、better-auth（ID）。UI クライアントはこの値から CRUD の可否を導くため、このオブジェクトのレコードでユーザーに何が提供されるかを決めます。"
+      },
+      editMode: {
+        label: "編集の開き方",
+        helpText: "このオブジェクトのレコードを編集するときの操作意図。未設定ならレンダラー側の既定に従います。スタイルではなく、レンダラー横断の意図表明です。"
+      },
+      fileAccessDelegate: {
+        label: "ファイルアクセス委譲サービス",
+        helpText: "このオブジェクトのメディア項目が持つファイルのダウンロードを認可するカーネルサービス。指定すると「呼び出し元がそのレコードを読めるか」では判定しなくなります。アクセスがサービスによって仲介されるオブジェクト向けで、判定できない場合は拒否します。"
+      },
       lifecycle: {
-        label: "Lifecycle",
-        helpText: "Data lifecycle contract (ADR-0057): how long rows live and how space is reclaimed. Leave empty for permanent record semantics. Non-record classes require at least one bounding policy (retention, TTL, or rotation)."
+        label: "データライフサイクル",
+        helpText: "データライフサイクルのコントラクト（ADR-0057）: 行をどれだけ保持し、容量をどう回収するか。空欄の場合は永続的な record セマンティクスになります。record 以外のクラスは、少なくとも 1 つの境界ポリシー（保持期間、TTL、ローテーション）を宣言する必要があります。"
       },
       "lifecycle.class": {
-        label: "Class",
-        helpText: "Persistence contract for the rows of this object"
+        label: "ライフサイクルクラス",
+        helpText: "このオブジェクトの行の永続化コントラクト"
       },
       "lifecycle.retention": {
-        label: "Retention",
-        helpText: "Age-based retention window"
+        label: "保持期間",
+        helpText: "行の経過時間にもとづく保持ウィンドウ"
       },
       "lifecycle.retention.maxAge": {
-        label: "Max Age",
-        helpText: "Rows older than this (by created_at) are reaped. Duration literal: h/d/w/y, e.g. \"30d\""
+        label: "最大経過時間",
+        helpText: "これより古い行（created_at 基準）は削除されます。期間リテラル: h/d/w/y、例: \"30d\""
       },
       "lifecycle.ttl": {
-        label: "Ttl",
-        helpText: "Per-row TTL expiry"
+        label: "TTL 期限切れ",
+        helpText: "行ごとの TTL による期限切れ"
       },
       "lifecycle.ttl.field": {
-        label: "Field",
-        helpText: "Timestamp field the TTL is measured from (e.g. expires_at)"
+        label: "タイムスタンプフィールド",
+        helpText: "TTL の起点となるタイムスタンプフィールド（例: expires_at）"
       },
       "lifecycle.ttl.expireAfter": {
-        label: "Expire After",
-        helpText: "Rows expire this long after the field, e.g. \"1d\""
+        label: "期限切れまでの期間",
+        helpText: "行はこのフィールドの時刻からこの期間が経過すると期限切れになります。例: \"1d\""
       },
       "lifecycle.storage": {
-        label: "Storage",
-        helpText: "Physical rotation for high-frequency telemetry (SQLite: O(1) shard DROP)"
+        label: "ストレージ",
+        helpText: "高頻度テレメトリー向けの物理ローテーション（SQLite: O(1) のシャード DROP）"
       },
       "lifecycle.storage.strategy": {
-        label: "Strategy",
-        helpText: "Storage strategy"
+        label: "戦略",
+        helpText: "ストレージ戦略"
       },
       "lifecycle.storage.shards": {
-        label: "Shards",
-        helpText: "Shards retained; total window = shards × unit"
+        label: "シャード数",
+        helpText: "保持するシャード数。合計ウィンドウ = シャード数 × 単位"
       },
       "lifecycle.storage.unit": {
-        label: "Unit",
-        helpText: "Time width of one shard"
+        label: "シャード単位",
+        helpText: "シャード 1 つあたりの時間幅"
       },
       "lifecycle.archive": {
-        label: "Archive",
-        helpText: "Cold-store hand-off (audit class). Rows are never hot-deleted before the archive copy succeeded."
+        label: "アーカイブ",
+        helpText: "コールドストレージへの引き渡し（audit クラス）。アーカイブのコピーが成功する前に、行がホット側から削除されることはありません。"
       },
       "lifecycle.archive.after": {
-        label: "After",
-        helpText: "Archive rows older than this — must equal retention.maxAge"
+        label: "アーカイブ対象の経過時間",
+        helpText: "これより古い行をアーカイブします — retention.maxAge と一致している必要があります"
       },
       "lifecycle.archive.to": {
-        label: "To",
-        helpText: "Target datasource name for cold storage"
+        label: "アーカイブ先データソース",
+        helpText: "コールドストレージ用の対象データソース名"
       },
       "lifecycle.archive.keep": {
-        label: "Keep",
-        helpText: "How long the archive keeps rows (empty = forever), e.g. \"7y\""
+        label: "アーカイブ保持期間",
+        helpText: "アーカイブが行を保持する期間（空欄 = 無期限）。例: \"7y\""
       },
       "lifecycle.reclaim": {
-        label: "Reclaim",
-        helpText: "Reclaim driver space after sweeps (default on for non-record classes)"
+        label: "容量の回収",
+        helpText: "スイープ後にドライバーの容量を回収します（record 以外のクラスでは既定で有効）"
       }
     }
   },
@@ -381,8 +405,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "新規レコードの既定値"
       },
       placeholder: {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
+        label: "プレースホルダー",
+        helpText: "空の入力欄の内側に表示されるヒント文言（値を入力すると消えます）。常時表示のヘルプには inlineHelpText を使用します"
+      },
+      inlineHelpText: {
+        label: "常時表示のヘルプ",
+        helpText: "入力欄の下に常に表示されるヘルプ。値を入力すると消える `placeholder` とは異なります。"
       },
       minLength: {
         label: "最小長",
@@ -393,12 +421,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "最大文字数"
       },
       valueDomain: {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
+        label: "値ドメイン",
+        helpText: "書き込む値が属していなければならない標準：iana_time_zone、iso_4217_currency または iso_3166_alpha2。メンバー以外の値を含む書き込みは拒否されます"
       },
       rows: {
-        label: "Rows",
-        helpText: "Inline editor height in text rows"
+        label: "行数",
+        helpText: "インライン編集欄の高さ（テキストの行数）"
       },
       min: {
         label: "最小値",
@@ -416,9 +444,51 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "小数桁",
         helpText: "小数部の桁数"
       },
+      step: {
+        label: "ステップ値",
+        helpText: "スライダーのステップ増分（既定は 1）。レンダラー専用で、書き込み経路はステップから外れた値を拒否しません。"
+      },
+      maxSize: {
+        label: "最大ファイルサイズ",
+        helpText: "許可する最大ファイルサイズ（バイト単位の正の整数）。書き込み時にサーバー側で保存済みのファイルサイズと照合します。サイズが記録されていないファイルは判定対象になりません。"
+      },
+      dimensions: {
+        label: "ベクトル次元数",
+        helpText: "ベクトルの次元数 — 1 から 10000 までの整数（例: OpenAI の埋め込みは 1536）。"
+      },
+      language: {
+        label: "コード言語",
+        helpText: "エディタのシンタックスハイライトに使う言語（例: javascript、python、sql）。"
+      },
+      autonumberFormat: {
+        label: "自動採番フォーマット",
+        helpText: "リテラル文字列に加えて、{0000} のカウンター、業務タイムゾーンで評価される {YYYY}/{MM}/{DD}/{YYYYMMDD} の日付トークン、{field_name} による項目埋め込みが使えます。カウンターは描画された接頭辞ごとにリセットされます。autonumber 項目で省略した場合の既定は {0000} です。"
+      },
+      referenceVia: {
+        label: "ポリモーフィック参照の相棒項目",
+        helpText: "このテキスト項目をポリモーフィック参照の id 側にします。ここには、対象オブジェクト名を行ごとに保持する同一オブジェクト上の別項目名を指定します（ADR-0052 §5）。snake_case で記述し、テキスト項目のみ、`reference` とは併用できません。"
+      },
       options: {
         label: "選択肢",
         helpText: "使用可能な選択肢（label/value ペア）"
+      },
+      "options.label": {
+        label: "表示名"
+      },
+      "options.value": {
+        label: "値"
+      },
+      "options.description": {
+        label: "説明"
+      },
+      "options.color": {
+        label: "色"
+      },
+      "options.default": {
+        label: "既定の選択肢"
+      },
+      "options.visibleWhen": {
+        label: "表示条件"
       },
       reference: {
         label: "参照",
@@ -429,36 +499,68 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "参照先レコード削除時の動作"
       },
       relatedListFilter: {
-        label: "Related List Filter",
-        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
+        label: "関連リストのフィルター",
+        helpText: "親レコードの詳細ページに表示される、この関係の関連リストの既定フィルター — 親レコードとの一致条件と AND で結合され、タブのバッジも同じ集合を数えます"
+      },
+      displayField: {
+        label: "候補の表示項目",
+        helpText: "ピッカーで各候補のラベルとして表示する項目。省略すると参照先オブジェクト自身のタイトル項目が使われます。"
+      },
+      descriptionField: {
+        label: "候補の補助表示項目",
+        helpText: "クイック選択ポップオーバーでラベルの下に表示する補助項目。"
+      },
+      allowCreate: {
+        label: "その場で新規作成",
+        helpText: "ピッカーで一致が見つからないとき、入力したテキストからレコードを作成できるようにします。必須項目が表示用項目だけのオブジェクトに向いています。"
+      },
+      lookupPageSize: {
+        label: "ピッカーの 1 ページ行数",
+        helpText: "レコードピッカーのダイアログで 1 ページに表示する行数。正の整数で、既定は 10 です。"
+      },
+      relatedListTitle: {
+        label: "関連リストのタイトル",
+        helpText: "親レコードの詳細ページに表示される、この関係の関連リストのタイトル。"
+      },
+      inlineTitle: {
+        label: "インライン表のタイトル",
+        helpText: "親レコードに埋め込まれるマスター／ディテール表のタイトル。"
+      },
+      inlineAmountField: {
+        label: "インライン合計項目",
+        helpText: "インライン表の合計に用いる、子オブジェクト側の数値項目。"
       },
       expression: {
         label: "式",
         helpText: "このフィールドを計算する CEL 式（読み取り専用化）"
+      },
+      returnType: {
+        label: "数式の戻り値型",
+        helpText: "数式が宣言する値の型。推論された CEL の型から記録され、利用側は式を解析し直さずにこの値を読みます。"
       },
       summaryOperations: {
         label: "集計操作",
         helpText: "ロールアップ集計設定（親子関係用）"
       },
       "summaryOperations.object": {
-        label: "Object",
-        helpText: "Child object to aggregate"
+        label: "オブジェクト",
+        helpText: "集計対象の子オブジェクト"
       },
       "summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "関数",
+        helpText: "集計関数"
       },
       "summaryOperations.field": {
-        label: "Field",
-        helpText: "Child field to aggregate (ignored for count)"
+        label: "フィールド",
+        helpText: "集計対象の子オブジェクトのフィールド（count では無視）"
       },
       "summaryOperations.relationshipField": {
-        label: "Relationship Field",
-        helpText: "Child FK back to this parent (auto-detected when omitted)"
+        label: "関係フィールド",
+        helpText: "この親を指し戻す子側の外部キー（省略時は自動検出）"
       },
       "summaryOperations.filter": {
-        label: "Filter",
-        helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
+        label: "フィルター",
+        helpText: "この述語に一致する子行のみが集計されます（例: status == received）"
       },
       externalId: {
         label: "外部 ID",
@@ -483,6 +585,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maskingRule: {
         label: "マスキングルール",
         helpText: "部分マスキング:プリセット('phone'、'id_card'、'bank_account'、'email'、'name')または {\"keepHead\": n, \"keepTail\": m}。フィールドの requiredPermissions を持たない呼び出し元にはマスク値が表示されます"
+      },
+      internal: {
+        label: "外部に返さない",
+        helpText: "この項目の値を汎用データ経路では返しません。エンジンは find／findOne の結果と、作成・更新のレスポンスボディからこのキーを削除します。既定の射影でも、クライアントが ?select= で名指ししたときも同様です。保存・絞り込み・インデックスには影響しません。"
+      },
+      trackHistory: {
+        label: "変更履歴を記録",
+        helpText: "この項目の値の変更を、レコードのアクティビティタイムラインの項目として表示します（ADR-0052 §5b）。項目ごとのオプトインです。"
+      },
+      widget: {
+        label: "ウィジェット指定",
+        helpText: "フォームウィジェットの上書き。登録済みのフィールドコンポーネント名を指定すると、`field:` にその名前をつないだ識別子で解決され、type から決まる既定のコントロールの代わりに描画されます。未登録の名前を書いた場合は type のコントロールに戻ります。"
+      },
+      ackPlaintextMasking: {
+        label: "平文保存を承知する",
+        helpText: "この汎用 password 項目が「保存時は平文、読み取り時はマスク」という契約であることを承知のうえで指定したと表明し、作成時の警告を抑止します（ADR-0100）。他の型には影響しません。"
       }
     }
   },
@@ -541,7 +659,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "関数 body ソース — トップレベル import 不可"
       },
       "body.capabilities": {
-        label: "機能",
+        label: "ケイパビリティ",
         helpText: "許可する ctx API（api.read, api.write, crypto.uuid, log, …）"
       },
       "body.timeoutMs": {
@@ -549,8 +667,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "呼び出しごとのタイムアウト（ms）"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "メモリ（MB）",
+        helpText: "呼び出しごとのメモリ上限（MB、最大 256）"
       },
       handler: {
         label: "ハンドラー",
@@ -564,8 +682,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "エラー時"
       },
       timeoutMs: {
-        label: "Timeout Ms",
-        helpText: "Abort the hook after N milliseconds"
+        label: "タイムアウト（ms）",
+        helpText: "N ミリ秒経過後にフックを中止"
       },
       runAs: {
         label: "実行主体",
@@ -576,26 +694,26 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "任意の数式 — false 評価時はフックをスキップ"
       },
       retryPolicy: {
-        label: "Retry Policy",
-        helpText: "Retry on failure — most useful for async hooks"
+        label: "再試行ポリシー",
+        helpText: "失敗時に再試行 — 非同期フックで特に有用"
       },
       "retryPolicy.maxRetries": {
-        label: "Max Retries",
-        helpText: "Maximum retry attempts"
+        label: "最大再試行回数",
+        helpText: "再試行の最大回数"
       },
       "retryPolicy.backoffMs": {
-        label: "Backoff Ms",
-        helpText: "Delay between retries (ms)"
+        label: "バックオフ（ms）",
+        helpText: "再試行間の遅延（ms）"
       }
     }
   },
   seed: {
-    label: "Seed Data",
-    description: "Fixture / initialization data applied on publish"
+    label: "シードデータ",
+    description: "公開時に適用されるフィクスチャ／初期化データ"
   },
   mapping: {
-    label: "Import Mapping",
-    description: "Reusable import/export field mapping (rename + transforms), referenced by name at import"
+    label: "インポートマッピング",
+    description: "再利用可能なインポート／エクスポートのフィールドマッピング（リネーム + 変換）。インポート時に名前で参照します"
   },
   view: {
     label: "ビュー",
@@ -719,7 +837,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userFilters: {
         label: "ユーザーフィルター",
-        helpText: "クイックフィルターバー：要素スタイル（ドロップダウン / タブ / トグル）+ 公開フィールドまたはタブプリセット"
+        helpText: "クイックフィルターバー：要素スタイル（dropdown / tabs / toggle）+ 公開フィールドまたはタブプリセット"
       },
       tabs: {
         label: "タブ",
@@ -763,8 +881,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "ページ領域とそこに配置するコンポーネント。"
       },
       interface: {
-        label: "Interface (list pages)",
-        description: "Interface mode (Airtable parity): the page defines its own data surface directly — columns, filters, visualizations and toolbar — no inheriting from a separate view."
+        label: "Interface（リストページ）",
+        description: "Interface モード（Airtable 互換）：ページが自身のデータサーフェスを直接定義します——列、フィルター、可視化、ツールバー——独立したビューを継承しません。"
       },
       advanced: {
         label: "詳細",
@@ -796,6 +914,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "説明",
         helpText: "ナビゲーション用ページ説明"
       },
+      source: {
+        label: "ページソース",
+        helpText: "ページのソーステキスト。kind が 'html'（別名 'jsx'）の場合は制約付きの JSX で、保存時にコンポーネントツリーへコンパイルされます（解析のみで、実行はしません）。kind が 'react' の場合は本物の React で、信頼済みランタイムが描画時に実行します。"
+      },
       object: {
         label: "オブジェクト",
         helpText: "バインド先オブジェクト（Record ページ用）"
@@ -817,68 +939,83 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "初期値（未指定の場合は型に応じた空の値）"
       },
       "variables.source": {
-        label: "ソース",
+        label: "書き込み元",
         helpText: "この変数に書き込むコンポーネント（id 指定）— 例: element:record_picker"
       },
       regions: {
         label: "リージョン",
         helpText: "コンポーネントを含むレイアウト領域（header, main, sidebar, footer）"
       },
+      "regions.name": {
+        label: "リージョン"
+      },
+      "regions.width": {
+        label: "幅"
+      },
+      "regions.components": {
+        label: "コンポーネント"
+      },
       interfaceConfig: {
-        label: "Interface Config",
-        helpText: "The page IS the view: source picks the object, columns/filterBy are defined directly here; appearance.allowedVisualizations whitelists renderers (one entry = locked); userActions toggles the toolbar."
+        label: "Interface 設定",
+        helpText: "ページ自体がビューです：source でオブジェクトを選び、columns/filterBy はここで直接定義します。appearance.allowedVisualizations が使用可能なレンダラーを限定し（1 件のみならロック）、userActions がツールバーを切り替えます。"
       },
       "interfaceConfig.source": {
-        label: "Source",
-        helpText: "Object this page reads from"
+        label: "ソース",
+        helpText: "このページがデータを読み取るオブジェクト"
       },
       "interfaceConfig.columns": {
-        label: "Columns",
-        helpText: "Columns to show — defined directly on the page (blank = all object fields)"
+        label: "列",
+        helpText: "表示する列——ページ上で直接定義します（空欄はオブジェクトの全フィールド）"
       },
       "interfaceConfig.filterBy": {
-        label: "Filter By",
-        helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+        label: "フィルター条件",
+        helpText: "ページに常時適用される基本フィルター——リストツールバーと同じビジュアルビルダー。"
       },
       "interfaceConfig.sort": {
-        label: "Sort",
-        helpText: "Default sort order for the page, defined directly on the page."
+        label: "並び替え",
+        helpText: "ページの既定の並び順。ページ上で直接定義します。"
+      },
+      "interfaceConfig.sort.field": {
+        label: "フィールド"
+      },
+      "interfaceConfig.sort.order": {
+        label: "並び方向"
       },
       "interfaceConfig.levels": {
-        label: "Levels",
-        helpText: "Hierarchy levels to display (tree-like sources)"
+        label: "階層レベル",
+        helpText: "表示する階層レベル（ツリー状のソース）"
       },
       "interfaceConfig.appearance": {
-        label: "Appearance",
-        helpText: "Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility"
+        label: "外観",
+        helpText: "使用可能な可視化（Grid / Kanban / Calendar / …）と説明の表示可否"
       },
       "interfaceConfig.userFilters": {
-        label: "User Filters",
-        helpText: "End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field). None removes the config."
+        label: "ユーザーフィルター",
+        helpText: "エンドユーザー用フィルターバー：None（バーなし）/ Tabs（名前付きプリセット）/ Dropdown（フィールド単位）。None は設定を削除します。"
       },
       "interfaceConfig.userActions": {
-        label: "User Actions",
-        helpText: "Toolbar toggles (search, sort, filter, row height)"
+        label: "ユーザーアクション",
+        helpText: "ツールバーの切り替え（検索、並べ替え、フィルター、行の高さ）"
       },
       "interfaceConfig.addRecord": {
-        label: "Add Record",
-        helpText: "Add-record entry point"
+        label: "レコードを追加",
+        helpText: "レコード追加の入口"
       },
       "interfaceConfig.buttons": {
-        label: "Buttons",
-        helpText: "Toolbar buttons — pick from this object's actions"
+        label: "ボタン",
+        helpText: "ツールバーのボタン——このオブジェクトのアクションから選択します"
       },
       "interfaceConfig.recordAction": {
-        label: "Record Action",
-        helpText: "How clicking a record opens its detail"
+        label: "レコードアクション",
+        helpText: "レコードをクリックしたときに詳細をどう開くか"
       },
       "interfaceConfig.showRecordCount": {
-        label: "Show Record Count",
-        helpText: "Show the record count bar"
+        label: "レコード数を表示",
+        helpText: "レコード数バーを表示します"
       },
       "interfaceConfig.allowPrinting": {
-        label: "Allow Printing",
-        helpText: "Allow users to print this page"
+        label: "印刷を許可",
+        helpText: "ユーザーがこのページを印刷できるようにします"
       },
       isDefault: {
         label: "既定",
@@ -974,6 +1111,57 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ウィジェット",
         helpText: "位置とサイズを持つダッシュボードウィジェット"
       },
+      "widgets.id": {
+        label: "ウィジェット ID"
+      },
+      "widgets.title": {
+        label: "タイトル"
+      },
+      "widgets.description": {
+        label: "説明"
+      },
+      "widgets.type": {
+        label: "可視化タイプ"
+      },
+      "widgets.chartConfig": {
+        label: "チャート設定"
+      },
+      "widgets.colorVariant": {
+        label: "カラーバリアント"
+      },
+      "widgets.requiresObject": {
+        label: "必要なオブジェクト"
+      },
+      "widgets.requiresService": {
+        label: "必要なサービス"
+      },
+      "widgets.filter": {
+        label: "フィルター"
+      },
+      "widgets.compareTo": {
+        label: "比較期間"
+      },
+      "widgets.dataset": {
+        label: "データセット"
+      },
+      "widgets.dimensions": {
+        label: "ディメンション"
+      },
+      "widgets.values": {
+        label: "メジャー"
+      },
+      "widgets.layout": {
+        label: "レイアウト"
+      },
+      "widgets.options": {
+        label: "選択肢"
+      },
+      "widgets.filterBindings": {
+        label: "フィルターの紐付け"
+      },
+      "widgets.suppressWarnings": {
+        label: "抑制する警告"
+      },
       dateRange: {
         label: "日付範囲",
         helpText: "既定の日付範囲セレクター"
@@ -981,6 +1169,36 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       globalFilters: {
         label: "グローバルフィルター",
         helpText: "全ウィジェットに適用するフィルター"
+      },
+      "globalFilters.name": {
+        label: "名前"
+      },
+      "globalFilters.field": {
+        label: "フィールド"
+      },
+      "globalFilters.object": {
+        label: "オブジェクト"
+      },
+      "globalFilters.label": {
+        label: "表示名"
+      },
+      "globalFilters.type": {
+        label: "入力タイプ"
+      },
+      "globalFilters.options": {
+        label: "選択肢"
+      },
+      "globalFilters.optionsFrom": {
+        label: "選択肢の取得元"
+      },
+      "globalFilters.defaultValue": {
+        label: "既定値"
+      },
+      "globalFilters.scope": {
+        label: "スコープ"
+      },
+      "globalFilters.targetWidgets": {
+        label: "対象ウィジェット"
       }
     }
   },
@@ -1030,6 +1248,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "既定",
         helpText: "新規ユーザーの既定アプリにする"
       },
+      hidden: {
+        label: "アプリスイッチャーで非表示",
+        helpText: "このアプリをアプリスイッチャーに出さず、シェルはアバターメニューから表示します。ナビゲーションだけの設定で、非表示のアプリも通常どおりルーティングされ権限チェックも行われます。"
+      },
       navigation: {
         label: "ナビゲーション",
         helpText: "ナビツリー — 再帰構造"
@@ -1037,6 +1259,21 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       areas: {
         label: "領域",
         helpText: "項目を折りたたみ可能なエリアにグループ化"
+      },
+      "areas.id": {
+        label: "エリア ID"
+      },
+      "areas.label": {
+        label: "表示名"
+      },
+      "areas.icon": {
+        label: "アイコン"
+      },
+      "areas.description": {
+        label: "説明"
+      },
+      "areas.navigation": {
+        label: "ナビゲーション"
       },
       defaultAgent: {
         label: "既定エージェント",
@@ -1097,6 +1334,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ボタン種別",
         helpText: "ボタンスタイル（primary=blue, danger=red, ghost=transparent）"
       },
+      mode: {
+        label: "セマンティックモード",
+        helpText: "このアクションの意味上のモード。現在読んでいるのは AI の人手確認（HITL）ヒューリスティックだけで、レンダラーはこの値で分岐しません。"
+      },
+      order: {
+        label: "並び順",
+        helpText: "同じ配置グループ内での並び順。値が小さいほど前に出て、レコードヘッダーは先頭のものを主ボタンにします。未設定の場合は登録順のままです。"
+      },
       target: {
         label: "ターゲット",
         helpText: "呼び出す URL、フロー名、または API エンドポイント"
@@ -1110,28 +1355,94 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "L1 式または L2 サンドボックス JS body"
       },
       "body.language": {
-        label: "Language",
-        helpText: "expression = pure formula; js = sandboxed JavaScript"
+        label: "言語",
+        helpText: "expression = 純粋な数式; js = サンドボックス化 JavaScript"
       },
       "body.source": {
-        label: "Source",
-        helpText: "Function body source — no top-level imports"
+        label: "ソース",
+        helpText: "関数 body ソース — トップレベル import 不可"
       },
       "body.capabilities": {
-        label: "Capabilities",
-        helpText: "Allowed ctx APIs (api.read, api.write, crypto.uuid, log, …)"
+        label: "ケイパビリティ",
+        helpText: "許可する ctx API（api.read, api.write, crypto.uuid, log, …）"
       },
       "body.timeoutMs": {
-        label: "Timeout Ms",
-        helpText: "Per-invocation timeout (ms)"
+        label: "タイムアウト（ms）",
+        helpText: "呼び出しごとのタイムアウト（ms）"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "メモリ（MB）",
+        helpText: "呼び出しごとのメモリ上限（MB、最大 256）"
       },
       params: {
         label: "パラメーター",
         helpText: "ユーザー入力パラメーター（実行前にフォームを表示）"
+      },
+      "params.name": {
+        label: "名前"
+      },
+      "params.field": {
+        label: "フィールド"
+      },
+      "params.objectOverride": {
+        label: "オブジェクトの上書き"
+      },
+      "params.label": {
+        label: "表示名"
+      },
+      "params.type": {
+        label: "型"
+      },
+      "params.required": {
+        label: "必須"
+      },
+      "params.options": {
+        label: "選択肢"
+      },
+      "params.placeholder": {
+        label: "プレースホルダー"
+      },
+      "params.helpText": {
+        label: "ヘルプテキスト"
+      },
+      "params.defaultValue": {
+        label: "既定値"
+      },
+      "params.multiple": {
+        label: "複数選択"
+      },
+      "params.accept": {
+        label: "許可するタイプ"
+      },
+      "params.maxSize": {
+        label: "最大サイズ（バイト）"
+      },
+      "params.reference": {
+        label: "参照オブジェクト"
+      },
+      "params.defaultFromRow": {
+        label: "行から既定値を取得"
+      },
+      "params.carryOver": {
+        label: "値の引き継ぎ"
+      },
+      "params.visible": {
+        label: "表示条件"
+      },
+      "params.requiresFeature": {
+        label: "必要な機能"
+      },
+      operation: {
+        label: "宣言的な書き込み",
+        helpText: "単一レコードに対する宣言的な項目書き込み。'update' は `patch`（収集された `params` の下にマージされます）を現在のレコードに適用します。実行は呼び出し元の権限のままで、システム権限に昇格しません。したがって呼び出し元の権限・オブジェクトのフック・バリデーションは、ユーザーが編集した場合と同じように動作します。"
+      },
+      undoable: {
+        label: "取り消し可能",
+        helpText: "更新が成功した後に「元に戻す」操作を提示します。取り消しが保持するのは、このアクションが書き込むすべての項目の変更前の値、すなわち `params` の下にマージされた `patch` という書き込み一式です。`operation` を宣言していないアクションは書き込み一式を持たないため、保持する対象がありません。"
+      },
+      execution: {
+        label: "一括ディスパッチ契約",
+        helpText: "このアクションの本体が前提とする一括ディスパッチの契約です。'perRecord' は選択された行ごとに 1 回ずつ、その行の recordId を添えてディスパッチします。'aggregate' は選択全体で 1 回だけディスパッチし、すべての id を params._selectedIds に入れて渡します。省略した場合はレコードごとのディスパッチになります。"
       },
       confirmText: {
         label: "確認文",
@@ -1144,6 +1455,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       refreshAfter: {
         label: "完了後に更新",
         helpText: "アクション完了後にリスト/ページを更新"
+      },
+      openIn: {
+        label: "リンクを開く場所",
+        helpText: "静的な `target` URL をどこで開くか。'self' はその場で遷移し、'new-tab' は新しいブラウザタブで開きます。省略した場合、絶対 URL や外部 URL は新しいタブで開き、相対 URL はその場で遷移します。"
+      },
+      opensInNewTab: {
+        label: "結果を新しいタブで開く",
+        helpText: "アクションの実行結果を新しいタブで開きます。レンダラーはクリック時に同期的にタブを先に開き（ポップアップブロックを回避します）、ハンドラーが返す redirectUrl へ遷移させます。静的な URL の行き先を決める `openIn` とは別物です。"
+      },
+      newTabUrl: {
+        label: "新しいタブの URL テンプレート",
+        helpText: "新しいタブで直接開く URL テンプレート。{recordId} プレースホルダーが使えます。`opensInNewTab` と併せて設定すると、レンダラーは先に開いたタブをただちにここへ遷移させ、アクションの POST は行いません。したがってこのエンドポイントは自前で認証を強制する必要があります。"
       },
       locations: {
         label: "表示位置",
@@ -1161,9 +1484,13 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "無効",
         helpText: "CEL 式: 条件が true の場合に無効化"
       },
+      requiresFeature: {
+        label: "必要な認証機能",
+        helpText: "このアクションの表示可否を決める公開認証機能フラグ。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
+      },
       ai: {
-        label: "Ai",
-        helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
+        label: "AI 公開",
+        helpText: "AI 公開（オプトイン）: ai.exposed=true を設定し、ai.description（≥40 文字）を記述すると、エージェントから呼び出せるようになります。"
       },
       recordIdParam: {
         label: "レコード ID パラメーター",
@@ -1187,8 +1514,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "ID とレポートタイプ。"
       },
       dataset_binding: {
-        label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        label: "データセットのバインド",
+        description: "このレポートがレンダリングするセマンティックレイヤーのデータセット。メジャーと行は、それぞれこのデータセットのメジャーとディメンションから取得します。"
       },
       joined_blocks: {
         label: "結合ブロック",
@@ -1215,16 +1542,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "レポート種別: tabular/summary/matrix/joined"
       },
       dataset: {
-        label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        label: "データセット",
+        helpText: "バインドするデータセット（メジャー/ディメンションはセマンティックレイヤーから取得）"
       },
       values: {
-        label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        label: "メジャー",
+        helpText: "表示するメジャー名（データセットから取得）"
       },
       rows: {
-        label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        label: "行",
+        helpText: "行をグループ化するディメンション名（データセットから取得）"
       },
       columns: {
         label: "列",
@@ -1234,17 +1561,56 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "並び順",
         helpText: "ソートキー（優先度の高い順）。rows/columns のディメンション、または values のメジャーを指定します。時間ディメンションは既定で時系列順です。"
       },
+      "order.by": {
+        label: "並び替えキー"
+      },
+      "order.direction": {
+        label: "並び方向"
+      },
       drilldown: {
-        label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        label: "ドリルダウン",
+        helpText: "集計された行/セルをクリックして、元になったレコードを開きます"
       },
       blocks: {
         label: "ブロック",
         helpText: "複数オブジェクトを結合（joined レポートのみ）"
       },
+      "blocks.name": {
+        label: "名前"
+      },
+      "blocks.label": {
+        label: "表示名"
+      },
+      "blocks.description": {
+        label: "説明"
+      },
+      "blocks.type": {
+        label: "ブロックタイプ"
+      },
+      "blocks.chart": {
+        label: "チャート"
+      },
+      "blocks.dataset": {
+        label: "データセット"
+      },
+      "blocks.rows": {
+        label: "行"
+      },
+      "blocks.columns": {
+        label: "列"
+      },
+      "blocks.values": {
+        label: "メジャー"
+      },
+      "blocks.runtimeFilter": {
+        label: "実行時フィルター"
+      },
+      "blocks.order": {
+        label: "並び順"
+      },
       runtimeFilter: {
-        label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        label: "実行時フィルター",
+        helpText: "レンダリング時のスコープフィルター。クエリ時に AND で結合されます"
       },
       chart: {
         label: "チャート",
@@ -1253,58 +1619,97 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   dataset: {
-    label: "Dataset",
-    description: "Analytics semantic layer — dimensions & measures",
+    label: "データセット",
+    description: "分析セマンティックレイヤー — ディメンションとメジャー",
     sections: {
       basics: {
-        label: "Basics",
-        description: "Dataset identity."
+        label: "基本",
+        description: "データセットの識別情報。"
       },
       source: {
-        label: "Source",
-        description: "The base object, the relationships to join, and the dataset’s intrinsic scope. Joins are derived from the object graph — pick relationship (lookup / master_detail) names, never write an ON clause."
+        label: "ソース",
+        description: "ベースオブジェクト、結合する関係、そしてデータセット固有のスコープ。結合はオブジェクトグラフから導出されます — 関係（lookup / master_detail）の名前を選択し、ON 句は記述しません。"
       },
       dimensions: {
-        label: "Dimensions",
-        description: "Groupable axes. Use a base field, or `relationship.field` (e.g. account.region) for a relationship included above."
+        label: "ディメンション",
+        description: "グループ化できる軸。ベースオブジェクトのフィールド、または上で含めた関係に対しては `relationship.field`（例: account.region）を使用します。"
       },
       measures: {
-        label: "Measures",
-        description: "Aggregatable values defined once and referenced by name. A measure is sum/avg/count/… of a field; a derived measure combines other measures (ratio/sum/difference/product). Measure-scoped filters and derived ops are edited per-row in the dataset designer."
+        label: "メジャー",
+        description: "一度定義すれば名前で参照できる集計可能な値。メジャーはフィールドの sum/avg/count/… であり、派生メジャーは他のメジャーを組み合わせます（ratio/sum/difference/product）。メジャー単位のフィルターと派生演算はデータセットデザイナーで行ごとに編集します。"
       }
     },
     fields: {
       name: {
-        label: "Name",
-        helpText: "snake_case unique identifier"
+        label: "名前",
+        helpText: "snake_case の一意識別子"
       },
       label: {
-        label: "Label",
-        helpText: "Display name"
+        label: "表示名",
+        helpText: "表示名"
       },
       description: {
-        label: "Description",
-        helpText: "What this dataset measures"
+        label: "説明",
+        helpText: "このデータセットが測定する内容"
       },
       object: {
-        label: "Object",
-        helpText: "Base object — the FROM"
+        label: "オブジェクト",
+        helpText: "ベースオブジェクト — FROM に相当"
       },
       include: {
-        label: "Include",
-        helpText: "Relationship (lookup / master_detail) field names to join — enables `relationship.field` dimensions/measures (e.g. include \"account\" → group by account.region)"
+        label: "含める関係",
+        helpText: "結合する関係（lookup / master_detail）のフィールド名 — `relationship.field` のディメンション/メジャーを有効にします（例: include \"account\" → account.region でグループ化）"
       },
       filter: {
-        label: "Filter",
-        helpText: "Intrinsic scope filter (e.g. exclude soft-deleted records), ANDed into every query"
+        label: "フィルター",
+        helpText: "固有スコープのフィルター（例: 論理削除済みレコードを除外）。すべてのクエリに AND で結合されます"
       },
       dimensions: {
-        label: "Dimensions",
-        helpText: "Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity"
+        label: "ディメンション",
+        helpText: "各ディメンション：名前（プレゼンテーションから参照）、フィールド、型、日付の場合は既定のバケット粒度"
+      },
+      "dimensions.name": {
+        label: "名前"
+      },
+      "dimensions.label": {
+        label: "表示名"
+      },
+      "dimensions.field": {
+        label: "フィールド"
+      },
+      "dimensions.type": {
+        label: "型"
+      },
+      "dimensions.dateGranularity": {
+        label: "日付の粒度"
       },
       measures: {
-        label: "Measures",
+        label: "メジャー",
         helpText: "各メジャー：名前、集計関数、フィールド（count の場合は省略可）、表示形式/通貨"
+      },
+      "measures.name": {
+        label: "名前"
+      },
+      "measures.label": {
+        label: "表示名"
+      },
+      "measures.aggregate": {
+        label: "集計関数"
+      },
+      "measures.field": {
+        label: "フィールド"
+      },
+      "measures.filter": {
+        label: "フィルター"
+      },
+      "measures.format": {
+        label: "フォーマット"
+      },
+      "measures.currency": {
+        label: "通貨"
+      },
+      "measures.derived": {
+        label: "派生元"
       }
     }
   },
@@ -1345,13 +1750,79 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ノード",
         helpText: "⚠️ JSON ではなく Flow Designer ビジュアルエディターの利用を検討"
       },
+      "nodes.id": {
+        label: "ノード ID"
+      },
+      "nodes.type": {
+        label: "ノードタイプ"
+      },
+      "nodes.label": {
+        label: "表示名"
+      },
+      "nodes.config": {
+        label: "設定"
+      },
+      "nodes.connectorConfig": {
+        label: "コネクタ操作"
+      },
+      "nodes.position": {
+        label: "キャンバス位置"
+      },
+      "nodes.timeoutMs": {
+        label: "タイムアウト（ms）"
+      },
+      "nodes.inputSchema": {
+        label: "入力スキーマ"
+      },
+      "nodes.waitEventConfig": {
+        label: "待機イベント"
+      },
+      "nodes.boundaryConfig": {
+        label: "境界イベント"
+      },
       edges: {
         label: "エッジ",
         helpText: "ノード間の接続 — 編集しやすい Flow Designer を使用"
       },
+      "edges.id": {
+        label: "エッジ ID"
+      },
+      "edges.source": {
+        label: "開始ノード"
+      },
+      "edges.target": {
+        label: "終了ノード"
+      },
+      "edges.condition": {
+        label: "条件"
+      },
+      "edges.type": {
+        label: "接続タイプ"
+      },
+      "edges.label": {
+        label: "表示名"
+      },
+      "edges.isDefault": {
+        label: "既定パス"
+      },
       variables: {
         label: "変数",
         helpText: "フロー変数（inputs/outputs）"
+      },
+      "variables.name": {
+        label: "名前"
+      },
+      "variables.type": {
+        label: "型"
+      },
+      "variables.isInput": {
+        label: "入力"
+      },
+      "variables.isOutput": {
+        label: "出力"
+      },
+      "variables.defaultValue": {
+        label: "既定値"
       },
       status: {
         label: "状態",
@@ -1368,6 +1839,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       errorHandling: {
         label: "エラー処理",
         helpText: "ノード失敗時の処理（fail, retry, continue）"
+      },
+      successMessage: {
+        label: "成功メッセージ",
+        helpText: "フローが正常終了したときに実行結果に載るメッセージ。画面フローの UI は、汎用の「Done」の代わりにこれをトーストで表示します。"
+      },
+      errorMessage: {
+        label: "エラーメッセージ",
+        helpText: "フローが失敗したときに実行結果に載るメッセージ。画面フローの UI は、生のエラーの代わりにこれをトーストで表示します。"
       }
     }
   },
@@ -1381,8 +1860,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "外部カタログ"
   },
   api: {
-    label: "API Endpoint",
-    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+    label: "API エンドポイント",
+    description: "宣言的な HTTP エンドポイント — 既存のパイプラインの上に安定した URL とポリシー層を提供（ADR-0121）"
   },
   translation: {
     label: "翻訳"
@@ -1447,7 +1926,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       variables: {
         label: "変数",
-        helpText: "[{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
+        helpText: "例: [{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
       },
       fromOverride: {
         label: "送信者オーバーライド",
@@ -1468,12 +1947,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   doc: {
-    label: "Documentation",
-    description: "Package documentation — flat Markdown items (ADR-0046)"
+    label: "ドキュメント",
+    description: "パッケージのドキュメント — フラットな Markdown 項目（ADR-0046）"
   },
   book: {
-    label: "Documentation Book",
-    description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
+    label: "ドキュメントブック",
+    description: "ドキュメントナビゲーションの骨格 — 順序付きグループと派生されたメンバーシップ（ADR-0046 §6）"
   },
   permission: {
     label: "権限セット",
@@ -1503,6 +1982,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       label: {
         label: "表示名",
         helpText: "管理者向け表示ラベル"
+      },
+      description: {
+        label: "説明",
+        helpText: "Setup に表示される説明文（sys_permission_set.description として保存されます）。"
+      },
+      isDefault: {
+        label: "既定の権限セット",
+        helpText: "everyone ポジション向けのアプリ基準です（ADR-0090 D5）。アプリレベルのセットは起動時に自動でバインドされ、パッケージレベルのセットはインストール時に管理者が確認する提案になります。既定は false です。"
+      },
+      managedBy: {
+        label: "管理元",
+        helpText: "レコードの由来（ADR-0086 D3）。アップグレードをまたいで、このセットを誰が所有するかを示します。"
+      },
+      packageId: {
+        label: "所属パッケージ ID",
+        helpText: "パッケージ同梱のセットが属するパッケージ id（ADR-0086 D3）。環境側で作成したセットでは空のままにします。"
       },
       systemPermissions: {
         label: "システム権限",
@@ -1544,12 +2039,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "説明"
+      },
+      delegatable: {
+        label: "セルフ委任を許可",
+        helpText: "保有者が自分でこのポジションを委任できるようにします。期間を区切り、理由の記入が必要です（ADR-0091 D3）。既定は false で、委任は管理者のみです。"
       }
     }
   },
   capability: {
-    label: "Capability",
-    description: "Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)"
+    label: "ケイパビリティ",
+    description: "パッケージが宣言する認可ケイパビリティ — ADR-0066 D1 の定義側（付与は権限セットに、要件はリソースに）"
   },
   agent: {
     label: "AI エージェント",
@@ -1591,6 +2090,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "有効",
         helpText: "このエージェントの有効/無効"
+      },
+      surface: {
+        label: "バインドする製品サーフェス",
+        helpText: "このエージェントがバインドする製品サーフェス（ADR-0063 §1）。自身のサーフェスが一致するか 'both' のスキルだけがアタッチされ、エージェントのツールセットはそれらのスキルのツールの和集合になります。既定は 'ask' です。"
       },
       instructions: {
         label: "指示",
@@ -1702,6 +2205,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "有効",
         helpText: "このスキルの有効/無効"
       },
+      surface: {
+        label: "バインドするエージェントサーフェス",
+        helpText: "このスキルがバインドするエージェントのサーフェス（ADR-0063 §3）。サーフェスが食い違うエージェントにバインドすると、黙ってスキップされるのではなく解決時にエラーになります。既定は 'ask' です。"
+      },
       instructions: {
         label: "指示",
         helpText: "AI への指示 — これらのツールを併用する方法を指定"
@@ -1713,6 +2220,15 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       triggerConditions: {
         label: "トリガー条件",
         helpText: "プログラム条件（例: objectName == \"case\"）"
+      },
+      "triggerConditions.field": {
+        label: "コンテキストフィールド"
+      },
+      "triggerConditions.operator": {
+        label: "演算子"
+      },
+      "triggerConditions.value": {
+        label: "値"
       }
     }
   }

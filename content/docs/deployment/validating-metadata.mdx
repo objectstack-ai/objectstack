@@ -435,7 +435,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | JSX / React page source parses (ADR-0080/0081) | ✓ | ✓ | ✓ | — |
 | Approval-node approvers (ADR-0090 D3) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | ✓ˢᵖᵉᵇᵒ |
-| Security vocabulary freeze (ADR-0090 D3 — the reserved word, replaced by `permission_set` / `position` / `business_unit`) | ✓ | ✓ | ✓ | — |
+| Security vocabulary freeze (ADR-0090 D3 — the reserved word, replaced by `permission_set` / `position` / `business_unit`) | ✓ | ✓ | ✓ | ✓ᵒᵖᵉᵇᵖᵒᵃ |
 | Organization-axis red lines (ADR-0105 D6) | ✓ | ✓ | ✓ | — |
 | Declared enforcement that cannot run, **declared on the object being written** — a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Declared enforcement that cannot run, **declared on another collection** — sharing-rule conditions (#4698), row-level-security predicates (#4983) | ✓ | ✓ | ✓ | — |
@@ -454,24 +454,38 @@ orthogonal to both, and no cell here can carry it; it is written out in
 
 **Every superscript in the `runtime publish` column is one metadata type whose
 writes that rule inspects: `✓ᶠ` `flow`, `✓ᵛ` `view`, `✓ᵈ` `dashboard`, `✓ᵒ`
-`object`, `✓ᵖ` `page`, `✓ˢ` `seed`, `✓ᵇ` `book`, `✓ᵖᵉ` `permission`** — the last
-one carries two letters because `page` already holds `ᵖ`. A cell lists one
-superscript per declared type, in the order the rule declares them, and that
+`object`, `✓ᵖ` `page`, `✓ˢ` `seed`, `✓ᵇ` `book`, `✓ᵖᵉ` `permission`,
+`✓ᵖᵒ` `position`, `✓ᵃ` `app`** — the two `ᵖ`-initial pairs carry a second
+letter because `page` already holds `ᵖ` on its own. Read the codes
+**longest-first**: `ᵖᵒ` is `position`, never `page` followed by `object`. A cell
+lists one superscript per declared type, in the order the rule declares them, and that
 rule's own `runtimeTypes` in `AUTHORING_RULES` is the authority — the set has
 grown a type at a time (#4463 shipped P1 as `flow` and four rule families, #7220
 moved the whole `views[]` visibility-predicate family across in one edit, #7529
 put widget-binding integrity on `dashboard`, #8307 → #8310 walked the ADR-0090
 security-posture block across `seed`, then `permission` and `book`, then
-`object`, and #4716 crossed the five remaining **gating** object rules —
+`object`, #4716 crossed the five remaining **gating** object rules —
 functional completeness, managed API methods, autonumber formats, and both
-validation-rule enforceability checks — onto `object`), so read the rule rather
-than assuming a save of some other type reaches storage unjudged.
+validation-rule enforceability checks — onto `object`, and #19370 took the
+vocabulary freeze across all five of its own write types at once), so read the
+rule rather than assuming a save of some other type reaches storage unjudged.
 
 That last move is also why the vocabulary freeze is a row of its own. It was
 split out of the security-posture rule on the day the rest of that block
-crossed, because it judges collections the per-write snapshot does not carry:
-one rule id has to sit on ONE side of the wall, so it stayed behind whole rather
-than crossing for some of the collections it judges and not others.
+crossed, because at that moment the door built no snapshot for two of the
+collections it judges — `positions` and `apps`: one rule id has to sit on ONE
+side of the wall, so it stayed behind whole rather than crossing for some of
+the collections it judges and not others.
+
+**It crossed in #19370, also whole**, and the split is what made that possible
+one half at a time. `position` and `app` are runtime-creatable — Studio's app
+designer is a shipped tenant capability — so the two types were mapped at the
+door rather than withdrawn from authors, and the rule now declares the write
+type of every collection it judges. A runtime write is refused when the
+reserved word appears in an object, field, action or field-group identifier or
+label, a permission-set name or label, a book's, a **position's**, or an
+**app's**. The CLI verdict is unchanged: both security entries have run on all
+three commands since the split.
 
 **Declared enforcement that cannot run** is two rows for the mirror-image
 reason, and #4716 is where it split. That heading covers four rule ids, and
@@ -485,16 +499,19 @@ already carries every declaration they judge and they crossed with the rest of
 is answered by an `object` write at all — and each is held by something
 different: the door does not accept `sharing_rule` as a type yet, whereas
 `permissions` has been in the snapshot since #8309 and only the declaration is
-missing. The freeze kept one id whole by staying behind; here four ids stopped
-agreeing, and one row cannot say two things. **When the next crossing lands on
+missing. The freeze kept one id whole by staying behind and then crossing whole;
+here four ids stopped agreeing, and one row cannot say two things. **When the next crossing lands on
 a shared row, check the rule ids before the cell: if they disagree, split the
 row by the collection each id reads, and neither `✓` nor `—` has to lie.**
 
 The `—` cells above are `—` for more than one reason, and only the first two
 are about the rule being unable to run there: some rules read a stack-wide
-collection a one-item write does not carry (pages, dashboards, navigation,
-positions, apps — the snapshot has carried `permissions` and `books` since
-#8309 and `datasets` since #7529, so those three are no longer in this class);
+collection a one-item write does not carry (pages, dashboards, navigation —
+the snapshot has carried `permissions` and `books` since #8309 and `datasets`
+since #7529, so those three are no longer in this class, and `positions` /
+`apps` left it by the other route in #19370: the only rule that reads them
+resolves nothing across collections, so mapping the two write types was enough
+and the snapshot did not have to grow);
 some parse authored source through `typescript`, which the kernel boot path
 must never load; some are snapshot-safe and simply have not been rolled out to
 a type yet (a sharing rule or an RLS predicate crosses on a `runtimeTypes`
@@ -607,10 +624,17 @@ matrix answers the first question only.
    each package's body re-read as the stack it was assembled from, handed the
    artifact's own `packages[]` as **resolution context** so a sibling package's
    object still resolves, while the collections being judged stay that package's
-   alone. It is de-duplicated against the union run, so what it reports is exactly
-   the set the union could not see, and every finding it raises carries a
-   `package '<id>' —` prefix in its `where`. A project with no `packages[]` skips
-   it: one package by definition, already judged whole by the union run.
+   alone. It is de-duplicated against the union run, so what it reports is the
+   set of per-package findings no union finding already carried under the same
+   rule, `where`, message and non-top-level position — the leading
+   `collection[N]` index is neutralised, because a package body re-bases its
+   collections from 0 and one finding would otherwise get two keys. Every
+   finding it raises carries a `package '<id>' —` prefix in its `where`. That
+   key is position-insensitive, not collision-proof: two entries that render the
+   same `where` share one, so the bound is what the key can tell apart and no
+   wider — `packages/cli/src/utils/artifact-packages.ts` states it, and why. A
+   project with no `packages[]` skips it: one package by definition, already
+   judged whole by the union run.
 
 The second pass is not the first one in a stricter mood — it is a different
 question. A rule asking *"does this stack's app navigation point at an object

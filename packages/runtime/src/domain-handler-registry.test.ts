@@ -579,10 +579,48 @@ describe('HttpDispatcher extracted domains (PR-5: packages)', () => {
     it('POST /packages rejects a duplicate id with 409 unless ?overwrite=true (data-loss footgun guard)', async () => {
         const objectql = qlWithRegistry({ getPackage: vi.fn().mockReturnValue({ id: 'pkg-a' }) });
         const dispatcher = withPkgCaller(makeDispatcher({ objectql }));
-        const dup = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, {}, {} as any);
+        // [#19120] `version` added to a fixture that never carried one. The
+        // subject here is the duplicate-id guard and its `?overwrite=true`
+        // bypass, ⛔ not manifest completeness — but `ManifestSchema` has always
+        // declared `version` required, so this body was never a legal input to
+        // the door it drives. Since the install door started parsing that leg,
+        // the fixture's own defect is what the case would report.
+        // ⚠️ The repair is owed whatever order the new gate sits in: the
+        // `forced` limb asserts `201`, which an under-specified manifest must
+        // never reach — so no placement of that gate leaves this fixture valid.
+        //
+        // [#19417] Same repair, one key over — and the LAST one this fixture
+        // owed. `ManifestSchema.id` carries `MANIFEST_ID_PATTERN` since #18319,
+        // `pkg-a` is not reverse-domain notation, and the install door parses
+        // that leg now: the `forced` limb's `201` was unreachable for this id.
+        // ⛔ The `pkg-a` reading is REVERSED, never deleted — the case below
+        // keeps it, asserting the refusal this fixture used to assert the
+        // acceptance of. `com.example.pkg-a` is the same name made publishable,
+        // which is the repair `manifestIdRefusal` itself prescribes for it.
+        const manifest = { id: 'com.example.pkg-a', name: 'A', version: '1.0.0' };
+        const dup = await dispatcher.dispatch('POST', '/packages', manifest, {}, {} as any);
         expect(dup.response?.status).toBe(409);
-        const forced = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, { overwrite: 'true' }, {} as any);
+        const forced = await dispatcher.dispatch('POST', '/packages', manifest, { overwrite: 'true' }, {} as any);
         expect(forced.response?.status).toBe(201);
+    });
+
+    it('[#19417] POST /packages refuses `pkg-a` — the id the pattern refuses (the REVERSED pin)', async () => {
+        // ⭐ This case is the other half of the repair above, and it is why that
+        // repair is not a deletion. `pkg-a` was the one standing pin on the gap
+        // this card closes: the door answered it `201` while `defineStack()`,
+        // `os build`, `os validate` and the publish face all refused it, so an
+        // author could install a package that could never be rebuilt or
+        // published. The reading is kept, pointing the other way.
+        //
+        // ⛔ Deliberately thin here — status only. The full pins (the
+        // declaration's own sentence, both install writers silent, and the
+        // gate's placement against `Package id is required`, the `version` leg
+        // and the `409`) live in `domains/packages-install-manifest-id.test.ts`
+        // beside the door. This file's subject is ROUTING.
+        const objectql = qlWithRegistry();
+        const result = await withPkgCaller(makeDispatcher({ objectql }))
+            .dispatch('POST', '/packages', { id: 'pkg-a', name: 'A', version: '1.0.0' }, {}, {} as any);
+        expect(result.response?.status).toBe(400);
     });
 
     it('POST /packages without an id is rejected with 400', async () => {

@@ -103,7 +103,7 @@
 - 只要 `totalCount` 的健康指标取 perPage=1;只要最近 N 张就取 N。
 - 小时池之外还有分钟级二级限流:GraphQL 端点 2,000 点/分、并发 ≤100。
 - 官方指引:变更类请求间停 ~1 秒,mutation 按 5 倍计;批量写因此 ~1 秒一发。
-- 双载体清标、批量重分诊这类把写挤在同一秒的扫动,会在小时池仍绿时撞上分钟墙。
+- 批量重分诊这类把写挤在同一秒的扫动,会在小时池仍绿时撞上分钟墙。
 - REST 可达性是会话属性(GitHub App 会话门),⛔ 不是端点或席位类型的属性。
 - 开轮探一次、按班存档;探针必须是一条真 repo-scoped 读。
 - 门关着时 repo-scoped 路径整类回 403 `GitHub access is not enabled for this session`。
@@ -117,7 +117,6 @@
 - CCR 容器的 GitHub 出口是代理加凭据的:无 header 的 REST 读回 200 带会话身份,core 上限 15000。
 - 调用方自带的 `Authorization` 头被代理覆盖;`HTTPS_PROXY` 端口打死也不切断网络。
 - ⇒ 容器内得出的 token 作用域结论 ⛔ 不迁移到出口未经代理的会话。
-- 同因:`check-clause2-carriers.mjs --pair` 带与不带 token 都不再 403 退 3;真缺声明照常退 4。
 - REST 写侧经出口代理必带 `Content-Type: application/json`,否则代理回 415 且一个字节都没写。
 - 判别式:该 415 的 `documentation_url` 指 Claude Code 不指 GitHub ⇒ 代理拒,不是 GitHub;四端点实测。
 - 两通道的信封在配额、权限、传输三样上都不同 ⇒ 任一侧的拒绝只是那一侧的读数。
@@ -382,8 +381,8 @@
 - ⛔ 不据 `ls-remote | grep issue-` 正命中回避该卡:失效方向是活卡被读成已认领,无红信号。
 - 会话从上下文检测不到自己的静默降档:横幅只在 UI 侧渲染,上下文零信号。
 - 服役档的权威读数是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`。
-- 它是最近一轮服役者,降档链中途照真;`session_context.model` 是配置档,⛔ 不作保险丝输入。
-- 该读数按宿主分叉:有的宿主的 `get_session` 按契约排除当前会话 ⇒ 保险丝无输入。
+- 它是最近一轮服役者,降档链中途照真;`session_context.model` 是配置档。
+- 该读数按宿主分叉:有的宿主的 `get_session` 按契约排除当前会话。
 - ⛔ 不据一台宿主推全体;替代读数用时在卡上申报。
 - 无它时的合法替代 = grep 本会话 transcript 里 harness 写的 `"model":`,逐请求写入、非自述。
 - 档位额度终止是第三种死法:子代理死在编辑中途、宿主报本账户档位额度到顶。
@@ -391,7 +390,7 @@
 - 处置 = 死认领回收加 worktree 抢救,⛔ 不重核前提、不升级。
 - 无前置探针,只在 dev 死在里面时可观测;缓解只在 dev 侧的早 WIP 提交。
 - 档位不可用时 ⛔ 不凭记忆宣告车道阻塞,逐文件面现推 mandate。
-- 强制档不得因不可用而降档 —— 那正是降档保险丝要拒的替换。
+- 强制档不因临缺授权降档:临缺非退役,退役唯维护者裁;不达档起隔离达档子代理或等档。
 - 本车道强制多是过宽的回忆:`dispatch-gates.mjs --tier PATH` 逐路径现推,路径线是下限非放行。
 - 该脚本只答自己那棵树:姊妹仓路径回 absent from this tree,姊妹仓的档位与条款②只能手推。
 - `os-verify-lock.sh` 只住 objectstack:objectui 无它,跑本仓副本读的是容器级锁,非该仓深度。

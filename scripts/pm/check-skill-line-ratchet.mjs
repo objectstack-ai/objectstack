@@ -332,7 +332,33 @@ export const CEILINGS = new Map([
   // clause is refused on the state-machine precedent. Ruled content is not
   // growth (the 811 → 812 entry above). Landed count, headroom 0, same
   // convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 813],
+  // Raised 813 → 819 by the product-only-queue charter ruling — an ORDINARY
+  // raise under this map's own maintainer exit, ⛔ not a cross-file move.
+  // Maintainer, 2026-09-21, live PM chat with the director seat, verbatim and
+  // untranslated: 「205 否，天花板抬到 819」 — the second clause is this ruling
+  // (the first is batch #205 item 1, on a different card); recorded by the
+  // director on #19457, comment 5754521737. The content is the six ruled edits
+  // of #19457 (ruling batch #202, letter B, plus the audit-retirement directive
+  // 「受管合并审计 以后不需要了，浪费时间。」 landed as its edit 6): the dev queue
+  // becomes product-only and a `tooling` card enters `pm:queue` only with an
+  // `Unblocks: #N` line or a named published surface; triage closes at first
+  // grading; a gate that misfires twice is deleted rather than repaired; at most
+  // one tooling card is dispatched fleet-wide; and `tooling` becomes a
+  // first-touch label with four named readers.
+  // It could not be paid in place — measured over three rounds, not assumed: the
+  // cost went 9 → 8 → 6 as everything payable was paid (three rules folded into
+  // existing lines, the four readers folded into the length-exempt glossary ROW,
+  // the close rule folded onto the 「无则关」 clause a sibling PR had landed
+  // meanwhile, and edit 6's deletions gave two lines back); every ceilinged file
+  // in this map stands at headroom 0, so no reference file can absorb the rest;
+  // the six that remain are one ruled rule each, 78–120 bytes, and no two of them
+  // pair under the 120-byte cap; and a declared cross-file move is zero-sum by
+  // construction — the destination's raise may not exceed the source's net
+  // decrease — so it can fund a move but never new content. Ruled content is not
+  // growth (the 811 → 812 entry above). SKILL.md is not a CROSS_FILE_MOVES
+  // destination, so no `ruledRaises` record applies. Landed count, headroom 0,
+  // same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 819],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -1185,6 +1211,12 @@ export const CEILINGS = new Map([
   // Landing it in SKILL.md alone was option C, refused by the ruling: the twin
   // obligation is not waived. Landed count, headroom 0, same convention.
   ['.claude/skills/pm-dispatch/references/core-rules.md', 151],
+  // New file, landed at its own count (headroom 0, same convention as every
+  // entry above): the filing gate and the grading/reading criteria the triage
+  // seat applies. A new pm-dispatch references file belongs in this map by the
+  // header's own definition of the covered surface — the map is an
+  // ENUMERATION, so a file that is merely absent is silently unratcheted.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 58],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
@@ -1435,7 +1467,45 @@ export const CEILINGS = new Map([
   // 并按实测行数抬上限」; recorded by the director on #15410 comment 5682595374, which
   // also refuses option D). AGENTS.md is not a CROSS_FILE_MOVES destination, so no
   // `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  ['AGENTS.md', 1099],
+  //
+  // 1099 → 1109 (card #16233): § Degradation log levels' third-legal-answer
+  // paragraph brought to the instrument, per letter C — a `catch` that delivers by
+  // RETURNING an outcome object (`return { ok: false, error }`, a `failed` receipt)
+  // has no callee to declare, so it is ⛔ never added to
+  // `DURABILITY_CRITICAL_CALLEES` or to either `FAILURE_PROPAGATION_*` map,
+  // ⛔ never baselined and ⛔ never log-bolted to green the checker; it is pinned by
+  // its own file's test and its population read from
+  // `scripts/measure-return-propagating-durability-seams.mjs`. Until this line the
+  // text prescribed, for all 12 censused seams, the two remedies the gate's own
+  // header refuses — correct code reds the gate, and the only two ways to green it
+  // were the two it forbids. +10 lines, measured: the paragraph goes 10 → 20
+  // physical lines and the file 1099 → 1109, and it is bought by CONTENT, not by
+  // bad wrapping. Re-measured on the merged tree with this gate's own `wrapLine`,
+  // at the width the section is actually typeset at (median 85 B, p90 89 B, max
+  // 90 B — inside the ≤91-byte ASCII-prose convention the 120-byte cap above
+  // codifies): a greedy rewrap returns exactly the 20 lines the paragraph already
+  // occupies at 90 B, and 21 at 88 B ⇒ 0 lossless-rewrap headroom. Lines come back
+  // only by re-typesetting ASCII prose ABOVE that convention (18 at 100 B, 15 at
+  // 120 B; the whole section 88 → 69 at 120 B), which is the reflow that cap
+  // documents itself as NOT imposing — and re-wrap funding is refused per the
+  // 2026-08-17 rule in any case. Maintainer ruling, verbatim and untranslated:
+  // 「1. #19214 / 卡 #16233 —— AGENTS.md 行预算, A 批 +10(1099→1109)」
+  // — the maintainer's live instruction to `session_019srGWGCBBCBHqcDoRZpQRh`,
+  // recorded on #16233 comment 5750261694; it rules the line budget that the
+  // standing letter-C ruling 5716260390 left unruled when it named the text.
+  // AGENTS.md is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
+  // applies. Landed count, headroom 0, same convention.
+  //
+  // 1109 → 1116 (card #19641, PR #19642): the six-line rule that every GitHub
+  // write leaves through scripts/pm/ as the fleet's App identity, behind the
+  // shared write gate — bought by CONTENT (a rule with no prior spelling
+  // anywhere in the file), after the paragraph was first compressed from
+  // sixteen lines to six. Maintainer ruling, verbatim and untranslated:
+  // 「同意 A（推荐）」 — the maintainer's live instruction to the desktop session
+  // that raised it, recorded on #19641 comment 5771401251 together with the
+  // option A text it accepted (raise to 1116, ruling quoted in the PR body).
+  // Landed count, headroom 0, same convention.
+  ['AGENTS.md', 1116],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
@@ -1889,6 +1959,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/true-green.md', 0],
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 352],
   ['.claude/skills/pm-dispatch/references/core-rules.md', 0],
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 0],
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 219],
   ['.claude/skills/pm-dispatch/references/lanes/engine.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/services.md', 0],

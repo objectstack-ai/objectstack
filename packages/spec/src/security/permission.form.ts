@@ -32,6 +32,18 @@ export const permissionForm = defineForm({
       fields: [
         { field: 'name', required: true, colSpan: 1, helpText: 'Machine name (snake_case)' },
         { field: 'label', colSpan: 1, helpText: 'Display label for admins' },
+        // #19331 — four declared keys had no control, so the only door to any of
+        // them was the Source tab's free-text JSON. `description` is persisted on
+        // sys_permission_set and shown in Setup; the other three are the ADR-0086
+        // D3 provenance pair plus the ADR-0090 D5 baseline flag.
+        { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Human-readable description shown in Setup (persisted as sys_permission_set.description).' },
+        { field: 'isDefault', type: 'boolean', colSpan: 1, helpText: 'App baseline for the everyone position (ADR-0090 D5): an app-level set is auto-bound at boot; a package-level set becomes an install-time suggestion an admin confirms. Default false.' },
+        { field: 'managedBy', type: 'select', colSpan: 1, helpText: 'Record provenance (ADR-0086 D3): who owns this set across upgrades.', options: [
+          { label: 'Package (upgrade-owned metadata)', value: 'package' },
+          { label: 'Platform (environment config)', value: 'platform' },
+          { label: 'User (environment config)', value: 'user' },
+        ] },
+        { field: 'packageId', type: 'text', colSpan: 2, helpText: 'Owning package id for a package-shipped set (ADR-0086 D3). Leave empty for an environment-authored set.' },
       ],
     },
     {

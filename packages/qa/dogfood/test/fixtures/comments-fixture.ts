@@ -130,7 +130,7 @@ export function commentsFixtureSecurity(): SecurityPlugin {
 
 export const commentsFixtureStack = defineStack({
   manifest: {
-    id: 'com.dogfood.comments_fixture',
+    id: 'com.dogfood.comments-fixture',
     namespace: 'cmt',
     version: '0.0.0',
     type: 'app',

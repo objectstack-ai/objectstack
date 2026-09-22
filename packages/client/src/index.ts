@@ -123,6 +123,20 @@ import {
   PackageExportManifest,
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
+  // [#17536] The element the two `/packages` READ doors are declared to serve.
+  // `ListInstalledPackagesResponseSchema.packages` is
+  // `z.array(InstalledPackageAtEitherStageSchema)` and
+  // `GetInstalledPackageResponseSchema.data` is that same schema
+  // (`spec/src/api/package-api.zod.ts`) — a union over the two manifest stages,
+  // authoring (`InstalledPackageSchema`) and assembled
+  // (`AssembledInstalledPackageSchema`), each a closed RUNTIME declaration. The
+  // client is a CONSUMER of that contract, so the widest value those doors are
+  // declared to answer is what they are declared to return here. ⚠️ What the
+  // published TYPE admits is wider than what the runtime parse accepts — the
+  // measurement, and what a caller does about it, are on `packages.list` below
+  // (#19324). The WRITE methods on the same object keep `InstalledPackage`:
+  // PR #17517 moved the read doors alone.
+  InstalledPackageAtEitherStage,
 } from '@objectstack/spec/api';
 import type {
   ApprovalRequestRow,
@@ -2453,8 +2467,61 @@ export class ObjectStackClient {
      * deliberately NOT declared here — the dispatcher rows have no such key, so
      * declaring it would be false on that surface. #8140 bound the identical
      * scoped sibling (`ScopedEnvironmentClient.packages.list`) the same way.
+     *
+     * ⚠️ [#17536] The ROW type moved, the envelope did not. #11925 bound the
+     * element to `InstalledPackage` — the AUTHORING stage — and PR #17517 then
+     * declared the door at EITHER stage:
+     * `ListInstalledPackagesResponseSchema.packages` is
+     * `z.array(InstalledPackageAtEitherStageSchema)`. That left two declarations
+     * one layer apart disagreeing, with this one under-declaring: a row a
+     * `defineStack()` host installed carries the ASSEMBLED body, the door is
+     * declared able to serve it, and this SDK's own types said it could not
+     * arrive. The contract is `packages/spec` and this is a consumer of it
+     * (Prime Directive #12), so the consumer's declaration is what moves.
+     *
+     * ⚠️ Clause-② widening, and what it costs a caller: the element is a union
+     * of two stages that differ in ONE key, `manifest`. Every other member of
+     * the row — `id`, `name`, `version`, `status`, `enabled`, … — is common to
+     * both branches and reads exactly as before, so a caller that reads only
+     * those members needs no change at all. No runtime behaviour changes; the
+     * values were always these.
+     *
+     * ⚠️ Reaching INTO `manifest` is where the cost is, and the TYPE will not
+     * do the narrowing for you. On the assembled branch `manifest` is declared
+     * `Record<string, unknown>`, so a member read off the union —
+     * `pkg.manifest.objects` — is `unknown` (measured with `tsc` against the
+     * published declarations, not inferred from the schemas). Narrow by PARSING
+     * the row with a `packages/spec` schema and reading the parse's output:
+     *
+     * ```ts
+     * const parsed = AssembledInstalledPackageSchema.safeParse(pkg); // spec/api
+     * if (parsed.success) {
+     *   // parsed.data.manifest — the ASSEMBLED stage, object definitions
+     * } else {
+     *   const authoring = InstalledPackageSchema.parse(pkg);         // spec/kernel
+     *   // authoring.manifest.objects — the AUTHORING stage, glob strings
+     * }
+     * ```
+     *
+     * ⛔ Do NOT narrow with `Array.isArray(pkg.manifest.objects)`, or with any
+     * other structural guess. It separates the stages on NEITHER level: at the
+     * type level `pkg.manifest` is the same union inside both branches of that
+     * `if`, and at runtime BOTH stages' `objects` are arrays —
+     * `z.array(z.string())` at the authoring stage against `z.array(ObjectSchema)`
+     * at the assembled one. (Measured: a row carrying no `objects` at all parses
+     * as either stage, which is the right answer for it — the key such a guess
+     * would read is not there.)
+     *
+     * ⚠️ The RUNTIME half is the strict one, and the asymmetry is a KNOWN GAP
+     * rather than a design: `InstalledPackageAtEitherStageSchema.safeParse()`
+     * refuses a `manifest` belonging to neither stage, while that same row
+     * COMPILES against this declaration. Tracked as #19324, whose root cause is
+     * the deliberate `z.ZodType<Record<string, unknown>, …>` annotation at
+     * `packages/spec/src/stack.zod.ts:1283` (#14513 — TS7056 and a
+     * declaration-chunk ceiling); ⛔ not something this declaration can fix, and
+     * ⛔ not a licence to relax either runtime branch to match the type.
      */
-    list: async (filters?: { status?: string; type?: string; enabled?: boolean }): Promise<{ packages: InstalledPackage[]; total: number }> => {
+    list: async (filters?: { status?: string; type?: string; enabled?: boolean }): Promise<{ packages: InstalledPackageAtEitherStage[]; total: number }> => {
         const route = this.getRoute('packages');
         const params = new URLSearchParams();
         if (filters?.status) params.set('status', filters.status);
@@ -2463,7 +2530,7 @@ export class ObjectStackClient {
         const qs = params.toString();
         const url = `${this.baseUrl}${route}${qs ? '?' + qs : ''}`;
         const res = await this.fetch(url);
-        return this.unwrapResponse<{ packages: InstalledPackage[]; total: number }>(res);
+        return this.unwrapResponse<{ packages: InstalledPackageAtEitherStage[]; total: number }>(res);
     },
 
     /**
@@ -2489,29 +2556,44 @@ export class ObjectStackClient {
      *
      * That is the SAME projection its `list` neighbour maps over every row
      * (`packages/runtime/src/domains/packages.ts` — one expression, two
-     * doors), and `list` is already declared `InstalledPackage[]` directly
-     * above. This binding therefore makes two doors of one domain agree
-     * rather than making a new claim about either. `packages/spec` has
-     * declared the same thing all along and was never the fork's casualty:
-     * `GetInstalledPackageResponseSchema` is `data: InstalledPackageSchema`,
-     * the bare row.
+     * doors), and `list` carries the identical element type directly above.
+     * This binding therefore makes two doors of one domain agree rather than
+     * making a new claim about either.
+     *
+     * ⚠️ [#17536] The sentence that closed this paragraph was measured STALE
+     * and is corrected rather than deleted, because what it claimed is what
+     * made the authoring-stage binding below look settled. It read:
+     * «`packages/spec` has declared the same thing all along and was never the
+     * fork's casualty: `GetInstalledPackageResponseSchema` is `data:
+     * InstalledPackageSchema`, the bare row.» The first half still holds — the
+     * door has always answered the BARE row, no envelope. The second half
+     * stopped being true when PR #17517 landed: that schema's `data` now reads
+     * `InstalledPackageAtEitherStageSchema`, the union of the two closed
+     * manifest stages. It was a COMMENT and never a binding, which is why the
+     * disagreement it describes could sit here unread by any gate.
      *
      * `source` stays undeclared because there is no longer anything that
      * emits it on this route; `writable` stays undeclared for the reason
      * `list` leaves it undeclared.
      *
-     * ⚠️ Clause-② narrowing. `{ package: any }` is what let
+     * ⚠️ Clause-② narrowing (#12034). `{ package: any }` is what let
      * `(await client.packages.get(id)).package` compile, and on the only
      * surface that has served this route since #16628 it was `undefined` at
      * runtime — the falsehood was invisible precisely because the member was
      * `any`. Callers read the row itself. Pinned in
      * `return-type-precision.test.ts`, which is the only place it CAN be
      * pinned: a runtime test cannot observe a return-type narrowing at all.
+     *
+     * ⚠️ Clause-② widening (#17536), the LATER and opposite move on the same
+     * member: the row is declared at whichever stage it was installed at, for
+     * the reason and at the cost written out on `list` above. Both directions
+     * are pinned in the same file, and for the same reason — only a
+     * compile-time assertion can observe either.
      */
-    get: async (id: string): Promise<InstalledPackage> => {
+    get: async (id: string): Promise<InstalledPackageAtEitherStage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}`);
-        return this.unwrapResponse<InstalledPackage>(res);
+        return this.unwrapResponse<InstalledPackageAtEitherStage>(res);
     },
 
     /**
@@ -2835,6 +2917,15 @@ export class ObjectStackClient {
    * that it is wrong when it is right — the `SearchResult` near-miss class
    * #8140 recorded, at family scale. The control-plane implementation is not
    * in this repo, so the casing cannot be settled from here.
+   *
+   * ⚠️ [#19383] That licence is BOUNDED, and this paragraph is no longer the
+   * only thing holding it. `src/environments-any-family.pin.test.ts` enumerates
+   * the family by name — 21 callables here, 14 of them `any`-carrying, derived
+   * with a `ts.createProgram` + `TypeChecker` census rather than a text search,
+   * because these methods carry no return annotation for text to read and
+   * `check:exported-any-returns` asks IS-`any`, never CONTAINS-`any`. ⛔ Do not
+   * read this paragraph as covering a method that pin does not list: a 15th is
+   * a diff whose author adds its name, not a silent addition absorbed here.
    */
   environments = {
     /**
@@ -5443,13 +5534,33 @@ export class ObjectStackClient {
        */
       runs: {
           /**
-           * List execution runs for a flow
+           * List execution runs for a flow.
+           *
+           * Returns the newest `limit` runs — a WINDOW, not a page. The
+           * `cursor` parameter was removed in `@objectstack/spec` 17.5.0
+           * (#19543): it was appended to the query string here, validated at
+           * the boundary and read by nothing beyond it, so a caller
+           * paginating by it re-read the first window forever.
+           *
+           * Omit `limit` to take the server's window (20). The declared range
+           * is 1..100, and a value this method SENDS that falls outside it is
+           * REFUSED with `400 VALIDATION_FAILED`, never clamped — so raise it
+           * deliberately to see further back.
+           *
+           * ⚠️ `0` and `NaN` are the exception, and they are dropped rather
+           * than refused: the guard below is truthy, so a falsy `limit` never
+           * leaves the client and the server answers its DEFAULT window
+           * instead. `-5`, `1.5` and `101` are truthy, are sent, and are
+           * refused. The two `listRuns` surfaces guard on `!= null` and do
+           * send `0`.
+           *
+           * There is no continuation token — read `hasMore` to learn whether
+           * the window was short.
            */
-          list: async (flowName: string, options?: { limit?: number; cursor?: string }): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
+          list: async (flowName: string, options?: { limit?: number }): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
               const route = this.getRoute('automation');
               const params = new URLSearchParams();
               if (options?.limit) params.set('limit', String(options.limit));
-              if (options?.cursor) params.set('cursor', options.cursor);
               const qs = params.toString();
               const res = await this.fetch(`${this.baseUrl}${route}/${flowName}/runs${qs ? `?${qs}` : ''}`);
               return this.unwrapResponse(res);
@@ -5515,15 +5626,20 @@ export class ObjectStackClient {
           });
           return this.unwrapResponse(res) as Promise<T>;
       },
-      /** Alias for `automation.runs.list`. */
+      /**
+       * Alias for `automation.runs.list`.
+       *
+       * `cursor` was removed in `@objectstack/spec` 17.5.0 (#19543) — see that
+       * method for the reason. A window, not a page: widen `limit`
+       * (1..100, default 20) and read `hasMore`.
+       */
       listRuns: async <T extends { runs: ExecutionLog[]; hasMore: boolean } = { runs: ExecutionLog[]; hasMore: boolean }>(
           flowName: string,
-          opts?: { limit?: number; cursor?: string; status?: ExecutionStatus },
+          opts?: { limit?: number; status?: ExecutionStatus },
       ): Promise<T> => {
           const route = this.getRoute('automation');
           const params = new URLSearchParams();
           if (opts?.limit != null) params.set('limit', String(opts.limit));
-          if (opts?.cursor) params.set('cursor', opts.cursor);
           // [#7359] The route's declared `status` filter, now that the boundary
           // honours it instead of dropping it. Until this card the typed client
           // could not send it at all — which is why nothing had tripped over the
@@ -7896,9 +8012,19 @@ export class ScopedEnvironmentClient {
    * package tests.
    */
   packages = {
-    list: async (): Promise<{ packages: InstalledPackage[]; total: number }> => {
+    /**
+     * ⚠️ [#17536] Clause-② widening, in step with the global twin
+     * `client.packages.list`. This path and that one reach the SAME door: the
+     * `@objectstack/hono` catch-all hands `dispatch()` the still-scoped path,
+     * `dispatch()` strips the `/environments/:environmentId` prefix, and the
+     * `/packages` domain answers. One door cannot be declared at two different
+     * element types by two SDK members, so both move together — see
+     * `ObjectStackClient.packages.list` for the door reading, the Prime
+     * Directive #12 argument and what the union costs a caller.
+     */
+    list: async (): Promise<{ packages: InstalledPackageAtEitherStage[]; total: number }> => {
       const res = await this.parent._fetch(this.url('/packages'));
-      return this.parent._unwrap<{ packages: InstalledPackage[]; total: number }>(res);
+      return this.parent._unwrap<{ packages: InstalledPackageAtEitherStage[]; total: number }>(res);
     },
     /**
      * [#11925 bound it · #12034 corrected the shape] The BARE row, no
@@ -7926,22 +8052,29 @@ export class ScopedEnvironmentClient {
      * site) — and the `/packages` domain answers
      * `success(withWritableVerdict(qlService, toPackageResponse(pkg)))`. That
      * is the identical projection its `list` neighbour above maps over, which
-     * is why `list` already declares `InstalledPackage[]` and needed no
+     * is why `list` carries the identical element type and needed no
      * correction here.
      *
-     * ⚠️ Clause-② narrowing, and the sharper of the two: this member was
-     * `InstalledPackage`, not `any`, so `(await scoped.packages.get(id))
+     * ⚠️ Clause-② narrowing (#12034), and the sharper of the two: this member
+     * was `InstalledPackage`, not `any`, so `(await scoped.packages.get(id))
      * .package` compiled with a REAL type behind it and was `undefined` at
      * runtime.
+     *
+     * ⚠️ Clause-② widening (#17536), the later and opposite move: the row is
+     * declared at whichever manifest stage it was installed at, because that is
+     * what `GetInstalledPackageResponseSchema.data` has been declared as since
+     * PR #17517. Same door as the global twin, same element type, same cost to
+     * a caller that reaches into `manifest` — written out once on
+     * `ObjectStackClient.packages.list`.
      *
      * `version` is unchanged and deliberately not touched by this card — it
      * is a request-side question, and it is a live one: see the acceptance
      * notes on #12034.
      */
-    get: async (id: string, version?: string): Promise<InstalledPackage> => {
+    get: async (id: string, version?: string): Promise<InstalledPackageAtEitherStage> => {
       const qs = version ? `?version=${encodeURIComponent(version)}` : '';
       const res = await this.parent._fetch(this.url(`/packages/${encodeURIComponent(id)}${qs}`));
-      return this.parent._unwrap<InstalledPackage>(res);
+      return this.parent._unwrap<InstalledPackageAtEitherStage>(res);
     },
   };
 
@@ -7978,14 +8111,19 @@ export class ScopedEnvironmentClient {
       });
       return this.parent._unwrap<T>(res);
     },
-    /** List recent runs for a flow, optionally narrowed to one status. */
+    /**
+     * List recent runs for a flow, optionally narrowed to one status.
+     *
+     * `cursor` was removed in `@objectstack/spec` 17.5.0 (#19543) — see
+     * `automation.runs.list` for the reason. A window, not a page: widen
+     * `limit` (1..100, default 20) and read `hasMore`.
+     */
     listRuns: async <T extends { runs: ExecutionLog[]; hasMore: boolean } = { runs: ExecutionLog[]; hasMore: boolean }>(
       flowName: string,
-      opts?: { limit?: number; cursor?: string; status?: ExecutionStatus },
+      opts?: { limit?: number; status?: ExecutionStatus },
     ): Promise<T> => {
       const params = new URLSearchParams();
       if (opts?.limit != null) params.set('limit', String(opts.limit));
-      if (opts?.cursor) params.set('cursor', opts.cursor);
       // [#7359] — see the sibling `listRuns` alias above.
       if (opts?.status) params.set('status', opts.status);
       const qs = params.toString();

@@ -44,6 +44,20 @@
  * branch did not move, and this literal is what would go red if it ever did.
  * It was recorded on both legs of the ablation in the PR body, from the same
  * fixture, and compared byte for byte.
+ *
+ * ---------------------------------------------------------------------------
+ * The second describe block (#19246) — the same door, a different reading
+ * ---------------------------------------------------------------------------
+ * #19246 was filed on a STATIC reading, twice and independently: that a
+ * multi-package artifact's top-level-only `docs` register nowhere at boot.
+ * Both readings were correct about the two places they looked —
+ * `resolveArtifactPackageOrder` does walk package bodies only, and
+ * `AppPlugin` does not register `collections.docs` — and both concluded
+ * "nowhere" without reaching this door, which is the registrar. Booting the
+ * #18431 e2e fixture and asking `GET /api/v1/meta/doc` (the live surface)
+ * showed the doc PRESENT, beside a per-package doc as the lit control. The
+ * block at the foot of this file is that measurement made permanent, so the
+ * next reader of those two files finds a pin instead of a third reading.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -316,5 +330,121 @@ describe('#14599 artifact door — a `packages[]` artifact is registered per pac
         // No `packages` key ⇒ no residual sweep ⇒ nothing to warn about.
         const warnings = ctx.logger.warn.mock.calls.map((c: unknown[]) => String(c[0]));
         expect(warnings.filter((w: string) => w.includes('top-level metadata item'))).toEqual([]);
+    });
+});
+
+/**
+ * The doc `os build` writes out of a flat `src/docs/` — judged by
+ * `stack.manifest.namespace` and placed at the artifact TOP LEVEL, on no
+ * package body at all (#18431 ruling, clause 1).
+ *
+ * The `content` carries a marker for the same reason the e2e fixture does: a
+ * count is satisfiable by an echo of the other doc, and pedigree is not.
+ */
+const FLAT_DOC = { name: 'pkgdocs_index', label: 'Index', content: '# Index\n\nMARKER-flat-doc\n' };
+
+/** The doc `os build` writes out of `src/orders/docs/` — the OWNING body only. */
+const PACKAGE_DOC = {
+    name: 'ord_playbook',
+    label: 'Orders Playbook',
+    content: '# Orders Playbook\n\nMARKER-package-doc\n',
+};
+
+/**
+ * The #18431 docs placement, laid over the real composed artifact.
+ *
+ * ⚠️ The docs half is positioned by hand, and that is deliberate — it is the
+ * ONE key on which `composeStacks(…, { manifest: 'preserve' })` is not the
+ * producer. `os build`'s docs collector places docs AFTER composition: a
+ * package-directory doc goes on its owning body and ⛔ never to the top level,
+ * while the stack's own flat `src/docs/` keeps the top level. So composing a
+ * `docs`-carrying stack would produce the additive both-places shape, which is
+ * precisely NOT the shape under test. The placement below was read off a real
+ * `os build` of the #18431 e2e fixture (two packages, `src/docs/` +
+ * `src/orders/docs/`): top level `['pkgdocs_index']`, orders body
+ * `['ord_playbook']`, core body none.
+ */
+const docsArtifact = () => {
+    const artifact = twoPackageArtifact();
+    artifact.docs = [{ ...FLAT_DOC }];
+    const orders = artifact.packages.find((e: any) => e.manifest.id === ORDERS_ID);
+    orders.manifest.docs = [{ ...PACKAGE_DOC }];
+    return artifact;
+};
+
+describe('#19246 artifact door — a `packages[]` artifact\'s TOP-LEVEL-only docs register', () => {
+    it('the fixture carries the card shape (premise guard)', () => {
+        const artifact = docsArtifact();
+
+        // The subject: a top-level doc that NO package body declares. This is
+        // the emitter's intended output for a multi-package project with a flat
+        // `src/docs/`, not an accident of `packages` being a `concat` key — so
+        // unlike the orphan `object` case above, this shape is on every such
+        // artifact the compiler produces.
+        expect(artifact.docs.map((d: any) => d.name)).toEqual(['pkgdocs_index']);
+        const onBodies = artifact.packages.flatMap((e: any) => (e.manifest.docs ?? []).map((d: any) => d.name));
+        expect(onBodies).not.toContain('pkgdocs_index');
+
+        // The control: a doc that reaches the registry through the package
+        // walk, and is NOT at the top level.
+        expect(onBodies).toEqual(['ord_playbook']);
+        expect(JSON.stringify(artifact.docs)).not.toContain('MARKER-package-doc');
+    });
+
+    it('registers BOTH — the body doc via the package walk, the top-level-only doc via the residual sweep', async () => {
+        const { plugin } = await load(docsArtifact());
+
+        // ⭐ The lit control, asserted FIRST and in the same load: a `doc` that
+        // does register. Without it an absent subject below would be equally
+        // consistent with a door that registers no `doc` at all, a fixture that
+        // never parsed, or a harness that recorded nothing.
+        expect(await stampOf(plugin, 'doc', 'ord_playbook'))
+            .toEqual({ packageId: ORDERS_ID, packageVersion: '2.4.0' });
+
+        // The subject. The static reading this pin exists to contradict was
+        // that `resolveArtifactPackageOrder` walks bodies only (true) and that
+        // `AppPlugin` registers no `collections.docs` (also true) — and
+        // concluded "nowhere", having never reached THIS door's residual sweep,
+        // which is the registrar.
+        expect(await stampOf(plugin, 'doc', 'pkgdocs_index'))
+            .toEqual({ packageId: CORE_ID, packageVersion: '1.0.0' });
+
+        // Pedigree, not counts: each registered doc carries the bytes of the
+        // file it came from, so neither assertion above can be satisfied by an
+        // echo of the other.
+        expect(((await plugin.manager.get('doc', 'pkgdocs_index')) as any).content)
+            .toContain('MARKER-flat-doc');
+        expect(((await plugin.manager.get('doc', 'ord_playbook')) as any).content)
+            .toContain('MARKER-package-doc');
+    });
+
+    it('the absence arm: with the top-level doc gone the control still registers', async () => {
+        // The negative leg of the same instrument. A pin that asserts presence
+        // is worth only as much as its ability to report absence, and these two
+        // cases differ by exactly the top-level `docs` array.
+        const artifact = docsArtifact();
+        delete artifact.docs;
+
+        const { plugin, ctx } = await load(artifact);
+
+        expect(await stampOf(plugin, 'doc', 'pkgdocs_index')).toBeUndefined();
+        expect(await stampOf(plugin, 'doc', 'ord_playbook'))
+            .toEqual({ packageId: ORDERS_ID, packageVersion: '2.4.0' });
+
+        // …and with nothing unowned at the top level, the sweep says nothing.
+        const warnings = ctx.logger.warn.mock.calls.map((c: unknown[]) => String(c[0]));
+        expect(warnings.filter((w: string) => w.includes('top-level metadata item'))).toEqual([]);
+    });
+
+    it('says out loud that the artifact\'s two halves disagree', async () => {
+        const { ctx } = await load(docsArtifact());
+
+        // The registration is silent-by-default's opposite: the door warns, and
+        // the remedy it names is one an author can actually perform — measured
+        // on the same fixture, moving `src/docs/pkgdocs_index.md` to
+        // `src/core/docs/` puts the doc on the core body and the top-level
+        // `docs` key disappears from the artifact.
+        const warnings = ctx.logger.warn.mock.calls.map((c: unknown[]) => String(c[0]));
+        expect(warnings.some((w: string) => w.includes('top-level metadata item'))).toBe(true);
     });
 });

@@ -27,14 +27,14 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // One staleness rule, shared with the merge driver's pre-commit half (#4675) —
 // two copies of "is dist older than src" would drift, and the direction they
 // drift in is the one that writes a wrong artifact.
-import { distIsStale } from '../../../scripts/check-regen-pending.mjs';
+import { declarationStamp, distIsStale } from '../../../scripts/check-regen-pending.mjs';
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -111,18 +111,6 @@ const GATED: ReadonlyArray<{
   // that has cost real triage time (AGENTS.md records the trap). Flagged so the
   // failure explains itself instead of sending the next reader after a ghost.
   { check: 'check:api-surface', gen: 'gen:api-surface', artifact: 'api-surface/', readsDist: true },
-  // The SHAPE half of the same surface (#16045), and the other dist-reading gate
-  // here. `api-surface/` records that an export EXISTS under a kind; this one
-  // records its declaration TEXT, which is the only one of the two a signature
-  // change, a renamed interface field or a dropped union member can move. Same
-  // `readsDist` caveat and for a sharper reason: on a stale dist it writes
-  // declaration text for a build nobody made, and `--check` then agrees with it.
-  {
-    check: 'check:api-surface-declarations',
-    gen: 'gen:api-surface-declarations',
-    artifact: 'api-surface-declarations/',
-    readsDist: true,
-  },
   // The #4796 declaration-origin baseline. Reads `src/`, NOT the dist — so it
   // carries no `readsDist` caveat and needs no build. It sits next to
   // `check:api-surface` because they answer adjacent questions about the same
@@ -489,7 +477,7 @@ const SELF = 'check:generated';
  * It works: the very first run rejected this script's own `package.json` entry
  * as unclassified, before it had checked a single artifact.
  */
-function reconcileLedger(scripts: Record<string, string>): void {
+function reconcileLedger(scripts: Record<string, string>): string[] {
   const problems: string[] = [];
   const declaredChecks = new Set([
     ...GATED.map((g) => g.check),
@@ -589,192 +577,442 @@ function reconcileLedger(scripts: Record<string, string>): void {
     }
   }
 
-  if (problems.length) {
-    console.error(`✗ check:generated ledger is out of sync with package.json:\n\n${problems.join('\n')}\n`);
-    process.exit(1);
-  }
+  return problems;
+}
+/* ───────────────────────────────────────────────────────────────────────────
+ * The effects this aggregate performs, named in one interface.
+ *
+ * Extracted for one reason: the behaviour ruled on #19086 is an ORDER between
+ * effects — build, then measure, then write, then re-measure — and an order is
+ * only pinnable if a test can watch the effects happen. Driving the real
+ * orchestration against a fixture world is what lets
+ * `check-generated-fix-rebuild.pin.test.ts` reproduce the two dist states this
+ * command was measured writing from (an entry declaration missing two exports;
+ * two of the emitted chunk declarations absent) in milliseconds instead of the
+ * ~3 minutes a real `packages/spec` build costs.
+ *
+ * ⛔ It is not a seam for production behaviour to vary through: `realIO` below
+ * is the only implementation this file ever runs with, and the entry point at
+ * the bottom is the only place that chooses one.
+ */
+export interface CheckGeneratedIO {
+  /** Run one of this package's own npm scripts, capturing its output. */
+  run(script: string): { ok: boolean; output: string };
+  /** `distIsStale()` — consulted only as a floor, after the forced build. */
+  distIsStale(): boolean;
+  /**
+   * The provenance clause plus its detail lines: WHICH dist the dist-reading
+   * gates were decided against, and whether this invocation built it. The first
+   * element is a clause meant to be appended to a sentence; the rest are lines.
+   */
+  distEvidence(builtByThisRun: boolean, buildMs: number | null): string[];
+  log(line: string): void;
+  error(line: string): void;
 }
 
-function run(script: string): { ok: boolean; output: string } {
+/**
+ * This package's own `build` script — `gen:schema && gen:openapi && tsup &&
+ * <declaration pass> && …`. It never invokes turbo, so there is no cache to
+ * hit: running it IS a forced build of this package, which is what the #19086
+ * ruling requires of the write path.
+ */
+const SPEC_BUILD = 'build';
+
+/** Every `.d.ts` under `dir`, with the newest mtime among them. */
+function declarationFiles(dir: string, depth = 0): { files: number; newest: number } {
+  if (depth > 12 || !existsSync(dir)) return { files: 0, newest: 0 };
+  let files = 0;
+  let newest = 0;
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) {
+      const sub = declarationFiles(p, depth + 1);
+      files += sub.files;
+      newest = Math.max(newest, sub.newest);
+    } else if (e.name.endsWith('.d.ts')) {
+      files++;
+      newest = Math.max(newest, statSync(p).mtimeMs);
+    }
+  }
+  return { files, newest };
+}
+
+/**
+ * Name the dist this run's verdicts were taken against — the reporting half of
+ * the #19086 ruling.
+ *
+ * The line it feeds used to read 「All N generated artifacts are up to date.」
+ * and stop there, while one of those N (`check:api-surface`) had been decided
+ * against a built tree whose correspondence to `src/` the run never measured
+ * and never mentioned. That is the whole indictment on that card: a green from
+ * an instrument that never looked is indistinguishable, downstream, from a
+ * green from one that did — and a void reading from this instrument was quoted
+ * as evidence in a revert decision before anyone noticed it was void.
+ *
+ * ⛔ The stamp is reported, never leaned on. `declarationStamp` hashes the
+ * build's INPUTS, so it reads `match` over a dist whose own files were
+ * truncated, hand-edited or only partly emitted — both reproducers on that card
+ * are exactly that state. It is printed here to IDENTIFY the tree, not to
+ * vouch for it; what vouches for it is `builtByThisRun`, and nothing else can.
+ */
+export function distEvidence(specDir: string, builtByThisRun: boolean, buildMs: number | null): string[] {
+  const distDir = join(specDir, 'dist');
+  const label = specDir === pkgRoot ? 'packages/spec/dist' : distDir;
+  const readers = GATED.filter((g) => g.readsDist).map((g) => g.check);
+  const readBy = readers.length ? `read by ${readers.length} gate(s) here: ${readers.join(', ')}` : 'no gate here reads it';
+  const { files, newest } = declarationFiles(distDir);
+
+  if (!files) {
+    return [
+      `measured against NO declarations at all — ${label} holds no .d.ts (${readBy})`,
+      `    Every dist-reading verdict above is about a tree that is not there.`,
+      `    pnpm --filter @objectstack/spec build`,
+    ];
+  }
+
+  const stamp = declarationStamp(specDir);
+  const digest = stamp.recorded ? ` (${stamp.recorded.slice(0, 12)}…)` : '';
+  const lines = [
+    builtByThisRun
+      ? `measured against ${label}, BUILT BY THIS RUN${buildMs === null ? '' : ` in ${(buildMs / 1000).toFixed(0)}s`}`
+      : `measured against ${label} AS FOUND ON DISK — this run did not build it`,
+    `    ${files} .d.ts, newest ${new Date(newest).toISOString()}; declaration stamp ${stamp.state}${digest}; ${readBy}.`,
+  ];
+  if (!builtByThisRun) {
+    lines.push(
+      `    ⚠ that stamp hashes the build's INPUTS, never the emitted files, so it cannot see a dist`,
+      `      whose own contents were truncated, hand-edited or only partly emitted — the state both`,
+      `      of #19086's reproducers are in. For a verdict taken against a dist this command built,`,
+      `      run --fix (it rebuilds first) or \`pnpm --filter @objectstack/spec build\` and re-run.`,
+    );
+  }
+  return lines;
+}
+
+function runScript(script: string): { ok: boolean; output: string } {
+  const env = { ...process.env };
+  // The forced build must EMIT DECLARATIONS. `OS_SKIP_DTS=1` is the documented
+  // fast local build and it skips the declaration pass outright, so a build
+  // inherited under it would leave precisely the dist this command exists to
+  // stop writing from — and would leave it looking freshly built. Stripped for
+  // the build alone; every gate keeps the caller's environment.
+  if (script === SPEC_BUILD) delete env.OS_SKIP_DTS;
   try {
-    const output = execSync(`pnpm -s ${script}`, { cwd: pkgRoot, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
+    const output = execSync(`pnpm -s ${script}`, { cwd: pkgRoot, env, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
     return { ok: true, output };
   } catch (err: any) {
     return { ok: false, output: `${err?.stdout?.toString() ?? ''}${err?.stderr?.toString() ?? ''}`.trim() };
   }
 }
 
-const fix = process.argv.includes('--fix');
-// CI mode (#4203): reconcile and stop — no gates. The reconciliation above only
-// ever ran where this aggregate ran, which was locally: CI runs the gates as
-// individual steps, so an unclassified `check:`/`gen:` script kept every CI gate
-// green while this wrapper exited red on `main` before running a single gate.
-// Twice in three days — #4177 (fixed only by colliding with #4194) and #4232
-// (caught wiring this flag in). It could not go in ci.yml's `check-generated`
-// job: that job was gated on a `generated` paths filter that never watched
-// packages/spec/package.json, the one file every offending PR must touch, so
-// both offenders skipped it entirely. #4291 deleted that job and its filter and
-// moved every gate to lint.yml's unfiltered, required "TypeScript Type Check"
-// job, which runs this mode too. Reads package.json and the arrays above; <1s.
-const reconcileOnly = process.argv.includes('--reconcile-only');
-const scripts = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).scripts ?? {};
-reconcileLedger(scripts);
+/** The one implementation this command ever runs with. */
+export const realIO: CheckGeneratedIO = {
+  run: runScript,
+  distIsStale: () => distIsStale(),
+  distEvidence: (builtByThisRun, buildMs) => distEvidence(pkgRoot, builtByThisRun, buildMs),
+  log: (line) => console.log(line),
+  error: (line) => console.error(line),
+};
 
-if (reconcileOnly) {
-  const checks = Object.keys(scripts).filter((n) => n.startsWith('check:')).length;
-  const gens = Object.keys(scripts).filter((n) => n.startsWith('gen:')).length;
-  console.log(
-    `✓ check:generated ledger reconciles with package.json: ${checks} check: + ${gens} gen: scripts, ` +
-      `all classified (${GATED.length} gated, ${NO_GENERATOR.length} source audits, ` +
-      `${EXTERNAL_INPUT_REQUIRED.length} needing an external input, ` +
-      `${UNGATED_GENERATORS.length} ungated generators, ${EXPLICIT_GENERATORS.length} explicit ` +
-      `manual-only generators, 1 aggregate).\n` +
-      // Named, not just counted: this bucket's whole reason for existing is that a
-      // bare count is what let #4690 read as "someone runs it".
-      EXTERNAL_INPUT_REQUIRED.map(
-        (e) => `  ⚠ cannot run here: ${e.check} — needs ${e.input}; runs in ${e.runBy}.\n`,
-      ).join('') +
-      // Named for the same reason as the bucket above: an ordering constraint
-      // nobody can see is one a later tidy-up silently breaks (#4723).
-      GATED.filter((g) => g.readsSchemaTree)
-        .map((g) => `  ↳ ${g.check} renders from json-schema/, generated by ${g.readsSchemaTree} above it.\n`)
-        .join('') +
-      `  --reconcile-only: no gates were run — this verifies coverage, not artifacts.`,
-  );
-  process.exit(0);
-}
+/** @returns the process exit code. */
+export function checkGenerated(
+  argv: readonly string[],
+  scripts: Record<string, string>,
+  io: CheckGeneratedIO,
+): number {
+  const fix = argv.includes('--fix');
+  // CI mode (#4203): reconcile and stop — no gates. The reconciliation above only
+  // ever ran where this aggregate ran, which was locally: CI runs the gates as
+  // individual steps, so an unclassified `check:`/`gen:` script kept every CI gate
+  // green while this wrapper exited red on `main` before running a single gate.
+  // Twice in three days — #4177 (fixed only by colliding with #4194) and #4232
+  // (caught wiring this flag in). It could not go in ci.yml's `check-generated`
+  // job: that job was gated on a `generated` paths filter that never watched
+  // packages/spec/package.json, the one file every offending PR must touch, so
+  // both offenders skipped it entirely. #4291 deleted that job and its filter and
+  // moved every gate to lint.yml's unfiltered, required "TypeScript Type Check"
+  // job, which runs this mode too. Reads package.json and the arrays above; <1s.
+  const reconcileOnly = argv.includes('--reconcile-only');
 
-console.log(`Checking ${GATED.length} generated artifacts (every gate runs — the first failure does not stop the rest).\n`);
-
-const stale: typeof GATED[number][] = [];
-for (const entry of GATED) {
-  const { ok, output } = run(entry.check);
-  console.log(`  ${ok ? '✓' : '✗'} ${entry.check.padEnd(26)} ${entry.artifact}`);
-  if (!ok) {
-    stale.push(entry);
-    // The gates print their own prescription; surface it rather than paraphrasing.
-    const detail = output.split('\n').filter(Boolean).slice(0, 3).map((l) => `      ${l}`).join('\n');
-    if (detail) console.log(detail);
-    if (entry.readsDist) {
-      console.log(`      ⚠ this gate reads the BUILT dist, not the source — if you have not run`);
-      console.log(`        \`pnpm --filter @objectstack/spec build\` since your last pull, the removals`);
-      console.log(`        above are phantoms. Build first, then re-run, before regenerating.`);
-    }
-    if (entry.readsSchemaTree) {
-      console.log(`      ℹ this gate renders from packages/spec/json-schema/, generated by`);
-      console.log(`        \`${entry.readsSchemaTree}\` above. It no longer regenerates that tree itself —`);
-      console.log(`        the first step that did also repaired two TRACKED projections (#4711, #4723).`);
-    }
+  const problems = reconcileLedger(scripts);
+  if (problems.length) {
+    io.error(`✗ check:generated ledger is out of sync with package.json:\n\n${problems.join('\n')}\n`);
+    return 1;
   }
-}
 
-// Narrowing is never silent: say what was deliberately not run.
-console.log(`\nNot run here (${NO_GENERATOR.length} source audits with no artifact to regenerate): ` +
-  NO_GENERATOR.map((n) => n.check).join(', '));
-// Narrowing is never silent, part three — and this one is a different sentence:
-// "deliberately not run" invites the reader to run it AS IT STANDS, which for
-// these does not work: each needs an input on the command line that this
-// aggregate does not pass. Say what that input is and who does pass it, so the
-// reader can run it by hand — for the entry below the input is tracked here.
-if (EXTERNAL_INPUT_REQUIRED.length) {
-  console.log(`Needs an input this aggregate does not pass (${EXTERNAL_INPUT_REQUIRED.length} source audit(s)):`);
-  for (const e of EXTERNAL_INPUT_REQUIRED) {
-    console.log(`  ${e.check} — needs ${e.input}\n    runs in ${e.runBy}; ${e.why}`);
-  }
-}
-if (UNGATED_GENERATORS.length) {
-  console.log(`Generated but ungated (${UNGATED_GENERATORS.length}): ` +
-    UNGATED_GENERATORS.map((u) => u.gen).join(', ') + ' — nothing verifies these are current.');
-}
-// Narrowing is never silent, part two: --fix will not reach these, by design.
-if (EXPLICIT_GENERATORS.length) {
-  console.log(`Explicit, manual-only (${EXPLICIT_GENERATORS.length}): ` +
-    EXPLICIT_GENERATORS.map((e) => `${e.gen} (gated by ${e.gatedBy})`).join(', ') +
-    ' — never run here or by --fix; their artifact may lag and still be green.');
-}
-
-if (!stale.length) {
-  console.log(`\n✓ All ${GATED.length} generated artifacts are up to date.`);
-  process.exit(0);
-}
-
-console.log(`\n✗ ${stale.length} of ${GATED.length} artifact(s) stale:\n`);
-for (const s of stale) {
-  console.log(`  ${s.artifact}\n    pnpm --filter @objectstack/spec ${s.gen}` +
-    (s.ratchet ? `   ← only if ${s.check} asked you to RE-RECORD; --fix will not run this one` : ''));
-}
-
-const autoFixable = stale.filter((s) => !s.ratchet);
-
-if (!fix) {
-  console.log(`\nRegenerate exactly these:\n  ` +
-    stale.map((s) => `pnpm --filter @objectstack/spec ${s.gen}`).join(' && '));
-  console.log(
-    autoFixable.length
-      ? `\nOr re-run with --fix to do it now (only the ${autoFixable.length} proved stale — never the whole set` +
-          (autoFixable.length < stale.length
-            ? `, and never the ${stale.length - autoFixable.length} ratchet(s) above: read their verdict first).`
-            : `).`)
-      : `\n--fix will not do this for you: every stale artifact above is a directional ratchet, ` +
-          `and its gate already said which direction it moved.`,
-  );
-  process.exit(1);
-}
-
-console.log(
-  `\n--fix: regenerating ${autoFixable.length} of the ${stale.length} stale artifact(s)` +
-    (autoFixable.length < stale.length ? ` — the rest are ratchets, refused below` : '') +
-    `. Review the diff before committing.\n`,
-);
-let failed = 0;
-for (const s of stale) {
-  // A ratchet's gate has already answered the question --fix would have to guess:
-  // it names, per file, whether the debt grew (fix the code) or shrank (re-record
-  // the number). Regenerating on the first reading launders new debt in as a
-  // mechanical diff — the same "admit it via the fix command" hazard that keeps
-  // dual-source-exports.baseline.json out of GATED entirely (#4446). That ledger
-  // can stay hand-edited because it holds a handful of rows; this one holds 79
-  // files, so it ships a generator and puts the refusal here instead.
-  if (s.ratchet) {
-    failed++;
-    console.log(`  ✗ ${s.gen} — REFUSED`);
-    console.error(
-      `      ${s.artifact} is a directional debt ledger, not a snapshot of the source.\n`
-        + `      "the debt shrank — re-record it" and "the debt grew — fix the new errors" both\n`
-        + `      reach --fix as one stale artifact, and only ${s.check} knows which it was.\n`
-        + `      Read its per-file verdict; if re-recording is what it asked for, run:\n`
-        + `      pnpm --filter @objectstack/spec ${s.gen}`,
+  if (reconcileOnly) {
+    const checks = Object.keys(scripts).filter((n) => n.startsWith('check:')).length;
+    const gens = Object.keys(scripts).filter((n) => n.startsWith('gen:')).length;
+    io.log(
+      `✓ check:generated ledger reconciles with package.json: ${checks} check: + ${gens} gen: scripts, ` +
+        `all classified (${GATED.length} gated, ${NO_GENERATOR.length} source audits, ` +
+        `${EXTERNAL_INPUT_REQUIRED.length} needing an external input, ` +
+        `${UNGATED_GENERATORS.length} ungated generators, ${EXPLICIT_GENERATORS.length} explicit ` +
+        `manual-only generators, 1 aggregate).\n` +
+        // Named, not just counted: this bucket's whole reason for existing is that a
+        // bare count is what let #4690 read as "someone runs it".
+        EXTERNAL_INPUT_REQUIRED.map(
+          (e) => `  ⚠ cannot run here: ${e.check} — needs ${e.input}; runs in ${e.runBy}.\n`,
+        ).join('') +
+        // Named for the same reason as the bucket above: an ordering constraint
+        // nobody can see is one a later tidy-up silently breaks (#4723).
+        GATED.filter((g) => g.readsSchemaTree)
+          .map((g) => `  ↳ ${g.check} renders from json-schema/, generated by ${g.readsSchemaTree} above it.\n`)
+          .join('') +
+        `  --reconcile-only: no gates were run — this verifies coverage, not artifacts.`,
     );
-    continue;
+    return 0;
   }
-  // The `readsDist` warning above is advice a reader can ignore; here it must
-  // become a refusal. `gen:api-surface` on a stale dist does not fail — it
-  // writes a plausible surface with every export added since the last build
-  // missing, and `gen:docs` then ratchets a baseline exemption in to cover the
-  // hole. That landed unnoticed on #4687 and was caught only by diffing the
-  // generated files against `main`. --fix is the one path that WRITES, so it is
-  // the one place the trap is unsurvivable: a visible conflict is recoverable,
-  // a confidently wrong artifact is not (#4675).
-  // `readsSchemaTree` gets no refusal of its own here, deliberately. Its
-  // generator (`build-docs.ts`) carries the guard itself, so EVERY caller is
-  // covered rather than this one — and by the time --fix runs, the producer gate
-  // above has already rebuilt the tree from the sources under test, so the guard
-  // is a backstop rather than the mechanism (#4723).
-  if (s.readsDist && distIsStale()) {
-    failed++;
-    console.log(`  ✗ ${s.gen} — REFUSED`);
-    console.error(
-      `      packages/spec/dist is missing or older than packages/spec/src.\n`
-        + `      Regenerating now would write a surface describing a build that no longer exists.\n`
-        + `      pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec ${s.gen}`,
+
+  // ── #19086: --fix rebuilds what it writes from, before it measures anything ──
+  //
+  // The write path used to be gated on the ABSENCE OF AN ACCUSATION rather than
+  // on positive proof. `distIsStale()` answers `fresh` the moment mtimes say
+  // fresh, and any write to a dist file moves that file's mtime FORWARD, so the
+  // whole class of damage where a dist stops describing `src` — an interrupted
+  // declaration pass, a partly emitted chunk set, a hand-edit, a partial restore
+  // — is by construction outside what that predicate can report. Measured twice
+  // on this package: an entry declaration missing two names, and two of the 46
+  // emitted chunk declarations absent, both reading `distIsStale=false` with the
+  // declaration stamp at `match`, from which `--fix` wrote a baseline missing
+  // live exports and exited 0.
+  //
+  // So the guard is no longer a predicate. `--fix` BUILDS the dist it is about
+  // to generate from, inside this invocation, and generates from that — positive
+  // proof by construction. The cost is one full build per `--fix`, which is the
+  // 「Build first」 precondition this command's own documentation already
+  // prescribes, made automatic rather than remembered.
+  //
+  // ⛔ The read-only path deliberately does NOT build: it is run on every CI lap
+  // and by every reader who just wants the diagnosis, and a build there is a
+  // cost on a path that writes nothing. What the read-only path owes instead is
+  // to SAY which dist it looked at — `distEvidence` below.
+  let buildMs: number | null = null;
+  if (fix) {
+    io.log(`--fix rebuilds what it writes from: forcing \`pnpm --filter @objectstack/spec ${SPEC_BUILD}\` first.`);
+    io.log(`  One full build per --fix — the documented 「Build first」 precondition, made automatic.`);
+    io.log(`  ⚠ that build runs gen:schema, so it also repairs authorable-surface/ and`);
+    io.log(`    json-schema.manifest/ if they are behind — exactly as running it by hand would.\n`);
+    const started = Date.now();
+    const built = io.run(SPEC_BUILD);
+    buildMs = Date.now() - started;
+    if (!built.ok) {
+      io.log(`  ✗ ${SPEC_BUILD} FAILED after ${(buildMs / 1000).toFixed(0)}s`);
+      io.error(built.output.split('\n').filter(Boolean).slice(-8).map((l) => `      ${l}`).join('\n'));
+      io.error(
+        `\n      NOTHING was checked and NOTHING was written. Generating now would write from a\n` +
+          `      dist this command could not produce, which is the one thing --fix must never do.\n` +
+          `      Fix the build, then re-run.`,
+      );
+      return 1;
+    }
+    const [clause, ...detail] = io.distEvidence(true, buildMs);
+    io.log(`  ✓ ${SPEC_BUILD} — ${clause}.`);
+    for (const line of detail) io.log(line);
+    // A floor, not the mechanism: the build exited 0, so the freshness predicate
+    // must agree. If it does not, something emitted no declarations and every
+    // verdict below would be about a tree nobody produced — refuse rather than
+    // write into that.
+    if (io.distIsStale()) {
+      io.log(`  ✗ ${SPEC_BUILD} exited 0 and the dist still reads as stale`);
+      io.error(
+        `      The build reported success and packages/spec/dist is still missing or older than\n` +
+          `      packages/spec/src. Nothing was written. Re-run the build by hand and read its output.`,
+      );
+      return 1;
+    }
+    io.log('');
+  }
+
+  io.log(`Checking ${GATED.length} generated artifacts (every gate runs — the first failure does not stop the rest).\n`);
+
+  const stale: typeof GATED[number][] = [];
+  for (const entry of GATED) {
+    const { ok, output } = io.run(entry.check);
+    io.log(`  ${ok ? '✓' : '✗'} ${entry.check.padEnd(26)} ${entry.artifact}`);
+    if (!ok) {
+      stale.push(entry);
+      // The gates print their own prescription; surface it rather than paraphrasing.
+      const detail = output.split('\n').filter(Boolean).slice(0, 3).map((l) => `      ${l}`).join('\n');
+      if (detail) io.log(detail);
+      if (entry.readsDist && !fix) {
+        io.log(`      ⚠ this gate reads the BUILT dist, not the source — if you have not run`);
+        io.log(`        \`pnpm --filter @objectstack/spec build\` since your last pull, the removals`);
+        io.log(`        above are phantoms. Build first, then re-run, before regenerating.`);
+      }
+      if (entry.readsSchemaTree) {
+        io.log(`      ℹ this gate renders from packages/spec/json-schema/, generated by`);
+        io.log(`        \`${entry.readsSchemaTree}\` above. It no longer regenerates that tree itself —`);
+        io.log(`        the first step that did also repaired two TRACKED projections (#4711, #4723).`);
+      }
+    }
+  }
+
+  // Narrowing is never silent: say what was deliberately not run.
+  io.log(`\nNot run here (${NO_GENERATOR.length} source audits with no artifact to regenerate): ` +
+    NO_GENERATOR.map((n) => n.check).join(', '));
+  // Narrowing is never silent, part three — and this one is a different sentence:
+  // "deliberately not run" invites the reader to run it AS IT STANDS, which for
+  // these does not work: each needs an input on the command line that this
+  // aggregate does not pass. Say what that input is and who does pass it, so the
+  // reader can run it by hand — for the entry below the input is tracked here.
+  if (EXTERNAL_INPUT_REQUIRED.length) {
+    io.log(`Needs an input this aggregate does not pass (${EXTERNAL_INPUT_REQUIRED.length} source audit(s)):`);
+    for (const e of EXTERNAL_INPUT_REQUIRED) {
+      io.log(`  ${e.check} — needs ${e.input}\n    runs in ${e.runBy}; ${e.why}`);
+    }
+  }
+  if (UNGATED_GENERATORS.length) {
+    io.log(`Generated but ungated (${UNGATED_GENERATORS.length}): ` +
+      UNGATED_GENERATORS.map((u) => u.gen).join(', ') + ' — nothing verifies these are current.');
+  }
+  // Narrowing is never silent, part two: --fix will not reach these, by design.
+  if (EXPLICIT_GENERATORS.length) {
+    io.log(`Explicit, manual-only (${EXPLICIT_GENERATORS.length}): ` +
+      EXPLICIT_GENERATORS.map((e) => `${e.gen} (gated by ${e.gatedBy})`).join(', ') +
+      ' — never run here or by --fix; their artifact may lag and still be green.');
+  }
+
+  if (!stale.length) {
+    // #19086: the sentence names the tree it measured against. Unqualified, it
+    // vouched for N artifacts of which one had been decided against a dist this
+    // run never looked at.
+    const [clause, ...detail] = io.distEvidence(fix, buildMs);
+    io.log(`\n✓ All ${GATED.length} generated artifacts are up to date — ${clause}.`);
+    for (const line of detail) io.log(line);
+    return 0;
+  }
+
+  io.log(`\n✗ ${stale.length} of ${GATED.length} artifact(s) stale:\n`);
+  for (const s of stale) {
+    io.log(`  ${s.artifact}\n    pnpm --filter @objectstack/spec ${s.gen}` +
+      (s.ratchet ? `   ← only if ${s.check} asked you to RE-RECORD; --fix will not run this one` : ''));
+  }
+  // The same sentence the pass path owes, owed here too: a red verdict taken
+  // against an unmeasured dist is as unreadable as a green one.
+  {
+    const [clause, ...detail] = io.distEvidence(fix, buildMs);
+    io.log(`\nThe verdicts above were ${clause}.`);
+    for (const line of detail) io.log(line);
+  }
+
+  const autoFixable = stale.filter((s) => !s.ratchet);
+
+  if (!fix) {
+    io.log(`\nRegenerate exactly these:\n  ` +
+      stale.map((s) => `pnpm --filter @objectstack/spec ${s.gen}`).join(' && '));
+    io.log(
+      autoFixable.length
+        ? `\nOr re-run with --fix to do it now (only the ${autoFixable.length} proved stale — never the whole set` +
+            (autoFixable.length < stale.length
+              ? `, and never the ${stale.length - autoFixable.length} ratchet(s) above: read their verdict first).`
+              : `). It rebuilds packages/spec first, so it writes from a dist it produced.`)
+        : `\n--fix will not do this for you: every stale artifact above is a directional ratchet, ` +
+            `and its gate already said which direction it moved.`,
     );
-    continue;
+    return 1;
   }
-  const { ok, output } = run(s.gen);
-  console.log(`  ${ok ? '✓' : '✗'} ${s.gen}`);
-  if (!ok) {
-    failed++;
-    console.error(output.split('\n').filter(Boolean).slice(0, 5).map((l) => `      ${l}`).join('\n'));
+
+  io.log(
+    `\n--fix: regenerating ${autoFixable.length} of the ${stale.length} stale artifact(s)` +
+      (autoFixable.length < stale.length ? ` — the rest are ratchets, refused below` : '') +
+      `, from the dist built above. Review the diff before committing.\n`,
+  );
+  let failed = 0;
+  const written: typeof GATED[number][] = [];
+  for (const s of stale) {
+    // A ratchet's gate has already answered the question --fix would have to guess:
+    // it names, per file, whether the debt grew (fix the code) or shrank (re-record
+    // the number). Regenerating on the first reading launders new debt in as a
+    // mechanical diff — the same "admit it via the fix command" hazard that keeps
+    // dual-source-exports.baseline.json out of GATED entirely (#4446). That ledger
+    // can stay hand-edited because it holds a handful of rows; this one holds 79
+    // files, so it ships a generator and puts the refusal here instead.
+    if (s.ratchet) {
+      failed++;
+      io.log(`  ✗ ${s.gen} — REFUSED`);
+      io.error(
+        `      ${s.artifact} is a directional debt ledger, not a snapshot of the source.\n`
+          + `      "the debt shrank — re-record it" and "the debt grew — fix the new errors" both\n`
+          + `      reach --fix as one stale artifact, and only ${s.check} knows which it was.\n`
+          + `      Read its per-file verdict; if re-recording is what it asked for, run:\n`
+          + `      pnpm --filter @objectstack/spec ${s.gen}`,
+      );
+      continue;
+    }
+    // A FLOOR under the forced build above, no longer the guard (#19086). It was
+    // the guard once, and that is exactly what failed: `distIsStale()` acquits on
+    // an mtime ordering, so the dist states this command was measured writing
+    // wrong artifacts from all passed it. Reaching this line now means the build
+    // reported success and the predicate still says stale, which the check after
+    // the build has already refused on — kept so a future edit that moves or
+    // weakens that check cannot let a stale dist reach a generator unremarked.
+    // `readsSchemaTree` gets no refusal of its own here, deliberately. Its
+    // generator (`build-docs.ts`) carries the guard itself, so EVERY caller is
+    // covered rather than this one — and by the time --fix runs, the producer gate
+    // above has already rebuilt the tree from the sources under test, so the guard
+    // is a backstop rather than the mechanism (#4723).
+    if (s.readsDist && io.distIsStale()) {
+      failed++;
+      io.log(`  ✗ ${s.gen} — REFUSED`);
+      io.error(
+        `      packages/spec/dist is missing or older than packages/spec/src, after this run\n`
+          + `      already forced a build of it. Regenerating now would write a surface describing\n`
+          + `      a build that no longer exists.\n`
+          + `      pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec ${s.gen}`,
+      );
+      continue;
+    }
+    const { ok, output } = io.run(s.gen);
+    io.log(`  ${ok ? '✓' : '✗'} ${s.gen}`);
+    if (!ok) {
+      failed++;
+      io.error(output.split('\n').filter(Boolean).slice(0, 5).map((l) => `      ${l}`).join('\n'));
+      continue;
+    }
+    written.push(s);
   }
+
+  // ── #19086: a write is never its own only witness ──
+  //
+  // Until this ran, --fix exited on generator success and the NEXT `check:generated`
+  // compared each artifact against the same dist that produced it — an agreement
+  // that holds for any dist whatsoever, including one that describes nothing on
+  // disk. So the green that followed a wrong write was structurally incapable of
+  // contradicting it. Re-running each gate here does not make the write right; it
+  // makes the run say whether the gate it was supposed to satisfy is satisfied.
+  if (written.length) {
+    io.log(`\n--fix: re-checking the ${written.length} artifact(s) just written — a write is not its own witness.`);
+    for (const s of written) {
+      const { ok, output } = io.run(s.check);
+      io.log(`  ${ok ? '✓' : '✗'} ${s.check.padEnd(26)} ${s.artifact}`);
+      if (!ok) {
+        failed++;
+        io.error(output.split('\n').filter(Boolean).slice(0, 5).map((l) => `      ${l}`).join('\n'));
+        io.error(
+          `      ${s.gen} ran and ${s.check} still fails. The artifact was written and the gate is\n`
+            + `      NOT satisfied — read the verdict above rather than the write. Half of what this\n`
+            + `      gate reports (a ledger row, an unclassified property, a rotted pointer) is never\n`
+            + `      arithmetic its generator can repair.`,
+        );
+      }
+    }
+  }
+  return failed ? 1 : 0;
 }
-process.exit(failed ? 1 : 0);
+
+const invokedDirectly = (() => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+
+if (invokedDirectly) {
+  const scripts = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).scripts ?? {};
+  process.exit(checkGenerated(process.argv.slice(2), scripts, realIO));
+}

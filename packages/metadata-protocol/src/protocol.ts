@@ -20,6 +20,12 @@ import { omitInternalFieldsFromWriteResponse } from './write-response-internal-f
 // `{ not: {} }` — is dropped from it. See the module header for the channels
 // that keep carrying the retirement's prescription.
 import { stripUnauthorableProperties } from './unauthorable-nodes.js';
+// [#19295] The output derivation of a `ZodPipe` erases the arm's own input
+// type, so an authoring arm that accepts a bare string is served as the
+// anonymous `{}`. This annotates that husk — and only that husk — so a
+// consumer can tell an ERASED authoring type from a member that genuinely
+// admits anything. See the module header for the predicate and its controls.
+import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
     evaluateRuntimeAuthoringGate,
     CLOSURE_CONTEXT_KEY_BY_TYPE,
@@ -131,6 +137,9 @@ import {
     type MetadataProvenance,
 } from '@objectstack/spec/kernel';
 import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
+// [#19417] The package-id declaration and its remedy text, imported to be
+// SURFACED rather than restated — see the gate at the top of `installPackage`.
+import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { REFERENCE_SITES } from './reference-sites.js';
 // [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
@@ -280,7 +289,7 @@ function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T 
     const refusal = metaUrlSpellingRefusal(request.type);
     if (refusal) {
         const err = new Error(
-            `[invalid_request] '${request.type}' is not a recognised spelling of metadata type `
+            `'${request.type}' is not a recognised spelling of metadata type `
             + `'${refusal.declared}'. Address it as '${refusal.declared}' or '${refusal.hint}'. `
             + `Refused rather than treated as a plugin-registered type, because forwarding an unrecognised `
             + `spelling of a declared type would create a second namespace under type='${request.type}'.`,
@@ -466,6 +475,21 @@ const _warnedDegenerateDerivation = new Set<string>();
  * documented for and it returns `undefined` as it always did — no retry. Not
  * one type's conversion throws today, so retrying there would move no payload
  * while widening the change past the ruling.
+ *
+ * ## [#19295] Why both derivations carry the erased-authoring `override`
+ *
+ * The degeneracy above is a WHOLE-TYPE husk. The same erasure also happens one
+ * level down, per MEMBER: a predicate slot's string arm is a `ZodPipe`, so the
+ * output derivation describes the transform's result and the arm itself is
+ * served as `{}` — indistinguishable from a member that admits anything.
+ * {@link markErasedAuthoringInput} annotates exactly those arms; it adds a
+ * vendor keyword and changes no keyword zod emitted, so what each document
+ * ACCEPTS is untouched and the refused `io: 'input'` widening stays refused.
+ *
+ * It is passed to BOTH calls on purpose. On the authoring retry a pipe derives
+ * from its input side, nothing is erased, and the hook marks nothing — so a
+ * type served from the retry (`action`) carries a real authoring arm instead
+ * of a marked husk, which is the honest answer rather than a gap.
  */
 const _jsonSchemaCache = new WeakMap<z.ZodTypeAny, Record<string, unknown> | null>();
 function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<string, unknown> | undefined {
@@ -474,7 +498,10 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
 
     let output: Record<string, unknown>;
     try {
-        output = z.toJSONSchema(schema, { unrepresentable: 'any' }) as Record<string, unknown>;
+        output = z.toJSONSchema(schema, {
+            unrepresentable: 'any',
+            override: markErasedAuthoringInput,
+        }) as Record<string, unknown>;
     } catch {
         // Conversion failed outright — the original hand-crafted-fallback case.
         _jsonSchemaCache.set(schema, null);
@@ -491,7 +518,11 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
     // before giving up — for a `ZodPipe` this is the derivation that can see
     // the object at all.
     try {
-        const authoring = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as Record<string, unknown>;
+        const authoring = z.toJSONSchema(schema, {
+            unrepresentable: 'any',
+            io: 'input',
+            override: markErasedAuthoringInput,
+        }) as Record<string, unknown>;
         if (!isDegenerateDerivation(authoring)) {
             const authorable = stripUnauthorableProperties(authoring);
             _jsonSchemaCache.set(schema, authorable);
@@ -2273,8 +2304,8 @@ function carryCatalogedErrorCode(target: Error, source: unknown): void {
  * met. It is the inverse and bounded question: **did we author this sentence
  * for a caller?** A producer that declared 4xx has said the failure is the
  * caller's to fix and has written the remedy into the message — the
- * self-correcting refusals `SysMetadataRepository` raises (`[item_locked]`,
- * `[writable_package_required]`, `[no_draft]`, …) are exactly that, and they
+ * self-correcting refusals `SysMetadataRepository` raises (`ITEM_LOCKED`,
+ * `WRITABLE_PACKAGE_REQUIRED`, `NO_DRAFT`, …) are exactly that, and they
  * must survive intact. Everything else is withheld by DEFAULT, so a dialect
  * this repo has never run is handled correctly without anyone having enumerated
  * it.
@@ -2608,7 +2639,7 @@ export function seedRequestValidationError(zodIssues: unknown): Error {
     // refusal thread it onto `seedApplied.issues` beside the headline, so
     // the author's curated per-key prose still arrives exactly once.
     const err = new Error(
-        `[invalid_metadata] the published seed bodies failed spec validation: `
+        `The published seed bodies failed spec validation: `
         + metadataIssueHeadline(issues),
     );
     (err as any).code = 'INVALID_METADATA';
@@ -5842,7 +5873,7 @@ export class ObjectStackProtocolImplementation implements
      * `translation`, `email_template`): a draft authored env-wide — which is
      * what package/AI authoring writes, and what `PUT ?mode=draft` writes when no
      * active org is threaded — is looked up under `organization_id = <org>`,
-     * matches nothing, and answers `404 [no_draft] … nothing to publish` over a
+     * matches nothing, and answers `404 NO_DRAFT` — `… nothing to publish` — over a
      * row the console's own pending-changes list is showing. Measured on a cloud
      * rig: four AI-authored `view` drafts, visible in `sys_metadata` at
      * `state='draft'`, all four refused by the per-item door while the batch
@@ -5872,7 +5903,7 @@ export class ObjectStackProtocolImplementation implements
      * a package-stating publish resolves the scope of the draft it NAMED.
      * Without the dimension, probe 1 could match ANOTHER package's row in the
      * caller's org, name a scope the package-exact promote then finds empty,
-     * and answer `404 [no_draft]` over a publishable draft sitting env-wide.
+     * and answer `404 NO_DRAFT` over a publishable draft sitting env-wide.
      * Accepted cost, on the record: a caller stating a package no longer
      * discovers a no-package draft of the same `(type, name)` — it 404s and the
      * caller retries without `?package=`; that narrowing is the ruling, not a
@@ -8170,7 +8201,7 @@ export class ObjectStackProtocolImplementation implements
         if (readState === 'draft') {
             if (item === undefined) {
                 const err: any = new Error(
-                    `[no_draft] No pending draft exists for ${request.type}/${request.name}.`,
+                    `No pending draft exists for ${request.type}/${request.name}.`,
                 );
                 err.code = 'NO_DRAFT';
                 err.status = 404;
@@ -11408,10 +11439,33 @@ export class ObjectStackProtocolImplementation implements
         // POSITIVE not-found signal, and inventing a 404 out of it would break
         // deletes against third-party drivers rather than report honestly.
         if (deleted === false) throw recordNotFoundError(request.object, request.id);
+        // The same measurement, one outcome over: `success` was still a
+        // LITERAL for every answer that was not the contract's `false`, so a
+        // row that MATCHED and was deliberately NOT removed reported a
+        // deletion. `sys_permission_set` is the shipped case — a
+        // package-declared set's delete is an ADR-0005 RESET, the record
+        // re-projects to the declared body instead of vanishing — and the
+        // envelope was byte-identical to a real delete, so a UI fired a
+        // success toast and showed the row again on refresh.
+        //
+        // `success` is declared "Whether deletion succeeded", and this is the
+        // only key on `DeleteDataResponseSchema` that can carry the
+        // difference; zero rows removed is a deletion that did not succeed.
+        // The engine's delete result declares two arms — the driver's boolean
+        // for a by-id write, a COUNT of rows removed otherwise — so a numeric
+        // zero is the one answer that positively means "the row is still
+        // there", and it is what the middleware that performs a reset now
+        // returns. It cannot say so with `false`: that value is spoken for by
+        // the not-found 404 above, which would be a second lie about a record
+        // this caller can still GET.
+        //
+        // Everything else keeps its #4435 reading, including an off-contract
+        // `undefined` from a third-party driver: only a POSITIVE zero is read
+        // as "not removed".
         return {
             object: request.object,
             id: request.id,
-            success: true
+            success: deleted !== 0
         };
     }
 
@@ -12515,8 +12569,66 @@ export class ObjectStackProtocolImplementation implements
                         // spurious 404.
                         const deleted = await this.engine.delete(object, { where: { id: record.id }, ...ctxOpt } as any);
                         if (deleted === false) throw recordNotFoundError(object, record.id);
-                        results.push({ id: record.id, success: true, index });
-                        succeeded++;
+                        // [#19433] The SECOND half of this site, and the THIRD and
+                        // last of the by-id delete doors to learn it — the
+                        // single-record face (#19306) and `deleteManyData` (#19412)
+                        // both already read the engine's answer. The paragraph
+                        // above fixed "no match"; this is "matched, and
+                        // deliberately NOT removed", where `success` was still a
+                        // LITERAL for every result that was not the contract's
+                        // `false`, so that row was reported as a deletion too.
+                        //
+                        // `sys_permission_set` is the shipped shape of it: deleting
+                        // a package-declared set is an ADR-0005 RESET — the overlay
+                        // tombstones and the record re-projects to the declared body
+                        // instead of vanishing — so the row MATCHED, the write ran,
+                        // and the record is still there. On a security-configuration
+                        // write this envelope told an operator a permission set was
+                        // gone while it was still being enforced.
+                        //
+                        // The defect rests on the CONTRACT, not on any shipped
+                        // handler: `IDataEngine.delete` declares
+                        // `Promise<boolean | number>` — the driver's boolean for a
+                        // by-id write, a COUNT of rows removed otherwise — and
+                        // `isDeleteResultShape` admits the number arm at the
+                        // ADR-0112 hook gate, so an `afterDelete` handler or a
+                        // non-ObjectQL engine may legally answer `0` today.
+                        //
+                        // ⛔ Not the `false` arm: that is spoken for by the 404
+                        // above, about a record this caller can still GET, and
+                        // answering it here would trade one wrong answer for a
+                        // louder one. Everything else keeps its #4435 reading, an
+                        // off-contract `undefined` from a third-party driver
+                        // included: only a POSITIVE zero is read as "not removed".
+                        //
+                        // ⛔ And the row gets NO `errors[]` entry. A surviving
+                        // record is an OUTCOME, not a fault — the single-record door
+                        // answers the same case with a bare `success: false` on a
+                        // 200 — and the two per-row codes this envelope owns
+                        // (`ROLLED_BACK`, `NOT_ATTEMPTED`) both describe a row that
+                        // never ran. Minting one for this ending is an
+                        // ERROR_CODE_LEDGER widening in `packages/spec`, and belongs
+                        // to the spec lane.
+                        //
+                        // This envelope's own consequences, measured here rather
+                        // than inherited from `deleteManyData`: the row is counted
+                        // in `failed` because `succeeded` and `failed` PARTITION
+                        // `results` (#7539, `reconcileStoppedBatch`, shared by all
+                        // three bulk faces), which makes the request-level `success`
+                        // false and, on the `atomic` arm, aborts the batch through
+                        // `runAtomicBatch`'s `failed > 0` — so an atomic batch
+                        // holding a package-declared set now rolls back instead of
+                        // committing under a response that called every row deleted.
+                        // It does NOT stop a non-atomic run: the `continueOnError`
+                        // stop belongs to the catch below and nothing was thrown, so
+                        // every remaining record is still attempted. `returnRecords:
+                        // false` keeps `success`, so the honest value survives that
+                        // projection too. Only this `case` is touched — the sibling
+                        // arms of this shared loop keep their own counters.
+                        const removed = deleted !== 0;
+                        results.push({ id: record.id, success: removed, index });
+                        if (removed) succeeded++;
+                        else failed++;
                         break;
                     }
                     default:
@@ -12588,8 +12700,7 @@ export class ObjectStackProtocolImplementation implements
     ): BatchDataLoopOutcome {
         if (outcome.results.length >= records.length) return outcome;
 
-        const causeIndex = outcome.results.findIndex(r => !r.success);
-        const cause = causeIndex >= 0 ? outcome.results[causeIndex]?.errors?.[0]?.message : undefined;
+        const cause = this.locateBatchCause(outcome.results);
 
         const results = outcome.results.slice();
         for (let index = results.length; index < records.length; index++) {
@@ -12600,7 +12711,7 @@ export class ObjectStackProtocolImplementation implements
                 index,
                 errors: [{
                     code: 'NOT_ATTEMPTED' as const,
-                    message: `record ${causeIndex} failed — ${cause ?? 'unknown error'}; the batch stopped there. `
+                    message: (cause ? `${cause.clause}; the batch stopped there. ` : 'the batch stopped before this record. ')
                         + 'Set options.continueOnError to process the remaining records.',
                 }],
             });
@@ -12609,6 +12720,51 @@ export class ObjectStackProtocolImplementation implements
         // Every padded row is a non-success, so this stays a PARTITION of
         // `results` rather than a second tally free to drift from it.
         return { results, succeeded: outcome.succeeded, failed: results.length - outcome.succeeded };
+    }
+
+    /**
+     * The row that ENDED the run, plus the clause both builders interpolate.
+     *
+     * ⛔ NOT `findIndex(r => !r.success)`. `success` is the envelope's
+     * *outcome* bit, and its false arm is open by construction: it means "this
+     * row is not a success", which since #19412 also covers a row that MATCHED
+     * and was deliberately NOT removed — an outcome, not a fault, carrying no
+     * `errors[]` entry. Locating the cause with it named that survivor and then
+     * called the real error, sitting in the same array, "unknown" (#19452).
+     *
+     * The discriminator is the row's `errors[]` entry, which is the ONE per-row
+     * value whose declared meaning is a fault:
+     * `BatchOperationResultSchema.errors` is documented as *"Array of errors if
+     * operation failed"*, and the ADR-0087 v17 migration entry publishes
+     * `row.errors?.[0]?.message` / `.code` to consumers as exactly that read.
+     * It cannot widen the way the boolean did: every entry must carry an
+     * `ApiError.code` drawn from the closed `StandardErrorCode ∪
+     * ERROR_CODE_LEDGER` vocabulary, so an unregistered code fails
+     * `BatchOperationResultSchema.parse` — giving a non-fault ending an
+     * `errors[]` entry is a ledger widening in `packages/spec`, which is
+     * precisely the step both survivor sites declined to take. `message` is
+     * REQUIRED on `ApiErrorSchema`, so a located cause always has one and the
+     * 「unknown error」 fallback is gone rather than merely unreached.
+     *
+     * Scanned from the END because a run ends AT the row it stops on: every
+     * stop is a `break` in a loop's `catch`, immediately after that row was
+     * pushed. A fault that does NOT stop the run (the `Unknown operation:` arm
+     * records one and keeps going) must not be able to shadow the row that did.
+     *
+     * When no row recorded a fault at all the batch still ended for a reason —
+     * `runAtomicBatch` aborts on `outcome.failed > 0`, which a lone survivor
+     * satisfies — so the non-success row is named as what it is, ⛔ never as a
+     * failure and ⛔ never as an 「unknown error」.
+     */
+    private locateBatchCause(
+        rows: ReadonlyArray<BatchDataRowResult>,
+    ): { index: number; clause: string } | undefined {
+        for (let index = rows.length - 1; index >= 0; index--) {
+            const fault = rows[index]?.errors?.[0];
+            if (fault) return { index, clause: `record ${index} failed — ${fault.message}` };
+        }
+        const stalled = rows.findIndex(r => !r.success);
+        return stalled >= 0 ? { index: stalled, clause: `record ${stalled} did not succeed` } : undefined;
     }
 
     /** The ordinary (committed) batch response — every row reports what it did. */
@@ -12659,21 +12815,25 @@ export class ObjectStackProtocolImplementation implements
         outcome: BatchDataLoopOutcome,
     ): BatchUpdateResponse {
         const attempted = outcome.results;
-        const causeIndex = attempted.findIndex(r => !r.success);
-        const cause = causeIndex >= 0 ? attempted[causeIndex]?.errors?.[0]?.message : undefined;
+        // [#19452] Same locator as the stopped-batch arm, for the same reason:
+        // `!success` stopped meaning "this row failed" when #19412 widened it.
+        // Both this builder's interpolations of the causal index read it, so
+        // neither the ROLLED_BACK message nor the NOT_ATTEMPTED one can name a
+        // row that merely survived — the two could not be fixed apart.
+        const cause = this.locateBatchCause(attempted);
 
         const results: BatchDataRowResult[] = records.map((record, index) => {
             const attempt = attempted[index];
             if (!attempt) {
                 return {
                     id: record.id, success: false, index,
-                    errors: [{ code: 'NOT_ATTEMPTED' as const, message: `atomic batch aborted by record ${causeIndex}` }],
+                    errors: [{ code: 'NOT_ATTEMPTED' as const, message: cause ? `atomic batch aborted by record ${cause.index}` : 'atomic batch aborted' }],
                 };
             }
             if (attempt.success) {
                 return {
                     id: attempt.id ?? record.id, success: false, index,
-                    errors: [{ code: 'ROLLED_BACK' as const, message: `record ${causeIndex} failed — ${cause ?? 'unknown error'}` }],
+                    errors: [{ code: 'ROLLED_BACK' as const, message: cause ? cause.clause : 'the atomic batch rolled back' }],
                 };
             }
             return { id: attempt.id ?? record.id, success: false, index, errors: attempt.errors };
@@ -13067,8 +13227,51 @@ export class ObjectStackProtocolImplementation implements
                 // `id` is `unknown` to this helper only because the caller's
                 // fail-closed `isScalarId` guard is what proves it scalar.
                 if (deleted === false) throw recordNotFoundError(object, id as string | number);
-                results.push({ id: String(id), success: true, index });
-                succeeded++;
+                // [#19412] The SECOND half of the same site. The paragraph above
+                // fixed "no match"; this is "matched, and deliberately NOT
+                // removed" — and until now `success` was still a LITERAL for
+                // every answer that was not the contract's `false`, so that row
+                // was reported as a deletion too.
+                //
+                // `sys_permission_set` is the shipped case: a package-declared
+                // set's delete is an ADR-0005 RESET — plugin-security's
+                // write-through tombstones the overlay and the record
+                // re-projects to the declared body instead of vanishing — so the
+                // row MATCHED, the write ran, and the record is still there. The
+                // batch envelope said `success: true` and counted it in
+                // `succeeded`, which on a security-configuration write tells an
+                // operator a permission set is gone while it is still enforced.
+                //
+                // `IDataEngine.delete` declares `Promise<boolean | number>` —
+                // the driver's boolean for a by-id write, a COUNT of rows
+                // removed otherwise — so a numeric zero is the one value that
+                // positively means "it is still there". ⛔ Not `false`: that
+                // arm is spoken for by the 404 above, about a record this caller
+                // can still GET, and answering it here would trade one wrong
+                // answer for a louder one. Everything else keeps its #4435
+                // reading, an off-contract `undefined` from a third-party driver
+                // included: only a POSITIVE zero is read as "not removed".
+                //
+                // ⛔ The row is NOT given an `errors[]` entry. A surviving record
+                // is an OUTCOME, not a fault — the single-record door answers the
+                // same case with a bare `success: false` on a 200 — and the two
+                // per-row codes this envelope owns (`ROLLED_BACK`,
+                // `NOT_ATTEMPTED`) both describe a row that never ran. Whether
+                // this ending deserves a per-row code of its own is a
+                // `packages/spec` widening (ERROR_CODE_LEDGER) and belongs to the
+                // spec lane, not here.
+                //
+                // It is counted in `failed` because that is the envelope's ONE
+                // declared reading — `succeeded` and `failed` PARTITION `results`
+                // (#7539, `reconcileStoppedBatch`) — which also makes the
+                // request-level `success` false and, on the `atomic` arm, aborts
+                // the batch through `runAtomicBatch`'s `failed > 0`. It does NOT
+                // stop a non-atomic run: the `continueOnError` stop belongs to
+                // the catch below, and nothing was thrown.
+                const removed = deleted !== 0;
+                results.push({ id: String(id), success: removed, index });
+                if (removed) succeeded++;
+                else failed++;
             } catch (err: any) {
                 results.push({ id: String(id), success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback('delete'))] });
                 failed++;
@@ -13366,7 +13569,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private static codeOnlyCreateError(type: string): Error {
         const err = new Error(
-            `[not_creatable] Metadata type '${type}' is code-only: the metadata-type registry declares `
+            `Metadata type '${type}' is code-only: the metadata-type registry declares `
             + `allowRuntimeCreate=false and allowOrgOverride=false, so it cannot be created through the `
             + `runtime metadata API (PUT /api/v1/meta/${type}/:name) on any kernel.`
             + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
@@ -13385,7 +13588,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private static codeOnlyOverrideError(type: string, name: string): Error {
         const err = new Error(
-            `[not_overridable] Metadata item '${type}/${name}' is provided by a code package and its type is `
+            `Metadata item '${type}/${name}' is provided by a code package and its type is `
             + `code-only (allowRuntimeCreate=false, allowOrgOverride=false), so it cannot be overlaid through `
             + `the runtime metadata API on any kernel.`
             + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
@@ -13481,7 +13684,7 @@ export class ObjectStackProtocolImplementation implements
         if (this.isOverlayAllowed(type)) return null;
         if (!this.STATIC_REGISTRY_TYPES.has(singular) && !this.STATIC_REGISTRY_TYPES.has(type)) return null;
         const err: any = new Error(
-            `[not_overridable] Metadata item '${type}/${name}' cannot be written org-scoped `
+            `Metadata item '${type}/${name}' cannot be written org-scoped `
             + `(organization '${organizationId}'). `
             + `The metadata-type registry declares allowOrgOverride=false for '${singular}', so the platform has `
             + `no per-org channel for it: boot hydration loads env-wide rows only, so this row would be absent `
@@ -13868,7 +14071,7 @@ export class ObjectStackProtocolImplementation implements
         const canonical = canonicalMetaType(entry.type);
         if (canonical !== entry.type) {
             const err: any = new Error(
-                `[audit_type_not_canonical] Refusing to write a sys_metadata_audit row under the `
+                `Refusing to write a sys_metadata_audit row under the `
                 + `non-canonical metadata type '${entry.type}' (canonical: '${canonical}') for `
                 + `'${entry.name}'. ADR-0010's trail is keyed on (type, name) and read back through `
                 + `the '/meta' boundary, which folds — a row filed under '${entry.type}' is a row no `
@@ -13935,7 +14138,7 @@ export class ObjectStackProtocolImplementation implements
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
         const err = new Error(
-            `[item_locked] ${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
+            `${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
             + `${reason} — See ADR-0010 §3.3.`,
         );
         (err as any).code = 'ITEM_LOCKED';
@@ -14003,7 +14206,7 @@ export class ObjectStackProtocolImplementation implements
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
         const err = new Error(
-            `[item_locked] ${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
+            `${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
             + `${reason} — See ADR-0010 §3.3.`,
         );
         (err as any).code = 'ITEM_LOCKED';
@@ -14296,7 +14499,7 @@ export class ObjectStackProtocolImplementation implements
         name: string, rowPackageId: string, ownerPackageId: string,
     ): Error {
         const err: any = new Error(
-            `[object_overlay_package_mismatch] Cannot layer object '${name}': the overlay is bound to package `
+            `Cannot layer object '${name}': the overlay is bound to package `
             + `'${rowPackageId}', but the object is owned by package '${ownerPackageId}'. `
             + `An object has exactly one registry entry, so it can carry exactly one overlay layer — bind the `
             + `customization to '${ownerPackageId}', or have '${rowPackageId}' extend the object instead. `
@@ -14454,7 +14657,7 @@ export class ObjectStackProtocolImplementation implements
         const canonicalType = canonicalMetaType(type);
         if (canonicalType !== type) {
             const err: any = new Error(
-                `[registry_type_not_canonical] Refusing to register a SchemaRegistry overlay entry under `
+                `Refusing to register a SchemaRegistry overlay entry under `
                 + `the non-canonical metadata type '${type}' (canonical: '${canonicalType}'). The registry `
                 + `holds exactly one plain key per (type, name) and every reader addresses it through the `
                 + `'/meta' boundary, which folds — an entry minted under '${type}' is a second namespace no `
@@ -15143,7 +15346,7 @@ export class ObjectStackProtocolImplementation implements
     private refuseUngrammaticalMetaItemName(request: { type: string, name: string }): void {
         if (METADATA_ITEM_NAME_PATTERN.test(request.name)) return;
         const err = new Error(
-            `[invalid_request] ${JSON.stringify(request.name)} is not a legal metadata item name. `
+            `${JSON.stringify(request.name)} is not a legal metadata item name. `
             + `Item names are lowercase snake_case segments, optionally dot-qualified — `
             + `/^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$/ — e.g. 'crm_lead' or 'crm_lead.pipeline'. `
             + `No slashes, spaces, uppercase, empty segments, or leading/trailing dots. `
@@ -15232,7 +15435,7 @@ export class ObjectStackProtocolImplementation implements
         // Exemption 2 — the namespace predates this write.
         if (await this.metaTypeNamespaceExists(unrecognised.type)) return;
         const err = new Error(
-            `[invalid_request] '${unrecognised.type}' is not a metadata type. The platform declares `
+            `'${unrecognised.type}' is not a metadata type. The platform declares `
             + `no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one `
             + `either — so this write would mint a sys_metadata namespace under `
             + `type='${unrecognised.type}' that nothing reads and nothing serves. Address a real `
@@ -15305,10 +15508,10 @@ export class ObjectStackProtocolImplementation implements
         // failure and break that convention. The structural twin is
         // {@link rollbackMetaItem}'s own opening guard — same class, same
         // position, a malformed REQUEST ENVELOPE rather than an off-spec
-        // document — which is `[invalid_request]`/400.
+        // document — which is `INVALID_REQUEST`/400.
         if (!request.item) {
             const err: any = new Error(
-                `[invalid_request] saveMetaItem requires an 'item' body for '${request.type}/${request.name}'. `
+                `saveMetaItem requires an 'item' body for '${request.type}/${request.name}'. `
                 + `Send the metadata document as the request body, or wrap it as {"item": {...}} / {"metadata": {...}}. `
                 + `An explicitly null item is refused rather than persisted as an empty document.`,
             );
@@ -15547,7 +15750,7 @@ export class ObjectStackProtocolImplementation implements
                     );
                 }
                 const err = new Error(
-                    `[not_overridable] Metadata item '${request.type}/${request.name}' is provided by a code package `
+                    `Metadata item '${request.type}/${request.name}' is provided by a code package `
                     + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
                     + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. `
                     + `See docs/adr/0005-metadata-customization-overlay.md.`
@@ -15702,7 +15905,7 @@ export class ObjectStackProtocolImplementation implements
                         // circle. See {@link destructiveChangeRemedy}.
                         const summary = issues.slice(0, 3).map((i) => i.message).join('; ');
                         const err = new Error(
-                            `[destructive_change] ${request.type}/${request.name} would drop or transform existing data: ${summary}`
+                            `${request.type}/${request.name} would drop or transform existing data: ${summary}`
                             + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '')
                             + ` — ${destructiveChangeRemedy(request.writeFace, request.name)}`
                         );
@@ -15740,7 +15943,7 @@ export class ObjectStackProtocolImplementation implements
                 && 'code' in it && 'overlay' in it && 'overlayScope' in it && 'effective' in it;
             if (looksLikeLayeredEnvelope) {
                 const err = new Error(
-                    `[invalid_metadata] ${request.type}/${request.name}: the request body is a layered read `
+                    `${request.type}/${request.name}: the request body is a layered read `
                     + `envelope ({ code, overlay, overlayScope, effective }), not a metadata body. `
                     + `Unwrap and send the effective/overlay document instead — the layered shape is read-only `
                     + `(GET ?layers=true) and must never be persisted.`
@@ -15837,7 +16040,7 @@ export class ObjectStackProtocolImplementation implements
                         // resubmitting the same body cannot help.
                         const first = result.conflicts[0]!;
                         const err = new Error(
-                            `[flow_conversion_conflict] ${request.type}/${request.name}: conversion refused — `
+                            `${request.type}/${request.name}: conversion refused — `
                             + `'${first.token}' at ${first.path} is a live name in this environment `
                             + `(${result.conflicts.length} conflict(s)). ${first.message}`
                         );
@@ -15890,7 +16093,7 @@ export class ObjectStackProtocolImplementation implements
                     // with it. `err.issues` below is unconditional — the split
                     // decides only what the SENTENCE repeats.
                     const err = new Error(
-                        `[invalid_metadata] ${request.type}/${request.name} failed spec validation: `
+                        `${request.type}/${request.name} failed spec validation: `
                         + specValidationFindings(request.writeFace, issues)
                     );
                     (err as any).code = 'INVALID_METADATA';
@@ -16301,7 +16504,7 @@ export class ObjectStackProtocolImplementation implements
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 const conflict = new Error(
-                    `[metadata_conflict] ${request.type}/${request.name} has been modified since you loaded it. `
+                    `${request.type}/${request.name} has been modified since you loaded it. `
                     + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                 );
                 (conflict as any).code = 'METADATA_CONFLICT';
@@ -16700,7 +16903,7 @@ export class ObjectStackProtocolImplementation implements
                 // this line changed, not assumed: every refusal this `try` can
                 // receive declares 4xx — `saveMetaItem`'s spec rejection
                 // (422 `INVALID_METADATA`), `SysMetadataRepository`'s
-                // `[item_locked]` / `[writable_package_required]` (403 / 422) —
+                // `ITEM_LOCKED` / `WRITABLE_PACKAGE_REQUIRED` (403 / 422) —
                 // so each is still quoted verbatim and still names the fix.
                 //
                 // ⚠️ The old fallback was `String(e)`, which is itself a
@@ -16801,7 +17004,7 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * Promote the pending draft overlay to the live (`active`) row.
-     * Records a history event with `op='publish'`. 404 (`[no_draft]`)
+     * Records a history event with `op='publish'`. 404 (`NO_DRAFT`)
      * when there is nothing to publish.
      */
     async publishMetaItem(request: {
@@ -17189,7 +17392,7 @@ export class ObjectStackProtocolImplementation implements
         if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)
             && !ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularType)) {
             const err: any = new Error(
-                `[not_overridable] Metadata type '${request.type}' is not draftable — no overlay/runtime-create permission.`,
+                `Metadata type '${request.type}' is not draftable — no overlay/runtime-create permission.`,
             );
             err.code = 'NOT_OVERRIDABLE';
             err.status = 403;
@@ -17312,7 +17515,7 @@ export class ObjectStackProtocolImplementation implements
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 const conflict: any = new Error(
-                    `[metadata_conflict] ${request.type}/${request.name} published row advanced while you held the draft. `
+                    `${request.type}/${request.name} published row advanced while you held the draft. `
                     + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                 );
                 conflict.code = 'METADATA_CONFLICT';
@@ -18843,7 +19046,7 @@ export class ObjectStackProtocolImplementation implements
         // composition `resolveActiveOrganizationId` makes real.
         if (request.organizationId && request.allTenants === true) {
             const err = new Error(
-                `[tenant_scope_required] Refusing to uninstall '${request.packageId}':`
+                `Refusing to uninstall '${request.packageId}':`
                 + ` organizationId ('${request.organizationId}') and allTenants: true are mutually exclusive —`
                 + ` one scopes the uninstall to a single tenant, the other clears every tenant's rows.`
                 + ` — pass organizationId alone to scope it, or allTenants: true alone to confirm the cross-tenant uninstall.`
@@ -18858,7 +19061,7 @@ export class ObjectStackProtocolImplementation implements
         // affirmative `true` does.
         if (!request.organizationId && request.allTenants !== true) {
             const err = new Error(
-                `[tenant_scope_required] Refusing to uninstall '${request.packageId}' with no organization scope:`
+                `Refusing to uninstall '${request.packageId}' with no organization scope:`
                 + ` an uninstall that names neither an organization nor an explicit cross-tenant intent would delete`
                 + ` EVERY organization's rows for this package.`
                 + ` — pass organizationId to scope it, or allTenants: true to confirm the cross-tenant uninstall.`
@@ -19115,12 +19318,79 @@ export class ObjectStackProtocolImplementation implements
         copied: Array<{ type: string; name: string }>;
         failed: Array<{ type: string; name: string; error: string }>;
     }> {
+        // [#19417] ⭐ THE TARGET ID IS PARSED BEFORE ANYTHING IS MINTED — same
+        // declaration, same surfaced sentence, one key over.
+        //
+        // This door builds `dupManifest` with `id: request.targetPackageId` and
+        // writes it through {@link installPackage}, so the gate there already
+        // covers the WRITE. It does not cover this method, for two reasons that
+        // are both about where the refusal lands:
+        //
+        //   ① the `installPackage` call below sits inside a `catch {}` that is
+        //     deliberately best-effort (a manifest row is not worth aborting a
+        //     copy for), so a refusal raised THERE would be swallowed here and
+        //     the caller would read `success: true` on a package with no
+        //     manifest row — a silent partial state, strictly worse than the
+        //     201 this card set out to close;
+        //   ② the refusal has to precede the MUTATIONS, and the manifest write
+        //     is not the first of them. #14451 already established the position
+        //     for this door's other precondition: `duplicatePackage` mints the
+        //     target package record ahead of its copy loop, so a refusal any
+        //     later leaves the empty shell behind.
+        //
+        // The key named is `targetPackageId`, because that is the authoring
+        // path the caller actually wrote — `manifestIdRefusal` takes the key so
+        // one declaration can name itself correctly at every door.
+        const declaredTargetId = ManifestSchema.shape.id.safeParse(request.targetPackageId);
+        if (!declaredTargetId.success) {
+            throw Object.assign(
+                new Error(manifestIdRefusal('targetPackageId', request.targetPackageId)),
+                { statusCode: 400 },
+            );
+        }
+
         const registry: any = (this.engine as any).registry;
         const srcPkg = registry?.getPackage?.(request.sourcePackageId);
+        // [#19417] ⭐ ONE ASSUMPTION, ONE IMPLEMENTATION. Both namespaces were
+        // derived here by a RAW `id.split('.').pop()`, while
+        // {@link installPackage} derives the very same default with the spec
+        // helper `deriveNamespaceFromPackageId` — which sanitises to the
+        // namespace charset, truncates to 20 and answers `null` when nothing
+        // valid comes out. The raw copy did none of that, and `targetNs` is not
+        // a label: it is spliced into every copied OBJECT name as
+        // `${targetNs}_${short}`, and an object name is
+        // `/^[a-z_][a-z0-9_]*$/` (`packages/spec/src/data/object.zod.ts`).
+        //
+        // So the Studio's own default duplicate id — `<sourceId>-copy`, the
+        // value both objectui duplicate dialogs prefill — derived the namespace
+        // `leave-copy` and minted object names `leave-copy_ticket`, which the
+        // object declaration refuses. The helper answers `leave_copy`. The
+        // source side is the same rule read backwards: the prefix these rows
+        // actually carry is the one `installPackage` stamped, i.e. the helper's,
+        // so matching them with the raw split found nothing and the copy landed
+        // under the SOURCE's names — the collision the re-namespacing exists to
+        // prevent.
+        //
+        // ⛔ An explicitly declared `targetNamespace` still wins untouched: it
+        // is the caller's decision and this seam is about the DEFAULT.
         const sourceNs: string =
-            (srcPkg?.manifest?.namespace as string) ?? (request.sourcePackageId.split('.').pop() ?? '');
-        const targetNs: string =
-            request.targetNamespace ?? (request.targetPackageId.split('.').pop() ?? request.targetPackageId);
+            (srcPkg?.manifest?.namespace as string) ?? (deriveNamespaceFromPackageId(request.sourcePackageId) ?? '');
+        const targetNs: string | null =
+            request.targetNamespace ?? deriveNamespaceFromPackageId(request.targetPackageId);
+        if (!targetNs) {
+            // Reachable only for an id the pattern admits but the namespace
+            // charset cannot carry (a single-letter final segment), or for an
+            // explicit `targetNamespace: ''`. Loud, with the remedy — never a
+            // copy renamed with an empty prefix.
+            throw Object.assign(
+                new Error(
+                    `Cannot derive a package namespace from '${request.targetPackageId}'. `
+                    + 'Pass `targetNamespace` explicitly — a lowercase letter followed by '
+                    + '1–19 letters, digits or underscores.',
+                ),
+                { statusCode: 400 },
+            );
+        }
 
         const where: Record<string, unknown> = { package_id: request.sourcePackageId, state: 'active' };
         // [#7819 tier 2] Copy the source's env-wide (`organization_id IS NULL`)
@@ -19963,7 +20233,7 @@ export class ObjectStackProtocolImplementation implements
         }
         const row = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
         if (!row) {
-            const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);
+            const err: any = new Error(`No commit '${request.commitId}'.`);
             err.code = 'COMMIT_NOT_FOUND';
             err.status = 404;
             throw err;
@@ -20014,7 +20284,8 @@ export class ObjectStackProtocolImplementation implements
             //   `reverted[0].action === 'restored'`, `registerItem` called ZERO
             //   times, and the only trace anywhere is
             //   `[Protocol] registry write-through failed for fields/… :
-            //    [registry_type_not_canonical] …` on the server's stderr. The
+            //    Refusing to register a SchemaRegistry overlay entry …`
+            //   (`REGISTRY_TYPE_NOT_CANONICAL`) on the server's stderr. The
             //   receipt claims the pre-commit body is what the platform now
             //   serves. It is not, and for this class it cannot be: #9111's mint
             //   door refuses the entry and boot refuses it too, so the restored
@@ -20371,10 +20642,10 @@ export class ObjectStackProtocolImplementation implements
                 // field carried `SQLITE_ERROR: no such table: sys_metadata`.
                 //
                 // Every authored refusal this `try` can receive declares 4xx —
-                // `SysMetadataRepository`'s `[version_not_found]` 404 (measured
-                // end to end and still quoted whole), `[no_draft]` 404,
-                // `[version_not_restorable]` 409, `[item_locked]` 403,
-                // `[writable_package_required]` 422 — so the self-correcting
+                // `SysMetadataRepository`'s `VERSION_NOT_FOUND` 404 (measured
+                // end to end and still quoted whole), `NO_DRAFT` 404,
+                // `VERSION_NOT_RESTORABLE` 409, `ITEM_LOCKED` 403,
+                // `WRITABLE_PACKAGE_REQUIRED` 422 — so the self-correcting
                 // sentences survive and only the driver line is withheld.
                 // [#8441] …and the `code` limb beside it, which #8333 left
                 // alone as a different field with a different rule. Measured
@@ -20487,7 +20758,7 @@ export class ObjectStackProtocolImplementation implements
         }
         const target = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
         if (!target) {
-            const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);
+            const err: any = new Error(`No commit '${request.commitId}'.`);
             err.code = 'COMMIT_NOT_FOUND';
             err.status = 404;
             throw err;
@@ -20531,7 +20802,7 @@ export class ObjectStackProtocolImplementation implements
                 // sys_metadata` reached the field.
                 //
                 // This `try` wraps exactly one call, and `revertCommit` throws
-                // only refusals it declared — `[commit_not_found]` 404
+                // only refusals it declared — `COMMIT_NOT_FOUND` 404
                 // (measured, still quoted whole) and the lock/authorization
                 // 4xx above it; its PER-ITEM failures never throw at all, they
                 // are collected into its own `failed[]` (P11).
@@ -20550,8 +20821,8 @@ export class ObjectStackProtocolImplementation implements
     /**
      * Restore the body recorded at history `toVersion` as the new
      * live row. Writes a history event with `op='revert'`. 404
-     * (`[version_not_found]`) when the target version doesn't exist;
-     * 409 (`[version_not_restorable]`) when the target is a delete
+     * (`VERSION_NOT_FOUND`) when the target version doesn't exist;
+     * 409 (`VERSION_NOT_RESTORABLE`) when the target is a delete
      * tombstone (no body to bring back).
      */
     async rollbackMetaItem(request: {
@@ -20570,7 +20841,7 @@ export class ObjectStackProtocolImplementation implements
     }> {
         if (!Number.isFinite(request.toVersion) || request.toVersion < 1) {
             const err: any = new Error(
-                `[invalid_request] rollbackMetaItem requires a positive integer 'toVersion' (got ${request.toVersion}).`,
+                `rollbackMetaItem requires a positive integer 'toVersion' (got ${request.toVersion}).`,
             );
             err.code = 'INVALID_REQUEST';
             err.status = 400;
@@ -20585,7 +20856,7 @@ export class ObjectStackProtocolImplementation implements
         // the very top: that is the position {@link saveMetaItem} documents for
         // this exact pair, calling this method's opening guard its structural
         // twin — a malformed request envelope is refused before its type key is
-        // canonicalised, and both refusals are `[invalid_request]`/400 anyway.
+        // canonicalised, and both refusals are `INVALID_REQUEST`/400 anyway.
         //
         // What the fold reaches here, measured rather than assumed:
         //
@@ -20603,7 +20874,7 @@ export class ObjectStackProtocolImplementation implements
         //    `external_catalog`, `translation`), which stayed plural through
         //    the manifest map and so took the PERMISSIVE PLUGIN branch — the
         //    #7894 shape, one verb over.
-        //  • the `[not_overridable]` refusal, the two ADR-0010 audit rows and
+        //  • the `NOT_OVERRIDABLE` refusal, the two ADR-0010 audit rows and
         //    both receipt sentences, which read `request.type` and so reported
         //    the CALLER's spelling for a row written under the canonical one.
         //    `recordMetadataAudit` re-folds through `PLURAL_TO_SINGULAR`
@@ -20632,7 +20903,7 @@ export class ObjectStackProtocolImplementation implements
         if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)
             && !ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularType)) {
             const err: any = new Error(
-                `[not_overridable] Metadata type '${request.type}' is not revertable — no overlay/runtime-create permission.`,
+                `Metadata type '${request.type}' is not revertable — no overlay/runtime-create permission.`,
             );
             err.code = 'NOT_OVERRIDABLE';
             err.status = 403;
@@ -20769,7 +21040,7 @@ export class ObjectStackProtocolImplementation implements
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 const conflict: any = new Error(
-                    `[metadata_conflict] ${request.type}/${request.name} advanced during rollback. `
+                    `${request.type}/${request.name} advanced during rollback. `
                     + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                 );
                 conflict.code = 'METADATA_CONFLICT';
@@ -21128,7 +21399,7 @@ export class ObjectStackProtocolImplementation implements
                 .mergesOverlayAtRead(request.type);
             if (artifactBacked && !overlayAllowed && !legacyOverlayRemoval) {
                 const err = new Error(
-                    `[not_overridable] Metadata item '${request.type}/${request.name}' is provided by a code package `
+                    `Metadata item '${request.type}/${request.name}' is provided by a code package `
                     + `and the type has not opted into per-org overlay writes. `
                     + `See docs/adr/0005-metadata-customization-overlay.md.`
                 );
@@ -21138,7 +21409,7 @@ export class ObjectStackProtocolImplementation implements
             }
             if (!artifactBacked && !overlayAllowed && !runtimeCreateAllowed) {
                 const err = new Error(
-                    `[not_creatable] Metadata type '${request.type}' does not allow runtime creation or deletion.`
+                    `Metadata type '${request.type}' does not allow runtime creation or deletion.`
                 );
                 (err as any).code = 'NOT_CREATABLE';
                 (err as any).status = 403;
@@ -21338,7 +21609,7 @@ export class ObjectStackProtocolImplementation implements
             } catch (err: any) {
                 if (err instanceof ConflictError) {
                     const conflict = new Error(
-                        `[metadata_conflict] ${request.type}/${request.name} has been modified since you loaded it. `
+                        `${request.type}/${request.name} has been modified since you loaded it. `
                         + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                     );
                     (conflict as any).code = 'METADATA_CONFLICT';
@@ -21756,7 +22027,17 @@ export class ObjectStackProtocolImplementation implements
                             `DELETE /api/v1/metadata/object/${record.name}.`,
                         );
                     } else {
-                        console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
+                        // The declared `code` is printed, not left to the prose.
+                        // A LOG LINE has no envelope beside it — the `code`
+                        // axis a caller reads does not exist here — so the one
+                        // machine-readable token an operator can grep for has
+                        // to be IN the line. Until the refusal messages stopped
+                        // restating their own code, this line inherited the
+                        // token by accident from the message it interpolates;
+                        // now it names it deliberately, which is also what the
+                        // sibling branch above already does.
+                        const hydrateCode = (e as any)?.code;
+                        console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}${typeof hydrateCode === 'string' && hydrateCode.length > 0 ? ` (code=${hydrateCode})` : ''}`);
                     }
                 }
             }
@@ -22173,16 +22454,17 @@ export class ObjectStackProtocolImplementation implements
         // `rest-server-meta-references-refusal-envelope.test.ts` — and the
         // producer-side ORDER by `protocol.reference-target-unanswerable.test.ts`.
         //
-        // ⛔ And it opens with NO bracketed tag. The `[item_locked]`-style tags
-        // this file writes elsewhere are lowercase restatements of the throw's OWN
-        // declared `code`, so the wire carries the same token on the `code` axis;
-        // this refusal's code is `NOT_IMPLEMENTED`, so an `[unanswerable_target]`
-        // opener restated nothing the envelope carries and nothing ever read it.
-        // #12975 (2026-08-29) rules that `error` is HUMAN LANGUAGE while `code` is
-        // the MACHINE TOKEN, and since #15685 this prose reaches the operator
-        // VERBATIM — so the tag was the first thing they read. What separates this
-        // refusal from the route's other 501 is the sentence itself, not a tag.
-        // Its absence is pinned by `protocol.reference-target-unanswerable.test.ts`.
+        // ⛔ And it opens with NO bracketed tag — as no refusal this file raises
+        // does any more. The lowercase `[item_locked]`-style openers this producer
+        // once wrote were restatements of the throw's OWN declared `code`, so the
+        // wire already carried the same token on the `code` axis; they are gone,
+        // and `protocol.bracketed-refusal-opener-absence.test.ts` pins their
+        // absence across the whole family. #12975 (2026-08-29) rules that `error` is HUMAN
+        // LANGUAGE while `code` is the MACHINE TOKEN, and since #15685 this prose
+        // reaches the operator VERBATIM — so an opener is the first thing they
+        // read. What separates this refusal from the route's other 501 is the
+        // sentence itself, not a tag. Its absence is pinned here too, by
+        // `protocol.reference-target-unanswerable.test.ts`.
         if (REFERENCE_SITES.unanswerableTargetTypes.includes(singularTarget)) {
             const owner = targetName.includes('.') ? targetName.slice(0, targetName.indexOf('.')) : '<object>';
             const err = new Error(
@@ -22325,10 +22607,98 @@ export class ObjectStackProtocolImplementation implements
      *      rows back into the registry on boot).
      *
      * The DB write is best-effort and non-fatal: when the `package` service is
-     * absent (e.g. the `marketplace` capability is off) the package is still
-     * registered in-memory and visible for the lifetime of the process.
+     * absent the package is still registered in-memory and visible for the
+     * lifetime of the process — and that in-memory-only branch STAYS, as the
+     * documented degraded path for reduced hosts (#17676 ruling A' item 2,
+     * decision batch #125 item 2). ⛔ It is not a bug to delete: a host that
+     * mounts no provider (`objectstack serve --preset minimal`, a metadata-only
+     * embedding) must still be able to install a package for the life of its
+     * process, and the `warn` below is what keeps the degradation from being
+     * silent.
+     *
+     * Which capability OWNS the service is no longer `marketplace`: ruling A'
+     * item 1 split the persistence half — the `sys_packages` container and the
+     * boot hydration that replays it — out under its own always-on token
+     * `package-registry` (`PLATFORM_ALWAYS_ON_CAPABILITIES`,
+     * `packages/spec/src/kernel/platform-capabilities.ts`), leaving
+     * `marketplace` naming only the optional catalogue / browsing half. ⚠️ The
+     * runtime half of that split is NOT landed: measured on `origin/main` at
+     * c334ba0f3a, `Serve.CAPABILITY_PROVIDERS`
+     * (`packages/cli/src/commands/serve.ts`) keys `marketplace` and does not key
+     * `package-registry`, so the always-on token is force-appended to every
+     * app's `requires` and then resolves to no provider — silently, because the
+     * resolver only warns for tokens outside the vocabulary. ⇒ on a stock
+     * `objectstack dev` boot of an app that does not itself declare
+     * `requires: ['marketplace']`, this branch is still the one taken, which is
+     * the defect #17676 reports. Recorded here rather than worked around: the
+     * fix belongs to the capability resolver, not to this primitive.
+     *
+     * [#19277] `request.enableOnInstall` is HONOURED here, under the same rule
+     * the HTTP door implements — 「缺省 = 保持，有旗 = 设置」: `true` enables,
+     * `false` disables, and an ABSENT key makes no lifecycle call at all. The
+     * durable disabled-package FILE is not this seam's to write (it is keyed by
+     * environment, which this request does not carry); see the comment on the
+     * flag arms below.
      */
     async installPackage(request: InstallPackageRequest): Promise<InstallPackageResponse> {
+        // [#19417] ⭐ THE PRIMITIVE PARSES THE `id` LEG — the declaration, by
+        // reference, ahead of every write and every derivation below.
+        //
+        // `MANIFEST_ID_PATTERN` (`packages/spec/src/kernel/manifest.zod.ts`) is
+        // the reverse-domain rule declared ONCE and referenced by BOTH faces of
+        // this identity — `ManifestSchema.id`, what an author writes, and
+        // `PackageSchema.manifestId`, what the registry stores and publishes by.
+        // This primitive read `request.manifest` POSITIONALLY: it spread the
+        // request into `any` and handed it to
+        // `this.engine.registry.installPackage` with a second `as any`, so
+        // `id: 'pkg-a'` — or `com.example.my_erp` — installed and PERSISTED,
+        // while `defineStack()`, `os build`, `os validate` and the publish face
+        // all refuse the same id. That is «declared ≠ enforced» on a PUBLISHED
+        // contract, the shape Prime Directive #10 refuses outright and
+        // 北极星 clause 4 names in as many words:
+        // 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+        //
+        // ⭐ THE GATE IS ON THE PRIMITIVE, NOT ON ONE DOOR. #19473 landed the
+        // same parse at `POST /packages`
+        // (`packages/runtime/src/domains/packages.ts`), which is ONE caller of
+        // this method — that door calls `protocol.installPackage` whenever the
+        // protocol service resolves, and falls back to the bare registry write
+        // when it does not. {@link duplicatePackage} below is a second caller,
+        // and an embedder holding this object is a third. Gating a door alone
+        // buys that door; the rule belongs where every caller passes.
+        //
+        // ⭐ THE SENTENCE IS THE DECLARATION'S, NOT THIS FILE'S — surfaced
+        // rather than reworded, exactly as #19473 did it: `manifestIdRefusal`
+        // names the key, echoes what the author wrote, lists the examples, and
+        // offers a mechanical repair only after VERIFYING that candidate
+        // against the pattern. A fourth sentence for one rule would drop the
+        // repair.
+        //
+        // The throw carries `statusCode` so an HTTP boundary answers `400`
+        // rather than the `500` an unannotated throw earns
+        // (`resolveThrownHttpError`, `@objectstack/types`) — the same status
+        // the HTTP door serves for this refusal, and the spelling this file
+        // already uses for its `404`.
+        //
+        // ⛔ THE RAW VALUE IS PARSED, before the spread and before the version
+        // and namespace defaults: an id the declaration refuses must never
+        // reach `deriveNamespaceFromPackageId` below, which already ASSUMES the
+        // reverse-domain shape it was never given a chance to enforce.
+        //
+        // ⛔ SCOPE — THE `id` LEG ALONE. `InstallPackageRequestSchema` /
+        // `ManifestSchema` are still not parsed whole here; the residual
+        // classes the HTTP door's own docblock records are untouched by this
+        // and are each their own narrowing of a published contract.
+        const rawId = (request.manifest as { id?: unknown } | undefined)?.id;
+        const declaredId = ManifestSchema.shape.id.safeParse(rawId);
+        if (!declaredId.success) {
+            const [issue] = declaredId.error.issues;
+            throw Object.assign(
+                new Error(issue?.message || manifestIdRefusal('manifest.id', rawId)),
+                { statusCode: 400 },
+            );
+        }
+
         // #2532 — runtime-created base packages routinely arrive versionless
         // ({id, name} from the builder / Setup). `sys_packages.version` is NOT
         // NULL, and the old guard here (`pkgSvc?.publish && manifest.version`)
@@ -22363,7 +22733,63 @@ export class ObjectStackProtocolImplementation implements
         // only); an unparsed range never causes a false rejection.
         assertProtocolCompat(manifest);
 
-        const pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+        let pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+
+        // [#19277] HONOUR `enableOnInstall` — the key THIS request contract
+        // declares and this primitive read past. `InstallPackageRequestSchema`
+        // (`packages/spec/src/kernel/package-registry.zod.ts`) has carried the
+        // key since it was written, and the implementation here read
+        // `request.manifest` and `request.settings` and nothing else: a caller
+        // that switched the option off got an ENABLED install, with no refusal
+        // and no warning. That is «declared but not enforced» on a published
+        // option — what ADR-0049 (enforce-or-remove) and Prime Directive #10
+        // refuse outright. Ruling batch #153 item 5 letter 1 (#18605) kept the
+        // kernel declaration as a COPY of the HTTP request key with the SAME
+        // meaning, so the disposition is ENFORCE, not retire.
+        //
+        // ⭐ The contract is 「缺省 = 保持，有旗 = 设置」 — maintainer ruling batch
+        // #157 item 5 letter C, the same rule the HTTP door implements
+        // (`packages/runtime/src/domains/packages.ts`). Three states, three
+        // outcomes, through the SAME registry verbs `PATCH /packages/:id/enable`
+        // and `PATCH /packages/:id/disable` use:
+        //
+        //   true    ⇒ enablePackage
+        //   false   ⇒ disablePackage
+        //   absent  ⇒ nothing at all; the row the registry returned stands
+        //
+        // ⚠️ The `true` arm is not decoration. `SchemaRegistry.installPackage`
+        // has preserved an existing row's `enabled` / `status` /
+        // `statusChangedAt` since #18877, so on a re-install nothing else will
+        // clear a disable any more — dropping this arm would silently stop
+        // honouring `true` on exactly the path an upgrade takes.
+        //
+        // ⚠️ `=== true` / `=== false`, never a truthiness test and never a `??`
+        // default: the THREE states of this key are the contract, and
+        // collapsing absent into either one is the defect. The declaration's own
+        // `.default(true)` never reaches here — nothing parses an install
+        // request through `InstallPackageRequestSchema` on this path — so
+        // absence arrives intact and is read as absence.
+        //
+        // ⛔ What this seam does NOT write, recorded so it is not mistaken for
+        // an oversight: the runtime's durable disabled-package file. That record
+        // is keyed by ENVIRONMENT (`setPackageDisabled(environmentId, id,
+        // disabled)`, `packages/runtime/src/package-state-store.ts`) and this
+        // request carries no environment, so the key cannot even be formed here;
+        // the module also lives in `@objectstack/runtime`, which depends on this
+        // package and not the other way round. The HTTP door owns that half and
+        // writes it from the row it returned. So `enableOnInstall` through this
+        // primitive moves the registry row — what every in-process reader serves
+        // from — for the life of the process, and a caller that needs the choice
+        // to survive a restart goes through the door that owns the durable
+        // record.
+        const requestedEnabled = request.enableOnInstall;
+        if (requestedEnabled === true) {
+            const enabled = this.engine.registry.enablePackage(manifest.id);
+            if (enabled) pkg = enabled;
+        } else if (requestedEnabled === false) {
+            const disabled = this.engine.registry.disablePackage(manifest.id);
+            if (disabled) pkg = disabled;
+        }
 
         // Best-effort durable persistence to `sys_packages` (non-fatal by
         // design — without the `package` service the install stays visible
@@ -22406,6 +22832,10 @@ export class ObjectStackProtocolImplementation implements
      * service so the edit survives a restart. Persistence is best-effort and
      * non-fatal (matching `installPackage`): the registry write already
      * succeeded, so a persist failure is logged, never thrown.
+     *
+     * The service-absent branch below is the same documented degraded path
+     * #17676 ruling A' item 2 keeps — see `installPackage`'s note for which
+     * capability owns the service and for the measured state of that split.
      */
     async updatePackage(request: {
         packageId: string;

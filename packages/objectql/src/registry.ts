@@ -45,6 +45,7 @@ import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
 import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, checkFieldCompleteness } from '@objectstack/spec/kernel';
+import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
 // [ADR-0130 D1] The ONE derivation of the key a package is installed under
@@ -1365,6 +1366,74 @@ function toRecordManifest(manifest: ObjectStackManifest): ObjectStackManifest {
 }
 
 /**
+ * Rewrite a BARE callable `functions` map entry into the declared form
+ * (`{ handler, effect }`) before {@link toRecordManifest} projects the body.
+ *
+ * ## The under-report this closes
+ *
+ * `functions` accepts two authored spellings, and the projection treats them
+ * unequally through no fault of its own:
+ *
+ * - `{ sweepProjectHealth: { handler: fn, effect: 'writes' } }` — the value is
+ *   a plain object, so it survives with its callable dropped: `{ effect:
+ *   'writes' }`. The function is still REPORTED, minus what cannot serialise.
+ * - `{ summarizeCompletedTask: fn }` — the value IS the callable, so the whole
+ *   ENTRY is dropped, key and all. The function vanishes from the record.
+ *
+ * `examples/app-showcase` ships one of each, so `GET /packages` reported ONE
+ * function for a package declaring TWO. A machine-readable read door that
+ * under-reports is a defect independent of how its rows are declared.
+ *
+ * ## Why it is fixed HERE and not in the projection
+ *
+ * {@link toRecordManifest}'s rule is STRUCTURAL — 「a live object reached the
+ * record」, ⛔ never a key denylist — and teaching it that a function found
+ * under `functions.<name>` means something other than a function found
+ * anywhere else would overturn exactly that. So the repair is at the assembly
+ * boundary instead: the two spellings are made structurally EQUAL before the
+ * projection runs, and the projection then leaves `{ effect }` for both.
+ *
+ * ⛔ No ref is minted. `packages/cli`'s `lowerCallables` mints refs with
+ * `uniqueName(base, taken)` and dedupes by function IDENTITY, so a ref minted
+ * here would not be guaranteed equal to the one `objectstack build` mints — a
+ * record could then assert a handler that resolves in no sibling module. An
+ * ABSENT `handler` on a record is the honest statement 「declared here, not
+ * serialisable」, and `RecordStagePackageBodySchema` in `@objectstack/spec`
+ * declares exactly that.
+ *
+ * `effect` is the declaration schema's OWN default
+ * ({@link DEFAULT_FLOW_FUNCTION_EFFECT}, `'pure'`, which
+ * `FlowFunctionDeclarationSchema.effect` carries as `.default(…)`), ⛔ not a
+ * value invented here: the bare spelling IS that declaration written the short
+ * way, and `normalizeFlowFunctionEntry` already reads it the same way at boot.
+ * The ARRAY form needs nothing — its entries are objects that carry their own
+ * `name`, so the projection keeps them — and its `effect` is `.optional()` with
+ * no default, so nothing is written where the schema declares nothing.
+ *
+ * ⛔ The caller's manifest is never mutated: the live object is what every
+ * other read in `installPackage` uses, and a copy is returned only when an
+ * entry really needed rewriting.
+ */
+function withDeclaredFunctionEntries(manifest: ObjectStackManifest): ObjectStackManifest {
+  if (manifest === null || typeof manifest !== 'object') return manifest;
+  const functions = (manifest as { functions?: unknown }).functions;
+  if (!functions || typeof functions !== 'object' || Array.isArray(functions)) return manifest;
+
+  let rewrote = false;
+  const declared: Record<string, unknown> = {};
+  for (const [name, entry] of Object.entries(functions as Record<string, unknown>)) {
+    if (typeof entry === 'function') {
+      declared[name] = { handler: entry, effect: DEFAULT_FLOW_FUNCTION_EFFECT };
+      rewrote = true;
+    } else {
+      declared[name] = entry;
+    }
+  }
+  if (!rewrote) return manifest;
+  return { ...manifest, functions: declared } as ObjectStackManifest;
+}
+
+/**
  * [#16159] The ADR-0112 `code` strings this file's three install-time and
  * registration refusals carry, as constants a consumer can import.
  *
@@ -1980,19 +2049,28 @@ export class SchemaRegistry {
   private appNavContributions = new Map<string, Array<{ packageId?: string; group?: string; priority: number; items: any[] }>>();
 
   /**
-   * Package ids that must be installed in a DISABLED state. Seeded once at
-   * boot (from persisted state) BEFORE any package registration so that every
-   * registration path — boot artifact, marketplace rehydrate, local import —
-   * honors persisted disable state uniformly without a fragile post-boot
-   * re-application hook. See {@link setInitialDisabledPackageIds} and
-   * {@link installPackage}.
+   * Package ids that must be installed in a DISABLED state **when they have no
+   * row yet**. Seeded once at boot (from persisted state) BEFORE any package
+   * registration so that every registration path — boot artifact, marketplace
+   * rehydrate, local import — honors persisted disable state uniformly without
+   * a fragile post-boot re-application hook.
+   *
+   * ⚠️ [#18877] It is a BOOT HYDRATION input, not a standing verdict: nothing
+   * updates it after the seed, so once a row exists the row is the truth and
+   * this set is not consulted. Reading it on every install is what let a
+   * flag-absent re-install durably revert an operator's later `enable`.
+   *
+   * See {@link setInitialDisabledPackageIds}, {@link installPackage} and
+   * {@link uninstallPackage} (which forgets the id with the row).
    */
   private initialDisabledPackageIds = new Set<string>();
 
   /**
    * Seed the set of package ids that should be installed disabled. Call this
-   * before package registration begins; later `installPackage` calls for these
-   * ids land in the `disabled` state. Replaces any previously seeded set.
+   * before package registration begins; the FIRST `installPackage` call for
+   * each of these ids lands it in the `disabled` state, and every later call
+   * for that id reads the row it created instead (#18877). Replaces any
+   * previously seeded set.
    */
   setInitialDisabledPackageIds(ids: Iterable<string>): void {
     this.initialDisabledPackageIds = new Set(ids);
@@ -4169,18 +4247,61 @@ export class SchemaRegistry {
     this.refuseCoOwnedObjectNameCollision(manifest, selfId, coOwners);
 
     const now = new Date().toISOString();
-    const disabled = this.initialDisabledPackageIds.has(manifest.id);
+
+    // [#18877] 「缺省 = 保持，有旗 = 设置」 — an install that was not asked to move
+    // the lifecycle state does not move it. The install verb carries no
+    // lifecycle argument at all, so at THIS layer every install is
+    // 「缺省」 and the whole rule is: an EXISTING row keeps its own
+    // `enabled` / `status` / `statusChangedAt`, and the boot seed decides only
+    // for an id that has no row yet. The door above is where 「有旗」 is spelled
+    // (`enableOnInstall` ⇒ `enablePackage` / `disablePackage`,
+    // `packages/runtime/src/domains/packages.ts`).
+    //
+    // ⚠️ The seed set is a BOOT HYDRATION input, not a standing verdict. It is
+    // filled once, before any registration, from the durable disable file
+    // (`AppPlugin.seedPersistedDisabledPackages`) and no lifecycle verb updates
+    // it. Consulting it on every install is what made the most recent explicit
+    // operator action revertible by an unrelated re-install: disable → restart
+    // → `PATCH /packages/:id/enable` (200, registry true, disk cleared) →
+    // flag-absent `install(m, { overwrite: true })` → the seed still listed the
+    // id → the row landed disabled again, and since #18752 the disk follows the
+    // row, so the enable was gone after the next restart with no error
+    // anywhere. Reading the ROW first is what makes the seed's answer
+    // unreachable once a row exists — and a row always exists by the time an
+    // operator can have acted on it.
+    const existing = this.getPackage(manifest.id);
+    const seeded = this.initialDisabledPackageIds.has(manifest.id);
+    const lifecycle: Pick<InstalledPackage, 'status' | 'enabled' | 'statusChangedAt'> = existing
+      ? {
+          status: existing.status,
+          enabled: existing.enabled,
+          // Carried, never restamped: `statusChangedAt` answers "when did an
+          // operator last move this package", and a re-install is not such a
+          // move. A row that never carried one still does not.
+          ...(existing.statusChangedAt !== undefined
+            ? { statusChangedAt: existing.statusChangedAt }
+            : {}),
+        }
+      : {
+          status: seeded ? 'disabled' : 'installed',
+          enabled: !seeded,
+          ...(seeded ? { statusChangedAt: now } : {}),
+        };
+
     const pkg: InstalledPackage = {
       // The RECORD's manifest, not the caller's live object — see
       // {@link toRecordManifest}. Every other read below (`manifest.id`,
       // `manifest.namespace`) deliberately keeps reading the ARGUMENT: the
       // projection is what the registry hands out, never what it decides with.
-      manifest: toRecordManifest(manifest),
-      status: disabled ? 'disabled' : 'installed',
-      enabled: !disabled,
+      //
+      // {@link withDeclaredFunctionEntries} runs FIRST and at this boundary
+      // only: it makes the two authored `functions` spellings structurally
+      // equal so the structural projection reports BOTH, without teaching the
+      // projection a key name.
+      manifest: toRecordManifest(withDeclaredFunctionEntries(manifest)),
+      ...lifecycle,
       installedAt: now,
       updatedAt: now,
-      ...(disabled ? { statusChangedAt: now } : {}),
       settings,
     };
     
@@ -4294,6 +4415,16 @@ export class SchemaRegistry {
     // process. Runs AFTER the object verb because that one can refuse
     // (ADR-0029 extenders): a refused uninstall must remove nothing at all.
     this.unregisterItemsByPackage(id);
+
+    // [#18877] The boot seed forgets the id together with the row. A package
+    // that no longer exists has no lifecycle state to preserve, so the next
+    // install of this id must be a FRESH install — and without this line the
+    // seed would outlive the row and re-disable it, which is exactly the
+    // 「听不见的持久回退」 this card removed from the install path. Runs with the
+    // record removal below rather than at the top: every mutation here is
+    // downstream of `unregisterObjectsByPackage`, the one step that can REFUSE
+    // (ADR-0029), so a refused uninstall still removes nothing at all.
+    this.initialDisabledPackageIds.delete(id);
 
     // Remove package record
     const collection = this.metadata.get('package');

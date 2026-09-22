@@ -20,6 +20,15 @@ export const skillForm = defineForm({
         { field: 'label', required: true, colSpan: 1, helpText: 'Display name (e.g., "Case Management")' },
         { field: 'description', widget: 'textarea', colSpan: 2, helpText: 'What this skill does' },
         { field: 'active', colSpan: 1, helpText: 'Enable/disable this skill' },
+        // #19331 — `surface` is declared by SkillSchema and was offered by no
+        // control. Three members here, not the agent's two: a skill may bind to
+        // both surfaces, and that third member is the whole reason the key is
+        // separately authorable.
+        { field: 'surface', type: 'select', colSpan: 1, helpText: "Agent surface this skill binds to (ADR-0063 §3). Binding it to an agent whose surface disagrees is a hard failure at resolve time, not a silent skip. Default 'ask'.", options: [
+          { label: 'Ask (conversational surfaces)', value: 'ask' },
+          { label: 'Build (authoring surfaces)', value: 'build' },
+          { label: 'Both', value: 'both' },
+        ] },
       ],
     },
     {
@@ -38,7 +47,20 @@ export const skillForm = defineForm({
       fields: [
         // `triggerPhrases` input removed with the key (#3896 close-out): phrases
         // were never matched; routing is triggerConditions + the agent allowlist.
-        { field: 'triggerConditions', type: 'repeater', helpText: 'Programmatic conditions (e.g., objectName == "case")' },
+        {
+          field: 'triggerConditions',
+          type: 'repeater',
+          helpText: 'Programmatic conditions (e.g., objectName == "case")',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'field', label: 'Context Field' },
+            { field: 'operator', label: 'Operator' },
+            { field: 'value', label: 'Value' },
+          ],
+        },
       ],
     },
   ],

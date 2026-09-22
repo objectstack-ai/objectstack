@@ -51,27 +51,27 @@
 # nothing -- also runs the step. The YAML half of that contract is pinned by
 # the self-test, which reads lint.yml and refuses any other spelling.
 #
-#   pm_dispatch_gates      `pnpm check:pm-dispatch-gates`. Its self-test
-#                          discovers every workflow file, resolves every
-#                          check:* script through the root and package
+#   pm_dispatch_gates      `pnpm check:pm-dispatch-gates`, which spawns
+#                          `scripts/pm/dispatch-gates.mjs --self-test`. Its
+#                          self-test discovers every workflow file, resolves
+#                          every check:* script through the root and package
 #                          `package.json`s, reads each gate's source for its
 #                          watch hints (so ALL of scripts/** and every
-#                          packages/*/scripts/**), reads .claude/**,
+#                          packages/*/scripts/**), and reads .claude/**,
 #                          skills/** (the frame-sync COPIES table),
-#                          `AGENTS.md`, `CLAUDE.md`, `tsconfig.json`,
-#                          .gitignore, and sweeps `git ls-files` for hint
-#                          reachability and test-file residue. It also reads
-#                          the CONTENT of every JS/TS and shell (`.sh`) file in
-#                          the tree: the compound-anchor census of
-#                          `function ...SelfTest...(` declarations asserts none
-#                          is unlisted, and the exposed-scratch-dir sweep reads
-#                          every mkdtempSync/mkdirSync caller and consults
-#                          nested .gitignore files. So any masked source file,
-#                          any `.sh` file, and any .gitignore runs it, and
-#                          because the name sweep reads the tracked NAME set an
-#                          ADDED file anywhere runs it too; only modifications
-#                          of docs, changesets and non-source workspace files
-#                          that are neither a manifest nor a script skip it.
+#                          `AGENTS.md`, `CLAUDE.md`. Those are the tool's OWN
+#                          inputs and they are this family's read-set.
+#                          ⛔ The battery reads MORE than that -- the CONTENT
+#                          of every JS/TS and shell (`.sh`) file in the tree
+#                          (the compound-anchor census of
+#                          `function ...SelfTest...(` declarations, the
+#                          exposed-scratch-dir sweep of every
+#                          mkdtempSync/mkdirSync caller and the nested
+#                          .gitignore files it consults) and the tracked NAME
+#                          set (hint reachability, test-file residue), which is
+#                          why an ADDED path anywhere used to run it. Those
+#                          reads are real and they are DELIBERATELY off the PR
+#                          path: see "The self-test families" below.
 #   query_options_erasure  `pnpm check:query-options-erasure`. Lints
 #                          packages/**/*.{ts,tsx,mts,cts} under
 #                          `eslint.config.mjs`, reads its baseline
@@ -91,12 +91,68 @@
 #   comment_mask_corpus    `node scripts/check-comment-mask-corpus.mjs`. Walks
 #                          every `.ts .tsx .mts .cts .js .mjs .cjs .jsx` file
 #                          in the tree outside build directories.
+#   entry_guard            `pnpm check:entry-guard`. Walks scripts/** -- its
+#                          `ROOT_DIR_WATCH_HINTS` declaration, held against the
+#                          root it really walks by its own self-test -- and
+#                          reads nothing outside it: no workflow, no workspace
+#                          package, no docs.
+#   declared_population_live
+#                          `pnpm check:declared-population-live`. Imports
+#                          `discoverFamilies` and `trackedFiles` from the
+#                          dispatch derivation, so it reads the workflow tree,
+#                          every gate source that discovery resolves (scripts/**,
+#                          a workspace package's own scripts/ and the
+#                          `package.json` that names its check:* script) and the
+#                          tracked NAME set. Only a name that DISAPPEARS can
+#                          move its verdict from live to refused, and every
+#                          deletion runs every family already.
+#   bare_root_worklist     `node scripts/pm/bare-root-worklist.mjs` with its
+#                          self-test flag -- the self-test only, never the sweep
+#                          as a verdict. Imports the same derivation and reads
+#                          the same set.
+#   self_test_workflow_commands
+#                          `node scripts/check-self-test-workflow-commands.mjs`
+#                          and its self-test. Declares
+#                          scripts/**/*.mjs, scripts/**/*.mts and scripts/**/*.sh
+#                          as its population, reads the workflow tree and
+#                          .github/actions to learn which self-tests CI runs,
+#                          and spawns those self-tests.
 #
 # Root configuration (`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
 # `turbo.json`, `tsconfig.json`, `eslint.config.mjs`, .gitignore,
 # .gitattributes, .npmrc, .nvmrc) runs every family: a parser or
 # dependency bump moves all of them. ESLint itself is not scoped (card
 # ruling 2), nor is any step whose reads this file cannot name.
+
+# ## The self-test families are POLICY-scoped, not read-set-scoped (#19498)
+#
+# Five families above judge the TOOLING rather than the product --
+# pm_dispatch_gates, entry_guard, declared_population_live, bare_root_worklist
+# and self_test_workflow_commands -- and their skip is a WEAKER claim than a
+# ratchet's. A ratchet's skip says: no changed path is one this family reads.
+# A self-test family's skip says: no changed path is one the TOOL'S OWN INPUTS
+# name, while the battery behind it may still read that path through a
+# whole-tree census. The difference is concentrated in pm_dispatch_gates, whose
+# census reads every source file in the tree and whose name sweep read every
+# ADDED path.
+#
+# That weakening is a maintainer call and it was taken: ruling #208 on #19491,
+# part R4, under the maintainer's verbatim sentence
+#
+#   19491 接受你的建议，并立刻派发处理相关任务。
+#
+# on the measurement it was ruled from -- on PR #19314 (a three-file
+# `packages/spec` diff) the `Lint & Repo Gates` job ran 27.4 minutes, 18.6 of
+# them self-tests, ratchets, corpora and censuses of the tooling, and the
+# single `PM dispatch-gates self-test` step 11.8 of those.
+#
+# ⛔ So a defect these families would have caught can now first appear on
+# `main` instead of on the PR that wrote it. What keeps that bounded is the
+# unscoped half, unchanged by this: `push` on main and the hourly scheduled run
+# take the `*)` branch above and run the whole battery, and lint.yml's `on:`
+# block owns that argument. Widening this set further -- moving another step
+# behind the selector, or making one of these read-sets smaller -- is again a
+# maintainer call, taken here, under this script's self-test.
 #
 # ## The interface
 #
@@ -116,7 +172,7 @@ set -euo pipefail
 # The family ids, in the order the job runs them. `--families` prints them so
 # the self-test can pin the workflow's `if:` set against this list without a
 # second transcription.
-FAMILIES='pm_dispatch_gates query_options_erasure slot_lookup verify_lock comment_mask_corpus'
+FAMILIES='slot_lookup query_options_erasure entry_guard comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands verify_lock'
 
 if [ "${1:-}" = '--families' ]; then
   for id in $FAMILIES; do echo "$id"; done
@@ -302,6 +358,30 @@ is_masked_source() {
   return 1
 }
 
+# reads_gate_tree <path> <class>  -- exit 0 when this change is inside the
+# read-set the dispatch derivation shares with the gates built on it: the
+# workflow tree it discovers (.github/**, workflows and composite actions),
+# and every gate source it resolves and reads for watch hints (scripts/** at
+# any depth, a workspace package's own scripts/, and the package.json that
+# names its check:* script). Docs, changesets, agent configuration and every
+# other workspace file are outside it. Four families share this helper rather
+# than carry four transcriptions of one read-set; each names its own extra
+# arms at its `case` below.
+reads_gate_tree() {
+  local path=$1 class=$2
+  case "$class" in
+    workflow|scripts|verify-lock) return 0 ;;
+    docs|changeset|agent-config) return 1 ;;
+    workspace)
+      case "$path" in
+        */package.json|*/scripts/*) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+  esac
+  return 0
+}
+
 # family_reads <id> <status> <path> <class>  -- exit 0 when the family must
 # run for this change. The *) arm of every `case` is "run": nothing here
 # skips by omission.
@@ -310,25 +390,36 @@ family_reads() {
   case "$class" in unknown|root-config) return 0 ;; esac
   case "$id" in
     pm_dispatch_gates)
-      [ "$status" = M ] || return 0
-      # The self-test reads the CONTENT of every JS/TS file in the tree (the
-      # compound-anchor census of `function ...SelfTest...(` declarations, the
-      # exposed-scratch-dir sweep of every mkdtempSync/mkdirSync caller) and
-      # every tracked `.sh` file (the same watch-hint extraction, run through
-      # the comment mask), and consults nested .gitignore files, so any masked
-      # source, any `.sh` file, and any .gitignore runs it whatever class it
-      # sits in.
-      is_masked_source "$path" && return 0
-      case "$path" in *.sh) return 0 ;; esac
-      case "$path" in */.gitignore) return 0 ;; esac
+      # NARROWED to the tool's own inputs (#19498). What it keeps: the
+      # derivation's own read-set above, plus the agent configuration the
+      # battery's live cases read (.claude/**, skills/**, AGENTS.md,
+      # CLAUDE.md).
+      # ⛔ What it gives up, on the ruling this script's header quotes: the
+      # whole-tree censuses -- every masked source and every `.sh` file read
+      # for the compound-anchor sweep, the nested .gitignore files the
+      # exposed-scratch-dir sweep consults, and the tracked NAME sweep that
+      # made an ADDED path anywhere run it. Those reads are real; they run on
+      # push-on-main and on the hourly full run, and not on a PR.
+      case "$class" in agent-config) return 0 ;; esac
+      if reads_gate_tree "$path" "$class"; then return 0; fi
+      return 1
+      ;;
+    declared_population_live|bare_root_worklist|self_test_workflow_commands)
+      # All three import the derivation (discoverFamilies) and judge what it
+      # finds, so the shared read-set above is theirs exactly.
+      # declared_population_live also reads the tracked NAME set, where only a
+      # name that DISAPPEARS can turn a live declaration dead -- and a deletion
+      # has already run every family before this point.
+      if reads_gate_tree "$path" "$class"; then return 0; fi
+      return 1
+      ;;
+    entry_guard)
+      # Walks scripts/** and nothing else (its ROOT_DIR_WATCH_HINTS, held
+      # against the root it really walks by its own self-test), so a workflow,
+      # a workspace package and the agent configuration are all outside it.
       case "$class" in
-        docs|changeset) return 1 ;;
-        workspace)
-          case "$path" in
-            */package.json|*/scripts/*) return 0 ;;
-            *) return 1 ;;
-          esac
-          ;;
+        scripts|verify-lock) return 0 ;;
+        docs|changeset|workflow|agent-config|workspace) return 1 ;;
         *) return 0 ;;
       esac
       ;;

@@ -279,19 +279,31 @@
  * — answered 「我点头」. The other half of that boundary, the 规则层, is every
  * remaining governed path and is quoted in full on #17950; ⛔ it is NOT excerpted
  * here, because a partial rules-layer list read as the whole one is precisely
- * the under-claim `check-governed-prose` exists to stop. The register is the
- * enumeration; this leg only asks whether a path is under the ONE prefix above. The charter text landed as PR #18018; this leg is what
- * makes it ENFORCED rather than declared, which is the whole of #18020.
+ * the under-claim `check-governed-prose` exists to stop. The charter text landed
+ * as PR #18018; this leg is what made it ENFORCED rather than declared, which is
+ * the whole of #18020 — narrowly, for the one prefix quoted above.
  *
- * So a governed diff whose governed paths ALL lie under
- * `.claude/skills/pm-dispatch/references/` may land on a REVIEW OF RECORD in
- * place of the authorized approval: the `## Contract review` comment — on the
+ * ⭐ SUPERSEDED 2026-09-18 (#19133, ruled 「同意改规则。」 on the skills seat's
+ * proposal; the amendment moved `.claude/settings.json` and `.claude/hooks/**`
+ * over too: 「我觉得这些我也没必要确认」): the quote above is reproduced as the
+ * ruling that STARTED this leg, not as the population it enforces today. #19133
+ * widened that population from the one prefix quoted above to the WHOLE of
+ * `.claude/**` — Tier S, in the register's own words — leaving Tier H as exactly
+ * the register's other rows. The register's `tier` field is the enumeration now;
+ * this leg asks `governedTierFor` for Tier S, never a prefix repeated here — see
+ * the "landing TIER" section below for the enforced definition, and read it live
+ * with `node scripts/pm/check-governed-merges.mjs --test <paths>` rather than
+ * trusting a prefix copied into prose, which is exactly what went stale once.
+ *
+ * So a governed diff whose governed paths are ALL Tier S — today, the whole of
+ * `.claude/**` — may land on a REVIEW OF RECORD in place of the authorized
+ * approval: the `## Contract review` comment — on the
  * PULL REQUEST'S THREAD **or on its CARD'S** — that names the pull request's
  * CURRENT head, carries a `Reviewed-by:` line, and declares a `Served-tier:`
  * reading that STANDS -- its token being the NAME `CONTRACT_REVIEW_TIER`,
  * ⛔ never a model identifier, which `AGENTS.md` lets land in no comment and a
- * record IS one (#18060). Every other governed path is the rules layer and
- * keeps the predicate above byte-for-byte.
+ * record IS one (#18060). Every governed path outside Tier S is Tier H, the
+ * rules layer, and keeps the predicate above byte-for-byte.
  *
  * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
  * to decide rather than this file's — quoted, untranslated, because it IS the
@@ -407,7 +419,13 @@
  * landed predicate says a human MERGE — 「人工审核」 landed as the same terminal
  * a governed diff has (ACCEPT on the card, `needs-user-decision` on the PR, a
  * final 维护者速读, review requested from `GOVERNED_APPROVERS`) and the
- * maintainer's own click (人工直合). An authorized APPROVED review lifts a
+ * maintainer's own click (人工直合). ⭐ #19344 — THAT CLICK IS ONE BUTTON
+ * OPTION and this text now names it: `main` mandates the queue and requires
+ * this check, so the only Merge that is not an enqueue is the Merge button's
+ * BYPASS-RULES option, offered only while the ruleset configures a bypass
+ * actor. While none was, the remedy named a terminal nobody could reach and
+ * PR #19024 was enqueued and refused three times. That it IS offered is a
+ * ruleset fact the pin reads. An authorized APPROVED review lifts a
  * Tier H path because the 2026-08-27 ruling said so of PATHS; nothing has
  * said it of the NUMBER, and widening a governance gate past its own ruling is
  * how gates acquire policy nobody agreed to. Widening it is a one-line
@@ -547,11 +565,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #18020 → #19133 Tier S: a review of record, not an approval': 43,
   '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
   '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 30,
+  '⭐ #19344: the remedy names a path the ruleset actually offers': 5,
+  '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 22;
+const SELF_TEST_BATTERY_FLOOR = 24;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -850,6 +870,11 @@ export function recordVerdict({ pair, recognisers, cardNote = null }) {
     // ⛔ never quoted back — a refusal that quotes it lands the identifier in
     // one more artifact, which is the thing `AGENTS.md` forbids of a comment.
     servedIsIdentifier: located.served?.state === 'read' && recognisers.isModelIdentifierToken(located.served.value),
+    // ⭐ A record reached through the 纯重生成 carry names an OLDER head, so the
+    // clear says which head was reviewed and over how many certified hops: ⛔ a
+    // verdict may not deny its own evidence (#15406).
+    carriedFrom: located.carriedFrom ?? null,
+    carriedHops: located.carriedHops ?? 0,
   };
   if (located.state === 'unsigned') return { state: 'unsigned', ...found };
   if (!recognisers.servedTierStands(located.served)) return { state: 'below-tier', ...found };
@@ -1270,6 +1295,14 @@ export function renderGuardVerdict(verdict) {
           (entry.record.served?.stamps
             ? ` on a stamp control of ${entry.record.served.stamps.atTier}/${entry.record.served.stamps.total}.`
             : ' (no stamp control declared, which the rule permits).'),
+        ...(entry.record.carriedFrom
+          ? [
+              `           ⭐ that record names head \`${String(entry.record.carriedFrom).slice(0, 12)}\`, carried forward over ` +
+                `${entry.record.carriedHops} certified PURE-REGENERATION hop(s) —`,
+              '           re-run on the COMMITTED trees by this build (`git diff --name-only`, no `merge=os-regen` path left),',
+              '           ⛔ never on the `Regen-provenance:` line being present (maintainer 2026-09-20).',
+            ]
+          : []),
         '           ⚠️ EXISTENCE and PROVENANCE, never the verdict: whether that record reads PASS is precondition ①',
         '           of the landing check and stays human. This leg measures what produced it, not what it concluded.',
       );
@@ -1376,8 +1409,9 @@ export function renderGuardVerdict(verdict) {
         `      ✅ What a seat DOES do once an account in GOVERNED_APPROVERS (${GOVERNED_APPROVERS.join(', ')}) has APPROVED it,`,
         '         on ANY commit: the CLAIMING SEAT lands it — ruling C (#17971, maintainer 2026-09-13, verbatim',
         '         「C. approve 后不管后续改动都由席位落地:」), 「席位落地 = 过落地前检、清标、ready、',
-        '         auto-merge,踢出/变基同法。」 Unapproved, the maintainer\'s own direct merge (人工直合) is',
-        '         the only landing this pull request has.',
+        '         auto-merge,踢出/变基同法。」 Unapproved, the maintainer\'s own direct merge (人工直合) is the',
+        '         only landing this pull request has, and it IS the Merge button\'s bypass-rules option —',
+        '         offered only while ruleset `main` configures a bypass actor (#19344).',
       );
     }
     if (tierS.length > 0) {
@@ -1469,7 +1503,8 @@ export function renderGuardVerdict(verdict) {
     '           要卡最新的提交。」); the authorized set is still the 2026-08-27 one (「os-zhuang hotlong 批准',
     '           算数」). ⛔ An agent seat never submits that approval, under any account — the post-merge audit',
     '           reads the approver too. ⛔ Unapproved, the maintainer\'s own direct merge (人工直合) is the only',
-    '           landing this pull request has.',
+    '           landing this pull request has, and it IS the Merge button\'s bypass-rules option — offered only',
+    '           while ruleset `main` configures a bypass actor (#19344); the audit log records it.',
   );
   if (verdict.entries.some((e) => e.record !== undefined)) {
     lines.push(
@@ -1507,7 +1542,7 @@ export function renderGuardVerdict(verdict) {
  * still governs everything the verdict is derived FROM; it never governed
  * things the verdict merely mentions.
  */
-export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [] }) {
+export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null, baseRef = null }) {
   const { governed, unattributed } = decomposeGovernedWork(rows);
   if (governed.length === 0 && unattributed.length === 0) {
     return guardVerdict({ event, governed, unattributed, apiCalls: 0, lifted });
@@ -1595,7 +1630,12 @@ export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComm
       // locations this leg READS are the locations `--template` STATES, because
       // both are this list. The cross-tool pin drives exactly this loop.
       const numbers = { pr: entry.pr, card: card.card };
-      const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null };
+      // ⭐ `runGit` and `baseRef` let the imported reader re-run the 纯重生成
+      // test on two COMMITTED trees when this head moved past its record —
+      // the base being what separates the merge commit's carry-over from a hand
+      // edit. ⛔ Either one absent is a REFUSAL, never a pass: the reader
+      // answers `unreadable` and this leg refuses on it.
+      const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null, runGit, baseRef };
       let unreadable = null;
       for (const thread of recognisers.threads) {
         const number = numbers[thread.number];
@@ -1925,6 +1965,32 @@ export async function runSizeGuard({ event, rows, namedPull = null, fetchPull })
   return sizeGuardVerdict({ event, pulls, readings, apiCalls });
 }
 
+// ── #19344: the remedy's terminal is a RULESET fact, so it is READ ─────────
+//
+// GitHub offers it only to an account ruleset `main` lists as a bypass actor,
+// and `bypass_actors` is withheld below `administration`, so a read answers
+// three ways and only ONE is a refusal. ⛔ Never assert a path from a field that
+// was not read (a permission difference must not red CI), ⛔ never pass mute.
+export const BYPASS_OPTION_PHRASE = "Merge button's bypass-rules option";
+
+/** `offered` | `not-offered` | `unreadable`, with the words a log should carry. */
+export function bypassActorReading(ruleset) {
+  const read = ruleset && typeof ruleset === 'object' ? ruleset : {};
+  if (!Object.prototype.hasOwnProperty.call(read, 'bypass_actors')) {
+    return { reading: 'unreadable', detail: `bypass_actors: unreadable with this token (the key is absent); current_user_can_bypass: ${JSON.stringify(read.current_user_can_bypass ?? null)}` };
+  }
+  const actors = read.bypass_actors;
+  if (Array.isArray(actors) && actors.length > 0) return { reading: 'offered', detail: `bypass_actors: ${actors.length} configured` };
+  return { reading: 'not-offered', detail: `bypass_actors: ${JSON.stringify(actors)} — nobody is offered the bypass-rules option` };
+}
+
+/** Two ways to red: the remedy stops naming a path (#19344's defect), or the ruleset is READ to offer none. */
+export function remedyPathVerdict({ remedy, ruleset }) {
+  const names = remedy.includes(BYPASS_OPTION_PHRASE);
+  const { reading, detail } = bypassActorReading(ruleset);
+  return { ok: names && reading !== 'not-offered', names, reading, detail };
+}
+
 /**
  * The words a reader acts on for this leg. Returns '' on the `pull_request`
  * leg. Every entry prints WHAT WAS READ — the two numbers, their sum and the
@@ -2003,7 +2069,11 @@ export function renderSizeVerdict(verdict) {
     '           alone does NOT dequeue it) and park it there — parked outside the queue is the SAFE state.',
     '        2. Then a HUMAN MERGE — the same terminal a governed diff has: ACCEPT on the card,',
     '           `needs-user-decision` on the PR, a final 维护者速读, review requested from GOVERNED_APPROVERS',
-    `           (${GOVERNED_APPROVERS.join(', ')}); the maintainer's own click lands it (人工直合).`,
+    `           (${GOVERNED_APPROVERS.join(', ')}); the maintainer's own click lands it (人工直合) — and that`,
+    '           click is the Merge button\'s bypass-rules option, offered only while ruleset `main` configures a',
+    '           bypass actor — ⛔ NOT a second Merge button: `main` mandates the queue and requires this check, so',
+    '           with none configured every re-enqueue comes back here (#19344). The audit log records the bypass',
+    '           and `check-governed-merges` lists such a landing on size.',
     '           ⛔ An authorized APPROVED review does NOT lift this limb the way it lifts a Tier H path, and no',
     '           review of record does either: the landed predicate says a human MERGE, and widening it is the',
     '           maintainer\'s one-line decision in the sibling, not this file\'s.',
@@ -2039,8 +2109,8 @@ export function groupExitCode({ governed, size, carrier }) {
 
 // ── git (diff decomposition; zero API) ──────────────────────────────────────
 
-function git(root, args) {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+function git(root, args, input) {
+  return execFileSync('git', args, { cwd: root, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
 /** Is `rev` an object this checkout actually has? A missing sha is a hard failure, never an empty diff. */
@@ -2414,7 +2484,8 @@ async function main() {
   const fetchLabels = makeLabelReader(reader);
   const fetchComments = makeCommentReader(reader);
 
-  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPull, fetchComments, lifted });
+  const runGit = (args, input) => git(repoRoot, args, input);
+  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPull, fetchComments, lifted, runGit, baseRef: context.baseSha ?? null });
   // The SIZE leg (#19036): every queued pull request, through the same pull
   // reader the governed leg reads heads with. `merge_group` only, '' on the
   // other leg, so the `pull_request` output is byte-identical to what it was.
@@ -3851,6 +3922,25 @@ export async function selfTest() {
     assert('the-workflow-is-readable-for-the-size-scope-pin', false, String(error?.message ?? error).split('\n')[0]);
   }
 
+  // ── ⭐ #19344: the remedy names a path the RULESET actually offers ────────
+  //
+  // RECORDED, not live: this self-test is the required guard job's FIRST step,
+  // declared offline, and a live read answers `unreadable` from every token CI
+  // can hold — a network dependency asserting nothing. ⛔ And a pinned phrase
+  // split across two wrapped array entries can never match: keep it on ONE.
+  battery('⭐ #19344: the remedy names a path the ruleset actually offers');
+  // GET /repos/objectstack-ai/objectstack/rulesets/12119582, read 2026-09-20 by
+  // an ordinary seat token: HTTP 200, and NO `bypass_actors` key at all.
+  const RULESET_19344 = Object.freeze({ id: 12119582, name: 'main', enforcement: 'active', current_user_can_bypass: 'never' });
+  const judgeRemedy = (remedy, over = {}) => remedyPathVerdict({ remedy, ruleset: { ...RULESET_19344, ...over } });
+  const sizeRemedy = renderSizeVerdict(overOne);
+  const recorded = judgeRemedy(sizeRemedy);
+  console.log(`  ℹ #19344 ruleset reading — ${recorded.detail}`);
+  assert('⭐ all-four-remedies-NAME-the-bypass-rules-option-and-keep-人工直合-as-the-name-of-the-act', recorded.names && judgeRemedy(refusalText).names && judgeRemedy(warnText).names && sizeRemedy.includes('人工直合') && /BYPASS-RULES option/.test(sizeOwnSource), sizeRemedy);
+  assert('⛔ a-field-this-token-cannot-see-is-UNREADABLE-and-PASSES-asserting-no-path-it-did-not-read', recorded.reading === 'unreadable' && recorded.ok === true && /unreadable with this token/.test(recorded.detail), recorded.detail);
+  assert('⛔ bypass_actors-PRESENT-and-EMPTY-REDS-the-remedy-names-a-path-the-ruleset-does-not-offer', judgeRemedy(sizeRemedy, { bypass_actors: [] }).ok === false && judgeRemedy(sizeRemedy, { bypass_actors: null }).reading === 'not-offered');
+  assert('⭐ one-configured-bypass-actor-makes-the-named-path-REACHABLE-and-the-pin-clears', judgeRemedy(sizeRemedy, { bypass_actors: [{ actor_type: 'RepositoryRole', bypass_mode: 'pull_request' }] }).ok === true);
+  assert('⛔ and-a-remedy-drifting-back-to-a-bare-maintainer-click-REDS-even-where-the-path-IS-offered', judgeRemedy("the maintainer's own click lands it (人工直合).", { bypass_actors: [{ actor_id: 5 }] }).ok === false);
 
   // ── the WIRING pin: the workflow still spells this context name ──────────
   //
@@ -3996,6 +4086,8 @@ export async function selfTest() {
     loaderThrows = false,
     event = EVENT_MERGE_GROUP,
     pr = 70,
+    runGit = null,
+    baseRef = null,
   } = {}) => {
     tierApiCalls = 0;
     tierThreadsRead = [];
@@ -4011,6 +4103,8 @@ export async function selfTest() {
         return n === pr ? comments : cardComments;
       },
       loadRecognisers: async () => { if (loaderThrows) throw new Error('loader exploded'); return recognisers; },
+      runGit,
+      baseRef,
     });
   };
 
@@ -4359,6 +4453,50 @@ export async function selfTest() {
     governedPathsIn([REF_A]).length === 1 && governedPathsIn([RULES_PATH]).length === 1,
   );
 
+
+  // ⭐ Nothing is re-implemented here: the carry lives in the IMPORTED reader
+  // and this leg supplies only the git it reads two COMMITTED trees with. ⛔ Its
+  // absence REFUSES — a `Regen-provenance:` line certifies nothing by existing.
+  battery('⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head');
+  const REGEN_PROV = { id: 901, created_at: '2026-09-13T13:30:00Z', body: `Regen-provenance: 900 · \`${REF_OLD}\` → \`${REF_HEAD}\` · \`git diff --name-only\` → (empty)` };
+  const onOldHead = [recordComment({ sha: REF_OLD.slice(0, 12) }), REGEN_PROV];
+  const QBASE = 'b'.repeat(40); // the merge group's base sha, which is what main brought
+  const qgit = (spec) => (args) => {
+    if (args[0] === 'merge-base') return `mb-${args[2]}\n`;
+    if (args[0] === 'check-attr') return spec.attrs;
+    if (args[0] === 'rev-parse') return `${REF_OLD}\n`;
+    const [, , , a, b] = args; // diff -z --name-only A B
+    return a === REF_OLD && b === REF_HEAD ? spec.moved : (spec.own?.[b] ?? '');
+  };
+  const qRegen = { moved: 'packages/spec/api-surface/ui.txt\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0' };
+  const qCarry = { moved: 'packages/spec/api-surface/ui.txt\0AGENTS.md\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0AGENTS.md\0merge\0unspecified\0', own: {} };
+  const qHand = { moved: 'AGENTS.md\0', attrs: 'AGENTS.md\0merge\0unspecified\0', own: { [REF_HEAD]: 'AGENTS.md\0' } };
+  // (ii) an edit SLIPPED IN beside the regeneration: a generated path moved, and
+  // so did one of this pull request's own, which its delta at the NEW head names.
+  const qSlipped = { moved: 'packages/spec/api-surface/ui.txt\0scripts/pm/x.mjs\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0scripts/pm/x.mjs\0merge\0unspecified\0', own: { [REF_HEAD]: 'scripts/pm/x.mjs\0' } };
+  const gitPure = qgit(qRegen);
+  const gitHand = qgit(qSlipped);
+  const carried = await tierRun({ comments: onOldHead, runGit: gitPure, baseRef: QBASE });
+  assert('⭐ a-record-on-an-OLDER-head-CARRIES-when-the-move-is-a-certified-pure-regeneration', carried.exitCode === EXIT_CLEAR && carried.entries[0].record.state === 'stands' && carried.entries[0].record.carriedHops === 1, JSON.stringify(carried.entries[0].record));
+  assert('and-the-CLEAR-names-the-head-actually-reviewed-and-says-it-re-ran-on-the-committed-trees', /carried forward over 1 certified PURE-REGENERATION hop/.test(renderGuardVerdict(carried)) && /COMMITTED trees/.test(renderGuardVerdict(carried)) && /never on the `Regen-provenance:` line being present/.test(renderGuardVerdict(carried)), renderGuardVerdict(carried));
+  const handMoved = await tierRun({ comments: onOldHead, runGit: gitHand, baseRef: QBASE });
+  assert('⛔ (ii) an-EDIT-SLIPPED-IN-beside-the-regeneration-refuses-exactly-as-an-uncarried-old-head-does', handMoved.exitCode === EXIT_REFUSED_UNAPPROVED && handMoved.entries[0].record.state === 'absent');
+  // ⭐ WHICH path is named by the reader that owns the reason; at the queue the
+  // refusal surfaces as an absent record, so the name is asserted at its source.
+  const { unexplainedPathsBetween } = await import(RECOGNISER_SOURCES.tier);
+  assert('…and-the-reader-NAMES-the-slipped-in-path-rather-than-the-generated-one-beside-it', unexplainedPathsBetween(gitHand, { from: REF_OLD, to: REF_HEAD, base: QBASE }).join() === 'scripts/pm/x.mjs', unexplainedPathsBetween(gitHand, { from: REF_OLD, to: REF_HEAD, base: QBASE }).join());
+  const blindTree = await tierRun({ comments: onOldHead, runGit: () => { throw new Error('fatal: bad object'); }, baseRef: QBASE });
+  assert('⛔ a-tree-this-build-cannot-reach-is-UNREADABLE-exit-4-never-clean', blindTree.exitCode === EXIT_REFUSED_UNREADABLE && blindTree.entries[0].record.state === 'unreadable');
+  assert('⛔ and-a-run-with-NO-git-reader-refuses-too-the-line-alone-certifies-nothing', (await tierRun({ comments: onOldHead, baseRef: QBASE })).exitCode === EXIT_REFUSED_UNREADABLE);
+  // ⭐ the carry-over arm at the queue: the merge group's OWN base is what
+  // separates what main brought from what this pull request changed.
+  const carryOver = await tierRun({ comments: onOldHead, runGit: qgit(qCarry), baseRef: QBASE });
+  assert('⭐ a-merge-forward-carrying-another-PRs-hand-written-path-beside-the-regeneration-CLEARS', carryOver.exitCode === EXIT_CLEAR && carryOver.entries[0].record.state === 'stands', JSON.stringify(carryOver.entries[0].record));
+  const resolved = await tierRun({ comments: onOldHead, runGit: qgit(qHand), baseRef: QBASE });
+  assert('⛔ the-SAME-path-hand-resolved-so-the-new-head-no-longer-holds-what-main-brought-REFUSES', resolved.exitCode === EXIT_REFUSED_UNAPPROVED && resolved.entries[0].record.state === 'absent');
+  assert('⛔ and-a-group-whose-BASE-this-build-could-not-read-is-UNREADABLE-never-clean', (await tierRun({ comments: onOldHead, runGit: qgit(qCarry) })).exitCode === EXIT_REFUSED_UNREADABLE);
+  assert('⛔ CONTROL-the-ordinary-old-head-refusal-is-unmoved-where-no-line-claims-the-exception', (await tierRun({ comments: [recordComment({ sha: REF_OLD.slice(0, 12) })], runGit: gitPure, baseRef: QBASE })).exitCode === EXIT_REFUSED_UNAPPROVED);
+  assert('⛔ CONTROL-a-record-on-the-CURRENT-head-still-clears-without-reading-any-tree', (await tierRun({ comments: [recordComment()], runGit: () => { throw new Error('no tree may be read when the record is already on this head'); } })).exitCode === EXIT_CLEAR);
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -4427,8 +4565,9 @@ export async function selfTest() {
       'fail-closed on an unreadable label set and on a group naming no pull request, enumerated per commit so a ' +
       'bare PR cannot carry a gated sibling through, silent and read-free on the pull_request leg, and replayed ' +
       'against the eleven measured enqueues of 2026-09-09 — five refused, six passed, that second number being ' +
-      'the boundary a label reader cannot cross — and the #18020 references TIER: a governed diff whose governed ' +
-      'paths all lie under the one ruled prefix lands on the skills seat\'s review of record instead of an ' +
+      'the boundary a label reader cannot cross — and the #18020 references TIER, re-keyed to Tier S by #19133: a ' +
+      'governed diff whose governed paths are ALL Tier S — the register\'s `.claude/**` row, asked through ' +
+      '`governedTierFor`, never a prefix repeated here — lands on the owning seat\'s review of record instead of an ' +
       'authorized approval, with the record recognisers IMPORTED through a lazy load whose precondition (no ' +
       'top-level await in this file\'s dispatch) is pinned against this file\'s own source, refused on an older ' +
       'head, on a missing or below-tier or partially-stamped `Served-tier:`, on an unsigned record, on no record ' +
@@ -4443,7 +4582,9 @@ export async function selfTest() {
       'on the governed code; an authorized approval lifting nothing from the size; a certified regeneration lifting ' +
       'nothing from it either; an unreadable size or a pull object without the pair FAIL-CLOSED on exit 9; the ' +
       'pull_request leg silent and read-free; and the three-leg exit precedence (governed, size, carrier) pinned on ' +
-      'every combination.',
+      'every combination — and the #19344 remedy pin: every limb names the Merge button\'s bypass-rules option, ' +
+      'judged against the recorded ruleset reading, red on a present-and-empty `bypass_actors` and on a remedy ' +
+      'drifting back to a bare click, and passing with the reading PRINTED when the field is unreadable.',
   );
 
   selfTestReachedVerdict = true;

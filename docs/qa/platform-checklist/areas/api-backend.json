@@ -1,6 +1,7 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "api-backend",
+  "axis": "api",
   "title": "REST / batch / formula / build-time gates",
   "items": [
     {
@@ -922,7 +923,7 @@
       "title": "Package REST lifecycle: POST /packages creates (201), a duplicate name is refused 409 (no silent manifest clobber), PATCH partial-patches the manifest, and an explicit overwrite re-install replaces in place without duplicating",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -931,31 +932,31 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a runtime that accepts package install/patch over HTTP (os dev's dispatcher install route, packages.install → POST /api/v1/packages); a scratch package id (e.g. qa_pkg_lifecycle_probe) so no shipped package is mutated"
+          "a runtime that accepts package install/patch over HTTP (os dev's dispatcher install route, packages.install → POST /api/v1/packages); a scratch package id (e.g. com.example.qa-pkg-lifecycle-probe) so no shipped package is mutated"
         ],
         "knownGaps": [
           "if the deployment blocks runtime package install (read-only metadata), record it as a fixture requirement and treat the item blocked(environment) rather than failing the install probes"
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as admin; choose a scratch id qa_pkg_lifecycle_probe",
-        "POST /api/v1/packages with { manifest: { id: 'qa_pkg_lifecycle_probe', name: 'QA Probe', version: '1.0.0', scope: 'custom', type: 'app' } }; capture status + body; then GET /api/v1/packages/qa_pkg_lifecycle_probe to confirm it persisted (the dispatcher install lands in BOTH the in-memory registry and durable sys_packages)",
+        "boot showcase isolated; sign in as admin; choose a scratch id com.example.qa-pkg-lifecycle-probe",
+        "POST /api/v1/packages with { manifest: { id: 'com.example.qa-pkg-lifecycle-probe', name: 'QA Probe', version: '1.0.0', scope: 'custom', type: 'app' } }; capture status + body; then GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe to confirm it persisted (the dispatcher install lands in BOTH the in-memory registry and durable sys_packages)",
         "POST the SAME manifest again with NO overwrite flag; capture status + body",
-        "PATCH /api/v1/packages/qa_pkg_lifecycle_probe with { name: 'QA Probe Renamed', description: 'edited', version: '1.1.0' }; GET the package back and confirm the patch persisted and that id/scope/type and the lifecycle fields (enabled/status/installedAt) are untouched",
+        "PATCH /api/v1/packages/com.example.qa-pkg-lifecycle-probe with { name: 'QA Probe Renamed', description: 'edited', version: '1.1.0' }; GET the package back and confirm the patch persisted and that id/scope/type and the lifecycle fields (enabled/status/installedAt) are untouched",
         "PATCH three malformed bodies: { name: '' }, { version: 'not-semver' }, and {} (nothing to update); capture each rejection",
         "re-install with the explicit opt-in: POST /api/v1/packages?overwrite=true (or body { overwrite: true }) carrying the same id and a changed manifest (version 2.0.0); capture status",
-        "GET /api/v1/packages and count rows whose id == qa_pkg_lifecycle_probe — must be exactly one",
+        "GET /api/v1/packages and count rows whose id == com.example.qa-pkg-lifecycle-probe — must be exactly one",
         "confirm the LIVE routing seam: POST /api/v1/packages resolves to the dispatcher install route (REST moved marketplace publish OFF the bare path to POST /api/v1/packages/publish in #3610), and PATCH /api/v1/packages/:id answers non-404 though it is absent from packages/rest/src/rest-route-ledger.ts (dispatcher-only)"
       ],
       "acceptance": [
         {
           "clause": "a scratch package installs → 201: POST /api/v1/packages returns 201 with the created package, and a follow-up GET reads it back (the install lands in the in-memory registry AND durable sys_packages, per packages.ts routing through protocol.installPackage)",
           "oracle": "api",
-          "verify": "POST status 201; GET /api/v1/packages/qa_pkg_lifecycle_probe returns the package",
+          "verify": "POST status 201; GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe returns the package",
           "evidence": "the POST + GET responses"
         },
         {
-          "clause": "a duplicate name is refused 409, NEVER silently overwritten: the second POST (no overwrite) answers 409 with message \"Package 'qa_pkg_lifecycle_probe' already exists\" and the bare-409 derived code RESOURCE_CONFLICT (HttpStatusErrorCodeMap 409) — the #2995 data-loss footgun (a silent re-install destroying the existing manifest) is closed",
+          "clause": "a duplicate name is refused 409, NEVER silently overwritten: the second POST (no overwrite) answers 409 with message \"Package 'com.example.qa-pkg-lifecycle-probe' already exists\" and the bare-409 derived code RESOURCE_CONFLICT (HttpStatusErrorCodeMap 409) — the #2995 data-loss footgun (a silent re-install destroying the existing manifest) is closed",
           "oracle": "api",
           "verify": "step-3 response: status 409, code RESOURCE_CONFLICT, message names the existing id; the stored manifest is unchanged from step 2",
           "evidence": "the 409 response + a re-read proving the manifest survived"
@@ -975,7 +976,7 @@
         {
           "clause": "the explicit overwrite re-install replaces in place WITHOUT duplicating: POST with overwrite=true (body or query) succeeds and the subsequent GET /api/v1/packages lists exactly ONE row for the id — the overwrite is the deliberate opt-out of the 409 guard, and it never leaves two package rows behind",
           "oracle": "api",
-          "verify": "step-6 status is a success (201/200); step-7 count of qa_pkg_lifecycle_probe rows == 1; the manifest reflects the overwrite (version 2.0.0)",
+          "verify": "step-6 status is a success (201/200); step-7 count of com.example.qa-pkg-lifecycle-probe rows == 1; the manifest reflects the overwrite (version 2.0.0)",
           "evidence": "the overwrite response + the deduped list"
         },
         {
@@ -1006,6 +1007,12 @@
           "date": "2026-08-08",
           "change": "new — package REST lifecycle (create/409-dup/patch/overwrite-reinstall), grounded in the dispatcher packages domain and the 409 data-loss guard; per PENDING-GAPS §G3",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-20",
+          "change": "the scratch probe id these steps POST is rewritten to a reverse-domain spelling (com.example.qa-pkg-lifecycle-probe) — `ManifestSchema.id` now carries `MANIFEST_ID_PATTERN`, so the underscored spellings this item used to name are refused by every door but the HTTP install door, and a checklist that teaches one is the trap the pattern was added to close. Steps, legs and expected verdicts are otherwise unchanged",
+          "ref": "#18319"
         }
       ]
     },

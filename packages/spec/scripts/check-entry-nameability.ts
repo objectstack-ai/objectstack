@@ -163,7 +163,7 @@ import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
 
-import { inspectDistFreshness } from './lib/dist-freshness';
+import { EXIT_PREREQUISITE_NOT_MET, inspectDistFreshness, prerequisiteNotMetText } from './lib/dist-freshness';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_DIR = path.resolve(HERE, '..');
@@ -583,8 +583,18 @@ function main(): number {
 
   const freshness = inspectDistFreshness(PKG_DIR, 'check', RERUN);
   if (!freshness.fresh) {
-    console.error(freshness.message);
-    return 1;
+    // PREREQUISITE NOT MET, not a finding (#19227). ⚠️ This gate returns its
+    // code up to `process.exit(main())` rather than exiting inline, which is
+    // why a `grep -c 'process.exit(1)'` over this file reads 0 while the
+    // refusal was there the whole time — the instrument, not the tree.
+    //
+    // The three refusals BELOW keep `return 1` deliberately: a dead canary, a
+    // probe that fails to compile for an unrelated reason and an enumeration
+    // that found zero callable exports are all findings about this gate or its
+    // subject, and each says so in its own text ("Both are findings; neither is
+    // a pass"). Only the unmet build prerequisite is "nothing was measured".
+    console.error(prerequisiteNotMetText('check:entry-nameability', freshness));
+    return EXIT_PREREQUISITE_NOT_MET;
   }
 
   const manifest = JSON.parse(fs.readFileSync(path.join(PKG_DIR, 'package.json'), 'utf8')) as {

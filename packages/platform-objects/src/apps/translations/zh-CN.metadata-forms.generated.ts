@@ -56,6 +56,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "描述",
         helpText: "开发文档说明"
       },
+      nameField: {
+        label: "记录标题字段",
+        helpText: "用作每条记录标题的字段（例如 \"name\"、\"subject\"）。ADR-0079 规定的规范指针——记录展示、ObjectQL 搜索和关联记录预览都读它。"
+      },
       isSystem: {
         label: "系统内置",
         helpText: "系统对象（受保护，不可删除；共享默认为公开）"
@@ -109,8 +113,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "新记录的默认值（JSON 字面量）"
       },
       "fields.placeholder": {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+        label: "占位文本",
+        helpText: "显示在空输入框内的提示文本；输入内容后消失"
       },
       "fields.maxLength": {
         label: "最大长度",
@@ -121,12 +125,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "最小字符数"
       },
       "fields.valueDomain": {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+        label: "值域",
+        helpText: "写入值必须归属的标准；写入非成员值将被拒绝"
       },
       "fields.rows": {
-        label: "Rows",
-        helpText: "Inline editor height (text rows)"
+        label: "行数",
+        helpText: "内联编辑器高度（文本行数）"
       },
       "fields.min": {
         label: "最小值",
@@ -165,44 +169,44 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "目标对象名称。tree 字段可省略；若填写，必须是本对象自身（树是同一对象内部的层级 — 链接到其他对象请用 lookup）"
       },
       "fields.lookupFilters": {
-        label: "Lookup Filters",
-        helpText: "Filter rules applied to the picker ({field, operator, value})"
+        label: "Lookup 筛选条件",
+        helpText: "应用于选择器的筛选规则（{field, operator, value}）"
       },
       "fields.deleteBehavior": {
-        label: "Delete Behavior",
-        helpText: "What happens when the referenced record is deleted"
+        label: "删除行为",
+        helpText: "被引用记录删除时的处理方式"
       },
       "fields.multiple": {
         label: "多选",
         helpText: "允许选择多条记录"
       },
       "fields.expression": {
-        label: "Expression",
-        helpText: "CEL formula expression"
+        label: "表达式",
+        helpText: "CEL 公式表达式"
       },
       "fields.returnType": {
         label: "返回类型",
         helpText: "公式结果类型"
       },
       "fields.summaryOperations": {
-        label: "Summary Operations",
-        helpText: "Roll-up: which child object, which field, which aggregation"
+        label: "汇总操作",
+        helpText: "汇总：取哪个子对象、哪个字段、用哪种聚合"
       },
       "fields.summaryOperations.object": {
-        label: "Object",
-        helpText: "Source child object name"
+        label: "对象",
+        helpText: "来源子对象名称"
       },
       "fields.summaryOperations.field": {
-        label: "Field",
-        helpText: "Field on the child object to aggregate (ignored for count)"
+        label: "字段",
+        helpText: "子对象上参与聚合的字段（count 时忽略）"
       },
       "fields.summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "函数",
+        helpText: "聚合函数"
       },
       "fields.autonumberFormat": {
-        label: "Autonumber Format",
-        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
+        label: "自动编号格式",
+        helpText: "例如 \"INV-{0000}\"；支持日期占位符 {YYYY}/{MM}/{DD} 以及 {field_name} 插值"
       },
       "fields.language": {
         label: "语言",
@@ -213,49 +217,69 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "在记录的活动时间线上概述该字段的变更"
       },
       "fields.visibleWhen": {
-        label: "Visible When",
-        helpText: "CEL predicate — field is shown only when TRUE"
+        label: "可见条件",
+        helpText: "CEL 判定式——结果为 TRUE 时才显示该字段"
       },
       "fields.readonlyWhen": {
-        label: "Readonly When",
-        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
+        label: "只读条件",
+        helpText: "CEL 判定式——结果为 TRUE 时该字段只读（由服务端强制）"
       },
       "fields.requiredWhen": {
-        label: "Required When",
-        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
+        label: "必填条件",
+        helpText: "CEL 判定式——结果为 TRUE 时该字段必填（由服务端强制）"
       },
       enable: {
-        label: "Enable",
-        helpText: "Enable/disable system features"
+        label: "启用",
+        helpText: "启用或禁用系统功能"
       },
       "enable.trackHistory": {
-        label: "Track History"
+        label: "历史跟踪"
       },
       "enable.searchable": {
-        label: "Searchable"
+        label: "可搜索"
       },
       "enable.apiEnabled": {
-        label: "Api Enabled"
+        label: "已启用 API"
       },
       "enable.files": {
-        label: "Files"
+        label: "文件"
       },
       "enable.feeds": {
-        label: "Feeds"
+        label: "动态"
       },
       "enable.activities": {
-        label: "Activities"
+        label: "活动"
       },
       "enable.clone": {
-        label: "Clone"
+        label: "克隆"
       },
       validations: {
-        label: "Validations",
-        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+        label: "校验规则",
+        helpText: "对象级校验规则——由规则对象组成的数组，例如 [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。状态机转移表也在此声明（ADR-0020）"
       },
       datasource: {
         label: "数据源",
         helpText: "目标数据源 ID（默认：\"default\"）"
+      },
+      ownership: {
+        label: "归属模型",
+        helpText: "记录归属模型。留空按 user 处理。"
+      },
+      sharingModel: {
+        label: "共享模型",
+        helpText: "面向内部用户的组织级默认记录可见性（OWD）。自定义对象若不声明，运行时按 private 处理（ADR-0090 D1）。"
+      },
+      managedBy: {
+        label: "生命周期归属",
+        helpText: "生命周期分类：platform（用户可增删改查）、config（管理员编写）、system-data（平台定义结构、管理员/用户可写数据）、engine-owned（引擎独占，用户不可写）、append-only（审计）、better-auth（身份）。UI 客户端据此推导 CRUD 能力，因此它决定用户在该对象记录上能做什么。"
+      },
+      editMode: {
+        label: "编辑方式",
+        helpText: "该对象记录的编辑交互意图。留空则由渲染端自行选择默认方式。这是跨渲染端的意图声明，不是样式。"
+      },
+      fileAccessDelegate: {
+        label: "文件访问委托服务",
+        helpText: "授权下载该对象媒体字段所属文件的内核服务；有了它就不再以“调用方能否读取宿主记录”来判断。适用于访问权由某个服务裁决的对象。失败即拒绝。"
       },
       lifecycle: {
         label: "数据生命周期",
@@ -381,8 +405,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "新建记录时的默认值"
       },
       placeholder: {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help"
+        label: "占位文本",
+        helpText: "显示在空输入框内的提示文本（输入内容后消失）；需要常驻帮助请使用 inlineHelpText"
+      },
+      inlineHelpText: {
+        label: "常驻帮助文本",
+        helpText: "显示在输入框下方、始终可见的帮助文本；与 `placeholder` 不同，后者一旦填入值就消失。"
       },
       minLength: {
         label: "最小长度",
@@ -393,12 +421,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "最多字符数"
       },
       valueDomain: {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
+        label: "值域",
+        helpText: "写入值必须归属的标准：iana_time_zone、iso_4217_currency 或 iso_3166_alpha2；写入非成员值将被拒绝"
       },
       rows: {
-        label: "Rows",
-        helpText: "Inline editor height in text rows"
+        label: "行数",
+        helpText: "内联编辑器高度，以文本行数计"
       },
       min: {
         label: "最小值",
@@ -416,9 +444,51 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "小数位",
         helpText: "小数部分位数"
       },
+      step: {
+        label: "步进值",
+        helpText: "滑块的步进增量（默认 1）。仅渲染端使用：写入路径不会拒绝偏离步进网格的值。"
+      },
+      maxSize: {
+        label: "最大文件大小",
+        helpText: "允许的最大文件大小，单位为字节（正整数）。写入时在服务端按已记录的文件大小校验——没有记录大小的文件不会被它拦下。"
+      },
+      dimensions: {
+        label: "向量维度",
+        helpText: "向量维度——1 到 10000 之间的整数（例如 OpenAI 嵌入为 1536）。"
+      },
+      language: {
+        label: "代码语言",
+        helpText: "编辑器语法高亮所用的语言（例如 javascript、python、sql）。"
+      },
+      autonumberFormat: {
+        label: "自动编号格式",
+        helpText: "字面文本加 {0000} 计数器、按业务时区取值的 {YYYY}/{MM}/{DD}/{YYYYMMDD} 日期标记，以及 {field_name} 字段插值。计数器按渲染出的前缀分别重置。autonumber 字段不填时默认为 {0000}。"
+      },
+      referenceVia: {
+        label: "多态指针伴随字段",
+        helpText: "把该文本字段声明为多态指针的 id 半边：此处填写同一对象上保存目标对象名的另一个字段，目标逐行决定（ADR-0052 §5）。使用 snake_case；仅限文本字段，且与 `reference` 互斥。"
+      },
       options: {
         label: "选项",
         helpText: "可选项（label/value 对）"
+      },
+      "options.label": {
+        label: "显示名称"
+      },
+      "options.value": {
+        label: "值"
+      },
+      "options.description": {
+        label: "描述"
+      },
+      "options.color": {
+        label: "颜色"
+      },
+      "options.default": {
+        label: "默认选项"
+      },
+      "options.visibleWhen": {
+        label: "可见条件"
       },
       reference: {
         label: "引用对象",
@@ -429,36 +499,68 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "被引用记录删除时的处理方式"
       },
       relatedListFilter: {
-        label: "Related List Filter",
-        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
+        label: "关联列表筛选",
+        helpText: "该关系在父记录详情页上的关联列表的默认筛选——以 AND 方式与父记录匹配条件组合，标签页徽标统计的也是同一集合"
+      },
+      displayField: {
+        label: "候选项标题字段",
+        helpText: "在选择器中作为每个候选记录标题显示的字段。留空则使用被引用对象自身的标题字段。"
+      },
+      descriptionField: {
+        label: "候选项副标题字段",
+        helpText: "在快速选择浮层中显示于标题下方的次要字段。"
+      },
+      allowCreate: {
+        label: "允许即时新建",
+        helpText: "选择器找不到匹配项时，允许用户用已输入的文本直接创建记录。适合只有标题字段为必填的对象。"
+      },
+      lookupPageSize: {
+        label: "选择器每页行数",
+        helpText: "记录选择对话框每页显示的行数——正整数，默认 10。"
+      },
+      relatedListTitle: {
+        label: "关联列表标题",
+        helpText: "该关系在父记录详情页上关联列表的标题。"
+      },
+      inlineTitle: {
+        label: "内嵌表格标题",
+        helpText: "父记录上内嵌主从表格的标题。"
+      },
+      inlineAmountField: {
+        label: "内嵌合计字段",
+        helpText: "用于内嵌表格合计行求和的子对象数值字段。"
       },
       expression: {
         label: "表达式",
         helpText: "用 CEL 表达式计算此字段的值（自动设为只读）"
+      },
+      returnType: {
+        label: "公式返回类型",
+        helpText: "公式声明的值类型，按推断出的 CEL 类型写入。消费方直接读它，无需重新解析表达式。"
       },
       summaryOperations: {
         label: "汇总操作",
         helpText: "父子关系下的汇总聚合配置"
       },
       "summaryOperations.object": {
-        label: "Object",
-        helpText: "Child object to aggregate"
+        label: "对象",
+        helpText: "参与聚合的子对象"
       },
       "summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "函数",
+        helpText: "聚合函数"
       },
       "summaryOperations.field": {
-        label: "Field",
-        helpText: "Child field to aggregate (ignored for count)"
+        label: "字段",
+        helpText: "参与聚合的子对象字段（count 时忽略）"
       },
       "summaryOperations.relationshipField": {
-        label: "Relationship Field",
-        helpText: "Child FK back to this parent (auto-detected when omitted)"
+        label: "关系字段",
+        helpText: "子对象上指回该父对象的外键（省略时自动探测）"
       },
       "summaryOperations.filter": {
-        label: "Filter",
-        helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
+        label: "筛选",
+        helpText: "仅聚合匹配该判定式的子记录（例如 status == received）"
       },
       externalId: {
         label: "外部 ID",
@@ -483,6 +585,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maskingRule: {
         label: "脱敏规则",
         helpText: "部分脱敏:预设('phone'、'id_card'、'bank_account'、'email'、'name')或 {\"keepHead\": n, \"keepTail\": m}。未持有该字段 requiredPermissions 的调用者将看到脱敏值"
+      },
+      internal: {
+        label: "不对外返回",
+        helpText: "该字段的值永远不经通用数据通道返回：引擎会从 find/findOne 结果以及创建和更新的响应体中删除这个键——默认投影如此，客户端在 ?select= 中点名它时同样如此。存储、过滤和索引都不受影响。"
+      },
+      trackHistory: {
+        label: "记录变更历史",
+        helpText: "把该字段的值变更渲染为记录活动时间线上的条目（ADR-0052 §5b）。按字段逐个开启。"
+      },
+      widget: {
+        label: "控件覆盖",
+        helpText: "表单控件覆盖——填写已注册的字段组件名，查找时会拼成 `field:` 加该名称，用它代替按 type 推断出的默认控件。名称未注册时退回 type 对应的控件。"
+      },
+      ackPlaintextMasking: {
+        label: "确认明文存储",
+        helpText: "确认该通用 password 字段“落盘为明文、读取时打码”的契约确实是有意为之，从而不再提示编写期警告（ADR-0100）。对其他字段类型无效。"
       }
     }
   },
@@ -541,7 +659,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "函数体源码——禁止顶层 import"
       },
       "body.capabilities": {
-        label: "功能",
+        label: "能力",
         helpText: "可用的 ctx API（api.read、api.write、crypto.uuid、log 等）"
       },
       "body.timeoutMs": {
@@ -549,8 +667,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "单次调用超时时间（毫秒）"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "内存（MB）",
+        helpText: "单次调用内存上限（MB，最大 256）"
       },
       handler: {
         label: "处理器",
@@ -564,8 +682,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "错误处理"
       },
       timeoutMs: {
-        label: "Timeout Ms",
-        helpText: "Abort the hook after N milliseconds"
+        label: "超时（毫秒）",
+        helpText: "超过 N 毫秒后中止该钩子"
       },
       runAs: {
         label: "运行身份",
@@ -576,26 +694,26 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "可选公式——求值为 false 时跳过该钩子"
       },
       retryPolicy: {
-        label: "Retry Policy",
-        helpText: "Retry on failure — most useful for async hooks"
+        label: "重试策略",
+        helpText: "失败时重试——对异步钩子最有用"
       },
       "retryPolicy.maxRetries": {
-        label: "Max Retries",
-        helpText: "Maximum retry attempts"
+        label: "最大重试次数",
+        helpText: "最多可重试的次数"
       },
       "retryPolicy.backoffMs": {
-        label: "Backoff Ms",
-        helpText: "Delay between retries (ms)"
+        label: "退避（毫秒）",
+        helpText: "两次重试之间的延迟（毫秒）"
       }
     }
   },
   seed: {
-    label: "Seed Data",
-    description: "Fixture / initialization data applied on publish"
+    label: "种子数据",
+    description: "发布时应用的预置/初始化数据"
   },
   mapping: {
-    label: "Import Mapping",
-    description: "Reusable import/export field mapping (rename + transforms), referenced by name at import"
+    label: "导入映射",
+    description: "可复用的导入/导出字段映射（重命名 + 转换），在导入时按名称引用"
   },
   view: {
     label: "视图",
@@ -719,7 +837,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userFilters: {
         label: "用户筛选器",
-        helpText: "快速筛选栏：控件样式（下拉 / 标签页 / 开关）+ 暴露的字段或标签页预设"
+        helpText: "快速筛选栏：控件样式（dropdown / tabs / toggle）+ 暴露的字段或标签页预设"
       },
       tabs: {
         label: "标签页",
@@ -763,8 +881,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "页面区块与组件"
       },
       interface: {
-        label: "Interface (list pages)",
-        description: "Interface mode (Airtable parity): the page defines its own data surface directly — columns, filters, visualizations and toolbar — no inheriting from a separate view."
+        label: "Interface（列表页）",
+        description: "Interface 模式（对标 Airtable）：页面直接定义自己的数据展现面——列、筛选、可视化与工具栏——不再继承独立视图。"
       },
       advanced: {
         label: "高级设置",
@@ -796,6 +914,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "描述",
         helpText: "用于导航的页面描述"
       },
+      source: {
+        label: "页面源码",
+        helpText: "页面源码文本。kind 为 'html'（别名 'jsx'）时，它是受约束的 JSX，在保存时被编译成组件树——只解析，绝不执行。kind 为 'react' 时，它是真正的 React，由受信任运行时在渲染时执行。"
+      },
       object: {
         label: "对象",
         helpText: "绑定的对象（用于记录页）"
@@ -817,68 +939,83 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "初始值（默认为对应类型的空值）"
       },
       "variables.source": {
-        label: "来源",
+        label: "写入组件",
         helpText: "写入该变量的组件（按 id 指定），如 element:record_picker"
       },
       regions: {
         label: "区域",
         helpText: "布局区域（header、main、sidebar、footer）及其组件"
       },
+      "regions.name": {
+        label: "区域"
+      },
+      "regions.width": {
+        label: "宽度"
+      },
+      "regions.components": {
+        label: "组件"
+      },
       interfaceConfig: {
-        label: "Interface Config",
-        helpText: "The page IS the view: source picks the object, columns/filterBy are defined directly here; appearance.allowedVisualizations whitelists renderers (one entry = locked); userActions toggles the toolbar."
+        label: "Interface 配置",
+        helpText: "页面本身就是视图：source 选择对象，columns/filterBy 直接在这里定义；appearance.allowedVisualizations 限定可用的渲染器（只有一项即锁定）；userActions 控制工具栏开关。"
       },
       "interfaceConfig.source": {
-        label: "Source",
-        helpText: "Object this page reads from"
+        label: "数据来源",
+        helpText: "此页面读取数据的对象"
       },
       "interfaceConfig.columns": {
-        label: "Columns",
-        helpText: "Columns to show — defined directly on the page (blank = all object fields)"
+        label: "列",
+        helpText: "要展示的列——直接在页面上定义（留空表示对象的全部字段）"
       },
       "interfaceConfig.filterBy": {
-        label: "Filter By",
-        helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+        label: "筛选条件",
+        helpText: "页面始终生效的基础筛选——与列表工具栏相同的可视化构建器。"
       },
       "interfaceConfig.sort": {
-        label: "Sort",
-        helpText: "Default sort order for the page, defined directly on the page."
+        label: "排序",
+        helpText: "页面的默认排序方式，直接在页面上定义。"
+      },
+      "interfaceConfig.sort.field": {
+        label: "字段"
+      },
+      "interfaceConfig.sort.order": {
+        label: "排序方向"
       },
       "interfaceConfig.levels": {
-        label: "Levels",
-        helpText: "Hierarchy levels to display (tree-like sources)"
+        label: "层级",
+        helpText: "要展示的层级（树形数据源）"
       },
       "interfaceConfig.appearance": {
-        label: "Appearance",
-        helpText: "Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility"
+        label: "外观",
+        helpText: "允许的可视化（Grid / Kanban / Calendar / …）与描述是否显示"
       },
       "interfaceConfig.userFilters": {
-        label: "User Filters",
-        helpText: "End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field). None removes the config."
+        label: "用户筛选器",
+        helpText: "终端用户筛选栏：None（不显示筛选栏）/ Tabs（命名预设）/ Dropdown（按字段）。None 会移除该配置。"
       },
       "interfaceConfig.userActions": {
-        label: "User Actions",
-        helpText: "Toolbar toggles (search, sort, filter, row height)"
+        label: "用户操作",
+        helpText: "工具栏开关（搜索、排序、筛选、行高）"
       },
       "interfaceConfig.addRecord": {
-        label: "Add Record",
-        helpText: "Add-record entry point"
+        label: "添加记录",
+        helpText: "添加记录的入口"
       },
       "interfaceConfig.buttons": {
-        label: "Buttons",
-        helpText: "Toolbar buttons — pick from this object's actions"
+        label: "按钮",
+        helpText: "工具栏按钮——从该对象的操作中选择"
       },
       "interfaceConfig.recordAction": {
-        label: "Record Action",
-        helpText: "How clicking a record opens its detail"
+        label: "记录操作",
+        helpText: "点击记录时如何打开其详情"
       },
       "interfaceConfig.showRecordCount": {
-        label: "Show Record Count",
-        helpText: "Show the record count bar"
+        label: "显示记录数",
+        helpText: "显示记录数栏"
       },
       "interfaceConfig.allowPrinting": {
-        label: "Allow Printing",
-        helpText: "Allow users to print this page"
+        label: "允许打印",
+        helpText: "允许用户打印此页面"
       },
       isDefault: {
         label: "默认",
@@ -974,6 +1111,57 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "组件",
         helpText: "包含位置和尺寸的仪表板组件"
       },
+      "widgets.id": {
+        label: "组件 ID"
+      },
+      "widgets.title": {
+        label: "标题"
+      },
+      "widgets.description": {
+        label: "描述"
+      },
+      "widgets.type": {
+        label: "可视化类型"
+      },
+      "widgets.chartConfig": {
+        label: "图表配置"
+      },
+      "widgets.colorVariant": {
+        label: "配色"
+      },
+      "widgets.requiresObject": {
+        label: "所需对象"
+      },
+      "widgets.requiresService": {
+        label: "所需服务"
+      },
+      "widgets.filter": {
+        label: "筛选"
+      },
+      "widgets.compareTo": {
+        label: "对比区间"
+      },
+      "widgets.dataset": {
+        label: "数据集"
+      },
+      "widgets.dimensions": {
+        label: "维度"
+      },
+      "widgets.values": {
+        label: "度量"
+      },
+      "widgets.layout": {
+        label: "布局"
+      },
+      "widgets.options": {
+        label: "选项"
+      },
+      "widgets.filterBindings": {
+        label: "筛选绑定"
+      },
+      "widgets.suppressWarnings": {
+        label: "抑制的告警"
+      },
       dateRange: {
         label: "日期范围",
         helpText: "默认日期范围选择器"
@@ -981,6 +1169,36 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       globalFilters: {
         label: "全局筛选",
         helpText: "应用到所有组件的筛选条件"
+      },
+      "globalFilters.name": {
+        label: "名称"
+      },
+      "globalFilters.field": {
+        label: "字段"
+      },
+      "globalFilters.object": {
+        label: "对象"
+      },
+      "globalFilters.label": {
+        label: "显示名称"
+      },
+      "globalFilters.type": {
+        label: "输入类型"
+      },
+      "globalFilters.options": {
+        label: "选项"
+      },
+      "globalFilters.optionsFrom": {
+        label: "选项来源"
+      },
+      "globalFilters.defaultValue": {
+        label: "默认值"
+      },
+      "globalFilters.scope": {
+        label: "范围"
+      },
+      "globalFilters.targetWidgets": {
+        label: "目标组件"
       }
     }
   },
@@ -1030,6 +1248,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "默认",
         helpText: "设为新用户的默认应用"
       },
+      hidden: {
+        label: "从应用切换器隐藏",
+        helpText: "把该应用排除在应用切换器之外——外壳改为从头像菜单展示它。这只影响导航：隐藏的应用依然可路由，且照常做权限校验。"
+      },
       navigation: {
         label: "导航",
         helpText: "递归的导航结构"
@@ -1037,6 +1259,21 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       areas: {
         label: "区域",
         helpText: "将菜单项组织为可折叠分组"
+      },
+      "areas.id": {
+        label: "区域 ID"
+      },
+      "areas.label": {
+        label: "显示名称"
+      },
+      "areas.icon": {
+        label: "图标"
+      },
+      "areas.description": {
+        label: "描述"
+      },
+      "areas.navigation": {
+        label: "导航"
       },
       defaultAgent: {
         label: "默认智能体",
@@ -1097,6 +1334,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "按钮样式",
         helpText: "按钮样式（primary=蓝色，danger=红色，ghost=透明）"
       },
+      mode: {
+        label: "语义模式",
+        helpText: "该动作的语义模式。目前只有 AI 人工确认（HITL）启发式会读它——没有任何渲染端按它分支。"
+      },
+      order: {
+        label: "排序权重",
+        helpText: "同一放置分组内的排序值——数值越小越靠前，记录头部会取排在最前的那个作为主按钮。不填则保持注册顺序。"
+      },
       target: {
         label: "目标",
         helpText: "调用的 URL、流程名或 API 端点"
@@ -1110,28 +1355,94 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "L1 表达式或 L2 沙箱 JS 体"
       },
       "body.language": {
-        label: "Language",
-        helpText: "expression = pure formula; js = sandboxed JavaScript"
+        label: "语言",
+        helpText: "expression = 纯公式；js = 沙箱 JavaScript"
       },
       "body.source": {
-        label: "Source",
-        helpText: "Function body source — no top-level imports"
+        label: "源码",
+        helpText: "函数体源码——禁止顶层 import"
       },
       "body.capabilities": {
-        label: "Capabilities",
-        helpText: "Allowed ctx APIs (api.read, api.write, crypto.uuid, log, …)"
+        label: "能力",
+        helpText: "可用的 ctx API（api.read、api.write、crypto.uuid、log 等）"
       },
       "body.timeoutMs": {
-        label: "Timeout Ms",
-        helpText: "Per-invocation timeout (ms)"
+        label: "超时（毫秒）",
+        helpText: "单次调用超时时间（毫秒）"
       },
       "body.memoryMb": {
-        label: "Memory Mb",
-        helpText: "Per-invocation memory cap (MB, max 256)"
+        label: "内存（MB）",
+        helpText: "单次调用内存上限（MB，最大 256）"
       },
       params: {
         label: "参数",
         helpText: "执行前向用户收集的输入参数"
+      },
+      "params.name": {
+        label: "名称"
+      },
+      "params.field": {
+        label: "字段"
+      },
+      "params.objectOverride": {
+        label: "对象覆盖"
+      },
+      "params.label": {
+        label: "显示名称"
+      },
+      "params.type": {
+        label: "类型"
+      },
+      "params.required": {
+        label: "必填"
+      },
+      "params.options": {
+        label: "选项"
+      },
+      "params.placeholder": {
+        label: "占位文本"
+      },
+      "params.helpText": {
+        label: "帮助文本"
+      },
+      "params.defaultValue": {
+        label: "默认值"
+      },
+      "params.multiple": {
+        label: "多选"
+      },
+      "params.accept": {
+        label: "允许的类型"
+      },
+      "params.maxSize": {
+        label: "最大大小（字节）"
+      },
+      "params.reference": {
+        label: "引用对象"
+      },
+      "params.defaultFromRow": {
+        label: "默认取自当前行"
+      },
+      "params.carryOver": {
+        label: "沿用行值"
+      },
+      "params.visible": {
+        label: "可见条件"
+      },
+      "params.requiresFeature": {
+        label: "所需功能"
+      },
+      operation: {
+        label: "声明式写入",
+        helpText: "对单条记录的声明式字段写入：'update' 会把 `patch`（合并在已收集的 `params` 之下）应用到当前记录，并且以调用方的身份执行——绝不提权，因此调用方的权限、对象的钩子与校验都会像用户手动编辑那样触发。"
+      },
+      undoable: {
+        label: "可撤销",
+        helpText: "更新成功后提供“撤销”入口。撤销捕获的是该动作写入的每个字段的原值——也就是合并后的写入集合，即 `params` 之下的 `patch`。没有声明 `operation` 的动作没有写入集合，因此也没有可捕获的内容。"
+      },
+      execution: {
+        label: "批量分发契约",
+        helpText: "该动作主体所依据的批量分发契约：'perRecord' 为每条选中的记录各发一次调用，并带上该行的 recordId；'aggregate' 对整批选中只发一次调用，所有 id 都在 params._selectedIds 里。不填则按逐条记录分发。"
       },
       confirmText: {
         label: "确认文本",
@@ -1144,6 +1455,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       refreshAfter: {
         label: "完成后刷新",
         helpText: "执行完成后刷新当前列表/页面"
+      },
+      openIn: {
+        label: "链接打开位置",
+        helpText: "静态 `target` URL 的打开位置——'self' 在当前页跳转，'new-tab' 打开新的浏览器标签页。不填时，绝对或外部 URL 打开新标签页，相对 URL 在当前页跳转。"
+      },
+      opensInNewTab: {
+        label: "结果在新标签页打开",
+        helpText: "在新标签页打开动作的执行结果：渲染端在点击时同步预开一个标签页（不会被弹窗拦截），随后把它导航到处理程序返回的 redirectUrl。与 `openIn` 不同，后者决定静态 URL 目标的去向。"
+      },
+      newTabUrl: {
+        label: "新标签页 URL 模板",
+        helpText: "直接使用的新标签页 URL 模板，可用 {recordId} 占位符。与 `opensInNewTab` 同时设置时，渲染端会立即把预开的标签页导航到这里，不再发起动作请求——因此该端点必须自行校验鉴权。"
       },
       locations: {
         label: "位置",
@@ -1161,9 +1484,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "禁用",
         helpText: "CEL 表达式：满足条件时禁用"
       },
+      requiresFeature: {
+        label: "所需认证特性",
+        helpText: "用于控制该动作是否出现的公共认证特性开关。它在解析时被降解进 `visible` 断言并从输出中移除，因此下游消费方永远看不到这个键。"
+      },
       ai: {
-        label: "Ai",
-        helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
+        label: "AI 暴露",
+        helpText: "AI 暴露（需显式开启）：设置 ai.exposed=true 并填写 ai.description（≥40 个字符），此操作即可被代理调用。"
       },
       recordIdParam: {
         label: "记录 ID 参数",
@@ -1187,8 +1514,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "标识与报表类型"
       },
       dataset_binding: {
-        label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        label: "数据集绑定",
+        description: "本报表渲染的语义层数据集。度量与行分别来自该数据集的度量与维度"
       },
       joined_blocks: {
         label: "关联对象",
@@ -1215,16 +1542,16 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "报表类型：tabular / summary / matrix / joined"
       },
       dataset: {
-        label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        label: "数据集",
+        helpText: "要绑定的数据集（度量/维度来自其语义层）"
       },
       values: {
-        label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        label: "度量",
+        helpText: "要展示的度量名（来自该数据集）"
       },
       rows: {
-        label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        label: "行",
+        helpText: "用于分组行的维度名（来自该数据集）"
       },
       columns: {
         label: "列",
@@ -1234,17 +1561,56 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "排序",
         helpText: "排序键，最重要的在前（rows/columns 维度或 values 度量）。时间维度默认按时间顺序排列。"
       },
+      "order.by": {
+        label: "排序依据"
+      },
+      "order.direction": {
+        label: "排序方向"
+      },
       drilldown: {
-        label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        label: "下钻",
+        helpText: "点击聚合后的行/单元格，打开其底层记录"
       },
       blocks: {
         label: "分块",
         helpText: "joined 报表的联合查询块"
       },
+      "blocks.name": {
+        label: "名称"
+      },
+      "blocks.label": {
+        label: "显示名称"
+      },
+      "blocks.description": {
+        label: "描述"
+      },
+      "blocks.type": {
+        label: "分块类型"
+      },
+      "blocks.chart": {
+        label: "图表"
+      },
+      "blocks.dataset": {
+        label: "数据集"
+      },
+      "blocks.rows": {
+        label: "行"
+      },
+      "blocks.columns": {
+        label: "列"
+      },
+      "blocks.values": {
+        label: "度量"
+      },
+      "blocks.runtimeFilter": {
+        label: "运行时筛选"
+      },
+      "blocks.order": {
+        label: "排序"
+      },
       runtimeFilter: {
-        label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        label: "运行时筛选",
+        helpText: "渲染时的范围筛选，在查询时以 AND 方式并入"
       },
       chart: {
         label: "图表",
@@ -1253,58 +1619,97 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   dataset: {
-    label: "Dataset",
-    description: "Analytics semantic layer — dimensions & measures",
+    label: "数据集",
+    description: "分析语义层 — 维度与度量",
     sections: {
       basics: {
-        label: "Basics",
-        description: "Dataset identity."
+        label: "基础信息",
+        description: "数据集标识"
       },
       source: {
-        label: "Source",
-        description: "The base object, the relationships to join, and the dataset’s intrinsic scope. Joins are derived from the object graph — pick relationship (lookup / master_detail) names, never write an ON clause."
+        label: "数据来源",
+        description: "基础对象、要关联的关系，以及数据集的固有范围。关联由对象关系图推导 — 选择关系（lookup / master_detail）字段名，不要手写 ON 子句"
       },
       dimensions: {
-        label: "Dimensions",
-        description: "Groupable axes. Use a base field, or `relationship.field` (e.g. account.region) for a relationship included above."
+        label: "维度",
+        description: "可分组的轴。使用基础对象的字段，或对上方已包含的关系使用 `relationship.field`（如 account.region）"
       },
       measures: {
-        label: "Measures",
-        description: "Aggregatable values defined once and referenced by name. A measure is sum/avg/count/… of a field; a derived measure combines other measures (ratio/sum/difference/product). Measure-scoped filters and derived ops are edited per-row in the dataset designer."
+        label: "度量",
+        description: "定义一次即可按名称引用的可聚合值。度量是某个字段的 sum/avg/count/…；派生度量由其他度量组合而成（ratio/sum/difference/product）。度量级筛选与派生运算在数据集设计器中逐行编辑"
       }
     },
     fields: {
       name: {
-        label: "Name",
-        helpText: "snake_case unique identifier"
+        label: "名称",
+        helpText: "snake_case 唯一标识符"
       },
       label: {
-        label: "Label",
-        helpText: "Display name"
+        label: "显示名称",
+        helpText: "显示名"
       },
       description: {
-        label: "Description",
-        helpText: "What this dataset measures"
+        label: "描述",
+        helpText: "此数据集衡量什么"
       },
       object: {
-        label: "Object",
-        helpText: "Base object — the FROM"
+        label: "对象",
+        helpText: "基础对象 — 即 FROM"
       },
       include: {
-        label: "Include",
-        helpText: "Relationship (lookup / master_detail) field names to join — enables `relationship.field` dimensions/measures (e.g. include \"account\" → group by account.region)"
+        label: "包含关联",
+        helpText: "要关联的关系（lookup / master_detail）字段名 — 用于启用 `relationship.field` 维度/度量（例如 include \"account\" → 按 account.region 分组）"
       },
       filter: {
-        label: "Filter",
-        helpText: "Intrinsic scope filter (e.g. exclude soft-deleted records), ANDed into every query"
+        label: "筛选",
+        helpText: "固有范围筛选（例如排除软删除记录），以 AND 方式并入每个查询"
       },
       dimensions: {
-        label: "Dimensions",
-        helpText: "Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity"
+        label: "维度",
+        helpText: "每个维度：名称（供展示层引用）、字段、类型，以及日期类型的默认分桶粒度"
+      },
+      "dimensions.name": {
+        label: "名称"
+      },
+      "dimensions.label": {
+        label: "显示名称"
+      },
+      "dimensions.field": {
+        label: "字段"
+      },
+      "dimensions.type": {
+        label: "类型"
+      },
+      "dimensions.dateGranularity": {
+        label: "日期粒度"
       },
       measures: {
-        label: "Measures",
+        label: "度量",
         helpText: "每个度量：名称、聚合函数、字段（count 时可省略）、显示格式/货币"
+      },
+      "measures.name": {
+        label: "名称"
+      },
+      "measures.label": {
+        label: "显示名称"
+      },
+      "measures.aggregate": {
+        label: "聚合函数"
+      },
+      "measures.field": {
+        label: "字段"
+      },
+      "measures.filter": {
+        label: "筛选"
+      },
+      "measures.format": {
+        label: "格式"
+      },
+      "measures.currency": {
+        label: "货币"
+      },
+      "measures.derived": {
+        label: "派生自"
       }
     }
   },
@@ -1345,13 +1750,79 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "节点",
         helpText: "⚠️ 建议使用流程设计器，而非手写 JSON"
       },
+      "nodes.id": {
+        label: "节点 ID"
+      },
+      "nodes.type": {
+        label: "节点类型"
+      },
+      "nodes.label": {
+        label: "显示名称"
+      },
+      "nodes.config": {
+        label: "配置"
+      },
+      "nodes.connectorConfig": {
+        label: "连接器操作"
+      },
+      "nodes.position": {
+        label: "画布位置"
+      },
+      "nodes.timeoutMs": {
+        label: "超时（毫秒）"
+      },
+      "nodes.inputSchema": {
+        label: "输入 Schema"
+      },
+      "nodes.waitEventConfig": {
+        label: "等待事件"
+      },
+      "nodes.boundaryConfig": {
+        label: "边界事件"
+      },
       edges: {
         label: "连线",
         helpText: "节点间的连接——建议用流程设计器编辑"
       },
+      "edges.id": {
+        label: "连线 ID"
+      },
+      "edges.source": {
+        label: "起始节点"
+      },
+      "edges.target": {
+        label: "目标节点"
+      },
+      "edges.condition": {
+        label: "条件"
+      },
+      "edges.type": {
+        label: "连接类型"
+      },
+      "edges.label": {
+        label: "显示名称"
+      },
+      "edges.isDefault": {
+        label: "默认路径"
+      },
       variables: {
         label: "变量",
         helpText: "流程变量（输入/输出）"
+      },
+      "variables.name": {
+        label: "名称"
+      },
+      "variables.type": {
+        label: "类型"
+      },
+      "variables.isInput": {
+        label: "输入"
+      },
+      "variables.isOutput": {
+        label: "输出"
+      },
+      "variables.defaultValue": {
+        label: "默认值"
       },
       status: {
         label: "状态",
@@ -1368,6 +1839,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       errorHandling: {
         label: "错误处理",
         helpText: "节点失败时的处理方式（fail / retry / continue）"
+      },
+      successMessage: {
+        label: "成功提示消息",
+        helpText: "流程成功结束时随运行结果返回的消息；屏幕流界面会用它代替通用的“Done”弹出提示。"
+      },
+      errorMessage: {
+        label: "失败提示消息",
+        helpText: "流程失败时随运行结果返回的消息；屏幕流界面会用它代替原始错误弹出提示。"
       }
     }
   },
@@ -1381,8 +1860,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "外部目录"
   },
   api: {
-    label: "API Endpoint",
-    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+    label: "API 端点",
+    description: "声明式 HTTP 端点——在既有管道之上提供稳定的 URL 与策略层（ADR-0121）"
   },
   translation: {
     label: "翻译"
@@ -1468,12 +1947,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   doc: {
-    label: "Documentation",
-    description: "Package documentation — flat Markdown items (ADR-0046)"
+    label: "文档",
+    description: "软件包文档——扁平的 Markdown 文档项（ADR-0046）"
   },
   book: {
-    label: "Documentation Book",
-    description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
+    label: "文档手册",
+    description: "文档导航主干——有序分组，成员由派生确定（ADR-0046 §6）"
   },
   permission: {
     label: "权限集",
@@ -1503,6 +1982,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       label: {
         label: "显示名称",
         helpText: "面向管理员的显示标签"
+      },
+      description: {
+        label: "描述",
+        helpText: "在 Setup 中展示的可读描述（持久化为 sys_permission_set.description）。"
+      },
+      isDefault: {
+        label: "默认权限集",
+        helpText: "面向 everyone 岗位的应用基线（ADR-0090 D5）：应用级权限集在启动时自动绑定；包级权限集则成为安装时由管理员确认的建议。默认 false。"
+      },
+      managedBy: {
+        label: "归属来源",
+        helpText: "记录来源（ADR-0086 D3）：跨版本升级时由谁拥有这个权限集。"
+      },
+      packageId: {
+        label: "所属包 ID",
+        helpText: "随包分发的权限集所属的包 id（ADR-0086 D3）。环境内自行编写的权限集留空即可。"
       },
       systemPermissions: {
         label: "系统权限",
@@ -1544,12 +2039,16 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "描述"
+      },
+      delegatable: {
+        label: "可自助委派",
+        helpText: "持有者可自行委派该岗位，需限定时段并填写理由（ADR-0091 D3）。默认 false——委派仅限管理员。"
       }
     }
   },
   capability: {
-    label: "Capability",
-    description: "Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)"
+    label: "能力",
+    description: "软件包声明的授权能力——ADR-0066 D1 的定义侧（授予在权限集上；要求在资源上）"
   },
   agent: {
     label: "AI 代理",
@@ -1591,6 +2090,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "启用",
         helpText: "启用或禁用此代理"
+      },
+      surface: {
+        label: "绑定产品界面",
+        helpText: "该智能体绑定的产品界面（ADR-0063 §1）。只有自身界面与之相符、或声明为 'both' 的技能才会挂载，而该智能体的工具集就是这些技能工具的并集。默认 'ask'。"
       },
       instructions: {
         label: "指令",
@@ -1702,6 +2205,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "启用",
         helpText: "启用或禁用此技能"
       },
+      surface: {
+        label: "绑定智能体界面",
+        helpText: "该技能绑定的智能体界面（ADR-0063 §3）。把它挂到界面不相符的智能体上会在解析时直接报错，而不是悄悄跳过。默认 'ask'。"
+      },
       instructions: {
         label: "指令",
         helpText: "AI 调用此技能时遵循的详细指令"
@@ -1713,6 +2220,15 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       triggerConditions: {
         label: "触发条件",
         helpText: "程序化条件（如 objectName == \"case\"）"
+      },
+      "triggerConditions.field": {
+        label: "上下文字段"
+      },
+      "triggerConditions.operator": {
+        label: "运算符"
+      },
+      "triggerConditions.value": {
+        label: "值"
       }
     }
   }

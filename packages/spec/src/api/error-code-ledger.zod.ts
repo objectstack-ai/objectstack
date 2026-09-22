@@ -99,9 +99,8 @@
  * answer with it — a thrown value's `code` is what a consumer's
  * `catch (e) { switch (e.code) }` pins, and once shipped it cannot be renamed
  * without breaking that consumer. Registering a code widens this face and is
- * therefore a Clause-② change (`needs:contract-review`), door or no door; a
- * code present in `dist` and absent here is a protocol gap, not a tier
- * question.
+ * therefore a Clause-② change, door or no door; a code present in `dist` and
+ * absent here is a protocol gap, not a tier question.
  *
  * ONE shape, no second list: a `door: 'none'` code is a row like any other —
  * the string under the package that stamps it, and a comment that states its
@@ -1093,6 +1092,32 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_METADATA',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
+    // [#19307] The data door's duplicate-name refusal on `sys_permission_set`
+    // — `PermissionSetNameConflictError` (`errors.ts`), thrown by the
+    // ADR-0094 D3 write-through middleware's insert leg
+    // (`permission-set-projection.ts`) when a set with that machine name
+    // already exists. `code` / `status` via the package's exported
+    // `PERMISSION_SET_NAME_CONFLICT_CODE` / `PERMISSION_SET_NAME_CONFLICT_STATUS`.
+    //
+    // THIRD EMITTER of a code `@objectstack/rest` (SQL conflict) and
+    // `@objectstack/driver-memory` (in-memory uniqueness refusal) already
+    // register, and the wire identity is deliberately the SAME for the reason
+    // their rows give: this object declares `{ fields: ['name'], unique:
+    // 'organization' }`, so the very same collision answers `409
+    // UNIQUE_VIOLATION` when the index catches it instead of this pre-check
+    // (the reading recorded on that index, #8554). A second spelling here
+    // would make one condition answer two envelopes depending only on which
+    // layer got there first. Per this file's header, a code emitted by
+    // several packages is listed once per emitting package — provenance, not
+    // identity; the union, its casing and every other package's rows are
+    // unchanged.
+    //
+    // Wire-reachable by the test the "Retiring a code" section applies
+    // (#8035), measured live on `examples/app-showcase` over a cookie session:
+    // `POST /api/v1/data/sys_permission_set {"name":"<a name already taken>"}`
+    // answers `409` with this code on the flat `{ error, code }` responder
+    // (`mapDataError`'s declared-status 4xx arm, `thrownCodeFields`).
+    'UNIQUE_VIOLATION',
   ],
   '@objectstack/plugin-webhooks': [
     // [#13353] The redeliver endpoint's malformed-body refusal — the plugin
@@ -1253,7 +1278,8 @@ export const ERROR_CODE_LEDGER = {
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
     'EXTERNAL_WRITE_FORBIDDEN',
-    // [#16449] The eight rows below are `door: 'none'` codes — raised at
+    // [#16449] The eight rows below — through `STACK_TRIGGER_CAPABILITY_REQUIRED`
+    // — are `door: 'none'` codes — raised at
     // authoring / boot, before any HTTP boundary exists — registered under the
     // #16404 ruling (door or no door; see the header). Each ships in this
     // package's `dist`, so its spelling is the face a consumer's
@@ -1282,6 +1308,29 @@ export const ERROR_CODE_LEDGER = {
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
     'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
     'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers`
+    // [#16348] The COMPOSITION half of the same family, and `door: 'none'` on
+    // the same reading: the six `composeStacks` refusals, one code per raise
+    // site, every one `status: 422` (`StackRefusalError`, `stack.zod.ts`), the
+    // findings the site collected on `issues`. Every message carries the
+    // literal `composeStacks conflict:` prefix, which is how the family is
+    // located — five of the six raise inside helper functions, not in
+    // `composeStacks`' own body. Raised where `defineStack` is: `os validate` /
+    // `os build` and a hand-written `objectstack.config.ts`, before any HTTP
+    // boundary exists (measured: zero `composeStacks` CALL sites under
+    // `packages/runtime/src` + `packages/rest/src` — 7 non-test occurrences,
+    // all doc comments or message prose in one file; positive control
+    // `defineStack`, same two trees, 31 occurrences across 8 files).
+    // ⛔ NOT registered, and the absence is load-bearing: the seventh bare
+    // `Error` in that file, `composeStacks internal error: no source stack
+    // recorded for composed object …`, is an internal-bookkeeping invariant
+    // rather than an authored-entity refusal — a 422 would blame the author
+    // for our defect. Its disposition is its own decision.
+    'STACK_COMPOSE_ACTION_KEY_COLLISION',        // two stacks declare the same action key — the collision `defineStack` refuses within one stack, one composition step later
+    'STACK_COMPOSE_COLLECTION_CONFLICT',         // under `objectConflict: 'merge'`, an object-level collection other than `fields` is declared with different values by two stacks
+    'STACK_COMPOSE_FUNCTION_CONFLICT',           // two stacks define a handler under the same name; handlers resolve by name at boot
+    'STACK_COMPOSE_FUNCTIONS_SHAPE_CONFLICT',    // `functions` authored in the map form by one stack and the array form by another
+    'STACK_COMPOSE_KEY_CONFLICT',                // a single-valued top-level key is declared with different values by two stacks
+    'STACK_COMPOSE_OBJECT_CONFLICT',             // the same object name is defined by more than one stack under the default `objectConflict: 'error'`
   ],
 } as const satisfies Record<string, readonly string[]>;
 
@@ -1626,21 +1675,6 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       '(kernel/metadata-protection.zod.ts) construct the structured refusal, and the ' +
       'protocol layer — the registered emitter — turns it into the 403 the wire carries ' +
       '(ADR-0010 §3.3). Spec ships schemas and pure helpers, never an HTTP door.',
-  },
-  {
-    package: '@objectstack/plugin-sharing',
-    code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
-    registeredUnder: '@objectstack/objectql',
-    reason: 'Matches the code, never emits it (#14754, adjudicated on #14937 — maintainer ' +
-      'ruling A, 2026-09-04): `ENGINE_ORGANIZATION_REFUSAL_CODE` in ' +
-      '`plugin-sharing/src/sharing-rule-service.ts` is a `constdef` the per-grant catch in BOTH ' +
-      'reconcile loops compares an incoming `err.code` against, so exactly one engine refusal is ' +
-      'absorbed and a refused grant no longer aborts the pass or its stale-row revocations. The ' +
-      'emitter is `@objectstack/objectql` (`SystemWriteOrganizationRequiredError`, ' +
-      'tenancy/system-write-organization.ts) and the objectql owner key already carries the row ' +
-      '(#8844). Recognising a code is not emitting it; the named constant is typed FROM the ' +
-      'engine\'s own declaration so it cannot drift from what the engine throws. Removed together ' +
-      'with the stamp site when #14936 lands and objectql publishes a recognizer.',
   },
   {
     package: '@objectstack/types',

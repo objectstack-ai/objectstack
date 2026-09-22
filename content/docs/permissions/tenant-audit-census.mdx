@@ -187,8 +187,8 @@ reproduce them. Where it disagrees, it disagrees on the page:
 | carried figure | where it survives | this census |
 | :--- | :--- | ---: |
 | 175 write call sites | quoted in the merged changeset | **227** |
-| 24 carrying no tenant context | quoted in the merged changeset | **9** provable and tenancy-enabled; **32** more whose options argument is unreadable |
-| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **151 of 227** decidable, **76** undecidable |
+| 24 carrying no tenant context | quoted in the merged changeset | **9** provable and tenancy-enabled; **34** more whose options argument is unreadable |
+| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **153 of 227** decidable, **74** undecidable |
 | 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 108 decidably elevated, 0 decidably not, 102 undecidable |
 | 141 and 132, two independent re-derivations | the card that filed this work | — |
 
@@ -200,7 +200,7 @@ at any commit.
 
 Two structural facts do plausibly widen this reading against any hand or regex
 one, and both are counted in the generated tables below: the 44 sites reached
-through an erased (`any`) receiver, and the 41 that name their object through a
+through an erased (`any`) receiver, and the 43 that name their object through a
 `const` rather than inline. An instrument that read either the way a person does
 would report a smaller number and would not say so.
 
@@ -213,7 +213,7 @@ answer is that a static reading cannot settle it.
 ⇒ **Cite `9 / 227`, and say what it is**: the sites whose options argument was
 READ and holds no tenant context, against a decidably tenancy-enabled object.
 That is the control's provable yield surface. ⛔ Do not cite it as "the sites
-without tenant context" — **32 further sites** have an options argument this
+without tenant context" — **34 further sites** have an options argument this
 cannot read, and they are neither in nor out.
 
 {/* BEGIN GENERATED: tenant-audit-census (scripts/tenant-audit-census.mjs) — DO NOT EDIT */}
@@ -223,15 +223,15 @@ cannot read, and they are neither in nor out.
 | what | count |
 | :--- | ---: |
 | write call sites on the application surface | **227** |
-| …whose object name is statically decidable | 151 |
-| …whose object name is chosen at run time | 76 |
-| …against an object with tenancy ENABLED | 150 |
+| …whose object name is statically decidable | 153 |
+| …whose object name is chosen at run time | 74 |
+| …against an object with tenancy ENABLED | 152 |
 | …against an object that declares tenancy off | 1 |
 | threading a tenant context | 143 |
 | PROVABLY carrying none (options read, no context key) | **17** |
 | …of those, against a decidably tenancy-enabled object | **9** |
 | options argument UNREADABLE — may or may not carry one | 67 |
-| …of those, against a decidably tenancy-enabled object | 32 |
+| …of those, against a decidably tenancy-enabled object | 34 |
 | threading a decidably ELEVATED (`isSystem`) context | 108 |
 | threading a context that is decidably NOT elevated | 0 |
 | threading a context whose elevation is a run-time fact | 102 |
@@ -239,13 +239,13 @@ cannot read, and they are neither in nor out.
 | how the instrument reached the site | count |
 | :--- | ---: |
 | receiver carried a readable engine type | 183 |
-| receiver erased, placed by the object NAME | 18 |
+| receiver erased, placed by the object NAME | 24 |
 | receiver erased, placed by an `object: string` PARAMETER | 15 |
-| receiver erased, placed by an `UNTYPED_RECEIVERS` row | 11 |
+| receiver erased, placed by an `UNTYPED_RECEIVERS` row | 5 |
 
 | object name spelled inline | 110 |
-| object name spelled through a `const` | 41 |
-| object name is an `object: string` parameter | 19 |
+| object name spelled through a `const` | 43 |
+| object name is an `object: string` parameter | 17 |
 | object name is some other run-time expression | 57 |
 
 ### Subtractions the census could NOT defend — enforced
@@ -260,6 +260,12 @@ receiver carries a declared type the engine type index does not hold, and that
 index is built from TRACKED sources only, deliberately. An untracked, generated
 or dependency-owned declaration is one this census never saw, and «never saw it»
 must not be spelled the same way as «read it, not an engine».
+
+⚠️ One arm here says something else again: `type-text-not-round-trippable` is a
+receiver whose declared type THIS TOOL derived and then could not read back —
+the source parsed, the re-serialisation of it did not, so the door rule could
+never be read off it. That is a fault in this tool rather than a fact about the
+corpus, and it is the one row here that also fails the gate.
 
 | what | count |
 | :--- | ---: |
@@ -290,11 +296,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-18 at `30def652e`.
+Measured on 2026-09-22 at `9db2c6234`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 573 |
+| tracked non-test sources scanned | 576 |
 | engine-shaped types recognised | 63 |
 | declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 144 |

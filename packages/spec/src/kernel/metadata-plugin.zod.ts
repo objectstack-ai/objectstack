@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
 import { MetadataManagerConfigSchema } from './metadata-loader.zod';
+import { MAJOR_MINOR_PATCH_VERSION_PATTERN } from './version-grammar';
 import { ActionSchema } from '../ui/action.zod';
 
 /**
@@ -646,7 +647,7 @@ export const MetadataPluginManifestSchema = lazySchema(() => z.object({
   name: z.literal('ObjectStack Metadata Service').describe('Plugin name'),
 
   /** Plugin version */
-  version: z.string().regex(/^\d+\.\d+\.\d+$/).describe('Plugin version'),
+  version: z.string().regex(MAJOR_MINOR_PATCH_VERSION_PATTERN).describe('Plugin version'),
 
   /** Plugin type */
   type: z.literal('standard').describe('Plugin type'),
@@ -926,6 +927,24 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // Code-defined (`origin: 'code'`) datasources remain read-only and win on
   // name collision; record-level read-only gating is enforced by origin, not
   // by this flag. No per-org overlay (a datasource = one physical connection).
+  //
+  // WHERE THE `allowRuntimeCreate: true` BELOW IS HONOURED, under ADR-0049
+  // 「declared ⇒ honoured; not honourable ⇒ retired」: `@objectstack/lint`'s
+  // runtime publish gate dispatches `lintLivenessProperties` for a datasource
+  // write (`runtimeTypes`, plus the `datasource: 'datasources'` row in
+  // `TYPE_TO_STACK_KEY`). ⚠️ Dispatched and SILENT today, by ledger rather
+  // than by accident: `liveness/datasource.json` carries 0 `authorWarn` rows,
+  // so the rule judges nothing here until a property earns one — the
+  // `email_template` / `mapping` end state, and ⛔ not a reason to populate
+  // the ledger. Retiring the flag was weighed and refused: `datasources` is a
+  // real stack collection with a live create path, so this declaration is
+  // keepable rather than a promise nothing can keep.
+  //
+  // ⚠️ The entry below is the registry's only MULTI-LINE one, which is not a
+  // formatting detail: a census that reads the registry line-wise — asking for
+  // `type:` and `allowRuntimeCreate:` on ONE line — cannot see this type at
+  // all, and one such census graded ten sibling types without it. ⛔ Read this
+  // table with a multi-line-aware parser, or the blind spot repeats.
   {
     type: 'datasource',
     label: 'Datasource',
