@@ -2430,6 +2430,57 @@ export function selfTest() {
       ['IProbeEngine']),
     'engine/IProbeEngine');
 
+  // ── ⭐⭐ ONE NAME, TWO CLASSES -- AND ONE NAME, TWO CALLABLES ─────────────
+  // The lexical tier above does not reach either of these, because neither name
+  // is a lexical one. `this.engine` in class `B` is `B`'s property however many
+  // other classes in the file spell it, and `getEngine` declared inside `b()` is
+  // `b`'s. Keyed on the bare identifier both were ONE entry and the first TYPED
+  // one decided for every site in the file -- the same three failures, at two
+  // storage sites, and the quiet one is still the expensive one: a real engine
+  // write subtracted under `platform-type`, an arm that DEFENDS the subtraction
+  // and so prints nothing and is counted nowhere.
+  t('⭐⭐ two CLASSES sharing a property name are TWO declarations -- the Map is not scored an engine write',
+    verdictsIn(`class A {\n  constructor(private readonly engine: IProbeEngine) {}\n  w() { this.engine.${WRITE}; }\n}\n`
+      + `class B {\n  constructor(private readonly engine: Map<string, number>) {}\n  w() { this.engine.delete('k'); }\n}\n`,
+      ['IProbeEngine']),
+    'engine/IProbeEngine | other/platform-type');
+  t('⭐⭐ …and in the other declaration order, the real engine write is no longer subtracted as a language global',
+    verdictsIn(`class A {\n  constructor(private readonly engine: Map<string, number>) {}\n  w() { this.engine.delete('k'); }\n}\n`
+      + `class B {\n  constructor(private readonly engine: IProbeEngine) {}\n  w() { this.engine.${WRITE}; }\n}\n`,
+      ['IProbeEngine']),
+    'other/platform-type | engine/IProbeEngine');
+  t('⭐⭐ …and at the OTHER storage site a property reaches its type through: a property DECLARATION',
+    verdictsIn(`class A {\n  private readonly engine: IProbeEngine;\n  w() { this.engine.${WRITE}; }\n}\n`
+      + `class B {\n  private readonly engine: Map<string, number>;\n  w() { this.engine.delete('k'); }\n}\n`,
+      ['IProbeEngine']),
+    'engine/IProbeEngine | other/platform-type');
+  t('⛔ FLOOR: a `this.<prop>` NO enclosing class declares still resolves file-wide',
+    verdictsIn('class A {\n  constructor(private readonly engine: IProbeEngine) {}\n}\n'
+      + `class B {\n  w() { this.engine.${WRITE}; }\n}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐ the `this.<base>.<member>` receiver reads its base from the SITE\'s own class, not from the file',
+    verdictsIn('interface Deps {\n  engine: IProbeEngine;\n}\ninterface Other {\n  engine: Map<string, number>;\n}\n'
+      + `class A {\n  constructor(private readonly deps: Deps) {}\n  w() { this.deps.engine.${WRITE}; }\n}\n`
+      + `class B {\n  constructor(private readonly deps: Other) {}\n  w() { this.deps.engine.delete('k'); }\n}\n`,
+      ['IProbeEngine']),
+    'engine/IProbeEngine | other/platform-type');
+  t('⭐⭐ two same-named LOCAL FUNCTIONS are two declarations -- the Map is not scored an engine write',
+    verdictsIn('export function a() {\n  function getEngine(): IProbeEngine { return null as never; }\n'
+      + `  getEngine().${WRITE};\n}\n`
+      + 'export function b() {\n  function getEngine(): Map<string, number> { return new Map(); }\n'
+      + "  getEngine().delete('k');\n}\n", ['IProbeEngine']),
+    'engine/IProbeEngine | other/platform-type');
+  t('⭐⭐ …and in the other declaration order, the real engine write survives',
+    verdictsIn('export function a() {\n  function getEngine(): Map<string, number> { return new Map(); }\n'
+      + "  getEngine().delete('k');\n}\n"
+      + 'export function b() {\n  function getEngine(): IProbeEngine { return null as never; }\n'
+      + `  getEngine().${WRITE};\n}\n`, ['IProbeEngine']),
+    'other/platform-type | engine/IProbeEngine');
+  t('⛔ FLOOR: a METHOD name is scoped to its class, and still resolves from a call OUTSIDE it',
+    verdictsIn('class Deps {\n  getEngine(): IProbeEngine { return null as never; }\n}\n'
+      + `export function w(d: Deps) {\n  d.getEngine().${WRITE};\n}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+
   // The same conflation decided two OTHER questions, and both are verdicts the
   // artefacts carry: WHICH object a site writes, and whether it is elevated.
   /** Every write call's object-name verdict, in source order. */
@@ -2499,7 +2550,11 @@ export function selfTest() {
     + 'declarations is two declarations in every direction it used to be one: the Map is not scored '
     + 'an engine write, the real engine write is not subtracted as a language global, the object '
     + 'name and the elevation are read from the site\'s own scope, and a name no enclosing scope '
-    + 'declares still resolves file-wide so nothing that resolved before stops).',
+    + 'declares still resolves file-wide so nothing that resolved before stops -- and the same in the '
+    + 'two places a name is NOT lexical: two classes sharing a property name are two properties at both '
+    + 'storage sites and through a `this.<base>.<member>` base, two same-named local functions are two '
+    + 'callables, each in both declaration orders, while a `this.<prop>` no enclosing class declares and '
+    + 'a method called from outside its class both still resolve file-wide).',
   );
   return 0;
 }
