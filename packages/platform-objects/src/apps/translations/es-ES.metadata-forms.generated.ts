@@ -56,6 +56,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Descripción",
         helpText: "Documentación para desarrolladores"
       },
+      nameField: {
+        label: "Name Field",
+        helpText: "Field whose value titles each record (e.g. \"name\", \"subject\"). ADR-0079 canonical pointer — read by record display, ObjectQL search and related-record previews."
+      },
       isSystem: {
         label: "Integrado del sistema",
         helpText: "Objeto de sistema (protegido contra eliminación; el uso compartido predeterminado es público)"
@@ -257,6 +261,26 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Fuente de datos",
         helpText: "ID de fuente de datos de destino (valor predeterminado: \"default\")"
       },
+      ownership: {
+        label: "Ownership",
+        helpText: "Record-ownership model. Absent resolves to user."
+      },
+      sharingModel: {
+        label: "Sharing Model",
+        helpText: "Org-Wide Default record visibility for internal users. A custom object that omits it resolves to private at runtime (ADR-0090 D1)."
+      },
+      managedBy: {
+        label: "Managed By",
+        helpText: "Lifecycle bucket: platform (user CRUD), config (admin authored), system-data (platform-defined schema with admin/user-writable data), engine-owned (no user writes), append-only (audit), better-auth (identity). UI clients derive their CRUD affordances from it, so it decides what a user is offered on records of this object."
+      },
+      editMode: {
+        label: "Edit Mode",
+        helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling."
+      },
+      fileAccessDelegate: {
+        label: "File Access Delegate",
+        helpText: "Kernel service that authorizes downloads of files owned by this object's media fields, instead of testing whether the caller can read the owning row. For objects whose access is mediated by a service. Fails closed."
+      },
       lifecycle: {
         label: "Ciclo de vida de los datos",
         helpText: "Contrato de ciclo de vida de los datos (ADR-0057): cuánto viven las filas y cómo se recupera el espacio. Déjalo en blanco para una semántica record permanente. Las clases distintas de record requieren al menos una política acotante (retención, TTL o rotación)."
@@ -384,6 +408,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Marcador de posición",
         helpText: "Texto de ayuda que se muestra dentro del campo vacío (desaparece al introducir un valor); usa inlineHelpText para ayuda siempre visible"
       },
+      inlineHelpText: {
+        label: "Inline Help Text",
+        helpText: "Always-visible help shown below the input, unlike `placeholder`, which disappears once a value is entered."
+      },
       minLength: {
         label: "Longitud mínima",
         helpText: "Longitud mínima de caracteres"
@@ -415,6 +443,30 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       scale: {
         label: "Decimales",
         helpText: "Número de dígitos decimales"
+      },
+      step: {
+        label: "Step",
+        helpText: "Step increment for the slider (default 1). Renderer-only: the write path does not reject a value off the step grid."
+      },
+      maxSize: {
+        label: "Max Size",
+        helpText: "Maximum permitted file size in BYTES (positive integer). Enforced server-side on write against the stored file size — a file with no recorded size cannot fail it."
+      },
+      dimensions: {
+        label: "Dimensions",
+        helpText: "Vector dimensionality — an integer from 1 to 10000 (e.g. 1536 for OpenAI embeddings)."
+      },
+      language: {
+        label: "Language",
+        helpText: "Editor language for syntax highlighting (e.g. javascript, python, sql)."
+      },
+      autonumberFormat: {
+        label: "Autonumber Format",
+        helpText: "Literal text plus a {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens in the business time zone, and {field_name} interpolation. The counter resets per rendered prefix. Omitted on an autonumber field it defaults to {0000}."
+      },
+      referenceVia: {
+        label: "Reference Via",
+        helpText: "Makes this text field the id half of a polymorphic pointer: names the SIBLING field on the same object that holds the target object name, per row (ADR-0052 §5). snake_case; text fields only, and mutually exclusive with `reference`."
       },
       options: {
         label: "Opciones",
@@ -450,9 +502,41 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Filtro de lista relacionada",
         helpText: "Filtro predeterminado para la lista relacionada de esta relación en la página de detalle del registro padre: combinado con AND con la coincidencia del registro padre, y el distintivo de la pestaña cuenta el mismo conjunto"
       },
+      displayField: {
+        label: "Display Field",
+        helpText: "Field shown as each candidate's label in the picker. Omitted, the referenced object's own title field is used."
+      },
+      descriptionField: {
+        label: "Description Field",
+        helpText: "Secondary field shown under the label in the quick-select popover."
+      },
+      allowCreate: {
+        label: "Allow Create",
+        helpText: "Let the user create a record from the typed text when the picker finds no match. Best for objects whose only required field is the display field."
+      },
+      lookupPageSize: {
+        label: "Lookup Page Size",
+        helpText: "Rows per page in the record-picker dialog — a positive integer; default 10."
+      },
+      relatedListTitle: {
+        label: "Related List Title",
+        helpText: "Title for this relationship's related list on the parent's detail page."
+      },
+      inlineTitle: {
+        label: "Inline Title",
+        helpText: "Title for the inline master-detail grid on the parent record."
+      },
+      inlineAmountField: {
+        label: "Inline Amount Field",
+        helpText: "Numeric child field summed for the inline grid total."
+      },
       expression: {
         label: "Expresión",
         helpText: "Expresión CEL para calcular este campo (lo hace de solo lectura)"
+      },
+      returnType: {
+        label: "Return Type",
+        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression."
       },
       summaryOperations: {
         label: "Operaciones de resumen",
@@ -501,6 +585,22 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maskingRule: {
         label: "Regla de enmascaramiento",
         helpText: "Enmascaramiento parcial: preset ('phone', 'id_card', 'bank_account', 'email', 'name') o {\"keepHead\": n, \"keepTail\": m}. Enmascarado salvo que el llamante tenga los requiredPermissions del campo"
+      },
+      internal: {
+        label: "Internal",
+        helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched."
+      },
+      trackHistory: {
+        label: "Track History",
+        helpText: "Render this field's value changes as entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."
+      },
+      widget: {
+        label: "Widget",
+        helpText: "Form widget override — names a registered field component, looked up as `field:` plus this name, to render the field instead of the type default. An unregistered name degrades to the type renderer."
+      },
+      ackPlaintextMasking: {
+        label: "Acknowledge plaintext at rest",
+        helpText: "Affirm that this generic password field's plaintext-at-rest, masked-on-read contract is intended, silencing the author-time warning (ADR-0100). No effect on any other type."
       }
     }
   },
@@ -813,6 +913,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       description: {
         label: "Descripción",
         helpText: "Descripción de página para navegación"
+      },
+      source: {
+        label: "Source",
+        helpText: "Page source text. For kind 'html' (alias 'jsx') it is constrained JSX compiled to the component tree at save time — parsed, never executed. For kind 'react' it is real React executed at render by the trusted runtime."
       },
       object: {
         label: "Objeto",
@@ -1144,6 +1248,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Predeterminado",
         helpText: "Convierte esta app en la predeterminada para usuarios nuevos"
       },
+      hidden: {
+        label: "Hidden",
+        helpText: "Keep this app out of the App Switcher — the shell surfaces it from the avatar menu instead. Navigation only: a hidden app stays fully routable and permission-checked."
+      },
       navigation: {
         label: "Navegación",
         helpText: "Árbol de navegación — estructura recursiva"
@@ -1225,6 +1333,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       variant: {
         label: "Variante visual",
         helpText: "Estilo de botón (primary=blue, danger=red, ghost=transparent)"
+      },
+      mode: {
+        label: "Mode",
+        helpText: "Semantic mode of the action. Read today by the AI human-in-the-loop heuristic only — no renderer branches on it."
+      },
+      order: {
+        label: "Order",
+        helpText: "Sort order within a location group — lower sorts higher, and the record header takes the first as its primary button. Unset keeps registration order."
       },
       target: {
         label: "Destino",
@@ -1316,6 +1432,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "params.requiresFeature": {
         label: "Requiere función"
       },
+      operation: {
+        label: "Operation",
+        helpText: "Declarative single-record field write: 'update' applies `patch`, merged under the collected `params`, to the current record AS THE CALLER — never system-elevated, so the caller's permissions, the object's hooks and its validations all fire as for a user edit."
+      },
+      undoable: {
+        label: "Undoable",
+        helpText: "Offer an Undo affordance after this update succeeds. The undo captures the prior value of every field the action writes — the merged bag, `patch` under the collected `params`. An action with no `operation` declares no write set, so there is nothing to capture."
+      },
+      execution: {
+        label: "Execution",
+        helpText: "The bulk dispatch contract this action's body is written for: 'perRecord' sends one dispatch per selected row carrying that row's recordId; 'aggregate' sends ONE dispatch for the whole selection, with every id in params._selectedIds. Omitted, the action is dispatched per record."
+      },
       confirmText: {
         label: "Texto de confirmación",
         helpText: "Mensaje de confirmación (p. ej., \"Are you sure?\")"
@@ -1327,6 +1455,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       refreshAfter: {
         label: "Actualizar después",
         helpText: "Actualiza la lista/página tras completar la acción"
+      },
+      openIn: {
+        label: "Open In",
+        helpText: "Where to open a static `target` URL — 'self' navigates in place, 'new-tab' opens a new browser tab. Omitted, an absolute or external URL opens in a new tab and a relative one navigates in place."
+      },
+      opensInNewTab: {
+        label: "Opens In New Tab",
+        helpText: "Open the action RESULT in a new tab: the renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. Distinct from `openIn`, which routes a static URL target."
+      },
+      newTabUrl: {
+        label: "New-tab URL",
+        helpText: "Direct new-tab URL template, with a {recordId} placeholder. Set together with `opensInNewTab` the renderer navigates the pre-opened tab here immediately and posts nothing — so the endpoint must enforce auth itself."
       },
       locations: {
         label: "Ubicaciones",
@@ -1343,6 +1483,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       disabled: {
         label: "Deshabilitado",
         helpText: "Expresión CEL: desactivar cuando la condición sea true"
+      },
+      requiresFeature: {
+        label: "Requires Feature",
+        helpText: "Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
       },
       ai: {
         label: "Exposición a IA",
@@ -1695,6 +1839,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       errorHandling: {
         label: "Manejo de errores",
         helpText: "Qué hacer cuando falla un nodo (fail, retry, continue)"
+      },
+      successMessage: {
+        label: "Success Message",
+        helpText: "Message carried on the run result when the flow completes; the screen-flow UI shows it as a toast instead of a generic \"Done\"."
+      },
+      errorMessage: {
+        label: "Error Message",
+        helpText: "Message carried on the run result when the flow fails; the screen-flow UI shows it as a toast instead of the raw error."
       }
     }
   },
@@ -1831,6 +1983,22 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Etiqueta",
         helpText: "Etiqueta mostrada para administradores"
       },
+      description: {
+        label: "Description",
+        helpText: "Human-readable description shown in Setup (persisted as sys_permission_set.description)."
+      },
+      isDefault: {
+        label: "Is Default",
+        helpText: "App baseline for the everyone position (ADR-0090 D5): an app-level set is auto-bound at boot; a package-level set becomes an install-time suggestion an admin confirms. Default false."
+      },
+      managedBy: {
+        label: "Managed By",
+        helpText: "Record provenance (ADR-0086 D3): who owns this set across upgrades."
+      },
+      packageId: {
+        label: "Package Id",
+        helpText: "Owning package id for a package-shipped set (ADR-0086 D3). Leave empty for an environment-authored set."
+      },
       systemPermissions: {
         label: "Permisos del sistema",
         helpText: "Lista de claves de capacidades del sistema"
@@ -1871,6 +2039,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "Descripción"
+      },
+      delegatable: {
+        label: "Delegatable",
+        helpText: "Holders may delegate this position themselves, time-boxed and with a reason (ADR-0091 D3). Default false — delegation is admin-only."
       }
     }
   },
@@ -1918,6 +2090,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "Activo",
         helpText: "Activa/desactiva este agente"
+      },
+      surface: {
+        label: "Surface",
+        helpText: "Product surface this agent binds (ADR-0063 §1). Only skills whose own surface matches — or is 'both' — attach, and the agent's tool set is the union of those skills' tools. Default 'ask'."
       },
       instructions: {
         label: "Instrucciones",
@@ -2028,6 +2204,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "Activo",
         helpText: "Activa/desactiva esta skill"
+      },
+      surface: {
+        label: "Surface",
+        helpText: "Agent surface this skill binds to (ADR-0063 §3). Binding it to an agent whose surface disagrees is a hard failure at resolve time, not a silent skip. Default 'ask'."
       },
       instructions: {
         label: "Instrucciones",
