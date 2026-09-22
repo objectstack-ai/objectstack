@@ -2605,7 +2605,7 @@ export function selfTest() {
   t('⭐⭐ a BARE call is not shadowed by an OBJECT LITERAL method of the same name in the same block',
     verdictsIn(fileLevelGetEngine + objectLiteralMethod, ['IProbeEngine']),
     'engine/IProbeEngine');
-  t('⭐⭐ …and in the other declaration order, where the file-wide floor would have answered the method',
+  t('⭐⭐ …and in the other declaration order, where the floor would have answered the OBJECT LITERAL\'s method',
     verdictsIn(objectLiteralMethod + fileLevelGetEngine, ['IProbeEngine']),
     'engine/IProbeEngine');
 
