@@ -77,18 +77,23 @@ an object-valued field traverses today and keeps traversing.
 
 ### `@objectstack/plugin-security` gains `canWriteObject`
 
-The object-level WRITE admission — the sibling of the existing `canReadObject`,
-and the same six arms in the middleware's own order: system bypass, no resolved
+The WRITE admission — the sibling of the existing `canReadObject`, running the
+middleware's own arms in the middleware's own order: system bypass, no resolved
 permission sets, unresolvable posture, the ADR-0066 D3 `requiredPermissions`
-capability AND-gate for both principals, the CRUD grant, and the ADR-0090 D10
-delegator check. It exists for doors that must ask "could this caller perform
-this write" without running the engine middleware — the write preview is the
-first — and an equivalence suite pins its answer EQUAL to the registered
-middleware's, case for case, so the two cannot drift.
+capability AND-gate for both principals, the CRUD grant, the ADR-0090 D10
+delegator check, and — when the caller's payload is supplied — the field-level
+security WRITE gate over it (`getFieldPermissions`, folded through the D3
+field-capability contract, intersected with the delegator's mask under D10, then
+the forbidden-write detection). It exists for doors that must ask "could this
+caller perform this write" without running the engine middleware — the write
+preview is the first — and an equivalence suite pins its answer EQUAL to the
+registered middleware's, case for case AND payload for payload, so the two
+cannot drift.
 
-⛔ Object-level only. `true` never means the write will succeed: record scope,
-field-level security, `readonlyWhen` and the rules themselves are all still
-ahead of it.
+⛔ `true` never means the write will succeed. What is still ahead of it, by
+name: the row-level pre-image (this method is asked about no ROW, and without a
+payload about no FIELD either), `readonlyWhen`, the static `readonly` strip, and
+the validation rules themselves.
 
 ### Scope
 

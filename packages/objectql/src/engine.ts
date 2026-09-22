@@ -3958,9 +3958,35 @@ export class ObjectQL implements IObjectQLEngine {
    * object and no ability to write it at all — a strictly wider channel than the
    * one that was accepted.
    *
-   * This restores the accepted bound rather than narrowing or widening it: the
-   * preview answers for callers who could perform the write, and for nobody
-   * else.
+   * ## The payload is part of the question — and so are the limits
+   *
+   * The write decision is not object-level. The middleware also refuses a write
+   * for reasons that depend on THE PAYLOAD, before any rule runs: the
+   * field-level-security write gate refuses a caller who holds the object's
+   * CRUD grant but is not `editable` on a field the payload names. So the
+   * caller's rows are handed to the probe, and the plugin answers over them —
+   * an editor of the child object who is FLS-locked out of the lookup column is
+   * refused by `insert()` and refused the elevated read here, alike.
+   *
+   * ⚠️ What this gate still does NOT cover, named rather than implied — the
+   * preview is NOT a promise that the write would succeed:
+   *
+   *  - **The row-level pre-image (the middleware's step 2.7).** A row-level
+   *    `using` / `check` policy judges a ROW, and the preview names none: it
+   *    reads nothing and has no prior image to judge. A caller the row filter
+   *    would refuse can still reach the verdict here.
+   *  - **The static `readonly` strip.** `insert()` strips an author-declared
+   *    `readonly` reference field inside the write's executor, so the real
+   *    write resolves NO related row for it and a traversing rule refuses;
+   *    the preview runs no strip, resolves the caller's own foreign key and
+   *    answers the rule against it. Every writer is affected alike — it widens
+   *    the channel to no caller the write path refuses — but the id the
+   *    preview judges is one the write path never carries.
+   *
+   * So the bound this restores is the one that was accepted, neither narrowed
+   * nor widened: an elevated read is issued only for a caller the write path
+   * would admit THIS PAYLOAD from, and the two limits above are the distance
+   * between "admitted this payload" and "this write would succeed".
    *
    * ## Unwired
    *
@@ -3968,11 +3994,29 @@ export class ObjectQL implements IObjectQLEngine {
    * either, so there is no bound to restore and the preview resolves. That is
    * the same behaviour such a composition already has everywhere else.
    */
-  private _writeGateProbe?: (object: string, operation: 'insert' | 'update', context: unknown) => Promise<boolean>;
+  private _writeGateProbe?: (
+    object: string,
+    operation: 'insert' | 'update',
+    context: unknown,
+    data: unknown,
+  ) => Promise<boolean>;
 
-  /** Wire the create/update gate question (#18682). Last registration wins. */
+  /**
+   * Wire the create/update gate question (#18682). Last registration wins.
+   *
+   * `data` is the caller's RAW payload for this preview — the rows exactly as
+   * they arrived, before `applyFieldDefaults` and before any hook, which is the
+   * same image the middleware's own field-level gate reads off `opCtx.data`.
+   * ⛔ Not the defaulted rows: a default the runtime fills is not a field the
+   * caller wrote, and judging it would refuse writes the real path accepts.
+   */
   registerWriteGateProbe(
-    fn: (object: string, operation: 'insert' | 'update', context: unknown) => Promise<boolean>,
+    fn: (
+      object: string,
+      operation: 'insert' | 'update',
+      context: unknown,
+      data: unknown,
+    ) => Promise<boolean>,
   ): void {
     this._writeGateProbe = fn;
     this.logger.debug('Registered write-gate probe for validate() relationship resolution');
@@ -10805,14 +10849,30 @@ export class ObjectQL implements IObjectQLEngine {
     // real update path reads the prior row and does resolve it; closing the
     // preview's half needs a read this operation's "nothing is executed"
     // contract does not make.
+    // ⚠️ Second named limit, the mirror of the first: a reference field the
+    // author declared static `readonly` is STRIPPED from the caller's payload
+    // inside `insert()`'s executor (`stripRuntimeOwnedFields`), so the real
+    // write resolves no related row for it and a traversing rule refuses there.
+    // Nothing is stripped here, so the preview resolves the caller's own
+    // foreign key and answers the rule against an id the write path never
+    // carries. Every writer is affected alike — this reaches no caller the
+    // write path refuses — but the preview's verdict is not the write's for
+    // that declaration. Running the strip here would make them agree and is a
+    // behaviour change on the preview's payload, so it is named, not done.
     // ⛔ Behind the caller's own create/update gate — see
     // {@link registerWriteGateProbe} for why the preview needs a gate the write
     // path gets from middleware for free. A caller who could not perform this
     // write gets NO elevated read: `related` stays unresolved, and a traversing
     // rule then refuses, which is the fail-closed direction and is honest about
     // what it did not evaluate.
+    // ⛔ `rawRows`, not `rows`: the gate's field-level arm judges WHICH FIELDS
+    // THE CALLER WROTE, and `rows` has already been through
+    // `applyFieldDefaults` / `initializeSummaryFields` above. Handing it the
+    // defaulted image would offer the plugin keys the caller never sent — the
+    // exact reading the middleware avoids by gating on `opCtx.data`, which is
+    // the raw payload (defaults are resolved inside the executor, under it).
     const mayWrite = this._writeGateProbe
-      ? await this._writeGateProbe(object, mode, options?.context).catch(() => false)
+      ? await this._writeGateProbe(object, mode, options?.context, rawRows).catch(() => false)
       : true;
     const previewRelatedForRow = mayWrite
       ? await this.resolvePredicateRelated(schemaForValidation, rows, options?.context)

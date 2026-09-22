@@ -1235,12 +1235,18 @@ export class SecurityPlugin implements Plugin {
     // and same permission sets the CRUD gate itself uses — ⛔ not a second
     // decision about who may write.
     //
+    // The PAYLOAD is passed straight through, because the write decision is not
+    // object-level: the middleware's field-level write gate (step 2.5 below)
+    // refuses a caller who holds the CRUD grant but may not edit a field the
+    // payload names, before any rule runs. A probe that dropped the payload
+    // would answer the preview for exactly that caller.
+    //
     // Fails CLOSED: any resolution error denies, and the engine treats a denial
     // as "resolve nothing", which makes a traversing rule refuse in preview.
     if (typeof (ql as any).registerWriteGateProbe === 'function') {
       (ql as any).registerWriteGateProbe(
-        (object: string, operation: 'insert' | 'update', context: any): Promise<boolean> =>
-          this.canWriteObject(object, operation, context),
+        (object: string, operation: 'insert' | 'update', context: any, data: unknown): Promise<boolean> =>
+          this.canWriteObject(object, operation, context, data),
       );
     } else {
       // Absence must be loud. This engine takes middleware — so its write path
@@ -5135,6 +5141,28 @@ export class SecurityPlugin implements Plugin {
    *   6. ADR-0090 D10 — the delegator must independently hold the same grant;
    *      a dangling delegator denies.
    *
+   * ## …and the seventh, which needs the PAYLOAD
+   *
+   * The object-level six are not the whole write decision either. The
+   * middleware refuses payload-dependent writes before `next()`, and the first
+   * of them is the field-level-security write gate (step 2.5): a caller holding
+   * the object's CRUD grant but not `editable` on a field the payload names is
+   * refused `PERMISSION_DENIED` there. A probe carrying no payload cannot ask
+   * it — so an editor of the child object who is FLS-locked out of the lookup
+   * column was refused by `insert()` and answered by the preview, the same
+   * divergence arms 4 and 6 close one gate earlier.
+   *
+   *   7. step 2.5's own primitives over `data`, in the middleware's order —
+   *      `getFieldPermissions` folded through `foldFieldRequiredPermissions`
+   *      (ADR-0066 D3), intersected under D10 with the delegator's mask via
+   *      `intersectFieldMasks`, then `detectForbiddenWrites`. Skipped when no
+   *      payload is supplied, exactly as the middleware skips it on `!opCtx.data`.
+   *
+   * `data` is the caller's RAW payload — one row or an array, the shape
+   * `detectForbiddenWrites` already normalises and the shape `opCtx.data`
+   * carries. ⛔ Not a post-default image: a key the runtime filled is not a
+   * field the caller wrote.
+   *
    * The equality with the registered middleware is pinned as an EQUIVALENCE
    * (`can-write-object-admission.test.ts`) rather than asserted here, for the
    * same reason `canReadObject`'s is: two doors that merely agree today drift
@@ -5143,11 +5171,18 @@ export class SecurityPlugin implements Plugin {
    * Fails CLOSED: a throw anywhere denies, and callers must treat a throw as a
    * denial too.
    *
-   * ⛔ Object-level ONLY. `true` never means "this write will succeed" — record
-   * scope, field-level security, `readonlyWhen` and the rules themselves are all
-   * still ahead of it. Nothing here may be used to widen.
+   * ⛔ `true` never means "this write will succeed". What is still ahead of it,
+   * by name: the row-level pre-image (step 2.7 — this answers about no ROW, and
+   * without a payload about no FIELD either), `readonlyWhen`, the static
+   * `readonly` strip, and the validation rules themselves. Nothing here may be
+   * used to widen.
    */
-  async canWriteObject(object: string, operation: 'insert' | 'update', context?: any): Promise<boolean> {
+  async canWriteObject(
+    object: string,
+    operation: 'insert' | 'update',
+    context?: any,
+    data?: unknown,
+  ): Promise<boolean> {
     const objectName = String(object ?? '');
     if (!objectName) return false;
     // 1. System operations bypass.
@@ -5158,7 +5193,7 @@ export class SecurityPlugin implements Plugin {
       // 2. No sets resolved → no permission-set restriction applies.
       if (permissionSets.length === 0) return true;
 
-      const { isPrivate, unresolved, requiredPermissions } =
+      const { isPrivate, unresolved, requiredPermissions, fieldRequiredPermissions } =
         await this.getObjectSecurityMeta(objectName);
       // 3. [#3545] Posture unresolvable → deny.
       if (unresolved) return false;
@@ -5200,10 +5235,37 @@ export class SecurityPlugin implements Plugin {
         return false;
       }
 
+      // 7. The field-level-security WRITE gate — the middleware's step 2.5,
+      //    over the payload the caller supplied. Same primitives, same order,
+      //    same guards: the middleware runs this only for an `insert`/`update`
+      //    carrying `opCtx.data` with permission sets resolved, and both of the
+      //    latter already hold here (arm 2 returned for the empty resolution).
+      //    ⛔ Not a re-derivation — a second spelling of "which fields may this
+      //    caller write" is the drift this whole method exists to avoid.
+      if (data) {
+        let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
+        // [ADR-0066 D3] AND-gate field-level requiredPermissions into the map.
+        fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, fieldRequiredPermissions, permissionSets);
+        // [ADR-0090 D10] Intersect with the delegator's field perms — a field
+        // the agent may edit but the delegator may not becomes forbidden.
+        if (delegatorSets) {
+          let delFieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
+          delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, fieldRequiredPermissions, delegatorSets);
+          fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
+        }
+        if (Object.keys(fieldPerms).length > 0) {
+          const forbidden = this.fieldMasker.detectForbiddenWrites(
+            data as Record<string, any> | Record<string, any>[],
+            fieldPerms,
+          );
+          if (forbidden.length > 0) return false;
+        }
+      }
+
       return true;
     } catch (e) {
       this.logger.error?.(
-        `[security] canWriteObject could not resolve the object-level write admission for ` +
+        `[security] canWriteObject could not resolve the write admission for ` +
           `'${objectName}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
         e instanceof Error ? e : new Error(String(e)),
       );
