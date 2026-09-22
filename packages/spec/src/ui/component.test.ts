@@ -3659,8 +3659,9 @@ describe('the three #18305 object blocks — key sets derived from the renderers
     // (:845), gantt (:501-503), navigation (:1615), label (:2181 — the
     // `resolveI18nLabel` call in the export-file-name chain; the retired
     // reading :1849 was the COMMENT above that chain even at its own pin, and
-    // at this one it is not even that), skipWeekends (:1333), holidays
-    // (:1334), persistLayout (:1485), viewName (:1487), markers (:2136),
+    // at this one is a BLANK line two above an unrelated callback's comment),
+    // skipWeekends (:1333), holidays (:1334), persistLayout (:1485),
+    // viewName (:1487), markers (:2136),
     // criticalPath (:2139), showBaselines (:2142), readOnly (:1985 and
     // :2143), mobileReadOnly (:2144).
     expect(keysOf('object-gantt')).toEqual([
@@ -3761,12 +3762,12 @@ describe('the three #18305 object blocks — key sets derived from the renderers
     // tree: `TreeConfigSchema`'s shape PLUS `titleField`. ⚠️ Re-READ at
     // 87af769e9 and the read point is GONE, not moved: objectui#8841 deleted
     // the `?? schema.titleField` rung from `getTreeConfig` (now :235-248),
-    // and the docblock above it (:197-210) records why — it read the
+    // and the docblock above it (:197-218) records why — it read the
     // FLATTENED NODE, never the block, and the key is declared on neither
     // face. The key stays in THIS set, and the prescription that names it
     // stays TRUE, on the OTHER half of the sentence: `ListView`'s flatten
     // still resolves `treeCfg.titleField` into `labelField` before emitting
-    // (`ListView.tsx:3271` at this pin), so an authored `titleField` is still
+    // (`ListView.tsx:3270` at this pin), so an authored `titleField` is still
     // only ever the block's `labelField`. What died is the renderer's own
     // fallback, not the flatten's.
     expect(setFor('object-tree', 'OBJECT_TREE_FLAT_CONFIG_KEYS'))

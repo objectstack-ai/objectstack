@@ -3581,7 +3581,7 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `resolveRecordSourceConfig(schema, 'view-data')` call, rung 1 of the ruled
  * record-source ladder, `core/src/utils/record-source.ts:292`. ⚠️ The
  * array-shorthand head this record used to cite beside it is GONE, deleted on
- * objectui#8348 — `:149-157` records the deletion and `:168-176` records what
+ * objectui#8348 — `:150-157` records the deletion and `:168-176` records what
  * survives it: an authored array still reaches this renderer, but through the
  * React props channel, never through the ladder), `staticData` (rung 2,
  * `record-source.ts:296`), `objectName` (rung 3, `record-source.ts:303`; also
@@ -3762,8 +3762,9 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * validated there against this
  * repo's own {@link GanttConfigSchema}), `navigation` (`:1615`), `label`
  * (`:2181`, resolved through `resolveI18nLabel` for the export file name —
- * ⚠️ the retired reading `:1849` was the comment ABOVE that chain and is now
- * a dependency-delete callback, so it is re-READ here, not re-pointed),
+ * ⚠️ the retired reading `:1849` was the comment ABOVE that chain and at this
+ * pin is a BLANK line, two above a dependency-delete callback's own comment,
+ * so it is re-READ here, not re-pointed),
  * `skipWeekends` (`:1333`), `holidays` (`:1334`), `persistLayout` (`:1485`),
  * `viewName` (`:1487`), `markers` (`:2136`), `criticalPath` (`:2139`),
  * `showBaselines` (`:2142`), `readOnly` (`:1985` and `:2143`) and
@@ -3854,7 +3855,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 /**
  * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
  * block (`ObjectTree.tsx:235-248`) and that `ObjectView` / `ListView` EMIT when
- * they flatten `options.tree` (`ListView.tsx:3261-3276`, `case 'tree'`: the
+ * they flatten `options.tree` (`ListView.tsx:3261-3275`, `case 'tree'`: the
  * product carries these keys and NO `tree` key). Both halves re-READ at the
  * pin this repo builds against (`.objectui-sha` = `87af769e9`) on
  * 2026-09-22 — this record carried no pin at all before, so nothing re-checked
@@ -3866,7 +3867,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  *
  * `titleField` is in the set although no `tree` block key is spelled that way:
  * `ListView`'s flatten resolves `treeCfg.titleField` into `labelField` before
- * emitting (`ListView.tsx:3271`, `labelField: treeCfg.labelField ||
+ * emitting (`ListView.tsx:3270`, `labelField: treeCfg.labelField ||
  * treeCfg.titleField || 'name'`), so the author's intent is always the block's
  * `labelField`, and the prescription below says so.
  *
@@ -3874,7 +3875,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  * read rather than a moved one: `getTreeConfig`'s `?? schema.titleField` rung
  * — the `:117` this record used to cite — was removed on objectui#8841
  * because it read the FLATTENED NODE and never the block, and the docblock at
- * `ObjectTree.tsx:197-210` records the three measurements that retired it.
+ * `ObjectTree.tsx:197-218` records the three measurements that retired it.
  * The flatten half above is what keeps the key in this set; ⛔ do not restore
  * the renderer half from this record's history.
  */
@@ -3912,7 +3913,7 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `filter` (`:742`, verbatim to `$filter`), `tree` (`:236`, the
  * nested config block `getTreeConfig` (`:235-248`) reads, and the
  * registration's declared `{ name: 'tree', type: 'object' }` input
- * (`plugin-tree/src/index.tsx:28-32`)) and `navigation` (`:908`, handed to
+ * (`plugin-tree/src/index.tsx:27-31`)) and `navigation` (`:908`, handed to
  * `useNavigationOverlay` at `:891`).
  *
  * ⚠️ `data` IS declared here, and that is the measurement, not a family
