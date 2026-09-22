@@ -435,6 +435,10 @@ export type {
 export { summaryEmptySetValue, summaryNullIsBackfillable, aggregateSummaryValue } from './summary-aggregate.js';
 export type { SummaryDescriptor, SummaryAggregateEngine } from './summary-aggregate.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';
+// #18682 — the engine asks which reference fields an object's predicate rules
+// read through, then hands the rows back as `EvaluateRulesOptions.related`.
+export { collectPredicateRelationships } from './validation/rule-validator.js';
+export type { RelatedRecordBinding } from './validation/rule-validator.js';
 export type { EvaluateRulesOptions } from './validation/rule-validator.js';
 export {
     InMemoryHookMetricsRecorder,

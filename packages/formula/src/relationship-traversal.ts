@@ -46,7 +46,6 @@
  */
 
 import { parseCelToAst } from './cel-engine';
-import type { CelAstNode } from './cel-engine';
 
 /** The default scope root a record-scoped predicate traverses from. */
 export const DEFAULT_TRAVERSAL_ROOT = 'record';
@@ -75,12 +74,6 @@ export interface RelationshipTraversalAnalysis {
    */
   readonly multiHopFields: ReadonlySet<string>;
 }
-
-const EMPTY_ANALYSIS: RelationshipTraversalAnalysis = {
-  traversals: new Map(),
-  bareFields: new Set(),
-  multiHopFields: new Set(),
-};
 
 /** `{ op: 'id', args: '<root>' }` — a bare identifier node for `root`. */
 function isRootId(node: unknown, root: string): boolean {

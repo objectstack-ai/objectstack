@@ -192,9 +192,10 @@
  * evaluator once per matched row — one payload, N priors (#3106).
  */
 
-import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
+import { ExpressionEngine, collectCelRootIdentifiers, analyzeRelationshipTraversals } from '@objectstack/formula';
+import type { RelationshipTraversalAnalysis } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
-import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, resolveInjectedSystemColumns } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, referenceTargetOf, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { recordAdvisoryHit } from '@objectstack/core';
 // [#8215] The canonical spelling of the primary-key column — the sanctioned use
 // of this registry ("what is the canonical spelling of the column that plays
@@ -290,6 +291,9 @@ interface RuleContext {
   /** Locale + translation hooks: the BUILT-IN messages (#3957) and the
    *  authored `rule.message` (#14253) — one hook, two message sources. */
   messages: ValidationMessageContext | undefined;
+  /** [#18682] Related rows the engine resolved for this write, or undefined
+   *  when it resolved none. Applied per rule — see {@link hydrateRelated}. */
+  related: RelatedRecordBinding | undefined;
 }
 
 /**
@@ -380,6 +384,27 @@ export interface EvaluateRulesOptions {
    */
   previousParent?: ParentBinding;
   /**
+   * [#18682] The related records this write's predicates read ONE HOP through a
+   * reference field — `record.crm_account.type` on an opportunity. Keyed by the
+   * reference FIELD name; the value is the related row, or `null` when it could
+   * not be read.
+   *
+   * Only the engine owns a driver, so it resolves these and hands them over —
+   * the same division of labour `parent` follows. One difference, and it is
+   * deliberate: `parent` reads as SYSTEM because a master-detail lock is a
+   * property of the header's state, whereas these rows are read under the
+   * ACTING USER so the referenced object's RLS and FLS apply. A field the user
+   * may not read therefore arrives ABSENT, the predicate faults on it, and a
+   * faulting validation predicate REJECTS the write (#4649) — loudly, never
+   * silently true.
+   *
+   * ⛔ NOT applied to every rule alike. A rule is hydrated only for the
+   * reference fields ITS OWN condition reads through, because hydrating a field
+   * replaces its stored id with the related record: a sibling rule that
+   * compares the bare id must keep seeing the id. See {@link hydrateRelated}.
+   */
+  related?: RelatedRecordBinding;
+  /**
    * When true, `state_machine` rules are skipped entirely — both the
    * `initialStates` entry-point check on insert (#3165) and the transition
    * check on update. Set by the engine for CURATED SEED writes
@@ -416,12 +441,90 @@ export function needsPriorRecord(
 }
 
 /**
+ * [#18682] The reference fields an object's PREDICATE rules read one hop
+ * through, and the related fields they name on each — everything the engine
+ * must preload before evaluating this object's validation rules, and nothing
+ * more.
+ *
+ * Returns an empty map when no rule traverses anything, which is the common
+ * case and is what lets the engine skip the extra read entirely: the N+1 bound
+ * is "one hop, only the named fields, only when a rule asks".
+ *
+ * ## Scope: `script` / `cross_field`, including inside `conditional`
+ *
+ * These are the rules {@link checkPredicate} evaluates, and they are fail-CLOSED
+ * (#4649) — the one policy under which an unreadable related field produces the
+ * loud refusal the permission rule requires. The field-level `requiredWhen` /
+ * `readonlyWhen` / option `visibleWhen` predicates are deliberately NOT
+ * collected here: they fail OPEN, so a related field the acting user cannot
+ * read would silently not enforce their gate, which is the opposite of what a
+ * permission-sensitive read must do. They are their own card.
+ *
+ * ## Only REFERENCE-typed fields
+ *
+ * Judged with the spec's own `REFERENCE_VALUE_TYPES` through
+ * {@link referenceTargetOf}, the same arbiter the `$expand` gate and the engine
+ * already ask, so "what does this field point at" cannot answer differently
+ * here than it does one layer down. `record.address.city` on an object-valued
+ * field is left alone — it traverses today and keeps traversing.
+ */
+export function collectPredicateRelationships(
+  objectSchema: { validations?: unknown[]; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const rules = objectSchema?.validations;
+  if (!Array.isArray(rules) || rules.length === 0) return out;
+  const fields = objectSchema?.fields;
+  if (!fields) return out;
+
+  const addFrom = (cond: unknown): void => {
+    const source = typeof cond === 'string'
+      ? cond
+      : (cond && typeof cond === 'object' ? (cond as Expression).source : undefined);
+    if (typeof source !== 'string' || !source) return;
+    const analysis = analysisFor(source);
+    if (!analysis) return;
+    for (const [field, related] of analysis.traversals) {
+      // `referenceTargetOf` answers undefined for a non-reference field AND for
+      // a reference field naming no target — both mean "nothing to preload".
+      if (!referenceTargetOf(fields[field])) continue;
+      let set = out.get(field);
+      if (!set) out.set(field, (set = new Set()));
+      for (const name of related) set.add(name);
+    }
+  };
+
+  const visit = (rule: unknown, depth: number): void => {
+    if (!rule || typeof rule !== 'object' || depth > 8) return;
+    const r = rule as { type?: unknown; condition?: unknown; then?: unknown; otherwise?: unknown };
+    if (r.type === 'script' || r.type === 'cross_field') addFrom(r.condition);
+    // A `conditional` wraps the rules it guards; its own `when` is evaluated
+    // by a different seam, so only the wrapped rules are collected here.
+    if (r.type === 'conditional') {
+      visit(r.then, depth + 1);
+      visit(r.otherwise, depth + 1);
+    }
+  };
+  for (const rule of rules) visit(rule, 0);
+  return out;
+}
+
+/**
  * The master-detail header a `parent`-scoped predicate reads (#4889). `null`
  * means "this operation could not resolve one" — which is NOT the same as
  * "there is none to read": see {@link isReadonlyWhenLocked} for why the two
  * resolve to opposite verdicts.
  */
 export type ParentBinding = Record<string, unknown> | null | undefined;
+
+/**
+ * [#18682] Reference FIELD name → the related row, or `null` when it could not
+ * be read (no id stored, row gone, or the acting user may not read it). The
+ * three collapse on purpose: every one of them means "this predicate cannot be
+ * answered from data the caller is allowed to see", and the predicate must
+ * fault rather than quietly pick a verdict.
+ */
+export type RelatedRecordBinding = Readonly<Record<string, Record<string, unknown> | null>>;
 
 /**
  * The two CEL roots a field `readonlyWhen` predicate reads — `record` (the
@@ -2346,7 +2449,7 @@ export function evaluateValidationRules(
   // and update: what a predicate can read is the object's DECLARED shape, not
   // whatever subset of columns this driver happened to return.
   if (groundTruth) materializeDeclaredFields(merged, fields);
-  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages };
+  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages, related: opts.related };
 
   const errors: FieldValidationError[] = [];
 
@@ -2561,7 +2664,7 @@ function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | 
       return checkStateMachine(rule as StateMachineRule, ctx.mode, ctx.data, ctx.previous, ctx);
     case 'script':
     case 'cross_field':
-      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger, ctx.messages);
+      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger, ctx.messages, ctx.related);
     case 'format':
       return checkFormat(rule as FormatRule, ctx.data, ctx.logger, ctx.messages);
     case 'json_schema':
@@ -2710,16 +2813,88 @@ function unevaluableRuleError(
  * declared field — is a broken rule, and a broken validation is **fail-closed**
  * (#4649): it rejects the write rather than waving it through.
  */
+/**
+ * [#18682] The parsed hop analysis for one authored source, memoised.
+ *
+ * Authored predicates are a small closed set per deployment, so this is bounded
+ * in practice; the cap is a guard against a caller that synthesises sources,
+ * and overflowing it costs a re-parse, never a wrong answer.
+ */
+const traversalAnalysisCache = new Map<string, RelationshipTraversalAnalysis | null>();
+const TRAVERSAL_CACHE_CAP = 512;
+
+function analysisFor(source: string): RelationshipTraversalAnalysis | null {
+  const hit = traversalAnalysisCache.get(source);
+  if (hit !== undefined) return hit;
+  const analysis = analyzeRelationshipTraversals(source);
+  if (traversalAnalysisCache.size < TRAVERSAL_CACHE_CAP) {
+    traversalAnalysisCache.set(source, analysis);
+  }
+  return analysis;
+}
+
+/**
+ * [#18682] Overlay the related rows THIS predicate reads through onto a COPY of
+ * the record.
+ *
+ * ## Why a copy, always
+ *
+ * The record handed to a rule is the engine's merged write payload. Hydrating
+ * it in place would replace a stored foreign key with the related RECORD and
+ * then hand that to the driver — writing an expanded object into the column.
+ * The copy is shallow, which is enough: only the top-level reference keys are
+ * replaced, and nothing mutates the related rows themselves.
+ *
+ * ## Why per RULE, and not once per write
+ *
+ * Hydrating `crm_account` makes `record.crm_account` the related record, so a
+ * rule comparing the bare id would stop matching. Rules on one object do not
+ * have to agree about how they read a field, so each rule is hydrated for
+ * exactly the fields ITS OWN condition reads through. A rule that never
+ * traverses is handed the record untouched — byte-for-byte the pre-#18682
+ * input, which is what keeps this change invisible to every existing rule.
+ *
+ * ## Absence is left absent, deliberately
+ *
+ * A field with no entry, or an entry of `null`, is NOT overlaid: the stored id
+ * stays, `record.<fk>.<field>` faults with `No such key`, and an unevaluable
+ * validation predicate rejects the write (#4649). That is the loud failure the
+ * permission rule requires — a related row the acting user may not read must
+ * never resolve to a quiet verdict.
+ */
+function hydrateRelated(
+  record: Record<string, unknown>,
+  source: string,
+  related: RelatedRecordBinding | undefined,
+): Record<string, unknown> {
+  if (!related) return record;
+  const analysis = analysisFor(source);
+  if (!analysis || analysis.traversals.size === 0) return record;
+
+  let copy: Record<string, unknown> | undefined;
+  for (const field of analysis.traversals.keys()) {
+    const row = related[field];
+    if (row == null) continue;
+    if (!copy) copy = { ...record };
+    copy[field] = row;
+  }
+  return copy ?? record;
+}
+
 function checkPredicate(
   rule: PredicateRule,
   record: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
   logger: EvaluateRulesOptions['logger'],
   messages?: ValidationMessageContext,
+  related?: RelatedRecordBinding,
 ): FieldValidationError | null {
   const expr = toExpression(rule.condition);
+  const scopeRecord = typeof expr.source === 'string'
+    ? hydrateRelated(record, expr.source, related)
+    : record;
   const result = ExpressionEngine.evaluate<boolean>(expr, {
-    record,
+    record: scopeRecord,
     previous: previous ?? undefined,
   });
 

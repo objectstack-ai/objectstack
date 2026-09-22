@@ -90,6 +90,10 @@ export type { WrapDeclarativeOptions } from './hook-wrappers.js';
 export { ValidationError, validateRecord } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';
+// #18682 — the engine asks which reference fields an object's predicate rules
+// read through, then hands the rows back as `EvaluateRulesOptions.related`.
+export { collectPredicateRelationships } from './validation/rule-validator.js';
+export type { RelatedRecordBinding } from './validation/rule-validator.js';
 export type { EvaluateRulesOptions } from './validation/rule-validator.js';
 // #4953 — published so a package that duplicates this algorithm for its own
 // zero-build-dependency reasons (`@objectstack/trigger-record-change`'s
