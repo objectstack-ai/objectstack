@@ -3095,7 +3095,7 @@ function checkPredicate(
     const scope = resolveTraversalScope(record, expr.source, related, fields);
     if (!scope.ok) {
       logger?.warn?.(
-        `Validation rule '${rule.name}' predicate could not be evaluated (${scope.summary}) — write rejected (#4649)`,
+        `Validation rule '${rule.name}' predicate could not be evaluated (${scope.summary}) — write rejected`,
       );
       return {
         field,

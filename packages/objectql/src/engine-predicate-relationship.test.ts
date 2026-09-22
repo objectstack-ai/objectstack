@@ -59,9 +59,12 @@ function makeDriver() {
       // The driver echoes ONLY the projected keys, and — like `driver-memory` —
       // omits a key whose value is `undefined`. That omission is the shape this
       // file pins the engine against.
+      // Hold the caller's bound: a double that ignores `limit` lets a real
+      // double-limit defect through unnoticed (`check:objectql-double-limit`).
+      const bounded = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
       const fields: string[] | undefined = ast?.fields;
-      if (!fields) return rows;
-      return rows.map((r) => {
+      if (!fields) return bounded;
+      return bounded.map((r) => {
         const out: any = {};
         for (const f of fields) if (r[f] !== undefined) out[f] = r[f];
         return out;
