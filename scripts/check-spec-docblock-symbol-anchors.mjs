@@ -239,7 +239,17 @@ export const CENSUS_17065 = {
  * classification below needs a checkout of the sibling objectui repo, which
  * this gate is deliberately not given -- the same reason its cross-repo
  * anchors are reported rather than judged. `--list-unresolvable` enumerates
- * the residual; only an outside reading can say what the rows ARE.
+ * the residual, and that much any reader can reproduce.
+ *
+ * ⚠️ The two classifications are NOT equally reproducible, and saying "only an
+ * outside reading can say what the rows ARE" flattered the weaker one. The
+ * BINDING split is re-runnable: its predicate is written out below and carried
+ * as data, so a reader holding both checkouts at the named shas lands on these
+ * cells. The TENSE split is not: the classifier that produced its three rows
+ * exists NOWHERE in this repository, so ⛔ NOTHING can re-derive it -- no
+ * reader, no checkout, no instrument. Those three rows are one round's reading
+ * and nothing more, and the row-level tense claim that DOES carry weight is
+ * the enumerated one below, which was read by hand.
  *
  * ## The population grew, and the instrument did NOT move it
  *
@@ -254,19 +264,71 @@ export const CENSUS_17065 = {
  * ## ⭐ What the residual IS -- the headline, and it is not rot
  *
  * Every declined citation was bound against the sibling objectui checkout and
- * against this repo under a spec-relative base. 463 of 467 name a file that
+ * against this repo under a spec-relative base. 462 of 467 name a file that
  * REALLY EXISTS. ⇒ this residual is a SPELLING population -- abbreviated
  * cross-repo and package-relative citations -- ⛔ not the stale-citation rot
  * its headline number suggests, and ⛔ not the shape #17591 measured on the
- * bare-path axis. Identical split against objectui's main and against the
- * `.objectui-sha` pin, so it does not depend on which sibling tree is read.
+ * bare-path axis.
  *
- * ## Tense -- the defect cell is EMPTY
+ * ⛔ A MOVING REF IS NOT AN ANCHOR. Both sibling trees are named by sha in the
+ * record itself -- `objectuiPinSha` and `objectuiMainSha` -- beside the
+ * objectstack tree the sweep ran on, `boundAgainstSha`. Naming "objectui's
+ * main" and stopping there was the earlier form of this sentence and it was
+ * not a reading. The two objectui trees agree ROW BY ROW, ⛔ not merely in the
+ * totals: all 467 rows land on the same verdict against the pin and against
+ * main (`objectuiPinAndMainAgreeRowwise`), so the split does not depend on
+ * which sibling tree is read.
+ *
+ * ## The BINDING PREDICATE -- stated, so the cells can be re-run
+ *
+ * A round that publishes a three-way split owes the predicate that produced
+ * it: two harnesses disagreeing on the cells while agreeing on the total
+ * differ in their PREDICATE, never in their arithmetic.
+ *
+ *   1. TOKEN. A declined row carrying a path of its own uses it. A row
+ *      carrying none -- a continuation -- inherits one by an ANTECEDENT WALK:
+ *      project the source with `commentProse`, take the maximal run of lines
+ *      non-blank after trimming that contains the citation (its own comment
+ *      block), scan that block forward as far as the citation, and keep the
+ *      LAST path-shaped token before it. `bindingTokenPattern` carries that
+ *      token grammar verbatim. ⛔ The walk is BACKWARD-only and BLOCK-local, so
+ *      a block naming its file only AFTER the continuation, or not at all,
+ *      yields no token and the row binds nowhere.
+ *   2. RESOLUTION, first hit wins, objectui before here within each tier:
+ *      exact tracked path, then TAIL match -- a tracked path equal to the
+ *      token, or ending in a slash followed by it. The tail tier is what binds
+ *      the package-relative spellings on both sides, the spec-relative ones
+ *      included.
+ *   3. ⚠️ WHERE IT IS LENIENT, named because the leniency is what moves rows
+ *      between repos: a token carrying NO slash has nothing but its basename
+ *      to match on, so its tail match IS a basename match and a generic
+ *      basename can attribute to the wrong repo. A token that DOES carry a
+ *      directory keeps it -- this predicate ⛔ does NOT fall back to the
+ *      basename there. `bindingUnderDirectoryLenientVariant` is the same
+ *      reading with that fallback ON; it moves exactly one row.
+ *   4. TIE-BREAK. A token resolving in BOTH trees is credited to objectui, and
+ *      `ambiguousBothTrees` records how many rows that decides.
+ *
+ * ⚠️ These cells MOVED off the ones the first round published, and the
+ * predicate above is the whole reason: it is stricter about directory-
+ * qualified tokens and it walks comment BLOCKS rather than whole files. ⛔ The
+ * earlier cells are not restated here as though they had been re-measured;
+ * what stands is what this predicate yields.
+ *
+ * ## Tense -- the defect cell is EMPTY, and the rows are NAMED
  *
  * A citation naming no tracked file is a defect ONLY when the surrounding
- * sentence is LIVE-TENSE. Of the four that bind nowhere, one is a retirement
- * record naming a file in the cloud repo in prose, and three are continuations
- * inside dated re-reads at a named objectui pin. ⇒ ZERO live-tense defects.
+ * sentence is LIVE-TENSE. The rows binding nowhere are ENUMERATED in
+ * `bindingInNeitherRepoRows`, each carrying the coordinate it was read at in
+ * the named tree, its citation text, why no tree binds it, and the tense of
+ * the sentence around it. Not one is live-tense: one is a retirement record
+ * naming a file in the `cloud` repo in prose (`packages/spec/src/ai/agent.zod.ts`);
+ * three are continuations inside dated re-reads at a named objectui pin whose
+ * own block names no file before them (`packages/spec/src/ui/component.zod.ts`);
+ * and one is an objectui citation whose DIRECTORY spelling is stale while its
+ * basename is not (`packages/spec/src/ui/dashboard.zod.ts`). ⇒ ZERO live-tense
+ * defects -- held now by a list a reader can check, ⛔ not by a sentence that
+ * could not be reconciled with the tree.
  *
  * ## ⛔ THE TRAP, measured -- repairing the PATH alone turns this gate RED
  *
@@ -292,20 +354,117 @@ export const RECENSUS_17242 = {
   /* Same tree, the resolver `CENSUS_17065` was taken with. Equal by both
    * readings -- the control that makes 183 -> 467 a population statement. */
   declinedUnderPreviousResolver: 467,
-  /* ⭐ The split #17242 filed as NOT MEASURED. Continuations are attributed to
-   * the antecedent they inherit, which for 34 of them is named in prose rather
-   * than in a preceding citation. */
-  namingAnExistingObjectuiFile: 408,
-  namingAnExistingFileHere: 55,
-  bindingInNeitherRepo: 4,
+  /* ── The cross-repo reading's ANCHORS ──────────────────────────────────────
+   * ⛔ A moving ref is not an anchor, so every tree this split was taken
+   * against is a sha here rather than a branch name in prose. The binding
+   * sweep ran on the objectstack tree `boundAgainstSha`, whose `packages/spec`
+   * subtree is byte-identical to `measuredOn`'s -- the only file differing
+   * between the two commits is this gate -- so the declined population it read
+   * is the same 467 rows recorded above. */
+  boundAgainstSha: 'cdd68cf15ed863468ce6eecdd5c0824b760ea22a',
+  objectuiPinSha: '87af769e9a3ee28ace099fdd653d3ebd79fe82e2',
+  objectuiMainSha: '0cf2d6644bdb96a9a6784ef801ee6a60a5306bd8',
+  /* ⭐ Stronger than "the totals matched": every one of the 467 rows lands on
+   * the same verdict, with the same inherited token, against both trees. */
+  objectuiPinAndMainAgreeRowwise: true,
+  /* ── The split, under the predicate the header states ──────────────────────
+   * ⭐ The split #17242 filed as NOT MEASURED. Continuations carry no path of
+   * their own and are attributed by the header's antecedent walk; 188 of the
+   * 467 rows are bound that way and the other 279 carry their own path. */
+  namingAnExistingObjectuiFile: 409,
+  namingAnExistingFileHere: 53,
+  bindingInNeitherRepo: 5,
+  /* The token grammar the antecedent walk keeps the LAST match of. Carried as
+   * data so the predicate is copyable rather than paraphrased; the alternation
+   * is longest-first on purpose, because a shorter arm matching first truncates
+   * every four-letter extension to its three-letter prefix and silently
+   * re-points the token at a file that does not exist. */
+  bindingTokenPattern: String.raw`(?:[A-Za-z0-9_.@-]+\/)*[A-Za-z0-9_.-]+\.(?:tsx|ts|mts|cts|jsx|js|mjs|cjs)(?![A-Za-z0-9_])`,
+  /* How many rows resolve in BOTH trees and are decided by the objectui-first
+   * tie-break alone. Every one of them is a bare basename. */
+  ambiguousBothTrees: 5,
+  /* The declared sensitivity: the same reading with the basename fallback
+   * extended to directory-qualified tokens. It moves exactly one row out of
+   * `bindingInNeitherRepo`, which is the whole distance between a strict and a
+   * lenient reading of this corpus. */
+  bindingUnderDirectoryLenientVariant: Object.freeze({ objectui: 410, here: 53, neither: 4 }),
+  /* ⛔ THE ENUMERATION, because a cell nobody can list is a cell nobody can
+   * check. `line` is a COORDINATE into `boundAgainstSha`, ⛔ not an anchor: a
+   * row's identity is its document plus its citation TEXT, which is what the
+   * self-test holds it by, and the number is here only so a reader can open the
+   * tree at the named sha and land on it. `tense` was read BY HAND, one row at
+   * a time -- the classifier that produced the three tense totals above exists
+   * nowhere and cannot be asked. */
+  bindingInNeitherRepoRows: Object.freeze([
+    {
+      doc: 'packages/spec/src/ai/agent.zod.ts',
+      line: 253,
+      raw: 'knowledge-tools.ts:96',
+      token: 'knowledge-tools.ts',
+      via: 'own-path',
+      why: 'the prose names the `cloud` repo, which is a third tree neither side of this reading holds',
+      tense: 'record',
+    },
+    {
+      doc: 'packages/spec/src/ui/component.zod.ts',
+      line: 2921,
+      raw: '`:227`',
+      token: null,
+      via: 'antecedent',
+      why: 'its block names the file it continues only AFTER the citation, and the walk is backward-only',
+      tense: 'dated-measurement',
+    },
+    {
+      doc: 'packages/spec/src/ui/component.zod.ts',
+      line: 2922,
+      raw: '`:237`',
+      token: null,
+      via: 'antecedent',
+      why: 'its block names the file it continues only AFTER the citation, and the walk is backward-only',
+      tense: 'dated-measurement',
+    },
+    {
+      doc: 'packages/spec/src/ui/component.zod.ts',
+      line: 3921,
+      raw: '`:359`',
+      token: null,
+      via: 'antecedent',
+      why: 'its block cites a read point in the sibling repo without naming any file at all',
+      tense: 'dated-measurement',
+    },
+    {
+      doc: 'packages/spec/src/ui/dashboard.zod.ts',
+      line: 1118,
+      raw: 'plugin-view/ObjectView.tsx:989',
+      token: 'plugin-view/ObjectView.tsx',
+      via: 'own-path',
+      why: 'the basename is live in objectui, the DIRECTORY spelling is not, and this predicate keeps directories',
+      tense: 'dated-measurement',
+    },
+  ]),
   /* The tense axis, over the whole residual. `record` and `dated-measurement`
    * are both correct historical prose; only `live` can carry a defect, and it
-   * carries none because every live-tense row names a file that exists. */
+   * carries none because every live-tense row names a file that exists.
+   * ⛔ These three totals are the ONE part of this record nothing can re-derive
+   * -- the classifier that produced them was never committed, so they are a
+   * round's reading and must not be read as a measurement a reader can check.
+   * The tense claim that IS checkable is the per-row one on
+   * `bindingInNeitherRepoRows`, which is where `liveTenseDefects: 0` is held. */
   liveTenseCitations: 300,
   historicalRecordCitations: 38,
   datedMeasurementCitations: 129,
   liveTenseDefects: 0,
 };
+
+/**
+ * The CLOSED tense vocabulary an enumerated `bindingInNeitherRepoRows` row may
+ * carry. Closed on purpose: `liveTenseDefects: 0` is held by asserting that no
+ * enumerated row is `live`, and an open vocabulary turns that assertion into a
+ * spelling test -- a row typed `live-tense` or `current` would pass a
+ * not-equal-to-`live` check while meaning exactly what the check exists to
+ * catch.
+ */
+export const NEITHER_ROW_TENSES = Object.freeze(['record', 'dated-measurement', 'live']);
 
 /**
  * ⚠️ THE DAY-ONE RESIDUAL -- the findings the census enumerated, pinned.
@@ -533,13 +692,19 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-spec-docblock
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 // ⛔ Three of these cases are registered PER `CENSUS_RESIDUAL` row (the
-// exactness loop below runs three `check()`s over each row), so 21 of the 64
+// exactness loop below runs three `check()`s over each row), so 21 of the 102
 // are the 7 day-one rows, and REPAIRING a citation and deleting its row
 // legitimately lowers this floor by 3 — that is the ONLY reason it may be
 // lowered. Any other drop is cases that STOPPED RUNNING; find what stopped
 // registering instead of moving the number.
+//
+// ⛔ A SECOND per-row loop registers five cases per enumerated
+// `bindingInNeitherRepoRows` row — 25 of the 102 — and it is NOT a second
+// lowering reason. Those rows are a reading frozen at the shas the record
+// names, so they are never repaired and never deleted; a drop there is the
+// enumeration being edited away from the cell it is supposed to hold.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-spec-docblock-symbol-anchors self-test': 64,
+  'check-spec-docblock-symbol-anchors self-test': 102,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -766,6 +931,93 @@ export function selfTest() {
       + CENSUS_17065.barePathsBindingNeitherBase === CENSUS_17065.barePathSpans,
     'the three bare-path resolution bases must exhaust the bare-path spans',
   );
+
+  // 8. ⭐ THE RE-CENSUS, held exactly as case 7 holds the census above. Two
+  //    records thirty lines apart in one file, one pinned five ways and the
+  //    other pinned by nothing, is how a record and the code it describes drift
+  //    apart in silence — which is the defect class this whole corpus exists
+  //    for. ⚠️ These pins are INTERNAL to the record and deliberately so: the
+  //    reading is frozen at the shas it names, so holding a cell against the
+  //    LIVE tree would turn a historical record into a ratchet that reds on
+  //    every unrelated spec docblock edit. What they close is the other drift —
+  //    a cell edited one at a time until the record says something no reading
+  //    ever said.
+  check(
+    RECENSUS_17242.trackedTargetLineCitations + RECENSUS_17242.declinedCitations
+      === RECENSUS_17242.commentProseLineCitations,
+    `judged (${RECENSUS_17242.trackedTargetLineCitations}) + declined (${RECENSUS_17242.declinedCitations}) must `
+      + `exhaust the re-census's comment-prose population (${RECENSUS_17242.commentProseLineCitations})`,
+  );
+  check(
+    Object.values(RECENSUS_17242.declinedByShape).reduce((a, b) => a + b, 0) === RECENSUS_17242.declinedCitations,
+    're-census: the declined shape tally must sum to the declined count',
+  );
+  check(RECENSUS_17242.declinedUnderPreviousResolver === RECENSUS_17242.declinedCitations,
+    're-census: the previous resolver\'s reading is the control that makes 183 -> 467 a POPULATION statement — '
+      + 'the two must stay equal or the control is gone');
+  // ⭐ The cross-repo split's own arithmetic: the three binding cells must
+  // exhaust the declined population, or one of them is a guess.
+  check(
+    RECENSUS_17242.namingAnExistingObjectuiFile + RECENSUS_17242.namingAnExistingFileHere
+      + RECENSUS_17242.bindingInNeitherRepo === RECENSUS_17242.declinedCitations,
+    `the three binding cells (${RECENSUS_17242.namingAnExistingObjectuiFile} / `
+      + `${RECENSUS_17242.namingAnExistingFileHere} / ${RECENSUS_17242.bindingInNeitherRepo}) must exhaust the `
+      + `declined population (${RECENSUS_17242.declinedCitations})`,
+  );
+  // ...and so must the tense split, which is measured over the same rows.
+  check(
+    RECENSUS_17242.liveTenseCitations + RECENSUS_17242.historicalRecordCitations
+      + RECENSUS_17242.datedMeasurementCitations === RECENSUS_17242.declinedCitations,
+    `the three tense cells must exhaust the declined population (${RECENSUS_17242.declinedCitations})`,
+  );
+  // ⛔ A moving ref is not an anchor: every tree this split was taken against
+  // must be a full sha, so a later reader can check it out.
+  for (const field of ['boundAgainstSha', 'objectuiPinSha', 'objectuiMainSha']) {
+    check(/^[0-9a-f]{40}$/.test(RECENSUS_17242[field]),
+      `\`${field}\` must be a full 40-character sha — a branch name, a short sha or a ref is not an anchor, `
+        + `got \`${RECENSUS_17242[field]}\``);
+  }
+  // The DECLARED sensitivity must be a variant of the SAME reading: it sweeps
+  // the same rows, so it exhausts the same population, and loosening the
+  // predicate can only move rows INTO a repo, never out of one.
+  const lenient = RECENSUS_17242.bindingUnderDirectoryLenientVariant;
+  check(lenient.objectui + lenient.here + lenient.neither === RECENSUS_17242.declinedCitations,
+    'the directory-lenient variant must exhaust the same declined population — a variant that does not is a '
+      + 'different reading, not a sensitivity');
+  check(
+    lenient.neither <= RECENSUS_17242.bindingInNeitherRepo
+      && lenient.objectui >= RECENSUS_17242.namingAnExistingObjectuiFile
+      && lenient.here >= RECENSUS_17242.namingAnExistingFileHere,
+    'relaxing a predicate can only move rows OUT of the unbound cell — a lenient variant binding FEWER rows means '
+      + 'the two readings were not taken against the same trees',
+  );
+  // ⛔ The enumeration IS the cell. A count nobody can list is a count nobody
+  // can check, and that is exactly what the previous round shipped.
+  check(RECENSUS_17242.bindingInNeitherRepoRows.length === RECENSUS_17242.bindingInNeitherRepo,
+    `the enumerated unbound rows (${RECENSUS_17242.bindingInNeitherRepoRows.length}) must equal the cell `
+      + `(${RECENSUS_17242.bindingInNeitherRepo}) — a cell that outruns its list is a number without evidence`);
+  for (const row of RECENSUS_17242.bindingInNeitherRepoRows) {
+    check(row.doc.startsWith(`${SPEC_SRC_DIR}/`),
+      `an enumerated unbound row may only name a file in this corpus, got \`${row.doc}\``);
+    check(Number.isInteger(row.line) && row.line > 0 && typeof row.raw === 'string' && row.raw.length > 0,
+      `the enumerated row in \`${row.doc}\` must carry the coordinate it was read at AND the citation text it was `
+        + 'read for — the text is its identity, the coordinate is only how a reader finds it');
+    check(NEITHER_ROW_TENSES.includes(row.tense),
+      `the enumerated row for \`${row.raw}\` must carry a tense from the closed vocabulary `
+        + `(${NEITHER_ROW_TENSES.join(' / ')}), got \`${row.tense}\``);
+    check(row.tense !== 'live',
+      `the enumerated row for \`${row.raw}\` in \`${row.doc}\` is LIVE-TENSE and names no file in either tree — `
+        + 'that is a real defect and `liveTenseDefects: 0` no longer holds');
+    check(typeof row.why === 'string' && row.why.length > 20,
+      `the enumerated row for \`${row.raw}\` must say WHY no tree binds it — an unexplained row is the sentence `
+        + 'nobody could reconcile, one indirection further down');
+  }
+  // ...and the predicate itself is carried as a usable pattern, not a paraphrase.
+  check(new RegExp(RECENSUS_17242.bindingTokenPattern).test('plugin-grid/src/ObjectGrid.tsx'),
+    'the recorded token grammar must match a directory-qualified sibling-repo citation');
+  check(RECENSUS_17242.bindingTokenPattern.indexOf('tsx') < RECENSUS_17242.bindingTokenPattern.indexOf('|ts|'),
+    'the recorded token grammar must keep its extension alternation LONGEST-FIRST — a shorter arm matching first '
+      + 'truncates every four-letter extension and re-points the token at a file that does not exist');
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   const floorMessages = [];
