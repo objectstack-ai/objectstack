@@ -1,0 +1,23 @@
+---
+"@objectstack/spec": minor
+"@objectstack/platform-objects": patch
+---
+
+45 declared-but-unoffered scalar metadata keys are authorable in the metadata form. Each was **declared** by an object-rooted metadata schema, graded `live` by the liveness ledger, and offered by **no** form in `METADATA_FORM_REGISTRY` — so the generic metadata form rendered no row for any of them and an author's only door was the Source tab: free-text JSON, where a mis-spelled sibling key is written, stored, and refused by the runtime later.
+
+**The population was re-derived, not inherited.** The reconciliation gate's own helper block (`packages/spec/src/system/metadata-form-zod-reconciliation.test.ts`, lines 104-469 verbatim) was run over the live registry with a lit control (`name`, offered by 17 of 17 forms) and a dark control (a fabricated key, 0 forms and 0 schemas) asserted in the same probe. Readings on the tree this change starts from: **142** top-level zod-only keys across the 17 forms once the ADR-0010 provenance overlay is skipped, **94** of them on the 11 object-rooted types (`view` is union-rooted and contributes the other 48), **87** of those graded `live`, and **49** of those resolving to a scalar schema node. After the change the same probe reads 4, which are the four rows deliberately not landed.
+
+**Four keys are deliberately still unoffered**, each because a control for it would be an authoring trap rather than an offer:
+
+- `object.displayNameField` — `[DEPRECATED → nameField]`. Its canonical replacement `nameField` lands here; offering the alias beside it would teach an author the retired spelling.
+- `app._unpublished` — the schema's own text says `Never authored`: a machine-managed publish gate written by the AI materialization path and cleared by publish-drafts.
+- `field.system` — the auto-injected/system-column marker the platform stamps (`applySystemFields`, the search companion). It is read widely on the write path — the record validator skips required and multi-value checks for a flagged column — so a control for it lets an author assert a false provenance that silently disables validation for that field.
+- `field.format` — its `describe` says `Format string (e.g. email, phone)` while the only consumer that can be measured honours the named date styles `short` / `relative` (the objectui date cell renderer, cited from `dataset.zod.ts`). The two disagree about the value vocabulary, so any help text would either repeat a vocabulary nothing honours or invent one the schema does not declare.
+
+**The control follows the scalar type and the copy states what the runtime enforces**, including what ABSENCE resolves to, which is the half an author cannot read off an enum: `object.sharingModel` says a custom object that omits it resolves to `private`; `field.step` says the write path does not reject a value off the step grid; `action.undoable` says an action with no `operation` has no write set to capture. Nineteen rows carry a `visibleWhen` MEANINGFULNESS gate mirrored from the same key's row in the object designer's quick-add grid — the schema accepts each key whatever the sibling value is, but only some field types, page kinds or action operations ever read it.
+
+Three enums (`object.managedBy`, `action.execution`, `action.openIn`) deliberately carry **no** inline `options` list: `FormSelectOptionSchema.value` is a system identifier (`^[a-z][a-z0-9_.]*$`), so members such as `system-data`, `engine-owned` or `perRecord` cannot be spelled as option values at all. Those rows derive their enum from the served JSON Schema, which carries every member verbatim, and the meanings ride the help text.
+
+⛔ **No schema accept set moves and no export changes.** `METADATA_FORM_REGISTRY` is declared as an opaque `Readonly<Record<string, FormView>>`, so row contents were never part of the declared surface. What changes is the **form payload** `getMetaTypes()` serves and the translation keys `os i18n extract` walks — hence the regenerated `platform-objects` metadata-form bundles, whose 90 new leaves are authored in `zh-CN`, `ja-JP` and `es-ES` rather than left as extractor fills, because those three catalogs are ratcheted against undecided echoes.
+
+⛔ **The gate that would notice a missing row is NOT landed here.** The top-level `zodOnly` direction of the reconciliation gate stays unwired: turning it on today would turn the remaining absences into red lines with no offers behind them, which is the shape the census round explicitly refused. This change lands offers; the assertion is a separate card.
