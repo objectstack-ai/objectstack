@@ -1024,10 +1024,10 @@ export function selfTest() {
   //    record into a ratchet that reds on every unrelated spec docblock edit.
   //    What they close is the other drift — a cell edited one at a time until
   //    the record says something no reading ever said.
-  //    ⛔ What an internal pin CANNOT catch is a sentence about a tree that
-  //    nothing reading that tree holds — which is what shipped here twice. So
+  //    ⛔ What an internal pin CANNOT catch is a sentence ABOUT A TREE that
+  //    nothing reading that tree holds — which is what the via sentence was. So
   //    where a pin against reality is both cheap and FROZEN, it is taken: the
-  //    objectui-pin case below is that one.
+  //    objectui-pin case below is that one, and it is the only one here.
   check(
     RECENSUS_17242.trackedTargetLineCitations + RECENSUS_17242.declinedCitations
       === RECENSUS_17242.commentProseLineCitations,
