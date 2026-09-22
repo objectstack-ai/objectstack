@@ -54,12 +54,15 @@ export interface ConnectorMaterialization {
  * secrets/env layer, so the factory receives a usable static credential rather
  * than a raw reference (`undefined` when the entry declares no auth).
  *
- * It also carries the entry's **resilience policy** — `retryConfig`,
- * `connectionTimeoutMs`, `requestTimeoutMs` — so a provider that performs its
- * own I/O can honour what the author declared. Before that, those keys were
- * parsed and then reached nothing: a factory was never handed them and had no
- * way to honour them, which is what `packages/spec/liveness/connector.json`
- * recorded as `dead`.
+ * It also carries the entry's **resilience policy** — `retryConfig` and
+ * `requestTimeoutMs` — so a provider that performs its own I/O can honour what
+ * the author declared. Before that, those keys were parsed and then reached
+ * nothing: a factory was never handed them and had no way to honour them, which
+ * is what `packages/spec/liveness/connector.json` recorded as `dead`.
+ *
+ * ⚠️ `connectionTimeoutMs` was a third member and is **removed** with the spec
+ * key (ADR-0049) — see the comment at its former position below. Being handed a
+ * value is not the same as honouring it, and nothing ever did.
  */
 export interface ConnectorProviderContext {
   readonly name: string;
@@ -81,19 +84,19 @@ export interface ConnectorProviderContext {
    * what makes the keys live rather than merely carried.
    */
   readonly retryConfig?: RetryConfigParsed;
-  /**
-   * The entry's declared connect deadline (ms), carried verbatim.
-   *
-   * ⚠️ **Carried, not enforced by the built-in HTTP path** — a WHATWG `fetch`
-   * exposes one `AbortSignal` for the whole operation and never the connection
-   * phase alone, so the platform has nowhere to apply a connect-only bound and
-   * deliberately does not pretend otherwise (see
-   * `connector-fetch-policy.ts`). It is handed over because a custom provider
-   * on a transport that CAN separate the phases (a database client, a pooled
-   * socket) is able to honour it; `packages/spec/liveness/connector.json`
-   * records the platform side as `dead` for that reason.
-   */
-  readonly connectionTimeoutMs?: number;
+  // `connectionTimeoutMs` — REMOVED (ADR-0049 enforce-or-remove). #18975 added
+  // it here as a pure carry: "handed over so a custom provider on a transport
+  // that CAN separate the phases could honour it". Measured before removal, no
+  // provider did — the built-in `rest` and `openapi` factories read
+  // `ctx.connectionTimeoutMs` only to deposit it back onto the def that
+  // `GET /connectors` echoes, and `connectorFetchOptions()` was never handed it.
+  // Carrying an inert number across a published interface is the same
+  // parsed-unmarked-unenforced state on one more surface, so the carry is
+  // withdrawn with the key. There is no source for a D2 conversion to rewrite
+  // here — a factory is code — which is why the withdrawal is declared as the
+  // D3 semantic entry `connector-provider-context-connection-timeout-ms-retired`
+  // rather than a conversion. A factory that needs a connect bound reads it from
+  // its own `providerConfig`, where the provider owns the vocabulary.
   /**
    * The entry's declared per-request deadline (ms). The built-in HTTP path
    * applies it as `resilientFetch`'s per-attempt timeout.
