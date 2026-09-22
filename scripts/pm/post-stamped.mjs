@@ -73,46 +73,41 @@
  * The parity sentence above is falsifiable, and it was false. The positional
  * walk read `maskQuotedStamps`'d text, where a declaration is blanked, so a
  * `{{WAS:…}}` on the OPENING line passed the write side — and the refusal text
- * above offered it there by name. `substituteTokens` then renders a declaration
- * as its payload and nothing else, so the declaration is SPENT at render time
- * and the board carries bare digits at a position the patrol reads as the
- * writing act's own clock. Measured twice, on live artefacts written by
- * following this file's own prescription: an opening line declaring a card's
- * close time, filed 19 minutes out; a subscript line declaring a CI-log
- * reading, filed 23 minutes out, six such rows in one sweep.
+ * above offered it there by name. `substituteTokens` renders a declaration as
+ * its payload and nothing else, so it is SPENT at render time and the board
+ * carries bare digits where the patrol reads the writing act's own clock.
+ * Measured twice, on live artefacts written by FOLLOWING this file's own
+ * prescription: an opening line declaring a card's close time, filed 19 minutes
+ * out; a subscript line declaring a CI-log reading, filed 23 out, six such rows
+ * in one sweep.
  *
  * So the positional judgement runs over the body `substituteTokens` will
  * actually send, and a stamp standing at one of those positions that is not
- * this act's own clock is refused whichever spelling put it there. What that
- * buys, exactly:
+ * this act's own clock is refused whichever spelling put it there. The REMEDIES
+ * differ where the spellings do: a typed stamp becomes `{{NOW}}`; a real
+ * reading MOVES into the body and is declared there.
  *
- *   BOTH SPELLINGS  a typed stamp and a declared one land as the same bytes at
- *                   those positions, so they get the same answer. The REMEDIES
- *                   differ: a typed stamp becomes `{{NOW}}`; a real reading
- *                   MOVES into the body and is declared there.
- *   H56'S HOLDOUT   a position carrying more than one stamp once rendered is
- *                   read by nobody — the patrol holds it out rather than
- *                   guessing, and so does this. `{{NOW}}` beside a declared
- *                   reading on one line is that shape, and it stays accepted.
- *   THE ACT'S OWN   a declaration whose value IS this act's clock minute renders
- *                   the bytes `{{NOW}}` would have, so it is accepted: refusing
- *                   it would refuse a body the patrol reads as perfectly
- *                   stamped, and the parity claim would be false the other way.
+ * Two shapes it leaves alone, both because the patrol does. A position carrying
+ * MORE THAN ONE stamp once rendered — `{{NOW}}` beside a declared reading on
+ * one line is that shape — is read by nobody: H56 holds that line out rather
+ * than guess, and so does this. And a declaration whose value IS this act's
+ * clock minute renders the bytes `{{NOW}}` would have, so refusing it would
+ * refuse a body the patrol reads as perfectly stamped — the parity claim false
+ * the other way round.
  *
- * ⛔ It does not widen the BARE scan, which stays value-free: a typed stamp that
- * happens to equal this act's minute is still typed, and the positional refusal
- * keeps it. The two rules meet at the position and part at the spelling.
- *
- * ⛔ And a declaration the value rules already refused is NOT also filed here.
- * One typo, one refusal — the rule this file states for the calendar and the
- * direction checks, spent on the same coin: a payload that is not a stamp
- * declared nothing, so there is no reading standing in the wrong place.
+ * ⛔ It does not widen the BARE scan, which stays value-free: a typed stamp
+ * equal to this act's minute is still typed, and the positional refusal keeps
+ * it. The two rules meet at the position and part at the spelling. ⛔ And a
+ * declaration the value rules already refused is not ALSO filed here — one
+ * typo, one refusal, the rule this file states for the calendar and direction
+ * checks: a payload that is not a stamp declared nothing, so there is no
+ * reading standing in the wrong place.
  *
  * ⛔ The rejected route, recorded because it is the one that reads well: render
  * a marker H56 recognises. That is a THIRD spelling both halves must learn, on
  * a board the marker is visible on, bought to keep a reading in the one
  * position where no reader can tell it from the act's own clock. The position
- * is the defect; a marker would make it survivable instead of removing it.
+ * is the defect; a marker makes it survivable instead of removing it.
  *
  * ## ⛔ Never pipe this tool, then `&&` the write that follows
  *
@@ -1409,10 +1404,7 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
   // standing at one of these two positions lands as bare digits the patrol
   // reads as this act's own clock. The reader is H56's, run over the body
   // `substituteTokens` will actually send — never a second idea of what a
-  // position is. A stamp EQUAL to this act's clock is the bytes `{{NOW}}`
-  // would have written, so it is not this refusal's business, and a position
-  // the render leaves carrying more than one stamp is nobody's — H56 holds
-  // that line out rather than guess, and so does this.
+  // position is. The header section names the two shapes left alone, and why.
   if (quotedValueProblems === 0) {
     for (const hit of h56StampedReadings(substituteTokens(raw, now, spans).body)) {
       const key = `${hit.where} :: ${hit.stamp}`;
