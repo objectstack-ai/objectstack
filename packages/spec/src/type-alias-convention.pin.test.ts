@@ -345,6 +345,14 @@ export type Iso36 = Assert<Eq< z.input< typeof M10.AIUsageRecordSchema >, z.infe
 // api/analytics.zod.ts
 export type Iso37 = Assert<Eq< z.input< typeof M11.AnalyticsEndpoint >, z.infer< typeof M11.AnalyticsEndpoint > >>;
 export type Iso38 = Assert<Eq< z.input< typeof M11.AnalyticsQueryRequestSchema >, z.infer< typeof M11.AnalyticsQueryRequestSchema > >>;
+// [#17551] The ADR-0021 dataset selection and its two nested directives. Their
+// seven shared members ARE `AnalyticsQuerySchema`'s own declarations (Iso300
+// above pins that schema isomorphic), and the four dataset-only members carry
+// no default, transform, catch or pipe — so the author state and the parsed
+// state coincide and no `XParsed` name would be anything but a synonym.
+export type Iso877 = Assert<Eq< z.input< typeof M11.DatasetCompareToSchema >, z.infer< typeof M11.DatasetCompareToSchema > >>;
+export type Iso878 = Assert<Eq< z.input< typeof M11.DatasetTotalsSchema >, z.infer< typeof M11.DatasetTotalsSchema > >>;
+export type Iso879 = Assert<Eq< z.input< typeof M11.DatasetSelectionSchema >, z.infer< typeof M11.DatasetSelectionSchema > >>;
 
 // api/auth-endpoints.zod.ts
 export type Iso39 = Assert<Eq< z.input< typeof M12.AuthEndpointSchema >, z.infer< typeof M12.AuthEndpointSchema > >>;
