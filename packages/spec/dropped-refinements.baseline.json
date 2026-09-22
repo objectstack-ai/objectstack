@@ -109,6 +109,11 @@
         ""
       ]
     },
+    "api/DatasetSelection": {
+      "sites": [
+        "runtimeFilter.lazy"
+      ]
+    },
     "api/DisablePackageResponse": {
       "sites": [
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"

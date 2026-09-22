@@ -498,11 +498,12 @@ function describeRefusedDateRange(input: unknown): string {
  * (`@objectstack/core`) — `AnalyticsService.query`, `queryDataset` and the
  * dataset executor behind it reached IN PROCESS, and a driver's cube face
  * called directly. ⚠️ Every REST analytics route is a SCHEMA-origin door,
- * `POST /analytics/dataset/query` included: since PR #17548, the PR that
- * landed that door for card #17058, the route parses its selection's shared
- * members — `timeDimensions` among them — against
- * `AnalyticsQuerySchema.pick(…)` ahead of the executor, so that route's
- * refusal is THIS schema's and says so. Until this parameter existed the
+ * `POST /analytics/dataset/query` included: PR #17548 (card #17058) landed a
+ * door there that parsed the selection's shared members — `timeDimensions`
+ * among them — and #17551 widened it to the WHOLE selection, against
+ * `DatasetSelectionSchema` (`api/analytics.zod.ts`, which takes those members
+ * off this schema's own shape). Either way the parse is ahead of the executor,
+ * so that route's refusal is THIS schema's and says so. Until this parameter existed the
  * shared sentence asserted the SCHEMA origin for both, so an author refused past
  * the door was sent to inspect a parse call that never ran; the one package that
  * noticed (`service-analytics`, #17593) had to OVERWRITE the message instead of

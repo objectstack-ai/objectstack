@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { AnalyticsQuery, Cube } from '../data/analytics.zod.js';
+import type { DatasetSelection } from '../api/analytics.zod.js';
 import type { FilterCondition } from '../data/filter.zod.js';
 import type { AggregationFunction } from '../data/query.zod.js';
 import type { PercentScale } from '../data/percent-scale.js';

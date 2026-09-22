@@ -17,8 +17,8 @@ Provides endpoints for executing analytical queries and discovering metadata.
 ## TypeScript Usage
 
 ```typescript
-import { AnalyticsEndpoint, AnalyticsMetadataResponseSchema, AnalyticsQueryRequestSchema, AnalyticsResultResponseSchema, AnalyticsSqlResponseSchema, GetAnalyticsMetaRequestSchema } from '@objectstack/spec/api';
-import type { AnalyticsEndpoint, AnalyticsMetadataResponse, AnalyticsQueryRequest, AnalyticsResultResponse, AnalyticsSqlResponse, GetAnalyticsMetaRequest } from '@objectstack/spec/api';
+import { AnalyticsEndpoint, AnalyticsMetadataResponseSchema, AnalyticsQueryRequestSchema, AnalyticsResultResponseSchema, AnalyticsSqlResponseSchema, DatasetCompareToSchema, DatasetSelectionSchema, DatasetTotalsSchema, GetAnalyticsMetaRequestSchema } from '@objectstack/spec/api';
+import type { AnalyticsEndpoint, AnalyticsMetadataResponse, AnalyticsQueryRequest, AnalyticsResultResponse, AnalyticsSqlResponse, DatasetCompareTo, DatasetSelection, DatasetTotals, GetAnalyticsMetaRequest } from '@objectstack/spec/api';
 
 // Validate data
 const result = AnalyticsEndpoint.parse(data);
@@ -191,6 +191,71 @@ const result = AnalyticsEndpoint.parse(data);
 | **duration** | `integer` | optional | Server-side processing duration in milliseconds |
 | **requestId** | `string` | optional |  |
 | **traceId** | `string` | optional |  |
+
+
+---
+
+## DatasetCompareTo
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `Enum<'previousPeriod' \| 'previousYear'>` | ✅ | Comparison window: previousPeriod (equal-length, immediately before) or previousYear (the same window one calendar year back) |
+| **dimension** | `string` | optional | Time dimension to shift; omit when the selection has exactly one dated time dimension |
+
+
+---
+
+## DatasetSelection
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dimensions** | `string[]` | optional | List of dimensions to group by |
+| **measures** | `string[]` | ✅ | List of metrics to calculate |
+| **runtimeFilter** | `any` | optional | Presentation-scope filter (canonical Query DSL FilterCondition), ANDed with the dataset's intrinsic filter at render |
+| **timeDimensions** | `{ dimension: string; granularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| [string, string] }[]` | optional | Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, and an optional `dateRange` — a preset name from the closed date-range vocabulary (e.g. `'last_7_days'`) or an explicit `[start, end]` window; an unrecognised string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening. |
+| **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Presentation-scope date bucketing applied to every selected `date` dimension; an explicit `timeDimensions` entry wins over it, and the dataset dimension's own default is used when neither is set |
+| **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
+| **limit** | `number` | optional |  |
+| **offset** | `number` | optional |  |
+| **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`); attaches `<measure>__compare` columns |
+| **totals** | `{ groupings: string[][] }` | optional | Server-side marginal aggregates; each grouping is a dimension subset to additionally aggregate by, `[]` being the grand total |
+| **timezone** | `string` | optional |  |
+
+### Nested Shape: `DatasetSelection.timeDimensions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dimension** | `string` | ✅ |  |
+| **granularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional |  |
+| **dateRange** | `Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| [string, string]` | optional | Time window for this dimension: a date-range PRESET name from the closed vocabulary in `data/date-range-presets.ts` (today, yesterday, this_week, last_week, this_month, last_month, this_quarter, last_quarter, this_year, last_year, last_7_days, last_30_days, last_90_days — e.g. `'last_7_days'`), or an explicit `[start, end]` array of ISO dates / `{date-macro}` tokens (e.g. `["2023-01-01", "2023-01-31"]`). Any other string is refused at the schema with `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`. |
+
+### Nested Shape: `DatasetSelection.compareTo`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `Enum<'previousPeriod' \| 'previousYear'>` | ✅ | Comparison window: previousPeriod (equal-length, immediately before) or previousYear (the same window one calendar year back) |
+| **dimension** | `string` | optional | Time dimension to shift; omit when the selection has exactly one dated time dimension |
+
+### Nested Shape: `DatasetSelection.totals`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **groupings** | `string[][]` | ✅ | Dimension subsets to additionally aggregate by, in request order; the empty subset is the grand total |
+
+
+---
+
+## DatasetTotals
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **groupings** | `string[][]` | ✅ | Dimension subsets to additionally aggregate by, in request order; the empty subset is the grand total |
 
 
 ---
