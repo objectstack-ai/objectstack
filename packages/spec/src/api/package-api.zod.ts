@@ -377,8 +377,18 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
    * - `InstallPackageRequestSchema` (`src/kernel/package-registry.zod.ts`) —
    *   **a COPY of this key**, restated on the in-process protocol primitive
    *   `ObjectStackProtocol.installPackage`. Same type, same default, same
-   *   meaning; its own implementation does not read it, and this door does not
-   *   forward it down that seam. Held to this declaration by
+   *   meaning; its own implementation HONOURS it on the REGISTRY ROW —
+   *   `true` enables, `false` disables, an ABSENT key makes no lifecycle
+   *   call at all, the same three states this door implements
+   *   (`packages/metadata-protocol/src/protocol.ts`, the `requestedEnabled`
+   *   arms). The DURABLE half is not that seam's to write: the
+   *   disabled-package record is keyed by ENVIRONMENT, which an
+   *   `InstallPackageRequest` does not carry — which is also why this door
+   *   still does not forward the key down that seam. It calls
+   *   `installPackage({ manifest, settings })` and performs the
+   *   enable/disable flip itself, so the record that survives a restart
+   *   follows the row this door returned rather than the request's intent.
+   *   Held to this declaration by
    *   `package-install-one-authority.test.ts`, not by an import: the authority
    *   sits above `kernel/` in the module graph, so a `…Schema.shape.…`
    *   reference from there is a cycle that dies under `OS_EAGER_SCHEMAS=1`.
