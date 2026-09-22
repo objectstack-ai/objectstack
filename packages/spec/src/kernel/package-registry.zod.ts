@@ -285,13 +285,23 @@ export const InstallPackageRequestSchema = lazySchema(() => z.object({
    * ## A RESTATEMENT of the install-request key — the one authority is
    * `PackageInstallRequestSchema` in `src/api/package-api.zod.ts`
    *
-   * Same type, same default, same meaning: this is a COPY of the request key,
-   * not a second key that happens to share a spelling. The authority is the
-   * request contract bound to the door that actually serves —
-   * `POST /api/v1/packages`, which writes the registry row's `enabled` from
-   * `enableOnInstall ?? true` (`packages/runtime/src/domains/packages.ts`).
+   * Same type, same optionality, same meaning: this is a COPY of the request
+   * key, not a second key that happens to share a spelling. The authority is
+   * the request contract bound to the door that actually serves —
+   * `POST /api/v1/packages` (`packages/runtime/src/domains/packages.ts`).
    * ⛔ Never let the two drift: `src/api/package-install-one-authority.test.ts`
    * parses BOTH over one matrix and reds when they disagree on any cell.
+   *
+   * ## ⭐ THREE STATES — absence is one, and it is not a default
+   *
+   * `true` enables the row, `false` disables it, and ABSENT keeps the row's
+   * current lifecycle state; a fresh id has no state to keep and lands
+   * ENABLED. 「缺省 = 保持，有旗 = 设置」, ruled in maintainer batch #157 item 5
+   * letter C for the door and carried onto the declarations in batch #210
+   * item 4 letter A. ⛔ This key is therefore `optional()` and never
+   * `.default(true)`: a default resolves absence at parse time, which erases
+   * the third state from the published surface while the door still honours
+   * it.
    *
    * ## ⚠️ This contract's own implementation does not read the key
    *
@@ -321,8 +331,8 @@ export const InstallPackageRequestSchema = lazySchema(() => z.object({
    * `PackageInstallRequestSchema.shape.enableOnInstall` — the pin above is the
    * mechanical half of the reference, and it is the half that can fail.
    */
-  enableOnInstall: z.boolean().default(true)
-    .describe('Whether to enable immediately after install — restates the install-door request key, whose one authority is api/PackageInstallRequest; this protocol primitive does not read it'),
+  enableOnInstall: z.boolean().optional()
+    .describe('Whether to enable immediately after install — restates the install-door request key, whose one authority is api/PackageInstallRequest (`true` enables, `false` disables, ABSENT keeps the row\'s current lifecycle state); this protocol primitive does not read it'),
   /**
    * Current platform version for compatibility checking.
    * When provided, the system compares this against the package's

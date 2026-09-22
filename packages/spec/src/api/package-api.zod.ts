@@ -369,23 +369,48 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
   /**
    * Whether to enable the package immediately after install.
    *
+   * ## ⭐ THREE STATES, and absence is one of them — that is why it is
+   * `optional()` and NOT `.default(true)`
+   *
+   * - `true`  — the row is ENABLED after this install, existing or fresh.
+   * - `false` — the row is DISABLED after this install: present-but-not-active,
+   *   and the disable survives a restart.
+   * - ABSENT  — the row KEEPS ITS CURRENT LIFECYCLE STATE. No lifecycle call is
+   *   made at all, so a package an operator disabled stays disabled across an
+   *   upgrade or a re-install. A FRESH id has no state to keep and lands
+   *   ENABLED, which is the registry's own new-row value, ⛔ not a default
+   *   this declaration applies.
+   *
+   * ⭐ 「缺省 = 保持，有旗 = 设置」 — ruled in maintainer batch #157 item 5
+   * letter C and implemented at the door (`packages/runtime/src/domains/packages.ts`),
+   * which reads the raw body and makes NO lifecycle call when the key is
+   * absent. The declaration followed in batch #210 item 4 letter A.
+   *
+   * ⛔ `.default(true)` is what this key may never go back to, and the reason
+   * is mechanical rather than stylistic: a default RESOLVES absence at parse
+   * time, so a parsed request that omitted the key becomes byte-identical to
+   * one that set `true`, and the third state stops existing on the published
+   * surface while the door still honours it — 「declared ≠ enforced」 on a
+   * contract this repo does not own both ends of.
+   *
+   * ⛔ Nor may the key be made to MEAN nothing in the name of making absence
+   * visible: the `true` and `false` arms are unchanged by that ruling and are
+   * re-read as such in `package-install-one-authority.test.ts`.
+   *
    * ## ⭐ THE ONE AUTHORITY for this key, and the map to the other two
    *
    * `enableOnInstall` is declared in three published schemas. This one is the
    * authority, because it is the request contract of the door that HONOURS it:
-   * `POST /api/v1/packages` writes the registry row's `enabled` from
-   * `enableOnInstall ?? true`, through the same registry flip and durable
-   * state write `PATCH /packages/:id/disable` uses
-   * (`packages/runtime/src/domains/packages.ts`). A `false` here installs the
-   * package present-but-not-active and survives a restart; `true` and absent
-   * install it enabled, which is this declaration's default.
+   * `POST /api/v1/packages` moves the registry row through the same registry
+   * flip and durable state write `PATCH /packages/:id/enable` and
+   * `PATCH /packages/:id/disable` use.
    *
    * The other two are re-read here so a reader never has to guess which of
    * three identical-looking declarations governs:
    *
    * - `InstallPackageRequestSchema` (`src/kernel/package-registry.zod.ts`) —
    *   **a COPY of this key**, restated on the in-process protocol primitive
-   *   `ObjectStackProtocol.installPackage`. Same type, same default, same
+   *   `ObjectStackProtocol.installPackage`. Same type, same optionality, same
    *   meaning; its own implementation does not read it, and this door does not
    *   forward it down that seam. Held to this declaration by
    *   `package-install-one-authority.test.ts`, not by an import: the authority
@@ -396,13 +421,15 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
    *   listing, its door is the control plane's `POST /api/v1/marketplace/install`,
    *   and its `enableOnInstall` is what a caller asks the marketplace channel
    *   to request on its behalf, one translation upstream of this one. It stays
-   *   a declaration of its own and says why at its own site.
+   *   a declaration of its own and says why at its own site. Its 缺省 cell moved
+   *   with the other two so the matrix stays readable as one row per state, ⛔
+   *   not because the key was folded.
    *
    * ⛔ Never unify the three silently, in either direction: two of them are
    * one commitment and the third is a different party's.
    */
-  enableOnInstall: z.boolean().default(true)
-    .describe('Whether to enable immediately after install — honoured at POST /api/v1/packages: the installed row\'s `enabled` is written from this key'),
+  enableOnInstall: z.boolean().optional()
+    .describe('Whether to enable immediately after install — honoured at POST /api/v1/packages: `true` enables the installed row, `false` disables it, and ABSENT keeps the row\'s current lifecycle state (a fresh install lands enabled)'),
 
   /**
    * Opt back in to overwriting an already-installed package id.
