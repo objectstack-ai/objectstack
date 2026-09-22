@@ -71,7 +71,8 @@ ruling that made the siblings live forbids.)
   `RETIRED_KEYS_BY_MAJOR[18]`. The schema is not `.strict()`, so a bare deletion
   would strip an authored key in silence (ADR-0104): the tombstone is audible in
   both channels — `tsc` (input type `never`) and the parse, which raises the
-  prescription itself. `DeclarativeConnectorEntrySchema` inherits it, so
+  prescription itself. `DeclarativeConnectorEntrySchema` carries it too — both
+  published carriers wrap the same private `ConnectorBaseSchema` — so
   `stack.connectors[]` and the `/meta/connector` door refuse it too.
 - **A D2 conversion, `connector-connection-timeout-ms-removed`** — one strip per
   `connectors[]` entry, a pure lossless delete. ⭐ The ruling left whether one was

@@ -26,8 +26,10 @@
  * Bookkeeping shapes, pinned below:
  *   1. `connectionTimeoutMs:` — `retiredKey()` tombstone on the non-strict
  *      `ConnectorSchema` (a bare deletion would be a SILENT STRIP, ADR-0104),
- *      inherited by `DeclarativeConnectorEntrySchema` (`superRefine`), so the
- *      refusal reaches `stack.connectors[]` and the `/meta/connector` door;
+ *      carried by `DeclarativeConnectorEntrySchema` too — both published
+ *      carriers wrap the same private `ConnectorBaseSchema`, so they are
+ *      siblings, not parent and child — so the refusal reaches
+ *      `stack.connectors[]` and the `/meta/connector` door;
  *      `integration/Connector:connectionTimeoutMs` and
  *      `integration/DeclarativeConnectorEntry:connectionTimeoutMs` in
  *      `RETIRED_KEYS_BY_MAJOR[18]`.
