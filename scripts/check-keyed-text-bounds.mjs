@@ -232,7 +232,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the detector FIRES': 15,
   'the detector STAYS SILENT': 8,
   'refusals: the shapes it will not guess at': 11,
-  'the authoring shape: the factory is the one authorised declaration': 12,
+  'the authoring shape: the factory is the one authorised declaration': 15,
   'the allowlist mechanism, driven on synthetic objects': 10,
   'the vacuity floors': 5,
   'provenance: the record must stay reproducible, and visibly so': 7,
@@ -783,7 +783,9 @@ function literalShapeMessage(name, signal) {
     + '    the declaration against ObjectSchema when the file is evaluated, so an error surfaces where\n'
     + '    it was written. A typed literal defers every check to a build the author may never run — and\n'
     + '    this gate cannot read it at all, so every keyed text column in it goes unjudged.\n'
-    + '    The conversion is mechanical: wrap the literal in `ObjectSchema.create( ... )`.\n'
+    + '    The conversion is mechanical: wrap the literal in `ObjectSchema.create( ... )`, and add\n'
+    + "    `import { ObjectSchema } from '@objectstack/spec/data'` — the `os init` shape imports only\n"
+    + '    `* as Data`, so the factory is not in scope yet.\n'
     + '    ⛔ Do not teach this scan the literal shape instead — the shape is refused, not unknown.';
 }
 
@@ -1656,7 +1658,7 @@ export function selfTest() {
       'packages/p/src/a.object.ts':
         "import { ObjectSchema } from '@objectstack/spec/data';\n\n"
         + 'function build(n) {\n'
-        + "  const base = { name: n, fields: { c: { type: 'text' } } };\n"
+        + "  const base = { name: 'b', fields: { c: { type: 'text' } } };\n"
         + '  return ObjectSchema.create(base);\n'
         + '}\n\n'
         + "export const o = ObjectSchema.create({ name: 'o', fields: {}, indexes: [] });\n",
