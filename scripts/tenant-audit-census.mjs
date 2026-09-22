@@ -528,16 +528,45 @@ function opensScope(node) {
 }
 
 /**
- * The lexical scopes enclosing a node, innermost first.
+ * The node kinds that own a `this` -- the scope a CLASS PROPERTY name lives in.
+ *
+ * A property is not a lexical name at all: `this.engine` inside a method of
+ * class `B` means `B`'s `engine` and can mean nothing else, however many other
+ * classes in the file spell the same property. So the chain for a property is
+ * the chain of enclosing classes, and an arrow function or a block between the
+ * site and its class is transparent to it -- exactly as `this` itself is.
+ */
+function opensClassScope(node) {
+  return ts.isClassDeclaration(node) || ts.isClassExpression(node);
+}
+
+/**
+ * Where a CALLABLE'S OWN NAME is declared: the lexical scopes, plus the class.
+ *
+ * A method's name belongs to its class body, a function declaration's and a
+ * `const fn = () => …`'s to the block or file that declares it -- so this is
+ * {@link opensScope} with the class added, and not either one alone. ⛔ Not the
+ * same predicate as {@link opensClassScope}: a method named `getEngine` is
+ * class-scoped, while a `function getEngine()` two lines above the class is not,
+ * and a chain that saw only classes would lose the second one.
+ */
+function opensCallableScope(node) {
+  return opensScope(node) || opensClassScope(node);
+}
+
+/**
+ * The scopes enclosing a node, innermost first, under `opens`.
  *
  * A parameter's own scope is the FUNCTION (its `parent`), while a `const` in a
  * body belongs to that body's block -- so a receiver inside the body walks
  * block, then function, then outwards, and finds the parameter exactly where a
- * reader would look for it.
+ * reader would look for it. `opens` is what makes the same walk answer for a
+ * property (classes) and for a callable's name (both), because those names are
+ * NOT scoped the way a local is and keying them as if they were is the defect.
  */
-function scopeChainOf(node) {
+function scopeChainOf(node, opens = opensScope) {
   const chain = [];
-  for (let p = node.parent; p; p = p.parent) if (opensScope(p)) chain.push(p);
+  for (let p = node.parent; p; p = p.parent) if (opens(p)) chain.push(p);
   return chain;
 }
 
@@ -567,11 +596,11 @@ function scopeChainOf(node) {
  *   before stops resolving: a repair that traded a false placement for a LOST
  *   engine write would be the expensive direction wearing the other costume.
  */
-function scopedNames() {
+function scopedNames(opens = opensScope) {
   const byScope = new Map(); // scope node -> Map<name, entry>
   const flat = new Map(); // name -> entry -- the file-wide tier
   const scopeMap = (declNode) => {
-    const scope = scopeChainOf(declNode)[0] ?? null;
+    const scope = scopeChainOf(declNode, opens)[0] ?? null;
     let m = byScope.get(scope);
     if (!m) { m = new Map(); byScope.set(scope, m); }
     return m;
@@ -591,7 +620,7 @@ function scopedNames() {
     /** The declaration `name` refers to AT `node` -- lexical tier, then the floor. */
     lookup(name, node) {
       if (node) {
-        for (const scope of scopeChainOf(node)) {
+        for (const scope of scopeChainOf(node, opens)) {
           const hit = byScope.get(scope)?.get(name);
           if (hit) return hit;
         }
@@ -601,11 +630,28 @@ function scopedNames() {
   };
 }
 
-/** Declared types visible in ONE file, keyed the way a receiver spells itself. */
+/**
+ * Declared types visible in ONE file, keyed the way a receiver spells itself.
+ *
+ * ⭐ THREE name maps, THREE scope notions -- and not one of them is "the file".
+ * A class property belongs to its CLASS (`this.engine` in class `B` is `B`'s and
+ * can be nothing else), a callable's name to whatever declares it (a class body
+ * for a method, the enclosing block or file for a function), and a local to its
+ * lexical scope. All three were once keyed on the bare identifier, which is one
+ * defect stated three times: two classes in one file sharing a property name
+ * were ONE entry, and the first TYPED one decided for both.
+ *
+ * ⇒ Each map is a {@link scopedNames} under the predicate that matches how the
+ *   language scopes that kind of name, and each keeps that structure's file-wide
+ *   FLOOR, so a name no enclosing scope declares resolves exactly where it used
+ *   to. ⛔ The repair may not cost a single site that resolved before: a fix that
+ *   traded a false placement for a LOST engine write would be the expensive
+ *   direction wearing the other costume.
+ */
 export function declaredTypesIn(sf) {
-  const thisProps = new Map();
+  const thisProps = scopedNames(opensClassScope);
   const locals = scopedNames();
-  const fnReturns = new Map();
+  const fnReturns = scopedNames(opensCallableScope);
   // `TypeName -> member -> declared type` for shapes declared in THIS file, so
   // `deps.getDataEngine()` and `opts.engine` resolve without a type checker.
   const shapes = new Map();
@@ -625,13 +671,15 @@ export function declaredTypesIn(sf) {
     node: initializer ?? null,
     literal: initializer && ts.isStringLiteralLike(initializer) ? initializer.text : null,
   });
-  const note = (map, key, typeNode, initializer) => {
-    if (map.has(key) && map.get(key).type) return;
-    map.set(key, entryOf(typeNode, initializer));
+  // ⛔ There is no bare-key spelling left to reach for. Every one of the three
+  // maps is recorded AT THE NODE that declares the name, because that node is
+  // the only thing that says which scope the name belongs to -- and a helper
+  // that could still be called without it is a helper the next author will call
+  // without it.
+  const note = (map, declNode, key, typeNode, initializer) => {
+    map.note(declNode, key, entryOf(typeNode, initializer));
   };
-  const noteLocal = (declNode, key, typeNode, initializer) => {
-    locals.note(declNode, key, entryOf(typeNode, initializer));
-  };
+  const noteLocal = (declNode, key, typeNode, initializer) => note(locals, declNode, key, typeNode, initializer);
   const visit = (n) => {
     if (ts.isImportDeclaration(n) && ts.isStringLiteralLike(n.moduleSpecifier)
         && /^node:/.test(n.moduleSpecifier.text)) {
@@ -649,9 +697,9 @@ export function declaredTypesIn(sf) {
       }
       shapes.set(n.name.text, m);
     }
-    if (ts.isPropertyDeclaration(n) && ts.isIdentifier(n.name)) note(thisProps, n.name.text, n.type, n.initializer);
+    if (ts.isPropertyDeclaration(n) && ts.isIdentifier(n.name)) note(thisProps, n, n.name.text, n.type, n.initializer);
     if (ts.isParameter(n) && ts.isIdentifier(n.name)) {
-      if (ts.isConstructorDeclaration(n.parent) && n.modifiers?.length) note(thisProps, n.name.text, n.type, n.initializer);
+      if (ts.isConstructorDeclaration(n.parent) && n.modifiers?.length) note(thisProps, n, n.name.text, n.type, n.initializer);
       noteLocal(n, n.name.text, n.type, n.initializer);
     }
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)) {
@@ -659,7 +707,7 @@ export function declaredTypesIn(sf) {
       // what a caller of `getData()` receives, not what `getData` itself is.
       const init = n.initializer;
       if (!n.type && init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.type) {
-        note(fnReturns, n.name.text, init.type, null);
+        note(fnReturns, n, n.name.text, init.type, null);
       }
       noteLocal(n, n.name.text, n.type, n.initializer);
     }
@@ -684,7 +732,7 @@ export function declaredTypesIn(sf) {
       }
     }
     if ((ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n)) && n.name && ts.isIdentifier(n.name)) {
-      note(fnReturns, n.name.text, n.type, null);
+      note(fnReturns, n, n.name.text, n.type, null);
     }
     ts.forEachChild(n, visit);
   };
@@ -762,7 +810,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
     return inlineEngineDoorOrOther(r.type.getText(sf), 'as', sf);
   }
   if (ts.isPropertyAccessExpression(r) && r.expression.kind === ts.SyntaxKind.ThisKeyword) {
-    return fromEntry(decls.thisProps.get(r.name.text), `this.${r.name.text}`);
+    return fromEntry(decls.thisProps.lookup(r.name.text, r), `this.${r.name.text}`);
   }
   if (ts.isIdentifier(r)) {
     if (decls.builtins.has(r.text)) return { kind: 'other', type: `node: builtin ${r.text}`, how: 'node-import' };
@@ -772,7 +820,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
   // base's own declared type gives the member.
   if (ts.isPropertyAccessExpression(r)) {
     const baseText = ts.isPropertyAccessExpression(r.expression) && r.expression.expression.kind === ts.SyntaxKind.ThisKeyword
-      ? decls.thisProps.get(r.expression.name.text)?.type
+      ? decls.thisProps.lookup(r.expression.name.text, r.expression)?.type
       : ts.isIdentifier(r.expression) ? decls.locals.lookup(r.expression.text, r.expression)?.type : null;
     const mt = memberTypeOf(baseText, r.name.text, decls);
     if (mt) {
@@ -803,7 +851,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
         return inlineEngineDoorOrOther(mt, `${fname}() return`, sf);
       }
     }
-    const entry = fname ? decls.fnReturns.get(fname) : null;
+    const entry = fname ? decls.fnReturns.lookup(fname, callee) : null;
     if (entry) return fromEntry(entry, `${fname}()`);
     return { kind: 'unresolved', how: 'call', detail: receiverKey(r, sf) };
   }
