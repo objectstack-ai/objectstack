@@ -7,10 +7,22 @@
  * `{ field: 'stage', operator: 'not_in', value: 'won' }` published cleanly and
  * then answered a named 400 `INVALID_FILTER` at query time (#5869 / PR #6209
  * closed that runtime half). The author was gone by then. These pins assert the
- * publish-time half now refuses the same three shapes the runtime refuses —
+ * publish-time half now refuses the same shapes the runtime refuses —
  * `$in`/`$nin` must be arrays, `$between` must be a 2-array — and, just as
  * importantly, that it refuses NOTHING ELSE (#5685: a schema stricter than the
  * runtime is the wrong side).
+ *
+ * [#19514] The SCALAR arm joined them, and it moved three pins in this file from
+ * the accepted side to the refused side. It is not an extension of #6227's
+ * reasoning but a correction of one of its readings: an array on a scalar
+ * operator was recorded here as accepted because it 「lowers to a bare
+ * deep-equality comparand, which every backend answers」, and re-measurement
+ * found the opposite — `driver-sql` refuses the comparand with `INVALID_FILTER`
+ * and the in-memory matchers exclude every row, so a view that PASSED the
+ * protocol selected nothing. The pins below carry both directions of that arm,
+ * and the carve-outs (an absent value, the four valueless operators) keep their
+ * own pins, because the #5685 side of this file is what stops a narrowing from
+ * running on past the query path.
  *
  * Every rejection pin asserts the issue PATH and the message's leading sentence,
  * not merely that a throw happened: a bare `.toThrow()` cannot tell "refused for
@@ -28,6 +40,34 @@ import {
 
 /** Parse helper — the authored object form, exactly as a view carries it. */
 const parse = (rule: Record<string, unknown>) => ViewFilterRuleSchema.safeParse(rule);
+
+/**
+ * The operators whose value position is discarded downstream — they take their
+ * direction from the operator NAME. Transcribed here rather than imported
+ * because the schema keeps its copy PRIVATE on purpose (publishing it would
+ * enlarge the package's public face for a question only the refinement asks),
+ * and the sweep below is what holds the two lists equal: an operator dropped
+ * from the schema's set reddens the array half of the sweep, and one added to
+ * it reddens the carve-out pin.
+ */
+const VALUELESS_OPERATORS = ['is_empty', 'is_not_empty', 'is_null', 'is_not_null'] as const;
+
+/**
+ * Every operator this check judges as taking a SCALAR — the canonical
+ * vocabulary minus the list set, the range set and the four above. DERIVED, so
+ * an operator added to the enum arrives in both directions of the sweep instead
+ * of quietly skipping it.
+ */
+const UNSHAPED_VALUE_OPERATORS: readonly string[] = VIEW_FILTER_OPERATORS.filter(
+  (operator) =>
+    !(
+      [
+        ...VIEW_FILTER_LIST_VALUE_OPERATORS,
+        ...VIEW_FILTER_PAIR_VALUE_OPERATORS,
+        ...VALUELESS_OPERATORS,
+      ] as readonly string[]
+    ).includes(operator),
+);
 
 /** The single `value`-path issue a shape refusal must produce. */
 function valueIssue(result: ReturnType<typeof parse>) {
@@ -135,18 +175,24 @@ describe('#6227 — what stays accepted (the #5685 side: never stricter than the
     ['not_in + empty array', { field: 'f', operator: 'not_in', value: [] }],
     ['between + pair', { field: 'f', operator: 'between', value: [1, 2] }],
     ['between + ISO date pair', { field: 'd', operator: 'between', value: ['2024-01-01', '2024-12-31'] }],
-    // A scalar operator carrying an array lowers to a deep-equality comparand.
-    ['equals + array', { field: 'f', operator: 'equals', value: ['a', 'b'] }],
-    ['not_equals + array', { field: 'f', operator: 'not_equals', value: ['a'] }],
-    // A string operator carrying a number: no backend refuses it.
+    // A string operator carrying a number: no backend refuses it. (`icontains`
+    // is the one exception and it is the TABLE's row, not an analogy — see the
+    // comparand pins below.)
     ['contains + number', { field: 'f', operator: 'contains', value: 5 }],
     ['starts_with + number', { field: 'f', operator: 'starts_with', value: 5 }],
     // Ordering operators take a scalar of any declared type (#5685 widened these).
     ['greater_than + ISO string', { field: 'd', operator: 'greater_than', value: '2026-01-01' }],
     ['before + string', { field: 'd', operator: 'before', value: '2026-01-01' }],
     ['after + string', { field: 'd', operator: 'after', value: '2026-01-01' }],
-    // Ordering operators carrying an array are not this check's business either.
-    ['greater_than + array', { field: 'f', operator: 'greater_than', value: [1, 2] }],
+    // A scalar operator with NO value: `value` is optional and absence is not a
+    // shape. The scalar arm must not turn an omitted comparand into a refusal.
+    ['equals + omitted', { field: 'f', operator: 'equals' }],
+    ['greater_than + omitted', { field: 'd', operator: 'greater_than' }],
+    // Every scalar type the declared union carries still parses on a scalar operator.
+    ['equals + null', { field: 'f', operator: 'equals', value: null }],
+    ['equals + boolean', { field: 'f', operator: 'equals', value: false }],
+    ['equals + empty string', { field: 'f', operator: 'equals', value: '' }],
+    ['equals + zero', { field: 'f', operator: 'equals', value: 0 }],
     // Alias spellings with a CONFORMING value keep parsing.
     ['nin alias + array', { field: 'f', operator: 'nin', value: ['a'] }],
     ['notIn alias + array', { field: 'f', operator: 'notIn', value: ['a'] }],
@@ -169,16 +215,80 @@ describe('#6227 — what stays accepted (the #5685 side: never stricter than the
     },
   );
 
-  it('leaves every operator outside the two shaped vocabularies unjudged', () => {
-    const shaped = new Set<string>([
-      ...VIEW_FILTER_LIST_VALUE_OPERATORS,
-      ...VIEW_FILTER_PAIR_VALUE_OPERATORS,
-    ]);
-    for (const operator of VIEW_FILTER_OPERATORS) {
-      if (shaped.has(operator)) continue;
-      // Both a scalar and an array parse for every unshaped operator.
-      expect(parse({ field: 'f', operator, value: 'x' }).success).toBe(true);
-      expect(parse({ field: 'f', operator, value: ['x'] }).success).toBe(true);
+  it('takes a SCALAR on every operator outside the list, range and valueless sets', () => {
+    // [#19514] The sweep that used to read "both a scalar and an array parse"
+    // for these operators. The scalar half is unchanged and is the half this
+    // assertion protects: a narrowing that made the common shape refuse would
+    // fail here before it reached a consumer. The array half moved and has its
+    // own two-directional sweep below.
+    for (const operator of UNSHAPED_VALUE_OPERATORS) {
+      expect(parse({ field: 'f', operator, value: 'x' }).success, operator).toBe(true);
+    }
+  });
+});
+
+describe('#19514 — the scalar arm, in both directions', () => {
+  /** The three pins this arm MOVED, named as such so the reversal is legible. */
+  it.each([
+    ['equals + array', { field: 'f', operator: 'equals', value: ['a', 'b'] }, 'equals'],
+    ['not_equals + array', { field: 'f', operator: 'not_equals', value: ['a'] }, 'not_equals'],
+    ['greater_than + array', { field: 'f', operator: 'greater_than', value: [1, 2] }, 'greater_than'],
+  ])('refuses %s — recorded as ACCEPTED at #6227, reversed on measurement', (_label, rule, operator) => {
+    const issue = valueIssue(parse(rule as Record<string, unknown>));
+    expect(issue.code).toBe('custom');
+    expect(issue.path).toEqual(['value']);
+    expect(issue.message).toContain(`Operator "${operator}" on field "f" requires a SCALAR value.`);
+    // Not the list wording and not the range wording — three arms, three
+    // diagnoses, and an author must be able to tell which one fired.
+    expect(issue.message).not.toContain('requires an ARRAY of values');
+    expect(issue.message).not.toContain('requires a [min, max] value array');
+    // The refusal carries what to DO, and the query-path code to match it against.
+    expect(issue.message).toContain('to compare against one value');
+    expect(issue.message).toContain('or use "in" to test membership of the list');
+    expect(issue.message).toContain('400 INVALID_FILTER');
+  });
+
+  it('prescribes the author OWN first member, not a canned example', () => {
+    const issue = valueIssue(parse({ field: 'stage', operator: 'equals', value: ['won', 'lost'] }));
+    expect(issue.message).toContain('Received an array of 2 (["won","lost"])');
+    expect(issue.message).toContain('write "won" to compare against one value');
+  });
+
+  it('has something to say about an EMPTY array too, where there is no first member', () => {
+    const issue = valueIssue(parse({ field: 'stage', operator: 'equals', value: [] }));
+    expect(issue.message).toContain('Received an array of 0 ([])');
+    expect(issue.message).toContain('write the value to compare against');
+  });
+
+  it('names the two vocabularies from the exported sets, not from a transcription', () => {
+    const issue = valueIssue(parse({ field: 'f', operator: 'equals', value: ['a'] }));
+    for (const operator of VIEW_FILTER_LIST_VALUE_OPERATORS) expect(issue.message).toContain(`"${operator}"`);
+    for (const operator of VIEW_FILTER_PAIR_VALUE_OPERATORS) expect(issue.message).toContain(`"${operator}"`);
+  });
+
+  it('carries no internal tracker id — the reader of this string cannot open one', () => {
+    const issue = valueIssue(parse({ field: 'f', operator: 'equals', value: ['a'] }));
+    expect(issue.message).not.toMatch(/(?<![#&])#[0-9]{3,5}(?![0-9A-Za-z])/);
+  });
+
+  it('sweeps every unshaped operator: an array REFUSES, a scalar ACCEPTS', () => {
+    // The two-directional sweep. A one-directional one would stay green if the
+    // arm refused everything, which is the failure an inert door looks like.
+    expect(UNSHAPED_VALUE_OPERATORS.length).toBeGreaterThan(0);
+    for (const operator of UNSHAPED_VALUE_OPERATORS) {
+      expect(parse({ field: 'f', operator, value: ['x'] }).success, `${operator} + array`).toBe(false);
+      expect(parse({ field: 'f', operator, value: 'x' }).success, `${operator} + scalar`).toBe(true);
+    }
+  });
+
+  it('leaves the four VALUELESS operators alone, array included', () => {
+    // The carve-out that keeps this narrowing from running past the query path:
+    // `convertComparison` maps these to `{ $null: true|false }` and discards the
+    // value position, and the ObjectUI client sends a truthy PLACEHOLDER there.
+    for (const operator of VALUELESS_OPERATORS) {
+      expect(parse({ field: 'f', operator, value: ['x'] }).success, operator).toBe(true);
+      expect(parse({ field: 'f', operator, value: 'x' }).success, operator).toBe(true);
+      expect(parse({ field: 'f', operator }).success, operator).toBe(true);
     }
   });
 });

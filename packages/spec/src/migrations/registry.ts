@@ -8546,6 +8546,67 @@ const step18: MigrationStep = {
         + 'authoring schema door (SET_MEMBER_DESCRIPTION); they are outside THIS entry\'s transition '
         + 'and are worth sweeping in the same pass.',
     },
+    // One entry for two doors on purpose: the two vocabularies spell one operator
+    // and the rows being answered are one pair. Splitting it would put half the
+    // prescription in front of an author who wrote the other spelling.
+    {
+      id: 'filter-icontains-comparand-refused-at-parse',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'the case-insensitive contains comparand, in BOTH authoring vocabularies — the $ dialect '
+        + 'key $icontains inside FilterConditionSchema (query where clauses, read-scope rules, '
+        + 'dashboard and analytics filters) and the infix spelling icontains on '
+        + 'ViewFilterRuleSchema (view, tab, page and block filters) — where the comparand is the '
+        + 'EMPTY STRING or is not a string at all',
+      replacement:
+        'a NON-EMPTY STRING, or no condition at all. A comparand that was empty is a predicate '
+        + 'that constrains nothing, so the repair is to DROP the condition rather than to write '
+        + 'something in it. A comparand that was a number, boolean or null is written as the '
+        + 'string it was meant to match: value 42 becomes value "42" only if a substring match on '
+        + 'the two characters is really what was meant, and if it is not, the operator was the '
+        + 'wrong one. On a view rule an OMITTED value is untouched — absence is not a comparand '
+        + 'and this rule says nothing about it',
+      reason:
+        '#19514, out of objectui#9050 ruling C-prime (maintainer 2026-09-20, verbatim, '
+        + 'untranslated): 「the differences are the protocol\'s to close」. The platform already '
+        + 'DECLARED both refusals, as data, in this package: FILTER_TEXT_CASES carries a '
+        + 'REJECTION row for an empty comparand and one for a non-string comparand, each with '
+        + 'code INVALID_FILTER and each requiring the refusal to name the operator. Every backend '
+        + 'answers those rows. Nothing applied them at PARSE on either vocabulary, so the '
+        + 'protocol declared the refusal and then admitted the document that would hit it — the '
+        + 'declared-not-enforced shape ADR-0049 exists to close. '
+        + 'The narrowing is DERIVED from the table, not transcribed beside it: both doors call '
+        + 'the published predicate isRefusedTextComparand and the published reason text '
+        + 'textComparandRefusalReason, the pair lifted into this package at #18113 for exactly '
+        + 'this reason, so a row added to the table reaches both doors without an edit at either. '
+        + 'Scope is the one operator the table writes rows for: $contains, $startsWith, '
+        + '$endsWith, $like and $ilike have no such row and keep the answer they have always '
+        + 'given, because widening by analogy is the table\'s decision and not a door\'s. '
+        + 'The two vocabularies differ on one point and it is a fact about them rather than an '
+        + 'extra rule: a view rule\'s value key is OPTIONAL, so an absent comparand is left '
+        + 'unjudged there; the $ dialect has no absent, so an explicit undefined in a comparand '
+        + 'slot is the refused non-string shape — the same reading the comparand-type door '
+        + 'already takes of that cell. '
+        + 'Metadata AT REST is deliberately NOT rewritten and this entry adds no D2 conversion. '
+        + 'An empty comparand has no lossless replacement (dropping a condition changes which '
+        + 'rows a view returns, which is the author\'s decision) and a non-string one has no '
+        + 'honest coercion (the platform refuses to answer a query nobody wrote). The read path '
+        + 'does not re-validate stored rows, so a stored filter keeps loading; what changes is '
+        + 'that RE-SAVING it is refused, with the reason text three shipped consumer faces '
+        + 'already show at query time. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep your authored filters for the case-insensitive contains operator in either '
+        + 'spelling and read each comparand: an empty one means the condition was a placeholder '
+        + 'and the repair is to delete it, and a non-string one means either a missing pair of '
+        + 'quotes or the wrong operator. A filter whose comparand was empty has been returning '
+        + 'EVERY row, not zero, so a list that looked unfiltered was unfiltered — re-check what '
+        + 'the view is supposed to show. A filter whose comparand was not a string has been '
+        + 'answered with INVALID_FILTER at query time on every backend, so it has never returned '
+        + 'rows at all. Both refusals now arrive at the authoring path with the same reason text '
+        + 'the runtime gives, so the message an author reads is the same message wherever they '
+        + 'hit it.',
+    },
     {
       id: 'filter-preset-ordering-comparand-refused',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
@@ -10119,6 +10180,65 @@ const step18: MigrationStep = {
         + 'the pin): the `object-grid.data:object` exemption entry in '
         + '`registry-inputs-spec-parity.test.ts` becomes deletable, which is what closes '
         + 'objectui#6207.',
+    },
+    // The key the one-filter-orthography convergence did not name. Its sibling
+    // entry element-data-source-and-object-block-filter-rule-array says so in as
+    // many words — 「object-grid.defaultFilters is a different key and is not named
+    // by the ruling this entry records」 — so this is the entry that names it.
+    {
+      id: 'object-grid-default-filters-rule-array',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'the object-grid page block\'s defaultFilters property — the legacy base-filter fallback '
+        + 'in ComponentPropsMap, which was z.unknown and therefore accepted a bare string, a '
+        + 'number, a MongoDB-style record, an ObjectQL AST tuple array and a list of malformed '
+        + 'rules alike',
+      replacement:
+        'the same ViewFilterRule array form its sibling filter takes — '
+        + '[{ field, operator, value }, ...]. A record-form fallback { status: "active" } becomes '
+        + '[{ field: "status", operator: "equals", value: "active" }] and several record keys '
+        + 'become several rules, which AND; an operator object { amount: { $gt: 100 } } lifts the '
+        + 'operator into the rule, becoming '
+        + '[{ field: "amount", operator: "greater_than", value: 100 }]; an AST tuple array '
+        + '[["owner_id", "=", "{current_user_id}"]] becomes '
+        + '[{ field: "owner_id", operator: "equals", value: "{current_user_id}" }], value '
+        + 'placeholders and date macros unchanged. Legacy operator shorthands are accepted and '
+        + 'normalized on parse. Better still, write the rules on filter and delete this key: it '
+        + 'is read only when filter is absent, and its own description has prescribed filter all '
+        + 'along',
+      reason:
+        '#19514, out of objectui#9050 ruling C-prime (maintainer 2026-09-20, verbatim, '
+        + 'untranslated): 「the differences are the protocol\'s to close」. This is the SAME value '
+        + 'in the SAME role as filter — the key\'s own description says it is read only when '
+        + 'filter is absent — and the consumer reads it through the SAME lowering sink, so every '
+        + 'refusal that sink can give was reachable from a document the protocol had just '
+        + 'accepted. filter converged on the rule array with the rest of its family; this key was '
+        + 'not named by that ruling and kept the pre-convergence read-point shape, which left the '
+        + 'block with one declared door and one undeclared door onto one seam. An author who put '
+        + 'the record form on the fallback got a silent success receipt and a 400 at render, with '
+        + 'nothing in between to tell them which of the two keys was the problem. '
+        + '⛔ This entry is a NARROWING and deliberately not a retirement. Refusing the key '
+        + 'outright — the other arm the finding offered — removes an accepted shape and needs its '
+        + 'own ruling; the deprecation already stated in the description is unchanged and still '
+        + 'says to prefer filter. '
+        + 'Metadata AT REST is deliberately NOT rewritten and this entry adds no D2 conversion, '
+        + 'for the reason its sibling gives at length: a SemanticMigration converts nothing by '
+        + 'its own type, the stored-row pass replays D2 conversions only, and the read path does '
+        + 'not re-validate stored rows — so a stored page carrying the record form keeps loading '
+        + 'and keeps rendering as it does today. What changes is that RE-SAVING it is refused at '
+        + 'the defaultFilters path, with the same conversion table the filter door gives, '
+        + 'computed from the author\'s own keys. ADR-0049 / ADR-0087.',
+      acceptanceCriteria:
+        'Every object-grid node in your pages either omits defaultFilters or carries a '
+        + 'ViewFilterRule array on it. The parse of an object-grid node whose defaultFilters is '
+        + 'that array raises no issue at the key; a record form is refused AT defaultFilters with '
+        + 'the conversion table and a worked rewrite built from the keys that were written, and '
+        + 'an AST tuple array is refused one level in, at the first element. A grid that has been '
+        + 'relying on a record-form defaultFilters was not being filtered by it — the lowering '
+        + 'refused the shape — so re-check which rows the grid is supposed to show rather than '
+        + 'assuming the displayed set was correct. Where both keys were authored, only filter was '
+        + 'ever read: deleting defaultFilters is the whole migration.',
     },
     {
       id: 'object-index-unknown-keys-refused',
@@ -12930,6 +13050,71 @@ const step18: MigrationStep = {
         + '`displayField`. Declared keys parse byte-identically to before; `objectstack validate` '
         + 'reports no `component-props-unknown-key` / `component-props-invalid` finding for the '
         + 'rail.',
+    },
+    // The scalar half of the coupling #6227 declared and did not judge. Recorded
+    // here rather than amended onto `view-filter-rule-value-shaped-by-operator`
+    // because that entry's own prose states the OPPOSITE reading as accepted, and
+    // an upgrade guide that quietly rewrites a shipped prescription leaves the
+    // reader who followed it with no trace of why their metadata now fails.
+    {
+      id: 'view-filter-rule-scalar-operator-array-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'ui.ViewFilterRule value on a SCALAR operator — an ARRAY where the operator takes one '
+        + 'value (equals, not_equals, contains, not_contains, icontains, starts_with, ends_with, '
+        + 'greater_than, less_than, greater_than_or_equal, less_than_or_equal, before, after), on '
+        + 'every carrier of ViewFilterRuleSchema: ListView.filter, a list view tab filter, '
+        + 'Page.filterBy, a related-list filter, a lookup picker filter, and the filter and '
+        + 'defaultFilters keys of the object-* page blocks',
+      replacement:
+        'one scalar — a string, number, boolean or null. A rule written '
+        + 'value: ["won"] on equals becomes value: "won"; a rule that really did mean membership '
+        + 'of a list becomes operator: "in" with the array unchanged. The list operators (in / '
+        + 'not_in) and the range operator (between) are untouched and still take their arrays. '
+        + 'The unary operators (is_empty / is_not_empty / is_null / is_not_null) are untouched '
+        + 'too: they take their direction from the operator NAME and their value position is '
+        + 'discarded, so whatever sits there still parses, array included. An omitted value is '
+        + 'still an omitted value',
+      reason:
+        '#19514, closing the protocol half of objectui#9050 ruling C-prime (maintainer '
+        + '2026-09-20, verbatim, untranslated): 「the differences are the protocol\'s to close」. '
+        + 'The value key\'s own published description has declared this rule since #6227 — '
+        + '「every other operator takes a scalar」 — and the refinement that implements the '
+        + 'coupling returned early for every operator that is neither a list operator nor '
+        + 'between, so the entire scalar class was declared and never judged. '
+        + '⚠️ This REVERSES a reading recorded in the sibling entry '
+        + 'view-filter-rule-value-shaped-by-operator, which listed a scalar operator carrying an '
+        + 'array as deliberately accepted because it 「lowers to a bare deep-equality comparand, '
+        + 'which every backend answers」. Re-measured at source for this entry: the lowered node '
+        + 'reaches driver-sql\'s bare field-value loop, which asserts the comparand against its '
+        + 'own SCALAR_COMPARAND_OPERATORS set; an array is none of the six accepted comparand '
+        + 'types the platform declares in ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE, so the '
+        + 'comparand is refused with the withheld INVALID_FILTER / 400 envelope, and every '
+        + 'in-memory matcher excludes every row for the same reason. So the earlier reading was '
+        + 'the one that widened the accept set past the query path, and a stored view carrying '
+        + 'this shape PASSED the protocol and then selected nothing. The narrowing mirrors the '
+        + 'query path exactly and goes no further, which is the #5685 boundary this family has '
+        + 'held since it was written. '
+        + 'Metadata AT REST is deliberately NOT rewritten and this entry adds no D2 conversion: a '
+        + 'SemanticMigration converts nothing by its own type, and the stored-row pass replays D2 '
+        + 'conversions only. Coercing at load would be the platform guessing intent — an array of '
+        + 'two on equals has no honest single value, and picking the first is a different '
+        + 'predicate. The read path does not re-validate stored rows, so a stored view keeps '
+        + 'loading; what changes is that RE-SAVING it is refused at the value path, instead of '
+        + 'storing a filter that 400s. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep your authored views, pages and object-* blocks for a filter rule whose operator is '
+        + 'none of in / not_in / between / the four unary operators and whose value is an array, '
+        + 'then decide per rule which of the two things it meant: one value, or membership. '
+        + 'os validate and os lint report each one by path with the operator, the received shape '
+        + 'and both corrected spellings, so the sweep is mechanical rather than by eye. '
+        + 'Worth knowing before you rewrite: such a rule has never returned filtered rows — it '
+        + 'answered 400 INVALID_FILTER on the SQL family and excluded every row on the in-memory '
+        + 'matchers — so re-check what the view is supposed to show rather than assuming the old '
+        + 'result set was correct. A one-element array is the case to read closest: '
+        + 'value: ["won"] on equals and operator: "in" with value: ["won"] select the same rows '
+        + 'today, and only the author knows which the metadata meant.',
     },
     {
       id: 'wait-node-event-config-required',
