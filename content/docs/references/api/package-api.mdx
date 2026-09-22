@@ -495,7 +495,7 @@ Install package request
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install (AUTHORING stage: `objects` are glob patterns) |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install — honoured at POST /api/v1/packages: the installed row's `enabled` is written from this key |
+| **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install — honoured at POST /api/v1/packages: `true` enables the installed row, `false` disables it, and ABSENT keeps the row's current lifecycle state (a fresh install lands enabled) |
 | **overwrite** | `boolean` | optional | Overwrite an already-installed package id instead of answering 409 Conflict |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for marketplace installation |
@@ -658,7 +658,7 @@ Install package request
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install (AUTHORING stage: `objects` are glob patterns) |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install — honoured at POST /api/v1/packages: the installed row's `enabled` is written from this key |
+| **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install — honoured at POST /api/v1/packages: `true` enables the installed row, `false` disables it, and ABSENT keeps the row's current lifecycle state (a fresh install lands enabled) |
 | **overwrite** | `boolean` | optional | Overwrite an already-installed package id instead of answering 409 Conflict |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for marketplace installation |

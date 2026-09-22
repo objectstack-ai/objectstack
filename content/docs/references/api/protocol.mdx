@@ -1910,7 +1910,7 @@ Install package request
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install — restates the install-door request key, whose one authority is api/PackageInstallRequest; this protocol primitive does not read it |
+| **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install — restates the install-door request key, whose one authority is api/PackageInstallRequest (`true` enables, `false` disables, ABSENT keeps the row's current lifecycle state); this protocol primitive does not read it |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 
 ### Nested Shape: `InstallPackageRequest.manifest`
