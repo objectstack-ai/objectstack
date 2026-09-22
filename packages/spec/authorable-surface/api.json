@@ -1057,7 +1057,7 @@
     "api/ListRecordResponse:meta",
     "api/ListRecordResponse:pagination",
     "api/ListRecordResponse:success",
-    "api/ListRunsRequest:cursor",
+    "api/ListRunsRequest:cursor [RETIRED]",
     "api/ListRunsRequest:limit",
     "api/ListRunsRequest:name",
     "api/ListRunsRequest:status",

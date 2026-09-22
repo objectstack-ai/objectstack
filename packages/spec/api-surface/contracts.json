@@ -253,6 +253,7 @@
     "RlsMembershipContext (interface)",
     "RollbackInput (interface)",
     "RouteHandler (type)",
+    "RunListResult (interface)",
     "SEED_SETTLEMENT_SERVICE (const)",
     "SHARE_LINK_SERVICE (const)",
     "SaveReportInput (interface)",

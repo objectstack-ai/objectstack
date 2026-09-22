@@ -253,6 +253,7 @@
     "RlsMembershipContext": "src/contracts/rls-membership-resolver.ts#RlsMembershipContext (interface)",
     "RollbackInput": "src/contracts/package-service.ts#RollbackInput (interface)",
     "RouteHandler": "src/contracts/http-server.ts#RouteHandler (type)",
+    "RunListResult": "src/contracts/automation-service.ts#RunListResult (interface)",
     "SEED_SETTLEMENT_SERVICE": "src/contracts/seed-settlement.ts#SEED_SETTLEMENT_SERVICE (const)",
     "SHARE_LINK_SERVICE": "src/contracts/share-link-service.ts#SHARE_LINK_SERVICE (const)",
     "SaveReportInput": "src/contracts/report-service.ts#SaveReportInput (interface)",
