@@ -44,6 +44,25 @@
  * installation serves `--print` / `--export` with the app and installation ids
  * alone — which is what lets `with-fleet.sh --self-test` run offline.
  *
+ * ## The second route: the repository's Actions VARIABLES
+ *
+ * A fleet container has no `OS_FLEET_*` of its own unless every Claude account
+ * that runs one configures them, so the maintainer decided to hold all three
+ * as repository variables of the board repo instead. When the environment
+ * lacks any of them (and `OS_FLEET_INPUTS_FROM_GITHUB` is not `0`), the absent
+ * ones are read from `GET /repos/{repo}/actions/variables/{NAME}` with this
+ * session's own `GITHUB_TOKEN` / `GH_TOKEN` — the board the sweep tooling
+ * resolves, or `OS_FLEET_VARIABLES_REPO`. The environment wins per variable.
+ * The key so read lives in this process's memory for the length of one mint
+ * and is never written anywhere; the cache stays token-only.
+ *
+ * ⚠️ The trust boundary this widens, stated so nobody rediscovers it: a
+ * repository variable is plaintext, readable by every collaborator and by
+ * every App installation holding `actions: read` on the repo. Every one of
+ * them can therefore mint as the fleet. That is the maintainer's decision,
+ * taken with that consequence in front of them, and a Secret would not serve:
+ * no API reads a Secret back, only a workflow run can.
+ *
  * ## The JWT — node's `crypto`, no dependency
  *
  * RS256 over `base64url(header).base64url(payload)`; `iat = now − 60` (clock
@@ -102,7 +121,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan } from './check-half-states.mjs';
+import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo } from './check-half-states.mjs';
 import { classifyHttp } from './label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceFilePath, paceWrite, releaseWriteLease } from './write-pace.mjs';
 
@@ -120,6 +139,9 @@ export const JWT_BACKDATE_S = 60;
 export const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 export const REQUIRED_INPUTS = Object.freeze(['OS_FLEET_APP_ID', 'OS_FLEET_INSTALLATION_ID']);
 export const MINT_INPUT = 'OS_FLEET_PRIVATE_KEY';
+export const INPUT_NAMES = Object.freeze([...REQUIRED_INPUTS, MINT_INPUT]);
+/** `0` closes the repository-variables route, so a self-test or a locked-down host reads the environment alone. */
+export const VARIABLES_OPT_OUT = 'OS_FLEET_INPUTS_FROM_GITHUB';
 
 /** A failure with the exit code it maps to. Its message is ALREADY redacted. */
 export class FleetTokenError extends Error {
@@ -291,6 +313,95 @@ export function readInputs(env = process.env, { mint = true } = {}) {
   const api = String(env.OS_FLEET_API_URL ?? '').trim().replace(/\/+$/, '') || DEFAULT_API;
   const authorLogin = String(env.OS_FLEET_GIT_AUTHOR_LOGIN ?? '').trim() || null;
   return { appId, installationId, api, authorLogin, privateKey: mint ? env[MINT_INPUT] : null };
+}
+
+/**
+ * The second route: read the named inputs from the repository's Actions
+ * variables with the session's own token. Returns what was found and what was
+ * absent (404); any other answer is thrown with the exit the status maps to.
+ */
+export async function fetchInputsFromGitHub({ repo, token, api = DEFAULT_API, fetchImpl = globalThis.fetch, names = INPUT_NAMES } = {}) {
+  if (!token) {
+    throw new FleetTokenError(
+      `${names.join(', ')} are not in the environment, and there is no GITHUB_TOKEN / GH_TOKEN to read them from ${repo}'s repository variables with — set them in one of the two places.`,
+      EXIT_PREREQUISITE,
+    );
+  }
+  const headers = { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', authorization: `Bearer ${token}` };
+  const get = async (path) => {
+    let res;
+    try {
+      res = await fetchImpl(`${api}${path}`, { method: 'GET', headers });
+    } catch (e) {
+      throw new FleetTokenError(`GET ${path}: the platform could not be reached — ${scrub(e?.message ?? 'fetch threw', [token])}`, EXIT_PREREQUISITE);
+    }
+    let json = null;
+    try {
+      json = await res.json();
+    } catch {
+      json = null;
+    }
+    return { res, json };
+  };
+
+  // An ORGANIZATION variable shared with the repo is read through the REPO's
+  // own endpoint — `/orgs/{org}/actions/variables/{name}` needs org-admin or
+  // the org-level variables permission, which a seat's token does not carry,
+  // while this one needs only `actions: read` on the repo. Fetched once, and
+  // only when a repo-level lookup came back 404. First page of 100: an
+  // organization sharing more variables than that with one repo is not this
+  // fleet's shape, and a name past the page reads as absent, loudly.
+  let shared = null;
+  const sharedValue = async (name) => {
+    if (shared === null) {
+      const { res, json } = await get(`/repos/${repo}/actions/organization-variables?per_page=100`);
+      shared = res.status === 200 && Array.isArray(json?.variables) ? json.variables : [];
+    }
+    const hit = shared.find((v) => v?.name === name && typeof v.value === 'string');
+    return hit ? hit.value : null;
+  };
+
+  const values = {};
+  const missing = [];
+  for (const name of names) {
+    const path = `/repos/${repo}/actions/variables/${name}`;
+    const { res, json } = await get(path);
+    if (res.status === 404) {
+      const fromOrg = await sharedValue(name);
+      if (fromOrg === null) missing.push(name);
+      else values[name] = fromOrg;
+      continue;
+    }
+    if (res.status !== 200 || typeof json?.value !== 'string') {
+      throw new FleetTokenError(`GET ${path} → HTTP ${res.status} ${scrub(platformSentence(json), [token])}`.trim(), exitForStatus(res.status, res.headers));
+    }
+    values[name] = json.value;
+  }
+  return { values, missing };
+}
+
+/**
+ * The inputs, from the environment first and the repository's variables for
+ * whatever the environment lacks. Async because the second route is a read.
+ */
+export async function resolveInputs(env = process.env, deps = {}, { mint = true } = {}) {
+  const names = mint ? INPUT_NAMES : REQUIRED_INPUTS;
+  const absent = names.filter((n) => !String(env[n] ?? '').trim());
+  if (absent.length === 0 || String(env[VARIABLES_OPT_OUT] ?? '').trim() === '0') return { ...readInputs(env, { mint }), source: 'environment' };
+  const log = deps.log ?? ((line) => console.error(line));
+  const repo = String(env.OS_FLEET_VARIABLES_REPO ?? '').trim() || resolveSweepRepo(env).repo;
+  const api = String(env.OS_FLEET_API_URL ?? '').trim().replace(/\/+$/, '') || DEFAULT_API;
+  const token = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
+  const { values, missing } = await fetchInputsFromGitHub({ repo, token, api, fetchImpl: deps.fetch ?? globalThis.fetch, names: absent });
+  if (missing.length) {
+    throw new FleetTokenError(
+      `${missing.join(', ')} neither in the environment nor among ${repo}'s repository variables — set each in one of the two places ` +
+        `(gh variable set <NAME> --repo ${repo} --body …); nothing was minted.`,
+      EXIT_PREREQUISITE,
+    );
+  }
+  log(`fleet-token: ${absent.join(', ')} not in the environment — read from ${repo}'s repository variables with this session's GitHub token.`);
+  return { ...readInputs({ ...env, ...values }, { mint }), source: `repository variables of ${repo}` };
 }
 
 /** POSIX shell single-quoting, so `eval "$(… --export)"` is exact for any byte. */
@@ -498,9 +609,11 @@ export async function getFleetToken({ force = false } = {}, deps = {}) {
   const now = deps.now ?? (() => Date.now());
   const file = deps.file ?? cacheFilePath(env, deps.home ?? homedir());
   const cached = force ? null : readCache(file);
-  const probe = readInputs(env, { mint: false });
+  // The probe resolves the ids only, quietly: the mint's own resolve below
+  // says where the inputs came from, once, on the run that actually mints.
+  const probe = await resolveInputs(env, { ...deps, log: () => {} }, { mint: false });
   if (!force && !needsRefresh(cached, now(), { installationId: probe.installationId })) return { ...cached, fresh: false, file };
-  const inputs = readInputs(env, { mint: true });
+  const inputs = await resolveInputs(env, deps, { mint: true });
   return mintInstallationToken(inputs, { ...deps, env, file, recheck: force ? null : () => readCache(file) });
 }
 
@@ -516,9 +629,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the mint: what a fake platform answers, and what this tool does with it': 11,
   'redaction: a known token and a known key fed through every output path never come back out': 12,
   'the CLI: --print prints the token alone, --export prints shell, --status prints neither': 8,
+  'the repository-variables route: read when the environment has none, environment wins, the key never lands anywhere': 11,
   'the wiring: the one POST is paced and leased, and the throttle roster names this file': 4,
 });
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -724,7 +838,10 @@ export async function selfTest() {
         repository_selection: 'all',
         minted_at: new Date().toISOString(),
       });
-      const base = { ...process.env, OS_FLEET_TOKEN_CACHE_FILE: file, OS_FLEET_APP_ID: inputs.appId, OS_FLEET_INSTALLATION_ID: inputs.installationId, OS_PM_WRITE_PACE_FILE: paceFile, OS_FLEET_PRIVATE_KEY: '', HTTPS_PROXY: '', https_proxy: '' };
+      // `OS_FLEET_INPUTS_FROM_GITHUB=0`: a CI runner carries a GITHUB_TOKEN, and
+      // the "missing inputs" case below must refuse from the environment alone
+      // rather than go and read the real repository's variables.
+      const base = { ...process.env, OS_FLEET_TOKEN_CACHE_FILE: file, OS_FLEET_APP_ID: inputs.appId, OS_FLEET_INSTALLATION_ID: inputs.installationId, OS_PM_WRITE_PACE_FILE: paceFile, OS_FLEET_PRIVATE_KEY: '', OS_FLEET_INPUTS_FROM_GITHUB: '0', HTTPS_PROXY: '', https_proxy: '' };
       const run = (args, env = base) => spawnSync(process.execPath, [SELF_PATH, ...args], { encoding: 'utf8', env });
       const print = run(['--print']);
       t('--print prints exactly the token and a newline, at exit 0, with nothing on stderr', [print.status, print.stdout, print.stderr], [0, `${TOKEN}\n`, '']);
@@ -738,6 +855,58 @@ export async function selfTest() {
       const missing = run(['--print'], { ...base, OS_FLEET_APP_ID: '', OS_FLEET_TOKEN_CACHE_FILE: join(dir, 'absent.json') });
       t('without the inputs and without a cache, --print exits 3 naming the variables and prints no token', [missing.status, missing.stderr.includes('OS_FLEET_APP_ID'), missing.stdout], [EXIT_PREREQUISITE, true, '']);
       t('an unrecognised flag is usage, ⛔ never a silent pass', run(['--pritn']).status, EXIT_USAGE);
+    }
+
+    // ── the repository-variables route ──────────────────────────────────────
+    battery('the repository-variables route: read when the environment has none, environment wins, the key never lands anywhere');
+    {
+      const vars = { OS_FLEET_APP_ID: inputs.appId, OS_FLEET_INSTALLATION_ID: inputs.installationId, OS_FLEET_PRIVATE_KEY: Buffer.from(PEM, 'utf8').toString('base64') };
+      // `absent`: names the REPO level answers 404 for; `orgShared`: names the
+      // organization shares with the repo (read through the repo endpoint).
+      const varsPlatform = (seen, absent = [], orgShared = []) => async (url, init) => {
+        const u = new URL(url);
+        seen.push({ call: `${init?.method ?? 'GET'} ${u.pathname}`, auth: init?.headers?.authorization ?? '' });
+        if (u.pathname.endsWith('/actions/organization-variables')) {
+          return { status: 200, headers: new Headers({ 'x-ratelimit-remaining': '4999' }), json: async () => ({ total_count: orgShared.length, variables: orgShared.map((name) => ({ name, value: vars[name] })) }) };
+        }
+        const m = /\/actions\/variables\/([A-Z_]+)$/.exec(u.pathname);
+        const name = m?.[1];
+        if (!name || absent.includes(name) || !(name in vars)) return { status: 404, headers: new Headers(), json: async () => ({ message: 'Not Found' }) };
+        return { status: 200, headers: new Headers({ 'x-ratelimit-remaining': '4999' }), json: async () => ({ name, value: vars[name] }) };
+      };
+      const logs = [];
+      const seen = [];
+      const got = await resolveInputs({ GITHUB_TOKEN: TOKEN, PM_SWEEP_REPO: 'o/r' }, { fetch: varsPlatform(seen), log: (l) => logs.push(l) });
+      t('with no OS_FLEET_* in the environment the three are read from the repository variables', [got.appId, got.installationId, got.source], [inputs.appId, inputs.installationId, 'repository variables of o/r']);
+      t('…with the session token, from the resolved board, one GET each', [seen.every((s) => s.auth === `Bearer ${TOKEN}`), seen.map((s) => s.call)], [true, INPUT_NAMES.map((n) => `GET /repos/o/r/actions/variables/${n}`)]);
+      t('…and the key arrives in its base64 spelling and parses', readPrivateKey(got.privateKey).form, 'base64');
+      t('…and one line says where the inputs came from', logs.some((l) => l.includes("read from o/r's repository variables")));
+      const seen2 = [];
+      const fromEnv = await resolveInputs({ ...vars, GITHUB_TOKEN: TOKEN }, { fetch: varsPlatform(seen2) });
+      t('the environment wins when it has them all: no request at all', [fromEnv.source, seen2.length], ['environment', 0]);
+      const seen3 = [];
+      await resolveInputs({ OS_FLEET_APP_ID: inputs.appId, OS_FLEET_INSTALLATION_ID: inputs.installationId, GITHUB_TOKEN: TOKEN, PM_SWEEP_REPO: 'o/r' }, { fetch: varsPlatform(seen3), log: () => {} });
+      t('…and only the absent ones are fetched', seen3.map((s) => s.call), ['GET /repos/o/r/actions/variables/OS_FLEET_PRIVATE_KEY']);
+      const refused = async (env, fetchImpl) => {
+        try {
+          await resolveInputs(env, { fetch: fetchImpl, log: () => {} });
+          return ['ok', ''];
+        } catch (e) {
+          return e instanceof FleetTokenError ? [e.exitCode, e.message] : ['other', String(e)];
+        }
+      };
+      const seen4 = [];
+      const viaOrg = await resolveInputs({ GITHUB_TOKEN: TOKEN, PM_SWEEP_REPO: 'o/r' }, { fetch: varsPlatform(seen4, INPUT_NAMES, INPUT_NAMES), log: () => {} });
+      t('an ORGANIZATION variable shared with the repo is found through the repo endpoint when the repo level answers 404', [viaOrg.appId, viaOrg.installationId, readPrivateKey(viaOrg.privateKey).form], [inputs.appId, inputs.installationId, 'base64']);
+      t('…and the shared list is fetched ONCE, after the first 404, ⛔ never through /orgs/', [seen4.filter((s) => s.call.endsWith('/actions/organization-variables')).length, seen4.some((s) => s.call.startsWith('GET /orgs/'))], [1, false]);
+      const missingVar = await refused({ GITHUB_TOKEN: TOKEN, PM_SWEEP_REPO: 'o/r' }, varsPlatform([], ['OS_FLEET_PRIVATE_KEY'], ['OS_FLEET_APP_ID']));
+      t('a variable absent at the repo level AND not shared by the organization is exit 3, naming it and the command that sets it', [missingVar[0], missingVar[1].includes('OS_FLEET_PRIVATE_KEY') && missingVar[1].includes('gh variable set')], [EXIT_PREREQUISITE, true]);
+      const noToken = await refused({ PM_SWEEP_REPO: 'o/r' }, varsPlatform([]));
+      t('no session token to read them with is exit 3 naming both routes', [noToken[0], noToken[1].includes('GITHUB_TOKEN') && noToken[1].includes('repository variables')], [EXIT_PREREQUISITE, true]);
+      const optOut = await refused({ GITHUB_TOKEN: TOKEN, PM_SWEEP_REPO: 'o/r', [VARIABLES_OPT_OUT]: '0' }, varsPlatform([]));
+      t(`${VARIABLES_OPT_OUT}=0 keeps the route closed: exit 3 from the environment alone`, [optOut[0], optOut[1].includes('OS_FLEET_APP_ID')], [EXIT_PREREQUISITE, true]);
+      const minted = await mintWith(happy, { inputs: got });
+      t('⛔ a key read from the repository reaches neither the cache file nor any log line', [readFileSync(minted.file, 'utf8').includes(vars.OS_FLEET_PRIVATE_KEY), minted.logs.join('\n').includes(PEM_BODY), minted.result?.key_form], [false, false, 'base64']);
     }
 
     // ── the wiring ──────────────────────────────────────────────────────────
@@ -807,6 +976,8 @@ const USAGE = [
   '  node scripts/pm/fleet-token.mjs --self-test   offline: throwaway key, fake platform',
   '',
   '  Inputs: OS_FLEET_APP_ID · OS_FLEET_INSTALLATION_ID · OS_FLEET_PRIVATE_KEY (PEM, PEM with literal \\n, or base64)',
+  '          — from the environment, else read from the board repo\'s Actions variables with this session\'s',
+  '          GITHUB_TOKEN (OS_FLEET_VARIABLES_REPO to name another repo; OS_FLEET_INPUTS_FROM_GITHUB=0 to forbid)',
   '          optional OS_FLEET_API_URL · OS_FLEET_TOKEN_CACHE_FILE · OS_FLEET_GIT_AUTHOR_LOGIN',
   `  Exits: 0 ok · ${EXIT_USAGE} usage · ${EXIT_PREREQUISITE} prerequisite not met · ${EXIT_PLATFORM_REFUSAL} platform refused · ${EXIT_WRITE_PACE_REFUSED} the write throttle refused the mint`,
 ].join('\n');

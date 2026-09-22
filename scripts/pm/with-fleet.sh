@@ -180,7 +180,9 @@ EOF
   run --read || rc=$?
   st_case 'no command is usage (2)' "$rc" "$EXIT_USAGE"
   rc=0
-  env -u GIT_DIR OS_FLEET_TOKEN_CACHE_FILE="$dir/absent.json" OS_FLEET_APP_ID= OS_FLEET_INSTALLATION_ID= OS_PM_WRITE_PACE_FILE="$pace" HTTPS_PROXY= https_proxy= bash "$SELF" --read -- true 2>> "$err" || rc=$?
+  # OS_FLEET_INPUTS_FROM_GITHUB=0: on a CI runner a GITHUB_TOKEN is present, and
+  # this case must refuse from the environment alone, never read real variables.
+  env -u GIT_DIR OS_FLEET_TOKEN_CACHE_FILE="$dir/absent.json" OS_FLEET_APP_ID= OS_FLEET_INSTALLATION_ID= OS_FLEET_INPUTS_FROM_GITHUB=0 OS_PM_WRITE_PACE_FILE="$pace" HTTPS_PROXY= https_proxy= bash "$SELF" --read -- true 2>> "$err" || rc=$?
   st_case 'missing fleet inputs and no cache is the minter\x27s exit 3, before the command runs' "$rc" 3
 
   # ⑥ redaction: nothing this script or the minter wrote to stderr carries the token
