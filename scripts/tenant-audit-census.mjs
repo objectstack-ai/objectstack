@@ -492,24 +492,129 @@ function unwrap(n) {
   return n;
 }
 
+/**
+ * The node kinds that OPEN a lexical scope for the names declared under them.
+ *
+ * Deliberately the SYNTACTIC scopes rather than a resolver's idea of them: this
+ * module has no type checker, and a chain of enclosing nodes is a fact it can
+ * read off the tree it already parsed. `var` is the one binding this list is
+ * wrong about -- it is function-scoped and recorded here at its block -- and the
+ * file-wide tier in {@link scopedNames} is what keeps that from LOSING a site.
+ */
+function opensScope(node) {
+  return ts.isSourceFile(node)
+    || ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)
+    || ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node)
+    || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node)
+    || ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCaseBlock(node)
+    || ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node)
+    || ts.isCatchClause(node);
+}
+
+/**
+ * The lexical scopes enclosing a node, innermost first.
+ *
+ * A parameter's own scope is the FUNCTION (its `parent`), while a `const` in a
+ * body belongs to that body's block -- so a receiver inside the body walks
+ * block, then function, then outwards, and finds the parameter exactly where a
+ * reader would look for it.
+ */
+function scopeChainOf(node) {
+  const chain = [];
+  for (let p = node.parent; p; p = p.parent) if (opensScope(p)) chain.push(p);
+  return chain;
+}
+
+/**
+ * ⭐ Names declared in ONE file, resolved by SCOPE rather than by spelling.
+ *
+ * A bare-name map answers "what is `engine` in this file?", and a file may
+ * contain several. Two parameters named `engine` in different functions are two
+ * declarations; keyed on the identifier alone they are one, and the first typed
+ * one decides for both. Measured, that is not one failure but three, and only
+ * the first of them is loud:
+ *
+ *   • a `Map.delete(k)` in the second function scored as an ENGINE WRITE and
+ *     admitted to the certified tenancy population -- an over-count,
+ *   • the SAME pair in the other declaration order: a real engine write scored
+ *     `platform-type` and subtracted under a DEFENDED arm, which prints nothing
+ *     and is counted nowhere -- the silent direction this census must never
+ *     fail in, and
+ *   • both sites refused together when the winning entry is one the door rule
+ *     cannot place.
+ *
+ * ⇒ Two tiers, in this order. The LEXICAL tier is the answer: the innermost
+ *   enclosing scope that declares the name wins, which is what the language
+ *   does. The FILE-WIDE tier is a floor, not a second opinion -- it holds
+ *   exactly what the bare-name map held before, and it is consulted only when
+ *   no enclosing scope declares the name at all. ⛔ So no receiver that resolved
+ *   before stops resolving: a repair that traded a false placement for a LOST
+ *   engine write would be the expensive direction wearing the other costume.
+ */
+function scopedNames() {
+  const byScope = new Map(); // scope node -> Map<name, entry>
+  const flat = new Map(); // name -> entry -- the file-wide tier
+  const scopeMap = (declNode) => {
+    const scope = scopeChainOf(declNode)[0] ?? null;
+    let m = byScope.get(scope);
+    if (!m) { m = new Map(); byScope.set(scope, m); }
+    return m;
+  };
+  return {
+    /** Record a declaration, first TYPED spelling winning within each tier. */
+    note(declNode, name, entry) {
+      const m = scopeMap(declNode);
+      if (!(m.has(name) && m.get(name).type)) m.set(name, entry);
+      if (!(flat.has(name) && flat.get(name).type)) flat.set(name, entry);
+    },
+    /** Record a declaration that OVERRIDES whatever was there (destructuring). */
+    set(declNode, name, entry) {
+      scopeMap(declNode).set(name, entry);
+      flat.set(name, entry);
+    },
+    /** The declaration `name` refers to AT `node` -- lexical tier, then the floor. */
+    lookup(name, node) {
+      if (node) {
+        for (const scope of scopeChainOf(node)) {
+          const hit = byScope.get(scope)?.get(name);
+          if (hit) return hit;
+        }
+      }
+      return flat.get(name);
+    },
+  };
+}
+
 /** Declared types visible in ONE file, keyed the way a receiver spells itself. */
 export function declaredTypesIn(sf) {
   const thisProps = new Map();
-  const locals = new Map();
+  const locals = scopedNames();
   const fnReturns = new Map();
   // `TypeName -> member -> declared type` for shapes declared in THIS file, so
   // `deps.getDataEngine()` and `opts.engine` resolve without a type checker.
   const shapes = new Map();
   // Identifiers imported from a `node:` builtin -- never an engine.
   const builtins = new Set();
+  // ⭐ The declared type text is stored EXACTLY as the source spells it. It is
+  // re-parsed later as a synthetic type alias to read the door rule off it, and
+  // a type literal may separate its members by a newline alone -- legal
+  // TypeScript, which a whitespace collapse turns into no separator at all. The
+  // collapse belongs at the PRESENTATION boundary, where `runCensus` and
+  // `cell()` already apply it, never at the one where the text is stored to be
+  // read back. `init` is a different thing and keeps its collapse: it is a
+  // diagnostic, truncated to 120 characters, and nothing ever re-parses it.
+  const entryOf = (typeNode, initializer) => ({
+    type: typeNode ? typeNode.getText(sf) : null,
+    init: initializer ? initializer.getText(sf).replace(/\s+/g, ' ').slice(0, 120) : null,
+    node: initializer ?? null,
+    literal: initializer && ts.isStringLiteralLike(initializer) ? initializer.text : null,
+  });
   const note = (map, key, typeNode, initializer) => {
     if (map.has(key) && map.get(key).type) return;
-    map.set(key, {
-      type: typeNode ? typeNode.getText(sf).replace(/\s+/g, ' ') : null,
-      init: initializer ? initializer.getText(sf).replace(/\s+/g, ' ').slice(0, 120) : null,
-      node: initializer ?? null,
-      literal: initializer && ts.isStringLiteralLike(initializer) ? initializer.text : null,
-    });
+    map.set(key, entryOf(typeNode, initializer));
+  };
+  const noteLocal = (declNode, key, typeNode, initializer) => {
+    locals.note(declNode, key, entryOf(typeNode, initializer));
   };
   const visit = (n) => {
     if (ts.isImportDeclaration(n) && ts.isStringLiteralLike(n.moduleSpecifier)
@@ -524,14 +629,14 @@ export function declaredTypesIn(sf) {
       for (const mem of members) {
         if (!mem.name || !ts.isIdentifier(mem.name)) continue;
         const t = ts.isMethodSignature(mem) ? mem.type : mem.type;
-        if (t) m.set(mem.name.text, t.getText(sf).replace(/\s+/g, ' '));
+        if (t) m.set(mem.name.text, t.getText(sf));
       }
       shapes.set(n.name.text, m);
     }
     if (ts.isPropertyDeclaration(n) && ts.isIdentifier(n.name)) note(thisProps, n.name.text, n.type, n.initializer);
     if (ts.isParameter(n) && ts.isIdentifier(n.name)) {
       if (ts.isConstructorDeclaration(n.parent) && n.modifiers?.length) note(thisProps, n.name.text, n.type, n.initializer);
-      note(locals, n.name.text, n.type, n.initializer);
+      noteLocal(n, n.name.text, n.type, n.initializer);
     }
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)) {
       // `const getData = (): IDataEngine | undefined => …` -- the RETURN type is
@@ -540,19 +645,19 @@ export function declaredTypesIn(sf) {
       if (!n.type && init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.type) {
         note(fnReturns, n.name.text, init.type, null);
       }
-      note(locals, n.name.text, n.type, n.initializer);
+      noteLocal(n, n.name.text, n.type, n.initializer);
     }
     // `const { engine, cryptoProvider } = deps;` -- the member's declared type on
     // the base's own shape. Losing these loses REAL engine sites, which is the
     // one direction a census must never fail in.
     if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name)) {
       const baseText = n.type ? n.type.getText(sf)
-        : (n.initializer && ts.isIdentifier(n.initializer) ? locals.get(n.initializer.text)?.type : null);
+        : (n.initializer && ts.isIdentifier(n.initializer) ? locals.lookup(n.initializer.text, n)?.type : null);
       for (const el of n.name.elements) {
         if (!ts.isIdentifier(el.name)) continue;
         const prop = el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : el.name.text;
         const mt = memberTypeOfShapes(baseText, prop, shapes);
-        if (mt) locals.set(el.name.text, { type: mt, init: null, node: null });
+        if (mt) locals.set(n, el.name.text, { type: mt, init: null, node: null });
         else if (n.initializer && ts.isAwaitExpression(n.initializer)
                  && ts.isCallExpression(n.initializer.expression)
                  && n.initializer.expression.expression.kind === ts.SyntaxKind.ImportKeyword
@@ -645,14 +750,14 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
   }
   if (ts.isIdentifier(r)) {
     if (decls.builtins.has(r.text)) return { kind: 'other', type: `node: builtin ${r.text}`, how: 'node-import' };
-    return fromEntry(decls.locals.get(r.text), r.text);
+    return fromEntry(decls.locals.lookup(r.text, r), r.text);
   }
   // `opts.engine`, `this.options.persistence` -- resolved through the shape the
   // base's own declared type gives the member.
   if (ts.isPropertyAccessExpression(r)) {
     const baseText = ts.isPropertyAccessExpression(r.expression) && r.expression.expression.kind === ts.SyntaxKind.ThisKeyword
       ? decls.thisProps.get(r.expression.name.text)?.type
-      : ts.isIdentifier(r.expression) ? decls.locals.get(r.expression.text)?.type : null;
+      : ts.isIdentifier(r.expression) ? decls.locals.lookup(r.expression.text, r.expression)?.type : null;
     const mt = memberTypeOf(baseText, r.name.text, decls);
     if (mt) {
       const t = nameOf(mt);
@@ -674,7 +779,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
     if (ts.isPropertyAccessExpression(callee)) {
       const baseText = callee.expression.kind === ts.SyntaxKind.ThisKeyword
         ? null
-        : ts.isIdentifier(callee.expression) ? decls.locals.get(callee.expression.text)?.type : null;
+        : ts.isIdentifier(callee.expression) ? decls.locals.lookup(callee.expression.text, callee.expression)?.type : null;
       const mt = memberTypeOf(baseText, callee.name.text, decls);
       if (mt) {
         const t = nameOf(mt);
@@ -1153,7 +1258,7 @@ function elevationOf(value, sf, decls, depth = 0) {
     const bare = unwrapLiteral(n);
     if (!bare) return null;
     if (ts.isObjectLiteralExpression(bare)) return bare;
-    if (ts.isIdentifier(bare)) return unwrapLiteral(decls?.locals.get(bare.text)?.node) ?? null;
+    if (ts.isIdentifier(bare)) return unwrapLiteral(decls?.locals.lookup(bare.text, bare)?.node) ?? null;
     return null;
   };
 
@@ -1326,7 +1431,7 @@ export function resolveObjectNameArg(a0, sf, decls) {
   if (a0 == null) return { kind: 'absent', name: null };
   if (ts.isStringLiteralLike(a0)) return { kind: 'literal', name: a0.text };
   if (ts.isIdentifier(a0)) {
-    const entry = decls.locals.get(a0.text);
+    const entry = decls.locals.lookup(a0.text, a0);
     if (entry?.literal) return { kind: 'const-literal', name: entry.literal };
     if (OBJECT_PARAM_NAMES.has(a0.text) && entry?.type?.trim() === 'string') {
       return { kind: 'object-name-parameter', name: a0.getText(sf) };
