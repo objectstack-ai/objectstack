@@ -522,7 +522,7 @@ export const ScheduleStateSchema = lazySchema(() => z.object({
   flowName: z.string().describe('Flow machine name'),
 
   /*
-   * `cronExpression` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * `cronExpression` was DELETED here in @objectstack/spec 17 (ADR-0049
    * enforce-or-remove, #16320). It was this schema's REQUIRED cron and was read by
    * nothing: `ScheduleStateSchema` has no consumer outside `packages/spec`, and the
    * schedule trigger that does run reads a flow start node's `config.schedule`

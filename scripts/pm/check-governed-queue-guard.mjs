@@ -279,19 +279,31 @@
  * — answered 「我点头」. The other half of that boundary, the 规则层, is every
  * remaining governed path and is quoted in full on #17950; ⛔ it is NOT excerpted
  * here, because a partial rules-layer list read as the whole one is precisely
- * the under-claim `check-governed-prose` exists to stop. The register is the
- * enumeration; this leg only asks whether a path is under the ONE prefix above. The charter text landed as PR #18018; this leg is what
- * makes it ENFORCED rather than declared, which is the whole of #18020.
+ * the under-claim `check-governed-prose` exists to stop. The charter text landed
+ * as PR #18018; this leg is what made it ENFORCED rather than declared, which is
+ * the whole of #18020 — narrowly, for the one prefix quoted above.
  *
- * So a governed diff whose governed paths ALL lie under
- * `.claude/skills/pm-dispatch/references/` may land on a REVIEW OF RECORD in
- * place of the authorized approval: the `## Contract review` comment — on the
+ * ⭐ SUPERSEDED 2026-09-18 (#19133, ruled 「同意改规则。」 on the skills seat's
+ * proposal; the amendment moved `.claude/settings.json` and `.claude/hooks/**`
+ * over too: 「我觉得这些我也没必要确认」): the quote above is reproduced as the
+ * ruling that STARTED this leg, not as the population it enforces today. #19133
+ * widened that population from the one prefix quoted above to the WHOLE of
+ * `.claude/**` — Tier S, in the register's own words — leaving Tier H as exactly
+ * the register's other rows. The register's `tier` field is the enumeration now;
+ * this leg asks `governedTierFor` for Tier S, never a prefix repeated here — see
+ * the "landing TIER" section below for the enforced definition, and read it live
+ * with `node scripts/pm/check-governed-merges.mjs --test <paths>` rather than
+ * trusting a prefix copied into prose, which is exactly what went stale once.
+ *
+ * So a governed diff whose governed paths are ALL Tier S — today, the whole of
+ * `.claude/**` — may land on a REVIEW OF RECORD in place of the authorized
+ * approval: the `## Contract review` comment — on the
  * PULL REQUEST'S THREAD **or on its CARD'S** — that names the pull request's
  * CURRENT head, carries a `Reviewed-by:` line, and declares a `Served-tier:`
  * reading that STANDS -- its token being the NAME `CONTRACT_REVIEW_TIER`,
  * ⛔ never a model identifier, which `AGENTS.md` lets land in no comment and a
- * record IS one (#18060). Every other governed path is the rules layer and
- * keeps the predicate above byte-for-byte.
+ * record IS one (#18060). Every governed path outside Tier S is Tier H, the
+ * rules layer, and keeps the predicate above byte-for-byte.
  *
  * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
  * to decide rather than this file's — quoted, untranslated, because it IS the
@@ -4553,8 +4565,9 @@ export async function selfTest() {
       'fail-closed on an unreadable label set and on a group naming no pull request, enumerated per commit so a ' +
       'bare PR cannot carry a gated sibling through, silent and read-free on the pull_request leg, and replayed ' +
       'against the eleven measured enqueues of 2026-09-09 — five refused, six passed, that second number being ' +
-      'the boundary a label reader cannot cross — and the #18020 references TIER: a governed diff whose governed ' +
-      'paths all lie under the one ruled prefix lands on the skills seat\'s review of record instead of an ' +
+      'the boundary a label reader cannot cross — and the #18020 references TIER, re-keyed to Tier S by #19133: a ' +
+      'governed diff whose governed paths are ALL Tier S — the register\'s `.claude/**` row, asked through ' +
+      '`governedTierFor`, never a prefix repeated here — lands on the owning seat\'s review of record instead of an ' +
       'authorized approval, with the record recognisers IMPORTED through a lazy load whose precondition (no ' +
       'top-level await in this file\'s dispatch) is pinned against this file\'s own source, refused on an older ' +
       'head, on a missing or below-tier or partially-stamped `Served-tier:`, on an unsigned record, on no record ' +

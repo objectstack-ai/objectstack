@@ -3084,14 +3084,28 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
  *   `npx`   the same census (#9613)
  *   `npm`   this file's own pinned specimen, transcribed from a live card
  *           (`npm view create-objectstack dist-tags reports >= 17.0.0`)
+ *   `node` the live objectui#9868 hold, read 2026-09-18 (#19129): its
+ *           `Restart-when:` is a `node -e` probe of the INSTALLED spec, and
+ *           `node` is the head every tool in this repo is invoked with
+ *           (`node scripts/pm/…`)
  *
  * A value opening with a BACKTICKED span needs no head at all — the span is
  * the canonical spelling of an executable predicate — so this list only has to
  * cover the un-backticked residue, which the census puts at one value. It
  * grows by MEASUREMENT: a head is added when a census finds one, ⛔ never
  * because it seemed likely.
+ *
+ * ⚠️ What the head word CAN tell is whether some mechanism could run the line
+ * at all — the only question H9's row asks. What it CANNOT tell is whether
+ * running it means anything: `node -e "process.exit(0)"` fires on the spot and
+ * answers nothing, and this list does not see the difference. ⛔ And because
+ * the head is the WHOLE test, re-heading a real predicate (`node -e …` →
+ * `pnpm exec node -e …`) moved the verdict without moving one byte of what
+ * runs — a WORKAROUND for a hole in this list, ⛔ never a sanctioned spelling:
+ * a gauge a seat satisfies by prefixing two words measures spelling, not
+ * fireability (#19129).
  */
-export const RESTART_WHEN_COMMAND_HEADS = ['git', 'npm', 'npx', 'pnpm'];
+export const RESTART_WHEN_COMMAND_HEADS = ['git', 'node', 'npm', 'npx', 'pnpm'];
 
 /**
  * Which classes of `Restart-when:` value some mechanism can actually fire.
@@ -25097,10 +25111,17 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // Registered with the class-(b) seam-line row (#18901), pin just under the
   // count: a READER pinned on MEASURED live shapes, its firing controls inside.
   'H68 class-(b) seam line': 24,
+  // Registered with the `node` command head (#19129), pin just under the
+  // count. What this battery floors is a WIDENING — a class that reported a
+  // runnable predicate as unschedulable stopped doing so — so the SILENCING
+  // controls live inside it: the `prose` specimens the row exists for, and the
+  // closed-list controls (`bash`, `gradle`, `nodemon`) proving the head set did
+  // not become a guess at command-shaped words.
+  'H9 node command head': 9,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
-export const SELF_TEST_BATTERY_FLOOR = 8;
+export const SELF_TEST_BATTERY_FLOOR = 9;
 
 async function selfTest() {
   const cases = [];
@@ -26485,7 +26506,7 @@ async function selfTest() {
   t('H9 paths: …and one closing a parenthesis', restartWhenTrackedPaths('(see packages/runtime/src/http-dispatcher.ts).', h9Tracked).join('|'), 'packages/runtime/src/http-dispatcher.ts');
   t('H9 paths: no oracle means no path, never a guess', restartWhenTrackedPaths(v7898).length, 0);
   t('H9 class: the fireable set is exactly the three', FIREABLE_RESTART_WHEN_CLASSES.join('|'), 'closed-ref|issue-ref|command');
-  t('H9 class: the bare command heads are the measured four', RESTART_WHEN_COMMAND_HEADS.join('|'), 'git|npm|npx|pnpm');
+  t('H9 class: the bare command heads are the measured five', RESTART_WHEN_COMMAND_HEADS.join('|'), 'git|node|npm|npx|pnpm');
 
   // The rows the two new classes produce — report-only, each naming the remedy
   // a seat can execute without re-reading the card.
@@ -26521,6 +26542,31 @@ async function selfTest() {
   t('gate: an executable-predicate body still buys nothing', needsRestartWhenComments(hold('Restart-when: `git grep -l foo` returns 0'), h9Tracked), false);
   t('gate: the ruling spelling still buys nothing', needsRestartWhenComments(hold('Restart-when: #13651 rules on it'), h9Tracked), false);
   t('gate: the reserved `closed …#N` class still buys nothing', needsRestartWhenComments(hold(`Restart-when: ${v5499}`), h9Tracked), false);
+
+  // -- H9: `node` is a command head, the fleet's own invocation word (#19129) -
+  // The head word was the WHOLE verdict and `node` was not on the list, so a
+  // runnable `node -e` predicate on a live hold classified `prose` — 「a
+  // `manual` in disguise, waiting on an actor nothing schedules」 — while the
+  // SAME predicate re-headed `pnpm exec node -e …` classified `command`. The
+  // card's four controls ARE this battery: the subject, the re-headed twin it
+  // must now agree with, and the controls that keep the instrument lit in both
+  // directions — the `prose` row must still fire, and the head set must still
+  // be closed.
+  const BATTERY19129 = 'H9 node command head';
+  // VERBATIM from objectui#9868's body (read 2026-09-18), the live specimen the
+  // card was filed on: an INSTALLED-surface probe, re-headed by a seat at
+  // 2026-09-18T22:00Z to clear a row this list should never have fired.
+  const v9868 = `node -e "const s=require('@objectstack/spec/ui'); process.exit(s.NavigationItemSchema.safeParse({type:'view',id:'x',order:1}).success?0:1)" exits 0`;
+  b(BATTERY19129, 'heads: `node` joined the list, in one closed measured set', RESTART_WHEN_COMMAND_HEADS.join('|'), 'git|node|npm|npx|pnpm');
+  b(BATTERY19129, '⭐ subject: the live objectui#9868 predicate classifies `command`, and that class is FIREABLE', [classifyRestartWhen(v9868), FIREABLE_RESTART_WHEN_CLASSES.includes(classifyRestartWhen(v9868))].join(), 'command,true');
+  b(BATTERY19129, '⭐ control: the `pnpm exec node …` re-heading is the same predicate byte for byte after the head, and now reads the same class — the rewrite buys nothing', classifyRestartWhen(`pnpm exec ${v9868}`), 'command');
+  b(BATTERY19129, 'control: the two fireable controls are unmoved, so the instrument is lit in that direction', [classifyRestartWhen('git grep -q foo -- bar'), classifyRestartWhen('closed objectstack-ai/objectstack#19049')].join(), 'command,closed-ref');
+  b(BATTERY19129, '⭐ control: the `prose` class still fires on prose — the widening did not silence the row it exists for', [classifyRestartWhen('someone gets around to it'), classifyRestartWhen(v3739), classifyRestartWhen('')].join(), 'prose,prose,prose');
+  b(BATTERY19129, '⭐ control: the head set is still CLOSED, not a guess at command-shaped words — an unmeasured head stays `prose` however runnable it looks', [classifyRestartWhen('gradle assemble reports a clean build'), classifyRestartWhen('bash scripts/pm/os-verify-lock.sh -c true exits 0'), classifyRestartWhen('sh -c "true"')].join(), 'prose,prose,prose');
+  b(BATTERY19129, 'control: …and `node` counts as a WHOLE head word only; the `manual` opt-out still outranks the head', [classifyRestartWhen('nodemon restarts cleanly'), classifyRestartWhen('node_modules/.bin/foo exits 0'), classifyRestartWhen(`manual — ${v9868}`)].join(), 'prose,prose,manual');
+  b(BATTERY19129, '⭐ row: a hold carrying the subject line is a LEGAL hold now, in either channel', [h9OnHoldNoRestartWhen(hold(`Restart-when: ${v9868}`)), h9OnHoldNoRestartWhen(hold('parked'), [`Restart-when: ${v9868}`])].join(), ',');
+  b(BATTERY19129, 'row: …and the gathering policy moved with the verdict — a body that now answers buys no comment fetch', needsRestartWhenComments(hold(`Restart-when: ${v9868}`)), false);
+  b(BATTERY19129, 'floor: this battery is DECLARED on the frozen roster with a positive pin, and the roster floor rose to NINE with it', [Object.hasOwn(SELF_TEST_BATTERIES, BATTERY19129), SELF_TEST_BATTERIES[BATTERY19129] > 0, Object.isFrozen(SELF_TEST_BATTERIES), SELF_TEST_BATTERY_FLOOR === 9, Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR].join(), 'true,true,true,true,true');
 
   // -- H9: `issue-ref` is the DECLARATION position (#17605) -------------------
   // The wide form (`/#\d+\b/`) read a MENTION as an exit, so four live holds
@@ -28300,7 +28346,7 @@ async function selfTest() {
   b(BATTERY18901, 'H68 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H68'), true);
   b(BATTERY18901, 'H68 band: no code is left unregistered and none registered that the sweep never pushes', familyRegistryCoverage().missing.length + familyRegistryCoverage().extra.length, 0);
   b(BATTERY18901, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18901) && SELF_TEST_BATTERIES[BATTERY18901] > 0, true);
-  b(BATTERY18901, 'floor: the roster now declares EIGHT batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR === 8 && Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
+  b(BATTERY18901, 'floor: the roster now declares NINE batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR === 9 && Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
@@ -29439,7 +29485,7 @@ async function selfTest() {
   b(BATTERY18664, '#18664 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18664), true);
   b(BATTERY18664, '#18664 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY18664] > 0, true);
   b(BATTERY18664, '#18664 floor: the roster is frozen', Object.isFrozen(SELF_TEST_BATTERIES), true);
-  b(BATTERY18664, '#18664 floor: the roster now declares EIGHT batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 8);
+  b(BATTERY18664, '#18664 floor: the roster now declares NINE batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 9);
   b(BATTERY18664, '#18664 floor: …including the five this battery landed BESIDE, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'H2/H47/H66 decorated ownership marker'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY18664, '#18664 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -31086,7 +31132,7 @@ async function selfTest() {
   b(BATTERY19255, '⭐ H26 stand-down: an exit naming the parked target silences the row in either channel — and once the label leaves, H19 fires the exit while H26 stays quiet', [h26row(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [parked], undefined, REPO_OS), h26row(exitCard('Blocked-by: #68'), [parked], [LIVE_EXIT], REPO_OS), h26row(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled], undefined, REPO_OS)].every((v) => v === '') && typeof h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled]) === 'string', true);
   b(BATTERY19255, 'H26 stand-down: ⛔ a comment it was not handed is not read; an exit naming ANOTHER card, or the PR-shaped value, leaves the row firing and the latter is named as a line nothing fires; two parked targets with one exit report only the other', [h26row(exitCard('Blocked-by: #68'), [parked], undefined, REPO_OS) !== '', h26row(exitCard('Blocked-by: #68\nUnlock-action: re-check #987 when label pm:on-hold absent'), [parked], undefined, REPO_OS) !== '', h26row(exitCard('Blocked-by: #68\nUnlock-action: re-check PR #123'), [parked], undefined, REPO_OS).includes('already do (`re-check PR #123`)'), h26row(exitCard(`Blocked-by: #68, #987\n${LIVE_EXIT}`), [parked, tgt(987, ['pm:on-hold'])], undefined, REPO_OS).includes('on 1 target(s)'), h26row(exitCard(`Blocked-by: #68, #987\n${LIVE_EXIT}`), [parked, tgt(987, ['pm:on-hold'])], undefined, REPO_OS).includes('`#987`')].join(), 'true,true,true,true,true');
   b(BATTERY19255, 'H26 remedy: the row without an exit prescribes the live spelling and the close, says other spellings fall back silently, and the chain leg carries none of it', [h26row(waiting(75), [parked]).includes('`Unlock-action: re-check #N when label needs-user-decision absent`'), h26row(waiting(75), [parked]).includes('close the waiting card `not planned`'), h26row(waiting(75), [parked]).includes('falls back silently'), h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('⭐ The exit')].join(), 'true,true,true,false');
-  b(BATTERY19255, 'floor: the roster now declares EIGHT batteries, and this one is on it', SELF_TEST_BATTERY_FLOOR === 8 && Object.hasOwn(SELF_TEST_BATTERIES, BATTERY19255), true);
+  b(BATTERY19255, 'floor: the roster now declares NINE batteries, and this one is on it', SELF_TEST_BATTERY_FLOOR === 9 && Object.hasOwn(SELF_TEST_BATTERIES, BATTERY19255), true);
 
   // -- The UNGATED liveness read + H28: the stale body line (#11747) ----------
   //
@@ -35904,7 +35950,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // THE ROSTER — a floor that cannot be satisfied by a zero.
   b(BATTERY67, 'H67 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY67), true);
   b(BATTERY67, 'H67 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY67] > 0, true);
-  b(BATTERY67, 'H67 floor: the roster grew again with #19255\'s and #18901\'s batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 8);
+  b(BATTERY67, 'H67 floor: the roster grew again with #19255\'s, #18901\'s and #19129\'s batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 9);
   b(BATTERY67, 'H67 floor: …including the two batteries this row landed BESIDE, so neither side of the base merge silently dropped one', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H65 tier declaration spelling') && Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H19 judged-set founding'), true);
   b(BATTERY67, 'H67 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -36247,7 +36293,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // FLOOR — this battery is declared, pinned, and the roster grew with it.
   b(BATTERY68, 'floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY68), true);
   b(BATTERY68, 'floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY68] > 0, true);
-  b(BATTERY68, 'floor: the roster now declares EIGHT batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 8);
+  b(BATTERY68, 'floor: the roster now declares NINE batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 9);
   b(BATTERY68, 'floor: …including the four this battery landed BESIDE and the one that landed after it, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'ISSUE_BODY_LIMIT measured cap'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY68, 'floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 

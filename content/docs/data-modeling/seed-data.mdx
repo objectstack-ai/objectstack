@@ -238,6 +238,16 @@ operator's job — to switch locales cleanly, start from a fresh database.
   and the loader warns naming each locale-scoped dataset it let through, so a
   scope that is not taking effect is one log line to diagnose rather than a
   silent no-op.
+
+  **Publishing and installing are locale-neutral acts, by decision.** Applying
+  a package, publishing a draft and installing from the marketplace each build
+  their own seed-load request and pass no locale, so a `locale`-scoped dataset
+  reaching one of those paths loads for every market and is named in that
+  warning. This is the declared bound of the axis rather than an unfinished
+  path — a package is assembled once for every market, and selecting a market
+  is what happens when it is opened, on the boot path above. Ruled
+  2026-09-10 on
+  [#17011](https://github.com/objectstack-ai/objectstack/issues/17011#issuecomment-5615361502).
 </Callout>
 
 ---

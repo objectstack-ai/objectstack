@@ -1355,11 +1355,34 @@ jobs:
       # the throttle would simply stop throttling — which is the shape
       # `check:self-test-wired` requires this step for.
       #
-      # Its last battery is the wiring: the five write transports each call both
+      # Its last battery is the wiring: the seven write transports each call both
       # halves, and the roster IS the set of files under scripts/pm that issue a
-      # write verb, so a SIXTH write path cannot land unpaced.
+      # write verb, so an EIGHTH write path cannot land unpaced. Two batteries
+      # run REAL child processes: the lease that keeps one write in flight
+      # fleet-wide, and the batch gap one process announces and two others obey,
+      # are claims about separate processes and are measured on separate
+      # processes, by their timestamps.
       - name: Write-pace throttle self-test
         run: pnpm check:pm-write-pace
+
+      # The fleet identity and the two doors — same family, same split. The
+      # minter's LIVE path is a POST to the platform signed with a private key,
+      # so the offline half is all CI can hold: a throwaway RSA pair, a fake
+      # platform through every branch, and the assertion that matters most — a
+      # known token and a known key fed through every output path and grepped
+      # out of ALL of them. The card-creation door and the shell wrapper both
+      # pin their wiring into the throttle above; the wrapper's self-test reads a
+      # fixture cache in place of the platform and proves what git sees (the
+      # bot as committer, no token in any remote or config file, a credential
+      # helper reached from the environment alone).
+      - name: Fleet token minter self-test
+        run: pnpm check:pm-fleet-token
+
+      - name: Issue-create door self-test
+        run: pnpm check:pm-issue-create
+
+      - name: with-fleet wrapper self-test
+        run: pnpm check:pm-with-fleet
 
       - name: Stamped-post helper self-test
         run: pnpm check:pm-post-stamped
@@ -5632,6 +5655,44 @@ jobs:
       # would blind it to the PR that adds a new agent definition anywhere else.
       - name: Check every agent definition declares a model
         run: pnpm check:agent-model-declared
+
+      # ADR-0049 tombstones, refusal strings and doc pages name the release that
+      # carries a removal, and ADR-0087's level ruling (Amended 2026-09-13) settles
+      # which number that is: "A tombstone names the npm release it ships in, ⛔ never
+      # the protocol major" — a pre-GA retirement ships `minor`, so it lands in a
+      # version of the CURRENT major, never in the next one. Prose dating a removal to
+      # the next major sends the reader to a version that does not exist.
+      #
+      # This is a RECURRENCE with a measured downstream cost. Ten sites of the class
+      # were corrected by hand in July, the card closed `completed`, and no gate landed
+      # with it; the class came back at 36 live sites across 15 files. Meanwhile a
+      # sibling repository had hung a cleanup schedule on "the PR that pushes
+      # `@objectstack/spec` to 18" — an event that will never come.
+      #
+      # Two axes make a naive matcher read a FALSE ZERO on live sites, and both are
+      # measured: the phrase spans string-concatenation, JSDoc `*` and plain-wrap line
+      # breaks (a single-line grep reads 33 where the tree holds 39), and the package
+      # name is often a backticked code span. A gate written against a single-line
+      # unbackticked grep would read zero and print green, which is worse than no gate.
+      # Its `--self-test` carries a wrapped fixture, a backticked fixture, a fenced-code
+      # fixture and a legitimate bare-17 fixture that must pass, and that self-test is
+      # the ONLY instrument watching the rule: this gate's defect class IS its matching
+      # rule, so a clean tree cannot observe a weakened one.
+      #
+      # The class is DERIVED from `packages/spec/package.json` at runtime — a major
+      # above the published one — never a hardcoded 18, which goes dormant the day the
+      # tree reaches 18. 588 legitimate bare-17 citations sit inside the naive class, so
+      # a gate refusing every bare major would fail the tree on day one.
+      #
+      # Same job and same reasons as its neighbours: no paths filter and required, so it
+      # cannot go dormant on exactly the PR that writes the next stale tombstone — and
+      # a `packages/spec/**` filter would blind it to `packages/core`, which held 11 of
+      # the 36 sites, six of them runtime refusal strings an operator reads.
+      #
+      # The `--self-test` invocation is what `check:self-test-wired` requires; the pnpm
+      # script runs it before the production pass.
+      - name: Check no prose dates a change to an unreleased `@objectstack/spec` major
+        run: pnpm check:future-spec-major
 
       # The #8435 ratchet-remedy authority convention, enforced farm-wide instead of
       # gate by gate. A gate whose second remedy is editing a shrink-only ratchet must

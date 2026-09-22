@@ -81,7 +81,7 @@ function healthMonitorRefusal(message: string): Error & { code: string; status: 
 const RETIRED_HEALTH_CHECK_KEYS: ReadonlyArray<readonly [string, string]> = [
   [
     'autoRestart',
-    "'autoRestart' was removed from PluginHealthCheck in @objectstack/spec 18 "
+    "'autoRestart' was removed from PluginHealthCheck in @objectstack/spec 17.3.0 "
     + '(#12032, ADR-0049 enforce-or-remove) — it never restarted a plugin. '
     + '`attemptRestart` called `plugin.destroy()` and stopped there, then '
     + "logged 'Plugin restarted' and set status `recovering`, and the periodic "
@@ -94,14 +94,14 @@ const RETIRED_HEALTH_CHECK_KEYS: ReadonlyArray<readonly [string, string]> = [
   [
     'maxRestartAttempts',
     "'maxRestartAttempts' was removed from PluginHealthCheck in "
-    + '@objectstack/spec 18 (#12032, ADR-0049 enforce-or-remove) — it capped a '
+    + '@objectstack/spec 17.3.0 (#12032, ADR-0049 enforce-or-remove) — it capped a '
     + 'restart that never happened, so it only counted `destroy()` calls. '
     + 'Delete the key.',
   ],
   [
     'restartBackoff',
     "'restartBackoff' was removed from PluginHealthCheck in @objectstack/spec "
-    + '18 (#12032, ADR-0049 enforce-or-remove) — it delayed a restart that '
+    + '17.3.0 (#12032, ADR-0049 enforce-or-remove) — it delayed a restart that '
     + 'never happened, so it only moved when the `destroy()` landed. Delete '
     + 'the key.',
   ],
@@ -180,7 +180,7 @@ function assertNoRetiredKeys(pluginName: string, config: object): void {
  * can obtain one, so there was nothing for a re-init hook to call. ADR-0049
  * enforce-or-remove, with no roadmap to point EXPERIMENTAL at, therefore
  * removed the declaration: `autoRestart`, `maxRestartAttempts` and
- * `restartBackoff` are tombstoned in `@objectstack/spec` 18, and this class
+ * `restartBackoff` are tombstoned in `@objectstack/spec` 17.3.0, and this class
  * refuses a config that still carries one instead of accepting it and doing
  * something else.
  *
