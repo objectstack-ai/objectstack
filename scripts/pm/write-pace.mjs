@@ -199,7 +199,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSy
 import { constants as OS_CONSTANTS, homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -233,6 +233,16 @@ export const DEFAULT_BATCH_THRESHOLD = 5;
 export const DEFAULT_BATCH_GAP_MS = 30_000;
 export const DEFAULT_LEASE_MAX_HOLD_MS = 120_000;
 export const DEFAULT_LEASE_WAIT_MS = 15 * 60 * 1000;
+
+/**
+ * `--run` hands its child the pid that holds the lease. A child that gates
+ * itself (a `scripts/pm` tool) then INHERITS the turn instead of waiting two
+ * minutes for its own parent's lease to be judged stale — measured on the
+ * first live run: the wrapper held it, the tool queued behind it. The child
+ * still reserves its own slot; it just does not re-take the lease, and never
+ * releases the one it inherited.
+ */
+export const LEASE_HOLDER_ENV = 'OS_PM_WRITE_LEASE_HOLDER';
 
 const LEASE_POLL_MS = 50;
 // The attempt bound beside the wait deadline, for the same frozen-clock reason
@@ -809,6 +819,14 @@ export function acquireWriteLease(file, deps = {}) {
 
   if (heldLeases.has(file)) return { held: true, reentered: true, waitedMs: 0, broke: null };
 
+  // An ancestor that took the lease for this command (`--run`) named itself in
+  // the environment: its turn is this process's turn.
+  const inheritFrom = Number(deps.inheritFrom ?? (deps.env ?? process.env)[LEASE_HOLDER_ENV]);
+  if (Number.isInteger(inheritFrom) && inheritFrom > 0 && existsSync(leaseDir)) {
+    const holder = readHolder(leaseDir);
+    if (holder && holder.pid === inheritFrom && pidAlive(inheritFrom)) return { held: true, inherited: true, reentered: false, waitedMs: 0, broke: null };
+  }
+
   try {
     mkdirSync(qDir, { recursive: true });
   } catch {
@@ -1171,7 +1189,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the log, --status and the CLI: what lands on disk, and what must never': 14,
   'rule ④: the lease — one write in flight, fleet-wide, measured on real processes': 12,
   'rule ⑤: batch mode — the gap rises for an announced batch, and the estimate is printed': 9,
-  "--run: the shell door — gated by default, ungated with --read, the command's own exit code": 7,
+  "--run: the shell door — gated by default, ungated with --read, the command's own exit code": 10,
   'the wiring: both halves, in every write transport, on write verbs only': 7,
 });
 const SELF_TEST_BATTERY_FLOOR = 12;
@@ -1591,6 +1609,21 @@ export async function selfTest() {
       t('a stop marker refuses the door too: exit 10, and the command never ran', [blocked.code, blocked.out], [EXIT_WRITE_PACE_REFUSED, '']);
       t('an empty command is usage', (await runChild(['--run', '--'], env)).code, EXIT_USAGE);
       t('--announce-batch needs a positive count', (await runChild(['--announce-batch', 'lots'], env)).code, EXIT_USAGE);
+
+      // A gated child under --run: it must INHERIT the wrapper's turn at once,
+      // not queue behind its own parent until the hold bound breaks the lease.
+      const nestedFile = join(dir, 'nested.jsonl');
+      const nestedEnv = { ...env, OS_PM_WRITE_PACE_FILE: nestedFile, OS_PM_WRITE_LEASE_MAX_HOLD_MS: '4000', OS_PM_WRITE_SELF: pathToFileURL(SELF).href };
+      const nestedCode =
+        'const m = await import(process.env.OS_PM_WRITE_SELF);' +
+        'const r = await m.paceWrite({ token: process.env.GITHUB_TOKEN, kind: "nested" }, { log: () => {} });' +
+        'process.stdout.write(r.refused ? "refused" : "ok");';
+      const t0 = Date.now();
+      const nested = await runChild(['--run', '--kind', 'outer', '--', process.execPath, '--input-type=module', '-e', nestedCode], nestedEnv);
+      const nestedMs = Date.now() - t0;
+      t('⛔ a gated child under --run inherits the turn: it wrote at once, long before the 4 s hold bound', [nested.code, nested.out, nestedMs < 3000], [0, 'ok', true], `${nestedMs}ms; ${nested.err.slice(-200)}`);
+      t('…both the wrapper and the child recorded their reservation', parseRecords(readFileSync(nestedFile, 'utf8')).map((r) => r.kind).sort(), ['nested', 'outer']);
+      t('…and the wrapper released the lease it held on the child\'s behalf', existsSync(leaseDirFor(nestedFile)), false);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1734,7 +1767,8 @@ async function runGated(cli, token) {
     if (paced.refused) return paced.exitCode ?? EXIT_WRITE_PACE_REFUSED;
   }
   const code = await new Promise((resolve) => {
-    const child = spawn(cli.command[0], cli.command.slice(1), { stdio: 'inherit', env: process.env });
+    const env = cli.read ? process.env : { ...process.env, [LEASE_HOLDER_ENV]: String(process.pid) };
+    const child = spawn(cli.command[0], cli.command.slice(1), { stdio: 'inherit', env });
     child.on('error', (e) => {
       console.error(`write-pace: could not run ${cli.command[0]}: ${e?.message ?? e}`);
       resolve(127);

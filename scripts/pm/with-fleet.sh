@@ -69,7 +69,7 @@ log() { printf 'with-fleet: %s\n' "$*" >&2; }
 
 ST_PASS=0
 ST_FAIL=0
-ST_MIN_CASES=16
+ST_MIN_CASES=17
 st_case() {
   local name="$1" got="$2" want="$3"
   if [[ "$got" == "$want" ]]; then
@@ -171,6 +171,15 @@ EOF
   rc=0
   run -- sh -c 'exit 7' || rc=$?
   st_case "a failing command's own exit code passes through, never rewritten" "$rc" 7
+  # A scripts/pm tool on the write-pace roster gates itself: identity only.
+  printf 'A body.\n' > "$dir/b.md"
+  : > "$err.tool"
+  env -u GIT_DIR OS_FLEET_TOKEN_CACHE_FILE="$cache" OS_FLEET_APP_ID=1 OS_FLEET_INSTALLATION_ID=2 OS_PM_WRITE_PACE_FILE="$pace" OS_PM_WRITE_MIN_GAP_MS=0 HTTPS_PROXY= https_proxy= \
+    bash "$SELF" -- node "$HERE/issue-create.mjs" --dry-run --repo o/r --title x --body-file "$dir/b.md" > /dev/null 2> "$err.tool"
+  rc=$?
+  st_case 'a roster tool under the wrapper runs with identity only — no second gate around a tool that gates itself' \
+    "$rc|$(grep -c 'gates itself' "$err.tool")" '0|1'
+  cat "$err.tool" >> "$err"
 
   # ⑤ usage and prerequisites
   rc=0
@@ -272,7 +281,17 @@ if ((GIT_IDENTITY)); then
   export GIT_TERMINAL_PROMPT=0
 fi
 
-# ④ the gate.
+# ④ the gate — unless the command IS a scripts/pm tool that gates itself (the
+# write-pace roster): it calls both halves of the throttle around its own
+# requests, so wrapping it in a second gate would only hold the lease over its
+# head. Identity only for those; the roster is read from write-pace, not copied.
+if ((READ == 0)) && [[ "${1##*/}" == node && "${2:-}" == *scripts/pm/*.mjs ]]; then
+  tool="${2##*/}"
+  if node --input-type=module -e "const m = await import(process.argv[1]); process.exit(m.WIRED_WRITE_TOOLS.includes(process.argv[2]) ? 0 : 1)" -- "file://$HERE/write-pace.mjs" "$tool" 2> /dev/null; then
+    log "$tool gates itself (write-pace roster) — identity only, no second gate around it."
+    READ=1
+  fi
+fi
 GATE=("$HERE/write-pace.mjs" --run)
 ((READ)) && GATE+=(--read)
 [[ -n "$KIND" ]] && GATE+=(--kind "$KIND")
