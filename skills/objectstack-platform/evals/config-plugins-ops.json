@@ -1,0 +1,65 @@
+{
+  "skill_name": "objectstack-platform",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Write `objectstack.config.ts` for our CRM app: objects, views and flows live under src/, the package namespace is `crm`, and it targets protocol 17.",
+      "expected_output": "A `defineStack` whose `manifest` carries `id`, `version`, `type: 'app'`, `name`, `namespace: 'crm'` and `engines: { protocol: '^17' }`, with barrel imports and `objects: Object.values(objects)` (same for `views` / `flows`). Object names carry the prefix in `name` (`crm_account`) — no object-level `namespace`, no `tableName`. No driver in `plugins:` (the CLI resolves it from the DB URL) and no `workflows` / `approvals` top-level keys (refused at load).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineStack", "manifest", "engines", "Object.values("],
+        "must_not_contain": ["workflows:", "approvals:", "tableName"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Build a plugin that registers an `audit` service and records every metadata reload; it should also record every `task` insert.",
+      "expected_output": "A `Plugin` object with `name`, `init(ctx)` calling `ctx.registerService('audit', ...)` and `ctx.hook('metadata:reloaded', ...)`, `start(ctx)`, `destroy()`. Record-level events are NOT kernel hooks — `ctx.hook('data:beforeInsert')` registers and silently never fires — so the task insert is a data hook (`hooks:` collection / `ql.on('beforeInsert', 'task', ...)`, objectstack-data). No `onInstall` / `onEnable` / `onDisable` plugin hooks exist.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["registerService", "ctx.hook(", "metadata:reloaded", "init(", "destroy"],
+        "must_not_contain": ["data:beforeInsert", "onInstall"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "Our scheduled flows never launch, and a `notify` step reports success but nobody receives anything.",
+      "expected_output": "Both are missing capability tokens: `requires: ['automation', 'triggers', 'job', 'messaging']` on the stack root — `triggers` alone arms record-change triggers, schedule and time-relative triggers run on the `job` service, and without `messaging` notify returns success with `skipped: true`. Declaring is a demand (a missing provider is a hard boot error); an unknown token is rejected by `defineStack` at authoring time.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["requires", "job", "messaging", "triggers"],
+        "must_not_contain": ["plugins: [new ServiceJobPlugin", "@objectstack/adapter-"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "We deploy on Vercel serverless functions inside our own Hono app. Mount the ObjectStack API under /api.",
+      "expected_output": "`createHonoApp({ kernel })` from `@objectstack/hono` (prefix defaults to `/api`) mounted into the host app — `HonoServerPlugin` is for when ObjectStack owns the server. Uses `LiteKernel` for the cold-start-sensitive host, warns that `/auth/*` follows the auth `basePath`, not `prefix`, and that there are no `@objectstack/adapter-*` packages.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["createHonoApp", "@objectstack/hono", "LiteKernel"],
+        "must_not_contain": ["@objectstack/adapter-", "HonoServerPlugin("]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "I changed field types on an object that already has production data. Show me what the database needs, verify the metadata, and give me a quality score.",
+      "expected_output": "`os migrate plan` to preview the metadata↔DB drift, `os migrate apply` (with `--allow-destructive` for type changes / drops) to reconcile, then `os validate` (schema + CEL + widget bindings) and `os lint --score`. Does not report the change done until `os validate` passes; `os lint` does not replace it.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["os migrate plan", "os migrate apply", "os validate", "os lint"],
+        "must_not_contain": ["os rollback", "os data seed"]
+      }
+    },
+    {
+      "id": 6,
+      "prompt": "Plan the production deployment: Docker on Kubernetes behind nginx, PostgreSQL.",
+      "expected_output": "`os start` as the container entrypoint with `PORT` pinned explicitly (production fails loudly on a busy port; only dev auto-hops), `driver-sql` selected by the database URL (no `DriverPlugin` in `plugins:`), TLS terminated on the proxy with the app on an internal port, and `OS_AUTH_URL` / `OS_TRUSTED_ORIGINS` / the app `hostname` kept in sync with the proxy. Health via `GET /health` and `GET /ready`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["os start", "PORT", "OS_TRUSTED_ORIGINS", "driver-sql"],
+        "must_not_contain": ["new DriverPlugin", "@objectstack/plugin-prometheus"]
+      }
+    }
+  ]
+}

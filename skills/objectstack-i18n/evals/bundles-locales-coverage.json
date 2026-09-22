@@ -1,0 +1,55 @@
+{
+  "skill_name": "objectstack-i18n",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add Simplified Chinese for the `support_case` object: its label and plural, the `status` field with options New / Open / Closed, the `close` action, and a welcome message that greets the user by name.",
+      "expected_output": "A `TranslationData` per locale under `objects.support_case` — `label`, `pluralLabel`, `fields.status.label`, `fields.status.options` keyed by the STORED option value (`new`, `open`, `closed`, never the display label), `_actions.close.label` — assembled with `defineTranslationBundle({ en, 'zh-CN': zhCN })` and registered under `defineStack({ translations })`. The message uses double-brace interpolation, `'welcome.user': '欢迎，{{userName}}！'`; there is no ICU plural/select.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineTranslationBundle", "objects", "pluralLabel", "options", "_actions", "{{"],
+        "must_not_contain": ["o: {", "{count, plural"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "We are adding Japanese to the app.",
+      "expected_output": "Adds `'ja-JP'` (BCP-47) to `i18n.supportedLocales`, keeps `defaultLocale` / `fallbackLocale`, scaffolds the skeleton with `os i18n extract --locales=ja-JP --out=./src/translations`, adds the `'ja-JP'` key to the bundle, and verifies with `os i18n check --locales=ja-JP`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["supportedLocales", "ja-JP", "os i18n extract", "fallbackLocale"],
+        "must_not_contain": ["'jp'", "ja_JP"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "A customer admin wants to relabel `account` as 客户 in their Studio without waiting for a redeploy.",
+      "expected_output": "A `translation` metadata item (author with `defineTranslation`, shape `TranslationItemSchema`) carrying `locale: 'zh-CN'` and the same `objects.account.label` group as a file bundle; published items layer over the shipped bundles at boot and on every publish, and deleting the item restores the shipped value. One locale per item; the retired `o.*` dialect is rejected on this door too.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["translation", "locale", "objects", "defineTranslation"],
+        "must_not_contain": ["o: {", "_meta"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Our storage plugin ships its own generated `objects` translations for `en` and `zh-CN`. Wire them in.",
+      "expected_output": "Wraps the generated subtree into a `TranslationData` (`{ objects: enObjects }`), builds the bundle with `defineTranslationBundle`, and wraps the translated locale with `withSourceFallback(..., enSource, undefined, zhCNGeneratedSourceHashes)` so a leaf whose source moved is not served forever under a green check. A plugin that owns its objects loads it from its own `kernel:ready` hook via `i18n.loadTranslations(locale, data)` (deep-merge) rather than the stack.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineTranslationBundle", "withSourceFallback", "loadTranslations", "kernel:ready"],
+        "must_not_contain": ["getAppBundle", "loadAppBundle"]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "`os i18n check` reports zh-CN is missing app, navigation and dashboard keys even though we just ran `os i18n extract`. What is wrong?",
+      "expected_output": "Diagnoses that `--objects-only` is on by default, so extract wrote only the `objects` / `globalActions` subtree while check also demands `apps`, `navigation`, `dashboard`, `widget`, `page` and `flow` keys. Re-runs `os i18n extract --no-objects-only` (or hand-authors those groups), re-checks with `os i18n check --locales=zh-CN`, and adds `--strict` / `--threshold` in CI; `extract --check` is the separate freshness gate.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["--no-objects-only", "os i18n check", "apps", "--strict"],
+        "must_not_contain": ["messageFormat"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "skill_name": "objectstack-ai",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add `src/skills/case-triage.skill.ts` for our support app: the assistant should be able to query and read support cases and run our existing `escalate_case` Action on a case. Only activate it when the user is working on the `support_case` object.",
+      "expected_output": "Emits a `defineSkill` with a snake_case `name`, `label`, `instructions`, and a `tools` list where every name resolves: platform tools `query_records` / `get_record` plus the action tool `action_escalate_case` materialised from the stack's own Action. Routing is a `triggerConditions` entry `{ field: 'objectName', operator: 'eq', value: 'support_case' }` (a string value for `eq`). No `permissions` key on the skill (removed in 17) and no `*.agent.ts` file.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineSkill", "tools", "action_escalate_case", "triggerConditions"],
+        "must_not_contain": ["permissions:", "defineAgent("]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Our copilot should use Anthropic with a low temperature (0.3) and cap responses at 2000 tokens. Where do these settings go in the metadata?",
+      "expected_output": "Places sampling under the agent's `model` block (`AIModelConfigSchema`): `provider: 'anthropic'`, a free-string `model`, `temperature: 0.3` (0–2, outside is a parse error) and `maxTokens: 2000`. States that there is no top-level `temperature` / `maxTokens` on an agent and that the inline `provider` enum is `openai | azure_openai | anthropic | local`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["provider", "anthropic", "temperature", "maxTokens"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "Index our `kb_article` records (title and body) so the assistant can answer from them with RAG. Only published articles, and we want to filter by `category` at search time. We run RAGFlow.",
+      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'ragflow'` and `source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'], metadataFields: ['category'], where: { published: true } }`, `refresh: { onRecordChange: true }`, registered at boot through `KnowledgeServicePlugin({ sources })`. Chunking / top-K / rerankers are adapter config, not platform metadata.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["KnowledgeSourceSchema", "contentFields", "metadataFields", "where", "KnowledgeServicePlugin"],
+        "must_not_contain": ["chunkSize", "topK"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Write a `*.tool.ts` so the assistant can call our `close_case` action on a support case.",
+      "expected_output": "Does not author a tool record: the default path is to opt the Action in with `ai: { exposed: true, description: '<40+ chars>' }` on the object's action, which materialises `action_close_case`, and to name that tool in a skill's `tools`. `defineTool` is only for presentation refinement and cannot make anything executable (no `handler` / `implementation`; `ToolSchema` is strict).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["exposed", "description", "action_", "tools"],
+        "must_not_contain": ["handler:", "implementation:"]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "Create `src/ai/support-bot.agent.ts` with defineAgent({ name: 'support_bot', tools: ['query_records', 'action_close_case'], knowledge: ['support_kb'] }) and register it under agents.",
+      "expected_output": "Refuses the agent: the `agent` type is closed to third parties (a stack-authored agent is filtered out, refused by `loadAgent()` and 404s on chat), and `agent.tools` / `agent.knowledge` are protocol-17 tombstones. Re-declares the two tools in a `defineSkill` (registered under `skills`) with a `surface`, and restricts retrieval at the knowledge-source level (`aiExposed`, `where`) rather than on an agent. The runtime's `ask` / `build` agents pick the skill up by surface.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineSkill", "skills", "surface", "aiExposed"],
+        "must_not_contain": ["defineAgent(", "knowledge:"]
+      }
+    }
+  ]
+}
