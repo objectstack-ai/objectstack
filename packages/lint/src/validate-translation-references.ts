@@ -137,6 +137,26 @@
  *   | `manifest.navigationContributions` | the contributed items' ids, under the target app — including an app this stack only contributes into and does not declare (#18442) |
  *   | `objectExtensions[]`           | the fields and validation rules it merges into the target object (#18441) |
  *
+ * ── The artifact reach is not object-only (#19349) ───────────────────────
+ *
+ * Rung 1's `packages[]` reach is the same reach EVERY metadata collection this
+ * rule judges needs, for the same reason: on the per-package leg
+ * `stack.<collection>` holds one package's declarations, so a package
+ * translating what a sibling of the same artifact declares was reported as an
+ * orphan while the runtime resolved the key. {@link artifactProvidedRecords}
+ * is the one reader of that carrier, and every collection it may be asked for
+ * is a key whose `COMPOSE_KEY_DISPOSITIONS` disposition puts it inside an
+ * ADR-0130 D4 entry's assembled body: `objects` (#19064) plus `views`,
+ * `pages`, `actions`, `apps`, `dashboards` and `flows` (#19349).
+ *
+ * ⚠️ `apps` reads BOTH that carrier and `navigationContributions`, and they
+ * answer different questions — what a sibling DECLARES, and what this package
+ * CONTRIBUTES. #18442 added the second alone, which left an app addressable
+ * only where this package contributed into it; the first is what makes a
+ * sibling's own navigation ids addressable and keeps the contributed-only
+ * diagnosis for the case it was written for — an app owned outside the
+ * artifact.
+ *
  * ⛔ Each fold widens what a key may RESOLVE against and nothing else: a name
  * no declaration and no contribution carries is still an orphan and still
  * errors, on the per-package leg exactly as on the union one. See
