@@ -283,7 +283,7 @@ EOF
   cat "$err.relay" >> "$err"
   # The shell reads NO discriminator of its own: under auto it asks the one selector every tool shares.
   st_case 'under auto the shell consults dispatch.mjs --route, and spells no cloud discriminator of its own' \
-    "$(grep -v 'st_case\|grep -c' "$SELF" | grep -c -- 'fleet-write/dispatch.mjs" --route')|$(grep -v 'st_case\|grep -c' "$SELF" | grep -c 'CCR_AGENT_PROXY_ENABLED:-')" '1|0'
+    "$(grep -v 'st_case\|grep -c' "$SELF" | grep -c -- 'dispatch.mjs" --route')|$(grep -v 'st_case\|grep -c' "$SELF" | grep -c 'CCR_AGENT_PROXY_ENABLED:-')" '1|0'
 
   local total=$((ST_PASS + ST_FAIL))
   if ((total < ST_MIN_CASES)); then
