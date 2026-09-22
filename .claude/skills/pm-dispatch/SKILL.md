@@ -797,7 +797,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `scripts/pm/git-history.mjs` | 窗口化 commit 计数:回答或 REFUSE(浅 clone 对窗口化 `git log`/`rev-list` 以 exit 0 无警告答错);`historyHorizon()` 是只读谓词 |
 | `scripts/pm/os-regen-merge.sh` | 碰生成物 PR 的 merge 四步序(防静默吞并与锚点倒退) |
 | `scripts/pm/ensure-pm-labels.sh` | pm 标签词表的幂等一次性创建;退役车道刻意不在 ⛔ 不加回,对象清理以脚本头为权威 |
-| `check:skill-frame-sync` / `-freshness` | 四维决策框架两份拷贝的同构与新鲜度 |
+| `check:skill-frame-sync` / `-freshness` | 四维决策框架唯一一份拷贝的同构与新鲜度 |
 | `guard-main-checkout` / `guard-shared-stash` hooks | worktree-first 与 stash 禁令的机械面 |
 
 ## 模板与表
