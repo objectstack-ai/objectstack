@@ -48,6 +48,18 @@
  * doors, pays exactly ONE related read on each, and DOES receive the rule's
  * verdict.
  *
+ * ## …and the two PRE-RESOLUTION classes, which are a different shape
+ *
+ * The second half of the file drives the same two doors for two callers the
+ * middleware refuses BEFORE any permission set resolves: a user-context write
+ * to an ADR-0103 `engine-owned` object, and a plain-CRUD holder on one of the
+ * ADR-0090 D12 RBAC link tables. The FLS caller above could have reached the
+ * write by sending a different payload; these two cannot reach it at all, under
+ * any payload and against any row — so a preview that answered them would hand
+ * the oracle to a caller with no write channel whatsoever. Each carries its own
+ * control on the identical harness: the same engine-owned bucket with
+ * `userActions` reopening the verb, and the tenant-level admin D12 admits.
+ *
  * ⚠️ What this file does NOT claim. The gate is not a promise that the write
  * would succeed — the row-level pre-image (the middleware's step 2.7) judges a
  * row the preview does not name, and the static `readonly` strip runs inside
@@ -81,6 +93,48 @@ const OPPORTUNITY = {
   }],
 };
 
+/**
+ * ⭐ Y1 — an object a platform service owns end to end (ADR-0103), carrying the
+ * same traversing rule. `managedBy: 'engine-owned'` is an AUTHORABLE key, so an
+ * app declares one the day it wants one.
+ */
+const ENG_LOG = {
+  name: 'eng_log',
+  managedBy: 'engine-owned',
+  fields: {
+    name: { type: 'text' },
+    amount: { type: 'number' },
+    account: { type: 'lookup', reference: 'crm_account' },
+  },
+  validations: [{
+    name: 'partner_cap', type: 'script', severity: 'error',
+    message: RULE_MESSAGE,
+    condition: "record.account.type == 'partner' && record.amount > 10000",
+  }],
+};
+
+/** …and the control: the SAME bucket with `userActions` reopening create. */
+const ENG_LOG_AMENDABLE = { ...ENG_LOG, name: 'eng_log_amendable', userActions: { create: true, edit: true } };
+
+/**
+ * ⭐ Y3 — one of the five RBAC link tables ADR-0090 D12 governs by NAME,
+ * carrying the same traversing rule.
+ */
+const USER_POSITION = {
+  name: 'sys_user_position',
+  fields: {
+    user: { type: 'text' },
+    position: { type: 'text' },
+    amount: { type: 'number' },
+    account: { type: 'lookup', reference: 'crm_account' },
+  },
+  validations: [{
+    name: 'partner_cap', type: 'script', severity: 'error',
+    message: RULE_MESSAGE,
+    condition: "record.account.type == 'partner' && record.amount > 10000",
+  }],
+};
+
 /** May create and edit opportunities — and may NOT repoint the account. */
 const FLS_LOCKED: PermissionSet = {
   name: 'member_default',
@@ -97,11 +151,42 @@ const FLS_OPEN: PermissionSet = {
   fields: { 'crm_opportunity.account': { readable: true, editable: true } },
 } as unknown as PermissionSet;
 
+/**
+ * ⭐ Y1/Y3 — the same persona holding EVERY grant an ordinary permission set can
+ * give on the two objects, the lookup column included. Arms 4-9 all admit them;
+ * only the two pre-resolution gates do not.
+ */
+const FULL_CRUD: PermissionSet = {
+  name: 'member_default',
+  label: 'Full CRUD on the engine-owned and RBAC objects',
+  objects: {
+    eng_log: { allowRead: true, allowCreate: true, allowEdit: true },
+    eng_log_amendable: { allowRead: true, allowCreate: true, allowEdit: true },
+    sys_user_position: { allowRead: true, allowCreate: true, allowEdit: true },
+  },
+  fields: {
+    'eng_log.account': { readable: true, editable: true },
+    'eng_log_amendable.account': { readable: true, editable: true },
+    'sys_user_position.account': { readable: true, editable: true },
+  },
+} as unknown as PermissionSet;
+
+/** …and the tenant-level admin ADR-0090 D12 exists to let through. */
+const TENANT_ADMIN: PermissionSet = {
+  name: 'tenant_admin',
+  label: 'Tenant-level administrator',
+  objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true } },
+} as unknown as PermissionSet;
+
 const CALLER = { userId: 'u_editor', tenantId: 'org-1', positions: [], permissions: [], posture: 'MEMBER' };
+/** The admin caller NAMES its set — the harness resolves only what is asked for. */
+const ADMIN_CALLER = { userId: 'u_admin', tenantId: 'org-1', positions: [], permissions: ['tenant_admin'], posture: 'PLATFORM_ADMIN' };
 const SYS_CTX = { isSystem: true, userId: 'usr_system' };
 
 /** The payload under test: it names the restricted column, and it trips the rule. */
 const PARTNER_PAYLOAD = { name: 'A', amount: 50000, account: 'acc_p' };
+/** ⭐ The D12 payload. `position` is deliberately not an audience anchor. */
+const RBAC_PARTNER_PAYLOAD = { user: 'u_target', position: 'sales', amount: 50000, account: 'acc_p' };
 
 function makeDriver() {
   const stores = new Map<string, Map<string, any>>();
@@ -200,6 +285,9 @@ async function boot(sets: PermissionSet[]) {
     fields: { name: { type: 'text' }, type: { type: 'text' } },
   } as any, 'test-package');
   engine.registry.registerObject(OPPORTUNITY as any, 'test-package');
+  engine.registry.registerObject(ENG_LOG as any, 'test-package');
+  engine.registry.registerObject(ENG_LOG_AMENDABLE as any, 'test-package');
+  engine.registry.registerObject(USER_POSITION as any, 'test-package');
   d.storeFor('crm_account').set('acc_p', { id: 'acc_p', name: 'P', type: 'partner' });
   d.storeFor('crm_account').set('acc_d', { id: 'acc_d', name: 'D', type: 'direct' });
 
@@ -227,6 +315,13 @@ async function boot(sets: PermissionSet[]) {
   await engine.insert(
     'crm_opportunity',
     { id: 'opp_1', name: 'seed', amount: 1, account: 'acc_d' },
+    { context: SYS_CTX } as any,
+  );
+  // …and the update targets for the two pre-resolution cases, seeded the same way.
+  await engine.insert('eng_log', { id: 'log_1', name: 'seed', amount: 1, account: 'acc_d' }, { context: SYS_CTX } as any);
+  await engine.insert(
+    'sys_user_position',
+    { id: 'pos_1', user: 'u_target', position: 'sales', amount: 1, account: 'acc_d' },
     { context: SYS_CTX } as any,
   );
   d.calls.length = 0;
@@ -325,6 +420,157 @@ describe('#18682 — the preview answers nobody the FLS write gate refuses', () 
       await expect(h.engine.insert(
         'crm_opportunity', { name: 'B', amount: 50000, account: 'acc_d' }, { context: CALLER } as any,
       )).resolves.toBeTruthy();
+    });
+  });
+});
+
+/**
+ * ⭐ [#18682] The two PRE-RESOLUTION caller-class refusals, on the same composed
+ * runtime. They are a different shape from W6 above and the difference is the
+ * point: W6's caller could have reached the write by sending a different
+ * payload, and these two cannot reach it at all. The write path admits NO
+ * user-context caller on the object for the verb, so a preview that answered
+ * would be handing the oracle to someone with no write channel whatsoever.
+ *
+ * Each has its control on the identical harness, so neither block can pass on a
+ * gate that refused everyone: for ADR-0103 the SAME bucket with `userActions`
+ * reopening the verb, for D12 the tenant-level admin the gate exists to admit.
+ */
+describe('#18682 — the preview answers nobody the two pre-resolution gates refuse', () => {
+  describe('Y1 — an ADR-0103 engine-owned object under a full CRUD grant', () => {
+    let h: Awaited<ReturnType<typeof boot>>;
+    beforeEach(async () => { h = await boot([FULL_CRUD]); });
+
+    it('insert() refuses on the PERMISSION_DENIED envelope, having read nothing related', async () => {
+      const outcome = await attempt(
+        () => h.engine.insert('eng_log', { ...PARTNER_PAYLOAD }, { context: CALLER } as any),
+      );
+      expect(outcome.ok).toBe(false);
+      expect(outcome.code).toBe('PERMISSION_DENIED');
+      expect(outcome.status).toBe(403);
+      expect(outcome.message).toMatch(/is engine-owned/);
+      expect(h.relatedReads()).toBe(0);
+    });
+
+    it('update() refuses on the same envelope, having read nothing related', async () => {
+      const outcome = await attempt(() => h.engine.update(
+        'eng_log', { amount: 50000, account: 'acc_p' },
+        { where: { id: 'log_1' }, context: CALLER } as any,
+      ));
+      expect(outcome.ok).toBe(false);
+      expect(outcome.code).toBe('PERMISSION_DENIED');
+      expect(outcome.status).toBe(403);
+      expect(h.relatedReads()).toBe(0);
+    });
+
+    it('validate() reads nothing related either, and never returns the rule verdict', async () => {
+      const preview = await h.engine.validate(
+        'eng_log', { ...PARTNER_PAYLOAD }, { mode: 'insert', context: CALLER } as any,
+      );
+      expect(h.relatedReads()).toBe(0);
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).not.toContain(RULE_MESSAGE);
+    });
+
+    it('validate({ mode: update }) reads nothing related and returns no rule verdict', async () => {
+      const preview = await h.engine.validate(
+        'eng_log', { amount: 50000, account: 'acc_p' }, { mode: 'update', context: CALLER } as any,
+      );
+      expect(h.relatedReads()).toBe(0);
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).not.toContain(RULE_MESSAGE);
+    });
+  });
+
+  describe('the ADR-0103 control: the same bucket with userActions reopening create', () => {
+    let h: Awaited<ReturnType<typeof boot>>;
+    beforeEach(async () => { h = await boot([FULL_CRUD]); });
+
+    it('insert() reaches the rule and refuses with the rule, after ONE related read', async () => {
+      const outcome = await attempt(
+        () => h.engine.insert('eng_log_amendable', { ...PARTNER_PAYLOAD }, { context: CALLER } as any),
+      );
+      expect(outcome.ok).toBe(false);
+      expect(outcome.message).toContain(RULE_MESSAGE);
+      expect(h.relatedReads()).toBe(1);
+    });
+
+    it('validate() agrees with it, after ONE related read', async () => {
+      const preview = await h.engine.validate(
+        'eng_log_amendable', { ...PARTNER_PAYLOAD }, { mode: 'insert', context: CALLER } as any,
+      );
+      expect(h.relatedReads()).toBe(1);
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).toContain(RULE_MESSAGE);
+    });
+  });
+
+  describe('Y3 — an ADR-0090 D12 RBAC link table under a plain CRUD grant', () => {
+    let h: Awaited<ReturnType<typeof boot>>;
+    beforeEach(async () => { h = await boot([FULL_CRUD]); });
+
+    it('insert() refuses on the PERMISSION_DENIED envelope, having read nothing related', async () => {
+      const outcome = await attempt(
+        () => h.engine.insert('sys_user_position', { ...RBAC_PARTNER_PAYLOAD }, { context: CALLER } as any),
+      );
+      expect(outcome.ok).toBe(false);
+      expect(outcome.code).toBe('PERMISSION_DENIED');
+      expect(outcome.status).toBe(403);
+      expect(outcome.message).toMatch(/delegated adminScope/);
+      expect(h.relatedReads()).toBe(0);
+    });
+
+    it('update() refuses on the same envelope, having read nothing related', async () => {
+      const outcome = await attempt(() => h.engine.update(
+        'sys_user_position', { amount: 50000, account: 'acc_p' },
+        { where: { id: 'pos_1' }, context: CALLER } as any,
+      ));
+      expect(outcome.ok).toBe(false);
+      expect(outcome.code).toBe('PERMISSION_DENIED');
+      expect(outcome.status).toBe(403);
+      expect(h.relatedReads()).toBe(0);
+    });
+
+    it('validate() reads nothing related either, and never returns the rule verdict', async () => {
+      const preview = await h.engine.validate(
+        'sys_user_position', { ...RBAC_PARTNER_PAYLOAD }, { mode: 'insert', context: CALLER } as any,
+      );
+      expect(h.relatedReads()).toBe(0);
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).not.toContain(RULE_MESSAGE);
+    });
+
+    it('validate({ mode: update }) reads nothing related and returns no rule verdict', async () => {
+      const preview = await h.engine.validate(
+        'sys_user_position', { amount: 50000, account: 'acc_p' },
+        { mode: 'update', context: CALLER } as any,
+      );
+      expect(h.relatedReads()).toBe(0);
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).not.toContain(RULE_MESSAGE);
+    });
+  });
+
+  describe('the D12 control: the tenant-level admin the gate admits', () => {
+    let h: Awaited<ReturnType<typeof boot>>;
+    beforeEach(async () => { h = await boot([TENANT_ADMIN]); });
+
+    it('insert() reaches the rule and refuses with the rule, after ONE related read', async () => {
+      const outcome = await attempt(
+        () => h.engine.insert('sys_user_position', { ...RBAC_PARTNER_PAYLOAD }, { context: ADMIN_CALLER } as any),
+      );
+      expect(outcome.ok).toBe(false);
+      expect(outcome.message).toContain(RULE_MESSAGE);
+      expect(h.relatedReads()).toBe(1);
+    });
+
+    it('validate() agrees with it, after ONE related read', async () => {
+      const preview = await h.engine.validate(
+        'sys_user_position', { ...RBAC_PARTNER_PAYLOAD }, { mode: 'insert', context: ADMIN_CALLER } as any,
+      );
+      expect(h.relatedReads()).toBe(1);
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).toContain(RULE_MESSAGE);
     });
   });
 });

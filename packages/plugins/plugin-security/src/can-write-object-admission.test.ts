@@ -14,16 +14,21 @@
  * {@link SecurityPlugin.canWriteObject} is what it asks.
  *
  * The first version of that question was NOT the middleware's decision. It
- * checked `isSystem`, a principal, and the CRUD grant — and admitted two
+ * checked `isSystem`, a principal, and the CRUD grant — and admitted four
  * classes the write path refuses:
  *
  *   - a caller holding `allowCreate` but NOT an ADR-0066 D3 `requiredPermissions`
  *     capability the object declares (reachable from the wire: the `dryRun`
  *     import route);
  *   - an ADR-0090 D10 `onBehalfOf` context naming a delegator that does not
- *     exist (the in-process / `/mcp` door).
+ *     exist (the in-process / `/mcp` door);
+ *   - a user-context caller on an ADR-0103 `engine-owned` object whose
+ *     `userActions` do not reopen the verb — refused BEFORE anything resolves,
+ *     so no grant the caller can hold changes the answer;
+ *   - a plain-CRUD holder on one of the ADR-0090 D12 RBAC link tables, refused
+ *     at the same pre-resolution point for the same reason.
  *
- * Both are cases below. ⭐ But the point of this file is not those two cases: it
+ * All four are cases below. ⭐ But the point of this file is not those cases: it
  * is that the first block asserts no expected boolean per case at all. It drives
  * the REAL registered middleware with the write for the same (object, context)
  * and requires the method's answer to EQUAL whether the middleware admitted. Two
@@ -120,6 +125,29 @@ const AGENT_FLS_OPEN_SET: PermissionSet = {
   fields: { 'invoice.account': { readable: true, editable: true } },
 } as unknown as PermissionSet;
 
+/**
+ * ⭐ Y1 — full CRUD on an object a platform service owns end to end, and on the
+ * sibling whose `userActions` reopen the verb. One fixture, both directions.
+ */
+const ENGINE_OWNED_SET: PermissionSet = {
+  name: 'member_default',
+  label: 'Full CRUD on an engine-owned object',
+  objects: {
+    eng_log: { allowRead: true, allowCreate: true, allowEdit: true },
+    eng_log_amendable: { allowRead: true, allowCreate: true, allowEdit: true },
+  },
+} as unknown as PermissionSet;
+
+/**
+ * ⭐ Y3 — plain CRUD on an RBAC link table. ADR-0090 D12's whole point: holding
+ * this does not make the caller a permission administrator.
+ */
+const RBAC_CRUD_SET: PermissionSet = {
+  name: 'member_default',
+  label: 'Plain CRUD on sys_user_position',
+  objects: { sys_user_position: { allowRead: true, allowCreate: true, allowEdit: true } },
+} as unknown as PermissionSet;
+
 const schema = (name: string, extra: Record<string, unknown> = {}) => ({
   name,
   fields: {
@@ -134,6 +162,24 @@ const SCHEMAS: Record<string, Record<string, unknown>> = {
   invoice: schema('invoice'),
   ledger: schema('ledger'),
   payroll_run: schema('payroll_run', { requiredPermissions: ['manage_payroll'] }),
+  // ⭐ Y1 — ADR-0103. The bucket's locked default grants no write, so the
+  // resolved affordances refuse every user-context verb…
+  eng_log: schema('eng_log', { managedBy: 'engine-owned' }),
+  // …and this one is the SAME bucket with `userActions` reopening create and
+  // edit, which is how the admin/user-writable members of it pass the guard.
+  eng_log_amendable: schema('eng_log_amendable', {
+    managedBy: 'engine-owned',
+    userActions: { create: true, edit: true },
+  }),
+  // ⭐ Y3 — ADR-0090 D12 governs this object by NAME, not by a bucket.
+  sys_user_position: {
+    name: 'sys_user_position',
+    fields: {
+      organization_id: { type: 'text', label: 'Organization' },
+      user: { type: 'text', label: 'User' },
+      position: { type: 'text', label: 'Position' },
+    },
+  },
 };
 
 const WRITER_CTX = { userId: 'u_writer', tenantId: 'org-1', positions: [], permissions: [], posture: 'MEMBER' };
@@ -147,8 +193,28 @@ const AGENT_CTX = {
 };
 const DELEGATED_AGENT_CTX = { ...AGENT_CTX, onBehalfOf: { userId: LIVE_DELEGATOR } };
 
+/**
+ * ⭐ The tenant-level admin ADR-0090 D12 exists to let through: the context NAMES
+ * the wildcard set, because the harness resolves a set only when the context
+ * asks for it. Without the name the caller resolves to the baseline alone and
+ * the case would prove nothing about the D12 arm.
+ */
+const TENANT_ADMIN_CTX = {
+  userId: 'u_admin', tenantId: 'org-1', positions: [],
+  permissions: [ADMIN_FULL_ACCESS], posture: 'PLATFORM_ADMIN',
+};
+/** A principal-less context — no positions, no sets, no `userId`. */
+const PRINCIPAL_LESS_CTX = { positions: [], permissions: [] };
+/** The system bypass, spelled the way every door spells it. */
+const SYSTEM_CTX = { isSystem: true, userId: 'usr_system' };
 /** The payload every case carries unless it is about a restricted field. */
 const PLAIN_PAYLOAD = { title: 'x' };
+/**
+ * ⭐ The D12 payload. `position` is deliberately NOT `everyone` / `guest`: those
+ * two are refused for every caller by the gate's audience-anchor invariant, and
+ * a case that tripped it would prove nothing about the delegated-admin arm.
+ */
+const RBAC_PAYLOAD = { user: 'u_target', position: 'sales' };
 /** …and the one that names the column the FLS fixtures restrict. */
 const REFERENCE_PAYLOAD = { title: 'x', account: 'acc_churn' };
 
@@ -252,6 +318,26 @@ describe('canWriteObject agrees with the engine middleware, case for case', () =
     // control twin is the identical caller with no delegation link.
     { label: 'a delegated agent whose delegator may not edit the field', object: 'invoice', operation: 'insert', sets: [AGENT_FLS_OPEN_SET, FLS_LOCKED_SET], context: DELEGATED_AGENT_CTX, data: REFERENCE_PAYLOAD },
     { label: 'the same agent acting for nobody', object: 'invoice', operation: 'insert', sets: [AGENT_FLS_OPEN_SET, FLS_LOCKED_SET], context: AGENT_CTX, data: REFERENCE_PAYLOAD },
+    // ⭐ Y1 — ADR-0103, the first of the two PRE-RESOLUTION classes that leaked.
+    // The caller holds every grant the object's own permission set can give and
+    // the write path still refuses them: the refusal is about the OBJECT and the
+    // CALLER CLASS, so no payload and no row can get them past it.
+    { label: 'an engine-owned object under a full CRUD grant', object: 'eng_log', operation: 'insert', sets: [ENGINE_OWNED_SET], context: WRITER_CTX },
+    { label: 'the same engine-owned object in UPDATE mode', object: 'eng_log', operation: 'update', sets: [ENGINE_OWNED_SET], context: WRITER_CTX },
+    // …and the OTHER direction, which is what keeps the arm from being a blanket
+    // deny on the bucket: the same bucket, the same caller, `userActions` open.
+    { label: 'an engine-owned object whose userActions reopen create', object: 'eng_log_amendable', operation: 'insert', sets: [ENGINE_OWNED_SET], context: WRITER_CTX },
+    { label: 'an engine-owned object for a SYSTEM context', object: 'eng_log', operation: 'insert', sets: [ENGINE_OWNED_SET], context: SYSTEM_CTX },
+    { label: 'an engine-owned object for a principal-less context', object: 'eng_log', operation: 'insert', sets: [ENGINE_OWNED_SET], context: PRINCIPAL_LESS_CTX },
+    // ⭐ Y3 — ADR-0090 D12, the second. Same shape, different mechanism: the
+    // gate governs the object by name and asks about the caller's delegated
+    // administration, which a CRUD grant is not.
+    { label: 'an RBAC link table under a plain CRUD grant', object: 'sys_user_position', operation: 'insert', sets: [RBAC_CRUD_SET], context: WRITER_CTX, data: RBAC_PAYLOAD },
+    { label: 'the same RBAC link table in UPDATE mode', object: 'sys_user_position', operation: 'update', sets: [RBAC_CRUD_SET], context: WRITER_CTX, data: RBAC_PAYLOAD },
+    // …and its other direction: the tenant admin the gate exists to let through.
+    { label: 'an RBAC link table for a tenant-level admin', object: 'sys_user_position', operation: 'insert', sets: [ADMIN_SET], context: TENANT_ADMIN_CTX, data: RBAC_PAYLOAD },
+    { label: 'an RBAC link table for a SYSTEM context', object: 'sys_user_position', operation: 'insert', sets: [RBAC_CRUD_SET], context: SYSTEM_CTX, data: RBAC_PAYLOAD },
+    { label: 'an RBAC link table for a principal-less context', object: 'sys_user_position', operation: 'insert', sets: [RBAC_CRUD_SET], context: PRINCIPAL_LESS_CTX, data: RBAC_PAYLOAD },
   ];
 
   for (const c of CASES) {
@@ -360,5 +446,69 @@ describe('the arms the CRUD grant alone does not cover', () => {
     await expect(
       plugin.canWriteObject('invoice', 'insert', AGENT_CTX, REFERENCE_PAYLOAD),
     ).resolves.toBe(true);
+  });
+
+  // ── arm 2: the ADR-0103 engine-owned affordance gate (pre-resolution) ─────
+
+  it('DENIES a full-CRUD holder on an engine-owned object (ADR-0103)', async () => {
+    const { plugin } = await boot([ENGINE_OWNED_SET]);
+    await expect(plugin.canWriteObject('eng_log', 'insert', WRITER_CTX, PLAIN_PAYLOAD)).resolves.toBe(false);
+  });
+
+  it('DENIES it in UPDATE mode too — the affordance is per verb, not per object', async () => {
+    const { plugin } = await boot([ENGINE_OWNED_SET]);
+    await expect(plugin.canWriteObject('eng_log', 'update', WRITER_CTX, PLAIN_PAYLOAD)).resolves.toBe(false);
+  });
+
+  it('ADMITS the same bucket once userActions reopen the verb — so the arm is not a blanket deny', async () => {
+    const { plugin } = await boot([ENGINE_OWNED_SET]);
+    await expect(plugin.canWriteObject('eng_log_amendable', 'insert', WRITER_CTX, PLAIN_PAYLOAD)).resolves.toBe(true);
+  });
+
+  it('ADMITS a system context on the engine-owned object — the bypass is intact', async () => {
+    const { plugin } = await boot([ENGINE_OWNED_SET]);
+    await expect(plugin.canWriteObject('eng_log', 'insert', SYSTEM_CTX, PLAIN_PAYLOAD)).resolves.toBe(true);
+  });
+
+  // ── arm 3: the ADR-0090 D12 delegated-admin gate (pre-resolution) ─────────
+
+  it('DENIES a plain-CRUD holder on an RBAC link table (ADR-0090 D12)', async () => {
+    const { plugin } = await boot([RBAC_CRUD_SET]);
+    await expect(
+      plugin.canWriteObject('sys_user_position', 'insert', WRITER_CTX, RBAC_PAYLOAD),
+    ).resolves.toBe(false);
+  });
+
+  it('DENIES it in UPDATE mode too', async () => {
+    const { plugin } = await boot([RBAC_CRUD_SET]);
+    await expect(
+      plugin.canWriteObject('sys_user_position', 'update', WRITER_CTX, RBAC_PAYLOAD),
+    ).resolves.toBe(false);
+  });
+
+  it('ADMITS a tenant-level admin on the same table — so the arm is not a blanket deny', async () => {
+    const { plugin } = await boot([ADMIN_SET]);
+    await expect(
+      plugin.canWriteObject('sys_user_position', 'insert', TENANT_ADMIN_CTX, RBAC_PAYLOAD),
+    ).resolves.toBe(true);
+  });
+
+  it('DENIES a principal-less context on the RBAC link table — the gate fails CLOSED before the fall-open', async () => {
+    const { plugin } = await boot([RBAC_CRUD_SET]);
+    await expect(
+      plugin.canWriteObject('sys_user_position', 'insert', PRINCIPAL_LESS_CTX, RBAC_PAYLOAD),
+    ).resolves.toBe(false);
+  });
+
+  it('ADMITS a system context on the RBAC link table — the bypass is intact', async () => {
+    const { plugin } = await boot([RBAC_CRUD_SET]);
+    await expect(
+      plugin.canWriteObject('sys_user_position', 'insert', SYSTEM_CTX, RBAC_PAYLOAD),
+    ).resolves.toBe(true);
+  });
+
+  it('leaves an ordinary object untouched by either pre-resolution arm', async () => {
+    const { plugin } = await boot([WRITER_SET]);
+    await expect(plugin.canWriteObject('invoice', 'insert', WRITER_CTX, PLAIN_PAYLOAD)).resolves.toBe(true);
   });
 });
