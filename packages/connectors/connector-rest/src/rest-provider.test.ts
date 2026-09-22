@@ -242,7 +242,7 @@ describe('rest provider factory (ADR-0097)', () => {
             // it back onto the def. The absence pin lives tree-scoped in
             // `packages/spec/src/integration/connector.test.ts`; here the point
             // is only that the surviving timeout still travels.
-            expect((def as Record<string, unknown>).connectionTimeoutMs).toBeUndefined();
+            expect(Object.keys(def)).not.toContain('connectionTimeoutMs');
         });
     });
 });

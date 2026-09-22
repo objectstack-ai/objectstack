@@ -289,12 +289,20 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
   /**
    * An AUTHORING of the key, never a prose mention:
    *   - key position — `connectionTimeoutMs:` in TS/JSON/YAML, not preceded by
-   *     a backtick (prose), a dot (a member read described in prose) or a
-   *     word character (a longer identifier ending in this name);
-   *   - a member read — `.connectionTimeoutMs` followed by a non-word, i.e. a
-   *     consumer pulling the value back off an object.
+   *     a word character (a longer identifier ending in this name);
+   *   - a member read — `.connectionTimeoutMs`, i.e. a consumer pulling the
+   *     value back off an object.
    */
-  const AUTHORING = /(^|[^`\w.])connectionTimeoutMs["']?\s*:|\.connectionTimeoutMs\b/m;
+  const AUTHORING = /(^|[^\w.])connectionTimeoutMs["']?\s*:|\.connectionTimeoutMs\b/m;
+
+  /**
+   * Prose mentions are spelled in INLINE CODE throughout this repo — the house
+   * style `check:doc-authoring` enforces — so stripping single-backtick spans
+   * separates "the retirement kit describing what it removed" from "a source
+   * still writing it". Deliberately newline-bounded: a fenced block's content
+   * is NOT stripped, so an authoring inside a fenced example is still caught.
+   */
+  const stripInlineCode = (text: string): string => text.replace(/`[^`\n]*`/g, '');
 
   /**
    * Structural exclusions — the retirement kit and its projections, each with
@@ -323,6 +331,14 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     // Release-owned prose records the removal; never edited by a code PR.
     'content/docs/releases/',
     '.changeset/',
+    // GITIGNORED build output (`.gitignore` line for `packages/spec/json-schema/`),
+    // reached only because this is a FILESYSTEM walk rather than a git walk.
+    // `retiredKey()` emits the tombstoned property into the generated JSON
+    // Schema, exactly as it already does for the two retired siblings on this
+    // same schema — measured: `Connector.json` carries `rateLimitConfig` and
+    // `errorMapping` the same way. Excluding it costs no coverage: the source
+    // it is generated from is `connector.zod.ts`, which this walk reads.
+    'packages/spec/json-schema/',
   ];
   /** tsup's own bundle of `tsup.config.ts`, written and deleted mid-build (#15513's measured ENOENT). */
   const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;
@@ -345,18 +361,25 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
   };
 
   it('the matcher recognises an authoring and ignores a prose mention (anti-vacuity)', () => {
-    expect(AUTHORING.test('  connectionTimeoutMs: 30000,')).toBe(true);
-    expect(AUTHORING.test('connectionTimeoutMs: 5000')).toBe(true);
-    expect(AUTHORING.test('  "connectionTimeoutMs": 30000,')).toBe(true);
-    expect(AUTHORING.test('connectionTimeoutMs: 15000   # yaml')).toBe(true);
-    expect(AUTHORING.test('const ms = ctx.connectionTimeoutMs;')).toBe(true);
-    expect(AUTHORING.test('entry.connectionTimeoutMs ?? null')).toBe(true);
+    const judge = (line: string): boolean => AUTHORING.test(stripInlineCode(line));
+
+    expect(judge('  connectionTimeoutMs: 30000,')).toBe(true);
+    expect(judge('connectionTimeoutMs: 5000')).toBe(true);
+    expect(judge('  "connectionTimeoutMs": 30000,')).toBe(true);
+    expect(judge('connectionTimeoutMs: 15000   # yaml')).toBe(true);
+    expect(judge('const ms = ctx.connectionTimeoutMs;')).toBe(true);
+    expect(judge('entry.connectionTimeoutMs ?? null')).toBe(true);
+    // ⛔ NARROWNESS of the strip: it must not swallow a real authoring that
+    // merely shares a line with inline code, or the pin goes quiet.
+    expect(judge('// see `requestTimeoutMs` — connectionTimeoutMs: 30000,')).toBe(true);
     // Prose: the retirement kit must be able to describe what it removed.
-    expect(AUTHORING.test('`connectionTimeoutMs` was removed in @objectstack/spec 17')).toBe(false);
-    expect(AUTHORING.test('the connectionTimeoutMs key is gone')).toBe(false);
-    expect(AUTHORING.test('"integration/Connector:connectionTimeoutMs",')).toBe(false);
+    expect(judge('`connectionTimeoutMs` was removed in @objectstack/spec 17')).toBe(false);
+    expect(judge('the factories read `ctx.connectionTimeoutMs` only to echo it')).toBe(false);
+    expect(judge('| **connectionTimeoutMs** | `never` | optional | [REMOVED] `connector.connectionTimeoutMs` was removed |')).toBe(false);
+    expect(judge('the connectionTimeoutMs key is gone')).toBe(false);
+    expect(judge('"integration/Connector:connectionTimeoutMs",')).toBe(false);
     // A longer identifier that merely ends in the name is not this key.
-    expect(AUTHORING.test('  defaultConnectionTimeoutMs: 30000,')).toBe(false);
+    expect(judge('  defaultConnectionTimeoutMs: 30000,')).toBe(false);
   });
 
   it('a path that VANISHES mid-walk is not a finding, and every other read fault still is', () => {
@@ -395,7 +418,7 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
         visited += 1;
         const text = readIfPresent(full, rel);
         if (text === undefined) continue;
-        const m = AUTHORING.exec(text);
+        const m = AUTHORING.exec(stripInlineCode(text));
         if (m) offenders.push(`${rel} authors \`${m[0].trim()}\``);
       }
     };
