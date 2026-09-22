@@ -257,10 +257,10 @@ directory rather than per file.
 | Dir | Sites |
 |---|---|
 | `ai/` | 78 |
-| `api/` | 451 |
+| `api/` | 454 |
 | `identity/` | 32 |
 | `integration/` | 8 |
-| `kernel/` | 257 |
+| `kernel/` | 247 |
 | `marketplace/` | 29 |
 | `qa/` | 6 |
 | `shared/` | 20 |
