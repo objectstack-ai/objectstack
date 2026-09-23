@@ -1017,20 +1017,40 @@ write for it: no bundle key exists for a map.
 nothing supplies text for, whether that text would come from a bundle or from
 an inline locale map. The reverse direction (keys a bundle carries that no
 metadata claims) is checked by `os validate`, `os lint`, and `os compile`, which walk
-every bundle against the stack it ships with:
+every bundle against the stack it ships with.
 
-| Key | Must name |
+"Declared" below has one meaning in every row: declared by the stack being
+checked **or by a sibling package of the same artifact**. On a single
+`defineStack` project, and on the union pass over an artifact, those are the same
+thing. On the per-package pass over an artifact's `packages[]` (see
+[Validating metadata](/docs/deployment/validating-metadata)) each package is
+checked alone, but with the artifact's `packages[]` as resolution context — so a
+package may translate an object, view, page, action, app, dashboard or flow a
+sibling package declares. The keys beneath it are then judged against the
+sibling's own declaration, not waved through: a typo under a sibling's object is
+still an error. Where the package being checked and a sibling declare the same
+name, the package's own record is the one a field's options, an action's params,
+a dashboard's widgets and header actions, or a flow's screens are judged against;
+every other name the two declare adds up.
+
+| Key | Resolves when it names |
 |:---|:---|
-| `objects.{object}` | an object this stack defines, or a platform object |
-| `objects.{object}.fields.{field}` | a field that object declares |
+| `objects.{object}` | an object declared by this stack **or a sibling package of the same artifact** — its keys are then judged row by row below; **or** a platform object, or an object an `objectExtensions[]` entry extends that no package of the artifact declares — both skipped whole, because the owner's fields are not visible from here |
+| `objects.{object}.fields.{field}` | a field that object declares, a field an `objectExtensions[]` entry merges into it, or a system column the registry injects (`id`, `owner_id`, the audit and tenant columns; `_id`, `name` and `space` are accepted too) |
 | `objects.{object}.fields.{field}.options.{key}` | an option's stored **`value`** |
-| `objects.{object}._views.{view}` | a view's `name` |
-| `objects.{object}._actions.{action}` | an action bound to that object |
-| `objects.{object}._actions.{action}.params.{param}` | a param's `name` |
-| `objects.{object}._sections.{section}` | a `fieldGroups[].key`, or a section with a `name` |
-| `apps.{app}` / `apps.{app}.navigation.{id}` | an app's `name` / a navigation item's `id` |
-| `dashboards.{dash}` / `.widgets.{id}` / `.actions.{actionUrl}` | the dashboard's `name` / a widget `id` / a header `actionUrl` |
-| `globalActions.{action}` | an action with **no** `objectName` |
+| `objects.{object}._views.{view}` | the key the view registry assigns a view over that object: a `listViews` / `formViews` map key, or the default `list`'s `name` — `default` when it has none (see [ObjectUI Integration](#objectui-integration)) |
+| `objects.{object}._sections.{section}` | a `fieldGroups[].key`, a named section of a form view over that object (a `formViews` entry or the default `form`), or a named section of a `record:details` component on a page bound to it |
+| `objects.{object}._tabs.{tab}` | a filter-preset tab's `name` in `interfaceConfig.userFilters.tabs` on a page over that object (`interfaceConfig.source`, else the page's `object`) — a list view's own `tabs` has no renderer and is not resolvable |
+| `objects.{object}._validations.{rule}` | a validation rule's `name` in that object's `validations[]` or in an `objectExtensions[]` entry aimed at it — a `conditional` rule's `then` / `otherwise` branch included |
+| `objects.{object}._actions.{action}` | an action bound to that object: one in its `actions`, or a stack-level action whose `objectName` is that object |
+| `objects.{object}._actions.{action}.params.{param}` | a param's `name` on that action |
+| `globalActions.{action}` | an action with **no** `objectName` — a key naming a bound action is reported with the `objects.{owner}._actions` key the resolver reads instead |
+| `apps.{app}` | an app declared, or one a `navigationContributions` entry anywhere in the artifact contributes into — including an app owned outside the artifact |
+| `apps.{app}.navigation.{id}` | a navigation item `id` the app declares (nested `children` and `areas[]` included) or one contributed into it; under an app that is only contributed into, the contributed ids alone |
+| `dashboards.{dash}` / `.widgets.{id}` / `.actions.{actionUrl}` | a dashboard declared / a widget `id` on it / a header action's `actionUrl` on it |
+| `flows.{flow}` | a flow's machine `name`, declared |
+| `flows.{flow}.screens.{node}` | the `id` of a `type: 'screen'` node in that flow, nodes nested in loop, parallel and try/catch regions included |
+| `flows.{flow}.screens.{node}.fields.{field}` | a `config.fields[].name` on that screen — an object-form screen (`config.objectName`) declares none, and its input labels live under `objects.{objectName}.fields` |
 
 An unresolvable key is an **error**, not a warning: `os validate`, `os lint` and
 `os compile` each report it as `translation-target-unknown` and exit non-zero, so
