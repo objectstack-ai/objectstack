@@ -5231,7 +5231,22 @@ const step18: MigrationStep = {
     + 'D2 conversion strips the group from per-app bundle entries only (never from a `translation` '
     + 'ITEM, which still declares it), and the paired semantic entry says what the strip means, '
     + 'because a notice reading "(removed)" does not say that those gaps fall back to the '
-    + "manifest's own English literal.",
+    + "manifest's own English literal. "
+    + 'Finally it retires object `tenancy.organizationField` (#19054, ADR-0049 '
+    + 'enforce-or-remove). The key named the column a PLATFORM ROW is stamped from, as '
+    + 'opposed to the column the object is WALLED by (`tenantField`); on an ordinary object '
+    + 'those are the same column, and the entire protocol declared it exactly once — on '
+    + '`sys_api_key`, a better-auth-managed credential table this platform ships and no '
+    + 'application authors. Its three readers were all platform-row writers, scope-pinned by '
+    + 'name, so an application declaration was inert by construction while still forcing '
+    + 'every future piece of organization logic to ask "what if somebody set this?". The '
+    + 'divergence is NOT retired, only its authorability: it moves to '
+    + '`PLATFORM_STAMP_ORGANIZATION_COLUMNS` in `@objectstack/metadata-core`, keyed by object '
+    + 'name and read by the stamp face alone, so audit stamping, the approval-row writer and '
+    + 'the automation-run recorder keep their behaviour with no authorable input. The '
+    + 'conversion is a lossless delete and there is no semantic residue — an application '
+    + 'whose tenant column genuinely is not `organization_id` declares `tenancy.tenantField`, '
+    + 'which both walls the object and stamps its platform rows.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5265,6 +5280,7 @@ const step18: MigrationStep = {
     'chart-config-aria-removed',
     'dashboard-widget-chart-config-structure-removed',
     'translation-per-app-settings-removed',
+    'object-tenancy-organization-field-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -14289,6 +14305,19 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `AggregationPipeline.options`, which no `stack.zod.ts` collection declares
     // and no `sys_metadata` row stores. See `data-nosql-query-options-timeout-unit-in-key`.
     'data/NoSQLQueryOptions:timeout',
+    // #19054 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-18, verbatim
+    // and untranslated: 「organizationField 撤出可授权面 同意你的建议」).
+    // `TenancyConfig.organizationField` named the column a platform row is STAMPED
+    // from, as opposed to the column the object is WALLED by (`tenantField`). On an
+    // ordinary object those are the same column, and the whole protocol declared it
+    // exactly once — on `sys_api_key`, a table this platform ships and no
+    // application authors. The `tenancy` block is `.strict()`, so the key is
+    // removed from the shape and its prescription is served from
+    // `TENANCY_RETIRED_KEY_GUIDANCE`. The divergence itself is unchanged: it moves
+    // to `PLATFORM_STAMP_ORGANIZATION_COLUMNS` in `@objectstack/metadata-core`, read
+    // by the three sanctioned platform-row writers alone. D2:
+    // `object-tenancy-organization-field-removed`.
+    'data/TenancyConfig:organizationField',
     // #15680 (stack card 5/6 of #14478) — ruling B. `TursoConfig.timeout` said
     // "Operation timeout in milliseconds" in prose and carried a `.meta({ title:
     // 'Timeout (ms)' })` no parse reads — and sat two keys below

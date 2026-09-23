@@ -998,7 +998,12 @@ describe('alias integrity — every table is a true claim about its schema', () 
 
     const tenancy = bySurface.get('`tenancy`');
     expect(tenancy, 'TenancyConfigSchema no longer declares through strictObject').toBeDefined();
-    expect(Object.keys(tenancy!.options.guidance ?? {}).sort()).toEqual(['crossTenantAccess', 'strategy']);
+    // `organizationField` joined the table at protocol 18 (#19054, ADR-0049):
+    // the strict-deletion route removes the key from the shape and serves its
+    // prescription from this very map, so the retirement is only audible
+    // through the folded channel this assertion holds open.
+    expect(Object.keys(tenancy!.options.guidance ?? {}).sort())
+      .toEqual(['crossTenantAccess', 'organizationField', 'strategy']);
   });
 
   it('no live surface still reports the shared view/page FAMILY name (#8202)', () => {
