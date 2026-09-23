@@ -7091,9 +7091,8 @@ export class ObjectQL implements IObjectQLEngine {
       // "what the related object DECLARES", and it is computed here so that it
       // can never be anything else. A predicate naming a column the related
       // object does not declare must not put that name into a system-authority
-      // query: the read is elevated, so its projection is the whole of what
-      // bounds it. An undeclared name is also a real authoring fault and is
-      // reported as one rather than silently dropped.
+      // query: the read is elevated. An undeclared name is also a real
+      // authoring fault and is reported as one rather than silently dropped.
       const targetSchema = this._registry.getObject(target) as { fields?: Record<string, unknown> } | undefined;
       const declared = targetSchema?.fields;
       // [#8215] The PRIMARY KEY is declared by the platform, not by the author,

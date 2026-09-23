@@ -11,7 +11,7 @@
  *
  *  - the related read runs under SYSTEM authority (like `parent`, and for the
  *    same kind of reason: a validation verdict is the system's, not the
- *    caller's), bounded by its PROJECTION rather than by the caller;
+ *    caller's), bounded by its PROJECTION;
  *  - the projection names `id` plus only the fields the rules actually read,
  *    and never smuggles a column the related object does not declare;
  *  - on UPDATE the foreign key is read off the PRIOR row when the patch omits
@@ -194,7 +194,7 @@ describe('#18682 — engine-produced relationship bindings', () => {
   // ⭐ The ruled read authority: a validation rule's output is a pass/fail the
   // SYSTEM enforces, so the related row is read under system authority and the
   // rule is authorable for exactly the persona it exists to constrain. Bounded
-  // by the PROJECTION, never by the caller.
+  // by the PROJECTION.
   it('reads the related row under SYSTEM authority', async () => {
     const seen: any[] = [];
     engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
@@ -210,7 +210,7 @@ describe('#18682 — engine-produced relationship bindings', () => {
 
   // ⛔ The bound on the elevation. A predicate that names a column the related
   // object does not declare must NOT put that name into a system-authority
-  // query — the projection is the whole of what limits an elevated read.
+  // query.
   it('never smuggles an UNDECLARED field into the system read set', async () => {
     engine.registry.registerObject({
       name: 'crm_opportunity',

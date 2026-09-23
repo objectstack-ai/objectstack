@@ -398,7 +398,7 @@ export interface EvaluateRulesOptions {
    * SYSTEM enforces, not data handed to the caller, which is why RLS predicates
    * are excluded from this capability altogether. What bounds the elevation is
    * the PROJECTION — only the columns the predicate names, intersected with the
-   * related object's declared fields — never the caller.
+   * related object's declared fields.
    *
    * ⛔ NOT applied to every rule alike. A rule is hydrated only for the
    * reference fields ITS OWN condition reads through, because hydrating a field
@@ -579,7 +579,7 @@ export type RelatedUnavailableReason =
  * ⚠️ The related row is read under SYSTEM authority — a validation rule's output
  * is a pass/fail the system enforces, not data handed to the caller. The read is
  * bounded by its PROJECTION (only the columns the predicate names, intersected
- * with the related object's declared fields), never by the caller. ⛔ This
+ * with the related object's declared fields). ⛔ This
  * applies to validation rules alone; RLS and UI predicates are out of the
  * capability entirely.
  */
