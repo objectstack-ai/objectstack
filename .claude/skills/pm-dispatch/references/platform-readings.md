@@ -103,6 +103,8 @@
 - 小时池之外还有分钟级二级限流:GraphQL 端点 2,000 点/分、并发 ≤100。
 - 官方指引:变更类请求间停 ~1 秒,mutation 按 5 倍计;批量写因此 ~1 秒一发。
 - 批量重分诊这类把写挤在同一秒的扫动,会在小时池仍绿时撞上分钟墙。
+- 中继读数:dispatch 后 5 s 建 run、17 s 起 job、22 s 评论落地、墙钟 31 s;上限 90 s / 5 min 不动。
+- `write-pace` 把一次 dispatch 记作那一笔写(40/时不变);`close-cards` 每步一次 dispatch。
 - REST 可达性是会话属性(GitHub App 会话门),⛔ 不是端点或席位类型的属性。
 - 开轮探一次、按班存档;探针必须是一条真 repo-scoped 读。
 - 门关着时 repo-scoped 路径整类回 403 `GitHub access is not enabled for this session`。
@@ -142,9 +144,7 @@
 - 同批事实改走 `gh api` 的 REST 路径照常返回,含开 draft PR;容器无 `gh`,本条只对本机席适用。
 - 红窗调度:守候只给上面那几件 GraphQL-only 的,⛔ 其余一切不为配额空等。
 - 走队列的仓落地仍必经 auto-merge,红窗里照样走 ccr REST 挂载;直合仓合并本身有 REST 端点。
-- 红窗里 draft 翻转与 auto-merge 挂载照常走 ccr REST,⛔ 不为它们守候。
 - 被挡住的翻转是在等窗口,不是关于该 PR 的信号 ⇒ ⛔ 不据它重挂、不据它改判状态。
-- 其余动作(评论、标签、请审、读、timeline)照常走 REST。
 - 报文里的 user ID 只是报文:据它推 MCP 池跨席共享与本节首条冲突,⛔ 未裁不写成事实。
 - `issue transfer` 因配额或权限拿不到 ⇒ 当轮改走多仓协调条款的在目的仓重建配方。
 - 该配方 = 出处头加裸 `#N` 改全名加关源单为 moved:纯 REST、配额免疫,⛔ 不为它空等重置。
