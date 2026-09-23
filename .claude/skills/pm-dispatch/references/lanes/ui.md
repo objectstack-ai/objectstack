@@ -1,6 +1,6 @@
 # 车道岗位说明:domain:ui
 
-见 SKILL.md 〈多仓协调〉;本文是本席的岗位说明,现值状态恒在座位贴,⛔ 不迁入本文件。
+见 cross-repo-coordination.md;本文是本席的岗位说明,现值状态恒在座位贴,⛔ 不迁入本文件。
 
 ## 形态
 
@@ -10,15 +10,15 @@
 
 ## 范围
 
-- 三流分流的残余流归本席:发布库 `@object-ui/*` 与 `apps/*`,判据见 SKILL.md 〈多仓协调〉。
+- 三流分流的残余流归本席:发布库 `@object-ui/*` 与 `apps/*`,判据见 cross-repo-coordination.md。
 - objectui 的 `domain:devx` 与 `domain:spec` 卡归各自跨仓车道,⛔ 不归本席。
 - 落点不明留分诊首触,⛔ 不猜、不代判。
 
 ## 常设承诺
 
-- 构建产物经 `pnpm objectui:refresh` 回流,见 SKILL.md 〈多仓协调〉。
+- 构建产物经 `pnpm objectui:refresh` 回流,见 cross-repo-coordination.md。
 - 回流后的 console pin bump 是 objectstack 的单张卡,⛔ 永不做本仓 PR 的 rider。
-- 新 `packages/spec` 工作恒归 `domain:spec` 席,已派发卡 ⛔ 不因此转席,见 SKILL.md 〈多仓协调〉。
+- 新 `packages/spec` 工作恒归 `domain:spec` 席,已派发卡 ⛔ 不因此转席,见 cross-repo-coordination.md。
 - `scripts/pm/**` 单写手恒在 objectstack 侧 ⇒ 本席的工具需求走上游卡带 `Blocked-by:` 回链。
 - 本仓标签/assignee 写走 objectstack `label-write.mjs --repo`,⛔ 不 MCP `issue_write`;被拒转有通道席。
 - 受管面五项含仓根发布 `skills/**`,清单、判据与禁令见 objectui AGENTS.md §9 受管面段。
