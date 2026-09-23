@@ -16,5 +16,4 @@ No behaviour moves. No schema, accept set or lint rule is touched, and no export
   - The `reason` said equality and membership "are NOT judged". That holds for the schema door only. The lint rule refuses a preset in an equality or membership position on a field it can resolve to a declared `date` or `datetime`, while `this_quarter` on a `select` field stays green. Where the filter binds to no object, such as a widget whose `dataset` names no dataset, that arm does not fire.
 - **Reach.** Counted over `dist/index.js`, `dist/index.mjs`, `dist/browser/index.js` and `dist/browser/index.mjs`:
   - The removed carrier list `page filter, component filter, rollup filter` and each of the four other removed claims read 4 before and 0 after.
-  - Each of nine sentences unique to the corrected text reads 0 before and 4 after.
   - The unchanged dark control `compared false against every row: HTTP 200` reads 4 on both sides.
