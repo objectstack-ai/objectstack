@@ -28,6 +28,7 @@
   "src/api/error-catalog-docs.test.ts",
   "src/data/api-methods-batch-conformance.test.ts",
   "src/identity/position-delegatable-enforcer.pin.test.ts",
+  "src/integration/connector-connection-timeout-retirement.test.ts",
   "src/shared/retired-key-migrate-sentence.test.ts",
   "src/system/compliance-families-retirement.test.ts",
   "src/system/constants/platform-object-names.test.ts",

@@ -842,25 +842,44 @@ describe('ADR-0097 — the entry\'s resilience policy on ConnectorProviderContex
         await kernel.shutdown();
     });
 
-    it('carries both declared timeouts verbatim', async () => {
+    it('carries the declared request timeout verbatim', async () => {
         const { factory, calls } = makeFakeProvider();
         const kernel = await boot(
-            [{ ...providerConnector('billing'), connectionTimeoutMs: 5000, requestTimeoutMs: 12000 }],
+            [{ ...providerConnector('billing'), requestTimeoutMs: 12000 }],
             { providerFactory: factory },
         );
 
-        expect(calls[0]?.connectionTimeoutMs).toBe(5000);
         expect(calls[0]?.requestTimeoutMs).toBe(12000);
 
         await kernel.shutdown();
     });
 
-    it('leaves all three undefined when the entry declares none — absence stays absence', async () => {
+    it('⛔ does NOT carry a stored connectionTimeoutMs onto the context — the carry is retired', async () => {
+        // ADR-0049: the key was handed to factories as a pure carry and no
+        // provider ever applied it, so the member left `ConnectorProviderContext`
+        // with the spec key. A row that still spells it (written before the
+        // retirement, or by a seam that bypasses the parse) must reach a factory
+        // with nothing extra — the host does not resurrect the carry.
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [{ ...providerConnector('billing'), connectionTimeoutMs: 5000, requestTimeoutMs: 12000 } as Record<string, unknown>],
+            { providerFactory: factory },
+        );
+
+        expect((calls[0] as unknown as Record<string, unknown>).connectionTimeoutMs).toBeUndefined();
+        // The lit control on the same context object and the same boot: the
+        // surviving timeout does arrive, so an empty reading above is the
+        // retirement and not a dead harness.
+        expect(calls[0]?.requestTimeoutMs).toBe(12000);
+
+        await kernel.shutdown();
+    });
+
+    it('leaves both undefined when the entry declares none — absence stays absence', async () => {
         const { factory, calls } = makeFakeProvider();
         const kernel = await boot([providerConnector('billing')], { providerFactory: factory });
 
         expect(calls[0]?.retryConfig).toBeUndefined();
-        expect(calls[0]?.connectionTimeoutMs).toBeUndefined();
         expect(calls[0]?.requestTimeoutMs).toBeUndefined();
 
         await kernel.shutdown();
