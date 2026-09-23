@@ -175,6 +175,7 @@ second at load, per ADR-0019 (app-as-consumer-unit) D3. More audiences are
 | `url`       | `url`, `label`, `icon`                        | External or custom URL |
 | `action`    | `actionDef` (`{ actionName, params? }`), `label`, `icon` | Run an action instead of navigating |
 | `component` | `componentRef`, `params?`, `label`, `icon`    | Built-in platform component; `componentRef` is a colon-joined registry key (`metadata:resource`), `params` become props |
+| `doc`       | `book?`, `doc?` (at least one), `label`, `icon` | Package docs on the menu: `book` opens the book, `doc` opens that page, both = that page in that book. Inherits the docs audience gate |
 | `separator` | —                                             | Visual separator |
 
 > **`requiresObject` / `requiresService`:** Use these on any item that
