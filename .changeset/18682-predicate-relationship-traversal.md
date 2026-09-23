@@ -52,7 +52,7 @@ acting user instead made the rule unauthorable for exactly the persona it exists
 to constrain: a member with CRUD on the child and no read on the parent faulted
 on every write.
 
-What bounds the elevation is the **projection**, not the caller: only the
+What bounds the elevation is the **projection**: only the
 columns the predicate names, intersected with the related object's declared
 fields. A column the related object does not declare never enters the query, and
 is refused as the authoring fault it is — distinct from a column that exists and

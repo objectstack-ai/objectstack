@@ -7033,7 +7033,7 @@ export class ObjectQL implements IObjectQLEngine {
    * capability altogether. Reading as the acting user instead made the rule
    * unauthorable for exactly the persona it exists to constrain.
    *
-   * What bounds the elevation is the PROJECTION, not the caller: only the
+   * What bounds the elevation is the PROJECTION: only the
    * columns the predicate names, intersected with the related object's declared
    * fields. ⛔ Never the whole row.
    *
@@ -7136,7 +7136,7 @@ export class ObjectQL implements IObjectQLEngine {
         // with CRUD on the child and no read on the parent faulted on every
         // write, so a legitimate business rule could not ship.
         //
-        // What bounds the elevation is the PROJECTION, not the caller: only the
+        // What bounds the elevation is the PROJECTION: only the
         // columns this predicate names, intersected with the related object's
         // declared fields above. ⛔ Never the whole row.
         //
