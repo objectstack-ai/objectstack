@@ -616,10 +616,8 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  *
  * Method: `driver-sql` on SQLite, `driver-memory`,
  * `driver-mongodb`'s `translateFilter` and `mingo` were each run on the
- * lowered `{ tags: ['a'] }` beside a scalar and an `$in` control; this
- * change's review also ran `driver-sql` on a live PostgreSQL 16 (refused with
- * zero SQL statements emitted), `driver-sqlite-wasm`, and turso's remote
- * transport over the repository's libsql stub. MySQL, a live Turso server and
+ * lowered `{ tags: ['a'] }` beside a scalar and an `$in` control;
+ * MySQL, a live Turso server and
  * a live `mongod` are NOT MEASURED, and so is whether any SQL-family release
  * before this change answered the shape.
  *
