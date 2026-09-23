@@ -80,6 +80,14 @@ describe('docs/nav-target — a doc nav item must open something this package ha
     ]);
   });
 
+  it('judges a doc entry this package contributes into another app', () => {
+    const issues = lintDocNavTargets({
+      ...STACK,
+      manifest: { ...STACK.manifest, navigationContributions: [{ app: 'setup', items: [{ id: 'nav_crm_help', type: 'doc', doc: 'ghost_doc' }] }] },
+    }, DOCS);
+    expect(issues.map((i) => i.path)).toEqual(['apps/setup/navigation/nav_crm_help']);
+  });
+
   it('resolves a book declared on a package body, and that package id as its implicit book', () => {
     expect(lintDocNavTargets({
       packages: [{ manifest: { id: 'com.example.help', books: [{ name: 'help_centre', groups: [] }] } }],

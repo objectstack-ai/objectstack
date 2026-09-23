@@ -1037,6 +1037,9 @@ export function lintMetadataEmbeds(docs: DocItem[], stack: Record<string, unknow
  * `os lint` all reach it through {@link collectAndLintDocs}. Both targets are
  * judged here so one nav item is judged in one place.
  *
+ * Walked: every app's `navigation` and `areas[].navigation` (children
+ * included), and the items of `manifest.navigationContributions`.
+ *
  * ## What resolves
  *
  * - `doc` — any doc name this artifact carries (`docNames`, whoever owns it).
@@ -1108,6 +1111,15 @@ export function lintDocNavTargets(stack: Record<string, unknown>, docNames: Read
     check(app.navigation, appName);
     if (Array.isArray(app.areas)) {
       for (const area of app.areas as AnyRec[]) check(area?.navigation, appName);
+    }
+  }
+  // A package may also CONTRIBUTE a doc entry into an app it does not own
+  // (ADR-0029 D7). The entry opens this package's docs, so it is judged here,
+  // against this package's set, under the name of the app it lands in.
+  const contributions = (stack.manifest as { navigationContributions?: unknown } | undefined)?.navigationContributions;
+  if (Array.isArray(contributions)) {
+    for (const c of contributions as AnyRec[]) {
+      check(c?.items, typeof c?.app === 'string' ? c.app : '(unnamed)');
     }
   }
   return issues;
