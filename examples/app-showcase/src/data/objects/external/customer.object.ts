@@ -25,6 +25,6 @@ export const ExternalCustomer = ObjectSchema.create({
     name: Field.text({ label: 'Name', searchable: true }),
     email: Field.text({ label: 'Email' }),
     region: Field.text({ label: 'Region' }),
-    lifetime_value: Field.currency({ label: 'Lifetime Value', scale: 2 }),
+    lifetime_value: Field.currency({ label: 'Lifetime Value' }),
   },
 });

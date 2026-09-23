@@ -28,8 +28,11 @@
  *  - `min` / `max`                        (number/currency/percent/rating/slider)
  *  - `scale`        more decimal places than the field's STORED allowance →
  *                   `max_scale` (#7501; rejection, NEVER rounding —
- *                   maintainer ruling 2026-08-11). The allowance is the
- *                   declared `scale` on every numeric type but ONE: on a
+ *                   maintainer ruling 2026-08-11), on `number` / `percent` /
+ *                   `rating` / `slider` — ⛔ NOT `currency`, from which the
+ *                   key is retired (ruling 5791803339, batch #215 item 1
+ *                   letter B). The allowance is the declared `scale` on each
+ *                   of those but ONE: on a
  *                   fraction-stored `percent` it is `scale + 2`, because
  *                   there `scale` counts DISPLAYED percentage-point decimals
  *                   and the stored fraction carries the same quantity two
@@ -785,7 +788,24 @@ function validateOne(
     // has no defined meaning, and inventing one here (floor? round?) would be
     // the consumer-side guessing PD #12 forbids — a malformed declaration
     // stays unenforced exactly as every declaration was before this branch.
+    //
+    // ── `currency` is OUTSIDE the enforced set (#19629) ──
+    // Maintainer ruling 5791803339 (batch #215 item 1, letter B): `scale` is
+    // retired from the `currency` type. `FieldSchema` refuses the key there at
+    // parse, with a remedy naming `currencyConfig.precision`, so no authored
+    // currency field declares it any more — and this branch stops reading
+    // `def.scale` for the type, so a declaration that reaches here anyway (a
+    // stored field that predates the refusal, a hand-built runtime schema)
+    // narrows nothing either. The key was the currency field's one enforced
+    // effect: the amount's cell never read it, so an author who set it bought a
+    // narrower write contract and no visible change. `min` / `max` and the
+    // finite-number check above still apply to `currency` unchanged.
+    // ⛔ Not replaced by a read of `currencyConfig.precision`: enforcing that
+    // width on writes (the ruling's B′) was offered and NOT taken — a currency
+    // write carries whatever decimals it carries, exactly as it always has on
+    // a currency field that declared no `scale`.
     if (
+      t !== 'currency' &&
       def.scale !== undefined &&
       Number.isInteger(def.scale) &&
       def.scale >= 0
@@ -800,8 +820,8 @@ function validateOne(
       // the same quantity two places further right: the widget offers
       // `12.34`, the write is `0.1234`. So its stored value is allowed
       // `scale + 2` places. A whole-percent field (`max > 1`) stores the
-      // displayed number itself and is unchanged, as is every OTHER numeric
-      // type — `number` / `currency` / `rating` / `slider` carry no percent
+      // displayed number itself and is unchanged, as is every OTHER type in
+      // the enforced set — `number` / `rating` / `slider` carry no percent
       // semantics and nothing derives for them.
       // ⛔ The derivation is read from `percentScaleOf`, the spec's single
       // source of truth for "what magnitude is this percentage stored at" —

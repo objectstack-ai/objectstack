@@ -65,15 +65,19 @@
  *   absent `scale` means "decimals unknown" and keeps its separators. Declaring
  *   `number ⇒ 0` would print every undeclared number field ungrouped: `2026`
  *   where the platform shows `2,026`.
- * - `currency` — the money faces do not read this key at all. They resolve
- *   fraction digits from the currency's own ISO 4217 minor-unit count, with
- *   `CurrencyConfigSchema.precision` (a DIFFERENT surface, with its own
- *   `scale` → `precision` alias) as the authored override. The one `2` that
- *   looks like a currency default belongs to an inline grid COLUMN's rounding
- *   of a computed result, not to a field's display width.
+ * - `currency` — ruled since, and not by a row here: `scale` is RETIRED from
+ *   the `currency` type (#19629, ruling 5791803339 letter B) and refused at
+ *   parse, so a currency field declares no `scale` for this table to default.
+ *   The amount's cell resolves its fraction digits from the currency's own
+ *   ISO 4217 minor-unit count and never read the key; in the console pinned
+ *   when the ruling landed (`.objectui-sha` 62597c58) the grid summary footer
+ *   and the dashboard metric widget did read it on a currency column, as
+ *   `scale ?? 0` — the consumer half is objectui#10221. The one `2` that looks
+ *   like a currency default belongs to an inline grid COLUMN's rounding of a
+ *   computed result, not to a field's display width.
  *
- * ⛔ Neither reading is an argument for `0`, and neither is an argument for
- * the other face's value: they are an argument that nobody has ruled yet.
+ * ⛔ Neither reading is an argument for a `0` row: `number` still awaits its
+ * own ruling, and `currency` no longer has a declaration to resolve.
  *
  * ## Why the table is not exported
  *

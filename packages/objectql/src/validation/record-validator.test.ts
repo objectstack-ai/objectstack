@@ -1225,8 +1225,9 @@ describe('validateRecord — a fraction-stored percent derives `scale + 2` (#193
     // Nothing derives for a type that carries no percent semantics. Each of
     // these is refused at scale + 1, which is precisely what a fraction-stored
     // percent now accepts — so this block discriminates the percent arm from
-    // a blanket loosening of the branch.
-    for (const type of ['number', 'currency', 'slider', 'rating'] as const) {
+    // a blanket loosening of the branch. `currency` is not in the list: it
+    // left the enforced set (#19629 — pinned in its own block below).
+    for (const type of ['number', 'slider', 'rating'] as const) {
       const s = { fields: { n: { type, label: 'N', scale: 2 } } };
       expect(fieldsOf(s, { n: 1.23 })).toBeNull();
       expect(fieldsOf(s, { n: 1.234 })?.[0]).toMatchObject({
@@ -1265,5 +1266,77 @@ describe('validateRecord — a fraction-stored percent derives `scale + 2` (#193
       messages: { locale: 'zh-CN', objectName: 'deal' },
     });
     expect(errs?.[0].message).toBe('Rate的小数位数不能超过 4 位(当前 5 位)');
+  });
+});
+
+/**
+ * #19629 — `currency` LEAVES the `max_scale` enforced set.
+ *
+ * Maintainer ruling 5791803339 (batch #215 item 1, letter B): `scale` is
+ * retired from the `currency` type. `FieldSchema` refuses the key there at
+ * parse (pinned in `packages/spec`'s `field-currency-scale-refused.test.ts`),
+ * and this branch stops reading `def.scale` for the type — so a declaration
+ * that reaches the validator anyway (a stored field that predates the refusal,
+ * a hand-built runtime schema) narrows nothing either.
+ *
+ * Three pins, per the ruling: a currency write with more decimals is ACCEPTED
+ * when nothing declares a width (today's contract, unchanged); the same write
+ * is accepted with a legacy `scale` on the def (the change); and `number` /
+ * `percent` still refuse the identical over-scale write (the controls that
+ * prove the branch is live in this harness, not deleted).
+ */
+describe('validateRecord — `currency` is outside the max_scale enforced set (#19629)', () => {
+  const fieldsOf = (
+    schema: Parameters<typeof validateRecord>[0],
+    data: Record<string, unknown>,
+    mode: 'insert' | 'update' = 'insert',
+  ) => {
+    try {
+      validateRecord(schema, data, mode);
+    } catch (e) {
+      return (e as ValidationError).fields;
+    }
+    return null;
+  };
+
+  it('accepts a currency write with more decimals when nothing declares a width — unchanged', () => {
+    const s = { fields: { amount: { type: 'currency', label: 'Amount' } } };
+    expect(fieldsOf(s, { amount: 1234.56789 })).toBeNull();
+    expect(fieldsOf(s, { amount: 1234.56789 }, 'update')).toBeNull();
+  });
+
+  it('accepts the same write when a legacy currency def still carries `scale` — the key no longer narrows it', () => {
+    // A def that bypassed `FieldSchema` (stored before the refusal, or built
+    // by hand at runtime). Before #19629 both writes answered `max_scale`
+    // with `constraint: { scale: 2, actual: 5 }`.
+    const legacy = { fields: { amount: { type: 'currency', label: 'Amount', scale: 2 } } };
+    expect(fieldsOf(legacy, { amount: 1.23456 })).toBeNull();
+    expect(fieldsOf(legacy, { amount: 1.23456 }, 'update')).toBeNull();
+    // A string-carried amount (a CSV cell) takes the same path after coercion.
+    expect(fieldsOf(legacy, { amount: '1.23456' })).toBeNull();
+  });
+
+  it('keeps the rest of the numeric branch on currency — min, max and the finite-number check', () => {
+    const bounded = { fields: { amount: { type: 'currency', label: 'Amount', scale: 2, min: 0, max: 100 } } };
+    expect(fieldsOf(bounded, { amount: -0.001 })?.[0]).toMatchObject({ field: 'amount', code: 'min_value' });
+    expect(fieldsOf(bounded, { amount: 100.001 })?.[0]).toMatchObject({ field: 'amount', code: 'max_value' });
+    expect(fieldsOf(bounded, { amount: 'abc' })?.[0]).toMatchObject({ field: 'amount', code: 'invalid_number' });
+  });
+
+  it('CONTROLS — number and percent still refuse the identical over-scale write', () => {
+    const number = { fields: { n: { type: 'number', label: 'N', scale: 2 } } };
+    expect(fieldsOf(number, { n: 1.23456 })?.[0]).toMatchObject({
+      field: 'n',
+      code: 'max_scale',
+      constraint: { scale: 2, actual: 5 },
+    });
+    // A fraction-stored percent's allowance is `scale + 2`, so 5 places is
+    // one past a `scale: 2` percent's four.
+    const percent = { fields: { p: { type: 'percent', label: 'P', scale: 2 } } };
+    expect(fieldsOf(percent, { p: 0.12345 })?.[0]).toMatchObject({
+      field: 'p',
+      code: 'max_scale',
+      constraint: { scale: 4, actual: 5 },
+    });
   });
 });
