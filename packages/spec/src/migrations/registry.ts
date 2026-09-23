@@ -9420,7 +9420,9 @@ const step18: MigrationStep = {
         + 'against, `.objectui-sha` = `62597c588072636e9c30ea35b3d89b1e46fd765d` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
         + 'the string debounceDelay each occur 0 times across its 8303 tracked files, against lit '
-        + 'controls objectstack 13125 and @objectstack/spec 5043 on the same corpus.',
+        + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
+        + 'which re-count at this pin to 13125 and 5043 respectively (git grep -o -F, the method '
+        + 'that reproduces every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
         + 'one of a HotReloadConfig spells debounceDelayMs — concretely '
