@@ -1,5 +1,11 @@
 # Field Types Reference
 
+- [Two spellings: `Field.*` factory or object literal](#two-spellings-field-factory-or-object-literal)
+- [Text & Content](#text--content) · [Numbers](#numbers) · [Date & Time](#date--time) · [Logic](#logic) · [Selection](#selection)
+- [Relational](#relational) · [Media](#media) · [Embedded](#embedded-json-sub-objects) · [Calculated](#calculated) · [Enhanced Types](#enhanced-types)
+- [Common Field Configurations](#common-field-configurations)
+- [Incorrect vs Correct](#incorrect-vs-correct)
+
 Quick reference for choosing the right field type from 49 available options.
 
 ## Two spellings: `Field.*` factory or object literal

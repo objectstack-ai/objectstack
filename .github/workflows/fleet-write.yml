@@ -17,7 +17,8 @@
 #
 # ⛔ The token this run WRITES with is the App installation token step 3
 # mints — narrowed to the one target repository and to the permissions the
-# op table declares (`issues: write`, `pull-requests: write`, and the
+# op table declares (`issues: write`, `pull-requests: write`, the
+# `contents: write` GitHub's auto-merge mutations require, and the
 # `metadata: read` the sender gate's permission read needs) — and revoked by
 # that action's post step. The workflow's own `GITHUB_TOKEN` gets nothing
 # (`permissions: {}` below); the job grants it `contents: read` for the
@@ -105,6 +106,12 @@ jobs:
           repositories: ${{ steps.validate.outputs.repo_name }}
           permission-issues: write
           permission-pull-requests: write
+          # ONE consumer: GitHub's `enablePullRequestAutoMerge` / `disablePullRequestAutoMerge`
+          # mutations require `contents: write` on the App token (measured: without it the
+          # relay's `automerge_enable` answered "Resource not accessible by integration").
+          # The op table in `scripts/pm/fleet-write/ops.mjs` has NO contents op — no file, ref
+          # or branch write — so this grant is spent only by those two mutations.
+          permission-contents: write
           permission-metadata: read
 
       # The sender gate, then the actions in order, then the step summary —

@@ -325,7 +325,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the fields: request_id shape and cap, the one organization, the session id': 8,
   'the actions: count, the closed op list, closed keys per op, typed values': 22,
   'the platform ceilings: ten top-level properties and under 64KB, pinned with their source': 6,
-  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 9,
+  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 14,
   'the normalised payload: only judged keys travel': 3,
   'the CLI: a file, the environment, GitHub outputs, and the exit ladder': 10,
 });
@@ -480,8 +480,20 @@ export async function selfTest() {
     t('pr_create forces draft: true whatever the action said', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r')[0].body.draft, true);
     t('labels_remove is one directed DELETE per name, URL-encoded, idempotent on 404', OPS.labels_remove.requests({ op: 'labels_remove', issue: 1, labels: ['a b', 'c'] }, 'o/r').map((r) => [r.verb, r.path, r.idempotent404]), [['DELETE', '/repos/o/r/issues/1/labels/a%20b', true], ['DELETE', '/repos/o/r/issues/1/labels/c', true]]);
     t('every op names a permission the token is narrowed to', OP_NAMES.every((op) => OPS[op].permission in PERMISSIONS));
+    // The permission map, pinned entry by entry: the auto-merge mutations need `contents: write` on the
+    // App token (measured live: without it, "Resource not accessible by integration"), and NOTHING else may
+    // spend it — the table has no contents op, so the grant reaches exactly two mutations.
+    t('the map is exactly issues/pull-requests/contents write and metadata read', PERMISSIONS, { issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read' });
+    t('the two auto-merge rows spend contents', [OPS.automerge_enable.permission, OPS.automerge_disable.permission], ['contents', 'contents']);
+    t('⛔ …and no other row does: contents reaches the two auto-merge mutations and nothing else', OP_NAMES.filter((op) => OPS[op].permission === 'contents').sort(), ['automerge_disable', 'automerge_enable']);
+    t('every row spending contents is a GraphQL auto-merge mutation, never a REST path', OP_NAMES.filter((op) => OPS[op].permission === 'contents').every((op) => OPS[op].requests({ op, pull: 1 }).every((r) => r.graphql && /PullRequestAutoMerge$/.test(r.graphql.mutation))));
     const repoRoot = resolve(SELF_PATH, '../../../..');
     t('the relay files the table declares are on disk, repo-relative, and this file is one of them', [RELAY_FILES.filter((f) => !existsSync(resolve(repoRoot, f))), RELAY_FILES.includes('scripts/pm/fleet-write/validate.mjs')], [[], true]);
+    // The workflow's mint step declares the SAME map, spelled as `permission-<name>: <level>` inputs — read
+    // from the file on disk, so a grant added on one side without the other reds here.
+    const workflowPath = resolve(repoRoot, '.github/workflows/fleet-write.yml');
+    const declared = existsSync(workflowPath) ? Object.fromEntries([...readFileSync(workflowPath, 'utf8').matchAll(/^\s+permission-([a-z-]+):\s*(read|write)\s*$/gm)].map((m) => [m[1], m[2]])) : null;
+    t('the workflow mint step declares exactly PERMISSIONS as its permission-* inputs', declared, { ...PERMISSIONS });
   }
 
   // ── the normalised payload ────────────────────────────────────────────────
