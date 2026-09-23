@@ -252,7 +252,7 @@ describe('[#19808] the lookup existence probe is scoped to the caller\'s organiz
   const stored = (door: Door) => storeFor('rts_contact').get(door === 'insert' ? 'ct_new' : 'ct_x');
 
   it('premise: the org-X caller cannot read the org-Y row directly', async () => {
-    const rows = await engine.find('rts_account', { where: { id: 'acc_y' }, context: MEMBER_X } as any);
+    const rows = await engine.find('rts_account', { where: { id: 'acc_y' }, context: MEMBER_X });
     expect(rows).toEqual([]);
   });
 
@@ -346,7 +346,7 @@ describe('[#19808] the lookup existence probe is scoped to the caller\'s organiz
     engine.setTenancyPostureProvider(() => 'group');
     const GROUP_MEMBER = { ...MEMBER_X, accessible_org_ids: [ORG_X, ORG_Y] } as unknown as ExecutionContext;
 
-    const readable = await engine.find('rts_account', { where: { id: 'acc_y' }, context: GROUP_MEMBER } as any);
+    const readable = await engine.find('rts_account', { where: { id: 'acc_y' }, context: GROUP_MEMBER });
     expect(readable.map((r: any) => r.id)).toEqual(['acc_y']);
 
     await engine.insert('rts_contact', { id: 'ct_grp', title: 'g', account: 'acc_y' }, { context: GROUP_MEMBER } as any);
