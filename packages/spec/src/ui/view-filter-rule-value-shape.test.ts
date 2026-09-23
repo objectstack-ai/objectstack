@@ -17,10 +17,18 @@
  * reasoning but a correction of one of its readings: an array on a scalar
  * operator was recorded here as accepted because it 「lowers to a bare
  * deep-equality comparand, which every backend answers」, and re-measurement
- * found the opposite — `driver-sql` AND `driver-memory` both refuse the
- * comparand with `INVALID_FILTER`, and `@objectstack/formula`'s matcher, the one
- * backend that answers the shape at all, excludes every row, so a view that
- * PASSED the protocol selected nothing. The pins below carry both directions of
+ * found the opposite, and the four shipped backends do not agree: the SQL
+ * family (`driver-sql`, the `driver-turso` / `driver-sqlite-wasm` drivers built
+ * on it, and turso's remote transport) and `driver-memory` REFUSE the comparand
+ * with `INVALID_FILTER`; `@objectstack/formula`'s matcher EXCLUDES every row;
+ * and `driver-mongodb` ANSWERS — it passes the array through to the server,
+ * where it is an exact-array equality that selects a row stored as exactly
+ * `['a']` and nothing else (a live `mongod` cell is NOT MEASURED; the driver's
+ * compile face, the engine's shared comparand doors and MongoDB's query
+ * semantics are). No backend reads the array as the scalar the operator
+ * declares, so a view that PASSED the protocol selected nothing on every
+ * backend but MongoDB — and there it selected by a predicate the rule never
+ * wrote. The pins below carry both directions of
  * that arm, and the carve-outs (an absent value, the four valueless operators) keep their
  * own pins, because the #5685 side of this file is what stops a narrowing from
  * running on past the query path.

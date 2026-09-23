@@ -12,7 +12,18 @@ Direction set by objectui#9050's ruling C′, quoted untranslated: 「the differ
 
 `ViewFilterRuleSchema.value` has carried this sentence in its published description since the operator/value coupling landed: *the accepted SHAPE depends on the operator: `in` / `not_in` take an array, `between` takes exactly [min, max], **every other operator takes a scalar**.* The refinement that implements the coupling returned early for every operator that was neither a list operator nor `between`, so the entire scalar class was declared and never judged.
 
-⚠️ **This reverses a reading the code recorded**, and the reversal is the substance. The scalar-operator array was listed as deliberately accepted because it *"lowers to a bare `{ field: value }` deep-equality comparand, which every backend answers"*. Re-measured by RUNNING all three backends: the lowered `{ tags: ['a'] }` reaches `driver-sql`'s bare `{ field: value }` loop, which asserts the comparand against its own scalar-operator set; an array is none of the six accepted comparand types (`a string, number, bigint, boolean, null or Date`), so the comparand is refused with the withheld `INVALID_FILTER` / 400 envelope. The in-memory half is not uniform, and each backend is named rather than generalised: `driver-memory`'s matcher refuses the same shape in the same envelope, and `@objectstack/formula`'s matcher — the one backend that answers the shape at all — excludes every row. **A stored view that passed the protocol selected nothing** — and unlike a 400, an exclusion reads as a true statement about the data.
+⚠️ **This reverses a reading the code recorded**, and the reversal is the substance. The scalar-operator array was listed as deliberately accepted because it *"lowers to a bare `{ field: value }` deep-equality comparand, which every backend answers"*. Re-measured by RUNNING the shipped backends one at a time — there are **four**, and they do not agree:
+
+| backend | what it does with the lowered `{ tags: ['a'] }` |
+|:--|:--|
+| the SQL family: `driver-sql`, the `driver-turso` / `driver-sqlite-wasm` drivers built on it, and turso's remote transport | **REFUSES** — the bare `{ field: value }` loop asserts the comparand against its own scalar-operator set, an array is none of the six accepted comparand types (`a string, number, bigint, boolean, null or Date`), and it comes back as the withheld `INVALID_FILTER` / 400 envelope |
+| `driver-memory` | **REFUSES** — the same shape in the same envelope |
+| `@objectstack/formula` | **EXCLUDES** — `matchesFilterCondition` answers `false` for every row, a row whose stored value IS `['a']` included |
+| `driver-mongodb` | **ANSWERS** — `translateFilter` passes the array through unchanged and the engine's shared comparand doors pass the shape, so the server runs an **exact-array equality**: it selects a row stored as exactly `['a']` and nothing else |
+
+⚠️ The MongoDB reading is taken at the driver's compile face, at the engine's shared comparand doors and against MongoDB's query semantics; a live `mongod` cell is NOT MEASURED.
+
+**No backend reads the array as the scalar the operator declares.** Three refuse or exclude it outright, so **a stored view that passed the protocol selected nothing** — and unlike a 400, an exclusion reads as a true statement about the data. The fourth returns rows, but for a different predicate and only on an array-valued field, which reads as a true statement about the data too.
 
 Two carve-outs are kept and pinned, because a narrowing that runs past the query path is the mirror-image defect: an **omitted** value still parses (`value` is optional), and the four **valueless** operators (`is_empty` / `is_not_empty` / `is_null` / `is_not_null`) still accept anything in the value position — they take their direction from the operator NAME, the lowering discards the value, and the ObjectUI client deliberately sends a truthy placeholder there.
 
@@ -42,7 +53,7 @@ The key is described as *"Legacy base-filter fallback, read only when `filter` i
 | `defaultFilters: { status: 'active' }` | `defaultFilters: [{ field: 'status', operator: 'equals', value: 'active' }]` — better, move it to `filter` and delete the key |
 | `defaultFilters: [['owner_id', '=', '{current_user_id}']]` | `defaultFilters: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }]` |
 
-Each refusal carries its own prescription at the key that raised it, so `os validate` / `os lint` make the sweep mechanical rather than by eye. Worth doing even where it looks unnecessary: **none of these shapes has ever returned filtered rows**, so re-check what each view is supposed to show rather than assuming the old result set was correct. The one to read closest is a one-element array — `value: ['won']` on `equals` and `operator: 'in'` with `value: ['won']` select the same rows, and only the author knows which the metadata meant.
+Each refusal carries its own prescription at the key that raised it, so `os validate` / `os lint` make the sweep mechanical rather than by eye. Worth doing even where it looks unnecessary: **none of these shapes has ever returned the rows it declares** — the scalar-operator array returned nothing at all on every backend but MongoDB, and on MongoDB only the rows whose stored value is that exact array — so re-check what each view is supposed to show rather than assuming the old result set was correct. The one to read closest is a one-element array — `value: ['won']` on `equals` and `operator: 'in'` with `value: ['won']` select the same rows, and only the author knows which the metadata meant.
 
 ## Who is affected, measured
 

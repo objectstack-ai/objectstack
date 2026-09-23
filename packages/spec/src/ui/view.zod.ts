@@ -585,22 +585,37 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  *
  * ⚠️ **The scalar arm REVERSES a reading recorded here at #6227**, which said
  * `equals: ['a','b']` "lowers to a bare `{ field: value }` deep-equality
- * comparand, which every backend answers". Re-measured by RUNNING all three
- * backends: the lowered `{ tags: ['a'] }` reaches `driver-sql`'s bare
- * `{ field: value }` loop, which calls
- * `assertCompilableComparand(column, '=', value)`; `'='` is in that file's
- * `SCALAR_COMPARAND_OPERATORS`, `isBindableComparand(['a'])` is `false` (an array
- * is none of the six accepted comparand types — `isAcceptedFilterComparand`,
- * `filter-comparand-type.ts`), and the comparand is refused with the withheld
- * `INVALID_FILTER` / 400 envelope. **The in-memory half is not uniform, and the
- * difference is stated per backend rather than generalised:** `driver-memory`
- * REFUSES the same shape in the same envelope — `match()` runs
- * `assertFilterConditionShape`, whose implicit-equality arm throws on an array
- * (`filter-refusal.ts`) — while `@objectstack/formula`'s
- * `matchesFilterCondition` is the one backend that answers the shape at all, and
- * it answers `false` for every row, a row whose stored value IS `['a']`
- * included. Two refusals and one exclusion: no backend selects the row the
- * author meant. So the ORIGINAL reading was the one that widened the accept
+ * comparand, which every backend answers". Re-measured by RUNNING the shipped
+ * backends, **each named rather than generalised — they do not agree, and the
+ * population is four, not three:**
+ *
+ * - **The SQL family REFUSES** — `driver-sql`, the `driver-turso` /
+ *   `driver-sqlite-wasm` drivers built on it, and turso's `RemoteTransport`. The
+ *   lowered `{ tags: ['a'] }` reaches `driver-sql`'s bare `{ field: value }`
+ *   loop, which calls `assertCompilableComparand(column, '=', value)`; `'='` is
+ *   in that file's `SCALAR_COMPARAND_OPERATORS`, `isBindableComparand(['a'])` is
+ *   `false` (an array is none of the six accepted comparand types —
+ *   `isAcceptedFilterComparand`, `filter-comparand-type.ts`), and the comparand
+ *   is refused with the withheld `INVALID_FILTER` / 400 envelope.
+ * - **`driver-memory` REFUSES** the same shape in the same envelope — `match()`
+ *   runs `assertFilterConditionShape`, whose implicit-equality arm throws on an
+ *   array (`filter-refusal.ts`).
+ * - **`@objectstack/formula` EXCLUDES** — `matchesFilterCondition` answers
+ *   `false` for every row, a row whose stored value IS `['a']` included.
+ * - **`driver-mongodb` ANSWERS** — the fourth shipped backend, and the one the
+ *   earlier wording left out. `translateFilter({ tags: ['a'] })` emits
+ *   `{"tags":["a"]}` unchanged (the array falls to the implicit-equality arm),
+ *   and the engine's shared comparand doors — `normalizeFilterComparandTypes`
+ *   and `assertListComparandShapes` — both pass the shape, so the server runs
+ *   an exact-array equality: it selects a row stored as exactly `['a']` and
+ *   nothing else. ⚠️ Measured at the driver's compile face, at those engine
+ *   doors, and against MongoDB's query semantics through `mingo`; a live
+ *   `mongod` cell is NOT MEASURED.
+ *
+ * So **no backend reads the array as the SCALAR the operator declares**: three
+ * refuse or exclude it outright, and the fourth returns rows for a different
+ * predicate — exact-array equality, and only on an array-valued field. So the
+ * ORIGINAL reading was the one that widened the accept
  * set past the query path; this arm pulls it back to what `value`'s own
  * `.describe()` has declared all along — 「every other operator takes a scalar」.
  * Direction set by objectui#9050's ruling C′ (「the differences are the
