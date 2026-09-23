@@ -344,7 +344,7 @@ export function captureExpectedReadRefusals(
      * the same place `captureDriver`'s goes.
      *
      * The fall-through below is `target.warn(msg, meta)` ([#17212]; it was
-     * `target.error(msg, err, meta)`) — or, on the [#13273] `debug` arm,
+     * `target.error(msg, err, meta)`) — or, on the `debug` arm,
      * `target.debug(msg, meta)`. `target` is
      * the ENGINE'S OWN logger, i.e. the `ObjectLogger` the kernel built from
      * its `logger` config and handed to the engine by reference
