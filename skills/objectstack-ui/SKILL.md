@@ -168,14 +168,14 @@ second at load, per ADR-0019 (app-as-consumer-unit) D3. More audiences are
 | Type | Properties | Purpose |
 |:-----|:-----------|:--------|
 | `group`     | `label`, `icon`, `expanded`, `children[]`     | Collapsible group of items |
-| `object`    | `objectName`, `viewName?`, `recordId?`, `filters?`, `label`, `icon` | Link to an object list, a named view, a record deep-link, or a `filters` slice on the bare data surface. Target precedence: `recordId` → `filters` → `viewName` |
+| `object`    | `objectName`, `viewName?`, `recordId?`, `filters?`, `label`, `icon` | Link to an object list, a named view, a record deep-link, or a `filters` slice on the bare data surface |
 | `dashboard` | `dashboardName`, `label`, `icon`              | Link to a dashboard |
 | `report`    | `reportName`, `label`, `icon`                 | Link to a report |
-| `page`      | `pageName`, `label`, `icon`                   | Link to a custom Page (`type: 'home' | 'list' | ...`) |
+| `page`      | `pageName`, `label`, `icon`                   | Link to a custom Page |
 | `url`       | `url`, `label`, `icon`                        | External or custom URL |
 | `action`    | `actionDef` (`{ actionName, params? }`), `label`, `icon` | Run an action instead of navigating |
-| `component` | `componentRef`, `params?`, `label`, `icon`    | Built-in platform component; `componentRef` is a colon-joined registry key (`metadata:resource`), `params` become props |
-| `doc`       | `book?`, `doc?` (at least one), `label`, `icon` | Package docs on the menu: `book` opens the book, `doc` opens that page, both = that page in that book. Inherits the docs audience gate |
+| `component` | `componentRef`, `params?`, `label`, `icon`    | Built-in platform component; `componentRef` is a colon-joined registry key (`metadata:resource`) |
+| `doc`       | `book?` / `doc?` (one required), `label`, `icon` | Package docs; inherits docs audience |
 | `separator` | —                                             | Visual separator |
 
 > **`requiresObject` / `requiresService`:** Use these on any item that
