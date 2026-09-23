@@ -1088,7 +1088,7 @@ Both non-handshake shapes, and how to classify and probe your own:
    so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it
    merges — "retire the surface" and "leave the sibling untouched" cannot both hold. A ruling that authorizes such a
    removal therefore implicitly authorizes the objectui-side fix and the pin bump as part of the same landing (the
-   bump's manifest-regeneration second half included — see the Frontend section). Pre-merge check for any removal or rename
+   bump's manifest regeneration included — see the Frontend section). Pre-merge check for any removal or rename
    of an exported surface: does the pinned sibling import what you are removing? `git grep` it in `../objectui` at the
    pinned SHA before merging.
 5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*
