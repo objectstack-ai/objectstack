@@ -23,8 +23,10 @@
  * `status: 422`, the zod issue on `issues` at `path: ['objects']` — the same
  * line `composeStacks` step 2 draws for the same key.
  *
- * A non-object ENTRY is handed on exactly as written (nothing is lost at this
- * door; composition is where it would be, and it reports it there).
+ * A non-object ENTRY is refused with the same envelope, one zod issue per
+ * entry at `path: ['objects', index]` (`expected: 'object'`): handing it on
+ * would return a success whose objects are not all objects, and the next
+ * consumer (plugin-object registration) drops every object after it.
  *
  * Every refusal has its CONTROL: the same stack with `objects` authored as an
  * array, or as the map form, is accepted and its bound actions are merged.
@@ -97,13 +99,23 @@ describe('#19785 — defineStack strict: false refuses a non-array `objects` wit
     expect(stack.actions?.map((a) => a.name)).toEqual(['b_open']);
   });
 
-  it('a non-object ENTRY is handed on as written, the object beside it still merged — never a bare TypeError', () => {
-    const stack = nonStrict({ objects: [null, obj('b_item'), 7], actions: [bound] });
-    const objects = stack.objects as unknown[];
-    expect(objects).toHaveLength(3);
-    expect(objects[0]).toBeNull();
-    expect(objects[2]).toBe(7);
-    expect((objects[1] as { actions?: Array<{ name: string }> }).actions?.map((a) => a.name)).toEqual(['b_open']);
+  it('a non-object ENTRY is refused with the same envelope, one issue per entry at [objects, index] — never handed on, never a bare TypeError', () => {
+    const refused = refusal(() => nonStrict({ objects: [null, obj('b_item'), 7], actions: [bound] }));
+    expect(refused).toBeInstanceOf(Error);
+    expect(refused?.code).toBe('STACK_SCHEMA_INVALID');
+    expect(refused?.status).toBe(422);
+    expect(refused?.issues?.map((issue) => issue.path)).toEqual([
+      ['objects', 0],
+      ['objects', 2],
+    ]);
+    expect(refused?.issues?.every((issue) => issue.code === 'invalid_type' && issue.expected === 'object')).toBe(true);
+  });
+
+  it('a single non-object entry beside a good one is refused too — the card\'s `[null, obj]` repro', () => {
+    const refused = refusal(() => nonStrict({ objects: [null, obj('b_item')] }));
+    expect(refused?.code).toBe('STACK_SCHEMA_INVALID');
+    expect(refused?.status).toBe(422);
+    expect(refused?.issues?.map((issue) => issue.path)).toEqual([['objects', 0]]);
   });
 
   it('the strict door raises the SAME code for the same defect — one dialect for one authored mistake', () => {

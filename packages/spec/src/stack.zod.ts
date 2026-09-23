@@ -2976,6 +2976,31 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
     );
   }
 
+  // [#19785] A non-object ENTRY is refused with the same envelope, one zod
+  // issue per entry at `['objects', index]` (`expected: 'object'`) — the
+  // strict parse's own answer for it. Never handed on: the merge cannot read
+  // it, and a stack returned with it is a success whose objects are not all
+  // objects — the next consumer (plugin-object registration) then drops every
+  // object after it inside one warn-level catch, which is concealment, not
+  // leniency.
+  if (Array.isArray(declaredObjects) && declaredObjects.some((entry) => !isRecord(entry))) {
+    const parsed = z.array(z.looseObject({})).safeParse(declaredObjects);
+    const issues = parsed.success
+      ? []
+      : parsed.error.issues.map((issue) => ({ ...issue, path: ['objects', ...issue.path] }));
+    const positions = declaredObjects
+      .map((entry, index) => (isRecord(entry) ? null : `#${index} (${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : `a ${typeof entry}`})`))
+      .filter((position): position is string => position !== null);
+    throw new StackSchemaInvalidError(
+      `defineStack validation failed: 'objects' holds ${positions.length === 1 ? 'an entry' : 'entries'} ` +
+        `that ${positions.length === 1 ? 'is' : 'are'} not an object — ${positions.join(', ')}. Bound actions ` +
+        `cannot be merged into such an entry, and \`strict: false\` skips validation, not this shape. Author ` +
+        `every entry of 'objects' as an object definition, or drop \`strict: false\` to have every schema ` +
+        `check run.`,
+      issues as z.core.$ZodIssue[],
+    );
+  }
+
   // Honour `order` on the preserved top-level actions regardless of objects.
   const sortedTop = config.actions ? sortActionsByOrder(config.actions) : config.actions;
   const topChanged = sortedTop !== config.actions;
@@ -2999,12 +3024,6 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
   // references, consistent with mergeObjects() and Zod output).
   let objectsChanged = false;
   const newObjects = config.objects.map((obj) => {
-    // [#19785] A non-object ENTRY (only reachable unparsed) carries no actions
-    // to merge into: it is handed on exactly as written, never dereferenced.
-    // Not dropped and not warned about here — nothing is lost at this door,
-    // which is what a scalar entry already got; `composeStacks` is where such
-    // an entry would be lost, and it skips and reports it there.
-    if (!isRecord(obj as unknown)) return obj;
     const base = obj.actions ?? [];
     // Idempotent (#14847): append only the bound actions `base` does not carry
     // ALREADY — judged by identity, never by equality. The one way an entry of
