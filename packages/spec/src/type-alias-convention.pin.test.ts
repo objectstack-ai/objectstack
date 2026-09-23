@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 787 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 789 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1259,6 +1259,11 @@ export type Iso651 = Assert<Eq< z.input< typeof M152.ActionResultDialogTranslati
 export type Iso652 = Assert<Eq< z.input< typeof M152.ObjectTranslationDataSchema >, z.infer< typeof M152.ObjectTranslationDataSchema > >>;
 export type Iso653 = Assert<Eq< z.input< typeof M152.TranslationDataSchema >, z.infer< typeof M152.TranslationDataSchema > >>;
 export type Iso654 = Assert<Eq< z.input< typeof M152.TranslationBundleSchema >, z.infer< typeof M152.TranslationBundleSchema > >>;
+// #15178 split the bundle type in two. The platform face is the per-app shape
+// plus one more optional group, so its two states coincide exactly as the
+// per-app face's do — pinned rather than given a permanent `XParsed` synonym.
+export type Iso880 = Assert<Eq< z.input< typeof M152.PlatformTranslationDataSchema >, z.infer< typeof M152.PlatformTranslationDataSchema > >>;
+export type Iso881 = Assert<Eq< z.input< typeof M152.PlatformTranslationBundleSchema >, z.infer< typeof M152.PlatformTranslationBundleSchema > >>;
 export type Iso655 = Assert<Eq< z.input< typeof M152.TranslationConfigSchema >, z.infer< typeof M152.TranslationConfigSchema > >>;
 export type Iso656 = Assert<Eq< z.input< typeof M152.TranslationItemSchema >, z.infer< typeof M152.TranslationItemSchema > >>;
 export type Iso657 = Assert<Eq< z.input< typeof M152.TranslationDiffStatusSchema >, z.infer< typeof M152.TranslationDiffStatusSchema > >>;
@@ -1691,7 +1696,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 787 isomorphic pins', () => {
+  it('still declares all 789 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2283,7 +2288,20 @@ describe('ADR-0122 type-alias convention', () => {
     // `AnalyticsQuerySchema.shape` — already pinned isomorphic as Iso300 — and
     // the four it adds carry no default, transform, catch or pipe, so no
     // `XParsed` is declared and all three come here instead. +3 added.
-    expect(pins).toHaveLength(787);
+    //
+    // 787 -> 789 is #15178's translation bundle split (system/translation.zod.ts,
+    // module slot M152): `PlatformTranslationDataSchema` and
+    // `PlatformTranslationBundleSchema`, the (RISE) case twice. The platform
+    // face is the per-app shape plus one more `.optional()` group and the
+    // bundle is a `z.record` of it, so neither gains a default or a transform —
+    // the same reason `TranslationDataSchema` and `TranslationBundleSchema`
+    // were already on this list, which is what makes their new siblings belong
+    // here rather than carrying a permanent `XParsed` synonym. +2 added. The
+    // two movements were authored in parallel off the same 784 and both took
+    // Iso877/Iso878; #17551 landed on main first, so its ids stand and this
+    // card's pins renumbered to Iso880/Iso881 — ids are claims about pins, not
+    // positions, so the renumbering asserts nothing new.
+    expect(pins).toHaveLength(789);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
