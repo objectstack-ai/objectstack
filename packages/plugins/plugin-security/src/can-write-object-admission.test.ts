@@ -686,7 +686,7 @@ describe("the D12 arm judges copies — a preview never stamps the caller's rows
  * receive: the probe an ARRAY (`validate()` always sends `rawRows`), the
  * middleware the engine's by-id `data` and id.
  */
-describe('DIRECTION — the one arm where the probe is narrower than the write path', () => {
+describe('DIRECTION — a delegate UPDATE the probe refuses and the middleware admits', () => {
   it("REFUSES a scope-holding delegate's id-less UPDATE that the middleware, holding the id, ADMITS (ADR-0090 D12)", async () => {
     const { plugin, middleware } = await boot([DELEGATE_SET], delegateTables());
     const patch = { position: 'sales_rep', business_unit_id: 'bu_es' };
