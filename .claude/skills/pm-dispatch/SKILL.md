@@ -39,9 +39,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 ## 优先级
 
-- 优先序:维护者裁决 > 北极星 > `AGENTS.md` > 红线 > 核心条款 > 细则 > 座位判断。
-- 核心条款住 `references/core-rules.md`,是本文的子集;细则是本文其余各节与其它 references。
-- 一条规则在本文与核心条款一处改动,另一处同 PR 同改。
+- 优先序:维护者裁决 > 北极星 > `AGENTS.md` > 红线 > 细则 > 座位判断。
+- 细则住本文其余各节与 `references/**`,按阶段读;阶段文件与各自读者见〈阶段细则索引〉。
 - 红线与各节的禁止行都在四轴权衡之外,⛔ 不因更合理的理由被推翻。
 - 两条细则冲突 ⇒ 按更严的一条行动并立卡;⛔ 不当场改文本了结。
 
@@ -75,6 +74,17 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 分诊席跑普通直连会话、默认判断档;裁决不在本席,归维护者召唤的总监席。
 - 子代理裁决逐份过转录核验采信。
 - 开轮互斥的四读数、开轮标记与章程触碰核对见 `references/seat-lifecycle.md` 〈开轮互斥〉。
+
+## 阶段细则索引
+
+| 文件 | 谁在哪个 fire 读 | 承载的章节 |
+|:--|:--|:--|
+| `references/seat-lifecycle.md` | 每个座位每次 fire:开轮互斥读数前、收班前 | 开轮互斥 · 座位贴协议 · Epic 子树车道 · 轮次报告与节奏 · 停止条件与待命 · 断粮与跨墙恢复 |
+| `references/reading-discipline.md` | 任一座位取读数、引读数或核验 main 的那一刻 | 平台读数纪律 |
+| `references/cross-repo-coordination.md` | 分诊席路由与查重前;执行席跨仓认领、派发或转移时 | 多仓协调 |
+| `references/triage-duties.md` | 分诊席每次 fire 开局 | 分诊座位职责 |
+| `references/execution-duties.md` | 执行席每次 fire | 候选与批次 · 认领 · 派发 · 收集 · 复核 |
+| `references/landing-operations.md` | 执行席落地窗口(ACCEPT 之后至 MERGED) | 入队与落地 · A–D 操作细则 |
 
 ## 全体座位的不变量
 

@@ -15101,7 +15101,7 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 //
 // ## The rule, and the clause that had no reader
 //
-// `.claude/skills/pm-dispatch/SKILL.md` 〈分诊座位职责〉 makes the triage seat's
+// `.claude/skills/pm-dispatch/references/triage-duties.md` 〈分诊座位职责〉 makes the triage seat's
 // inventory two-tiered and closes the rule with a forcing function: 「选层按
 // fire 时刻,⛔ 不用计数器;简报写明本轮跑的层」. The SELECTOR itself is pinned
 // one hop away in `.claude/skills/pm-dispatch/references/dispatch-runbook.md`
@@ -15168,7 +15168,7 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 //
 // The filing card measured, and this file's flight re-measured, that the
 // English word `Tier` in any casing appears NOWHERE in the charter: the only
-// clause is SKILL.md 〈分诊座位职责〉 「选层按 fire 时刻,⛔ 不用计数器;简报写明
+// clause is references/triage-duties.md 〈分诊座位职责〉 「选层按 fire 时刻,⛔ 不用计数器;简报写明
 // 本轮跑的层」, which requires the tier to be WRITTEN and prescribes no
 // spelling. So the repair is HERE, in the predicate, and ⛔ NOT in adding an
 // English spelling to a charter that is a governed surface and never said it.
@@ -15520,7 +15520,7 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
       : '';
   return (
     `${hit.shape} (comment \`${id}\`) ${because} — so the two-tier rule at ` +
-    '`.claude/skills/pm-dispatch/SKILL.md` 〈分诊座位职责〉 (「选层按 fire 时刻,⛔ 不用计数器;' +
+    '`.claude/skills/pm-dispatch/references/triage-duties.md` 〈分诊座位职责〉 (「选层按 fire 时刻,⛔ 不用计数器;' +
     '简报写明本轮跑的层」) is satisfied by SILENCE here. The clause is the rule\'s forcing ' +
     'function: a seat that must NAME its tier cannot skip choosing one, and the one measured ' +
     'instance of the skipped choice was a full-board enumeration on a fire that owed a `since` ' +

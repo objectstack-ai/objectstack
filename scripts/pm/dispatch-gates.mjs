@@ -25400,7 +25400,7 @@ function selfTest() {
   // per-file entry under `skills/` has quietly returned.
   t('a catalog file is covered by exactly ONE entry — skills/** — now that the published PM skill and its own entry are gone', catalogHit.hits.length === 1 && catalogHit.hits[0].glob === 'skills/**');
   t('no per-file entry for the deleted published PM skill survives it, and its old path carries the root mandate only', !MANDATORY_TIER_GLOBS.some((g) => g.glob.includes('objectstack-pm-dispatch')) && fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).hits.every((h) => h.glob === 'skills/**'));
-  t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/core-rules.md']).mandatory === false);
+  t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/state-machine.md']).mandatory === false);
   t('the skills/** entry is declared with its one-line exit switched off, as data', MANDATORY_TIER_GLOBS.some((g) => g.glob === 'skills/**' && g.oneLineExit === false && g.tier === CONTRACT_REVIEW_TIER));
   t('every other mandatory entry keeps the one-line exit open (the flag is an opt-out, absent by default)', MANDATORY_TIER_GLOBS.filter((g) => g.glob !== 'skills/**').every((g) => g.oneLineExit === undefined) && catalogHit.hits.every((h) => h.glob !== 'skills/**' || h.oneLineExit === false));
   const catalogLines = tierLines(catalogHit).join('\n');
@@ -26505,7 +26505,7 @@ function selfTest() {
   t('and refuses the one-line-class exit on stdout, where the claim comment reads it', (catalogCli.stdout ?? '').includes('NOT available') && !(catalogCli.stdout ?? '').includes('drops to opus execution'));
   const catalogAiCli = runCli(['--tier', 'skills/objectstack-ai/SKILL.md']);
   t('⭐ a second catalog SKILL.md prints the same mandate', catalogAiCli.status === 0 && (catalogAiCli.stdout ?? '').includes('MANDATORY') && (catalogAiCli.stdout ?? '').includes("'skills/**'"));
-  const internalRefsCli = runCli(['--tier', '.claude/skills/pm-dispatch/references/core-rules.md']);
+  const internalRefsCli = runCli(['--tier', '.claude/skills/pm-dispatch/references/state-machine.md']);
   t('⭐ --tier on an internal pm-dispatch references file still prints NO mandate', internalRefsCli.status === 0 && (internalRefsCli.stdout ?? '').includes('no path-derived mandate') && !(internalRefsCli.stdout ?? '').includes('MANDATORY'));
 
   // ── The entry guard (#9757) ───────────────────────────────────────────────
