@@ -10237,7 +10237,8 @@ export class ObjectQL implements IObjectQLEngine {
    *     timeout, a permission denial, a query fault — and, through its
    *     `excludes`, Postgres' `column "x" of relation "y" does not exist`,
    *     which contains a legal missing-table phrase but is a column fault on a
-   *     table that EXISTS — all stay `error`, with the stack.
+   *     table that EXISTS — all stay on the loud branch, with the stack (at
+   *     `warn`; the last section says why not `error`).
    *   * The fault stays visible without this frame: the driver's own refusal
    *     envelope (`SqlDriver.backendStatementFault` → `logger.warn`) carries
    *     the table, the dialect reason and the compiled statement, and is
@@ -10250,16 +10251,33 @@ export class ObjectQL implements IObjectQLEngine {
    * move this noise rather than remove it. What the demotion drops is the
    * duplicate and its stack; the classification survives in the meta.
    *
-   * ⛔ Deliberately READS only — and the write doors have since moved for a
-   * DIFFERENT reason, so this fence still holds but its old sentence does not.
-   * #17052 dropped `insert`/`update`/`delete` to `warn` because each of those
-   * catches rethrows: the caller IS told, which is AGENTS.md's third legal
-   * answer ("a failure handed to the CALLER is not a degradation at all"), and
-   * "the row the caller believes it stored is gone" was never true of a
-   * rethrowing door. That argument is about DELIVERY and applies to this frame
-   * too — `find`'s catch also rethrows — but the level here was set by a
-   * separate ruling that weighed the driver's own surviving `warn` against a
-   * second line, so moving it is its own card rather than a rider on #17052.
+   * The `debug` demotion is READS only: a write to a table that does not exist
+   * is not a normal answer for any caller, and takes the write doors' `warn`
+   * like every other write fault does (#17052).
+   *
+   * ## The loud branch is `warn`, not `error` — the caller is told
+   *
+   * [#17212] Every cause the predicate does NOT earn a benign verdict for is
+   * reported at `warn`, with its message and stack, and `find`'s `catch` then
+   * rethrows it — `throw e` is that catch's only exit. That is AGENTS.md's
+   * third legal answer (*Degradation log levels*): "a failure handed to the
+   * CALLER is not a degradation at all … Do not bolt a `logger.error` onto
+   * such a site". The requester IS told — the throw is the answer — so an
+   * `error` line is a second, louder report of a fact the caller already has.
+   * The write doors moved for the same reason (#17052): their catches rethrow
+   * too.
+   *
+   * ⛔ Demoted, not deleted — only the level moved. The message and the stack
+   * survive through {@link writeFailureLogMeta}: `warn(message, meta?)` has no
+   * `Error` slot, and an Error handed over AS meta serializes to `{}` (its
+   * `message`/`stack` are non-enumerable). On the SQL read path the fault is
+   * also reported one frame down on the driver's own `warn` —
+   * `SqlDriver.backendStatementFault` for every backend fault it measured
+   * (connection, timeout and ACL included), `unresolvableFilterColumnRefusal`
+   * for an unresolvable WHERE column. The filter COMPILER's refusals
+   * (`uncompilableFieldReferenceError` and its siblings) have no driver line:
+   * they are raised before the statement runs, as refusals carrying a declared
+   * `400` — a rejected request, answered to its caller.
    */
   private reportFindFailure(object: string, error: unknown): void {
     if (isMissingTableError(error, object)) {
@@ -10270,28 +10288,8 @@ export class ObjectQL implements IObjectQLEngine {
       });
       return;
     }
-    // [#17212] The LEVEL is `warn`, not `error`, for the same reason #17052
-    // moved the three write doors: the next statement in `find`'s catch is
-    // `throw e`, so AGENTS.md's third legal answer applies — "a failure handed
-    // to the CALLER is not a degradation at all". The requester IS told; an
-    // `error` line is a second, louder report of a fact the caller already has.
-    //
-    // Measured for this card, and it retires the "only operator-facing copy"
-    // argument the card left open. `SqlDriver.backendStatementFault`'s own
-    // measured table (live PG 16.13 + better-sqlite3) covers EVERY read-path
-    // dialect fault including `connection, timeout, ACL`, and puts each one in
-    // front of a reader on the driver's own `logger.warn`. The one read-path
-    // class with no driver-channel sibling is the filter COMPILER's refusals
-    // (`uncompilableFieldReferenceError`, `unresolvableFilterColumnRefusal`),
-    // raised before the statement executes — and those are rejected requests
-    // carrying a declared status, which is precisely the path the gate's own
-    // remedy text names as the mirror-image failure.
-    //
-    // ⛔ Demoted, not deleted. What still observes a `find` failure: the
-    // rethrow one frame up (unconditional, level-independent, the caller's
-    // answer), this line, and the driver's `warn` for the whole backend-fault
-    // class. `writeFailureLogMeta` keeps the message and the stack, which
-    // `warn(message, meta?)` has no Error slot for (see its header).
+    // [#17212] `warn`, not `error`: `find`'s `catch` rethrows, so the caller
+    // is told — see the docblock's last section.
     this.logger.warn('Find operation failed', writeFailureLogMeta(error, { object }));
   }
 
