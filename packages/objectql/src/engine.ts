@@ -3940,15 +3940,12 @@ export class ObjectQL implements IObjectQLEngine {
    * [#18682] "May this context CREATE or UPDATE this object?" — supplied by the
    * security plugin, never decided here.
    *
-   * ## What it protects, and why only the dry run needs it
+   * ## What it protects
    *
    * A validation rule reads its related record under SYSTEM authority, and the
    * accepted cost of that is an inference channel: a caller can learn something
    * about a value they cannot read by observing which of THEIR WRITES are
-   * refused. That bound holds on the real write path for free — the CRUD gate
-   * runs in middleware and refuses a caller with no write grant long before any
-   * rule is evaluated, so only someone who could already write the row can
-   * observe anything at all.
+   * refused.
    *
    * `validate()` runs NO middleware for the target object, by design: it
    * executes nothing. Its network ingress (the `dryRun` import) checks auth and
@@ -4027,9 +4024,7 @@ export class ObjectQL implements IObjectQLEngine {
    *    `readonly` reference field inside the write's executor, so the real
    *    write resolves NO related row for it and a traversing rule refuses;
    *    the preview runs no strip, resolves the caller's own foreign key and
-   *    answers the rule against it. Every writer is affected alike — it widens
-   *    the channel to no caller the write path refuses — but the id the
-   *    preview judges is one the write path never carries.
+   *    answers the rule against it — an id the write path never carries.
    *
    * ## Unwired
    *
@@ -10909,18 +10904,16 @@ export class ObjectQL implements IObjectQLEngine {
     // author declared static `readonly` is STRIPPED from the caller's payload
     // inside `insert()`'s executor (`stripRuntimeOwnedFields`), so the real
     // write resolves no related row for it and a traversing rule refuses there.
-    // Nothing is stripped here, so the preview resolves the caller's own
+    // Nothing is stripped here: the preview resolves the caller's own
     // foreign key and answers the rule against an id the write path never
-    // carries. Every writer is affected alike — this reaches no caller the
-    // write path refuses — but the preview's verdict is not the write's for
-    // that declaration. Running the strip here would make them agree and is a
+    // carries, so the preview's verdict is not the write's for that
+    // declaration. Running the strip here would make them agree and is a
     // behaviour change on the preview's payload, so it is named, not done.
     // ⛔ Behind the caller's own create/update gate — see
-    // {@link registerWriteGateProbe} for why the preview needs a gate the write
-    // path gets from middleware for free. A caller who could not perform this
-    // write gets NO elevated read: `related` stays unresolved, and a traversing
-    // rule then refuses, which is the fail-closed direction and is honest about
-    // what it did not evaluate.
+    // {@link registerWriteGateProbe}. A caller the probe refuses gets NO
+    // elevated read: `related` stays unresolved, and a traversing rule then
+    // refuses, which is the fail-closed direction and is honest about what it
+    // did not evaluate.
     // ⛔ `rawRows`, not `rows`: the gate's field-level arm judges WHICH FIELDS
     // THE CALLER WROTE, and `rows` has already been through
     // `applyFieldDefaults` / `initializeSummaryFields` above. Handing it the

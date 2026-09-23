@@ -1228,8 +1228,6 @@ export class SecurityPlugin implements Plugin {
 
     // [#18682] Answer the engine's create/update gate question for `validate()`.
     //
-    // The real write path gets this gate from the middleware below for free, so
-    // only a caller who could write can observe a validation rule's verdict.
     // `validate()` runs no middleware for its target object, so without this the
     // dry run would answer for callers the write path refuses. Same evaluator
     // and same permission sets the CRUD gate itself uses — ⛔ not a second
@@ -5101,12 +5099,9 @@ export class SecurityPlugin implements Plugin {
    * target object, by design: it executes nothing. A validation rule that reads
    * one hop through a reference field is evaluated there against a related row
    * fetched under SYSTEM authority, and the accepted cost of that elevation is
-   * an inference channel bounded to callers the write path would admit — a
-   * bound the real path gets for free, because the middleware's write gate
-   * refuses long before any rule is evaluated. The preview has no such gate, so
-   * it asks this. What this method restores is the nine arms enumerated below
-   * and nothing beyond them — the closing paragraph names the refusals that
-   * stay ahead of it.
+   * an inference channel — so the preview asks this before it reads. What this
+   * method restores is the arms enumerated below and nothing beyond them — the
+   * closing paragraph names the refusals that stay ahead of it.
    *
    * ## The arms, in the middleware's own order — ⛔ the CRUD grant is not the gate
    *

@@ -7,9 +7,7 @@
  * ## Why this file exists, and why the unit suites could not hold it
  *
  * `ObjectQL.validate()` resolves a traversing validation rule's related row
- * under SYSTEM authority. The accepted cost is an inference channel bounded to
- * callers who could perform the write — a bound the real path gets from the
- * security middleware and the preview has to ask for, through
+ * under SYSTEM authority, behind the gate it asks for through
  * `registerWriteGateProbe`.
  *
  * The first probe asked an OBJECT-LEVEL question, and the write decision is not

@@ -328,8 +328,7 @@ describe('#18682 — engine-produced relationship bindings', () => {
     ).rejects.toThrow(/partner acc_p is capped/);
   });
 
-  // The gate that keeps the accepted inference channel to writers only. A
-  // caller who could not perform this write gets NO elevated read at all.
+  // The probe's refusal: a caller it refuses gets NO elevated read at all.
   it('issues NO elevated read in validate() for a caller who may not write', async () => {
     (engine as any).registerWriteGateProbe(async () => false);
     d.calls.length = 0;

@@ -7,11 +7,8 @@
  *
  * `ObjectQL.validate()` previews a write without running middleware, and a
  * validation rule that reads one hop through a reference field is evaluated
- * there against a related row fetched under SYSTEM authority. The accepted cost
- * of that elevation is an inference channel bounded to callers who could
- * perform the write — a bound the real write path gets for free, because the
- * middleware refuses first. The preview has to ask for it, and
- * {@link SecurityPlugin.canWriteObject} is what it asks.
+ * there against a related row fetched under SYSTEM authority. The preview asks
+ * {@link SecurityPlugin.canWriteObject} before it reads.
  *
  * The first version of that question was NOT the middleware's decision. It
  * checked `isSystem`, a principal, and the CRUD grant — and admitted four
