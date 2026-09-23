@@ -23,7 +23,7 @@ Direction set by objectui#9050's ruling C′, quoted untranslated: 「the differ
 
 ⚠️ The MongoDB reading is taken at the driver's compile face, at the engine's shared comparand doors and against MongoDB's query semantics; a live `mongod` cell is NOT MEASURED.
 
-**No backend reads the array as the scalar the operator declares.** Three refuse or exclude it outright, so **a stored view that passed the protocol selected nothing** — and unlike a 400, an exclusion reads as a true statement about the data. The fourth returns rows, but for a different predicate and only on an array-valued field, which reads as a true statement about the data too.
+**No backend reads the array as the scalar the operator declares.** Three refuse or exclude it outright, so **a stored view that passed the protocol selected nothing** — and unlike a 400, an exclusion reads as a true statement about the data. The fourth returns rows — but for a different predicate, and only on an array-valued field, so it too reads as a true statement about data the rule never asked for.
 
 Two carve-outs are kept and pinned, because a narrowing that runs past the query path is the mirror-image defect: an **omitted** value still parses (`value` is optional), and the four **valueless** operators (`is_empty` / `is_not_empty` / `is_null` / `is_not_null`) still accept anything in the value position — they take their direction from the operator NAME, the lowering discards the value, and the ObjectUI client deliberately sends a truthy placeholder there.
 

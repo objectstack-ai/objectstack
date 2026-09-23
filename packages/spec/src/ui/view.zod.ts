@@ -614,8 +614,8 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  *
  * So **no backend reads the array as the SCALAR the operator declares**: three
  * refuse or exclude it outright, and the fourth returns rows for a different
- * predicate — exact-array equality, and only on an array-valued field. So the
- * ORIGINAL reading was the one that widened the accept
+ * predicate — exact-array equality, and only on an array-valued field. The
+ * ORIGINAL reading was therefore the one that widened the accept
  * set past the query path; this arm pulls it back to what `value`'s own
  * `.describe()` has declared all along — 「every other operator takes a scalar」.
  * Direction set by objectui#9050's ruling C′ (「the differences are the
