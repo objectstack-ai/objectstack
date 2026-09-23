@@ -810,6 +810,9 @@ describe('DelegatedAdminGate — the anchor is picked by organization, not by ar
     };
     const matches = (row: any, where: any): boolean =>
       Object.entries(where ?? {}).every(([k, v]) => {
+        // Refuse what this double does not implement, rather than reading a
+        // combinator as a field name and answering a quiet `false`.
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
           return (v as any).$in.includes(row[k]);
         }
