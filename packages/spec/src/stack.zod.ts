@@ -1797,6 +1797,10 @@ function collectObjectNames(config: ObjectStackDefinition): Set<string> {
   const names = new Set<string>();
   if (config.objects) {
     for (const obj of config.objects) {
+      // [#18239] `composeStacks`' artifact pass reads its unparsed inputs through
+      // here, and `mergeObjects` skips a non-object entry rather than refusing
+      // it — so skip it here too instead of dereferencing it.
+      if (!isRecord(obj)) continue;
       names.add(obj.name);
     }
   }
@@ -3681,9 +3685,22 @@ const warnedMalformedCollectionKeys = new Set<string>();
  * `defineStack` path rejects the shape outright.
  * @internal
  */
-function warnMalformedCollectionKey(key: string): void {
-  if (warnedMalformedCollectionKeys.has(key)) return;
-  warnedMalformedCollectionKeys.add(key);
+function warnMalformedCollectionKey(key: string, shape: 'value' | 'entry' = 'value'): void {
+  // [#18239] `'entry'`: the collection IS an array but one of its entries is not
+  // an object (`mergeObjects`, where a non-array `objects` is refused instead).
+  // Deduplicated apart from the `'value'` notice, so neither silences the other.
+  const dedupKey = shape === 'value' ? key : `${key}[]`;
+  if (warnedMalformedCollectionKeys.has(dedupKey)) return;
+  warnedMalformedCollectionKeys.add(dedupKey);
+  if (shape === 'entry') {
+    console.warn(
+      `composeStacks: top-level key '${key}' is a collection but at least one stack carries an ` +
+        `entry in it that is not an object — that entry cannot be composed and was skipped. Author ` +
+        `every entry as an object, or run the stack through strict \`defineStack\` to have the ` +
+        `shape rejected where it is written.`,
+    );
+    return;
+  }
   console.warn(
     `composeStacks: top-level key '${key}' is a collection (concatenated across stacks) but at ` +
       `least one stack carries a non-array value for it — that value cannot be composed and was ` +
@@ -3994,8 +4011,46 @@ function mergeObjects(
   const collectionOwner = new Map<string, Map<string, number>>();
 
   for (const [i, stack] of stacks.entries()) {
-    if (!stack.objects) continue;
-    for (const obj of stack.objects) {
+    // [ADR-0112 · #18239] Shape guard, because composition accepts inputs the
+    // strict parse never saw (a hand-built stack, `strict: false`). A non-array
+    // `objects` is REFUSED, never skipped: skipping it composes an artifact that
+    // silently lacks this stack's objects — a composed artifact is complete or
+    // it is refused. `undefined` is the one non-array that is not malformed: the
+    // key is simply absent. The code is the strict parse's own
+    // (`STACK_SCHEMA_INVALID`) because the defect is the same authored mistake
+    // that door refuses; the header names this pass, the split
+    // {@link StackCrossReferenceError} makes across its two raise sites.
+    const declared: unknown = (stack as { objects?: unknown }).objects;
+    if (declared === undefined) continue;
+    if (!Array.isArray(declared)) {
+      const parsed = z.array(z.unknown()).safeParse(declared);
+      const issues = parsed.success
+        ? []
+        : parsed.error.issues.map((issue) => ({ ...issue, path: ['objects', ...issue.path] }));
+      const kind =
+        declared === null
+          ? 'null'
+          : typeof declared !== 'object'
+            ? `a ${typeof declared}`
+            : Object.getPrototypeOf(declared) === Object.prototype
+              ? 'an object'
+              : `a ${(declared as object).constructor?.name ?? 'non-plain'} object`;
+      throw new StackSchemaInvalidError(
+        `composeStacks validation failed: ${stackLabel(stack, i)} declares 'objects' as ${kind}, ` +
+          `not an array. Its objects cannot be composed, and skipping them would compose an artifact ` +
+          `that silently lacks them. Author 'objects' as an array (\`defineStack\` normalizes the map ` +
+          `form into one), or run the stack through strict \`defineStack\` to have the shape rejected ` +
+          `where it is written.`,
+        issues as z.core.$ZodIssue[],
+      );
+    }
+    for (const obj of declared as Obj[]) {
+      // A non-object ENTRY carries no object to merge — step 3's shape: skip it
+      // and say so once, never dereference it into a bare `TypeError`.
+      if (!isRecord(obj)) {
+        warnMalformedCollectionKey('objects', 'entry');
+        continue;
+      }
       const existing = map.get(obj.name);
       if (!existing) {
         map.set(obj.name, obj);
