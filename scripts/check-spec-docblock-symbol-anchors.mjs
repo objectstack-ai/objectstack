@@ -1194,7 +1194,7 @@ export function selfTest() {
           + `${shallow ? 'reports' : 'does not report'} as shallow, so \`${OBJECTUI_PIN_FILE}\` could not be read at it.`,
       );
     }
-    // ⛔ Everything not `skipped` is a hard red, and the
+    // ⛔ Every failed read not `skipped` is a hard red, and the
     // message names the status it was HANDED rather than picking a cause — which
     // is the whole of what went wrong here. ⚠️ Measured: `no-repo` is not
     // reachable through `--self-test`, because the live-corpus sweep above asks
@@ -1206,8 +1206,8 @@ export function selfTest() {
         + 'is a failure only for the primary anchor, in a clone git does not report as shallow — a mistyped literal '
         + 'lands here. `path-absent` means the anchor RESOLVED and the pin file is not readable at it — a renamed or '
         + 'mistyped pin path lands here, and reporting that as an unreachable anchor is how this pin gets switched off '
-        + 'while its own notice tells the reader to expect the skip. `no-repo` means this directory is not a git '
-        + 'repository at all. ⛔ In every case the pin is NOT MEASURED, and NOT MEASURED is not a pass.');
+        + 'while its own notice tells the reader to expect the skip. `no-repo` means `git rev-parse --git-dir` failed '
+        + 'here. ⛔ In every case the pin is NOT MEASURED, and NOT MEASURED is not a pass.');
     check(read.status !== 'ok' || read.text === RECENSUS_17242.objectuiPinSha,
       `\`objectuiPinSha\` (${RECENSUS_17242.objectuiPinSha}) must be the objectui commit this repo was pinned to at `
         + `\`${field}\` — the pin file reads \`${read.text}\` there, so the binding sweep and this repo were standing `
