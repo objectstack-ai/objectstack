@@ -37,7 +37,7 @@ One asymmetry between the two vocabularies, and it is a fact about them rather t
 
 ## 3. `object-grid`'s `defaultFilters` carries `filter`'s declaration
 
-The key is described as *"Legacy base-filter fallback, read only when `filter` is absent"* — the same value in the same role as `filter`, read through the same lowering sink. `filter` converged on the `ViewFilterRule` array with the rest of its family; this key was not named by that ruling and kept `z.unknown()`, so the block had one declared door and one undeclared door onto one seam, and the parse receipt said nothing about what the grid would then do with the value. In the objectui version this release pins (`.objectui-sha` `87af769e9a`), `ObjectGrid` lowers `defaultFilters` through `toFilterNode` whenever `filter` lowers to nothing, and what that does depends on the shape:
+The key is described as *"Legacy base-filter fallback, read only when `filter` is absent"* — the same value in the same role as `filter`, read through the same lowering sink. `filter` converged on the `ViewFilterRule` array with the rest of its family; this key was not named by that ruling and kept `z.unknown()`, so the block had one declared door and one undeclared door onto one seam, and the parse receipt said nothing about what the grid would then do with the value. In the objectui version this release pins (`.objectui-sha` pin `87af769e9a`), `ObjectGrid` lowers `defaultFilters` through `toFilterNode` whenever `filter` lowers to nothing, and what that does depends on the shape:
 
 - the **record form** and the **AST tuple array** are lowered and **applied** as declared;
 - a **bare string** or a **number** is **dropped** without a word, so the grid sends no filter and lists its rows unfiltered;

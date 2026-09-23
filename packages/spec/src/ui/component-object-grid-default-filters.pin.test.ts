@@ -11,7 +11,7 @@
  * pre-convergence `z.unknown()`, so the block had one declared door and one
  * undeclared door onto one seam: a bare string, a number, a MongoDB-style
  * record, an ObjectQL AST tuple array and a list of malformed rules all parsed
- * here. At the pinned objectui (`.objectui-sha` `87af769e9a`) the lowering
+ * here. At the objectui `.objectui-sha` pin `87af769e9a` the lowering
  * treats them three ways, per shape: the record form and the tuple array are
  * lowered and APPLIED as declared; a bare string or a number is DROPPED, so the
  * grid sends no filter and lists its rows unfiltered; and a list of malformed

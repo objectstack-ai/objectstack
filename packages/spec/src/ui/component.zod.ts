@@ -2727,8 +2727,8 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * a declared door and an undeclared one onto the same seam — a bare string, a
    * number, a MongoDB-style record and an ObjectQL AST tuple array all parsed
    * here, and the author's receipt said nothing about what the grid would do
-   * with them. At the pinned objectui (`.objectui-sha` `87af769e9a`,
-   * `ObjectGrid.tsx` → `toFilterNode`) that depends on the shape: the record
+   * with them. At the objectui `.objectui-sha` pin `87af769e9a`
+   * (`ObjectGrid.tsx` → `toFilterNode`) that depends on the shape: the record
    * form and the tuple array are lowered and APPLIED as declared; a bare string
    * or a number is DROPPED, so the grid sends no filter and lists its rows
    * unfiltered; and a list of malformed rules is REFUSED — on the wire with
