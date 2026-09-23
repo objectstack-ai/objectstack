@@ -452,7 +452,7 @@ describe('a readonlyWhen lock is judged against the row the write STORES (#19911
 
   // ── requiredWhen answers for the amount the row keeps ─────────────────
 
-  it('requiredWhen: a requirement the forged-through amount raised no longer refuses the write', async () => {
+  it('requiredWhen: a requirement only the let-through amount raised no longer refuses the write', async () => {
     await engine.update('case_big_note', { id: 'g1', status: 'open', amount: 999 });
     expect(row('case_big_note', 'g1')).toMatchObject({ status: 'closed', amount: 100, note: null });
   });

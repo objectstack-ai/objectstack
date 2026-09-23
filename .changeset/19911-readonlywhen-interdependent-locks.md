@@ -34,7 +34,7 @@ decide):**
   event, and a `strictReadonlyWrites` refusal names the fields the update would
   have dropped; it was a refusal before and still is.
 - `requiredWhen` and validation rules run on the stripped update, so they see
-  the amount the row keeps: a requirement only the dropped-through amount raised
+  the amount the row keeps: a requirement only the let-through amount raised
   no longer refuses the write, and clearing a field the kept amount requires is
   now refused (`VALIDATION_FAILED`).
 - When locks read each other in a cycle, so that no set of drops agrees with
