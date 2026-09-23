@@ -5101,7 +5101,7 @@ export class SecurityPlugin implements Plugin {
    * ## Why it exists
    *
    * `ObjectQL.validate()` is a write PREVIEW that runs no middleware for its
-   * target object, by design: it executes nothing. A validation rule that reads
+   * target object, by design. A validation rule that reads
    * one hop through a reference field is evaluated there against a related row
    * fetched under SYSTEM authority, and the accepted cost of that elevation is
    * an inference channel — so the preview asks this before it reads. What this

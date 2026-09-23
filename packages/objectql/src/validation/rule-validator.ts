@@ -536,9 +536,7 @@ export function collectPredicateRelationships(
 export type ParentBinding = Record<string, unknown> | null | undefined;
 
 /**
- * [#18682] Reference FIELD name → the related row, or `null` when it could not
- * be read (no reference stored, the related record was not found, the related
- * object declares no such column, or the read failed). They do NOT collapse: each names itself in
+ * [#18682] The reasons do NOT collapse: each names itself in
  * the refusal, because "there is no parent" and "that column does not exist"
  * send an author to different repairs.
  */

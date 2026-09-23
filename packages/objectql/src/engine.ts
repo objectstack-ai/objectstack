@@ -3948,8 +3948,8 @@ export class ObjectQL implements IObjectQLEngine {
    * about a value they cannot read by observing which of THEIR WRITES are
    * refused.
    *
-   * `validate()` runs NO middleware for the target object, by design: it
-   * executes nothing. Its network ingress (the `dryRun` import) checks auth and
+   * `validate()` runs NO middleware for the target object, by design.
+   * Its network ingress (the `dryRun` import) checks auth and
    * API access but not the caller's CRUD grant on the object. So the elevated
    * read, wired into the preview without this gate, would hand the same
    * one-bit-per-row oracle to any authenticated caller with no permission on the

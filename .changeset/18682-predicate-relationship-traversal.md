@@ -63,7 +63,7 @@ they cannot see by observing which writes are refused. The value itself never
 appears — the refusal names the field and the rule, never the value — and the
 channel is deliberately no wider than "this rule refused this write".
 
-### Two shapes are refused at authoring time, with a prescription
+### Two shapes are refused, with a prescription
 
 Both fault at evaluation today, so neither removes anything that works:
 
