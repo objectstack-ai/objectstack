@@ -19371,22 +19371,44 @@ export class ObjectStackProtocolImplementation implements
         // under the SOURCE's names — the collision the re-namespacing exists to
         // prevent.
         //
-        // ⛔ An explicitly declared `targetNamespace` still wins untouched: it
-        // is the caller's decision and this seam is about the DEFAULT.
+        // [#19577] ⭐ AN EXPLICIT `targetNamespace` STILL WINS OVER THE DEFAULT,
+        // BUT IT IS PARSED, NOT TAKEN RAW. Whichever branch answered, the value
+        // becomes the copy's `manifest.namespace` AND the prefix of every copied
+        // object name, so both branches pass ONE parse before anything is
+        // minted — `ManifestSchema.shape.namespace`, the declaration itself,
+        // never a hand-copied regex. An explicit value was the more reachable
+        // hole of the two: it is pure caller input, and `targetNamespace:
+        // 'my-ns'` minted `my-ns_ticket`, a name the object declaration refuses.
+        //
+        // ⛔ A refused explicit value is REFUSED, never sanitised the way the
+        // derivation sanitises an id: it is what the caller wrote, and a copy
+        // quietly landing under a namespace nobody wrote is the silent rewrite
+        // this door exists not to perform.
+        //
+        // The sentence is the DECLARATION's, surfaced — the discipline the id
+        // gate above follows — and this door adds only the key it read and the
+        // value that arrived. The throw carries `statusCode: 400` and no `code`,
+        // exactly like the id refusal above, so an HTTP boundary answers the
+        // status-derived `VALIDATION_ERROR` on both branches (`resolveThrownHttpError`).
         const sourceNs: string =
             (srcPkg?.manifest?.namespace as string) ?? (deriveNamespaceFromPackageId(request.sourcePackageId) ?? '');
-        const targetNs: string | null =
-            request.targetNamespace ?? deriveNamespaceFromPackageId(request.targetPackageId);
-        if (!targetNs) {
-            // Reachable only for an id the pattern admits but the namespace
-            // charset cannot carry (a single-letter final segment), or for an
-            // explicit `targetNamespace: ''`. Loud, with the remedy — never a
-            // copy renamed with an empty prefix.
+        const explicitNs = request.targetNamespace;
+        const targetNs: string | null = explicitNs ?? deriveNamespaceFromPackageId(request.targetPackageId);
+        // `?? ''` because the declaration is `.optional()`: an ABSENT value
+        // passes it, and a derivation that produced nothing must not.
+        const declaredTargetNs = ManifestSchema.shape.namespace.safeParse(targetNs ?? '');
+        if (targetNs == null || !declaredTargetNs.success) {
+            const rule = declaredTargetNs.error?.issues[0]?.message ?? 'See `manifest.namespace`';
             throw Object.assign(
                 new Error(
-                    `Cannot derive a package namespace from '${request.targetPackageId}'. `
-                    + 'Pass `targetNamespace` explicitly — a lowercase letter followed by '
-                    + '1–19 letters, digits or underscores.',
+                    explicitNs != null
+                        ? `Invalid package namespace '${String(explicitNs)}' on \`targetNamespace\`. ${rule}. `
+                            + 'It becomes the copy\'s `manifest.namespace` and the prefix of every copied object name.'
+                        // Reachable only for an id the pattern admits but the
+                        // namespace charset cannot carry (a single-letter final
+                        // segment) — never a copy renamed with an empty prefix.
+                        : `Cannot derive a package namespace from '${request.targetPackageId}'. `
+                            + `Pass \`targetNamespace\` explicitly. ${rule}.`,
                 ),
                 { statusCode: 400 },
             );
