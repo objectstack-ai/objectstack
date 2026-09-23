@@ -358,7 +358,20 @@ export const CEILINGS = new Map([
   // growth (the 811 → 812 entry above). SKILL.md is not a CROSS_FILE_MOVES
   // destination, so no `ruledRaises` record applies. Landed count, headroom 0,
   // same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 819],
+  // Lowered 819 → 319 by the principle-only cut (maintainer, decision batch #213
+  // item 4, verbatim: 「1 2 4 同意」 on 「协议主文 819 → 约 300 行(红线 + 状态模型 +
+  // 入口 + 索引),派发 / 复核 / 入队细则各成一份按阶段读的 reference;同时删
+  // core-rules.md 双份」). Relocation, not deletion: 开轮互斥 / 座位贴协议 / Epic
+  // 子树车道 / 轮次报告与节奏 / 停止条件与待命 / 断粮与跨墙恢复 →
+  // references/seat-lifecycle.md; 平台读数纪律 → references/reading-discipline.md;
+  // 多仓协调 → references/cross-repo-coordination.md; 分诊座位职责 →
+  // references/triage-duties.md; 执行座位职责 (候选/认领/派发/收集/复核) →
+  // references/execution-duties.md; 入队与落地 → references/landing-operations.md
+  // (the one declared CROSS-FILE MOVE below; this file is its source). Every
+  // rule line moved verbatim; the ACCEPT path-fork block stays here under
+  // 路径分叉 because check:pm-governed-prose anchors its region in this file.
+  // Landed count, headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/SKILL.md', 319],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -1145,7 +1158,13 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 69],
+  // Raised 69 → 101 by the CROSS-FILE MOVE declared in CROSS_FILE_MOVES below
+  // (the principle-only cut of SKILL.md, decision batch #213 item 4): the
+  // 入队与落地 clause block — 29 rule lines, its heading and blank lines — moved
+  // verbatim out of SKILL.md, whose ceiling fell 819 → 319 in the same PR; +32
+  // against a net source decrease of 500. Landed count, headroom 0, same
+  // convention.
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 101],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
   // rolls to production, which the landing window (ends at MERGED) never
   // covered: post-roll placement/latency reading with the waker-bias re-draw
@@ -1198,20 +1217,21 @@ export const CEILINGS = new Map([
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 24],
-  // Plain-language digest of the corpus's binding rules, one rule per line, added
-  // under the 2026-09-04 rules-only ruling so the maintainer reviews the rules
-  // instead of the corpus. Set at the landed line count (headroom 0, same
-  // convention as every entry above); it is a NEW file, so this is an added row
-  // and no other row moves.
-  // Raised 150 → 151 by the same queue-entry third-case ruling (decision batch
-  // #91, 2026-09-08, option A — quoted in full at the SKILL.md entry above): the
-  // twin line that SKILL.md:44 orders (一条规则在本文与核心条款一处改动,另一处同
-  // PR 同改), one 116 B line stating the sole exception with all three conditions.
-  // Could not be paid in place: the rule line holds 114 B of 120, and of this
-  // file's 121 adjacent bullet pairs ZERO merge under the cap (smallest 156 B).
-  // Landing it in SKILL.md alone was option C, refused by the ruling: the twin
-  // obligation is not waived. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/core-rules.md', 151],
+  // `references/core-rules.md` (151) left this map with the file: it was the
+  // declared subset of SKILL.md, and the principle-only cut (maintainer,
+  // decision batch #213 item 4, verbatim: 「1 2 4 同意」 on 「协议主文 819 → 约 300
+  // 行(红线 + 状态模型 + 入口 + 索引),派发 / 复核 / 入队细则各成一份按阶段读的
+  // reference;同时删 core-rules.md 双份」) deleted the duplicate.
+  // Five per-phase references created by that cut, each holding sections moved
+  // VERBATIM out of SKILL.md (819 → 319 in the same PR) and opening with one
+  // line naming which seat reads it on which fire. New files, landed at their
+  // own counts (headroom 0, same convention as every entry above); added rows,
+  // paid for by the SKILL.md decrease — the map's total goes down.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 96],
+  ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
+  ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 51],
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 120],
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 183],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the
@@ -1889,6 +1909,21 @@ export const CROSS_FILE_MOVES = new Map([
       ],
     },
   ],
+  // The principle-only cut of SKILL.md (maintainer, decision batch #213 item 4):
+  // the 入队与落地 clause block moved verbatim into the file that already held
+  // its A–D operating detail. `was` values are the participants' ceilings on
+  // `origin/main` at fae870352; the reviewer holds them against that diff. The
+  // five NEW per-phase references of the same PR are added rows, not
+  // destinations — a move needs a pre-move ceiling, which a new file has none
+  // of — and the same source decrease is what pays for them.
+  [
+    '.claude/skills/pm-dispatch/references/landing-operations.md',
+    {
+      ruling: '入队与落地 consolidation into landing-operations.md under the principle-only cut of SKILL.md, authorised by #14685 item 5 (comment 5520452691)',
+      was: 69,
+      sources: [['.claude/skills/pm-dispatch/SKILL.md', 819]],
+    },
+  ],
 ]);
 
 /**
@@ -1961,7 +1996,13 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 0],
   ['.claude/skills/pm-dispatch/references/true-green.md', 0],
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 352],
-  ['.claude/skills/pm-dispatch/references/core-rules.md', 0],
+  // The five per-phase references of the principle-only cut carry no table
+  // row (their tables stayed in SKILL.md), so each pin is the measurement 0.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 0],
+  ['.claude/skills/pm-dispatch/references/reading-discipline.md', 0],
+  ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 0],
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 0],
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 0],
   ['.claude/skills/pm-dispatch/references/filing-gate.md', 0],
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 219],
   ['.claude/skills/pm-dispatch/references/lanes/engine.md', 0],
