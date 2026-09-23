@@ -342,7 +342,7 @@ export const InstallPackageRequestSchema = lazySchema(() => z.object({
    * ## ⛔ Why the reference is documentary and not `…Schema.shape.…`
    *
    * `PackageInstallRequestSchema` sits ABOVE this module in the import graph —
-   * it is built from `ManifestSchema` and `InstalledPackageSchema`, both
+   * its module, `src/api/package-api.zod.ts`, imports `InstalledPackageSchema`,
    * declared here — so a reference from here up to it is an import cycle. It
    * is not a cycle the `lazySchema` proxy absorbs: under `OS_EAGER_SCHEMAS=1`,
    * the mode `gen:schema` and `check:authorable-surface` run in, the factory
