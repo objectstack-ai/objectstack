@@ -2,8 +2,8 @@
   "number": 19715,
   "kind": "issue",
   "title": "Published skills: the four SKILL.md files over 500 lines become routing + rules with examples and the platform ops tail moved under references/; TOCs on the 7 reference files over 300 lines; data's description trimmed under its cap (maintainer direct dispatch, batch #213 item 1)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -12,18 +12,19 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "huangyiirene"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T10:27:26Z",
-  "updated_at": "2026-09-23T00:55:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-23T03:17:37Z",
+  "closed_at": "2026-09-23T03:15:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

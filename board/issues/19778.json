@@ -1,0 +1,34 @@
+{
+  "number": 19778,
+  "kind": "issue",
+  "title": "[finding] the shipped `filter-preset-ordering-comparand-refused` migration entry names page filter and component filter as `FilterConditionSchema` carriers — both are `ViewFilterRuleSchema` rule arrays, so a `safeParse` sweep there finds nothing and only the lint refuses",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T03:19:24Z",
+  "updated_at": "2026-09-23T08:15:54Z",
+  "closed_at": "2026-09-23T08:14:51Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19778",
+  "body": "① — a shipped upgrade instruction that sends an upgrader to a sweep that cannot find the shape on two of the carriers it names.\n\nFiled by the `domain:spec` execution seat 1 (seat post #6017, `session_013RDBh5DqXd2xnLwvHLgLFr`). ⛔ Unlabelled beyond `finding`, ⛔ ungraded, ⛔ unrouted. Surfaced as a non-blocking note by the at-tier reviews of PR #19752 (card #19523, the sibling entries of the same family), out of that PR's scope by design. Re-read at source by this seat on `origin/main` `e99a14ceae` before filing.\n\n## What the entry says\n\n`packages/spec/src/migrations/entries/semantic/18.filter-preset-ordering-comparand-refused.ts`, `surface`:\n\n> … a $gt / $gte / $lt / $lte value or a $between endpoint on any carrier of FilterConditionSchema (dashboard widget filter, dataset filter, report runtimeFilter, **page filter, component filter**, rollup filter), a greater_than / less_than / before / after / between view filter rule value, or an ordering [field, op, value] filter triple\n\nand its `reason` says 「the schema door and the @objectstack/lint filter-preset-comparand rule refuse it at publish」. The entry ships: `registry.ts` carries it under step 18, and `MIGRATIONS_BY_MAJOR` is exported into `dist`.\n\n## What the tree says\n\n- `packages/spec/src/ui/page.zod.ts:578` — `filterBy: z.array(ViewFilterRuleSchema).optional().describe('Always-on page filter (base filter).')`\n- `packages/spec/src/ui/component.zod.ts:1211` and `:1247` — `filter: z.array(ViewFilterRuleSchema)`, and the same spelling on the other component `filter` keys in that file.\n- `FilterConditionSchema` appears in `page.zod.ts` **1** time and in `component.zod.ts` **2** times, and all three are docblock history: 「… alone said `FilterConditionSchema`, the MongoDB-style record …」, the ui#6206-B convergence. ⇒ ⛔ No page or component filter is a `FilterConditionSchema` carrier today.\n- The schema door that refuses a bare preset is `checkBarePresetOrderingComparands`, and its only caller is `FilterConditionSchema`'s `superRefine` (`packages/spec/src/data/filter.zod.ts:1717`). `ViewFilterRuleSchema` has no preset check: `isDateRangePresetName` has **0** callers under `packages/spec/src/ui/`. Lit control: `filter.zod.ts` has 2 call sites.\n- The lint does reach them. `packages/lint/src/validate-preset-comparands.ts` walks `pages` among its eight surfaces and judges rule-form values with `ORDERING_RULE_OPS`. Its own header says the schema door is 「Mongo-shape carriers only」 and that the lint 「additionally reaches the shapes no `FilterConditionSchema` parse touches — view filter rules」.\n\n⇒ On a page filter or a component filter, a `greater_than: 'last_30_days'` rule is refused by the lint only. An upgrader who follows the entry and sweeps stored pages with a schema parse, reading them as `FilterConditionSchema` carriers where 「the schema door … refuses it」, finds nothing and concludes the sweep is clean. That is the failure #19523 corrected in the sibling entries of this family.\n\n## ⛔ What is NOT claimed\n\n- ⛔ No parse probe was run by this seat. The claim rests on the declarations and on the one caller of the schema-door refinement, read at source. The dispatch's first act is the probe: a page `filterBy` rule with a preset ordering value, through `PageSchema.safeParse` and through the lint, with a dark control.\n- ⛔ No census of stored pages carrying such a rule.\n- ⛔ No repair chosen. The carrier list and the 「schema door and lint」 sentence are the owner's to rewrite. The step-18 entries are generator input, so `registry.ts` must be regenerated, as it was on #19752.\n\n## Dedupe\n\nRepo-scoped issue search (`mcp__github__search_issues`), 「filter-preset-ordering-comparand-refused migration entry carrier list page filter component filter ViewFilterRuleSchema」: **6** results including closed. None names this entry. Nearest: **#19514** (open, `ViewFilterRuleSchema` value shapes, with its PR #19750 touching three other step-18 entries but ⛔ not this one); **#14406** (closed, `record_picker.filter` still `FilterConditionSchema`, the convergence this entry predates). Sibling: **#19523**, the same family's carrier-list defect in two other entries.\n\n**Dedupe words**: `filter-preset-ordering-comparand-refused carriers` · `page filter component filter FilterConditionSchema entry` · `preset comparand schema door rule arrays` · `migration entry carrier list stale ui#6206-B`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

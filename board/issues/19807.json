@@ -1,0 +1,33 @@
+{
+  "number": 19807,
+  "kind": "issue",
+  "title": "hourly full run: red on main (CI)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T07:22:38Z",
+  "updated_at": "2026-09-23T08:17:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19807",
+  "body": "os-hourly-full-run-ci — machine-findable marker for this generated card. ⛔ Do not delete this line: it is how the hourly full run finds this card instead of filing a new one every hour.\n# hourly full run: red on main (CI)\n_Swept 2026-09-23T07:22:35.007Z · [run log](https://github.com/objectstack-ai/objectstack/actions/runs/35829772446) · commit `de4ed33fd5745d3061986c69d2c2898af14ba202` · conclusion `failure`._\n`CI` runs the FULL battery on `main` every hour (#16467). A `push` run on\n`main` tests only the packages the merge touched, and a merge-queue build tests only what the group\ncontained — so this hourly run is the only thing that says whether the WHOLE tree is green, and\nthis card is the only channel that reports it. Nothing is blocked by it.\n⛔ The remedy is never to narrow, skip or delete the failing check to make the hourly run green.\nFix what it names and let the next hourly run refresh this card; a card nobody reopens is closed by\nthe next green run being uneventful, not by editing this one.\n## What landed since the last green hourly run\nRange: `16d090ede0` (run 35764440297, the last green `CI` schedule run) .. `de4ed33fd5` — [compare](https://github.com/objectstack-ai/objectstack/compare/16d090ede01e8e940313364603a254a659a2355b...de4ed33fd5745d3061986c69d2c2898af14ba202)\n- `c120dbdfb8` docs(spec): bring the odata module's Programmatic Use example under check:skill-examples (#19745)\n- `2bdb81f8ad` fix(spec): re-measure the ComponentPropsMap objectui read-point records at the live pin and make them assertable (#19743)\n- `544767da3b` test(spec): pin proof 4's message-includes leg with a fifth check-mode box (#19754)\n- `a754563353` fix(plugin-auth): a public plain-HTTP boot says its AS discovery is unencrypted, in English (#19689)\n- `dc1b98680b` fix(spec): narrow the object designer's formula returnType options to the four declared members (#19759)\n- `ed4b655e5b` fix(pm): fleet-write derives the seat session from the container; the workflow’s Actions state is the kill switch; size-routed direct for post-stamped (#19760)\n- `e99a14ceae` fix(census): scope the tenant-audit census on class-property and callable names (#19749)\n- `2005a558de` docs(pm): the dev's writes go through the fleet tools; platform-readings records the relay's first readings (#19771)\n- `041c8cf62b` fix(spec): describe `format` by the readers that exist, not by email/phone (#19763)\n- `d0f1845657` feat(spec)!: split the translation bundle type — `settings` is a platform group, not a per-app one (#15178) (#19600)\n- `0f057b65bc` fix(spec): correct both $between-endpoint entries' carrier claims and detectors (#19752)\n- `90d65e4db5` ci(fleet-write): grant permission-contents: write to the mint step so the relay can arm auto-merge (#19767)\n- `70a2e752b8` docs(pm): rest-channel names the fleet-write relay as the channel to the App identity (#19770)\n- `595621d35c` docs(skills): split the four over-500-line SKILL.md into routing + references, TOC the seven long reference files, trim data's description (#19738)\n- `67add1301a` docs(adr): spell the ADR-0005/0010 payload `code` tokens as the ledger members the runtime emits (#19765)\n- `4b23e4fab5` docs(gates): record the #17242 re-census — the declined residual is a SPELLING population, not rot (#19733)\n- `43e17b8905` fix(service-datasource): emit the authorised `ObjectSchema.create` shape for object drafts (#19776)\n- `531689c230` test(lint): pin the dispatch-contract disarm by an undeclared same-named action, and state it in the docblock (#19781)\n- `cc2e9511c8` fix(pm): fleet-write fails closed on an indeterminate liveness read, reads it only behind the proxy re-exec, and stops reading a proxy 403 as a rate limit (#19780)\n- `a690c494c0` test(plugin-dev): make the tenancy-posture clocked window load-independent (#19779)\n- `01df025f7f` fix(lint): check the autonumber format the runtime resolves, not a local copy (#19787)\n- `55095cc460` fix(spec): composeStacks refuses a non-array `objects` with an ADR-0112 envelope (#19783)\n- `3f9e2eaa1c` fix(spec): list plugin-security's class-field error codes under its own ledger key (#19782)\n- `628e55dfa6` pm: retire the needs:contract-review label from the tree (ruling B step ③) (#19737)\n- `2cf9db7c43` fix(spec): the gantt, timeline and map binding warnings describe the refusals objectui left, not the floors it deleted (#19788)\n- `fae870352e` docs(gates): delete the spec-docblock gate's stale \"symbol is ZERO\" reason (#19786)\n- `98d83361d9` pm-dispatch: the pre-dispatch in-flight read covers every lane's pm:dispatched claims (#19792)\n- `0b83e01627` fix(spec): composeStacks refuses a non-array concatenated collection instead of dropping its content (#19794)\n- `de4ed33fd5` docs(pm): a suspended seat account is a dead session — takeover, re-rendered records, retriage, durable state (#19795)\n_Filed by `.github/workflows/scheduled-full-run-card.yml`. Generated by [Claude Code](https://claude.ai/code)_"
+}

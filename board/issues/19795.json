@@ -1,0 +1,34 @@
+{
+  "number": 19795,
+  "kind": "pull_request",
+  "title": "docs(pm): a suspended seat account is a dead session — takeover, re-rendered records, retriage, durable state",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T05:55:57Z",
+  "updated_at": "2026-09-23T06:53:49Z",
+  "closed_at": "2026-09-23T06:53:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-23T06:53:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19795",
+  "body": "Fixes #19777\n\nClause-②: no\n\n## What changed\n\nThree one-line edits, one per reference file, each paid in place under the file's `check-skill-line-ratchet.mjs` ceiling (241 / 469 / 91 — counts unchanged, every line ≤ 120 bytes, no re-wrap). Base `origin/main` at 2cf9db7c.\n\n| file · section | line added | line paid |\n|---|---|---|\n| `dispatch-runbook.md` 〈接手中断的 dev(worktree 接手协议)〉 | `- 账号封禁即死会话:接手者重认领,消失的记录(认领/复核/裁决)按正文行在当前 head 重出。` | folded `- PM 会话已死 ⛔ 不推导其 dev 已死;跨账号活性只认 GitHub 产出读数。` and `- 死后恢复查三态:远程(\\`git ls-remote\\`)、仅容器磁盘、真没了。` into `- PM 会话已死 ⛔ 不推导其 dev 已死;死后恢复查三态:远程 \\`ls-remote\\`、仅容器磁盘、真没了。` — the dropped clause 跨账号活性只认 GitHub 产出读数 is line 135 of the same file (〈Routine 传输〉 block) |\n| `platform-readings.md` 〈API 配额〉 | `- 封号隐藏其全部评论、无 timeline 事件;assignee、PR、正文存活;分诊没了挂 \\`pm:retriage\\`。` | replaced the older suspension reading in the same block, `- 用户类写绑作者:封号则其评论与卡按作者 404,标签/状态/标题/正文存活。` — the director's measurement (104 cards, zero `comment_deleted` events; assignee, PRs and bodies persist) supersedes it; the `⇒ 耐久算按令牌类重算…` line under it stands |\n| `seat-post-protocol.md` 〈活性、写侧刷新与收班〉 | `- 耐久状态只住正文或以 App 写入;正文守中继上限 60,000 字节,超大贴由半状态巡查浮出。` | folded `- 超大贴由半状态巡查的 report-only 项浮出,⛔ 不等读取失败。` (〈贴的四段与派生视图〉) into it |\n\nNot touched: `contract-review.md` :13 / :19 (#19061 step ④), `SKILL.md`, `os-dev.md`, `AGENTS.md`; no gate, hook, ratchet or roster.\n\n## Landing\n\nTier S (`.claude/**`) at `CONTRACT_REVIEW_TIER`: the director seat renders the `## Contract review` record on this head and lands it through the queue. `skip-changeset` — nothing published from any released package; the label is the seat's to apply (this dispatch forbids label writes by the dev). The two serial PRs the card named (#19737, #19771) are on `main`; nothing to rebase.\n\n## Verification\n\nGates derived by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` on the edited tree at d192977; each run alone, exit captured before any pipe (`cmd > log 2>&1; ec=$?`).\n\n| command | exit | verdict line |\n|---|---|---|\n| `node scripts/check-closing-keyword-parity.mjs` | 0 | • packages/spec/CHANGELOG.md -- 6080503 bytes exceeds the sweep's 2097152-byte cutoff for UNREGISTERED files |\n| `node scripts/check-closing-keyword-parity.mjs --self-test` | 0 | ✓ check-closing-keyword-parity --self-test: 40 assertions, 5 mutations of the shipped parsers each driven to r |\n| `node scripts/check-comment-mask-corpus.mjs` | 0 | ✓ comment-mask corpus sweep [scripts/js-comment-mask.mjs]: 7015 files, 0 disagree, 0 unparseable, 89.9s (compa |\n| `node scripts/pm/check-governed-queue-guard.mjs --self-test` | 0 | ✓ check-governed-queue-guard self-test: 279 cases pass (register-driven verdicts, the queue/PR event split, la |\n| `node scripts/pm/check-harness-current.mjs --self-test` | 0 | check-harness-current --self-test: all 26 cases passed. |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | 0 | #11673). |\n| `pnpm check:agent-test-spelling` | 0 | which drives this same sweep RED over a temp tree on disk. |\n| `pnpm check:cross-package-test-inputs` | 0 | OK: 29 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob (6 of them  |\n| `pnpm check:doc-authoring` | 0 | ✓ doc authoring guard: sibling-package prose ids hold the baseline — 819 pinned site(s) across 231 file(s), 90 |\n| `pnpm check:driver-memory-census` | 0 | check-driver-memory-census: OK — every declaration is ledgered, every ledger entry is live, and every ruled fi |\n| `pnpm check:gitlink-declared` | 0 | check-gitlink-declared: OK (9269 index entries -- 0 gitlink(s) at mode 160000; no .gitmodules in the index, so |\n| `pnpm check:nul-bytes` | 0 | check-nul-bytes: OK (scanned 9262 text file(s) -- 9262 tracked, 0 untracked-not-ignored; skipped 7 binary; no  |\n| `pnpm check:pm-governed-merges` | 0 | live: the real generator declared 9 output(s) and certified this tree |\n| `pnpm check:pm-half-states` | 0 | ✓ check-half-states self-test: 4897 cases pass. Batteries: H66 released queue card 182/172, H19 judged-set fou |\n| `pnpm check:pm-skill-id-lint` | 0 | ✓ check-skill-id-lint: 30 file(s) clean (pattern /#[0-9]{3,}/g). |\n| `pnpm check:pm-skill-ratchet` | 0 | ✓ check-skill-line-ratchet: declared cross-file moves: 1, total ceilings down 9 lines. |\n| `pnpm check:refd-timer-probe` | 0 | 1 code site(s), all inside the approved module, which is present and still reads it. |\n| `pnpm check:required-contexts` | 0 | governed-surface-guard.yml:governed-surface-guard → 'Governed Surface Queue Guard' |\n| `pnpm check:skill-frame-sync` | 0 | binding sentence present in it; 1 count mention(s) agree; 86 markdown files scanned for undeclared copies. |\n| `pnpm check:watch-hint-literal` | 0 | ✓ check-watch-hint-literal: 71 declaration(s) across 4 rostered name(s) -- ROOT_DIR_WATCH_HINTS 47, ROOT_FILE_ |\n\nAlso run on this head, named by the dispatch and outside the derived list: `pnpm check:skill-frame-freshness` exit 0 · `pnpm check:pm-governed-prose` exit 0. The doc-formula gate measured only after `@objectstack/lint` and its closure were built through `scripts/pm/os-verify-lock.sh` (VERDICT command-exit 0). `--ran` reconciliation: ✓ dispatch-gates --ran: 20 derived famil(ies) accounted for — 20 run, 0 NOT-MEASURED (a DERIVED zero — all 20 recorded an exit code and none of them is 3).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XPUwWGnmky4PXPofNsf2w7)_\n"
+}

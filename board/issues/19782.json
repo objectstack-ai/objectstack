@@ -1,0 +1,35 @@
+{
+  "number": 19782,
+  "kind": "pull_request",
+  "title": "fix(spec): list plugin-security's class-field error codes under its own ledger key",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T03:41:50Z",
+  "updated_at": "2026-09-23T04:55:35Z",
+  "closed_at": "2026-09-23T04:55:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-23T04:55:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19782",
+  "body": "Fixes #19441\n\nClause-②: yes\n\n## What changed\n\nTwo halves, in two packages, landed together (the triage rider: the registration and the comment are not interchangeable).\n\n1. **`packages/spec` ledger** — `ERROR_CODE_LEDGER['@objectstack/plugin-security']` gains three provenance rows, `INVALID_STATE`, `NOT_FOUND`, `NOT_OVERRIDABLE`, each with a comment naming the throwing class, its status and its door. They cover all four emission points the card listed (`NOT_OVERRIDABLE` is stamped by two classes, one row). Every code was already registered under another package (`@objectstack/rest`, `@objectstack/metadata-protocol`), so the `ErrorCode` union and the wire are unchanged: provenance, not identity. The `NOT_FOUND` entry in `STANDARD_SYNONYM_WAIVERS` keeps its `code`/`shadows`; its `reason` text now names plugin-security among the emitters (the same edit the `FORBIDDEN` waiver got when cloud-connection joined).\n2. **`plugin-security`** — the `PackagedPermissionSetLockedError` docblock no longer says \"the code is a StandardErrorCode, so no ledger entry is minted\". It now says what is true: `NOT_OVERRIDABLE` is a registered extension code, NOT a `StandardErrorCode` member, and this package's own owner key lists it. The two overlay-discard error classes get a one-line pointer to their rows. The plugin-security edits are comments only.\n\n## Premise check (on `origin/main` `041c8cf6`)\n\n- The four stamps are at `packaged-permission-set-lock.ts:266`, `:287` and `permission-set-overlay-discard.ts:91`, `:101`, all spelled `readonly code = '...'`.\n- All four are live. `assertPermissionSetNotPackageDeclared` is called from `permission-set-projection.ts` (three sites) and `packaged-permission-set-lock-gate.ts`. `discardPermissionSetOverlay` is registered by `security-plugin.ts` and served by rest's `POST .../security/permission-sets/:id/discard-overlay`. The classes are exported from `index.ts`.\n- They ship: after the build, each of the three literals hits 1 file in `packages/plugins/plugin-security/dist/*.js` (control `UNIQUE_VIOLATION`: 1).\n- None of the three was listed under plugin-security before this PR.\n- `check:error-code-provenance` declares class fields out of its scan (see its header, \"BLIND ... and a class field\"), so it was green before this PR and is still green now (exit 0).\n\n## Tests\n\n- New pin in `error-code-ledger.test.ts`: `lists the plugin-security class-field stamps under their stamping package`. It checks each code is listed under plugin-security AND is still listed under its first owner, and that it parses as an `ErrorCode`. It also checks `NOT_OVERRIDABLE` is absent from `StandardErrorCode.options`, with a lit control: `PERMISSION_DENIED` is present.\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/api/error-code-ledger.test.ts`: 21 passed.\n- `src/api` (44 files): 1518 passed.\n- plugin-security `packaged-permission-set-lock*.test.ts` and `permission-set-overlay-discard.test.ts` (3 files): 33 passed.\n- `typecheck` for `@objectstack/spec` (including scripts-typecheck and test-typecheck) and for `@objectstack/plugin-security`: exit 0.\n- **Ablation** (one-off, not left in the tree): I deleted the plugin-security `NOT_OVERRIDABLE` row with `scripts/ablation-replace.mjs` (anchor x1 -> x0, marker x0 -> x1) and ran the pin: `1 failed | 20 passed`, failing with `NOT_OVERRIDABLE listed under plugin-security: expected [ 'INVALID_METADATA', ...(5) ] to include 'NOT_OVERRIDABLE'`. After the restore the blob equals HEAD (`d8ad7285`) and `git diff HEAD` is empty. The suite imports the ledger from `src`, so no dist rebuild was involved. My first attempt was a no-op: the replacement text was already inside the anchor, so the tool refused and restored. It is not counted.\n\n## Gates (head `5a1a2efd`)\n\n`dispatch-gates.mjs --commands` listed 89 commands; `--ran` reconciled all of them (86 run, 3 NOT MEASURED, 0 unrun). All 86 that ran exited 0, including `check:error-code-provenance`, `check:dispatcher-error-vocabulary`, `check:error-code-casing`, `check:api-surface`, `check:docs`, `check:authorable-surface`, `check:adr-0087-registration`, `check-changeset-no-major` and `check:nul-bytes`.\nNOT MEASURED, each exit 3 PREREQUISITE (they need a whole-workspace build that was not done locally; left to CI): `check:dual-build-cjs-loads`, `check:i18n`, `check:type-check-debt`. `pnpm lint` (a repo-wide scan) was not run locally; that is CI's run.\n\n## Changeset level\n\nThe dispatch suggested `patch`. The changeset grades `@objectstack/spec` **minor** instead: AGENTS.md's Post-Task Checklist says `Clause-②: yes` takes at least `minor`, `check-changeset-no-major.mjs`'s level axis enforces that, and the ledger header says registering a code widens the published face. The precedent is #19437 (the prior plugin-security ledger row: spec minor). plugin-security has no changeset entry because its diff is comments only.\n\n## Acceptance notes\n\n- The card's other idea, making `check:error-code-provenance` see class-field spellings, is **not** done here. That is a gate-population change and a separate decision. Measurement for it: these four stamps were invisible to the gate because class fields are out of its scan. The new vitest pin holds only these rows; a future class-field stamp in any package would still be invisible to the gate.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VWsFyWDp8Rjb2Ma6a3Cyo8)_\n"
+}

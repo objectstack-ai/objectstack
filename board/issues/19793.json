@@ -1,0 +1,35 @@
+{
+  "number": 19793,
+  "kind": "pull_request",
+  "title": "ci(console-pin): conclude on every PR and enrol Console Pin Gate in REQUIRED_CONTEXTS",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T05:39:20Z",
+  "updated_at": "2026-09-23T08:24:24Z",
+  "closed_at": "2026-09-23T08:24:24Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19793",
+  "body": "Part of #17673\nClause-②: no\n\nStep 1 of ruling #18900 item ⑤ (comment 5727134555): `Console Pin Gate` reports a conclusion on every PR (a `success` on an unaffected one), and it is enrolled in `REQUIRED_CONTEXTS`. Step 2 is adding it to the required set in Settings → Rulesets. That is the maintainer's click after this lands, and nothing here does it.\n\n## Design: the filter term moves from the job onto its steps\n\n- `console-pin`'s own `if:` is now `!cancelled()` alone, so the job always runs and concludes. A job-level `if:` that is false concludes `skipped`, and branch protection counts `skipped` as passing. That was the tombstone's cause.\n- Every step carries the filter term in the contract's own spelling, `needs.filter.outputs.console != 'false'`. Only an exact `'false'` skips a step, so a dead `filter` job still builds. Both halves of THE FILTER CONTRACT are kept, and `merge_group` still widens the output to `'true'`.\n- On an unaffected run, only one step runs. Its `if:` is the complement (`== 'false'`), and it writes a NOT BUILT notice and a step summary. That `success` is the filter's verdict, not a build.\n- One change from round 1's design: round 1 passed the verdict through a shell step output (`steps.scope.outputs.affected`). The repo's declaration readers cannot read that without trusting the shell, and that is what broke the dispatch-gates derivation. Each step's `if:` now reads the filter output directly. The rest of round 1's design is kept.\n\n## The three required-path reds round 1 found, and how each is addressed\n\n1. `check:required-contexts`: the set-naming census needs `platform-readings.md` to name the eighth context. It now does (see below).\n2. `check:pm-expected-skips`: `Console Pin Gate` is removed from the skip-by-design roster, so a skipped one now exits 4. The measured 39-run head is kept verbatim, and its `Console Pin Gate` skip is now its one unexpected skip. A derived copy, with that one row concluding `success`, carries the OK-path cases. Two new cases tie the roster's absence to the live job's own `if:`.\n3. `dispatch-gates`: a job's path population was read only from its job-level `if:`, so a pin-only diff stopped deriving `check:console-sha` / `check:console-injection`. The new rule (`stepFilterPopulations`): a job whose own `if:` is absent or `!cancelled()` alone is read step by step. When a step's `if:` passes the unchanged job-level whitelist, that step's checks get the population. The job-filtered tail walks the same steps. The 4 live console cases are unchanged. 12 new fixture cases and 1 live case pin the step-level shape.\n\n## The instruction files stay true on both sides of the click\n\n- `AGENTS.md`: \"seven block (eight once Settings adds `Console Pin Gate`)\". Where the sentence means the names the registry pins, \"those seven\" becomes \"those eight\".\n- `platform-readings.md`: \"objectstack 七个(`Console Pin Gate` 已登记,入 Settings 即第八)\".\n- Both files are at a zero-headroom line ceiling. The new words fill slack in an existing line, and no text moved between lines, so the files stay at 1116 and 469 lines.\n\n## CI on this PR\n\n`ci.yml` is in the `console` filter, so this PR gets an AFFECTED run: `Console Pin Gate` builds. ⛔ This PR does not exercise the unaffected leg (NOT BUILT, `success`) live. The conclusion read on this head is recorded in the os-dev-report on #17673.\n\n## Verification (head d134f4cd0e, after one merge of `origin/main` at 2cf9db7c43)\n\n- `node scripts/check-required-contexts.mjs`: exit 0, 8 names pinned. Its `--self-test`: exit 0, 169 assertions.\n- `check-expected-skips --self-test`: exit 0, 107 cases. Before this change it was 1 of 99 red.\n- `check-skill-line-ratchet`: exit 0. `AGENTS.md` is 1116 lines against a ceiling of 1116, and `platform-readings.md` is 469 against 469.\n- `dispatch-gates .objectui-sha`: base 43e17b8905 derives both console gates. Round 1's head fb32a5e1cf derives neither. This head derives both again, via \"CI job filter for 'Console Pin Gate'\".\n- `check:workflow-status-functions`, `check:workflow-step-name-quoting`, `check-step-collectors`, `check-self-test-workflow-commands`, `check-ci-filter-parity`, `check:pm-skill-id-lint`, `check:pm-governed-prose` and `check:nul-bytes` all exit 0. actionlint is not installed here (NOT MEASURED).\n- These were still running when this PR opened: the full `dispatch-gates --self-test`, the ablation that shows the new cases red on the job-level-only derivation, and the `--commands` sweep with `--ran` reconciliation. Their readings are in the os-dev-report on #17673.\n\n## Landing\n\nThis PR touches governed surfaces: `AGENTS.md` (Tier H) and `.claude/**` (Tier S). It lands only by the maintainer's hand or after an authorized approval, and it stays draft. There is no changeset because no published package changes (`ci.yml`, `scripts/**` and two instruction files).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UDXER3sdqfeVYpEWZs5mZx)_"
+}

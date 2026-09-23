@@ -1,0 +1,34 @@
+{
+  "number": 19792,
+  "kind": "pull_request",
+  "title": "pm-dispatch: the pre-dispatch in-flight read covers every lane's pm:dispatched claims",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T05:36:15Z",
+  "updated_at": "2026-09-23T06:24:52Z",
+  "closed_at": "2026-09-23T06:24:51Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-09-23T06:24:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19792",
+  "body": "Fixes #18964\n\n## 维护者速读(草稿)\n\n**改了什么**:`.claude/skills/pm-dispatch/SKILL.md` 第 266 行删掉一个词「本车道」,其余一字不动,文件行数 815 不变。改前:「- 派发前在飞检查:读本车道 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。」改后:「- 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。」`references/core-rules.md` 没有这句话的对应行,本 PR 不动它。\n\n**为什么改**:执行裁决记录 5780497628(字母 B)。席位认领前的在飞检查原来只读本车道已派发卡申报的文件面,所以另一个车道里已认领、已推分支、但还没开 PR 的同文件工作单对它不可见。#18314(spec 车道)与 #18844(skills 车道)的双重派发就是这样漏掉的,#17518 也是同一形态。改成读所有车道的已派发认领之后,申报的文件面会直接点名文件,两个实例都能命中。卡上原来提议的「按文件名词干扫描分支名」经实测证伪(两个实例 0 命中,开放 PR 上召回率 29%),裁决明确不采用(A、C 均不取)。\n\n**风险与代价(含回滚)**:每次认领要多读其它车道已派发卡的认领评论,仍是本地求交、不另发查询;这项读取成本裁决没有实测,如果某个车道觉得太慢,另立一张带数字的卡,⛔ 不悄悄把这个词加回来。没有代码、门禁或发布面变化。回滚 = revert 这一个提交。\n\n**席位意见**:(待席位填写)\n\n**你要做的**:无需操作。本 PR 属 Tier S(`.claude/**`),由席位出具 `## Contract review` 记录、全部检查通过后经合并队列落地。\n\nClause-②: no\n\n## Summary\n\nRuling record 5780497628 on the card (letter B, complete; A and C not taken) removes the lane qualifier from the pre-dispatch in-flight read, so a seat about to claim reads every lane's `pm:dispatched` claim comments for their declared file surfaces, still intersected locally with no extra query. One word, one line, net 0 lines.\n\n```diff\n- - 派发前在飞检查:读本车道 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。\n+ - 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。\n```\n\n| site | before | after |\n|---|---|---|\n| `.claude/skills/pm-dispatch/SKILL.md` :266 | 121 bytes, contains 本车道 (anchor count 1) | 112 bytes, anchor gone (count 0), new sentence count 1 |\n| file length | 815 lines (ceiling 819) | 815 lines (ceiling 819) |\n\nPremise re-measured on base `2cf9db7c4` (the current `origin/main`): the sentence sat at :266 unchanged after PR #19737 landed.\n\n## Verification (head `8ead063f3`, the only commit)\n\nFamily set derived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` (21 commands, 1 path) and reconciled with `--ran`: 21 derived, 21 run, 0 NOT-MEASURED, 0 UNRUN, every line carrying its captured exit. All exits captured before any pipe.\n\n| command | exit | verdict line (excerpt) |\n|---|---|---|\n| `pnpm check:pm-skill-ratchet` | 0 | SKILL.md is 815 lines (ceiling 819; headroom 4); widest table row is 342 bytes (pin 342; headroom 0) |\n| `pnpm check:pm-skill-id-lint` | 0 | 30 file(s) clean |\n| `pnpm check:skill-frame-sync` | 0 | the one declared copy of the decision frame is internally coherent |\n| `pnpm check:skill-frame-freshness` (named by the dispatch, outside the derivation) | 0 | the decision frame in this tree is current with origin/main |\n| `pnpm check:doc-authoring` | 0 | 16196 customer-facing strings clean; sibling-package prose ids hold the baseline |\n| `pnpm check:nul-bytes` | 0 | 9262 text files, no raw ASCII control bytes |\n| `pnpm check:pm-governed-prose` | 0 | 2 instruction surfaces name all 6 registered governed surfaces |\n| `pnpm check:pm-settings-deny-roster` (roster under `.claude`, outside the derivation) | 0 | 17 content-write tools declared = enforced |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | 0 | first run exit 3 PREREQUISITE NOT MET (formula and lint unbuilt, nothing measured); built both under the verify lock (VERDICT command-exit 0), re-run exit 0 |\n| `node scripts/check-closing-keyword-parity.mjs` and `--self-test` | 0 / 0 | 3 parsers agree on all 9 keywords |\n| `node scripts/check-comment-mask-corpus.mjs` | 0 | 7015 files, 0 disagree |\n| self-tests: governed-queue-guard, harness-current, pm-expected-skips, pm-governed-merges, pm-half-states | 0 each | 279 / 26 / 99 / 441 assertions / 4897 cases pass |\n| `pnpm check:agent-test-spelling`, `check:cross-package-test-inputs`, `check:driver-memory-census`, `check:gitlink-declared`, `check:refd-timer-probe`, `check:watch-hint-literal` | 0 each | OK |\n\nNo package is touched, so there is no dependency-closure build and no package test or typecheck owed. There is no core-rules twin gate (`check:core-rules-*` does not exist in `package.json`).\n\n## Changeset\n\n`skip-changeset`: the only path is under `.claude/**`, which is in no package's `files[]` and publishes nothing.\n\n## Acceptance notes\n\n- `references/core-rules.md` is untouched. `grep -n '本车道'` there gives 1 hit, at :18, which is the round-opening mutex reading (the twin of SKILL.md :80), not this sentence. The core-rules line that summarises the cross-domain path (:68, 「跨域单 PR 由分诊席指定一个车道 PM 认领并申报完整文件面,在飞检查同域跨域皆跑。」) stays true after this change.\n- SKILL.md :267 (the cross-domain exception path adds every touched domain's in-flight cards) is now covered by :266 reading every lane. It is still true, and it stays as it is because the ruling moves nothing else.\n- The other 本车道 readings (SKILL.md :36, :80, :82, :230, :586, :587; `dispatch-runbook.md` :61; `seat-post-protocol.md` :28) are different rules (claim scope, round mutex, liveness baseline) and are outside the ruling.\n- The empty probe branch `claude/issue-18964-claim-time-branch-stem-scan` is neither reused nor deleted; the seat removes it.\n- Serial check at open: 16 open PRs, 308 file rows, 0 unreadable, none on `SKILL.md` or `core-rules.md` (control: 112 `.changeset/` rows read). `origin/main` has not moved from the base.\n\nThis PR stays draft: `.claude/**` is Tier S, and the seat lands it after its contract-review record and a fully green run.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Wnstp2kTth7sGXfr8fXypc)_\n"
+}

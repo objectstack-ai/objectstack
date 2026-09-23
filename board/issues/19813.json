@@ -1,0 +1,30 @@
+{
+  "number": 19813,
+  "kind": "pull_request",
+  "title": "test(lint): compute the SYSTEM_FIELDS live census once per file, under its own hook timeout",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T07:52:16Z",
+  "updated_at": "2026-09-23T08:18:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19813",
+  "body": "Fixes #19807\n\nClause-②: no\n\n## What is red and why\n\nThe hourly full run on `main` (run 35829772446, `Test Core (2/6)` on `de4ed33f`) failed on exactly one test: `packages/lint/src/system-fields-consumers.test.ts:586` (the #8999 SYSTEM_FIELDS consumer census, 「the live population › is anchored to a real export…」) — `Error: Test timed out in 5000ms`. The shard then stopped and six scheduled packages never ran. The same failure, same shard, same test, is the only red in the last 100 hourly runs (09-21 04:01Z, 09-21 16:00Z, 09-23 07:03Z); no commit between the last green run (`fae870352`) and the red head touches `packages/lint/**`, and the file is green on PR shards, where `@objectstack/lint` runs with few neighbours.\n\nCause, read from the file: `liveSources()` reads every `.ts` under `packages/lint/src` (201 files) and `censusUnionConsumers` parses each with the TypeScript compiler (`setParentNodes: true`); the six live tests each recomputed that whole census under vitest's default 5,000 ms per-test wall, and the cold run crossed it on a loaded full-battery shard (13 packages, `--concurrency=4` on 4 vCPUs).\n\n## What changed\n\nOne file, test-only: the live census is computed ONCE per file in a `beforeAll` that carries its own explicit timeout (60,000 ms, sized from the measured cold run of ~1 s on a quiet box with headroom for a contended shard), and the six live tests read that one result. `censusUnionConsumers`, `liveSources()`, the LEDGER rows, the PROVENANCE_API pin and every assertion are unchanged; no walk is narrowed, no test skipped, no file-wide or package-wide `testTimeout` raised.\n\n## Verification\n\n- Branch pushed by the dispatched dev (`session_01XPUwWGnmky4PXPofNsf2w7`); its report with the measured before/after durations follows on #19807.\n- CI on this head is the judge: `Test Core` shards (the `@objectstack/lint` package suite), `Lint & Repo Gates`, type checks.\n- Not governed (`packages/lint/src/**` is on no register surface); ordinary queue landing after the dispatching seat's ACCEPT.\n\nRelated, not changed here: #16465 / #16468 (shard-duration alarm and per-package suite-duration ratchet, `pm:queue` in `domain:devx`), and ten other test files that walk directories or parse with the TypeScript compiler under the default wall (cli ×5, spec ×4, service-analytics ×1) — none has gone red; the same one-computation shape applies if one does.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0129ZpnaBcYZZ51rCvQiXg6C\n"
+}

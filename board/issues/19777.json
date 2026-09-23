@@ -1,0 +1,36 @@
+{
+  "number": 19777,
+  "kind": "issue",
+  "title": "protocol(pm): a suspended seat account is a dead session whose comments are gone — the takeover path, re-rendered records, `pm:retriage` for vanished triage, and durable state in bodies or under the App identity",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T03:04:55Z",
+  "updated_at": "2026-09-23T07:26:12Z",
+  "closed_at": "2026-09-23T06:53:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19777",
+  "body": "③ 直派任务 — maintainer direct dispatch, filed by the director seat (summon #27, `session_0129ZpnaBcYZZ51rCvQiXg6C`). `domain:skills` · `tooling` (the PM loop's own protocol, `.claude/**`, Tier S at `CONTRACT_REVIEW_TIER`). Ruled by the director on the maintainer's word 「已经封过好几个号,你不用管具体的,只要决定怎么处理」 (2026-09-23); dispatched by this seat when the serial constraint below clears.\nBlocked-by: #19061\nUnlock-action: re-check #19061 when label pm:dispatched absent\n\n**Provenance (who / verbatim / where):** the objectui `domain:spec` seat reported 12 triage comments gone from 11 cards; the maintainer: 「评论被删应该是因为封号」, then 「已经封过好几个号」. Measured by the director seat at 2026-09-23T03:03Z: a platform suspension hides every comment of the account fleet-wide and leaves **no** `comment_deleted` timeline event (104 recently updated cards in both repos scanned: zero events); the account's **assignee** field, its **PRs** and every **body** it edited persist. A sweep of all 31 open `pm:dispatched` cards found only three without a `Claim:` comment, none of them a suspension casualty — the damage is to comment history (triage notes, claims, reports, `## Contract review` records), not to labels or bodies.\n\n## Ruling — the fleet's handling of a suspended seat account (standing, ⛔ not per-case)\n\n1. **A suspended account is a dead session, by construction.** The dead-session path in `references/dispatch-runbook.md` 〈接手中断的 dev〉 applies unchanged: liveness is read from GitHub output only, and an account whose comments have vanished and whose token no longer reads has produced nothing since — the taker re-claims. ⛔ No unbanning, ⛔ no reuse, ⛔ no new personal seat accounts: the fleet's writing identity is `objectstack-fleet[bot]` through the relay (#19701, #19755, #19774), and a local checkout writes through `with-fleet.sh` with the App token.\n2. **Vanished records are re-rendered on the current head, never assumed.** A `## Contract review` of record that disappeared with its author does not exist for the queue guard; the landing seat renders a new one on the current head before enqueuing. A `Claim:` that disappeared is re-posted by the taker (as the bot). A ruling comment that disappeared is re-recorded from the card body's `Ruled:` line (bodies persist — this is why the body carries it).\n3. **Vanished triage is re-triaged, not reconstructed.** Cards whose triage comment vanished get `pm:retriage` (one label write per card; any seat may hang it); the triage seat re-grades them at first touch, writing as the bot. ⛔ Nobody dispatches on a grading that cannot be read.\n4. **Durability rule.** State that must survive an account event lives in a **body** (card `Ruled:` / `Blocked-by:` / `Unlock-action:` lines, seat-post status block) or is written **as the App**. Comments by a personal account are not durable and are never the only carrier of a state. A seat-post body must therefore stay writable through the relay (≤ 60,000 bytes — #19755's size route covers the over-cap write as the seat's user, which is exactly the non-durable case to avoid): shrink the body, per the director's ruling on the triage seat's report.\n5. ⛔ Not ruled here: which accounts, when, or why — the maintainer's, and not the fleet's business.\n\n## Ruled shape for the skills lane — ⛔ not open for re-design\n\n- `references/dispatch-runbook.md` 〈接手中断的 dev〉: one line — an account suspension is the dead-session case; the taker re-claims and re-renders any vanished record (claim / review / ruling) on the current head from the body's lines.\n- `references/platform-readings.md` 〈API 配额〉 or the nearest reading block: one line — a suspension hides the account's comments fleet-wide with no timeline event; assignee, PRs and bodies persist; `pm:retriage` is the remedy for vanished triage.\n- `references/seat-post-protocol.md` (or wherever the status block is spelled): one line — durable state lives in the body or is written as the App; the body stays under the relay's byte cap.\n- ⛔ No new gate, hook, ratchet or roster; every line paid in place under the file's ceiling; `Clause-②: no`; `skip-changeset`; one PR `Fixes` this card; landed after the director's in-seat `## Contract review` (`Reviewed-by:` + `**VERDICT: PASS**`, the spelling the queue guard reads).\n- Serial: PR #19737 (#19061 step ③, Tier H) holds `dispatch-runbook.md` and `platform-readings.md`; PR #19771 (#19739) holds `platform-readings.md` too — this card lands after both; the taker rebases then.\n\n## Dedupe\n`suspended account dead session comments vanished` · `pm:retriage vanished triage` · `re-render contract review vanished author` · `durable state body or App identity` · `封号 席位账号 处理`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

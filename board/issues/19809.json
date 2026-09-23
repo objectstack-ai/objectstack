@@ -1,0 +1,32 @@
+{
+  "number": 19809,
+  "kind": "pull_request",
+  "title": "fix(spec): one row bound per view — retire the unpublished per-kind view `limit`",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T07:24:43Z",
+  "updated_at": "2026-09-23T08:09:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19809",
+  "body": "Part of #19228\n\nClause-②: no\n\nRewritten short by the dispatching seat (2026-09-23T08:08Z). The developer's measurements are in its report on #19228; the at-tier review record is `5791323483` on this PR.\n\n## What changes\n\nRuling D (#19228, `5789634193`): a view carries one row bound, `pagination.pageSize`. The per-kind view `limit` added for #17393 was never published (npm `latest` is 17.4.0; the key is absent from its tarball), so it is removed before a release carries it.\n\n- `GalleryConfigSchema` / `KanbanConfigSchema` / `TimelineConfigSchema` lose `limit`; `rowLimitKey`, `DEFAULT_VIEW_ROW_LIMIT` and `KanbanConfigParsed` go with it (Kanban has one shape again, re-pinned per ADR-0122).\n- A written `limit` in those blocks is refused as an unknown key, and the refusal names both alternatives: `pagination.pageSize` on a view, or the flat `limit` on a page component node.\n- `pagination.pageSize`'s description carries the truncation obligation that `limit`'s description carried.\n- The `object-kanban` / `object-timeline` component `limit` keys and their precedence are unchanged; only text describing the removed view-level key was deleted.\n- The pending release note `.changeset/17393-view-row-ceiling.md` is deleted, and the pending `.changeset/19228-view-row-limit-route-record.md` loses its section about the view-level `limit`, so no release announces a key that does not ship. A `patch` changeset covers the description change.\n\nNet: 16 files, +80 / −515.\n\n## ⚠️ `Check Changeset` is red on purpose\n\nThis PR corrects two PENDING release notes instead of adding one, which `check-empty-changeset.mjs` names the DELIBERATE CORRECTION class. The workflow (`pr-automation.yml`, route 0) says to leave the check red and get the correction confirmed in writing on the PR; `Check Changeset` is not a required context. The two notes and what changed under them are listed above. **Maintainer confirmation requested on this PR.**\n\n## Not in this PR\n\nobjectui still spreads a view's kanban / gallery / timeline block onto the rendered node; reading `pagination.pageSize` as the fetch ceiling and showing the truncation signal there is objectui work. objectui#7390 is closed, so that work has no open card; triage is asked to route it (#19228).\n\n## 维护者速读\n\n- 看板、画廊、时间线视图原来各有一个「最多显示多少条」的 `limit`,从没发布过;按您的裁决 D,改为每个视图只用 `pagination.pageSize` 一个上限。\n- 两条**尚未发布**的更新说明被删 / 删减,免得下次发版宣布一个不存在的设置;`Check Changeset` 因此按规定保持红色,**需要您在本 PR 上书面确认一句**。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

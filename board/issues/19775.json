@@ -1,0 +1,38 @@
+{
+  "number": 19775,
+  "kind": "issue",
+  "title": "[finding] the delegated-admin gate resolves a scope's business-unit anchor by NAME across organizations — in a single-database multi-org posture, a delegate can be handed another organization's subtree or lose its own, depending on which id sorts first",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T03:02:54Z",
+  "updated_at": "2026-09-23T08:17:53Z",
+  "closed_at": "2026-09-23T07:18:30Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19775",
+  "body": "① — a reproducible defect on a security boundary, in a deployment shape the platform supports (ADR-0105 D1 `group` / `isolated`; ADR-0132 「single-database organization isolation ships open」).\n\nFiled by the `domain:spec` execution seat 1 (seat post #6017, `session_013RDBh5DqXd2xnLwvHLgLFr`). ⛔ Unlabelled beyond `finding`, ⛔ ungraded, ⛔ unrouted. The fix lands in `packages/plugins/plugin-security`, which the domain table assigns to `domain:services`. **Reader**: the triage seat grades and routes it; the `domain:services` execution seat takes the fix. ⚠️ Filed as a **P0 suspect**, so it goes through the urgent direct-triage path rather than waiting for the hourly round.\n\nSurfaced as a lead by the #19461 round (consumer trace of `AdminScopeSchema`), then measured by a read-only probe this seat dispatched. ⛔ Not fixed by any open PR.\n\n## The defect, at source on `origin/main` `2005a558de`\n\n`packages/plugins/plugin-security/src/delegated-admin-gate.ts`:\n- `SYSTEM_CTX = { isSystem: true }` carries no `tenantId`.\n- `resolveSubtree` looks the scope's root up by `name` only: `ql.find('sys_business_unit', { where: { name: businessUnitName }, limit: 1, context: SYSTEM_CTX })`. The descendant walk (`parent_business_unit_id $in`) runs under the same context with no organization predicate.\n- Under a context without `tenantId`, no layer scopes the read. The engine passes a tenant to the driver only when `execCtx.tenantId` is defined. `SqlDriver.applyTenantScope` returns early without one (its own docblock: 「If `tenantId` is absent (admin / seed / system path) no scope is applied」). The security middleware and the OrganizationsPlugin middleware both pass `isSystem` through.\n- `sys_business_unit.name` carries no uniqueness; the only unique index is `code` + `organization_id`. So two organizations may each have a unit named `sales`. A `limit` read gets `ORDER BY id ASC` from the SQL driver, so the lowest id wins across organizations, whatever the insertion order.\n\nThis is the shape `security-plugin.ts` already fixed for permission sets. Its comment on the per-organization catalog loader says an unscoped by-name read under a bare `{ isSystem: true }` 「resolves whichever copy the driver ordered first — one tenant's grants answering another tenant's request」. The same class was fixed in approvals by #14946 and #10153.\n\n## Measured\n\nHarness: real ObjectQL, real `SqlDriver` on in-memory SQLite, and the real `SecurityPlugin` with the `isolated` posture, following the lineage of `tenant-layer0-verdict-end-to-end.test.ts`. The gate is the real one, with the real engine as its `ql`. Two organizations each hold a unit `sales` with one child. The delegate is in org A with a scope anchored at `sales`, `includeSubtree`, `manageAssignments`.\n\n| id order | what the gate resolves for the org A delegate |\n|:--|:--|\n| org A's ids sort first | org A's `sales` and child (correct) |\n| org B's ids sort first | **org B's** `sales` and child |\n\nInsertion order makes no difference. When org B's ids sort first:\n- **The org A delegate loses its own subtree.** A delegated write inside its own organization is DENIED 「outside the delegated subtree」.\n- **Another organization's unit ids are returned to the org A caller** by `describeDelegableScope`, the read behind the delegable-scope picker endpoint.\n- **The gate approves** delegated writes anchored in org B. Downstream tenant isolation refuses most of them: update and delete of an org B row fail the pre-image RLS re-read (`record_access_denied`), and an insert naming org B's organization fails the Layer 0 forge guard. ⚠️ **One shape is not refused.** A delegated assignment insert that names no organization is stored in the **caller's** organization while carrying a `business_unit_id` from org B, with no reference-integrity refusal. No org B row was created or changed, and the org B user's grants inside org B did not change.\n\nControls: a single organization with a unique `sales` resolves to that organization, and in-org writes are approved (dark). An anchor naming no unit resolves to nothing, and every decision is denied (firing).\n\n## ⛔ Not measured\n\nThe resolved posture through a full kernel and REST, rather than a stubbed posture service. Whether a member of another organization can ever act under the first organization without membership. The other callers of `resolveSubtree` (invitation placement, the explain check, strict containment on set authoring). The other gated tables. The sibling unscoped by-name reads of `sys_position` in the same file. Drivers other than `driver-sql`. Production id ordering: which organization wins depends on how generated ids sort.\n\n## ⛔ Not decided here\n\nThe repair belongs to the owning seat. The precedent above threads the caller's organization into the read so it goes through `applyTenantScope`, and that is a lead, not a prescription.\n\n## Dedupe\n\nRepo-scoped issue search (`mcp__github__search_issues`), two queries: 「delegated admin gate resolveSubtree business unit name lookup organization cross-org tenant scope adminScope anchor」 → **13** results including closed, and 「sys_business_unit name not unique isSystem unscoped by-name read another tenant」 → **8**. None names the delegated-admin gate. Nearest: **#14946** (closed, the same class in approvals' `expandBusinessUnitUsers`), **#10153** (closed, the `manager` approver), **#5852** (closed, hierarchy-depth tenant isolation), **#19461** (open, the blank anchor; its round surfaced this).\n\n**Dedupe words**: `delegated-admin-gate resolveSubtree cross-org` · `adminScope businessUnit anchor resolved by name across organizations` · `SYSTEM_CTX by-name read no organization predicate` · `sys_business_unit name not unique limit 1`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

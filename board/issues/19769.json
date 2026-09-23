@@ -4,7 +4,7 @@
   "title": "docs(adr-0026): spell the UI plugin package type `ui`, note the original `ui-plugin`",
   "state": "open",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -19,7 +19,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T01:37:25Z",
-  "updated_at": "2026-09-23T01:51:50Z",
+  "updated_at": "2026-09-23T08:27:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

@@ -1,0 +1,30 @@
+{
+  "number": 19806,
+  "kind": "issue",
+  "title": "Update ruling D (#18375): the maintainer lifts the ban — `skip-changeset` may go on a PR that only corrects a pending changeset; four carriers in the repo still say the opposite",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T07:08:26Z",
+  "updated_at": "2026-09-23T07:15:09Z",
+  "closed_at": "2026-09-23T07:15:09Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19806",
+  "body": "③ — a maintainer-directed task. The maintainer's words, verbatim, with provenance:\n\n- **Words**: 「立卡更新我的决裁,这两个你直接打标签跟进合并。」\n- **Who / where**: the maintainer, in the chat of `domain:spec` execution seat 1 (`session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017), on 2026-09-23 UTC.\n- **Replying to**: the seat's report that PRs #19746 and #19747 were red only on `Check Changeset` (route 0) under ruling D. Before the words above, the maintainer asked whether that ruling was unreasonable and felt like a waste of their time. The seat offered three routes: 甲 keep it; 乙 let an at-tier review PASS stand in for the maintainer's confirmation on wording-only corrections; 丙 restore the label, which the seat advised against. The maintainer directed the label on both PRs and asked for the ruling to be updated.\n\nFiled by that seat. ⛔ Ungraded and unrouted: routing is triage's, and this card spans a governed surface and a non-governed one, so it may be split.\n\n## The ruling being updated\n\nBatch #158 item 1 on #18375 (`5729188290`, maintainer 「同意」 2026-09-18): ② B — a PR that edits an existing changeset is confirmed in writing on the PR, and the gate stays advisory red; ⛔ `skip-changeset` is never applied to it. ① D — no workflow mechanics change; only the texts say so.\n\n## The update, as this seat reads the words (⚠️ the maintainer corrects this if it is wrong)\n\nA PR that only corrects a pending changeset (every `.changeset` row `M`/`D`, none `A`) **may take `skip-changeset`**. No per-PR maintainer confirmation is required. Nothing in the words asks for a workflow mechanics change, so this round changes **texts only**, the same scope ① D had.\n\nApplied already, before the texts change, on the maintainer's direct instruction: #19746 and #19747 carry `skip-changeset` and are in the merge queue. Provenance is on each PR (`5790571940`, `5790573062`).\n\n## The carriers that still say the opposite (re-read on `origin/main`, cited by content)\n\n| # | file | what it says today | governed? |\n|:--|:--|:--|:--|\n| 1 | `.github/workflows/pr-automation.yml` | route 0 of the 「Require a changeset」 message: 「do NOT apply 'skip-changeset' … LEAVE THIS CHECK RED」, and its paragraph 「Ruled on #18375 (ruling D …) the 'skip-changeset' label is never applied to a PR that edits an existing changeset」; the `::error::` line repeats it | no |\n| 2 | `scripts/check-empty-changeset.mjs` | the DELIBERATE CORRECTION refusal: 「no label and no diff shape makes that safe … this gate stays red either way」 | no |\n| 3 | `.claude/agents/os-dev.md` | 「PR 改到已有的 `.changeset/*.md`:⛔ 永不打 `skip-changeset`,门禁红着是对的,确认走 PR 文字。」 | **yes** (Tier S) |\n| 4 | `.claude/skills/pm-dispatch/SKILL.md` | 「改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取维护者原话或出处三件转述。」 | **yes** (Tier S) |\n\n⛔ **Not a carrier**: AGENTS.md's 「A bug fix in a released package takes a **`patch`** changeset — never none, and ⛔ never `skip-changeset`」. That is a different rule, for a PR that ships a fix, and this update does not touch it.\n\n## What the executing round must state, so the maintainer knows what the label now waives\n\nThe label is read by the changeset job's own guards. When applied, the job is skipped: that is how PR #18765 merged on 2026-09-18 with nothing in the job run. ⇒ The PR that rewrites the texts should list, from the workflow as it stands, **which checks in that job stop running on a correction PR** once the label is on. For example: whether the edited changeset's frontmatter or bump level is still validated anywhere else. ⛔ It does not change those mechanics unless the maintainer asks. It only states them.\n\n## Constraints for whoever takes it\n\n- `.claude/**` is a governed surface, so rows 3 and 4 land by the maintainer's hand. ⛔ No seat readies, enqueues or arms that PR.\n- `.claude/skills/pm-dispatch/SKILL.md` is at its line ceiling: row 4 is a rewrite of the same line, ⛔ never a net new line.\n- Rows 1 and 2 are wording in a workflow message and a script message. ⛔ Zero `if:`, step or job changes.\n- #18375 is closed. The executing round leaves one comment there pointing to this card, so the ruling's home names its successor.\n\n## Dedupe\n\nRepo-scoped issue search (`mcp__github__search_issues`), 「skip-changeset deliberate correction pending changeset ruling D route 0 label confirmation」: 10 shown (`total_count` 32, ranked by relevance, ⛔ not a count of matches). None is an open card updating this ruling. Nearest: **#18375** (closed, the ruling's home), **#19729** / **#19735** (the cards behind #19746 / #19747), **#18160** and **#18404** (closed, the same gate's earlier rulings).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}
