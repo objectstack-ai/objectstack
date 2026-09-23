@@ -18,8 +18,6 @@
  */
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.view.sections.pagination.description": "ccd1ce9181e55cc3",
-  "metadataForms.view.sections.pagination.label": "309131fbaca258df",
   "objects.sys_account._actions.link_social.params.provider.options.apple": "cfdc41e15ed6699b",
   "objects.sys_account._actions.link_social.params.provider.options.discord": "12f931cc062e76ae",
   "objects.sys_account._actions.link_social.params.provider.options.facebook": "7eea009178f5b807",

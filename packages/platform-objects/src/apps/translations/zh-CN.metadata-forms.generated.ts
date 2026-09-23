@@ -731,8 +731,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "仅 Grid 表格的显示选项"
       },
       pagination: {
-        label: "Pagination",
-        description: "Page size and page-size options — every view type accepts them, not only grids."
+        label: "分页",
+        description: "每页条数与每页条数选项——所有视图类型都接受，不只是 Grid 表格"
       },
       kanban: {
         label: "看板配置",
