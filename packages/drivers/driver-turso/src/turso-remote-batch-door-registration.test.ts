@@ -28,7 +28,8 @@
  *
  * 1. All three halves on the batch door, with `syncSchema` and `initObjects`
  *    held to the same expectations as controls: one table, three doors, one
- *    answer.
+ *    answer. That includes the WRITE side: a `datetime` in a non-canonical
+ *    spelling reaches disk in the canonical one.
  * 2. The batch door keys by `object`, never by a `schema.name` that differs.
  * 3. The backfill runs once per batch and converges a pre-existing legacy row.
  * 4. A DDL failure rejects before anything is registered or backfilled.
@@ -40,6 +41,9 @@ import { makeLibsqlSqliteStub, asLibsqlClient, type LibsqlSqliteStub } from './l
 
 /** The reproduction's object: one boolean, one JSON field, no `name`. */
 const W_SCHEMA = { fields: { flag: { type: 'boolean' }, meta: { type: 'json' } } };
+
+/** One declared `datetime`, for the write-side pin. */
+const STAMP_SCHEMA = { fields: { at: { type: 'datetime' } } };
 
 type Door = 'syncSchemasBatch' | 'syncSchema' | 'initObjects';
 
@@ -90,6 +94,22 @@ describe.each<Door>(['syncSchemasBatch', 'syncSchema', 'initObjects'])(
       // Non-vacuous: the disk holds the storage forms, so the values above are
       // the driver's read coercion at work and not what SQLite handed back.
       expect(stub.raw.prepare(`select flag, meta from "w"`).all()).toEqual([{ flag: 1, meta: '{"k":1}' }]);
+
+      await driver.disconnect();
+    });
+
+    it('a datetime written in a non-canonical spelling lands on disk in the canonical one', async () => {
+      const { driver, stub } = await remoteDriver();
+      await DOORS[door](driver, 'stamp', STAMP_SCHEMA);
+
+      await driver.create('stamp', { id: 'offset', at: '2025-07-28T08:00:00+08:00' });
+
+      // The raw cell, not a read: the write path canonicalises only a field it
+      // has registered as a datetime, so this is the registration at work on
+      // the WRITE side. Unregistered, the offset string is stored as sent.
+      expect(stub.raw.prepare(`select at from "stamp" where id = 'offset'`).all()).toEqual([
+        { at: '2025-07-28T00:00:00.000Z' },
+      ]);
 
       await driver.disconnect();
     });

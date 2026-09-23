@@ -31,7 +31,7 @@
  * |:--|:--|:--|
  * | (a) the dry run performs DDL | `syncSchemasBatch` (engine boot sync) | MEASURED — `CREATE TABLE "fresh"`, `ALTER TABLE "probe" ADD COLUMN "why"` |
  * | (a) | `syncSchema` / `initObjects` (coverage pass, direct) | MEASURED — the same CREATE/ALTER |
- * | (b) the dry run rewrites rows (canonical temporal backfill) | `syncSchemasBatch` | REFUTED — no row write on this door |
+ * | (b) the dry run rewrites rows (canonical temporal backfill) | `syncSchemasBatch` | REFUTED — no row write on this door (since #19844 this door runs the backfill too; the row records the measurement as taken) |
  * | (b) | `syncSchema` / `initObjects` | MEASURED — `update "probe" set "at" = …`, the naive value is rewritten on disk |
  * | (c) the plan reports no pending work | every door | MEASURED — `previewDeferredSchemaWork()` and `flushDeferredSchemaDdl()` both answer `[]` |
  *
