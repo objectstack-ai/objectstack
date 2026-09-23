@@ -3784,10 +3784,12 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
  * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `87af769e9`, re-READ there 2026-09-22. ⛔ Not one anchor
- * below is carried from `53ded82bf`; every number was re-derived from the
- * pinned tree, and the `label` one moved far enough that the retired reading
- * now lands in an unrelated callback.)
+ * — `.objectui-sha` = `62597c588`, re-measured there 2026-09-23: both files,
+ * and `core/src/utils/record-source.ts`, are byte-identical to `87af769e9`
+ * (`git diff --quiet`), so no anchor moved on this hop. At `87af769e9`
+ * (re-READ 2026-09-22) not one anchor below was carried from `53ded82bf`;
+ * every number was re-derived from that tree, and the `label` one moved far
+ * enough that the retired reading now lands in an unrelated callback.)
  * Read points per key: `data` (`resolveRecordSourceConfig` at
  * `:613` — rung 1, `core/src/utils/record-source.ts:292`), `staticData` (rung 2,
  * `record-source.ts:296`), `objectName` (rung 3; also `:1487` and `:1682` here),
@@ -3893,9 +3895,10 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  * block (`ObjectTree.tsx:235-248`) and that `ObjectView` / `ListView` EMIT when
  * they flatten `options.tree` (`ListView.tsx:3261-3275`, `case 'tree'`: the
  * product carries these keys and NO `tree` key). Both halves re-READ at the
- * pin this repo builds against (`.objectui-sha` = `87af769e9`) on
- * 2026-09-22 — this record carried no pin at all before, so nothing re-checked
- * it when the pin moved. Read, but NOT authorable —
+ * pin this repo builds against (`.objectui-sha` = `62597c588`) on
+ * 2026-09-23 — `ObjectTree.tsx` and `ListView.tsx` are byte-identical to
+ * `87af769e9`, where both were re-READ 2026-09-22 (this record carried no pin
+ * at all before that, so nothing re-checked it when the pin moved). Read, but NOT authorable —
  * one composition key per concept (Prime Directive #12), the ruling the map and
  * the gantt carry from objectui#5018 / #6469 and the channel `object-calendar`
  * uses above. The registration agrees: `plugin-tree/src/index.tsx` declares
@@ -3932,9 +3935,12 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
  * shell `plugin-tree/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `87af769e9`, re-READ there 2026-09-22. ⛔ No anchor
- * below is carried from `53ded82bf`; every one was re-derived from the pinned
- * tree, and the ladder call changed in CONTENT as well as position.)
+ * — `.objectui-sha` = `62597c588`, re-measured there 2026-09-23: both files,
+ * and `core/src/utils/record-source.ts`, are byte-identical to `87af769e9`
+ * (`git diff --quiet`), so no anchor moved on this hop. At `87af769e9`
+ * (re-READ 2026-09-22) no anchor below was carried from `53ded82bf`; every
+ * one was re-derived from that tree, and the ladder call changed in CONTENT
+ * as well as position.)
  * Read points per key: `data` (`resolveRecordSourceConfig` at
  * `:582` — rung 1, `core/src/utils/record-source.ts:292`, which returns the
  * authored value VERBATIM; that ONE site is the whole support
@@ -4007,12 +4013,13 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * holds for them because each registers through `ElementDataSourceGate`,
    * which lowers the spec binding onto `objectName` before the renderer sees
    * the node. `plugin-tree/src/index.tsx` does NOT: at the pin this repo
-   * builds against (`.objectui-sha` = `87af769e9`, re-COUNTED there
-   * 2026-09-22) its registry shell has ZERO hits for that wiring, against 3
+   * builds against (`.objectui-sha` = `62597c588`, re-COUNTED there
+   * 2026-09-23) its registry shell has ZERO hits for that wiring, against 3
    * each in `plugin-map`, `plugin-gantt`, `plugin-grid` and `plugin-calendar`
-   * — four controls, so the zero discriminates. ⚠️ Re-counted at BOTH ends of
-   * the hop with ONE method (occurrences of that identifier in each
-   * `src/index.tsx`): `53ded82bf` reads 3 each and 0 for the tree as well, so
+   * — four controls, so the zero discriminates. ⚠️ Re-counted at every end
+   * with ONE method (occurrences of that identifier in each `src/index.tsx`):
+   * `87af769e9` and `53ded82bf` both read 3 each and 0 for the tree as well —
+   * `plugin-grid/src/index.tsx` changed on this hop and still reads 3 — so
    * nothing about this reading moved. The `7 each` this record used to carry is
    * reproducible at neither pin by that method, nor by a whole-package count
    * (7 / 5 / 11 / 5, not 7 each). ⛔ A count is a reading only with its METHOD
@@ -4095,8 +4102,9 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
  * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
- * repo builds against (`.objectui-sha` = `87af769e9`), re-READ there
- * 2026-09-22.
+ * repo builds against (`.objectui-sha` = `62597c588`), re-measured there
+ * 2026-09-23: all three files are byte-identical to `87af769e9`, where they
+ * were re-READ 2026-09-22, so no anchor below moved on this hop.
  *
  * ⛔ This record used to be MIXED, and the historical spelling is what let it
  * be: its `limit` clause was re-read at this pin on 2026-09-21 while every
@@ -4269,7 +4277,8 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * first publishes a refusal for a key the renderer honours.
    *
    * Read points at the pin this repo builds against (`.objectui-sha` =
-   * `87af769e9`, re-READ 2026-09-22), all in
+   * `62597c588`; the file is byte-identical to `87af769e9`, where they were
+   * re-READ 2026-09-22), all in
    * `ObjectTimeline.tsx`: `:255` seeds the loading state off it, `:420`
    * SKIPS the object query when it is present, `:442` tracks it, and `:444`
    * is the row source itself — `(props as any).data || boundData ||
@@ -4477,7 +4486,10 @@ export const ComponentPropsMap = {
   // authority for map and gantt while tree's rung-1 `data` read stayed
   // undeclared on every face. Key sets measured from the renderers' read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `87af769e9`), all three re-READ there 2026-09-22 — per-block citations in
+  // `62597c588`), all three re-measured there 2026-09-23 (gantt and tree
+  // byte-identical to `87af769e9`, where all three were re-READ 2026-09-22;
+  // the map's anchors moved with their text byte-identical and no key set
+  // moved) — per-block citations in
   // each schema's header, including what each block reads and deliberately
   // does NOT declare, and what the hop from `53ded82bf` deleted rather than
   // moved.
@@ -4491,7 +4503,8 @@ export const ComponentPropsMap = {
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `87af769e9`), re-READ there 2026-09-22; the schema's own header
+  // `62597c588`), re-measured there 2026-09-23 (byte-identical to `87af769e9`,
+  // where it was re-READ 2026-09-22); the schema's own header
   // carries the per-key citations and what it deliberately does NOT declare.
   'object-timeline': ObjectTimelinePropsSchema,
 } as const;
