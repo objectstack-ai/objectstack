@@ -1530,7 +1530,7 @@ export function jobFilterPopulations(workflowText) {
  */
 export function jobPathPopulations(workflowText, workflowFile) {
   const out = [];
-  for (const { text, ...population } of jobFilterPopulations(workflowText)) {
+  for (const { text, walkText, ...population } of jobFilterPopulations(workflowText)) {
     const checks = [...new Set(extractCheckInvocations(text, workflowFile).map((i) => i.check))];
     if (!checks.length) continue;
     out.push({ ...population, checks });
@@ -21238,6 +21238,95 @@ function selfTest() {
     jobPathPopulations("on:\n  pull_request:\n    branches: [main]\njobs:\n  a:\n    steps:\n      - run: pnpm check:x\n", 'x.yml').length === 0,
   );
 
+  // ── The same term on a job's STEPS (#17673) ────────────────────────────────
+  //
+  // A job that must CONCLUDE on every run keeps `!cancelled()` alone at job
+  // level and carries its filter term on each step. Every case here is red on
+  // the job-level-only derivation, where the console job below resolves to
+  // nothing; the refusals are pinned beside it because they are the half that
+  // keeps the step-level reading from claiming a step your path never ran.
+  const stepGatedWf = [
+    'name: Fixture',
+    'on:',
+    '  pull_request:',
+    '    branches: [main]',
+    'jobs:',
+    '  filter:',
+    '    runs-on: ubuntu-latest',
+    '    outputs:',
+    "      console: ${{ steps.changes.outputs.console || 'true' }}",
+    '    steps:',
+    '      - uses: dorny/paths-filter@v4',
+    '        id: changes',
+    '        with:',
+    '          filters: |',
+    '            console:',
+    "              - '.objectui-sha'",
+    '  console-pin:',
+    '    name: Console Pin Gate',
+    '    needs: filter',
+    '    if: ${{ !cancelled() }}',
+    '    steps:',
+    '      - name: Report NOT BUILT',
+    "        if: needs.filter.outputs.console == 'false'",
+    '        run: pnpm check:inverted',
+    '      - name: Every run',
+    '        run: pnpm check:every-run',
+    '      - name: Gated',
+    "        if: needs.filter.outputs.console != 'false'",
+    '        run: pnpm check:console-sha',
+    '      - name: Gated and cache-conditional',
+    "        if: needs.filter.outputs.console != 'false' && steps.cache.outputs.cache-hit != 'true'",
+    '        run: pnpm check:anded',
+    '      - name: Gated setup',
+    "        if: needs.filter.outputs.console != 'false'",
+    '        run: pnpm install --frozen-lockfile',
+    '  push-only:',
+    '    name: Push Only',
+    "    if: github.event_name == 'push'",
+    '    steps:',
+    '      - name: Gated under a job condition this does not evaluate',
+    "        if: needs.filter.outputs.console != 'false'",
+    '        run: pnpm check:push-only',
+    '',
+  ].join('\n');
+  const stepPops = jobPathPopulations(stepGatedWf, 'fixture.yml');
+  const stepPin = stepPops.find((p) => p.job === 'console-pin');
+  t(
+    '⭐ STEP-LEVEL (#17673): a job whose filter term sits on its steps, not its own if:, resolves to that population',
+    Boolean(stepPin) && stepPin.paths.join('|') === '.objectui-sha' && stepPin.outputs.join('|') === 'filter.console',
+    JSON.stringify(stepPops),
+  );
+  t('…and attributes it to the check its GATED step runs, and to nothing else', stepPin?.checks.join('|') === 'check:console-sha');
+  t('…never to a step with no if: — in a job that concludes on every run, that step runs whatever your path is', Boolean(stepPin) && !stepPin.checks.includes('check:every-run'));
+  t('…never to the inverted step — it runs when the filter said FALSE', Boolean(stepPin) && !stepPin.checks.includes('check:inverted'));
+  t('…never to a step whose if: ANDs a term the whitelist refuses', Boolean(stepPin) && !stepPin.checks.includes('check:anded'));
+  t(
+    'a job-level if: carrying any OTHER term contributes nothing at step level — a push-only job is not claimed for a PR',
+    !stepPops.some((p) => p.job === 'push-only')
+      && stepFilterPopulations(extractJobBlocks(stepGatedWf).find((j) => j.id === 'push-only') ?? {}, new Map([['filter.console', ['.objectui-sha']]])).length === 0,
+  );
+  t(
+    'a job-level population is untouched by the step-level reading — the #12956 fixture still resolves exactly as before',
+    fixturePops.map((p) => `${p.job}:${p.gate ?? 'job'}`).join('|') === 'console-pin:job|both:job',
+  );
+  const stepTail = jobFilteredSteps([{ file: 'fixture.yml', text: stepGatedWf }], ['.objectui-sha']);
+  const stepTailRow = stepTail.rows.find((r) => r.job === 'Console Pin Gate') ?? { steps: [], gate: null };
+  t('TAIL: a step whose if: restates the population term adds no condition — its unaccounted setup step is listed', stepTailRow.steps.some((s) => s.step === 'Gated setup'));
+  t('TAIL: the steps it makes no claim about are SIZED as conditional, not lost (the inverted one and the AND)', stepTail.counts.conditionalSteps === 2, JSON.stringify(stepTail.counts));
+  t('TAIL: the every-run step is neither listed nor counted — no path of yours scheduled it', !stepTailRow.steps.some((s) => s.step === 'Every run') && stepTail.counts.steps === 2);
+  t(
+    "TAIL: the row says its STEPS' if:s read the output, not a job if: it no longer carries",
+    stepTailRow.gate === 'step' && jobFilteredStepLines(stepTail.rows, stepTail.counts).some((l) => l.includes("its steps' `if:`s read filter.console")),
+  );
+  t(
+    'stepIfIsPopulationTerm: the same term restates the population; another output, an AND or no if: does not',
+    stepIfIsPopulationTerm("needs.filter.outputs.console != 'false'", ['filter.console'])
+      && !stepIfIsPopulationTerm("needs.filter.outputs.core != 'false'", ['filter.console'])
+      && !stepIfIsPopulationTerm("needs.filter.outputs.console != 'false' && github.event_name == 'push'", ['filter.console'])
+      && !stepIfIsPopulationTerm(null, ['filter.console']),
+  );
+
   // Matching, and the precedence question the new key raises. A job filter is a
   // DECLARATION CI obeys, so it outranks a literal scanned out of a script and
   // sits under the workflow trigger, which decides whether the job runs at all.
@@ -21283,6 +21372,13 @@ function selfTest() {
   t(
     'both console gates are reached, not just the one the card named',
     Boolean(livePinJob?.checks.includes('check:console-sha') && livePinJob?.checks.includes('check:console-injection')),
+  );
+  // The live SHAPE those four now hold through (#17673): the job concludes on
+  // every run, so its own `if:` names no filter output and the population above
+  // comes from its steps. Red on the job-level-only derivation.
+  t(
+    "⭐ LIVE (#17673): the console job's population is read off its STEPS — its own if: carries no filter term, so it concludes on every run",
+    jobFilterPopulations(readFileSync(nodePath.join(ROOT, '.github/workflows/ci.yml'), 'utf8')).find((p) => p.name === 'Console Pin Gate')?.gate === 'step',
   );
   // The NEGATIVE control, and it is the half that keeps the widening honest: a
   // path in none of the four filters must derive nothing extra. AGENTS.md is a
