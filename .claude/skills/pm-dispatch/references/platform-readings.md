@@ -1,6 +1,6 @@
 # 平台读数事实表
 
-见 SKILL.md 〈平台读数纪律〉;本表是 GitHub API 与工具行为的读数事实,操作时查阅。
+见 reading-discipline.md;本表是 GitHub API 与工具行为的读数事实,操作时查阅。
 
 ## 队列成员资格与 auto-merge
 
