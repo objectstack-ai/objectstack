@@ -34,6 +34,11 @@
  * - `packages` present → iterate it.
  * - `packages` absent  → treat `manifest` (singular) as a **single-element list**.
  *
+ * A `packages` that is present but is not an array takes neither branch. It is
+ * refused here as `INVALID_ARTIFACT_PACKAGES`, and this function is the one
+ * place every reader reaches that refusal through. The rule is stated once,
+ * beside `AssembledPackageBodySchema` (`@objectstack/spec`, `stack.zod.ts`).
+ *
  * The second branch is not a convenience: it is the term ADR-0130's whole
  * compatibility claim rests on (D7 — an existing single-`manifest` artifact must
  * register bit-identically through this path). That is why this function returns
@@ -188,8 +193,11 @@ interface ArtifactPackageNode extends OrderablePlugin {
  * @param artifact - A release artifact (`{ packages: [...] }`), or a bare
  *   manifest / single-`manifest` artifact — both shapes are read.
  * @returns The manifest bodies to register, in the order to register them.
- * @throws An ADR-0112 envelope (`code` + `status: 422`) for a malformed entry or
- *   a duplicate package id, and `resolvePluginOrder`'s own error for a cycle.
+ * @throws An ADR-0112 envelope (`code` + `status: 422`):
+ *   `INVALID_ARTIFACT_PACKAGES` for a `packages` that is present but is not an
+ *   array, `INVALID_ARTIFACT_PACKAGE_ENTRY` for a malformed entry, and
+ *   `DUPLICATE_ARTIFACT_PACKAGE` for a duplicate package id. Also
+ *   `resolvePluginOrder`'s own error for a cycle.
  */
 export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
   const declared = (artifact as { packages?: unknown } | null | undefined)?.packages;
@@ -200,6 +208,8 @@ export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
   // built to date takes, and D7 pins that it did not move.
   if (declared === undefined || declared === null) return [artifact];
 
+  // Present but not an array: malformed, never absent. The rule is stated
+  // once, beside `AssembledPackageBodySchema`.
   if (!Array.isArray(declared)) {
     throw refuse(
       'INVALID_ARTIFACT_PACKAGES',
