@@ -1247,24 +1247,20 @@ jobs:
       - name: PM half-state sweeper self-test
         run: pnpm check:pm-half-states
 
-      # Clause-② carrier + declaration checker self-test (#13922 · #12409 ·
-      # #13914). Same family and the same split as the two steps either side:
-      # the LIVE sweep reads a shared board over the API and is report-only, so
-      # only the offline self-test runs here — a clause-② desync on somebody
-      # else's pair is a fact about the board, not about the PR that happens to
-      # run CI next, and failing that PR would punish the wrong actor.
+      # Contract-review record recogniser self-test (#18042 · #18701). The
+      # readers the Governed Surface Queue Guard's Tier S leg lazily imports,
+      # and the record `--template` prints, live in
+      # `scripts/pm/record-recognisers.mjs`; this step runs that file's offline
+      # self-test, which pins each reader and drives the guard once with the
+      # printed record on each thread. Same family and the same split as the
+      # steps either side: offline, no network, no token.
       #
-      # ⛔ Do not "promote" the live sweep into this step. The script's `--pair`
-      # landing pre-check is retired (ruling record 5770886272 on #19061) and
-      # nothing runs it; the file stays only because the Governed Surface Queue
-      # Guard lazily imports its contract-review record recognisers and
-      # `--template`, and this self-test is what keeps those loadable.
-      #
-      # The self-test is offline and imports `check-half-states.mjs` for the
-      # `prDeliversCard` delivery relation and the shared PREREQUISITE-NOT-MET
-      # exit code — one source for each.
-      - name: Clause-② carrier checker self-test
-        run: pnpm check:pm-clause2-carriers
+      # This is the step that ran `check-clause2-carriers.mjs`'s self-test,
+      # retargeted when ruling record 5770886272 on #19061 (letter B, its last
+      # step) deleted that file with its retired `--pair` sweep — ⛔ not a gate
+      # added beside it.
+      - name: Contract-review record recogniser self-test
+        run: pnpm check:pm-record-recognisers
 
       # Widening-tell gate self-test (#16448) — the mechanical half of the
       # directional clause-② ruling (#16349), and the same split as every step
