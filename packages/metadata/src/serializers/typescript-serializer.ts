@@ -17,11 +17,11 @@ import type { MetadataSerializer, SerializeOptions } from './serializer-interfac
  * An emitted annotation must never be false. So a metadata type is listed only
  * when the spec exports a type that IS the input type of the schema
  * `getMetadataTypeSchema()` resolves for it (`z.input<typeof XSchema>`, the
- * ADR-0122 authoring name): then any body that metadata type's contract accepts
- * also type-checks. A metadata type that is not listed (a plugin's own type,
- * a misspelling, or one whose spec type is narrower than its schema) gets no
- * annotation and no `import type`, never `any`, `unknown` or another type's
- * shape.
+ * ADR-0122 authoring name): the annotation then states that type's own
+ * contract, nothing narrower and nothing else. A metadata type that is not
+ * listed (a plugin's own type, a misspelling, or one whose spec type does not
+ * state its schema) gets no annotation and no `import type`: never `any`,
+ * `unknown` or another type's shape.
  *
  * Two metadata types are deliberately absent:
  * - `view`: `ViewMetadataSchema` is a `z.preprocess`, so its input type, and
