@@ -781,7 +781,7 @@ describe('#18682 — the referential FK clear resolves no relationship, so a rul
   it('the deleter cannot read C — the premise every case below rests on', async () => {
     const { h } = await withLine('secret');
     const err = await h.engine
-      .find('os_ehr_line', { context: h.caller() } as any)
+      .find('os_ehr_line', { context: h.caller() })
       .then(() => null, (e: any) => e);
     expect(err?.code).toBe('PERMISSION_DENIED');
   });
@@ -812,7 +812,7 @@ describe('#18682 — the referential FK clear resolves no relationship, so a rul
   it('CONTROL: an ordinary update of B DOES read C and refuses with the rule — the harness can answer the read', async () => {
     const { h, linesRead } = await withLine('secret');
     const err = await h.engine
-      .update('os_ehr_inspection', { id: 'insp_1', owner_id: 'u_next' }, { context: { isSystem: true } } as any)
+      .update('os_ehr_inspection', { id: 'insp_1', owner_id: 'u_next' }, { context: { isSystem: true } })
       .then(() => null, (e: any) => e);
     expect(err?.code).toBe('VALIDATION_FAILED');
     expect(err?.message).toContain(SECRET_LINE_MESSAGE);
