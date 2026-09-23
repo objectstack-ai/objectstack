@@ -69,7 +69,7 @@ entry's cross-reference sentence so the in-process one stays findable.
   "httpStatus": 400,
   "retryable": false,
   "fields": [
-    { "field": "email", "message": "Invalid email format", "code": "invalid_format" }
+    { "field": "email", "message": "Invalid email format", "code": "invalid_email" }
   ]
 }
 ```
@@ -197,8 +197,21 @@ rather than deriving it from the table at the end of this page.
 </Callout>
 
 ### `INVALID_FORMAT`
-**Cause:** Field value does not match the expected format (e.g., invalid email, wrong date format).  
-**Fix:** Ensure the value matches the field's `format` constraint or built-in type validation.  
+**Cause:** Reserved for a value that does not match an expected format. **No route emits it
+today.** A malformed value is refused as a *field-level* failure inside `VALIDATION_FAILED`
+instead, and its `fields[].code` names what checked it:
+
+- **the field's `type`** — an `email`, `url` or `phone` field runs a built-in shape check keyed
+  on `type` itself and answers `invalid_email` / `invalid_url` / `invalid_phone`; a value a
+  `date`, `datetime` or `time` field cannot parse answers `invalid_date` / `invalid_time`;
+- **a [`format` validation rule](/docs/data-modeling/validation#format-validation)** — its
+  `regex`, or its named `format` (`email` | `url` | `phone` | `json`) — answers `invalid_format`.
+
+A value that misses a declared `pattern` outside record metadata (a settings value, a request
+body a route parses with Zod) also answers field-level `invalid_format`.  
+**Fix:** Do not branch on this code; branch on `VALIDATION_FAILED` + `fields[].code`. To change
+what a field accepts, change its `type` or the `format` validation rule — a field-level `format`
+key is a display hint the server never checks, so editing it changes nothing.  
 **Retry:** `no_retry`
 
 ### `VALUE_TOO_LONG`
