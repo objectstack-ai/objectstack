@@ -78,6 +78,10 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * trigger dialect with its own identity-forwarding bugs. Exporting it is the
  * whole point: the alternative (a second builder over there) is the shape
  * #4127 above was written to remove.
+ *
+ * [#19846] It also states `callerParamKeys` — which keys of the params bag the
+ * caller supplied, as opposed to the row id this builder seeds — so every route
+ * sharing it carries the same caller-provenance signal.
  */
 export function buildAutomationContext(body: any, context: HttpProtocolContext): Record<string, unknown> {
     const ctxBody = body && typeof body === 'object' ? body : {};
@@ -102,16 +106,27 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
             if (baseParams[k] === undefined) baseParams[k] = v;
         }
     }
+    // [#19846] The keys the CALLER supplied, read before the row-id seeds below
+    // are added — `AutomationContext.callerParamKeys`, so the screen node's
+    // headless verdict is told rather than left to infer it from the merged
+    // bag. The two row-id keys this door defines (`recordId` and the
+    // `<objectName>Id` alias) stay out even when the caller's own bag names
+    // them: the console mirrors the launched row's id into `params.recordId`,
+    // and that is the row being addressed, not a screen being answered.
+    const alias = objectName
+        ? `${String(objectName).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase())}Id`
+        : undefined;
+    const callerParamKeys = Object.keys(baseParams).filter((k) => k !== 'recordId' && k !== alias);
     if (recordId !== undefined && baseParams.recordId === undefined) {
         baseParams.recordId = recordId;
     }
-    if (recordId !== undefined && objectName) {
-        const alias = `${String(objectName).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase())}Id`;
+    if (recordId !== undefined && alias !== undefined) {
         if (baseParams[alias] === undefined) baseParams[alias] = recordId;
     }
 
     const automationContext: Record<string, unknown> = {
         params: baseParams,
+        callerParamKeys,
         object: objectName,
         event: ctxBody.event ?? 'manual',
     };

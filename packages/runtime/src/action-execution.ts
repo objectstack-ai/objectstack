@@ -711,28 +711,58 @@ export function seedFlowActionParams(_deps: ActionExecutionDeps,
     const rowId: unknown = record?.[idField] ?? (idField === 'id' ? recordId : undefined);
 
     if (rowId != null) {
-        const keys = new Set<string>(['recordId']);
-        // [#14864] ONE predicate for "object-less", the same one
-        // `dispatchFlowAction` asks three lines from here before it decides
-        // whether to hand the automation service an `object` at all. This used
-        // to be a second, narrower comparison (`objectName !==
-        // GLOBAL_ACTION_OBJECT_KEY`), and the two parted on exactly one input:
-        // a route resolved at the legacy `'*'` was object-less to the envelope
-        // and object-BOUND here, so the bag grew a nonsense `'*Id'` alias. The
-        // empty-string leg was never the divergence — the `objectName &&`
-        // truthiness test this replaces already covered it.
-        if (!isObjectLessActionKey(objectName)) {
-            keys.add(`${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`);
-        }
-        if (typeof action?.recordIdParam === 'string' && action.recordIdParam) {
-            keys.add(action.recordIdParam);
-        }
-        for (const key of keys) {
+        for (const key of flowActionRowIdKeys(action, objectName)) {
             if (seeded[key] === undefined) seeded[key] = rowId;
         }
     }
 
     return { ...seeded, ...params };
+}
+
+/**
+ * The keys this door uses to carry the launched row's id into a flow's params
+ * bag: `recordId`, the camelCase `<objectName>Id` alias (object-bound actions
+ * only), and the action's own declared `recordIdParam`. ONE definition, read by
+ * {@link seedFlowActionParams} to seed them and by
+ * {@link flowActionCallerParamKeys} to keep them out of the caller-provenance
+ * signal — a second copy of this set is how the two would drift.
+ */
+function flowActionRowIdKeys(action: any, objectName: string): Set<string> {
+    const keys = new Set<string>(['recordId']);
+    // [#14864] ONE predicate for "object-less", the same one
+    // `dispatchFlowAction` asks before it decides whether to hand the
+    // automation service an `object` at all. This used to be a second,
+    // narrower comparison (`objectName !== GLOBAL_ACTION_OBJECT_KEY`), and the
+    // two parted on exactly one input: a route resolved at the legacy `'*'` was
+    // object-less to the envelope and object-BOUND here, so the bag grew a
+    // nonsense `'*Id'` alias. The empty-string leg was never the divergence —
+    // the `objectName &&` truthiness test this replaces already covered it.
+    if (!isObjectLessActionKey(objectName)) {
+        keys.add(`${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`);
+    }
+    if (typeof action?.recordIdParam === 'string' && action.recordIdParam) {
+        keys.add(action.recordIdParam);
+    }
+    return keys;
+}
+
+/**
+ * [#19846] `AutomationContext.callerParamKeys` for this door: the keys of the
+ * CALLER's own `params`, read before {@link seedFlowActionParams} spreads the
+ * subject row and the row id in — so the screen node's headless verdict is told
+ * which values the caller supplied instead of inferring it from the merged bag.
+ *
+ * The row-id keys ({@link flowActionRowIdKeys}) are left out even when the
+ * caller's bag names them: a client that mirrors the row id into
+ * `params.recordId` is addressing the row, not answering a screen. That is also
+ * what closes the two constructions the inference could not: with a non-default
+ * `recordIdField` and a `recordIdParam` naming a key the record lacks, the
+ * seeded row id reached the screen under a name no inference leg could refuse;
+ * here that name is simply not in the caller's list.
+ */
+function flowActionCallerParamKeys(action: any, objectName: string, params: Record<string, unknown>): string[] {
+    const rowIdKeys = flowActionRowIdKeys(action, objectName);
+    return Object.keys(params).filter((key) => !rowIdKeys.has(key));
 }
 
 /**
@@ -862,6 +892,12 @@ export function isFlowActionRefusal(e: unknown): e is FlowActionRefusal {
  * "the actions endpoint dispatches flows for you" is a claim the runtime
  * doesn't keep.
  *
+ * [#19846] **The context also says which params keys the CALLER supplied**
+ * (`AutomationContext.callerParamKeys`, read off `wiring.params` before any
+ * seeding — {@link flowActionCallerParamKeys}). The merged bag cannot say it:
+ * the record spread and the row-id seeds sit in it beside the caller's values,
+ * and a downstream reader that had to tell them apart could only infer.
+ *
  * [#15168] **The wiring takes the subject LOAD, not a bare record.** The flow
  * face of #14143's signal (`AutomationContext.recordLoadDenied`, declared by
  * #14244) is derived here, once, from {@link loadActionSubjectRecord}'s
@@ -879,6 +915,10 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         objectName: string;
         /** The caller-scope load outcome — `record` AND its verdict, from ONE producer. */
         subject: ActionSubjectRecordLoad;
+        /**
+         * The CALLER's own params bag, unseeded — [#19846] its keys become the
+         * run's `callerParamKeys`, so nothing may be merged into it upstream.
+         */
         params: Record<string, unknown>;
         recordId?: string;
         ec: any;
@@ -920,6 +960,9 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
         ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
         params: seedFlowActionParams(deps, action, { objectName, record, params, recordId }),
+        // [#19846] Which of those keys the CALLER supplied, stated here where it
+        // is known rather than inferred downstream from the merged bag.
+        callerParamKeys: flowActionCallerParamKeys(action, objectName, params),
     });
     // [#9446] Rows 2-4, read off the PRODUCER's classification through the one
     // shared table. What stood here mapped every `success: false` to
