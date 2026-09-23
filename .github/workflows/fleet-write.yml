@@ -18,10 +18,10 @@
 # ⛔ The token this run WRITES with is the App installation token step 3
 # mints — narrowed to the payload's repository (and, for a `transfer` stroke
 # alone, that transfer's one target too: `transferIssue` needs issues write on
-# both ends) and to the permissions the op table declares (`issues: write`, `pull-requests: write`, the
-# `contents: write` GitHub's auto-merge mutations require, and the
-# `metadata: read` the sender gate's permission read needs) — and revoked by
-# that action's post step. The workflow's own `GITHUB_TOKEN` gets nothing
+# both ends) and to the permissions the op table declares (`issues: write`,
+# `pull-requests: write`, the `contents: write` GitHub's auto-merge mutations
+# require, and the `metadata: read` the sender gate's permission read needs)
+# — and revoked by that action's post step. The workflow's own `GITHUB_TOKEN` gets nothing
 # (`permissions: {}` below); the job grants it `contents: read` for the
 # checkout and nothing else, so the run's ONLY write path is the App token,
 # and it exists only inside the execute step's environment.

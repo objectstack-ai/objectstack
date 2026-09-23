@@ -1290,10 +1290,9 @@ let selfTestReachedVerdict = false;
  * five board tools, the token minter (its one POST creates no content, but a
  * write verb is a write verb and the roster below is mechanical), the
  * card-creation door, the card-transfer door, and the two halves of the
- * fleet-write relay — the
- * seat-side dispatcher (its one POST is the `repository_dispatch` that
- * carries a stroke) and the runner-side executor (the writes that stroke asked
- * for, paced on the runner's own log).
+ * fleet-write relay — the seat-side dispatcher (its one POST is the
+ * `repository_dispatch` that carries a stroke) and the runner-side executor
+ * (the writes that stroke asked for, paced on the runner's own log).
  *
  * Spelled REPO-RELATIVE, because the dispatch derivation reads every
  * separator-bearing literal in a gate's source as a path lead: a bare
