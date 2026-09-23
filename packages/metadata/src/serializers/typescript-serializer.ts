@@ -27,9 +27,13 @@ import { sortObjectKeys } from './sort-object-keys.js';
  * `unknown` or another type's shape.
  *
  * Two metadata types are deliberately absent:
- * - `view`: `ViewMetadataSchema` is a `z.preprocess`, so its input type, and
- *   with it `ViewMetadata`, is `unknown`. Annotating with it would check
- *   nothing.
+ * - `view`: `ViewMetadataSchema` is a `z.preprocess`, so its input type is
+ *   `unknown`. `ViewMetadata` is declared instead as the union of the input
+ *   types of the members the schema's union runs, so it is not the bound
+ *   schema's `z.input` and this table's rule excludes it. The rule holds for a
+ *   reason here: the view door accepts bodies `ViewMetadata` refuses (the
+ *   preprocess removes the console's row `id`s before any member judges the
+ *   body), so annotating a saved view with it could be false.
  * - `book`: `Book` is written by hand and lacks the `_packageId` /
  *   `_provenance` protection keys `BookSchema` accepts, so a book the loader
  *   has stamped would fail against it.
