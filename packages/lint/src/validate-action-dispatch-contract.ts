@@ -130,12 +130,36 @@ const MISFIRE: Readonly<Record<ActionDispatchContract, string>> = {
  * Every action name in the stack that DECLARES a dispatch contract, mapped to
  * the contract it declares.
  *
- * A name declared more than once (a global action and an object-embedded one,
- * or two objects) contributes only when every declaration agrees: two
- * declarations that disagree are a defect in the DECLARATIONS, not in any
- * wiring, and charging a view for it would name the wrong file. Undeclared
- * names are absent from the map, which is what makes "undeclared is not
- * defaulted" structural here rather than a branch someone can drop.
+ * Action names are ONE flat namespace here, the same one
+ * `validate-action-name-refs` resolves against: the global `actions` and every
+ * object's embedded `actions`, pooled. Each name collects the set of contracts
+ * its declarations carry, and an action that declares NO `execution` does not
+ * drop out of that set: it enters it as `'none'`. A name contributes only when
+ * its set holds exactly one member and that member is a real contract.
+ *
+ * ⇒ ABSENCE COUNTS AS DISAGREEMENT. One same-named action that declares no
+ * `execution`, anywhere in the flat namespace, turns this rule OFF for that
+ * name, for every view that wires it. "Anywhere" is literal: the view's own
+ * object, the global list, or an object the view never resolves through.
+ * Declarations are not scoped by the view's object; the map is built once for
+ * the whole stack, before any view is read.
+ *
+ * That is deliberate, and it is the zero-false-positive posture (silence is the
+ * safe direction) applied to the name rather than to the action:
+ *
+ *  - two declarations that disagree are a defect in the DECLARATIONS, not in
+ *    any wiring, and charging a view for it would name the wrong file;
+ *  - an action that declares nothing is not unanimous with one that declares
+ *    a contract, because undeclared is not defaulted to either contract.
+ *    Counting it as agreement would be exactly that silent default, arriving
+ *    through a sibling.
+ *
+ * Undeclared names are absent from the map, which is what makes "undeclared is
+ * not defaulted" structural here rather than a branch someone can drop; the
+ * `'none'` member is what carries the same rule to a name that is declared in
+ * one place and undeclared in another. The test file pins the disarm from the
+ * view's own object, from an unrelated object and from the global list, each
+ * beside a control that fires on the same stack without the sibling.
  */
 function collectDeclaredContracts(stack: AnyRec): Map<string, ActionDispatchContract> {
   const seen = new Map<string, Set<ActionDispatchContract | 'none'>>();

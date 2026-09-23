@@ -26,8 +26,14 @@
 #                   the ONE selector every tool shares: `dispatch` only when the cloud discriminator,
 #                   the seat's session (read from the container's CLAUDE_CODE_REMOTE_SESSION_ID;
 #                   OS_FLEET_SESSION overrides it — a local checkout, a test) and a live relay on the
-#                   board — the workflow file on main AND its Actions state `active` — all hold,
-#                   `direct` otherwise (the line says which condition failed). A COMMAND under auto that
+#                   board — the workflow file on main AND its Actions state `active` — all hold;
+#                   `direct` when the discriminator or the session is missing, or when the relay is
+#                   DEFINITELY absent (the file's 404) or switched off (`disabled_manually`), the line
+#                   saying which; and a REFUSAL (exit 3, nothing runs) when the liveness read is
+#                   INDETERMINATE — 401 / 403 / 5xx / a malformed answer / no answer — because an
+#                   unreadable relay is not a missing one and the fall-back would write as the
+#                   session's login. OS_FLEET_TRANSPORT=direct is the only way to do that on purpose.
+#                   The selector reads the relay only behind its own --use-env-proxy re-exec. A COMMAND under auto that
 #                   resolves to `dispatch` is REFUSED (exit 3) with the actions-file spelling: it
 #                   cannot be run as the fleet there, and running it as the session's login instead
 #                   would be a silent change of identity.
