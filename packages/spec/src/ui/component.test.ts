@@ -3191,10 +3191,11 @@ describe('#7751 — object-* block props schemas', () => {
     // The key is still honoured and still parses; what changed is that it now
     // carries `filter`'s own declaration — the same value in the same role,
     // read through the same lowering sink — instead of `z.unknown()`. The AST
-    // tuple array this pin used to spell was one of the five shapes that sink
-    // refuses, so the old fixture was pinning a receipt for a filter that never
-    // ran. Its refusal is pinned below, and in full at
-    // `component-object-grid-default-filters.pin.test.ts`.
+    // tuple array this pin used to spell is one the pinned objectui grid
+    // APPLIES (`toFilterNode` passes it through and `parseFilterAST` accepts
+    // it), so its refusal here is a spelling change for the author, not the
+    // repair of a filter that failed. Its refusal is pinned below, and in full
+    // at `component-object-grid-default-filters.pin.test.ts`.
     const rules = [{ field: 'status', operator: 'equals', value: 'open' }];
     const parsed = ComponentPropsMap['object-grid'].parse({
       objectName: 'showcase_task',

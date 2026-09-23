@@ -2718,15 +2718,22 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * [#19514] The legacy base-filter fallback — the SAME value in the SAME role
    * as `filter` above, so it carries the same declaration.
    *
-   * Its own description has always said "read only when `filter` is absent",
-   * which is a statement that the two keys hold one kind of value: objectui's
-   * `ObjectGrid` reads this one through the same lowering sink it reads `filter`
-   * through, so every refusal that sink can give is reachable from a document
-   * that passed the protocol. While `filter` was narrowed to the rule array and
-   * this stayed `z.unknown()`, the block had a declared door and an undeclared
-   * one onto the same seam — a bare string, a number, a MongoDB-style record and
-   * an ObjectQL AST tuple array all parsed here, and the author's receipt said
-   * nothing about the 400 waiting for them.
+   * Its own description has said "read only when `filter` is absent" since the
+   * key entered this map (#7751), which is a statement that the two keys hold
+   * one kind of value: objectui's `ObjectGrid` reads this one through the same
+   * lowering sink it reads `filter` through, so every refusal that sink can
+   * give is reachable from a document that passed the protocol. While `filter`
+   * was narrowed to the rule array and this stayed `z.unknown()`, the block had
+   * a declared door and an undeclared one onto the same seam — a bare string, a
+   * number, a MongoDB-style record and an ObjectQL AST tuple array all parsed
+   * here, and the author's receipt said nothing about what the grid would do
+   * with them. At the pinned objectui (`.objectui-sha` `87af769e9a`,
+   * `ObjectGrid.tsx` → `toFilterNode`) that depends on the shape: the record
+   * form and the tuple array are lowered and APPLIED as declared; a bare string
+   * or a number is DROPPED, so the grid sends no filter and lists its rows
+   * unfiltered; and a list of malformed rules is REFUSED — on the wire with
+   * 400 `INVALID_FILTER`, or by the client before any request for the value
+   * shapes it judges itself.
    *
    * ⛔ **Narrowed, NOT retired.** Refusing the key outright is the other arm this
    * could have taken and it is a REMOVAL of an accepted shape, which needs its

@@ -11,7 +11,11 @@
  * pre-convergence `z.unknown()`, so the block had one declared door and one
  * undeclared door onto one seam: a bare string, a number, a MongoDB-style
  * record, an ObjectQL AST tuple array and a list of malformed rules all parsed
- * here, and each of them is a refusal waiting at the lowering.
+ * here. At the pinned objectui (`.objectui-sha` `87af769e9a`) the lowering
+ * treats them three ways, per shape: the record form and the tuple array are
+ * lowered and APPLIED as declared; a bare string or a number is DROPPED, so the
+ * grid sends no filter and lists its rows unfiltered; and a list of malformed
+ * rules is REFUSED, on the wire or by the client before any request.
  *
  * These pins hold the two keys EQUAL rather than transcribing a list of shapes
  * — the equality is the rule, and a list would go stale the next time `filter`

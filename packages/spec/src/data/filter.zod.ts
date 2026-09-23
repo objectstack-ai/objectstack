@@ -1592,7 +1592,7 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
  *
  * ⛔ **Scoped to the one operator the table writes rows for.** `$contains` /
  * `$startsWith` / `$endsWith` / `$like` / `$ilike` have no such row and keep the
- * answer they have always given; widening by analogy is the table's decision.
+ * answer they give today; widening by analogy is the table's decision.
  */
 function checkFilterConditionComparands(
   node: unknown,
