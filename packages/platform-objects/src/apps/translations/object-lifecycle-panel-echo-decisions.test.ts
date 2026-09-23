@@ -1109,8 +1109,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // form row each across ten forms, and authored every one of their labels
       // in all three locales rather than leaving it an extractor fill — so this
       // control moves by exactly the number of rows that landed, in every
-      // locale, which is the reading a per-locale count is for.
-      expect(translated.length, `${locale} positive control`).toBe(583);
+      // locale, which is the reading a per-locale count is for. 584 since
+      // #19814: the view form's new `pagination` section, its label authored
+      // in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(584);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
