@@ -6,12 +6,17 @@
 
 - 出口代理按设计只放 repo-scoped 路径(`/repos/{o}/{r}/...`)加 `/rate_limit`;org 级端点未实测。
 - ✓ 按席位类别限定:每个 ✓ = 会话门开着的席位实调通过,⛔ 无 ✓ 不当已验证事实。
-- 会话门关着的席位本表两侧整表不可达:repo-scoped 读写全 403、`gh` 缺席,而 MCP 与 git 正常。
-- ⇒ 先跑一条 repo-scoped 探针再选通道。
 - 403 后 `/rate_limit` 判凭据形态:15000/时 = 凭据活被 repo-scoping 拒;60/时或 auth 错 = 无凭据。
 - 两只桶:MCP 记链接用户 5000/时,兄弟会话共享同桶;REST/CCR 记 App 安装 15000/时。
-- 限流拒绝绑定被拒身份(报文 user ID):同身份各写通道一并耗尽,⛔ 换通道续写与重试同罪。
-- 他侧只在身份不同时是退路:凭据 `GET /user` ≠ 被拒 user ID 才换;席内 PM 与 dev 同一身份。
+- `objectstack-fleet[bot]` 经 `fleet-write` 中继:四个写工具与 `with-fleet.sh --via auto` 共一选择器。
+- 三条件全立才 `dispatch`:`CCR_AGENT_PROXY_ENABLED=1`、会话 id、中继活着;否则 `direct`,印一行。
+- 会话 id 由容器 `CLAUDE_CODE_REMOTE_SESSION_ID` 派生;`OS_FLEET_SESSION` 只覆盖本地检出与测试。
+- ⛔ 永不把它前缀在命令前:允许规则是字面前缀,带前缀的写落到分类器,席位就此卡死。
+- 活着 = 工作流文件在 `main` 且 Actions 状态 `active`;维护者在 Actions UI 停用即整队回 `direct`。
+- dispatch 带会话令牌发往 objectstack;run 在 runner 上以逐次铸造、窄到目标仓的 App 令牌执行。
+- 闭合 op 表住 `scripts/pm/fleet-write/ops.mjs`;读侧不走中继。
+- 正文超 60,000 字节的那一笔 `post-stamped` 写走 `direct` 并印一行,身份是席位自己的用户。
+- run 失败(post-stamped/close-cards 4,label-write/issue-create 5)与 UNCONFIRMED(6)只读,⛔ 永不重试。
 
 ## 读侧 —— 全部可迁移
 
@@ -35,13 +40,11 @@
 
 - ✓ 评论 `POST .../issues/{n}/comments`;改评论 `PATCH .../issues/comments/{id}`。
 - ✓ 标签加法 `POST .../issues/{n}/labels`,定向删 `DELETE .../issues/{n}/labels/{name}`;加法优先。
-- 标签/assignee 写恒经 `scripts/pm/label-write.mjs`:四步内建、回读、回退整组 PATCH 回传 assignees。
 - ⛔ `post-stamped`/`label-write` 永不接进管道再 `&&`:拒收读成 0;看尾先落文件或 `set -o pipefail`。
 - ⛔ 永不 MCP `issue_write`(锁 1 已拒);会话分类器拒改动 ⇒ 无通道,交有通道席位立卡。
 - ✓ 建卡带标签 `POST .../issues` · 改正文 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`。
 - ✓ 该 `PATCH` 带 `state` 关卡/重开,`state_reason` 交付 `completed`、撤单 `not_planned`,走裸 REST。
 - 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。
-- 每个写请求必带 `Content-Type: application/json`;缺头的 415 与判别式见配额段。
 - ✓ 请求复审 `POST .../pulls/{n}/requested_reviewers` · 开 PR `POST .../pulls` 带 `draft=true`。
 - ✓ `origin/main` 合进 PR head:`PUT .../pulls/{n}/update-branch`,PM 席位、零文件写、真合并提交。
 - `expected_head_sha` 须完整 40 字符 SHA(短 SHA 回 422);base 未动回 422 = 无事可做,不是失败。
@@ -51,13 +54,11 @@
 - ✓ `POST .../ccr/comments/{id}/resolve` · `/unresolve`;`{id}` 是评审评论 id,⛔ 只在自己 PR 上探。
 - ✓ auto-merge 挂载 `curl -sS -X PUT .../pulls/{n}/ccr/auto_merge -d '{"merge_method":"SQUASH"}'`,`DELETE` 卸载。
 - ⛔ `PUT .../ccr/auto_merge` 在 draft 上 422 零存储;`DELETE` 无挂载回 422 = 本就没挂,非失败。
-- ⛔ 永不 MCP `update_pull_request`(锁 1 已拒);ready/draft 翻转只走 ccr 路;auto-merge MCP 锁 1 同拒。
 - 直合仓 `PUT .../pulls/{n}/merge`;actor 记令牌类,按账号非会话、逐写回读;见配额段,MCP 恒用户。
 
 ## 不可迁移 —— 只有这三件,围着它们排计划;红窗守候规则住 `platform-readings.md` 配额段
 
 1. 语义搜索:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点加本地 grep。
-   REST 也被会话门关掉的席位 = 一次定向 MCP `search_issues`,⛔ 不宽表扫。
 2. Projects field_values:GraphQL-only —— 舰队并不需要它;MCP 服务器端无条件抓它才是漏点。
 3. `issue transfer`:issues 端点表无此路由(未实调)⇒ 同为 GraphQL-only;配方住 `platform-readings.md`。
 
@@ -69,7 +70,6 @@
 ## 队列路由的读法
 
 - `merged_by` 是入队者,⛔ 不是绕队证据:队列合并归属给入队的账户,对队列与直合零分辨力。
-- 问本仓 auto-merge 是否经队列,答案来自尝试动作,不来自属性字段。
 - 判据 ①:直接合并 `PUT .../pulls/{n}/merge` 在强制队列 ruleset 下回 405。
 - ②:PR 上的 `added_to_merge_queue` timeline 事件。③:对已入队 PR 调 update-branch 回不能更新。
 - ①② 的拼写与边界住 `platform-readings.md` 队列段,本条只归拢判据。
