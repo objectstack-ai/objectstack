@@ -44,6 +44,43 @@ import {
     getMetadataTypeSchema,
 } from '@objectstack/spec/kernel';
 
+// [#19586] The tenant every fixture is judged in, declared ONCE. The runtime
+// publish gate resolves references against a live universe, and since `find`
+// is mocked to `[]` below and nothing is read back, this harness's universe is
+// exactly what `makeProtocol` registers. Each document here is used twice: a
+// clone is seeded into every harness's registry, and the document itself is
+// the `valid` payload of its own row, so the tenant cannot drift from what
+// those rows publish.
+//
+// Declared here rather than read out of `FIXTURES`, so a row stays removable:
+// deleting the `dataset` fixture brings its `no fixture (skipped)` note back
+// and leaves the tenant intact, where a seed read from `FIXTURES.dataset`
+// would crash every row on the missing key.
+const SWEEP_ACCOUNT: any = {
+    name: 'sweep_account',
+    label: 'Account',
+    // [#8310] The runtime object door requires an authored OWD
+    // (`security-owd-unset` refuses absence), so a "valid" object
+    // fixture must author its posture.
+    sharingModel: 'private',
+    // [#19542] `stage` joins `amount` so the dataset seeded into this
+    // harness's live universe is COHERENT with the object this tenant
+    // declares — its one dimension is over a field `sweep_account` really
+    // has. The `report` fixture groups by that dimension.
+    fields: {
+        amount: { name: 'amount', label: 'Amount', type: 'number' },
+        stage: { name: 'stage', label: 'Stage', type: 'text' },
+    },
+};
+
+const SWEEP_ACCOUNT_METRICS: any = {
+    name: 'sweep_account_metrics',
+    label: 'Account Metrics',
+    object: 'sweep_account',
+    dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
+    measures: [{ name: 'amount_sum', label: 'Amount', aggregate: 'sum', field: 'amount' }],
+};
+
 function makeProtocol() {
     const registry = new SchemaRegistry({ multiTenant: false });
     // [#19542] The live resolution universe this harness hands the runtime
@@ -63,16 +100,13 @@ function makeProtocol() {
     //
     // [#19586] The OBJECT that dataset is over joins it, for the same reason
     // one door further on: since the dataset door opened (#19143) a dataset's
-    // `object` resolves against this universe, and with nothing registered the
-    // `dataset` fixture was refused `object-reference-unknown` on
-    // `datasets.sweep_account_metrics.object` — the refusal that kept this
-    // type's row at `no fixture (skipped)`. Both seeds are the `valid` fixtures
-    // themselves, cloned, so the tenant cannot drift from what the `object` and
-    // `dataset` rows publish: the rows judge a document, the seeds are the
-    // tenant it is judged in. ⛔ Still not a relaxation: a dataset over an object
-    // this tenant does not declare is refused exactly as before.
-    registry.registerObject(structuredClone(FIXTURES.object.valid));
-    registry.registerItem('dataset', structuredClone(FIXTURES.dataset.valid));
+    // `object` resolves against this universe, and with no object registered
+    // the `dataset` fixture was refused `object-reference-unknown` on
+    // `datasets.sweep_account_metrics.object`. That refusal kept this type's
+    // row at `no fixture (skipped)`. ⛔ Still not a relaxation: a dataset over
+    // an object this tenant does not declare is refused exactly as before.
+    registry.registerObject(structuredClone(SWEEP_ACCOUNT));
+    registry.registerItem('dataset', structuredClone(SWEEP_ACCOUNT_METRICS));
     const mockEngine: any = {
         registry,
         find: vi.fn().mockResolvedValue([]),
@@ -99,22 +133,7 @@ interface Fixture {
 
 const FIXTURES: Record<string, Fixture> = {
     object: {
-        valid: {
-            name: 'sweep_account',
-            label: 'Account',
-            // [#8310] The runtime object door requires an authored OWD
-            // (`security-owd-unset` refuses absence), so a "valid" object
-            // fixture must author its posture.
-            sharingModel: 'private',
-            // [#19542] `stage` joins `amount` so the dataset seeded into this
-            // harness's live universe is COHERENT with the object this tenant
-            // declares — its one dimension is over a field `sweep_account` really
-            // has. The `report` fixture groups by that dimension.
-            fields: {
-                amount: { name: 'amount', label: 'Amount', type: 'number' },
-                stage: { name: 'stage', label: 'Stage', type: 'text' },
-            },
-        },
+        valid: SWEEP_ACCOUNT,
         invalid: { label: 'No Name' },
         invalidatedField: 'name',
     },
@@ -190,19 +209,12 @@ const FIXTURES: Record<string, Fixture> = {
     },
     // [#19586] Runtime-creatable since the #19143 door, and until this fixture
     // its row printed `no fixture (skipped)`. The valid document is the
-    // tenant's own dataset over `sweep_account`. `makeProtocol` seeds that
-    // object, and seeds this dataset from this fixture for the `report`
-    // row. The invalid one is the same document minus `measures`, so the only
-    // thing the schema can refuse it for is `measures`, and `runOne` asserts
-    // that it is the schema refusing, never a gate rule on `object`.
+    // tenant's own dataset over `sweep_account` (see `SWEEP_ACCOUNT_METRICS`).
+    // The invalid one is the same document minus `measures`, so the only thing
+    // the schema can refuse it for is `measures`, and `runOne` asserts that it
+    // is the schema refusing, never a gate rule on `object`.
     dataset: {
-        valid: {
-            name: 'sweep_account_metrics',
-            label: 'Account Metrics',
-            object: 'sweep_account',
-            dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
-            measures: [{ name: 'amount_sum', label: 'Amount', aggregate: 'sum', field: 'amount' }],
-        },
+        valid: SWEEP_ACCOUNT_METRICS,
         invalid: {
             name: 'sweep_account_metrics',
             label: 'Account Metrics',
@@ -213,9 +225,9 @@ const FIXTURES: Record<string, Fixture> = {
     },
     report: {
         // ADR-0021 single-form: a report binds a dataset + selects values by name.
-        // The bound dataset is the fixture directly above (seeded from it into
-        // every harness's universe by `makeProtocol`), and its dimension and
-        // measure names are what `rows` / `values` select.
+        // The bound dataset is the fixture directly above (`SWEEP_ACCOUNT_METRICS`,
+        // which `makeProtocol` seeds into every harness's universe), and its
+        // dimension and measure names are what `rows` / `values` select.
         valid: {
             name: 'sweep_report',
             label: 'Sweep',
@@ -350,7 +362,7 @@ const FIXTURES: Record<string, Fixture> = {
         // [#19586] `tools`, not `description`: the payload drops both, but
         // `description` is optional on a skill, and the schema's only issue is
         // at `tools`. The label named a field whose absence refuses nothing,
-        // and nothing read it until the assertion above started to.
+        // and nothing read it until `runOne` started to.
         invalidatedField: 'tools',
     },
 };
