@@ -528,16 +528,175 @@ function opensScope(node) {
 }
 
 /**
- * The lexical scopes enclosing a node, innermost first.
+ * Where a CLASS PROPERTY NAME is declared -- a RECORDING predicate, ⛔ not a
+ * lookup one.
+ *
+ * A property is not a lexical name at all: `this.engine` declared in class `B`
+ * is `B`'s `engine` and can be nothing else, however many other classes in the
+ * file spell the same property. So a property name is recorded under ITS CLASS,
+ * and an arrow function or a block between the declaration and its class is
+ * transparent to that -- exactly as `this` itself is.
+ *
+ * ⛔ It is NOT the chain a `this.` SITE reads. Reading a site through "the
+ * enclosing classes" answers the wrong container the moment anything between
+ * the site and that class rebinds `this` -- an object literal's own method is
+ * the shape that costs a site, and a `function` expression is the shape where
+ * the language binds nothing at all. {@link thisContainerOf} is the lookup-side
+ * predicate; the two are deliberately not the same function.
+ */
+function opensClassScope(node) {
+  return ts.isClassDeclaration(node) || ts.isClassExpression(node);
+}
+
+/**
+ * Where a CALLABLE'S OWN NAME is declared -- a RECORDING predicate, ⛔ not a
+ * lookup one: the lexical scopes, plus every container whose members are NOT
+ * lexical names -- the class, and the object literal.
+ *
+ * A method's name belongs to its class body, a function declaration's and a
+ * `const fn = () => …`'s to the block or file that declares it -- so this is
+ * {@link opensScope} with those containers added, and not either one alone.
+ * ⛔ Not the same predicate as {@link opensClassScope}: a method named
+ * `getEngine` is class-scoped, while a `function getEngine()` two lines above
+ * the class is not, and a chain that saw only classes would lose the second one.
+ *
+ * ⭐ The object literal is on this list for the same reason the class is, and
+ * omitting it cost the same site. `ts.isMethodDeclaration` is true for
+ * `const o = { getEngine() {…} }` as well as for a class method, and an object
+ * literal opens no lexical scope -- so such a method was recorded at the
+ * enclosing BLOCK, and a bare `getEngine()` written in that block resolved to
+ * it, which the language never does (the compiler reports `TS2304` for a name
+ * declared only that way). ⇒ A member name is recorded under ITS CONTAINER, and
+ * no lookup chain walks a container: {@link calleeScopeChain} reaches the class
+ * for `this.m()` and nothing for the rest, so an object-literal method stays
+ * reachable through the file-wide FLOOR exactly as it was before.
+ *
+ * ⭐ That reasoning answers WHERE A NAME IS DECLARED, and it is the whole
+ * question only while a declaration is being recorded. A CALL SITE asks a
+ * different question -- which declaration THIS call reaches -- and the answer
+ * there is keyed on how the call is WRITTEN. ⛔ Reading a bare `getEngine()`
+ * through this union is how a method came to shadow a file-level function that
+ * the language would never let it shadow. {@link calleeScopeChain} is the
+ * lookup-side predicate; the two are deliberately not the same function --
+ * and BOTH halves are needed, because a chain that excludes a container cannot
+ * help when the member was recorded outside that container in the first place.
+ */
+function opensCallableScope(node) {
+  return opensScope(node) || opensClassScope(node) || ts.isObjectLiteralExpression(node);
+}
+
+/**
+ * ⭐ The container a site's `this` NAMES -- the class or the object literal the
+ * enclosing member belongs to, or `null` when the language binds `this`
+ * dynamically and this module therefore cannot name a container at all.
+ *
+ * `this` is not lexical the way a `const` is, and it is not "the enclosing
+ * class" either. It is rebound by every ORDINARY function between the site and
+ * its member, and the member it belongs to may sit on an OBJECT LITERAL rather
+ * than on a class:
+ *
+ *   • an arrow function is TRANSPARENT -- it has no `this` of its own, so the
+ *     walk passes straight through it, as `this` itself does;
+ *   • a `function` expression or declaration REBINDS `this` to whatever the
+ *     call site supplies, so no container can be named -- `null` ⇒ the
+ *     file-wide FLOOR alone, which is what such a receiver resolved through
+ *     before there were any scopes at all. The compiler says the same thing a
+ *     different way (`TS2683: 'this' implicitly has type 'any'`);
+ *   • a method, accessor, constructor, property declaration or static block
+ *     STOPS the walk, and the container is that member's own parent -- a class
+ *     for a class member, ⭐ the OBJECT LITERAL for an object literal's method.
+ *     `this.m()` written inside `const o = { m() {…}, z() { this.m(); } }` is
+ *     `o`'s `m` even when the whole literal sits inside a class that spells `m`
+ *     too, and reading it through the class subtracted a real engine write
+ *     under the DEFENDED `platform-type` arm, which prints nothing and is
+ *     counted nowhere;
+ *   • ⛔ a plain `key: value` PROPERTY ASSIGNMENT is NOT a stop. An object
+ *     literal rebinds nothing by existing -- only its own methods do -- so
+ *     `{ k: this.engine }` written in a class method is still the class's
+ *     `this`, and stopping at the literal would lose that site.
+ *
+ * ⇒ A miss inside the named container falls to the FLOOR rather than to an
+ *   OUTER container: an inner class expression does not inherit the enclosing
+ *   class's members through `this` (the compiler answers `TS2339`), so walking
+ *   outwards would be inventing a resolution the language does not have, while
+ *   the floor is exactly the answer that shape had before any of this existed.
+ */
+function thisContainerOf(node) {
+  for (let p = node.parent; p; p = p.parent) {
+    if (ts.isArrowFunction(p)) continue;
+    if (ts.isFunctionExpression(p) || ts.isFunctionDeclaration(p) || ts.isSourceFile(p)) return null;
+    if (ts.isMethodDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)
+        || ts.isConstructorDeclaration(p) || ts.isPropertyDeclaration(p)
+        || ts.isClassStaticBlockDeclaration(p)) {
+      return p.parent ?? null;
+    }
+  }
+  return null;
+}
+
+/**
+ * The lookup chain that reaches EXACTLY the container {@link thisContainerOf}
+ * names, and nothing outside it -- or `null` for the floor alone.
+ */
+function thisContainerChain(node) {
+  const container = thisContainerOf(node);
+  return container ? (p) => p === container : null;
+}
+
+/**
+ * ⭐ The scope chain a CALL SITE resolves its callee through -- by how the call
+ * is WRITTEN, which is not the question {@link opensCallableScope} answers.
+ *
+ * One map records every callable's name at the scope that declares it, and that
+ * map is read from three different call shapes, each of which the language
+ * resolves differently:
+ *
+ *   • `f()`      -- a BARE IDENTIFIER is a lexical name and nothing else. A
+ *                    method lives on its prototype or its object, ⛔ never in
+ *                    lexical scope, so no member container is on this chain: a
+ *                    `class C { getEngine() {…} }` does not shadow a
+ *                    `function getEngine()` for a call written `getEngine()`
+ *                    inside `C`. Reading it through the class subtracted a real
+ *                    engine write under the DEFENDED `platform-type` arm, which
+ *                    prints nothing and is counted nowhere. ⚠️ Excluding the
+ *                    container here is only half of that property: it also
+ *                    depends on {@link opensCallableScope} RECORDING every
+ *                    member name under its container, which is why an object
+ *                    literal is on that predicate.
+ *   • `this.m()` -- a member name on whatever `this` NAMES, and to no lexical
+ *                    scope. ⛔ Not "the enclosing class": {@link thisContainerOf}
+ *                    walks to the member that owns the site's `this` and hands
+ *                    back ITS container, which is an object literal as readily
+ *                    as a class, and nothing at all inside a `function`.
+ *   • `x.m()`    -- a member of whatever `x` is, and this module has no index of
+ *                    class members to read that off (interfaces and type-literal
+ *                    aliases only, via {@link memberTypeOfShapes}, tried before
+ *                    this chain). `null` ⇒ the file-wide FLOOR alone, which is
+ *                    exactly what this receiver resolved through before there
+ *                    were any scopes at all. ⛔ Not a placement this module can
+ *                    justify -- it is the one it can defend as unchanged.
+ */
+function calleeScopeChain(callee) {
+  if (ts.isIdentifier(callee)) return opensScope;
+  if (ts.isPropertyAccessExpression(callee) && callee.expression.kind === ts.SyntaxKind.ThisKeyword) {
+    return thisContainerChain(callee);
+  }
+  return null;
+}
+
+/**
+ * The scopes enclosing a node, innermost first, under `opens`.
  *
  * A parameter's own scope is the FUNCTION (its `parent`), while a `const` in a
  * body belongs to that body's block -- so a receiver inside the body walks
  * block, then function, then outwards, and finds the parameter exactly where a
- * reader would look for it.
+ * reader would look for it. `opens` is what makes the same walk answer for a
+ * property (classes) and for a callable's name (both), because those names are
+ * NOT scoped the way a local is and keying them as if they were is the defect.
  */
-function scopeChainOf(node) {
+function scopeChainOf(node, opens = opensScope) {
   const chain = [];
-  for (let p = node.parent; p; p = p.parent) if (opensScope(p)) chain.push(p);
+  for (let p = node.parent; p; p = p.parent) if (opens(p)) chain.push(p);
   return chain;
 }
 
@@ -567,11 +726,11 @@ function scopeChainOf(node) {
  *   before stops resolving: a repair that traded a false placement for a LOST
  *   engine write would be the expensive direction wearing the other costume.
  */
-function scopedNames() {
+function scopedNames(opens = opensScope) {
   const byScope = new Map(); // scope node -> Map<name, entry>
   const flat = new Map(); // name -> entry -- the file-wide tier
   const scopeMap = (declNode) => {
-    const scope = scopeChainOf(declNode)[0] ?? null;
+    const scope = scopeChainOf(declNode, opens)[0] ?? null;
     let m = byScope.get(scope);
     if (!m) { m = new Map(); byScope.set(scope, m); }
     return m;
@@ -588,10 +747,18 @@ function scopedNames() {
       scopeMap(declNode).set(name, entry);
       flat.set(name, entry);
     },
-    /** The declaration `name` refers to AT `node` -- lexical tier, then the floor. */
-    lookup(name, node) {
-      if (node) {
-        for (const scope of scopeChainOf(node)) {
+    /**
+     * The declaration `name` refers to AT `node` -- lexical tier, then the floor.
+     *
+     * `chain` defaults to the predicate this map RECORDS under, which is the
+     * right answer wherever the name is looked up the same way it is declared.
+     * A callable's name is not: it is recorded where it is declared and read by
+     * how the call is written, so {@link resolveReceiver} passes the chain from
+     * {@link calleeScopeChain} instead. `null` asks for the FLOOR alone.
+     */
+    lookup(name, node, chain = opens) {
+      if (node && chain) {
+        for (const scope of scopeChainOf(node, chain)) {
           const hit = byScope.get(scope)?.get(name);
           if (hit) return hit;
         }
@@ -601,11 +768,28 @@ function scopedNames() {
   };
 }
 
-/** Declared types visible in ONE file, keyed the way a receiver spells itself. */
+/**
+ * Declared types visible in ONE file, keyed the way a receiver spells itself.
+ *
+ * ⭐ THREE name maps, THREE scope notions -- and not one of them is "the file".
+ * A class property belongs to its CLASS (`this.engine` in class `B` is `B`'s and
+ * can be nothing else), a callable's name to whatever declares it (a class body
+ * for a method, the enclosing block or file for a function), and a local to its
+ * lexical scope. All three were once keyed on the bare identifier, which is one
+ * defect stated three times: two classes in one file sharing a property name
+ * were ONE entry, and the first TYPED one decided for both.
+ *
+ * ⇒ Each map is a {@link scopedNames} under the predicate that matches how the
+ *   language scopes that kind of name, and each keeps that structure's file-wide
+ *   FLOOR, so a name no enclosing scope declares resolves exactly where it used
+ *   to. ⛔ The repair may not cost a single site that resolved before: a fix that
+ *   traded a false placement for a LOST engine write would be the expensive
+ *   direction wearing the other costume.
+ */
 export function declaredTypesIn(sf) {
-  const thisProps = new Map();
+  const thisProps = scopedNames(opensClassScope);
   const locals = scopedNames();
-  const fnReturns = new Map();
+  const fnReturns = scopedNames(opensCallableScope);
   // `TypeName -> member -> declared type` for shapes declared in THIS file, so
   // `deps.getDataEngine()` and `opts.engine` resolve without a type checker.
   const shapes = new Map();
@@ -625,13 +809,15 @@ export function declaredTypesIn(sf) {
     node: initializer ?? null,
     literal: initializer && ts.isStringLiteralLike(initializer) ? initializer.text : null,
   });
-  const note = (map, key, typeNode, initializer) => {
-    if (map.has(key) && map.get(key).type) return;
-    map.set(key, entryOf(typeNode, initializer));
+  // ⛔ There is no bare-key spelling left to reach for. Every one of the three
+  // maps is recorded AT THE NODE that declares the name, because that node is
+  // the only thing that says which scope the name belongs to -- and a helper
+  // that could still be called without it is a helper the next author will call
+  // without it.
+  const note = (map, declNode, key, typeNode, initializer) => {
+    map.note(declNode, key, entryOf(typeNode, initializer));
   };
-  const noteLocal = (declNode, key, typeNode, initializer) => {
-    locals.note(declNode, key, entryOf(typeNode, initializer));
-  };
+  const noteLocal = (declNode, key, typeNode, initializer) => note(locals, declNode, key, typeNode, initializer);
   const visit = (n) => {
     if (ts.isImportDeclaration(n) && ts.isStringLiteralLike(n.moduleSpecifier)
         && /^node:/.test(n.moduleSpecifier.text)) {
@@ -649,9 +835,9 @@ export function declaredTypesIn(sf) {
       }
       shapes.set(n.name.text, m);
     }
-    if (ts.isPropertyDeclaration(n) && ts.isIdentifier(n.name)) note(thisProps, n.name.text, n.type, n.initializer);
+    if (ts.isPropertyDeclaration(n) && ts.isIdentifier(n.name)) note(thisProps, n, n.name.text, n.type, n.initializer);
     if (ts.isParameter(n) && ts.isIdentifier(n.name)) {
-      if (ts.isConstructorDeclaration(n.parent) && n.modifiers?.length) note(thisProps, n.name.text, n.type, n.initializer);
+      if (ts.isConstructorDeclaration(n.parent) && n.modifiers?.length) note(thisProps, n, n.name.text, n.type, n.initializer);
       noteLocal(n, n.name.text, n.type, n.initializer);
     }
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)) {
@@ -659,7 +845,7 @@ export function declaredTypesIn(sf) {
       // what a caller of `getData()` receives, not what `getData` itself is.
       const init = n.initializer;
       if (!n.type && init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.type) {
-        note(fnReturns, n.name.text, init.type, null);
+        note(fnReturns, n, n.name.text, init.type, null);
       }
       noteLocal(n, n.name.text, n.type, n.initializer);
     }
@@ -684,7 +870,7 @@ export function declaredTypesIn(sf) {
       }
     }
     if ((ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n)) && n.name && ts.isIdentifier(n.name)) {
-      note(fnReturns, n.name.text, n.type, null);
+      note(fnReturns, n, n.name.text, n.type, null);
     }
     ts.forEachChild(n, visit);
   };
@@ -762,7 +948,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
     return inlineEngineDoorOrOther(r.type.getText(sf), 'as', sf);
   }
   if (ts.isPropertyAccessExpression(r) && r.expression.kind === ts.SyntaxKind.ThisKeyword) {
-    return fromEntry(decls.thisProps.get(r.name.text), `this.${r.name.text}`);
+    return fromEntry(decls.thisProps.lookup(r.name.text, r, thisContainerChain(r)), `this.${r.name.text}`);
   }
   if (ts.isIdentifier(r)) {
     if (decls.builtins.has(r.text)) return { kind: 'other', type: `node: builtin ${r.text}`, how: 'node-import' };
@@ -772,7 +958,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
   // base's own declared type gives the member.
   if (ts.isPropertyAccessExpression(r)) {
     const baseText = ts.isPropertyAccessExpression(r.expression) && r.expression.expression.kind === ts.SyntaxKind.ThisKeyword
-      ? decls.thisProps.get(r.expression.name.text)?.type
+      ? decls.thisProps.lookup(r.expression.name.text, r.expression, thisContainerChain(r.expression))?.type
       : ts.isIdentifier(r.expression) ? decls.locals.lookup(r.expression.text, r.expression)?.type : null;
     const mt = memberTypeOf(baseText, r.name.text, decls);
     if (mt) {
@@ -803,7 +989,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
         return inlineEngineDoorOrOther(mt, `${fname}() return`, sf);
       }
     }
-    const entry = fname ? decls.fnReturns.get(fname) : null;
+    const entry = fname ? decls.fnReturns.lookup(fname, callee, calleeScopeChain(callee)) : null;
     if (entry) return fromEntry(entry, `${fname}()`);
     return { kind: 'unresolved', how: 'call', detail: receiverKey(r, sf) };
   }
@@ -2382,6 +2568,193 @@ export function selfTest() {
       ['IProbeEngine']),
     'engine/IProbeEngine');
 
+  // ── ⭐⭐ ONE NAME, TWO CLASSES -- AND ONE NAME, TWO CALLABLES ─────────────
+  // The lexical tier above does not reach either of these, because neither name
+  // is a lexical one. `this.engine` in class `B` is `B`'s property however many
+  // other classes in the file spell it, and `getEngine` declared inside `b()` is
+  // `b`'s. Keyed on the bare identifier both were ONE entry and the first TYPED
+  // one decided for every site in the file -- the same three failures, at two
+  // storage sites, and the quiet one is still the expensive one: a real engine
+  // write subtracted under `platform-type`, an arm that DEFENDS the subtraction
+  // and so prints nothing and is counted nowhere.
+  t('⭐⭐ two CLASSES sharing a property name are TWO declarations -- the Map is not scored an engine write',
+    verdictsIn(`class A {\n  constructor(private readonly engine: IProbeEngine) {}\n  w() { this.engine.${WRITE}; }\n}\n`
+      + `class B {\n  constructor(private readonly engine: Map<string, number>) {}\n  w() { this.engine.delete('k'); }\n}\n`,
+      ['IProbeEngine']),
+    'engine/IProbeEngine | other/platform-type');
+  t('⭐⭐ …and in the other declaration order, the real engine write is no longer subtracted as a language global',
+    verdictsIn(`class A {\n  constructor(private readonly engine: Map<string, number>) {}\n  w() { this.engine.delete('k'); }\n}\n`
+      + `class B {\n  constructor(private readonly engine: IProbeEngine) {}\n  w() { this.engine.${WRITE}; }\n}\n`,
+      ['IProbeEngine']),
+    'other/platform-type | engine/IProbeEngine');
+  t('⭐⭐ …and at the OTHER storage site a property reaches its type through: a property DECLARATION',
+    verdictsIn(`class A {\n  private readonly engine: IProbeEngine;\n  w() { this.engine.${WRITE}; }\n}\n`
+      + `class B {\n  private readonly engine: Map<string, number>;\n  w() { this.engine.delete('k'); }\n}\n`,
+      ['IProbeEngine']),
+    'engine/IProbeEngine | other/platform-type');
+  t('⛔ FLOOR: a `this.<prop>` NO enclosing class declares still resolves file-wide',
+    verdictsIn('class A {\n  constructor(private readonly engine: IProbeEngine) {}\n}\n'
+      + `class B {\n  w() { this.engine.${WRITE}; }\n}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐ the `this.<base>.<member>` receiver reads its base from the SITE\'s own class, not from the file',
+    verdictsIn('interface Deps {\n  engine: IProbeEngine;\n}\ninterface Other {\n  engine: Map<string, number>;\n}\n'
+      + `class A {\n  constructor(private readonly deps: Deps) {}\n  w() { this.deps.engine.${WRITE}; }\n}\n`
+      + `class B {\n  constructor(private readonly deps: Other) {}\n  w() { this.deps.engine.delete('k'); }\n}\n`,
+      ['IProbeEngine']),
+    'engine/IProbeEngine | other/platform-type');
+  t('⭐⭐ two same-named LOCAL FUNCTIONS are two declarations -- the Map is not scored an engine write',
+    verdictsIn('export function a() {\n  function getEngine(): IProbeEngine { return null as never; }\n'
+      + `  getEngine().${WRITE};\n}\n`
+      + 'export function b() {\n  function getEngine(): Map<string, number> { return new Map(); }\n'
+      + "  getEngine().delete('k');\n}\n", ['IProbeEngine']),
+    'engine/IProbeEngine | other/platform-type');
+  t('⭐⭐ …and in the other declaration order, the real engine write survives',
+    verdictsIn('export function a() {\n  function getEngine(): Map<string, number> { return new Map(); }\n'
+      + "  getEngine().delete('k');\n}\n"
+      + 'export function b() {\n  function getEngine(): IProbeEngine { return null as never; }\n'
+      + `  getEngine().${WRITE};\n}\n`, ['IProbeEngine']),
+    'other/platform-type | engine/IProbeEngine');
+  t('⛔ FLOOR: a METHOD name is scoped to its class, and still resolves from a call OUTSIDE it',
+    verdictsIn('class Deps {\n  getEngine(): IProbeEngine { return null as never; }\n}\n'
+      + `export function w(d: Deps) {\n  d.getEngine().${WRITE};\n}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+
+  // ── ⭐⭐ ONE MAP, THREE CALL SHAPES ────────────────────────────────
+  // The cases above all read the callable map the way its name was DECLARED.
+  // These four read it the way the call is WRITTEN, which is the other question
+  // and the one the lookup site actually asks. A single chain answering both is
+  // wrong for one of them: reading a BARE `getEngine()` through the enclosing
+  // class body lets a method shadow a file-level function that the language
+  // would never let it shadow -- and in this instrument that is the quiet
+  // direction again, a real engine write subtracted under `platform-type`, an
+  // arm that DEFENDS the subtraction and so prints nothing and is counted
+  // nowhere. ⛔ Pinned in BOTH declaration orders, because the floor decides the
+  // one the lexical tier does not reach and the two orders disagree there.
+  t('⭐⭐ a BARE call resolves lexically -- a method never shadows a file-level function of the same name',
+    verdictsIn('function getEngine(): IProbeEngine { return null as never; }\n'
+      + 'class C {\n  getEngine(): Map<string, number> { return new Map(); }\n'
+      + `  w() { getEngine().${WRITE}; }\n}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐⭐ …and in the other declaration order, where the file-wide floor would have answered the method',
+    verdictsIn('class C {\n  getEngine(): Map<string, number> { return new Map(); }\n'
+      + `  w() { getEngine().${WRITE}; }\n}\n`
+      + 'function getEngine(): IProbeEngine { return null as never; }\n', ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐ a `this.<method>()` call DOES read the class its `this` names, so that class\'s method wins over a same-named function',
+    verdictsIn('function getEngine(): IProbeEngine { return null as never; }\n'
+      + 'class C {\n  getEngine(): Map<string, number> { return new Map(); }\n'
+      + "  w() { this.getEngine().delete('k'); }\n}\n", ['IProbeEngine']),
+    'other/platform-type');
+  t('⛔ FLOOR: an `x.<method>()` call is not the enclosing class\'s method -- the site\'s own class does not capture it',
+    verdictsIn('class A {\n  getEngine(): IProbeEngine { return null as never; }\n}\n'
+      + 'class B {\n  constructor(private readonly x: A) {}\n'
+      + '  getEngine(): Map<string, number> { return new Map(); }\n'
+      + `  w() { this.x.getEngine().${WRITE}; }\n}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+
+  // ── ⭐⭐ A MEMBER NAME IS NOT A LEXICAL ONE ON THE RECORDING SIDE EITHER ───
+  // Keeping the class body off a bare call's chain is only half of "a bare
+  // `f()` is never shadowed by a method". A name is reachable through whatever
+  // scope it was RECORDED at, so a member name recorded at a LEXICAL scope is
+  // found by a bare call however careful the chain is. `ts.isMethodDeclaration`
+  // is true of an OBJECT LITERAL's method too, and an object literal opens no
+  // lexical scope -- so one was recorded at the enclosing BLOCK, and a bare
+  // `getEngine()` in that block resolved to the object's method. The compiler
+  // never does that: declared ONLY that way, the name is `TS2304: Cannot find
+  // name`. Quiet direction again -- a real engine write subtracted under
+  // `platform-type`, an arm that DEFENDS the subtraction and so prints nothing
+  // and is counted nowhere. ⛔ Pinned in BOTH declaration orders: the floor
+  // decides the order the lexical tier does not reach, and the two disagree
+  // there, so one order alone can pass on the floor's answer by luck.
+  const objectLiteralMethod = 'export function w() {\n'
+    + '  const o = { getEngine(): Map<string, number> { return new Map(); } };\n'
+    + '  void o;\n'
+    + `  getEngine().${WRITE};\n}\n`;
+  const fileLevelGetEngine = 'function getEngine(): IProbeEngine { return null as never; }\n';
+  t('⭐⭐ a BARE call is not shadowed by an OBJECT LITERAL method of the same name in the same block',
+    verdictsIn(fileLevelGetEngine + objectLiteralMethod, ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐⭐ …and in the other declaration order, where the floor would have answered the OBJECT LITERAL\'s method',
+    verdictsIn(objectLiteralMethod + fileLevelGetEngine, ['IProbeEngine']),
+    'engine/IProbeEngine');
+
+  // ── ⭐⭐ `this` IS NOT "THE ENCLOSING CLASS" ─────────────────────────
+  // Recording a member name under its container fixed the BARE call. The `this.`
+  // call reads a chain, and reading it as "the enclosing classes" is wrong the
+  // moment anything between the site and that class rebinds `this`. An object
+  // literal's own method does: `this.m()` written in `{ m() {…}, z() { this.m(); } }`
+  // is the LITERAL's `m`, and the language never reaches past it to a class that
+  // happens to enclose the whole literal. Measured, the census did, and in the
+  // literal-first order that SUBTRACTED a real engine write `origin/main` had
+  // PLACED -- under the DEFENDED `platform-type` arm, which prints nothing and is
+  // counted nowhere, the one direction this census must never fail in.
+  // ⛔ Pinned in BOTH declaration orders: the floor decides the order the
+  // container tier does not reach, and the two orders disagree there.
+  const litGetEngine = '    const o = {\n'
+    + '      getEngine(): IProbeEngine { return null as never; },\n'
+    + `      z() { void this.getEngine().${WRITE}; },\n`
+    + '    };\n    return o;\n';
+  const classGetEngine = '  getEngine(): Map<string, number> { return new Map(); }\n';
+  t('⭐⭐ a `this.<method>()` inside an OBJECT LITERAL\'s method reads the LITERAL, not the enclosing class',
+    verdictsIn(`class C {\n  w() {\n${litGetEngine}  }\n${classGetEngine}}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐⭐ …and with the CLASS\'s same-named method declared first, where the floor holds the Map',
+    verdictsIn(`class C {\n${classGetEngine}  w() {\n${litGetEngine}  }\n}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐ an ARROW inside an object-literal method is transparent to `this`, so it reads the literal too',
+    verdictsIn(`class C {\n${classGetEngine}  w() {\n    const o = {\n`
+      + '      getEngine(): IProbeEngine { return null as never; },\n'
+      + `      z() { const f = () => { void this.getEngine().${WRITE}; }; f(); },\n`
+      + '    };\n    return o;\n  }\n}\n', ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐ an object literal at FILE level owns its methods\' `this` too -- no enclosing class is required',
+    verdictsIn('function getEngine(): Map<string, number> { return new Map(); }\n'
+      + 'const o = {\n  getEngine(): IProbeEngine { return null as never; },\n'
+      + `  z() { void this.getEngine().${WRITE}; },\n};\nvoid o;\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐ a class declared INSIDE an object-literal method answers its OWN `this.<method>()`',
+    verdictsIn('const o = {\n  getEngine(): IProbeEngine { return null as never; },\n'
+      + '  z() {\n    class D {\n      getEngine(): Map<string, number> { return new Map(); }\n'
+      + `      w() { void this.getEngine().${WRITE}; }\n    }\n    return D;\n  },\n};\nvoid o;\n`,
+      ['IProbeEngine']),
+    'other/platform-type');
+  t('⭐ a plain `key: value` in a class method is no `this` container -- the CLASS still answers',
+    verdictsIn('class A {\n  constructor(private readonly engine: IProbeEngine) {}\n'
+      + `  w() { const o = { k: this.engine.${WRITE} }; void o; }\n}\n`
+      + 'class B {\n  constructor(private readonly engine: Map<string, number>) {}\n'
+      + "  w() { const o = { k: this.engine.delete('k') }; void o; }\n}\n", ['IProbeEngine']),
+    'engine/IProbeEngine | other/platform-type');
+  t('⛔ NOTHING LOST: the literal\'s method as the file\'s ONLY `getEngine` still resolves',
+    verdictsIn(`class C {\n  w() {\n${litGetEngine}  }\n}\n`, ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⛔ FLOOR: a member the LITERAL does not declare falls to the file-wide tier, never to the outer class',
+    verdictsIn('function getEngine(): IProbeEngine { return null as never; }\n'
+      + `class C {\n${classGetEngine}  w() {\n    const o = {\n`
+      + '      getOther(): IProbeEngine { return null as never; },\n'
+      + `      z() { void this.getEngine().${WRITE}; },\n    };\n    return o;\n  }\n}\n`,
+      ['IProbeEngine']),
+    'engine/IProbeEngine');
+  // A `function` expression rebinds `this` to whatever the CALL supplies, so no
+  // container can be named -- `TS2683` is the compiler saying the same thing.
+  const dynamicThisSite = 'class B {\n  constructor(private readonly engine: Map<string, number>) {}\n'
+    + `  w() { const f = function () { void this.engine.${WRITE}; }; void f; }\n}\n`;
+  const engineHolder = 'class A {\n  constructor(private readonly engine: IProbeEngine) {}\n}\n';
+  t('⛔ FLOOR: `this.<prop>` inside a FUNCTION EXPRESSION names no container, so it resolves file-wide',
+    verdictsIn(engineHolder + dynamicThisSite, ['IProbeEngine']), 'engine/IProbeEngine');
+  t('⛔ FLOOR: …and in the other declaration order that same site takes the floor\'s other answer',
+    verdictsIn(dynamicThisSite + engineHolder, ['IProbeEngine']), 'other/platform-type');
+  // An inner class expression does not inherit the OUTER class's members through
+  // `this` -- the compiler answers `TS2339`. Walking outwards would invent a
+  // resolution the language does not have; the floor is the answer this shape
+  // had before there were any scopes at all.
+  const innerClassSite = 'class C {\n  getEngine(): IProbeEngine { return null as never; }\n'
+    + `  w() { const K = class { z() { void this.getEngine().${WRITE}; } }; void K; }\n}\n`;
+  const fileMapGetEngine = 'function getEngine(): Map<string, number> { return new Map(); }\n';
+  t('⛔ FLOOR: an inner CLASS EXPRESSION does not inherit the outer class\'s members through `this`',
+    verdictsIn(fileMapGetEngine + innerClassSite, ['IProbeEngine']), 'other/platform-type');
+  t('⛔ FLOOR: …and in the other declaration order the file-wide tier answers the engine instead',
+    verdictsIn(innerClassSite + fileMapGetEngine, ['IProbeEngine']), 'engine/IProbeEngine');
+
   // The same conflation decided two OTHER questions, and both are verdicts the
   // artefacts carry: WHICH object a site writes, and whether it is elevated.
   /** Every write call's object-name verdict, in source order. */
@@ -2451,7 +2824,22 @@ export function selfTest() {
     + 'declarations is two declarations in every direction it used to be one: the Map is not scored '
     + 'an engine write, the real engine write is not subtracted as a language global, the object '
     + 'name and the elevation are read from the site\'s own scope, and a name no enclosing scope '
-    + 'declares still resolves file-wide so nothing that resolved before stops).',
+    + 'declares still resolves file-wide so nothing that resolved before stops -- and the same in the '
+    + 'two places a name is NOT lexical: two classes sharing a property name are two properties at both '
+    + 'storage sites and through a `this.<base>.<member>` base, two same-named local functions are two '
+    + 'callables, each in both declaration orders, while a `this.<prop>` no enclosing class declares and '
+    + 'a method called from outside its class both still resolve file-wide -- and the callable map read '
+    + 'by how the CALL is written rather than by where the name was declared: a bare `f()` resolves '
+    + 'lexically and is never shadowed by a same-named method -- neither one on the enclosing class, '
+    + 'which the lookup chain excludes, nor one on an OBJECT LITERAL in the same block, which is kept '
+    + 'off that chain by being recorded under the literal -- in both declaration orders each, while '
+    + '`x.m()` reads neither -- and `this.m()` reads the container its `this` NAMES rather than the '
+    + 'enclosing class: that class when the site is one of its own members, through an arrow as '
+    + 'through none, but the OBJECT LITERAL when the site is one of the literal\'s methods however '
+    + 'many classes enclose it, and NO container at all inside a `function` expression, whose `this` '
+    + 'the language itself refuses -- in both declaration orders each, a miss inside the named '
+    + 'container falling to the file-wide FLOOR and never outwards to a class that merely encloses '
+    + 'it, while a plain `key: value` rebinds nothing and leaves the class answering).',
   );
   return 0;
 }
