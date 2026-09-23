@@ -353,17 +353,338 @@ describe('[#19808] the lookup existence probe is scoped to the caller\'s organiz
     expect(storeFor('rts_contact').get('ct_grp')?.account).toBe('acc_y');
   });
 
-  it('the dangling-reference audit keeps its unscoped probe — a stored cross-organization reference is NOT reported', async () => {
-    // Pinned so the audit's semantics move only by decision. The audit has no
-    // caller: it probes under the bare `{ isSystem: true }` it always used, so
-    // a row holding another organization's id reads as resolving. Whether the
-    // audit should probe under each row's OWN organization is an open
-    // question on the card, not something this fix decided.
+  // ── [#19837] The dangling-reference audit asks the same question the guard
+  // above now asks: each scanned row's reference is probed under that row's
+  // OWN organization (claim-seat ruling, option B). It used to probe under the
+  // bare `{ isSystem: true }`, so the row below read as resolving.
+
+  it('[#19837] the audit REPORTS a stored cross-organization reference — probed under the row\'s own organization', async () => {
+    // Written before #19808, or by an `isSystem` write: the guard never saw it.
     storeFor('rts_contact').set('ct_cross', { id: 'ct_cross', title: 'legacy', account: 'acc_y', organization_id: ORG_X });
+    // Named, not inherited from the environment: the per-row probe is the
+    // non-union postures' behaviour (see the `group` case below).
+    engine.setTenancyPostureProvider(() => 'isolated');
+    observed.length = 0;
 
     const out = await engine.inspectDanglingReferences({ objects: ['rts_contact'] });
 
     expect(out.undetermined).toBe(0);
-    expect(out.dangling).toEqual([]);
+    expect(out.dangling).toEqual([
+      { objectName: 'rts_contact', recordId: 'ct_cross', field: 'account', target: 'rts_account', value: 'acc_y' },
+    ]);
+    // The row's organization reached the driver as the probe's tenant.
+    const probe = observed.filter((c) => c.object === 'rts_account' && c.method === 'findOne');
+    expect(probe.map((c) => c.options?.tenantId)).toEqual([ORG_X, ORG_X]);
+  });
+
+  it('[#19837] lit controls: same-organization, NULL-organization and tenancy-disabled references are not reported', async () => {
+    const contacts = storeFor('rts_contact');
+    // `ct_x` (seeded above) holds a same-organization reference.
+    contacts.set('ct_y_own', { id: 'ct_y_own', title: 'y', account: 'acc_y', organization_id: ORG_Y });
+    // A NULL-organization row probes unscoped: its reference resolves anywhere.
+    contacts.set('ct_null', { id: 'ct_null', title: 'n', account: 'acc_y', organization_id: null });
+    // `cat_1` is stamped ORG_Y, so only the withheld tenant lets this resolve.
+    contacts.set('ct_cat', { id: 'ct_cat', title: 'c', catalog: 'cat_1', organization_id: ORG_X });
+    // The lit half: the same run still reports what really resolves nowhere.
+    contacts.set('ct_gone', { id: 'ct_gone', title: 'g', account: 'acc_nowhere', organization_id: ORG_X });
+
+    const out = await engine.inspectDanglingReferences({ objects: ['rts_contact'] });
+
+    expect(out.scanned).toBe(5);
+    expect(out.undetermined).toBe(0);
+    expect(out.dangling.map((d) => d.recordId)).toEqual(['ct_gone']);
+  });
+
+  it('[#19837] `group` posture: a cross-organization reference to an EXISTING row is not reported — the probe stays unscoped', async () => {
+    // Claim-seat decision completing option B: under a union posture the
+    // guard's reach is the WRITER's membership set, which the stored row does
+    // not record, so a per-row probe would be STRICTER than the rule and fire
+    // on healthy group data every sweep. The probe stays unscoped there.
+    engine.setTenancyPostureProvider(() => 'group');
+    const GROUP_MEMBER = { ...MEMBER_X, accessible_org_ids: [ORG_X, ORG_Y] } as unknown as ExecutionContext;
+    await engine.insert('rts_contact', { id: 'ct_grp', title: 'g', account: 'acc_y' }, { context: GROUP_MEMBER } as any);
+    expect(storeFor('rts_contact').get('ct_grp')).toMatchObject({ account: 'acc_y', organization_id: ORG_X });
+    // The lit half: the same run still reports what resolves nowhere.
+    storeFor('rts_contact').set('ct_gone', { id: 'ct_gone', title: 'g', account: 'acc_nowhere', organization_id: ORG_X });
+    observed.length = 0;
+
+    const out = await engine.inspectDanglingReferences({ objects: ['rts_contact'] });
+
+    expect(out.undetermined).toBe(0);
+    expect(out.dangling.map((d) => d.recordId)).toEqual(['ct_gone']);
+    // Unscoped: no probe of `rts_account` carried a tenant.
+    const probe = observed.filter((c) => c.object === 'rts_account' && c.method === 'findOne');
+    expect(probe.length).toBeGreaterThan(0);
+    expect(probe.every((c) => c.options?.tenantId === undefined)).toBe(true);
+
+    // Lit control: the SAME stored rows under `isolated` — the per-row probe applies.
+    engine.setTenancyPostureProvider(() => 'isolated');
+    const isolated = await engine.inspectDanglingReferences({ objects: ['rts_contact'] });
+
+    expect(isolated.dangling.map((d) => d.recordId)).toEqual(['ct_grp', 'ct_gone']);
+  });
+});
+
+/**
+ * [#19837] The master-detail PARENT binding reads the header under the
+ * caller's tenant scope.
+ *
+ * `resolveMasterDetailParent` (update by id) and `resolveMasterDetailParents`
+ * (insert, bulk update) read the header the detail's `parent.*` predicates are
+ * judged against. They read under a bare `{ isSystem: true }`, so the header
+ * was found in ANY organization. Measured on a real `SecurityPlugin` +
+ * `ObjectQL` + `SqlDriver` stack after #19808: an org-X caller naming an org-Y
+ * header got `note: required` for a `locked` header and `header:
+ * reference_not_found` for an `open` one — one bit of another organization's
+ * row per write, because `evaluateValidationRules` runs before
+ * `assertReferencesResolve`. The update doors leaked the same bit through
+ * `readonlyWhen` (a dropped or kept field, a strict refusal or not) and, for a
+ * row that already STORES a cross-organization header, through a committed or
+ * refused write.
+ *
+ * The read now runs under `ObjectQL.referenceCheckContext(context)`. A header
+ * outside the caller's tenant scope binds as ABSENT — the same binding a header
+ * that exists nowhere gets — so every pair below answers the same, and the
+ * controls prove the predicates still evaluate wherever the header is the
+ * caller's to read.
+ */
+describe('[#19837] the master-detail parent binding is scoped to the caller\'s organization', () => {
+  let engine: ObjectQL;
+  let observed: ObservedCall[];
+  let storeFor: (obj: string) => Map<string, Record<string, unknown>>;
+
+  const HEADER = {
+    name: 'pb_header',
+    label: 'Header',
+    fields: {
+      id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+      status: { name: 'status', label: 'Status', type: 'text' as const },
+    },
+  } as any;
+
+  /** A platform-global master (ADR-0066). */
+  const GLOBAL_HEADER = { ...HEADER, name: 'pb_gheader', label: 'Global header', tenancy: { enabled: false } } as any;
+
+  /** `requiredWhen` over `parent.*` — the insert and update doors. */
+  const LINE = {
+    name: 'pb_line',
+    label: 'Line',
+    fields: {
+      id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+      header: { name: 'header', label: 'Header', type: 'master_detail' as const, reference: 'pb_header' },
+      note: { name: 'note', label: 'Note', type: 'text' as const, requiredWhen: "parent.status == 'locked'" },
+    },
+  } as any;
+
+  const GLOBAL_LINE = {
+    ...LINE,
+    name: 'pb_gline',
+    label: 'Global line',
+    fields: { ...LINE.fields, header: { ...LINE.fields.header, reference: 'pb_gheader' } },
+  } as any;
+
+  /** `readonlyWhen` over `parent.*` — the update doors. */
+  const ITEM = {
+    name: 'pb_item',
+    label: 'Item',
+    fields: {
+      id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+      header: { name: 'header', label: 'Header', type: 'master_detail' as const, reference: 'pb_header' },
+      memo: { name: 'memo', label: 'Memo', type: 'text' as const, readonlyWhen: "parent.status == 'locked'" },
+    },
+  } as any;
+
+  beforeEach(async () => {
+    observed = [];
+    engine = new ObjectQL();
+    const stub = makeTenantScopedDriver(observed);
+    storeFor = stub.storeFor;
+    engine.registerDriver(stub.driver, true);
+    await engine.init();
+    for (const o of [HEADER, GLOBAL_HEADER, LINE, GLOBAL_LINE, ITEM]) engine.registry.registerObject(o, PACKAGE_ID);
+    const headers = storeFor('pb_header');
+    headers.set('hx_open', { id: 'hx_open', status: 'open', organization_id: ORG_X });
+    headers.set('hx_locked', { id: 'hx_locked', status: 'locked', organization_id: ORG_X });
+    headers.set('hy_open', { id: 'hy_open', status: 'open', organization_id: ORG_Y });
+    headers.set('hy_locked', { id: 'hy_locked', status: 'locked', organization_id: ORG_Y });
+    headers.set('hnull_locked', { id: 'hnull_locked', status: 'locked', organization_id: null });
+    // Stamped with ANOTHER organization on purpose, as `cat_1` above: only the
+    // engine withholding `tenantId` for a tenancy-disabled master resolves it.
+    storeFor('pb_gheader').set('gh_locked', { id: 'gh_locked', status: 'locked', organization_id: ORG_Y });
+  });
+
+  /** Insert a line with `note` omitted — `requiredWhen` decides. */
+  const insertLine = (header: string, object = 'pb_line') =>
+    engine.insert(object, { id: `ln_${header}`, header }, { context: MEMBER_X } as any);
+
+  it('premise: the org-X caller cannot read either org-Y header directly', async () => {
+    const rows = await engine.find('pb_header', { where: { id: { $in: ['hy_open', 'hy_locked'] } }, context: MEMBER_X });
+    expect(rows).toEqual([]);
+  });
+
+  it('insert — an org-Y `locked` header and an org-Y `open` header answer the same, as a header that exists nowhere', async () => {
+    const locked = await refusalOf(() => insertLine('hy_locked'));
+    const open = await refusalOf(() => insertLine('hy_open'));
+    const nowhere = await refusalOf(() => insertLine('h_nowhere'));
+
+    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'header', code: 'reference_not_found' }] };
+    expect(locked).toBeInstanceOf(ValidationError);
+    expect(envelopeOf(locked)).toEqual(expected);
+    expect(envelopeOf(open)).toEqual(expected);
+    expect(envelopeOf(nowhere)).toEqual(expected);
+    const shape = (err: unknown, id: string) => String((err as Error).message).split(id).join('ID');
+    expect(shape(locked, 'hy_locked')).toBe(shape(open, 'hy_open'));
+    expect(storeFor('pb_line').size).toBe(0);
+  });
+
+  it('update by id — a repoint onto an org-Y header answers the same whichever state that header is in', async () => {
+    storeFor('pb_line').set('ln_x', { id: 'ln_x', header: 'hx_open', note: null, organization_id: ORG_X });
+    const repoint = (header: string) =>
+      engine.update('pb_line', { header }, { where: { id: 'ln_x' }, context: MEMBER_X } as any);
+
+    const locked = await refusalOf(() => repoint('hy_locked'));
+    const open = await refusalOf(() => repoint('hy_open'));
+
+    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'header', code: 'reference_not_found' }] };
+    expect(envelopeOf(locked)).toEqual(expected);
+    expect(envelopeOf(open)).toEqual(expected);
+    expect(storeFor('pb_line').get('ln_x')?.header).toBe('hx_open');
+  });
+
+  it('update by id — `readonlyWhen` over a STORED org-Y header locks the field whichever state that header is in', async () => {
+    const items = storeFor('pb_item');
+    items.set('it_yl', { id: 'it_yl', header: 'hy_locked', memo: 'orig', organization_id: ORG_X });
+    items.set('it_yo', { id: 'it_yo', header: 'hy_open', memo: 'orig', organization_id: ORG_X });
+    const drops: Record<string, unknown[]> = { it_yl: [], it_yo: [] };
+    const writeMemo = (id: string) => engine.update('pb_item', { memo: 'new' }, {
+      where: { id }, context: MEMBER_X, onFieldsDropped: (d: unknown) => drops[id].push(d),
+    } as any);
+
+    await writeMemo('it_yl');
+    await writeMemo('it_yo');
+
+    // Unbound `parent` is #4889's fail-CLOSED LOCKED, for both: no bit leaks
+    // through the stored value or through the drop report.
+    expect(items.get('it_yl')?.memo).toBe('orig');
+    expect(items.get('it_yo')?.memo).toBe('orig');
+    expect(drops.it_yl).toEqual([{ object: 'pb_item', fields: ['memo'], reason: 'readonly_when' }]);
+    expect(drops.it_yo).toEqual(drops.it_yl);
+
+    // The bulk branch's batch header read: the same verdict, row by row.
+    items.set('it_bl', { id: 'it_bl', header: 'hy_locked', memo: 'orig', organization_id: ORG_X });
+    items.set('it_bo', { id: 'it_bo', header: 'hy_open', memo: 'orig', organization_id: ORG_X });
+    await engine.update('pb_item', { memo: 'new' }, { where: { id: { $in: ['it_bl', 'it_bo'] } }, multi: true, context: MEMBER_X } as any);
+    expect([items.get('it_bl')?.memo, items.get('it_bo')?.memo]).toEqual(['orig', 'orig']);
+
+    // …and under `strictReadonlyWrites`, both are the same loud refusal.
+    const strict = (id: string) => refusalOf(() => engine.update('pb_item', { memo: 'new' }, {
+      where: { id }, context: MEMBER_X, strictReadonlyWrites: true,
+    } as any));
+    const lockedStrict = envelopeOf(await strict('it_yl'));
+    expect({ status: lockedStrict.status, code: lockedStrict.code }).toEqual({ status: 500, code: 'ERR_READONLY_FIELD_REJECTED' });
+    expect(envelopeOf(await strict('it_yo'))).toEqual(lockedStrict);
+  });
+
+  it('update by id and bulk — `requiredWhen` over a STORED org-Y header is not judged against that header', async () => {
+    const lines = storeFor('pb_line');
+    for (const id of ['ln_yl', 'ln_yo', 'ln_bl', 'ln_bo']) {
+      lines.set(id, { id, header: id.endsWith('l') ? 'hy_locked' : 'hy_open', note: 'n', organization_id: ORG_X });
+    }
+
+    // Clearing `note` would violate `requiredWhen` against the locked header
+    // (ADR-0113: the pre-state complied). It used to be refused for `hy_locked`
+    // and committed for `hy_open`; the header is not the caller's to read, so
+    // both are now judged with `parent` unbound (#4977: fail-open) — alike.
+    await engine.update('pb_line', { note: '' }, { where: { id: 'ln_yl' }, context: MEMBER_X } as any);
+    await engine.update('pb_line', { note: '' }, { where: { id: 'ln_yo' }, context: MEMBER_X } as any);
+    // An OPERATOR on `id` is a predicate, so these take the bulk branch and its
+    // batch header read; a scalar `where.id` would route to the by-id branch
+    // even under `multi: true` (`resolveEngineUpdateDispatch`).
+    await engine.update('pb_line', { note: '' }, { where: { id: { $in: ['ln_bl'] } }, multi: true, context: MEMBER_X } as any);
+    await engine.update('pb_line', { note: '' }, { where: { id: { $in: ['ln_bo'] } }, multi: true, context: MEMBER_X } as any);
+
+    expect(['ln_yl', 'ln_yo', 'ln_bl', 'ln_bo'].map((id) => lines.get(id)?.note)).toEqual(['', '', '', '']);
+  });
+
+  it('lit controls: a same-organization `locked` header still requires `note`; an `open` one commits', async () => {
+    const err = await refusalOf(() => insertLine('hx_locked'));
+    expect(envelopeOf(err)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'required' }] });
+
+    await insertLine('hx_open');
+    expect(storeFor('pb_line').get('ln_hx_open')?.header).toBe('hx_open');
+  });
+
+  it('lit controls: a same-organization `locked` header still locks `readonlyWhen`; an `open` one lets it through', async () => {
+    const items = storeFor('pb_item');
+    items.set('it_xl', { id: 'it_xl', header: 'hx_locked', memo: 'orig', organization_id: ORG_X });
+    items.set('it_xo', { id: 'it_xo', header: 'hx_open', memo: 'orig', organization_id: ORG_X });
+
+    await engine.update('pb_item', { memo: 'new' }, { where: { id: 'it_xl' }, context: MEMBER_X } as any);
+    await engine.update('pb_item', { memo: 'new' }, { where: { id: 'it_xo' }, context: MEMBER_X } as any);
+
+    expect(items.get('it_xl')?.memo).toBe('orig');
+    expect(items.get('it_xo')?.memo).toBe('new');
+  });
+
+  it('lit controls: a NULL-organization header and a tenancy-disabled master still bind', async () => {
+    const nullOrg = await refusalOf(() => insertLine('hnull_locked'));
+    expect(envelopeOf(nullOrg)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'required' }] });
+
+    observed.length = 0;
+    const global = await refusalOf(() => insertLine('gh_locked', 'pb_gline'));
+    expect(envelopeOf(global)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'required' }] });
+    // Bound because the engine withheld the tenant for this master (ADR-0066).
+    const read = observed.filter((c) => c.object === 'pb_gheader' && c.method === 'find');
+    expect(read).toHaveLength(1);
+    expect(read[0].options?.tenantId).toBeUndefined();
+  });
+
+  it('`group` posture: a header inside the caller\'s membership set binds — the union reaches the header read', async () => {
+    // The spread carries `accessible_org_ids`, which `buildDriverOptions` widens
+    // into `tenantIds` under `group` (ADR-0105 D2) — the caller's read reach, so
+    // the header binds wherever the caller could read it, and nowhere else.
+    engine.setTenancyPostureProvider(() => 'group');
+    const GROUP_MEMBER = { ...MEMBER_X, accessible_org_ids: [ORG_X, ORG_Y] } as unknown as ExecutionContext;
+    observed.length = 0;
+
+    const inside = await refusalOf(() =>
+      engine.insert('pb_line', { id: 'ln_grp', header: 'hy_locked' }, { context: GROUP_MEMBER } as any));
+
+    expect(envelopeOf(inside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'required' }] });
+    const read = observed.filter((c) => c.object === 'pb_header' && c.method === 'find');
+    expect(read).toHaveLength(1);
+    expect([...(read[0].options?.tenantIds ?? [])].sort()).toEqual([ORG_X, ORG_Y].sort());
+
+    // Lit control: a member whose set is org X alone cannot see the org-Y
+    // header, so it binds absent and the write answers `reference_not_found`.
+    const ONLY_X = { ...MEMBER_X, accessible_org_ids: [ORG_X] } as unknown as ExecutionContext;
+    const outside = await refusalOf(() =>
+      engine.insert('pb_line', { id: 'ln_x_only', header: 'hy_locked' }, { context: ONLY_X } as any));
+
+    expect(envelopeOf(outside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'header', code: 'reference_not_found' }] });
+  });
+
+  it('the header read runs ELEVATED and TENANT-SCOPED — the two halves of `{ ...context, isSystem: true }`', async () => {
+    const reads: Array<{ operation: string; context: ExecutionContext }> = [];
+    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      if (opCtx.object === 'pb_header') reads.push({ operation: opCtx.operation, context: opCtx.context });
+      await next();
+    });
+    storeFor('pb_line').set('ln_x', { id: 'ln_x', header: 'hx_open', note: 'n', organization_id: ORG_X });
+
+    // Insert: `resolveMasterDetailParents` is the batch `find`; the `findOne`
+    // behind it is #19808's reference probe (the payload names the header).
+    await insertLine('hx_open');
+    // Update by id, header not in the payload: no reference probe, so the one
+    // `findOne` is `resolveMasterDetailParent` reading the stored row's header.
+    await engine.update('pb_line', { note: 'm' }, { where: { id: 'ln_x' }, context: MEMBER_X } as any);
+
+    expect(reads.map((r) => r.operation)).toEqual(['find', 'findOne', 'findOne']);
+    for (const { context } of reads) {
+      expect(context).toMatchObject({ isSystem: true, tenantId: ORG_X, userId: 'u_x' });
+    }
+    // …and the tenant reaches the driver on every one of them.
+    const driverReads = observed.filter((c) => c.object === 'pb_header');
+    expect(driverReads.map((c) => c.options?.tenantId)).toEqual([ORG_X, ORG_X, ORG_X]);
   });
 });
