@@ -60,6 +60,12 @@ const MEMBER: PermissionSet = {
   },
 } as unknown as PermissionSet;
 
+/** The driver's own query builder, reached past its `protected` modifier. */
+type Table = (name: string) => {
+  insert(rows: Array<Record<string, unknown>>): Promise<unknown>;
+  where(match: Record<string, unknown>): { select(...columns: string[]): Promise<unknown[]> };
+};
+
 /** Bound to org X. */
 const CALLER = { userId: 'u_x', tenantId: 'org_x', positions: [], permissions: [], posture: 'MEMBER' };
 
@@ -107,7 +113,8 @@ async function boot(kind: 'secret' | 'public') {
   vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
 
   // Straight into the table, past every scope: the fixture is not the subject.
-  await driver.knex('qa_line').insert([
+  const table = (driver as unknown as { knex: Table }).knex;
+  await table('qa_line').insert([
     { id: 'line_x', kind: 'secret', organization_id: 'org_x' },
     { id: 'line_y', kind, organization_id: 'org_y' },
   ]);
@@ -121,7 +128,7 @@ async function boot(kind: 'secret' | 'public') {
     return rows;
   });
 
-  const stored = async (name: string) => (await driver.knex('qa_inspection').where({ name }).select('id')).length;
+  const stored = async (name: string) => (await table('qa_inspection').where({ name }).select('id')).length;
   return { engine, readsOfLine, stored };
 }
 
