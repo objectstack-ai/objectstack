@@ -115,10 +115,25 @@ export {
 } from '../meta-spelling/manifest-collection-spelling.js';
 
 /**
+ * Whether `value` is a plain object — a `{ … }` literal, `Object.create(null)`,
+ * or a plain object from another realm (a `vm` context): its prototype is
+ * `null`, or a prototype whose own prototype is `null` (that realm's
+ * `Object.prototype`). A `Set`, `Map`, `Date`, array or class instance is not.
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === null || Object.getPrototypeOf(proto) === null;
+}
+
+/**
  * Normalize a single metadata collection value from map format to array format.
  * If the input is already an array (or nullish), it is returned unchanged.
  * If the input is a plain object (map), it is converted to an array where
  * each key is injected as the `name` field of the corresponding item.
+ * Any other value — including a non-plain object such as a `Set` or `Map` — is
+ * returned unchanged, so schema validation refuses it rather than this
+ * function reading it as an empty map.
  * 
  * **Precedence:** If an item already has a `name` property, it is preserved
  * (the map key is only used as a fallback).
@@ -148,8 +163,14 @@ export function normalizeMetadataCollection(value: unknown, keyField = 'name'): 
   // Nullish or already an array — pass through
   if (value == null || Array.isArray(value)) return value;
 
-  // Plain object — treat as map and convert to array
-  if (typeof value === 'object') {
+  // Plain object — treat as map and convert to array. ONLY a plain object: a
+  // `Set`, `Map`, `Date` or class instance is `typeof 'object'` too, and
+  // `Object.entries` reads its own enumerable string keys — `[]` for a `Set` or
+  // a `Map` — so treating it as the map form would hand the parse a valid empty
+  // array and drop every authored entry before any schema saw it. A non-plain
+  // object falls through unchanged so the strict parse refuses it as a
+  // non-array at the key, where it was written.
+  if (isPlainObject(value)) {
     return Object.entries(value as Record<string, unknown>).map(([key, item]) => {
       if (item && typeof item === 'object' && !Array.isArray(item)) {
         const obj = item as Record<string, unknown>;
