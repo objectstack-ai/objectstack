@@ -33,19 +33,18 @@
  * This file was STEP ① of that ruling; step ② retired the rule text and step ③
  * the label — its constant, the queue guard's label leg, the half-state rows
  * that patrolled it and the changeset gate's label carrier are gone from this
- * tree. What still stands beside this reader is `check-clause2-carriers.mjs`,
- * kept only because the queue guard's Tier S leg lazily imports its record
- * recognisers and `--template`; its `--pair` sweep is retired by the ruling and
- * nothing runs it, and the file goes once those recognisers are extracted.
+ * tree. Step ④ moved the record recognisers and `--template` the queue guard's
+ * Tier S leg imports into `record-recognisers.mjs` and deleted
+ * `check-clause2-carriers.mjs`, its retired `--pair` sweep with it.
  *
  * ## ⛔ One reader, and this is it
  *
- * `check-clause2-carriers.mjs` imports these symbols back rather than keeping a
- * copy, and so does `pm/post-stamped.mjs`. The condition the arm (#16421) landed
- * under is that the direction has a single legal spelling read in a single
- * place: a second parser anywhere — a regex in a gate, a "close enough" match in
- * a sweep — is the drift every docblock below refuses by name. Add a reading
- * HERE or not at all.
+ * `pm/post-stamped.mjs` imports the reader rather than keeping a copy, and
+ * `pm/record-recognisers.mjs` imports `quoteLine`. The condition the arm
+ * (#16421) landed under is that the direction has a single legal spelling read
+ * in a single place: a second parser anywhere — a regex in a gate, a "close
+ * enough" match in a sweep — is the drift every docblock below refuses by name.
+ * Add a reading HERE or not at all.
  *
  * ⛔ Nothing in this file reads a board, a comment thread, a label or a PR. It
  * is pure: text in, a four-valued reading out. Everything that talks to GitHub

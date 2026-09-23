@@ -633,9 +633,9 @@ export function breakingDeclaration(parsed) {
   const summary = (parsed.body.trim().split(/\n/)[0] || '').replace(/^\*\*|^#+\s*/, '');
   if (/^[a-z]+(\([^)]*\))?!:/.test(summary)) signals.push('bang');
   // (4) The direction arm. A `malformed` or `near-miss` reading declares
-  // nothing HERE and must not: this gate judges changesets, and the states that
-  // send a seat to fix an unreadable declaration are `check-clause2-carriers`'s
-  // rows, on the carriers that own them.
+  // nothing HERE and must not: this gate judges changesets, and the refusal that
+  // sends a seat to fix an unreadable declaration is `pm/post-stamped.mjs`'s, at
+  // the moment the claim carrying it is written.
   const decl = readClause2Line(parsed.body);
   if (decl?.kind === 'declared' && decl.arm === 'narrowing') signals.push('clause-②-narrowing');
   return { breaking: signals.length > 0, signals };

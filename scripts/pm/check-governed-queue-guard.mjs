@@ -277,8 +277,8 @@
  * dequeued `CI_FAILURE`, and only a SECOND COPY of the same comment on the PR
  * thread cured it. The thread set now travels inside the imported reader (see
  * `recordVerdict`), so the set this leg searches and the set `--template`
- * offers cannot be edited apart — a cross-tool pin in the sibling's self-test
- * drives this guard to prove it.
+ * offers cannot be edited apart — a cross-tool pin in `record-recognisers.mjs`'s
+ * self-test drives this guard to prove it.
  *
  * ⚖️ THE CARD IS DERIVED, never configured: from the pull request's own body
  * by the closing-keyword / `Part of` / branch-name relation the whole regime
@@ -298,7 +298,7 @@
  *
  * ⭐ RECOGNITION IS IMPORTED, NEVER RE-IMPLEMENTED — and since #18701 the
  * WHOLE reading is, not only the facts it is made of. `locateReviewOfRecord`
- * (`check-clause2-carriers.mjs`, the function that file composes the record
+ * (`record-recognisers.mjs`, the function that file composes the record
  * reading with) is what this leg calls: heading marker, head-sha span test, newest-of
  * resolution, `Reviewed-by:` key line, `Served-tier:` reader — and THE SET OF
  * THREADS to run them over. That last one is the fact a spelled-out filter here
@@ -619,19 +619,20 @@ export function tierSGlobs() {
 
 /**
  * WHERE a review of record may live, in the words a refusal prints — a MIRROR
- * of `REVIEW_OF_RECORD_LOCATION` in `check-clause2-carriers.mjs`, which is the
+ * of `REVIEW_OF_RECORD_LOCATION` in `record-recognisers.mjs`, which is the
  * one place the set itself is declared (#18701).
  *
  * ⚠️ THIS IS A MIRROR, NOT THE SOURCE, and the reason is a MODULE-EVAL CYCLE.
- * Importing `check-clause2-carriers.mjs` — or `check-half-states.mjs`, which
+ * Importing `record-recognisers.mjs` — or `check-half-states.mjs`, which
  * it imports — from here at MODULE SCOPE deadlocks both modules: that file's
  * H43 resolves its governed register at module scope with a top-level
  * `await loadGovernedRegister()`, which awaits `import('./check-governed-queue-guard.mjs')`
  * — this file — for `GOVERNED_APPROVERS`. Adding the reverse edge deadlocks
  * BOTH modules; measured on 2026-09-10, node exits 13 with "Detected unsettled
  * top-level await" and `check-half-states.mjs` stops loading standalone as well.
- * Re-measured on 2026-09-13 through `check-clause2-carriers.mjs`, which imports
- * that file: the INDIRECT edge deadlocks identically, exit 13 at the same line.
+ * Re-measured on 2026-09-13 through `check-clause2-carriers.mjs`, and on
+ * 2026-09-23 through `record-recognisers.mjs`, which took its recognisers over —
+ * both import that file, and the INDIRECT edge deadlocks identically, exit 13.
  * The references tier reaches the recognisers with a LAZY import taken after
  * this module has finished evaluating — legal only because this file's own
  * dispatch carries no top-level `await`, which `loadRecordRecognisers` states
@@ -647,7 +648,7 @@ export const REVIEW_OF_RECORD_LOCATION = 'the PR or its card';
 
 /**
  * `governedTierFor` — the register's own function, re-exported so this file's
- * readers (`check-clause2-carriers.mjs`'s cross-tool pin) and its battery keep
+ * readers (`record-recognisers.mjs`'s cross-tool pin) and its battery keep
  * one name. ⛔ Not a wrapper and not a copy: the register answers, this file
  * relays. The tier docblock above carries the ALL-not-ANY rule and the H default.
  */
@@ -655,7 +656,7 @@ export { governedTierFor };
 
 /** Where each imported recogniser lives. Named, so a failure can say which file. */
 export const RECOGNISER_SOURCES = Object.freeze({
-  tier: './check-clause2-carriers.mjs',
+  tier: './record-recognisers.mjs',
 });
 
 /**
@@ -666,7 +667,7 @@ export const RECOGNISER_SOURCES = Object.freeze({
  * before touching this function: `check-half-states.mjs` resolves its governed
  * register at MODULE SCOPE with a top-level await that imports THIS file. A
  * module-scope import from here — direct, or indirect through
- * `check-clause2-carriers.mjs`, which imports that file — deadlocks both
+ * `record-recognisers.mjs`, which imports that file — deadlocks both
  * modules (node exits 13, "Detected unsettled top-level await"; measured both
  * ways, see `REVIEW_OF_RECORD_LOCATION`). The cycle closes only while THIS module
  * is still evaluating, so the import is taken from a function body, after
@@ -3945,7 +3946,7 @@ export async function selfTest() {
   );
   assert(
     'and-the-recogniser-source-is-the-ONE-file-that-COMPOSES-these-parsers',
-    RECOGNISER_SOURCES.tier === './check-clause2-carriers.mjs' && Object.keys(RECOGNISER_SOURCES).length === 1,
+    RECOGNISER_SOURCES.tier === './record-recognisers.mjs' && Object.keys(RECOGNISER_SOURCES).length === 1,
     Object.keys(RECOGNISER_SOURCES).join(', '),
   );
   assert(

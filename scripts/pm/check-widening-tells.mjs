@@ -4292,7 +4292,7 @@ function main(argv, env = process.env) {
     console.error(
       'check-widening-tells: the board is not an argument. Set PM_SWEEP_REPO — e.g. ' +
         "PM_SWEEP_REPO=objectstack-ai/objectui node scripts/pm/check-widening-tells.mjs --declaration no --diff - " +
-        '— which is the same convention `check-clause2-carriers.mjs` reads, and ⛔ never a second one.',
+        '— which is the same convention `check-half-states.mjs` reads, and ⛔ never a second one.',
     );
     return EXIT_USAGE;
   }

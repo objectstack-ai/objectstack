@@ -1222,7 +1222,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 // Reading the two ownership markers — ONE place, decoration included (#18680).
 //
 // The two constants above describe the BARE directive and still do: they are
-// exported, a sibling gate imports the claim one (`check-clause2-carriers.mjs`)
+// exported, a sibling tool imports the claim one (`post-stamped.mjs`)
 // and several cases here assert on them directly, so their semantics are held
 // still on purpose. What was missing is the READING — how a line written by a
 // seat is offered to them.
@@ -2705,10 +2705,9 @@ export function branchNameTarget(ref) {
  *
  * ⚠️ This relation answers "is there a PR on this card", NOT "is the card
  * finished". H8's MERGED side needs the second question and asks it of
- * `prFullyDeliversCard` below; every other reader here — H8's open side,
- * `claimDelivery`, and the pairing `check-clause2-carriers` derives — wants
- * this wide one, because a half in flight is live work. ⛔ Do
- * not narrow it here to serve H8: that would make the live half invisible to
+ * `prFullyDeliversCard` below; every other reader here — H8's open side and
+ * `claimDelivery` — wants this wide one, because a half in flight is live
+ * work. ⛔ Do not narrow it here to serve H8: that would make the live half invisible to
  * the rows that exist to see it.
  *
  * ⭐ And ⛔ not narrowed for a reader that needs the stronger question either
@@ -5488,8 +5487,9 @@ export function claimedBranches(body) {
  *
  * ⭐ An unparsed claim is an UNCLASSIFIED result, ⛔ never a "no". Its three
  * consequences are all silent and all wrong in different directions: H20/H27
- * probe a branch the seat is no longer on, `check-clause2-carriers` reads a
- * SUPERSEDED declaration as if it were the current one (measured on #16322 —
+ * probe a branch the seat is no longer on, `check-clause2-carriers` (deleted
+ * since) read a SUPERSEDED declaration as if it were the current one (measured
+ * on #16322 —
  * two rounds, a director re-review and a re-issued claim to clear), and the
  * near-miss on the same card is sharper still — a fallback whose older claim
  * happens to AGREE is a green that is right for the wrong reason and nothing
@@ -6698,9 +6698,10 @@ export function h30QueueRotting(issue, nowMs = Date.now()) {
  * `prDeliversCard` owns the second question and stays wide for the readers that
  * need a half in flight to be visible. ⛔ Do not substitute one for the other.
  *
- * Exported because `check-clause2-carriers.mjs` asks the same question of an
- * epic tracker reached through a `Part of` line (#18214), and wants this
- * predicate rather than a second copy of it.
+ * Exported for `check-clause2-carriers.mjs`, which asked the same question of
+ * an epic tracker reached through a `Part of` line (#18214) and wanted this
+ * predicate rather than a second copy of it; that file is deleted, and no other
+ * file imports it.
  */
 export function bindingClosesCard(pr, n) {
   return deliveryEvidence(pr, n) === 'closing-keyword';
@@ -10588,8 +10589,7 @@ export function h45EpicUnderUndelegatedParent(issue, parent) {
 //
 // The keyword extraction is `closingKeywordTargets` — H7's and H21's, so the
 // three rows can never disagree about what GitHub will act on. The claim half
-// is `CLAIM_COMMENT_MARKER` and the branch half is `claimedBranches`, the same
-// pair `check-clause2-carriers.mjs` reads.
+// is `CLAIM_COMMENT_MARKER` and the branch half is `claimedBranches`.
 //
 // ## What it costs, and the silences that buys
 //
@@ -11360,7 +11360,7 @@ export const H50_COMMENT_PAGE_CEILING = 5;
 /**
  * The `Thread-read:` line of a claim body — H2's leading-blockquote tolerance,
  * `claimedBranches`'s leading-bullet tolerance, and the bold/code decoration
- * around the key that `check-clause2-carriers` admits on `Clause-②`. ⛔ The
+ * around the key that `readClause2Line` (`clause2-line.mjs`) admits on `Clause-②`. ⛔ The
  * VALUE is read strictly: the remainder of the line, trimmed, with ONE pair of
  * enclosing backticks removed and nothing else decoded — a hashed, prosed or
  * capitalised value is reported as the text it is, exactly as a `Clause-②: YES`
@@ -11859,7 +11859,7 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
 // ---------------------------------------------------------------------------
 // The contract-review RECORD readers — the heading marker, the head-sha span
 // and the newest-on-head finder. Read by H48/H64 here and, through
-// `check-clause2-carriers.mjs`, by the queue guard's record recognisers. The
+// `record-recognisers.mjs`, by the queue guard's record recognisers. The
 // rows that patrolled the retired `needs:contract-review` label around these
 // readers are gone (ruling record 5770886272 on #19061, letter B); the
 // `H51_` prefix on the two span constants is kept so their importer keeps one
@@ -13982,8 +13982,7 @@ export function h60ClaimBranchUnparsed(issue, governance) {
       : `governance SILENTLY FELL BACK to an OLDER claim (${governing.createdAt ?? 'undated'}, ` +
         `naming ${namedBranches(governing.branches.map((branch) => ({ branch, state: 'exists' })))}) — ` +
         'so every reader here is answering about a claim this seat has already replaced. H20 and H27 ' +
-        'probe the superseded branch; `check-clause2-carriers` reads the superseded comment\'s ' +
-        '`Clause-②` declaration as if it were the current one. ⚠️ And when the older claim happens ' +
+        'probe the superseded branch. ⚠️ And when the older claim happens ' +
         'to AGREE, the fallback produces a GREEN that is right for the wrong reason and no row ' +
         'anywhere reports it — that near-miss is the sharper half of this class, not the mild one.';
 
@@ -24728,8 +24727,8 @@ async function selfTest() {
   t('#16706 reader claimDelivery: …and the suppression is attributable', cd.evidence[0].kind, 'part-of-inline');
   t('#16706 reader claimDelivery: …naming the PR it came from', cd.evidence[0].pr, 8354);
   t('#16706 reader claimDelivery: a merged delivery is attributed too', claimDelivery(7760, [], [mergedPr(8354, body8354)]).evidence[0].kind, 'closing-keyword');
-  // READER 4 is `derivePairs`/C1, which lives in `check-clause2-carriers.mjs`
-  // and is pinned in that file's own self-test.
+  // READER 4 was `derivePairs`/C1, deleted with `check-clause2-carriers.mjs`
+  // and that file's own pin of it.
 
   // -- #16706: the `Refs` axis — the reading the ruling asked for -----------
   // The hole is OPEN on this axis too: `refsRe` is documented as "same
@@ -32088,7 +32087,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // SYNTHETIC fixtures (⛔ the self-test never touches GitHub) whose SHAPES were
   // read off the live board: two title dialects and the 7-to-40 hex spelling
   // range. `latestContractReviewOnHead` is what the queue guard's recognisers
-  // reach through `check-clause2-carriers.mjs`, so its head-scoping stays pinned.
+  // reach through `record-recognisers.mjs`, so its head-scoping stays pinned.
   const HEAD51 = 'ba3d95a4f3514243131a698f12589c23d49e6fcd';
   const OLDHEAD51 = 'de0bd50469a6c5f20102f67e0901c43fe316567c';
   const cm51 = (id, body, at) => ({ id, body, created_at: at });
