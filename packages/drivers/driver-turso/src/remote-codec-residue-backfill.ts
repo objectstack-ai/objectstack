@@ -86,7 +86,10 @@
  * ## Exact by construction, not by a second definition
  *
  * The SQL here only PRE-FILTERS: it selects a superset of the cells that could
- * be rewritten, cheaply enough to run on every boot. The decision and the new
+ * be rewritten, cheaply enough to run on every boot. There is one exception, in
+ * the safe direction: a `date` text with an embedded NUL after the day. SQLite's
+ * `length()` stops at the NUL, so that cell is never selected and stays as
+ * stored. The decision and the new
  * value come from the driver's own codec, handed over rather than copied. That
  * is `JSON.parse` / `JSON.stringify` for json (the `formatOutput` / `formatInput`
  * json arms) and `SqlDriver.toDateOnly` for date. A cell the pre-filter selects
@@ -167,8 +170,8 @@ export interface RemoteCodecResidueReport {
  * Written as escapes and BOUND as an argument, never inlined into SQL.
  */
 export const JS_TRIM_CHARS =
-  '\u0009\u000A\u000B\u000C\u000D        ' +
-  '          　﻿';
+  '\u0009\u000A\u000B\u000C\u000D\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004' +
+  '\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF';
 
 interface SqlFragment {
   sql: string;
@@ -176,12 +179,15 @@ interface SqlFragment {
 }
 
 /**
- * The pre-filter: a superset of the cells the codec could rewrite.
+ * The pre-filter: a superset of the cells the codec could rewrite, with one
+ * exception in the safe direction (the date bullet).
  *
  * - json: TEXT that SQLite's `json_valid()` rejects. `JSON.parse` then decides.
  * - date: TEXT longer than a bare day whose left-trimmed first ten characters
- *   are `YYYY-MM-DD`. That is exactly when `toDateOnly` answers a different
- *   string, since its answer is those ten characters. `GLOB '[0-9]'` is ASCII
+ *   are `YYYY-MM-DD`. That is when `toDateOnly` answers a different string,
+ *   since its answer is those ten characters. The exception is a text with an
+ *   embedded NUL after the day: SQLite's `length()` stops at the NUL, so the
+ *   cell is not selected and stays as stored. `GLOB '[0-9]'` is ASCII
  *   digits, like the helper's `\d`.
  */
 export function residueCandidateSql(kind: RemoteCodecResidueKind, columnSql: string): SqlFragment {
