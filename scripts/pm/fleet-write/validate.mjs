@@ -689,7 +689,8 @@ export async function selfTest() {
   }
   console.log(
     `✓ fleet-write/validate self-test: ${cases.length} cases pass across ${declared.length} batteries — a closed envelope, one organization, ` +
-      'closed keys per op with typed values, the platform\'s own client_payload ceilings pinned with their source, and no row that can reach a refused family.',
+      'closed keys per op with typed values, the platform\'s own client_payload ceilings pinned with their source, no row that can reach a refused family, ' +
+      'and a token list of ONE repository for every op but transfer, whose second is one governed target.',
   );
   selfTestReachedVerdict = true;
   return 0;
