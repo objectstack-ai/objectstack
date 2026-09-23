@@ -12,9 +12,11 @@
     "Regenerate + re-record: pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs"
   ],
   "objectuiSha": "62597c588072636e9c30ea35b3d89b1e46fd765d",
-  "objectuiPackagesVersion": "17.6.0",
+  "source": "built-tree",
+  "modulesRoot": ".cache/objectui-62597c588072/apps/console",
+  "objectuiWorkspaceVersion": "17.6.0",
   "generator": "scripts/gen-sdui-manifest-node.mjs",
   "generatedAt": "2026-09-23",
-  "sha256": "49211fee7792cf51174930dc2c1be2169d5175f77a83491f68f90b3f0c19e69d",
-  "components": 57
+  "sha256": "22c83c9ec70163559c2bd8f7b1613174d8660ad9949d15ed483a4189b7857c9a",
+  "components": 59
 }

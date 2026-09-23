@@ -405,42 +405,11 @@ jobs:
       - name: Verify the Console dist stamp matches the pin
         run: pnpm check:console-sha
 
-      # ────────────────────────────────────────────────────────────────────────
-      # ADR-0082 D4 declaration-parity ratchet — the mandatory SECOND HALF of
-      # every pin move (#5960), run here against the pin as COMMITTED.
-      #
-      # ⚠️ Since #10134 this lane no longer moves the pin, so this is no longer
-      # "the second half of a move this run performed" — the move, and the
-      # ratchet that belongs to it, happen on the manual bump PR. Kept anyway,
-      # and deliberately: the ratchet is an on-demand gate by decision (ADR-0082
-      # addendum), which means "unrun" is its live failure mode, and a bump PR
-      # that skipped it leaves a divergence that reaches a release unnoticed.
-      # This is the last place before publish that can still say so. It writes to
-      # a gitignored path and asserts against the committed baseline, so it adds
-      # no file to the version commit; on a pin that already ratcheted it simply
-      # passes.
-      #
-      # Installing a Playwright browser is fine HERE. The #5960 ruling that keeps
-      # the ratchet off CI is about not putting an objectui build plus a browser
-      # download on every matching PR; this workflow runs a handful of times a
-      # month, on purpose, and has already built the console two steps above.
-      # ────────────────────────────────────────────────────────────────────────
-      - name: Install a Playwright browser for the manifest dump
-        run: |
-          # The dump runs INSIDE objectui's build tree (gen-sdui-manifest.sh does
-          # `pushd $BUILD_ROOT` and drives objectui's own playwright), so the
-          # browser must be installed against THAT workspace. `pnpm exec
-          # playwright` from the framework root resolves nothing — playwright is
-          # not a framework dependency.
-          BUILD_ROOT=".cache/objectui-${OBJECTUI_SHA:0:12}"
-          if [ ! -d "$BUILD_ROOT" ]; then
-            echo "::error::expected objectui build tree at ${BUILD_ROOT} (created by 'pnpm objectui:build'). Cannot install the browser the ratchet needs."
-            exit 1
-          fi
-          pnpm --dir "$BUILD_ROOT" exec playwright install chromium-headless-shell
-
-      - name: 'Declaration-parity ratchet at the committed pin (ADR-0082 D4)'
-        run: pnpm sdui:manifest
+      # No SDUI manifest step follows. The console dist built above already
+      # carries the TRACKED repo-root sdui.manifest.json (build-console.sh copies
+      # it), whose freshness against the pin the required lint job holds on every
+      # PR; the ADR-0082 D4 declaration-parity ratchet that used to run here, and
+      # the Playwright browser it needed, are retired.
 
       # ────────────────────────────────────────────────────────────────────────
       # PRE-VERSION GATES. Every one of these reads `.changeset/*`, so all of them
