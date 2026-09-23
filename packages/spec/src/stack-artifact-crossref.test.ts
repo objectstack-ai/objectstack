@@ -396,18 +396,18 @@ describe('#18202 — an input that bypassed the strict parse IS checked at compo
  * The shape guard the two collectors carry (#18202 rework).
  *
  * Because the artifact pass reads `permissions` / `data` off inputs the strict
- * parse never saw, those keys can be a non-array, and an entry can be `null` or
- * a scalar. `composeStacks`'s step-3 concat pass already refuses to drop such a
- * key without a word (#5005); the two collectors must not turn the same input
- * into a bare `TypeError` with no `code` and no `status`, which is exactly what
- * this pass did before the guards existed. Every case below composes on
- * `origin/main`, so a throw here is a regression, not a stricter contract.
+ * parse never saw, an entry can be `null` or a scalar; the two collectors must
+ * not turn such an input into a bare `TypeError` with no `code` and no
+ * `status`, which is exactly what this pass did before the guards existed.
+ * Every entry-shape case below composes, so a throw there is a regression, not
+ * a stricter contract.
  *
- * ⚠️ `warnMalformedCollectionKey` deduplicates per key for the lifetime of the
- * module, so each key is asserted in exactly ONE test and the count assertion
- * (`toBe(1)`) is what proves the two passes do not both speak.
+ * A non-array VALUE for either key is a different finding: since #19784
+ * `composeStacks`'s step-3 concat pass REFUSES it with the ADR-0112 envelope
+ * before this pass runs — skipping it composed an artifact without that
+ * stack's grants or seed rows — so those two cases assert the refusal.
  */
-describe('#18202 — a malformed collection on an unparsed input is skipped, never a bare TypeError', () => {
+describe('#18202 — a malformed collection on an unparsed input is skipped or refused, never a bare TypeError', () => {
   /** Collect `console.warn` for one call, restoring the real one afterwards. */
   function warningsDuring(run: () => unknown): { warnings: string[]; thrown: Envelope | null } {
     const warnings: string[] = [];
@@ -428,21 +428,21 @@ describe('#18202 — a malformed collection on an unparsed input is skipped, nev
   const composeWith = (stack: ReturnType<typeof defineStack>) => () =>
     composeStacks([serviceStack(), stack], { manifest: 'preserve' });
 
-  it('a non-array `permissions` composes, and the key is warned about exactly once', () => {
-    // Map format, which `permissions` does not support — the shape a
-    // hand-built stack most plausibly carries. It is NOT iterable, which is
-    // what makes this the case that distinguishes the guard: a string value
-    // would iterate its characters and never throw either way.
+  it('a non-array `permissions` is refused by the concat pass, never a bare TypeError (#19784)', () => {
+    // Map format on a hand-built stack (only `defineStack` normalizes it). It
+    // is NOT iterable, which is what makes this the case that distinguishes a
+    // guard from a bare `TypeError`: a string value would iterate its
+    // characters and never throw either way.
     const mapShaped = { sales_rep: { label: 'Sales Rep', objects: { [NOWHERE]: { allowRead: true } } } };
-    const { warnings, thrown } = warningsDuring(composeWith(malformed({ permissions: mapShaped })));
-    expect(thrown).toBeNull();
-    expect(warnings.filter((w) => w.includes("top-level key 'permissions'"))).toHaveLength(1);
+    const { thrown } = warningsDuring(composeWith(malformed({ permissions: mapShaped })));
+    expect(thrown?.code).toBe('STACK_SCHEMA_INVALID');
+    expect(thrown?.status).toBe(422);
   });
 
-  it('a non-array `data` composes, and the key is warned about exactly once', () => {
-    const { warnings, thrown } = warningsDuring(composeWith(malformed({ data: 42 })));
-    expect(thrown).toBeNull();
-    expect(warnings.filter((w) => w.includes("top-level key 'data'"))).toHaveLength(1);
+  it('a non-array `data` is refused by the concat pass, never a bare TypeError (#19784)', () => {
+    const { thrown } = warningsDuring(composeWith(malformed({ data: 42 })));
+    expect(thrown?.code).toBe('STACK_SCHEMA_INVALID');
+    expect(thrown?.status).toBe(422);
   });
 
   it('a null entry inside `permissions` is skipped, not dereferenced', () => {
