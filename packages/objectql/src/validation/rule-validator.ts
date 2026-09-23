@@ -832,6 +832,11 @@ function withoutKeys(
  *    declaration order and payload key order cannot move the answer.
  *  - The exact set need not lie inside ①'s: a key ① kept can lock once
  *    another key is released, and the exact set drops it.
+ *  - Each claim is about the views this function is handed. The engine's
+ *    master-detail settlement judges the FK here against the header it NAMES
+ *    and, when the FK does not land, judges the rest against the header the
+ *    row KEEPS (#19853): an FK dropped that way can be unlocked on the row the
+ *    write stores, as it could before #19927.
  *
  * Cost, counted in key judgements (a bulk write judges each over its matched
  * rows): at most n(n + 1) / 2 in ①, at most n + n² in ②. When ① or its first
