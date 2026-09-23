@@ -67,10 +67,10 @@ export const entry: SemanticMigration = {
     + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
     + '(1195 again at 9b62f54671); and the objectui '
     + 'checkout this repo builds against — this is the pin, '
-    + '`.objectui-sha` = `87af769e9a3ee28ace099fdd653d3ebd79fe82e2`, re-read from this tree — '
-    + 'spells all six metrics def names and both distinctive keys 0 times across 8228 tracked '
-    + 'files at that sha, against lit controls window 3464, timeout 1075, period 170, '
-    + 'interval 170 and metrics 324 on that same corpus and sha, so no pin bump is owed. '
+    + '`.objectui-sha` = `62597c588072636e9c30ea35b3d89b1e46fd765d`, re-read from this tree — '
+    + 'spells all six metrics def names and both distinctive keys 0 times across 8303 tracked '
+    + 'files at that sha, against lit controls window 3526, timeout 1086, period 170, '
+    + 'interval 179 and metrics 324 on that same corpus and sha, so no pin bump is owed. '
     + '#15939, #15679, #14478, ADR-0087.',
   acceptanceCriteria:
     'Every metric definition spells summary.maxAgeSeconds, every error-budget burn rate window '

@@ -48,7 +48,9 @@ import {
 
 const SYSTEM_CTX = { isSystem: true } as const;
 /**
- * Max by-name candidates read when resolving a scope's business-unit anchor.
+ * Max by-name candidates read when resolving a scope's business-unit anchor,
+ * or a position's own `sys_position` row (the same shape: `sys_position.name`
+ * is per-organization too — see `resolveOwnPosition`).
  *
  * `sys_business_unit.name` carries NO uniqueness — the object's only unique
  * index is `(code, organization_id)` — so under a walled posture two
@@ -322,7 +324,7 @@ export class DelegatedAdminGate {
 
     switch (opCtx.object) {
       case 'sys_user_position':
-        return this.assertAssignmentWrite(opCtx, ctx, held);
+        return this.assertAssignmentWrite(opCtx, ctx, held, organizationId);
       case 'sys_user_permission_set':
         return this.assertDirectGrantWrite(opCtx, ctx, held);
       case 'sys_position_permission_set':
@@ -461,7 +463,7 @@ export class DelegatedAdminGate {
     const assignablePositions: string[] = [];
     if (placing.length > 0) {
       for (const positionName of await allPositions()) {
-        const boundSets = await this.setsBoundToPosition(positionName);
+        const boundSets = await this.setsBoundToPosition(positionName, organizationId);
         const ok = placing.some((s) =>
           boundSets.every(
             (bound) =>
@@ -605,12 +607,12 @@ export class DelegatedAdminGate {
       }
 
       // 5. The position must opt in to delegation.
-      if (!(await this.positionIsDelegatable(positionName))) {
+      if (!(await this.positionIsDelegatable(positionName, organizationId))) {
         deny(`position '${positionName}' is not delegatable — set delegatable: true on the position to allow it`, { position: positionName });
       }
 
       // 6. A delegatable position must not distribute administration.
-      const boundSets = await this.setsBoundToPosition(positionName);
+      const boundSets = await this.setsBoundToPosition(positionName, organizationId);
       for (const b of boundSets) {
         if (parseMaybeJson((b as any).admin_scope ?? (b as any).adminScope)) {
           deny(`position '${positionName}' distributes the admin set '${b.name}' — administration cannot be self-delegated (D12 containment)`, { position: positionName, permissionSet: b.name });
@@ -654,12 +656,47 @@ export class DelegatedAdminGate {
       }));
   }
 
-  private async positionIsDelegatable(positionName: string): Promise<boolean> {
+  /**
+   * Resolve a position NAME to the caller's own organization's `sys_position`
+   * row — the one read both position-keyed authority decisions below stand on.
+   *
+   * `sys_position` is a per-organization catalog upserted by
+   * `(name, organization_id)`, and `name` carries no installation-wide
+   * uniqueness, so under a walled posture two organizations may each hold a
+   * position of the same name. A `limit: 1` read under a bare system context
+   * answered whichever row the driver ordered first — an id ordering, not an
+   * organization — and that row then decided whether the position may be
+   * self-delegated and which permission sets it distributes.
+   *
+   * The same two arms {@link resolveSubtree} uses for a business-unit anchor,
+   * and for the same reasons: the read carries the caller's organization so
+   * the driver composes a tenant predicate, and {@link resolveOwnOrganizationRow}
+   * reduces what came back to the caller's OWN row (a driver's compatibility
+   * arm also returns organization-less rows; a driver with no tenant scoping
+   * returns every organization's).
+   *
+   * Fail closed: a name with no row in the caller's organization resolves to
+   * `null` — never to another organization's row, never to an unscoped read.
+   * An organization-less caller (`single` posture) keeps the by-name answer —
+   * there is no other organization for it to cross into.
+   */
+  private async resolveOwnPosition(positionName: string, organizationId?: string): Promise<any | null> {
     const ql = this.deps.ql;
-    if (!ql?.find) return false;
+    if (!ql?.find || !positionName) return null;
+    const rows = await ql.find('sys_position', {
+      where: { name: positionName },
+      limit: ANCHOR_CANDIDATE_LIMIT,
+      context: organizationScopedCtx(organizationId),
+    });
+    return resolveOwnOrganizationRow(Array.isArray(rows) ? rows : [], organizationId).own;
+  }
+
+  /** [ADR-0091 D3 rule 5] Does the caller's OWN organization's row for this
+   *  position opt in to delegation? A position with no row there is not
+   *  delegatable (fail closed — see {@link resolveOwnPosition}). */
+  private async positionIsDelegatable(positionName: string, organizationId?: string): Promise<boolean> {
     try {
-      const rows = await ql.find('sys_position', { where: { name: positionName }, limit: 1, context: SYSTEM_CTX });
-      const pos = Array.isArray(rows) && rows[0] ? rows[0] : null;
+      const pos = await this.resolveOwnPosition(positionName, organizationId);
       const v = (pos as any)?.delegatable;
       return v === true || v === 1 || v === '1';
     } catch {
@@ -669,12 +706,17 @@ export class DelegatedAdminGate {
 
   // ── sys_user_position: user ↔ position assignments ──────────────────
 
-  private async assertAssignmentWrite(opCtx: any, ctx: any, held: HeldScope[]): Promise<void> {
+  private async assertAssignmentWrite(
+    opCtx: any,
+    ctx: any,
+    held: HeldScope[],
+    organizationId?: string,
+  ): Promise<void> {
     const targets = await this.materializeTargets(opCtx, 'sys_user_position');
     for (const t of targets) {
       const buId = t.next?.business_unit_id ?? null;
       const positionName = String(t.next?.position ?? t.prev?.position ?? '');
-      const boundSets = positionName ? await this.setsBoundToPosition(positionName) : [];
+      const boundSets = positionName ? await this.setsBoundToPosition(positionName, organizationId) : [];
 
       const failure = this.firstApprovalFailure(held, (s) => {
         if (!s.scope.manageAssignments) return 'the scope does not grant manageAssignments';
@@ -1123,12 +1165,18 @@ export class DelegatedAdminGate {
     return [{ next: null, prev }];
   }
 
-  private async setsBoundToPosition(positionName: string): Promise<Array<{ name: string; admin_scope?: any }>> {
+  /** The permission sets the caller's OWN organization's row for this position
+   *  distributes. A position with no row there distributes nothing (fail
+   *  closed — see {@link resolveOwnPosition}); the bindings and sets are then
+   *  read by the resolved row's id, which no other organization shares. */
+  private async setsBoundToPosition(
+    positionName: string,
+    organizationId?: string,
+  ): Promise<Array<{ name: string; admin_scope?: any }>> {
     const ql = this.deps.ql;
     if (!ql?.find) return [];
     try {
-      const posRows = await ql.find('sys_position', { where: { name: positionName }, limit: 1, context: SYSTEM_CTX });
-      const pos = Array.isArray(posRows) && posRows[0] ? posRows[0] : null;
+      const pos = await this.resolveOwnPosition(positionName, organizationId);
       if (!pos?.id) return [];
       const bindings = await ql.find('sys_position_permission_set', {
         where: { position_id: pos.id },

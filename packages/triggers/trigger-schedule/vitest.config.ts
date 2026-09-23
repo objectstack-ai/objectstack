@@ -53,6 +53,14 @@ export default defineConfig({
         find: /^@objectstack\/metadata-core$/,
         replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
       },
+      {
+        // [#19834] The per-kernel policy acceptance suite boots two REAL
+        // `LiteKernel`s in one process. Same rule as the two entries above: a
+        // value import of `@objectstack/core` from a test must read the source
+        // in this checkout, never a `dist/` that may be behind it.
+        find: /^@objectstack\/core$/,
+        replacement: path.resolve(__dirname, '../../core/src/index.ts'),
+      },
     ],
   },
 });

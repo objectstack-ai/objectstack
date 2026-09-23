@@ -155,6 +155,7 @@ import {
   TenantLayer0VerdictSchema,
   type TenancyPosture,
   type TenantLayer0Verdict,
+  postureUsesUnionScope,
 } from '@objectstack/spec/security';
 
 /**
@@ -6791,11 +6792,12 @@ export class ObjectQL implements IObjectQLEngine {
    * `false` here, exactly like a row that exists nowhere (#19808).
    *
    * Without a `context` the elevation is the bare `{ isSystem: true }` and the
-   * probe spans every organization. That is how
-   * {@link inspectDanglingReferences} calls it — the audit has no caller, and
-   * its semantics are unchanged by #19808 — so the audit does not report a
-   * stored reference whose target lives in ANOTHER organization than the row
-   * holding it; only the write-path guard refuses one.
+   * probe spans every organization. {@link inspectDanglingReferences}, which
+   * has no caller, passes the SCANNED row's own organization as the context's
+   * `tenantId` instead (#19837), and no context only for a row that carries
+   * none or under a union (`group`) posture — so outside `group` the audit
+   * reports a stored reference into another organization, the class this guard
+   * now refuses.
    */
   private async referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
     try {
@@ -6824,15 +6826,36 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * The header id comes from the payload first, then the prior row: a write that
    * REPOINTS the detail at another master must be judged against the master it
-   * is landing on, not the one it is leaving. Read as **system**: the lock is a
+   * is landing on, not the one it is leaving. Read ELEVATED: the lock is a
    * data-integrity property of the header's state, not of the caller's
    * visibility of it, and the caller's right to touch this detail at all was
    * already settled upstream (RLS / `controlled_by_parent`, ADR-0055) before the
    * write reached the strip.
    *
-   * `null` on any failure — no relation, no id, header gone, read threw. It is
-   * NOT read as "unlocked": an unresolved binding leaves `parent` unbound, and
-   * `isReadonlyWhenLocked` treats a predicate that needs it as LOCKED.
+   * ## The elevation keeps the tenant wall (#19837)
+   *
+   * That argument is about row-level VISIBILITY, never about TENANCY, so the
+   * read runs under {@link ObjectQL.referenceCheckContext} — the `sudo()`-shaped
+   * `{ ...context, isSystem: true }` both reference checks share — and never a
+   * bare `{ isSystem: true }`. The bare spelling carried no `tenantId`, so the
+   * header was found in ANY organization and a `parent.*` predicate was judged
+   * against another organization's row: an org-bound caller naming that row's
+   * id learned one bit of it per write (`requiredWhen` answered `required` for a
+   * `locked` header and `reference_not_found` for an `open` one; `readonlyWhen`
+   * dropped or kept the field). With the caller's context spread first,
+   * `buildDriverOptions` forwards its `tenantId` (and, under the `group`
+   * posture, its membership set as `tenantIds`), a header stamped with an
+   * organization outside that scope — another organization, or under `group`
+   * one outside the caller's membership set — is not found, and it binds
+   * exactly as a header that exists nowhere does — absent. The tenancy exemptions stay where they are decided:
+   * a `tenancy.enabled: false` or federated master gets no `tenantId`, and a
+   * NULL-organization header passes the driver's `OR … IS NULL` term. A system
+   * caller with no `tenantId` (seed replay, boot) still reads unscoped.
+   *
+   * `null` on any failure — no relation, no id, header gone or outside the
+   * caller's tenant scope, read threw. It is NOT read as "unlocked": an
+   * unresolved binding leaves `parent` unbound, and `isReadonlyWhenLocked`
+   * treats a predicate that needs it as LOCKED.
    *
    * [#6457] A header that IS resolved is handed over TOTAL over the MASTER
    * object's declared fields — see {@link materializeParentHeader} for why that
@@ -6842,13 +6865,14 @@ export class ObjectQL implements IObjectQLEngine {
     schema: any,
     data: Record<string, unknown> | null | undefined,
     priorRow: Record<string, unknown> | null | undefined,
+    context: ExecutionContext | undefined,
   ): Promise<Record<string, unknown> | null> {
     const rel = resolveMasterDetailRelation(schema);
     if (!rel) return null;
     const parentId = masterIdOf(rel.fk, data, priorRow);
     if (parentId == null) return null;
     try {
-      const row = await this.findOne(rel.master, { where: { id: parentId }, context: { isSystem: true } } as any);
+      const row = await this.findOne(rel.master, { where: { id: parentId }, context: ObjectQL.referenceCheckContext(context) } as any);
       // `null` stays `null` — the fail-CLOSED signal (#4889) is the ABSENCE of
       // the binding, and materialising a row we do not have would destroy it.
       return row == null ? null : this.materializeParentHeader(rel.master, row as Record<string, unknown>);
@@ -6877,11 +6901,17 @@ export class ObjectQL implements IObjectQLEngine {
    * declared fields, exactly as the single-id twin does — the declared-field
    * table is read ONCE for the batch, not per row. A row this map has no entry
    * for still answers `null` (unbound, fail-CLOSED for `readonlyWhen`).
+   *
+   * [#19837] Read under the same tenant-keeping elevation as the single-id twin,
+   * for the same reason: a header outside the caller's tenant scope gets no
+   * entry here, so it binds as absent rather than lending its fields to a
+   * `parent.*` predicate.
    */
   private async resolveMasterDetailParents(
     schema: any,
     data: Record<string, unknown> | null | undefined,
     priorRows: ReadonlyArray<Record<string, unknown>> | null | undefined,
+    context: ExecutionContext | undefined,
   ): Promise<(row: Record<string, unknown> | undefined) => Record<string, unknown> | null> {
     const unbound = () => null;
     const rel = resolveMasterDetailRelation(schema);
@@ -6896,7 +6926,7 @@ export class ObjectQL implements IObjectQLEngine {
     try {
       const rows = await this.find(rel.master, {
         where: { id: { $in: [...ids] } },
-        context: { isSystem: true },
+        context: ObjectQL.referenceCheckContext(context),
       } as any) as Array<Record<string, unknown>>;
       // [#6457] One declared-field lookup for the whole batch, then one shallow
       // copy per header. A master the registry does not know leaves `fields`
@@ -7001,6 +7031,31 @@ export class ObjectQL implements IObjectQLEngine {
    * with one predicate, so the report can never be more or less strict than the
    * rule it reports on.
    *
+   * ## Each row is probed under its OWN organization (#19837)
+   *
+   * One predicate needs one scope, too. The write-path guard probes under the
+   * WRITER's `tenantId` since #19808, and refuses a reference into another
+   * organization; this audit has no writer, so it hands the probe the
+   * organization the scanned row was stamped with — the same one, for every
+   * non-system write — and a NULL-organization row (or an object with no tenant
+   * column) probes unscoped. A stored cross-organization reference — written
+   * before #19808, or by an `isSystem` write — is therefore reported, where the
+   * unscoped probe found the row in the other organization and said nothing.
+   *
+   * ## …except under a UNION posture, where it stays unscoped
+   *
+   * Under `group` ({@link postureUsesUnionScope}) the write rule's reach is the
+   * WRITER's whole membership set, and the stored row does not record it. A
+   * probe scoped to the row's own organization would be STRICTER than that
+   * rule: it would report every cross-organization reference a group member
+   * legitimately wrote, on every sweep of healthy data. So the probe stays
+   * unscoped there, as before #19837 — never stricter than the rule. ⚠️ The
+   * blind spot this leaves, stated rather than implied: under `group` a stored
+   * reference into an organization NO writer of that row could reach (a write
+   * made before #19808's guard existed, an `isSystem` write, or a membership
+   * since revoked) resolves and is NOT reported; only a reference that
+   * resolves nowhere is.
+   *
    * See {@link auditDanglingReferences} for the judgments (readonly SPLIT —
    * `readonly` references are read like any other and their findings filed
    * under `provenance` / `provenanceUndetermined` since #4743/#5719, not
@@ -7013,11 +7068,15 @@ export class ObjectQL implements IObjectQLEngine {
   async inspectDanglingReferences(
     options?: DanglingReferenceAuditOptions,
   ): Promise<DanglingReferenceReport> {
+    // Read once per run, live — the posture IN FORCE, by the engine's one reader.
+    const unionScope = postureUsesUnionScope(this.resolveEnginePosture());
     return auditDanglingReferences(
       {
         objects: () => this._registry.getAllObjects() as unknown as AuditableObject[],
         find: (object, opts) => this.find(object, opts as any) as Promise<Array<Record<string, unknown>>>,
-        probe: (target, id) => this.referenceExists(target, id),
+        probe: (target, id, organization) => this.referenceExists(
+          target, id, organization == null || unionScope ? undefined : ({ tenantId: organization } as ExecutionContext),
+        ),
         warn: (msg, meta) => this.logger?.warn?.(msg, meta as any),
       },
       options,
@@ -11342,7 +11401,7 @@ export class ObjectQL implements IObjectQLEngine {
         // predicate, so an object with only `record`-scoped requirements pays
         // nothing; batched, so N rows under M masters cost ONE header read.
         const insertParentForRow = hasParentScopedRequiredWhen(schemaForValidation as any)
-          ? await this.resolveMasterDetailParents(schemaForValidation, null, rows)
+          ? await this.resolveMasterDetailParents(schemaForValidation, null, rows, opCtx.context)
           : undefined;
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
@@ -12690,7 +12749,7 @@ export class ObjectQL implements IObjectQLEngine {
                    hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhen) ||
                    schemaHasParentRequiredWhen;
                const roWhenParent = wantsParentBinding
-                   ? await this.resolveMasterDetailParent(updateSchema, preRoWhen, priorRecord)
+                   ? await this.resolveMasterDetailParent(updateSchema, preRoWhen, priorRecord, opCtx.context)
                    : undefined;
                // [#4977] The ADR-0113 non-regression pre-check asks whether the
                // STORED row already violated, so for a REPOINT it must read the
@@ -12705,7 +12764,7 @@ export class ObjectQL implements IObjectQLEngine {
                    priorMasterId != null &&
                    masterIdOf(mdRel.fk, preRoWhen, priorRecord) !== priorMasterId;
                const roWhenPreviousParent = repointsMaster
-                   ? await this.resolveMasterDetailParent(updateSchema, null, priorRecord)
+                   ? await this.resolveMasterDetailParent(updateSchema, null, priorRecord, opCtx.context)
                    : undefined;
                // [#9107] `suppliedValues` — the SAME entry snapshot the static
                // strip below consumes, now feeding the conditional one too, so
@@ -12895,7 +12954,7 @@ export class ObjectQL implements IObjectQLEngine {
                const parentForRow =
                    hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti) ||
                    schemaHasParentRequiredWhenMulti
-                       ? await this.resolveMasterDetailParents(updateSchema, preRoWhenMulti, priorRows)
+                       ? await this.resolveMasterDetailParents(updateSchema, preRoWhenMulti, priorRows, opCtx.context)
                        : undefined;
                // [#4977] Pre-check headers for the ADR-0113 non-regression test,
                // resolved only when the payload REPOINTS the matched rows at
@@ -12904,7 +12963,7 @@ export class ObjectQL implements IObjectQLEngine {
                const mdRelMulti = schemaHasParentRequiredWhenMulti ? resolveMasterDetailRelation(updateSchema as any) : null;
                const previousParentForRow =
                    mdRelMulti != null && masterIdOf(mdRelMulti.fk, preRoWhenMulti, undefined) != null
-                       ? await this.resolveMasterDetailParents(updateSchema, null, priorRows)
+                       ? await this.resolveMasterDetailParents(updateSchema, null, priorRows, opCtx.context)
                        : undefined;
                if (payloadHasReadonlyWhen) {
                    // [#9107] Same entry snapshot, same authorship gate as the

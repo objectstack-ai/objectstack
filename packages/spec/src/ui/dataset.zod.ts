@@ -209,8 +209,14 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `87af769e9`; re-derived at that pin 2026-09-20 — every anchor below MOVED
-   * on this hop and one of them changed SUBSTANCE, so nothing here is carried:
+   * `62597c588`; re-derived at that pin 2026-09-23 — `dataset-format.ts` is
+   * byte-identical to `87af769e9`, and `date-display.ts` moved (objectui
+   * `516583b54`, +77/-4): `formatDate` now parses through `toDisplayDate`, so a
+   * date-only value renders the calendar day it names in every timezone,
+   * while the style handling this record cites re-reads unchanged; its two
+   * anchors MOVED `198-233` -> `271-306` and `152` -> `225`, the second
+   * byte-identical. At `87af769e9` (2026-09-20) every anchor below MOVED and
+   * one of them changed SUBSTANCE, so nothing here was carried there either:
    * `formatMeasureDate`'s datetime arm no longer calls
    * `formatDateTime(v, { locale })` unconditionally, it SELECTS a formatter,
    * because `formatDateTime(value, options?)` has no style parameter to thread
@@ -220,9 +226,9 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * non-numeric value through `formatMeasureDate` (`:229-264`, was `:185-198`)
    * at `:370`,
    * whose date-only arm threads `format` into the STYLE parameter of
-   * `formatDate` (`utils/date-display.ts:198-233`, was `:131-164`, whose
-   * `relative` branch falls back to the absolute form beyond ±7 days at
-   * `:152`, was `:117` — the fallback now strips the style through
+   * `formatDate` (`utils/date-display.ts:271-306`, was `:198-233` and before
+   * that `:131-164`, whose `relative` branch falls back to the absolute form
+   * beyond ±7 days at `:225`, was `:152` and `:117` — the fallback strips the style through
    * `absoluteFallbackOptions`), while its datetime arm answers `relative` with
    * `formatRelativeDate` (`:260`), `short` with
    * `formatDateTime(v, { locale, style: 'compact' })` (`:261`) and everything
