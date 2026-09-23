@@ -404,8 +404,9 @@ export const CEILINGS = new Map([
   // (maintainer ruling: provenance narratives, incident post-mortems and rationale
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
-  // legitimate).
-  ['.claude/skills/pm-dispatch/references/state-machine.md', 42],
+  // legitimate). Lowered 42 → 41 when the retired contract-review label's
+  // card-side-first line left (ruling record 5770886272 on #19061).
+  ['.claude/skills/pm-dispatch/references/state-machine.md', 41],
   // Raised 48 → 51 by the clause-② CONTENT-limb applicability ruling (maintainer
   // 2026-08-31, 第 6 场总监席决裁批 #12, verbatim 「同意」, adopting A + C: published
   // `skills/**` changes making a falsifiable operator/contract semantic claim fall
@@ -1339,8 +1340,10 @@ export const CEILINGS = new Map([
   // narratives, incident post-mortems and rationale tails leave the corpus; one
   // rule per ≤120-byte line; the frontmatter, section order, pinned spellings and
   // the report JSON keep their operative content). Landed count, headroom 0, same
-  // convention (lowering is always legitimate).
-  ['.claude/agents/os-dev.md', 403],
+  // convention (lowering is always legitimate). Lowered 403 → 402 when the
+  // retired contract-review label's reporting line left (ruling record
+  // 5770886272 on #19061).
+  ['.claude/agents/os-dev.md', 402],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on
