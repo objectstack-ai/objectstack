@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `TypeScriptSerializer` annotates a `typescript`-format file with the spec
- * type of the item's metadata type. This file holds that annotation to the one
- * property that makes it worth writing: it is never false.
+ * `FilesystemLoader.save()` annotates a `typescript`-format file with the spec
+ * type of the item's metadata type, through the package-internal
+ * `serializeTypeScriptForMetadataType`. This file holds that annotation to the
+ * one property that makes it worth writing: it is never false.
  *
  * Every annotated metadata type is compiled here with `tsc`, twice:
  *  - a spec-valid body must type-check with no diagnostic at all;
@@ -18,11 +19,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { MetadataTypeSchema, getMetadataTypeSchema } from '@objectstack/spec/kernel';
-import { TypeScriptSerializer } from './typescript-serializer.js';
+import { TypeScriptSerializer, serializeTypeScriptForMetadataType } from './typescript-serializer.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -66,7 +68,13 @@ const NON_MEMBER_TYPES = ['webhook', 'connector', 'sharing_rule', 'analytics_cub
 
 const serializer = new TypeScriptSerializer('typescript');
 const annotates = (metadataType: string): boolean =>
-  serializer.serialize({ name: 'x' }, { metadataType }).startsWith('import type {');
+  serializeTypeScriptForMetadataType({ name: 'x' }, metadataType).startsWith('import type {');
+
+/** This package's `exports` entries, as the source modules tsup builds them from. */
+const PACKAGE_ROOT = resolve(HERE, '../..');
+const EXPORT_ENTRY_SOURCES: string[] = Object.values(
+  JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf8')).exports as Record<string, { import: { default: string } }>,
+).map((entry) => join(PACKAGE_ROOT, entry.import.default.replace(/^\.\/dist\//, 'src/').replace(/\.js$/, '.ts')));
 
 /** Type-check in-memory files as if they sat in this directory. */
 function typeCheck(files: ReadonlyMap<string, string>): readonly ts.Diagnostic[] {
@@ -109,9 +117,24 @@ describe('TypeScriptSerializer annotation, per metadata type', () => {
     }
   });
 
+  it('the public TypeScriptSerializer.serialize() annotates none of them', () => {
+    for (const item of Object.values(REPRESENTATIVE)) {
+      expect(serializer.serialize(item).startsWith('export const metadata = {')).toBe(true);
+    }
+  });
+
+  it('no exports entry of the package re-exports the internal channel', async () => {
+    expect(EXPORT_ENTRY_SOURCES.length).toBe(5);
+    for (const source of EXPORT_ENTRY_SOURCES) {
+      const entry = (await import(source)) as Record<string, unknown>;
+      expect(Object.keys(entry).length, source).toBeGreaterThan(0);
+      expect(Object.keys(entry), source).not.toContain('serializeTypeScriptForMetadataType');
+    }
+  });
+
   it('round-trips every annotated body through serialize and deserialize', () => {
     for (const [metadataType, item] of Object.entries(REPRESENTATIVE)) {
-      expect(serializer.deserialize(serializer.serialize(item, { metadataType })), metadataType).toEqual(item);
+      expect(serializer.deserialize(serializeTypeScriptForMetadataType(item, metadataType)), metadataType).toEqual(item);
     }
   });
 
@@ -119,7 +142,7 @@ describe('TypeScriptSerializer annotation, per metadata type', () => {
     const dir = join(HERE, '__annotation_type_check__');
     const files = new Map<string, string>();
     for (const [metadataType, item] of Object.entries(REPRESENTATIVE)) {
-      const valid = serializer.serialize(item, { metadataType });
+      const valid = serializeTypeScriptForMetadataType(item, metadataType);
       files.set(join(dir, `${metadataType}.ts`), valid);
       files.set(join(dir, `${metadataType}.undeclared-key.ts`), valid.replace('= {', '= {\n  "undeclared_key": 1,'));
     }

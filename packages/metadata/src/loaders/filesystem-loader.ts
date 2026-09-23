@@ -22,6 +22,7 @@ import type {
 import type { Logger } from '@objectstack/core';
 import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
 import type { MetadataSerializer } from '../serializers/serializer-interface.js';
+import { TypeScriptSerializer, serializeTypeScriptForMetadataType } from '../serializers/typescript-serializer.js';
 import { AmbiguousMetadataStemError } from './ambiguous-metadata-stem.js';
 
 /**
@@ -459,15 +460,17 @@ export class FilesystemLoader implements MetadataLoader {
         }
       }
 
-      // Serialize data
-      const content = serializer.serialize(data, {
-        prettify,
-        indent,
-        sortKeys,
-        // The `typescript` format annotates the file with this metadata type's
-        // spec type, or with nothing when the type has none.
-        metadataType: type,
-      });
+      // Serialize data. The built-in `typescript` serializer is the one format
+      // that annotates, and the annotation depends on the metadata type, which
+      // only this call knows: it goes through the package-internal
+      // `serializeTypeScriptForMetadataType`, so the published
+      // `SerializeOptions` does not grow a key. Any other serializer, including
+      // a custom one registered for `typescript`, is called as it always was.
+      const serializeOptions = { prettify, indent, sortKeys };
+      const content =
+        serializer instanceof TypeScriptSerializer && serializer.getFormat() === 'typescript'
+          ? serializeTypeScriptForMetadataType(data, type, serializeOptions)
+          : serializer.serialize(data, serializeOptions);
 
       // Write to disk (atomic or direct)
       if (atomic) {

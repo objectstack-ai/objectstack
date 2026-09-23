@@ -31,6 +31,9 @@ import type { MetadataSerializer, SerializeOptions } from './serializer-interfac
  *   `_provenance` protection keys `BookSchema` accepts, so a book the loader
  *   has stamped would fail against it.
  *
+ * Only {@link serializeTypeScriptForMetadataType} reads this table; the public
+ * `TypeScriptSerializer.serialize()` never annotates.
+ *
  * `typescript-serializer-annotation.test.ts` compiles every entry with `tsc`:
  * a valid body must type-check and an undeclared key must not, so a renamed,
  * moved or widened-to-`unknown` spec type fails there instead of in a saved
@@ -67,26 +70,55 @@ const ANNOTATION_BY_METADATA_TYPE: ReadonlyMap<string, readonly [typeName: strin
   ['connector', ['DeclarativeConnectorEntry', 'integration']],
 ]);
 
+/** The module text: `export const metadata = …; export default metadata;`, annotated when given one. */
+function renderModule(
+  item: unknown,
+  options: SerializeOptions | undefined,
+  annotation: readonly [typeName: string, subpath: string] | undefined,
+): string {
+  const { prettify = true, indent = 2 } = options || {};
+
+  const jsonStr = JSON.stringify(item, null, prettify ? indent : 0);
+
+  if (annotation) {
+    const [typeName, subpath] = annotation;
+    return `import type { ${typeName} } from '@objectstack/spec/${subpath}';\n\n` +
+      `export const metadata: ${typeName} = ${jsonStr};\n\n` +
+      `export default metadata;\n`;
+  }
+  return `export const metadata = ${jsonStr};\n\n` +
+    `export default metadata;\n`;
+}
+
+/**
+ * PACKAGE-INTERNAL: the `typescript`-format file for an item of a known
+ * metadata type, annotated per {@link ANNOTATION_BY_METADATA_TYPE}.
+ * `FilesystemLoader.save()` calls it for the built-in `typescript` serializer,
+ * because only the loader knows the item's metadata type.
+ *
+ * ⛔ Not re-exported from any `exports` entry of `@objectstack/metadata`, and
+ * the public `SerializeOptions` does not carry the metadata type. Publishing
+ * either would widen the package's public surface for a caller that lives
+ * inside the package; `typescript-serializer-annotation.test.ts` pins that no
+ * entry exports it.
+ */
+export function serializeTypeScriptForMetadataType(
+  item: unknown,
+  metadataType: string,
+  options?: SerializeOptions,
+): string {
+  return renderModule(item, options, ANNOTATION_BY_METADATA_TYPE.get(metadataType));
+}
+
 export class TypeScriptSerializer implements MetadataSerializer {
   constructor(private format: 'typescript' | 'javascript' = 'typescript') {}
 
+  /**
+   * Writes no type annotation: this call does not know the item's metadata
+   * type, and a guessed annotation can be false.
+   */
   serialize<T>(item: T, options?: SerializeOptions): string {
-    const { prettify = true, indent = 2, metadataType } = options || {};
-
-    const jsonStr = JSON.stringify(item, null, prettify ? indent : 0);
-
-    const annotation =
-      this.format === 'typescript' && metadataType !== undefined
-        ? ANNOTATION_BY_METADATA_TYPE.get(metadataType)
-        : undefined;
-    if (annotation) {
-      const [typeName, subpath] = annotation;
-      return `import type { ${typeName} } from '@objectstack/spec/${subpath}';\n\n` +
-        `export const metadata: ${typeName} = ${jsonStr};\n\n` +
-        `export default metadata;\n`;
-    }
-    return `export const metadata = ${jsonStr};\n\n` +
-      `export default metadata;\n`;
+    return renderModule(item, options, undefined);
   }
 
   deserialize<T>(content: string, schema?: z.ZodSchema): T {
