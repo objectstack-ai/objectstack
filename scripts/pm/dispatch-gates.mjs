@@ -1132,8 +1132,9 @@ export function extractTriggerPaths(workflowText) {
  * ## What this closes, and what it deliberately does NOT
  *
  * It closes the INDIRECTION: a declared path population the tool could not
- * follow. It does not close, and cannot, the gate that declares no population
- * ON PURPOSE. `check:objectui-pin-citations` is unfiltered because `lint.yml`
+ * follow — and, since #17673, the same term carried on a job's STEPS when its
+ * own `if:` must stay free of it (`stepFilterPopulations`). It does not close,
+ * and cannot, the gate that declares no population ON PURPOSE. `check:objectui-pin-citations` is unfiltered because `lint.yml`
  * says a `packages/spec/**` filter "would go dormant on exactly the PR that
  * moves `.objectui-sha`, which is the PR this exists to catch" — the
  * correctness requirement and the derivability requirement are in direct
@@ -1413,6 +1414,74 @@ export function jobFilterPopulation(job, filterStepsByOutputSource) {
 }
 
 /**
+ * ── The same filter term, one level down: on the STEPS' `if:`s (#17673) ─────
+ *
+ * A job-level `if:` that evaluates false concludes `skipped`, which branch
+ * protection counts as passing, so a job that must CONCLUDE on every run (the
+ * `Console Pin Gate` of ruling #18900 ⑤) cannot carry its filter term there.
+ * It carries it on each step instead — `if: needs.filter.outputs.console !=
+ * 'false'` — and the job's own `if:` is left with `!cancelled()` alone. Read
+ * only at job level, that job resolves to nothing, and a pin-only diff
+ * derived neither console gate: the #12956 blind spot, reopened one level
+ * down.
+ *
+ * The rule, and all of it: a job whose own `if:` discriminates NO path —
+ * absent, or `!cancelled()` alone — is read step by step, and each step whose
+ * OWN `if:` passes the job-level whitelist above (`jobFilterOutputRefs`,
+ * unchanged: an OR of filter-output comparisons, `!cancelled()` stripped,
+ * everything else refused whole) contributes that population to the checks
+ * THAT STEP runs. Steps resolving to the same outputs share one population.
+ *
+ * What it deliberately does NOT read, each in the safe direction:
+ *
+ *   - a job-level `if:` that carries ANY other term: a step under it would
+ *     inherit a condition this does not evaluate (a push-only job would be
+ *     claimed for every PR), so the job contributes nothing at step level;
+ *   - a step whose `if:` the whitelist refuses — an AND with a cache-hit
+ *     output, an inverted `== 'false'`: its checks gain no population;
+ *   - a step carrying no `if:` in such a job: it runs on every PR, which is
+ *     not a claim about YOUR paths, so it is not in the population either;
+ *   - a verdict a shell step computed into a step OUTPUT for later steps to
+ *     read (`steps.<id>.outputs.<x>`): following it would mean trusting what
+ *     the shell wrote, the fabrication the header of this section refuses.
+ *
+ * Two texts, one per caller, both built from the job's own `steps:` line:
+ * `text` holds the gated steps ONLY, so the family derivation reads the checks
+ * the population schedules and nothing else in the job; `walkText` adds every
+ * other step that carries an `if:`, so the job-filtered tail still SIZES the
+ * steps it makes no claim about (a cache-hit AND, the inverted NOT BUILT
+ * step) instead of losing them. Neither holds a step with no `if:`: in a job
+ * that concludes on every run, that step runs on every PR, and "your path
+ * scheduled it" would be false of it.
+ */
+export function stepFilterPopulations(job, filterStepsByOutputSource) {
+  let jobIf = typeof job.if === 'string' ? job.if.trim() : '';
+  const wrapped = /^\$\{\{([\s\S]*)\}\}$/.exec(jobIf);
+  if (wrapped) jobIf = wrapped[1].trim();
+  if (jobIf !== '' && !/^!\s*cancelled\(\)$/.test(jobIf)) return [];
+  const stepsLine = String(job.text ?? '').split('\n').find((line) => /^[ \t]*steps:\s*$/.test(line));
+  if (stepsLine === undefined) return [];
+  const steps = extractStepBlocks(job.text);
+  const byOutputs = new Map();
+  for (const step of steps) {
+    const population = jobFilterPopulation({ if: step.if }, filterStepsByOutputSource);
+    if (!population) continue;
+    const key = population.outputs.join('|');
+    if (!byOutputs.has(key)) byOutputs.set(key, population);
+  }
+  return [...byOutputs.values()].map((population) => {
+    const gated = steps.filter((s) => stepIfIsPopulationTerm(s.if, population.outputs)).map((s) => s.text);
+    const conditional = steps.filter((s) => s.if).map((s) => s.text);
+    return {
+      ...population,
+      gate: 'step',
+      text: [stepsLine, ...gated].join('\n'),
+      walkText: [stepsLine, ...conditional].join('\n'),
+    };
+  });
+}
+
+/**
  * Every job in one workflow whose `if:` resolves to a path population, WITH the
  * job's own text: `[{ job, name, text, outputs, paths, dropped }]`.
  *
@@ -1442,8 +1511,15 @@ export function jobFilterPopulations(workflowText) {
   const out = [];
   for (const job of jobs) {
     const population = jobFilterPopulation(job, byOutput);
-    if (!population) continue;
-    out.push({ job: job.id, name: job.name, text: job.text, ...population });
+    if (population) {
+      out.push({ job: job.id, name: job.name, text: job.text, ...population });
+      continue;
+    }
+    // A job whose filter term sits on its steps (#17673) — see
+    // `stepFilterPopulations` for the rule and what it refuses.
+    for (const stepPopulation of stepFilterPopulations(job, byOutput)) {
+      out.push({ job: job.id, name: job.name, ...stepPopulation });
+    }
   }
   return out;
 }
@@ -2793,7 +2869,9 @@ export function alwaysRunSteps(entries) {
  *     per-card claim is available;
  *   - a step carrying an `if:`: counted and RETURNED, never silently dropped —
  *     the claim is "CI runs this for your path", and a condition this walk did
- *     not evaluate could falsify it, the same standard the tail holds;
+ *     not evaluate could falsify it, the same standard the tail holds. The one
+ *     `if:` it does evaluate is the population's OWN filter term restated on
+ *     the step (`stepIfIsPopulationTerm`, #17673): that adds no condition;
  *   - a step the family derivation DOES name a check family for: it is already
  *     in the matched block above, and a row here would double-count it. The two
  *     halves are disjoint by construction, which is what makes either count
@@ -2824,7 +2902,10 @@ export function jobFilteredSteps(entries, paths) {
       if (hits.length === 0) continue;
       counts.covering += 1;
       const steps = [];
-      for (const step of extractStepBlocks(job.text)) {
+      // A step-level population (#17673) hands this walk its `walkText`: the
+      // gated steps plus the job's other conditional ones, so those are sized
+      // below rather than lost.
+      for (const step of extractStepBlocks(job.walkText ?? job.text)) {
         // Continuations are SPLICED before the split, so a row is the command
         // the shell sees rather than a fragment of its argv. It is the same
         // reading `extractCheckInvocations` takes for the same body, and here
@@ -2841,7 +2922,10 @@ export function jobFilteredSteps(entries, paths) {
           .map((l) => l.trim())
           .filter((l) => l !== '');
         if (commands.length === 0) continue;
-        if (step.if) {
+        // A step whose `if:` IS the population's own filter term adds no
+        // condition to it — the shape of a job that carries its filter on its
+        // steps (#17673, `stepFilterPopulations`), where every step does.
+        if (step.if && !stepIfIsPopulationTerm(step.if, job.outputs)) {
           counts.conditionalSteps += 1;
           continue;
         }
@@ -2855,10 +2939,24 @@ export function jobFilteredSteps(entries, paths) {
       }
       if (steps.length === 0) continue;
       counts.named += 1;
-      rows.push({ workflow: file, job: job.name, outputs: job.outputs, hits, dropped: job.dropped, steps });
+      rows.push({ workflow: file, job: job.name, outputs: job.outputs, gate: job.gate ?? 'job', hits, dropped: job.dropped, steps });
     }
   }
   return { rows, counts };
+}
+
+/**
+ * Does a step's `if:` resolve, under the job-level whitelist, to EXACTLY the
+ * filter outputs a population was read from? Then it restates the condition
+ * the population already carries and adds none; anything else — another
+ * output, an AND, an unreadable term — is a condition this walk did not
+ * evaluate, and the step stays conditional.
+ */
+export function stepIfIsPopulationTerm(stepIf, outputs) {
+  const refs = jobFilterOutputRefs(stepIf);
+  if (!refs || !Array.isArray(outputs)) return false;
+  const own = [...new Set(refs.map((r) => `${r.job}.${r.output}`))];
+  return own.length === outputs.length && own.every((o) => outputs.includes(o));
 }
 
 /**
@@ -11956,7 +12054,7 @@ export function jobFilteredStepLines(rows, counts) {
     const via = row.hits.map((h) => `${h.path} ⇢ '${h.pattern}'`).join('; ');
     const dropped = row.dropped ? `, ${row.dropped} glob(s) of it untranslatable and dropped` : '';
     lines.push(
-      `  - [${row.workflow} · ${row.job}]   scheduled by ${via}   (job \`if:\` reads ${row.outputs.join(', ')}${dropped})`,
+      `  - [${row.workflow} · ${row.job}]   scheduled by ${via}   (${row.gate === 'step' ? 'its steps\' `if:`s read' : 'job `if:` reads'} ${row.outputs.join(', ')}${dropped})`,
     );
     for (const { step, commands } of row.steps) {
       lines.push(`      · ${step}`);
