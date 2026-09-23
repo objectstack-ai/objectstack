@@ -128,7 +128,10 @@ describe('#18239 — composeStacks refuses a non-array `objects` with an ADR-011
   });
 
   it('the strict door raises the SAME code for the same defect — one dialect for one authored mistake', () => {
-    const refused = refusal(() => defineStack({ manifest: mf('com.example.b'), objects: { b_item: obj('b_item') } } as never));
+    // A number, not a map: the map form (`objects: { name: {…} }`) is a legal
+    // AUTHORING spelling that `defineStack` normalizes to the array before any
+    // check runs, so only a hand-built stack can carry a map into composition.
+    const refused = refusal(() => defineStack({ manifest: mf('com.example.b'), objects: 5 } as never));
     expect(refused?.code).toBe('STACK_SCHEMA_INVALID');
     expect(refused?.status).toBe(422);
     expect(ERROR_CODE_LEDGER['@objectstack/spec']).toContain('STACK_SCHEMA_INVALID');
