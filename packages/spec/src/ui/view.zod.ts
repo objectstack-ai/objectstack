@@ -6369,11 +6369,17 @@ function withOptionValueDeriveRemedy(
 ): z.core.$ZodIssue[] {
   return issues.map((issue) => {
     const path = [...at, ...issue.path];
+    // Spread copies keep every field the parse raised; the casts restore the
+    // discriminated union the spread widens (`errors` on the no-match and
+    // multiple-match variants of `invalid_union` are typed apart).
     if (issue.code === 'invalid_union') {
-      return { ...issue, errors: issue.errors.map((branch) => withOptionValueDeriveRemedy(branch, path)) };
+      return {
+        ...issue,
+        errors: issue.errors.map((branch) => withOptionValueDeriveRemedy(branch, path)),
+      } as z.core.$ZodIssue;
     }
     if (OPTION_VALUE_GRAMMAR_CODES.has(issue.code) && isInlineOptionValuePath(path)) {
-      return { ...issue, message: `${issue.message}. ${FORM_OPTION_VALUE_DERIVE_REMEDY}` };
+      return { ...issue, message: `${issue.message}. ${FORM_OPTION_VALUE_DERIVE_REMEDY}` } as z.core.$ZodIssue;
     }
     return issue;
   });
