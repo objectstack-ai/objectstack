@@ -96,24 +96,6 @@
  * site in the file it names, and a file-level anchor with a `#fragment` must
  * name a file the tree really has.
  *
- * ## ⚠️ `counts.symbol` is ZERO on this corpus, and that is a census result
- *
- * The whole of `packages/spec/src` contains exactly ONE span written in symbol
- * anchor form, and it does not resolve: `packages/spec/src/api/websocket.zod.ts`
- * anchors `RealtimeSubscriptionOptions` to a PACKAGE-RELATIVE spelling of the
- * contracts file, so no tracked file is at that path -- the symbol itself is
- * real and lives in `packages/spec/src/contracts/realtime-service.ts`. The
- * citation as written is pinned in `CENSUS_RESIDUAL` below, and ⛔ it is NOT
- * requoted in anchor form here: this header is itself swept by the `scripts/**`
- * corpus, so quoting a broken anchor verbatim makes THIS file a finding.
- *
- * So the live-corpus self-test here asserts `fileLevel`, ⛔ never `symbol > 0`
- * the way `scripts/**` can: a corpus the convention has not reached yet cannot
- * prove the extractor works by finding a resolved symbol in it. What stands in
- * for that positive control is the residual's exactness loop -- the one
- * symbol-shaped span in the tree must still be SEEN, every run, or its row goes
- * stale and this gate reds.
- *
  * ## The exit contract, and why it is a pinned residual rather than reporting
  *
  * `#17065` left the exit contract to the census, and the census forces this
@@ -1003,12 +985,6 @@ export function selfTest() {
   // 4. ⭐ The live corpus is not empty, and the projection really is wired.
   //    This is the ONLY thing separating a clean tree from an extractor that
   //    silently matches nothing.
-  //    ⚠️ `symbol > 0` is NOT assertable here and that is a census result, not
-  //    an oversight: the whole tree holds exactly ONE symbol-anchor-shaped span
-  //    and it does not resolve (see the header, and the `websocket.zod.ts`
-  //    residual row). The file-level population is what proves the extractor
-  //    ran; the residual's exactness loop below is what proves it still SEES
-  //    that one symbol-shaped span.
   const live = sweepCorpus(CORPUS);
   check(live.counts.anchors > 1000, `the live spec corpus must yield its anchors, got ${live.counts.anchors}`);
   check(live.counts.fileLevel > 1000, `the live corpus must resolve its file-level anchors, got ${live.counts.fileLevel}`);
@@ -1020,8 +996,7 @@ export function selfTest() {
   // 5. ⛔ Every residual row is EXACT IN BOTH DIRECTIONS against the LIVE tree.
   //    A row whose citation is repaired has done its job and must be DELETED;
   //    leaving it is how a dated residual becomes a permanent exemption nobody
-  //    re-reads. This loop is also the positive control for the ONE
-  //    symbol-shaped span in the corpus (case 4's note).
+  //    re-reads.
   const liveTriage = triage(live.findings);
   check(liveTriage.stale.length === 0,
     'every CENSUS_RESIDUAL row must still match a LIVE finding — a stale row is a repaired citation whose row was '
