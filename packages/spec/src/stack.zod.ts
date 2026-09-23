@@ -2996,6 +2996,63 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
     );
   }
 
+  // [ADR-0112 · #19799] The same guard for every `actions` array this merge
+  // reads — the top-level one and each object's own — because
+  // `sortActionsByOrder` calls `.some` on it and reads `order` off each entry:
+  // a non-array raised a bare `TypeError` (`actions.some is not a function`),
+  // a `null` entry one reading `order`, and any other non-object entry was
+  // handed on inside a success. Each is refused with the strict parse's own
+  // envelope at the strict parse's own path — `['actions']` /
+  // `['actions', index]`, `['objects', i, 'actions']` /
+  // `['objects', i, 'actions', index]` — all findings in one refusal, as the
+  // parse reports them. `undefined` is the one non-array that is not
+  // malformed: the key is absent. This merge also ends `composeStacks`
+  // (step 7), which refuses a non-array top-level `actions` in its own step 3
+  // with this same code, so the message names both doors.
+  const actionsProblems: string[] = [];
+  const actionsIssues: z.core.$ZodIssue[] = [];
+  const guardActions = (prefix: readonly (string | number)[], label: string, declared: unknown): void => {
+    if (declared === undefined) return;
+    const reroot = (issue: z.core.$ZodIssue): z.core.$ZodIssue =>
+      ({ ...issue, path: [...prefix, ...issue.path] }) as z.core.$ZodIssue;
+    if (!Array.isArray(declared)) {
+      const { kind, issues } = describeNonArrayCollection('actions', declared);
+      actionsProblems.push(`${label} is ${kind}, not an array`);
+      actionsIssues.push(...issues.map(reroot));
+      return;
+    }
+    const positions = declared
+      .map((entry, index) =>
+        isRecord(entry) ? null : `#${index} (${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : `a ${typeof entry}`})`,
+      )
+      .filter((position): position is string => position !== null);
+    if (positions.length === 0) return;
+    const parsed = z.array(z.looseObject({})).safeParse(declared);
+    if (!parsed.success) {
+      actionsIssues.push(
+        ...parsed.error.issues.map((issue) => reroot({ ...issue, path: ['actions', ...issue.path] } as z.core.$ZodIssue)),
+      );
+    }
+    actionsProblems.push(
+      `${label} holds ${positions.length === 1 ? 'an entry' : 'entries'} that ` +
+        `${positions.length === 1 ? 'is' : 'are'} not an object — ${positions.join(', ')}`,
+    );
+  };
+  guardActions([], "'actions'", (config as { actions?: unknown }).actions);
+  for (const [index, obj] of ((declaredObjects as Record<string, unknown>[] | undefined) ?? []).entries()) {
+    const label = typeof obj.name === 'string' ? `object '${obj.name}'` : `object #${index}`;
+    guardActions(['objects', index], `${label}'s 'actions'`, obj.actions);
+  }
+  if (actionsProblems.length > 0) {
+    throw new StackSchemaInvalidError(
+      `Stack validation failed (the bound-action merge that ends \`defineStack\` and \`composeStacks\`): ` +
+        `${actionsProblems.join('; ')}. Actions cannot be merged or ordered by \`order\` in that shape, and ` +
+        `\`strict: false\` skips validation, not this shape. Author every 'actions' as an array of action ` +
+        `definitions, or drop \`strict: false\` to have every schema check run.`,
+      actionsIssues,
+    );
+  }
+
   // Honour `order` on the preserved top-level actions regardless of objects.
   const sortedTop = config.actions ? sortActionsByOrder(config.actions) : config.actions;
   const topChanged = sortedTop !== config.actions;
