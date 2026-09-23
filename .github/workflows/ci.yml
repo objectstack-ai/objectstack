@@ -2325,17 +2325,24 @@ jobs:
   # that evaluates false concludes `skipped`: the question this gate asks was
   # never asked, yet the check-run reads like a pass. Ruling ⑤ asks for a
   # conclusion on every PR — a `success` on an unaffected one — so the filter
-  # verdict moved from the job's `if:` into the first step (`scope`), and every
-  # step that costs anything is step-gated on it. THE FILTER CONTRACT (#4928)
-  # is kept in both halves, only one level down: the `scope` step treats the
-  # `console` output as "affected" unless it is EXACTLY 'false', so a dead
-  # `filter` job (output '' or the `|| 'true'` fallback) still builds, and
-  # `!cancelled()` still displaces the implicit success() at the job level. On
-  # merge_group / schedule / workflow_dispatch the output is widened to 'true'
-  # and the full gate runs, exactly as before.
+  # term moved from the job's `if:` onto EVERY STEP's own `if:`, spelled
+  # exactly as it was at job level: `needs.filter.outputs.console != 'false'`.
+  # THE FILTER CONTRACT (#4928) is kept in both halves, one level down: only an
+  # EXACT 'false' skips a step, so a dead `filter` job (output '') still builds,
+  # and `!cancelled()` still displaces the implicit success() at the job level.
+  # On merge_group / schedule / workflow_dispatch the output is widened to
+  # 'true' and the full gate runs, exactly as before.
   #
-  # An unaffected run MUST say so: the `scope` step writes a notice and a step
-  # summary stating that nothing was built. That `success` is the filter's
+  # ⛔ Not a step that computes the verdict once into a step output for the
+  # others to read. An `if:` is a declaration that GitHub, a reader and
+  # scripts/pm/dispatch-gates.mjs all read the same way — the derivation follows
+  # a filter term on a step `if:` when the job-level `if:` carries none (#17673)
+  # — whereas a verdict a shell step wrote is readable only by trusting the
+  # shell. With it, a pin-only diff stopped deriving check:console-sha and
+  # check:console-injection at all.
+  #
+  # An unaffected run MUST say so: its one running step writes a notice and a
+  # step summary stating that nothing was built. That `success` is the filter's
   # verdict, never a measured build — read it as NOT BUILT, not as a pass of the
   # pinned SHA.
   #
@@ -2351,8 +2358,8 @@ jobs:
     name: Console Pin Gate
     needs: filter
     # See THE FILTER CONTRACT on the filter job's outputs (#4928). `console`,
-    # not `core` — each job keeps its own filter output, read by the `scope`
-    # step below rather than here (see the header: a job-level filter term
+    # not `core` — each job keeps its own filter output, read by each STEP's
+    # `if:` below rather than here (see the header: a job-level filter term
     # concludes `skipped`, and this job must conclude on every run).
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -2361,61 +2368,52 @@ jobs:
       contents: read
 
     steps:
-      # The filter verdict, read ONCE. Every later step is gated on
-      # `steps.scope.outputs.affected != 'false'` — "skip only when EXPLICITLY
-      # false", the contract's own spelling — so a step that forgets its guard
-      # costs runner time, never a false green: this step fails loudly rather
-      # than writing anything but 'true' or 'false'.
-      - name: Read the console filter verdict
-        id: scope
+      # The one step an unaffected run executes, and its only output is the
+      # statement that nothing else ran. Its `if:` is the exact complement of
+      # every other step's: `== 'false'` here, `!= 'false'` on all the rest.
+      - name: Report NOT BUILT when the console filter said false
+        if: needs.filter.outputs.console == 'false'
         env:
-          CONSOLE_OUTPUT: ${{ needs.filter.outputs.console }}
-          FILTER_RESULT: ${{ needs.filter.result }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          echo "filter job result: ${FILTER_RESULT:-<none>}; console output: '${CONSOLE_OUTPUT}'; event: ${EVENT_NAME}"
-          if [ "$CONSOLE_OUTPUT" = "false" ]; then
-            echo "affected=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Console Pin Gate: NOT BUILT::The console filter said false for this diff, so nothing was built or checked here. This success is the filter's verdict, not a measured build of the pinned objectui SHA. The merge-queue build widens the filter and runs the full gate."
-            {
-              echo "### Console Pin Gate — NOT BUILT on this run"
-              echo
-              echo "The \`filter\` job's \`console\` output was \`false\` (event: \`${EVENT_NAME}\`): this diff moves none of the console build inputs listed in ci.yml's \`console\` filter."
-              echo
-              echo "- ⛔ No objectui checkout, no console build, no dist restore, no \`check:console-sha\` / \`check:console-injection\` ran."
-              echo "- This \`success\` is the **filter's verdict**, not a measured pass of the pinned SHA — read it as NOT BUILT."
-              echo "- On \`merge_group\` the filter is widened to \`'true'\` and this job runs the full gate on the merged tree."
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            # '' (a dead filter job) and 'true' both mean RUN — THE FILTER
-            # CONTRACT's half 1, restated at step level.
-            echo "affected=true" >> "$GITHUB_OUTPUT"
-            echo "Console inputs affected (or the filter could not say otherwise): running the full gate."
-          fi
+          echo "::notice title=Console Pin Gate: NOT BUILT::The console filter said false for this diff, so nothing was built or checked here. This success is the filter's verdict, not a measured build of the pinned objectui SHA. The merge-queue build widens the filter and runs the full gate."
+          {
+            echo "### Console Pin Gate — NOT BUILT on this run"
+            echo
+            echo "The \`filter\` job's \`console\` output was \`false\` (event: \`${EVENT_NAME}\`): this diff moves none of the console build inputs listed in ci.yml's \`console\` filter."
+            echo
+            echo "- ⛔ No objectui checkout, no console build, no dist restore, no \`check:console-sha\` / \`check:console-injection\` ran."
+            echo "- This \`success\` is the **filter's verdict**, not a measured pass of the pinned SHA — read it as NOT BUILT."
+            echo "- On \`merge_group\` the filter is widened to \`'true'\` and this job runs the full gate on the merged tree."
+          } >> "$GITHUB_STEP_SUMMARY"
 
+      # Every step from here on carries the filter term in the contract's own
+      # spelling — skip only when EXPLICITLY 'false' — so a step added without
+      # it costs runner time on an unaffected run (and fails without a
+      # checkout), never a false green.
       - name: Checkout repository
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         uses: actions/checkout@v7
 
       - name: Setup Node.js
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         uses: actions/setup-node@v7
         with:
           node-version: '22'
 
       - name: Setup pnpm
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         uses: ./.github/actions/setup-pnpm
 
       - name: Get pnpm store directory
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         shell: bash
         run: |
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         uses: actions/cache@v6
         with:
           path: ${{ env.STORE_PATH }}
@@ -2429,7 +2427,7 @@ jobs:
       # builds a superset of the client closure needed here and is seeded from
       # main (same reasoning as the Temporal Conformance job's fallback).
       - name: Restore Turbo cache
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
@@ -2441,7 +2439,7 @@ jobs:
             ${{ runner.os }}-turbo-build-core-
 
       - name: Install dependencies
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         run: pnpm install --frozen-lockfile
 
       # build-console.sh bundles THIS tree's @objectstack/client into the console
@@ -2453,7 +2451,7 @@ jobs:
       # script's existing callers (release.yml, showcase-smoke.yml) pre-build for
       # the same reason.
       - name: Build @objectstack/client and its dependencies
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         run: pnpm exec turbo run build --filter=@objectstack/client... --concurrency=4
 
       # Same key as release.yml's "Cache vendored Console dist" step. Actions
@@ -2470,7 +2468,7 @@ jobs:
       # the same guarantees as a freshly built one.
       - name: Restore vendored Console dist (keyed on the objectui pin)
         id: console-dist
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         uses: actions/cache/restore@v6
         with:
           path: packages/console/dist
@@ -2483,7 +2481,7 @@ jobs:
       - name: Build the Console SPA at the pinned objectui SHA
         # Both terms: on an unaffected run the restore above is skipped, its
         # cache-hit output is '' and `'' != 'true'` alone would BUILD.
-        if: steps.scope.outputs.affected != 'false' && steps.console-dist.outputs.cache-hit != 'true'
+        if: needs.filter.outputs.console != 'false' && steps.console-dist.outputs.cache-hit != 'true'
         run: bash scripts/build-console.sh
 
       # check:console-sha exits 0 — deliberately — when there is no dist at all
@@ -2494,7 +2492,7 @@ jobs:
       # check with nothing to check and report success. Prove one is really in
       # place before letting that check speak for the job.
       - name: Assert a real Console dist is in place
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         env:
           CACHE_HIT: ${{ steps.console-dist.outputs.cache-hit }}
         run: |
@@ -2511,7 +2509,7 @@ jobs:
           echo "✓ Console dist present ($(du -sk "$dist" | awk '{print $1}') KB, via $origin) from objectui@$(cut -c1-12 "$dist/.objectui-sha")"
 
       - name: Verify the Console dist stamp matches the pin
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         run: pnpm check:console-sha
 
       # The spec-injection half of the same question, and the reason it is a
@@ -2540,7 +2538,7 @@ jobs:
       # whose post-step saves even on failure, under this same repo-scoped key — so
       # a poisoned entry is reachable from here and must not pass quietly.
       - name: Verify the restored Console dist bundles this tree's spec
-        if: steps.scope.outputs.affected != 'false'
+        if: needs.filter.outputs.console != 'false'
         env:
           CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
         run: pnpm check:console-injection --require-stamp
@@ -2551,7 +2549,7 @@ jobs:
       # key moves only when the pin does. A pin-bump PR writes one entry, and the
       # rest of that PR's pushes reuse it instead of rebuilding the console again.
       - name: Save vendored Console dist
-        if: steps.scope.outputs.affected != 'false' && steps.console-dist.outputs.cache-hit != 'true'
+        if: needs.filter.outputs.console != 'false' && steps.console-dist.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: packages/console/dist
