@@ -153,6 +153,7 @@ import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object
 import { resolveTenancyPosture } from '@objectstack/types';
 import {
   normalizeTenancyPosture,
+  postureUsesUnionScope,
   TenantLayer0VerdictSchema,
   type TenancyPosture,
   type TenantLayer0Verdict,
@@ -7070,6 +7071,12 @@ export class ObjectQL implements IObjectQLEngine {
     if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) return unbound;
     const wanted = collectPredicateRelationships(schema);
     if (wanted.size === 0) return unbound;
+    // ⛔ Under `group` a USER caller with no active organization has no `tenantId` to
+    // scope this read by, while its own reads are walled: it reads nothing, and
+    // every stored reference stays unresolved.
+    const caller = context as ExecutionContext | undefined;
+    const readsNothing = !!caller?.userId && !carriesOrganization(caller?.tenantId)
+      && postureUsesUnionScope(this.resolveEnginePosture());
 
     const fields = (schema?.fields ?? {}) as Record<string, unknown>;
     type Resolved = {
@@ -7123,7 +7130,7 @@ export class ObjectQL implements IObjectQLEngine {
         if (value == null || Array.isArray(value) || typeof value === 'object') continue;
         ids.add(String(value));
       }
-      if (ids.size === 0) { resolved.set(fk, { object: target, byId: new Map() }); continue; }
+      if (ids.size === 0 || readsNothing) { resolved.set(fk, { object: target, byId: new Map() }); continue; }
       try {
         // ⭐ SYSTEM authority, and ONLY for this seam.
         //

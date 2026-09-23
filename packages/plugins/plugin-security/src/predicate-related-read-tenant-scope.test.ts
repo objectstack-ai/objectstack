@@ -77,7 +77,7 @@ afterEach(async () => {
 });
 
 /** `kind` is org Y's row's value; org X holds one `secret` line of its own. */
-async function boot(kind: 'secret' | 'public') {
+async function boot(kind: 'secret' | 'public', posture?: 'group') {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   const engine = new ObjectQL();
   engine.registerDriver(driver as never, true);
@@ -95,6 +95,7 @@ async function boot(kind: 'secret' | 'public') {
 
   const services: Record<string, unknown> = {
     'org-scoping': { name: 'org-scoping' },
+    ...(posture ? { tenancy: { posture } } : {}),
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: { get: async (_t: string, name: string) => engine.getSchema(name) ?? null, list: async () => [MEMBER] },
@@ -129,23 +130,32 @@ async function boot(kind: 'secret' | 'public') {
   });
 
   const stored = async (name: string) => (await table('qa_inspection').where({ name }).select('id')).length;
-  return { engine, readsOfLine, stored };
+  return { engine, readsOfLine, stored, table };
 }
 
 /** Everything the caller sees of one write and one preview naming `line`. */
-async function observe(kind: 'secret' | 'public', line: string) {
-  const h = await boot(kind);
+async function observe(kind: 'secret' | 'public', line: string, caller: object = CALLER, posture?: 'group') {
+  const h = await boot(kind, posture);
   const refusal = await h.engine
-    .insert('qa_inspection', { name: 'probe', line }, { context: CALLER } as never)
+    .insert('qa_inspection', { name: 'probe', line }, { context: caller } as never)
     .then(() => null, (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }));
   const preview = await h.engine.validate(
-    'qa_inspection', { name: 'probe', line }, { mode: 'insert', context: CALLER } as never,
+    'qa_inspection', { name: 'probe', line }, { mode: 'insert', context: caller } as never,
   );
+  // Under `group`, the by-id UPDATE door too: org X's own inspection repointed at `line`.
+  let update: unknown;
+  if (posture) {
+    await h.table('qa_inspection').insert([{ id: 'insp_x', name: 'seed', organization_id: 'org_x' }]);
+    update = await h.engine
+      .update('qa_inspection', { line }, { where: { id: 'insp_x' }, context: caller } as never)
+      .then(() => 'committed', (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }));
+  }
   return {
     seen: {
       refusal,
       committed: await h.stored('probe'),
       preview: { valid: preview.results?.[0]?.valid, errors: preview.results?.[0]?.errors?.map((e) => e.message) },
+      update,
     },
     readsOfLine: h.readsOfLine,
   };
@@ -171,5 +181,35 @@ describe('#18682 — the related read stays inside the caller’s organization',
     expect(own.seen.committed).toBe(0);
     expect(own.seen.preview).toEqual({ valid: false, errors: [RULE_MESSAGE] });
     expect(own.readsOfLine.map((rows) => rows.length)).toEqual([1, 1]);
+  });
+});
+
+/**
+ * Under `group` a member's reach is their membership set, so a member with no
+ * ACTIVE organization is admitted to the preview, yet carries no `tenantId`
+ * to scope the related read by. Such a caller gets no related read at all.
+ */
+describe('#18682 — under `group`, a member with no active organization reads nothing related', () => {
+  const ORGLESS_MEMBER = { userId: 'u_x', accessible_org_ids: ['org_x'], positions: [], permissions: [], posture: 'MEMBER' };
+
+  it('a reference to org Y’s row ends identically whether that row is secret or public', async () => {
+    const secret = await observe('secret', 'line_y', ORGLESS_MEMBER, 'group');
+    const open = await observe('public', 'line_y', ORGLESS_MEMBER, 'group');
+
+    expect(open.seen).toEqual(secret.seen);
+    expect(secret.seen.committed).toBe(0);
+    expect(secret.seen.preview.valid).toBe(false);
+    expect(secret.seen.update).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(secret.readsOfLine).toEqual([]);
+    expect(open.readsOfLine).toEqual([]);
+  });
+
+  it('CONTROL: WITH an active organization, org X’s own secret line reaches the rule on every door', async () => {
+    const own = await observe('public', 'line_x', { ...ORGLESS_MEMBER, tenantId: 'org_x' }, 'group');
+
+    expect(own.seen.refusal).toEqual({ code: 'VALIDATION_FAILED', message: RULE_MESSAGE });
+    expect(own.seen.preview).toEqual({ valid: false, errors: [RULE_MESSAGE] });
+    expect(own.seen.update).toEqual({ code: 'VALIDATION_FAILED', message: RULE_MESSAGE });
+    expect(own.readsOfLine.map((rows) => rows.length)).toEqual([1, 1, 1]);
   });
 });
