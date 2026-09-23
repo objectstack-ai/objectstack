@@ -2944,6 +2944,38 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * @internal
  */
 function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefinition {
+  // [ADR-0112 · #19785] Shape guard, because `defineStack(config, { strict:
+  // false })` hands this merge the normalized input with no parse in between.
+  // A non-array `objects` is REFUSED with the strict parse's own envelope
+  // (`STACK_SCHEMA_INVALID`, 422, the zod issue at `['objects']`) — never a bare
+  // `TypeError` from `.map`, and never a pass-through: bound actions cannot be
+  // merged into objects that are not a list, and a stack handed on in that
+  // shape is one `composeStacks` refuses with this same code anyway. `strict:
+  // false` skips VALIDATION (cross-references, schema detail); it never
+  // promised to accept a shape this merge cannot read. `undefined` is the one
+  // non-array that is not malformed — the key is simply absent — the same line
+  // `mergeObjects` draws for the same key.
+  const declaredObjects: unknown = (config as { objects?: unknown }).objects;
+  if (declaredObjects !== undefined && !Array.isArray(declaredObjects)) {
+    const parsed = z.array(z.unknown()).safeParse(declaredObjects);
+    const issues = parsed.success
+      ? []
+      : parsed.error.issues.map((issue) => ({ ...issue, path: ['objects', ...issue.path] }));
+    const kind =
+      declaredObjects === null
+        ? 'null'
+        : typeof declaredObjects !== 'object'
+          ? `a ${typeof declaredObjects}`
+          : `a ${(declaredObjects as object).constructor?.name ?? 'non-plain'} object`;
+    throw new StackSchemaInvalidError(
+      `defineStack validation failed: 'objects' is ${kind}, not an array. Bound actions cannot be ` +
+        `merged into it, and \`strict: false\` skips validation, not this shape — \`composeStacks\` ` +
+        `refuses the same stack with the same code. Author 'objects' as an array or in the map form ` +
+        `(\`{ name: { … } }\`), or drop \`strict: false\` to have every schema check run.`,
+      issues as z.core.$ZodIssue[],
+    );
+  }
+
   // Honour `order` on the preserved top-level actions regardless of objects.
   const sortedTop = config.actions ? sortActionsByOrder(config.actions) : config.actions;
   const topChanged = sortedTop !== config.actions;
@@ -2967,6 +2999,12 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
   // references, consistent with mergeObjects() and Zod output).
   let objectsChanged = false;
   const newObjects = config.objects.map((obj) => {
+    // [#19785] A non-object ENTRY (only reachable unparsed) carries no actions
+    // to merge into: it is handed on exactly as written, never dereferenced.
+    // Not dropped and not warned about here — nothing is lost at this door,
+    // which is what a scalar entry already got; `composeStacks` is where such
+    // an entry would be lost, and it skips and reports it there.
+    if (!isRecord(obj as unknown)) return obj;
     const base = obj.actions ?? [];
     // Idempotent (#14847): append only the bound actions `base` does not carry
     // ALREADY — judged by identity, never by equality. The one way an entry of
