@@ -7,9 +7,10 @@
  *
  * `filter-text-conformance.test.ts` proves the table is internally honest and
  * `filter-text-comparand.test.ts` proves the published predicate answers it.
- * Neither of those reaches a SCHEMA: until this round the platform declared the
- * two refusals as data, every backend answered them, and both authoring doors
- * admitted the document anyway — `FilterConditionSchema` and
+ * Neither of those reaches a SCHEMA. The platform declares the two refusals as
+ * data, and each of the five driver packages refuses both comparands at query
+ * time (the formula matcher excludes every row instead); yet until this round
+ * both authoring doors admitted the document — `FilterConditionSchema` and
  * `ViewFilterRuleSchema` both said `success: true` for an empty comparand and
  * for a numeric one. That is the declared-not-enforced shape ADR-0049 closes.
  *
