@@ -3315,7 +3315,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 20,
   'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 12,
-  "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 12,
+  "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
 });
 const SELF_TEST_BATTERY_FLOOR = 16;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -4433,6 +4433,8 @@ export function selfTest() {
     t('structural: main hands the resolved route through sizeRoute on the RENDERED body before the transport line is printed', mainSource.includes('sizeRoute(await resolveRoute(process.env), rendered.body)') && mainSource.indexOf('sizeRoute(') < mainSource.indexOf('transport ${route.transport}'));
     // An import SHAPE, not the module's bare name: the name is spelled in this very line, so a name test could never fail.
     t('⛔ no compression codec: this file imports nothing from zlib', /from '(node:)?zlib'/.test(ownSource) === false && /require\('(node:)?zlib'\)/.test(ownSource) === false);
+    const entrySource = ownSource.slice(ownSource.indexOf('if (isEntrypoint(import.meta.url))'));
+    t('⛔ the proxy re-exec at the entrypoint is UNCONDITIONAL — a dry run resolves the route, which is a read, so it re-execs too', entrySource.includes('rearmThroughProxy(process.argv.slice(2))') && /--dry-run'\)\s*\?\s*null\s*:\s*rearmThroughProxy/.test(entrySource) === false);
   }
 
   // The floor, evaluated last: a battery that stops running names itself here.
@@ -4483,9 +4485,11 @@ if (isEntrypoint(import.meta.url)) {
     }
     process.exit(code);
   } else {
-    // ⛔ Not on a dry run: that path makes no request, so re-execing it would
-    // spawn a second process to prove a route nothing is about to use.
-    const rearmed = process.argv.includes('--dry-run') ? null : rearmThroughProxy(process.argv.slice(2));
+    // A dry run too: it WRITES nothing, but it resolves the route, and the
+    // route's liveness read is a request — from a process whose fetch bypasses
+    // HTTPS_PROXY it answers 401 for a live relay, the reading that once turned
+    // a seat `direct`. Route resolution runs only behind the re-exec.
+    const rearmed = rearmThroughProxy(process.argv.slice(2));
     if (rearmed !== null) process.exit(rearmed);
     main(process.argv.slice(2)).then((code) => process.exit(code));
   }
