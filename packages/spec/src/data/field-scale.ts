@@ -69,10 +69,11 @@
  *   the `currency` type (#19629, ruling 5791803339 letter B) and refused at
  *   parse, so a currency field declares no `scale` for this table to default.
  *   The amount's cell resolves its fraction digits from the currency's own
- *   ISO 4217 minor-unit count and never read the key; in the console pinned
- *   when the ruling landed (`.objectui-sha` 62597c58) the grid summary footer
- *   and the dashboard metric widget did read it on a currency column, as
- *   `scale ?? 0` — the consumer half is objectui#10221. The one `2` that looks
+ *   ISO 4217 minor-unit count and never read the key; measured at
+ *   `.objectui-sha` pin `62597c588072` (the pin when the ruling landed), the
+ *   grid summary footer and the dashboard metric widget did read it on a
+ *   currency column, as `scale ?? 0` — the ruling's consumer half is
+ *   objectui#10221. The one `2` that looks
  *   like a currency default belongs to an inline grid COLUMN's rounding of a
  *   computed result, not to a field's display width.
  *
