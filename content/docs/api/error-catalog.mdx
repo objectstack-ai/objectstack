@@ -211,7 +211,7 @@ A value that misses a declared `pattern` outside record metadata (a settings val
 body a route parses with Zod) also answers field-level `invalid_format`.  
 **Fix:** Do not branch on this code; branch on `VALIDATION_FAILED` + `fields[].code`. To change
 what a field accepts, change its `type` or the `format` validation rule — a field-level `format`
-key is a display hint the server never checks, so editing it changes nothing.  
+key runs no write-time check on any field type, so editing it changes nothing.  
 **Retry:** `no_retry`
 
 ### `VALUE_TOO_LONG`
