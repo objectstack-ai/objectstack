@@ -145,11 +145,13 @@
  * only a maintainer can change the settings. What #9642 changed is that a
  * disagreement is now MEASURED instead of invisible — and the first run found
  * one: `Build Docs` and `Console Pin Gate` were registered here and were NOT
- * in the live required set. That first finding is closed (#9533, 2026-08-18
- * ruling — the two rows dropped; the tombstone below carries the provenance),
- * so the two lists agree in both directions today and the sweep prints its
- * ✅ line. The mechanism stays for the next disagreement; it reports and
- * decides nothing.
+ * in the live required set. That first finding was closed by #9533 (2026-08-18
+ * ruling — the two rows dropped; the tombstone below carries the provenance).
+ * `Console Pin Gate` has since been re-enrolled ahead of its Settings half
+ * (#17673, ruling #18900 ⑤: code first, the maintainer's click after), so
+ * until that click the sweep reports it as direction A — the designed reading
+ * of an enrolment whose settings half has not happened yet, not a new finding.
+ * The mechanism reports and decides nothing.
  *
  * ## Why `if:` is deliberately NOT asserted
  *
@@ -157,13 +159,17 @@
  * right for lint.yml's two and WRONG for the four jobs the 2026-08-09 ruling
  * approved (approved — how much of that batch reached the settings is #9533's
  * finding below): `build-core`, `build-docs`, `console-pin` and
- * `temporal-conformance` each carry `if: ${{ !cancelled() && needs.filter…}}`
+ * `temporal-conformance` each carried `if: ${{ !cancelled() && needs.filter…}}`
  * BY DESIGN — THE FILTER CONTRACT (#4928). A job-level `if:` that skips still
  * publishes a check run (conclusion `skipped`, which branch protection counts
  * as passing); it is the workflow-level `paths:` filter that publishes nothing,
  * which is why assertion 7 above judges the trigger and not the job. Asserting
  * "no `if:`" uniformly would have made this gate red on `main` the day it
- * landed, against four jobs that are correct.
+ * landed, against four jobs that are correct. (`console-pin` has since moved
+ * its filter term from the job's `if:` into a first step, so it concludes on
+ * every run rather than reading `skipped` — #17673, ruling #18900 ⑤; see its
+ * registry row. That is a property of that one job, not a rule this pin
+ * asserts of the others.)
  *
  * The two aggregate gates are a further special case — they need `if: always()`
  * for a reason of their own (#3622: a gate that skips because a dependency
@@ -290,11 +296,19 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * the registry-follows half of the header's two-step; the Settings half is
  * the maintainer attestation above.
  *
- * ⛔ TOMBSTONE — `Build Docs` (ci.yml:build-docs) and `Console Pin Gate`
- * (ci.yml:console-pin), dropped 2026-08-18 by the #9533 ruling. Recorded at
- * length because the shape here is NOT the one the ruling's wording assumed,
- * and a future reader who re-derives it from git will otherwise reach the
- * same wrong conclusion twice:
+ * ⛔ TOMBSTONE — `Build Docs` (ci.yml:build-docs), dropped 2026-08-18 by the
+ * #9533 ruling together with `Console Pin Gate` (ci.yml:console-pin). ⭐ The
+ * console half is REVERSED: ruling #18900 ⑤ put `Console Pin Gate` back, in
+ * two steps — first the job reports a conclusion on every PR and its row
+ * returns here (#17673, the row below), then the maintainer adds it in
+ * Settings → Rulesets. Until that click the row is registered-not-live and
+ * `--verify-required-set` prints it as direction A; that is the two-step's
+ * designed intermediate state, which the row's `authorized` field says in
+ * words so it is never read as an attested application (the exact mistake
+ * the first bullet below records). `Build Docs` stays dropped. The #9533
+ * provenance is kept for both, because the shape here is NOT the one that
+ * ruling's wording assumed, and a future reader who re-derives it from git
+ * will otherwise reach the same wrong conclusion twice:
  *
  *   • What the rows claimed. Both carried `authorized: '#5617 closing ruling
  *     2026-08-09, second batch'` — and that ruling reads «Second batch
@@ -323,9 +337,10 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * ⛔ And why this tombstone is PROSE and not a RETIRED_CONTEXT_NAMES row,
  * against the #9523 precedent the ruling cited. That ledger bans a name from
  * the instruction surfaces because the name is DEAD — no check-run reports it
- * any more. Neither of these names is dead: both jobs still exist, still carry
- * these `name:` literals, and still publish these check-runs on every PR that
- * trips their filter. They lost REQUIRED status, which is a different fact.
+ * any more. Neither of these names was dead: both jobs still existed, still
+ * carried these `name:` literals, and still published these check-runs. They
+ * lost REQUIRED status, which is a different fact — and for `Console Pin
+ * Gate` a reversible one, as ⑤ has now shown.
  * Ledgering them anyway was measured before it was rejected (2026-08-18):
  * `docs/releases-maintenance.md` names `Console Pin Gate` in correct, current
  * prose describing what still checks the pin, so
@@ -334,18 +349,20 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * is right. Budgeting around it would only arm the trap for the next author
  * who legitimately names the live job.
  *
- * ⚠️ The cost of the drop, stated rather than discovered later: these two
- * `name:` literals are now pinned by NOTHING, while prose elsewhere still refers
- * to the jobs by name — `docs/releases-maintenance.md`,
+ * ⚠️ The cost of the drop, stated rather than discovered later: the `Build
+ * Docs` literal is pinned by NOTHING (`Console Pin Gate` is pinned again by its
+ * row below), while prose elsewhere still refers to the jobs by name —
+ * `docs/releases-maintenance.md`,
  * `packages/console/README.md` and lint.yml's cross-reference among them. This
  * list read FIVE until #10134 deleted `scripts/check-objectui-pin-fresh.mjs` and
  * `.github/workflows/objectui-pin-freshness.yml`, both of which named
  * `Console Pin Gate` only to tell it apart from `Console Pin Freshness`; the
  * recorded debt shrank by two and did not close. ⚠️ It was never asserted by
  * anything either way, so read it as examples and never as a census — the same
- * trap the `carries` note below is about. Renaming either job no longer detaches a
- * required gate — that is the whole point — but it does silently falsify that
- * prose. Filed as its own card rather than solved here, since a pin for
+ * trap the `carries` note below is about. Renaming `build-docs` no longer
+ * detaches a required gate — that is the whole point — but it does silently
+ * falsify that prose (renaming `console-pin` reds this pin again, since #17673).
+ * Filed as its own card rather than solved here, since a pin for
  * "contract job names that are not required contexts" is a new mechanism and
  * this card is ledger hygiene. Filed as #9793.
  *
@@ -438,6 +455,23 @@ export const REQUIRED_CONTEXTS = [
       '#12427 maintainer confirmation, closed `completed` 2026-08-27T07:51Z on the verbatim 「Governed Surface Queue Guard 已添加」 (comment 5436049459); ' +
       'read back live in the ruleset sweep of 2026-09-10 that carries the director ruling enrolling this row (#15233)',
     carries: 'the governed-surface refusal — the `merge_group` leg that refuses a governed diff carrying no ruled approval',
+  },
+  {
+    workflow: 'ci.yml',
+    job: 'console-pin',
+    // Re-enrolled AHEAD of its Settings half, on purpose (ruling #18900 ⑤:
+    // code first, the maintainer's click after). The job concludes on every
+    // run — `success` with a NOT BUILT notice when the `console` filter says
+    // false, the real build and dist checks otherwise — so the tombstone's
+    // `skipped` reading is gone. Until the click, `--verify-required-set`
+    // reports this row as direction A; `authorized` below says APPROVED, not
+    // APPLIED, so it is never mistaken for an attested application (the
+    // #9533 lesson recorded in the tombstone above).
+    context: 'Console Pin Gate',
+    authorized:
+      'maintainer ruling on #18900 item ⑤ (comment 5727134555, 2026-09-18): back to required in two steps — this row is step one (#17673); ' +
+      'the Settings → Rulesets entry is the maintainer\'s click AFTER it lands, and NOT attested applied until then',
+    carries: 'the pinned-objectui console build and its dist checks (check:console-sha, check:console-injection)',
   },
 ];
 
@@ -563,6 +597,12 @@ export const INSTRUCTION_SURFACES = [
       'Build Core',
       'Temporal Conformance (live PG + MySQL)',
       'Governed Surface Queue Guard',
+      // The eighth, re-enrolled ahead of its Settings half by #17673 (ruling
+      // #18900 ⑤). ⚠️ This file already named it in its Post-Task Checklist
+      // item 4, so the literal scan is satisfied by that mention whether or
+      // not the merge-queue sentence above follows — see the PR for that
+      // residual.
+      'Console Pin Gate',
     ],
   },
   {
@@ -593,6 +633,9 @@ export const INSTRUCTION_SURFACES = [
       // array — held equal to the registry by the exclusivity rule in
       // judgeInstructionSurfaces — that makes the seat's copy non-optional.
       'Governed Surface Queue Guard',
+      // The eighth, re-enrolled ahead of its Settings half by #17673 (ruling
+      // #18900 ⑤).
+      'Console Pin Gate',
     ],
   },
   {
