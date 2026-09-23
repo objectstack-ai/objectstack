@@ -672,3 +672,116 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
     ]);
   });
 });
+
+// ── [#19791] The two consumed rule-array carriers the walk never entered ────
+//
+// A list page's `interfaceConfig.filterBy` and a lookup field's
+// `lookupFilters` both reach the engine's `where` verbatim, and neither schema
+// carries a preset check. Before `FILTER_KEYS` named them, the card's rule
+// `{ field: 'close_date', operator: 'gt', value: 'last_30_days' }` parsed
+// green AND linted green on both, while the identical rule on a component
+// `dataSource.filter` was refused — the lit control every block below keeps.
+describe('validatePresetComparands — page filterBy and lookup-field lookupFilters (#19791)', () => {
+  const card = { field: 'close_date', operator: 'gt', value: 'last_30_days' };
+  // `close_date` is a DATE on `crm_deal` and a SELECT on `crm_region`, whose
+  // option value collides with a preset name — the pair that tells a binding
+  // to the right object from a binding to the wrong one.
+  const carrierObjects = [
+    { name: 'crm_deal', fields: { close_date: { type: 'date' }, name: { type: 'text' } } },
+    { name: 'crm_region', fields: { close_date: { type: 'select', options: [{ label: 'This Quarter', value: 'this_quarter' }] } } },
+  ];
+  const listPage = (interfaceConfig: Record<string, unknown>, over: Record<string, unknown> = {}) => ({
+    objects: carrierObjects,
+    pages: [{ name: 'deals', type: 'list', interfaceConfig, ...over }],
+  });
+  const lookupHolder = (account: Record<string, unknown>, owner: Record<string, unknown> = {}) => ({
+    objects: [
+      ...carrierObjects,
+      { name: 'crm_invoice', fields: { ...owner, account: { type: 'lookup', ...account } } },
+    ],
+  });
+
+  it("refuses the card's rule in a page's filterBy, beside the lit control on the same page", () => {
+    const findings = validatePresetComparands({
+      objects: carrierObjects,
+      pages: [{
+        name: 'deals', type: 'list',
+        interfaceConfig: { source: 'crm_deal', filterBy: [card, { field: 'close_date', operator: 'between', value: ['this_week', '2026-01-01'] }] },
+        components: [{ type: 'list', dataSource: { object: 'crm_deal', filter: [card] } }],
+      }],
+    });
+    expect(findings.map((f) => f.path).sort()).toEqual([
+      'pages[0].components[0].dataSource.filter[0].value',
+      'pages[0].interfaceConfig.filterBy[0].value',
+      'pages[0].interfaceConfig.filterBy[1].value[0]',
+    ]);
+    const onFilterBy = findings.find((f) => f.path === 'pages[0].interfaceConfig.filterBy[0].value')!;
+    expect(onFilterBy.severity).toBe('error');
+    expect(onFilterBy.rule).toBe(FILTER_PRESET_COMPARAND);
+    expect(onFilterBy.where).toBe('page "deals"');
+    expect(onFilterBy.message).toContain('"last_30_days" is a dashboard date-range PRESET name');
+  });
+
+  it("refuses the card's rule in a lookup field's lookupFilters, map-form and array-form fields alike", () => {
+    expect(validatePresetComparands(lookupHolder({ reference: 'crm_deal', lookupFilters: [card] }))
+      .map((f) => f.path)).toEqual(['objects[2].fields.account.lookupFilters[0].value']);
+    expect(validatePresetComparands({
+      objects: [{ name: 'crm_invoice', fields: [{ name: 'account', type: 'lookup', reference: 'crm_deal', lookupFilters: [card] }] }],
+    }).map((f) => f.path)).toEqual(['objects[0].fields[0].lookupFilters[0].value']);
+  });
+
+  it('judges equality on filterBy against the object interfaceConfig.source names, falling back to the page object', () => {
+    const eq = { field: 'close_date', operator: 'equals', value: 'this_quarter' };
+    // `source` is the date object: refused.
+    expect(validatePresetComparands(listPage({ source: 'crm_deal', filterBy: [eq] })).map((f) => f.path))
+      .toEqual(['pages[0].interfaceConfig.filterBy[0].value']);
+    // `source` is the select object while the page's own `object` is the date
+    // one: the list queries `source`, so the equality is the picklist case.
+    expect(validatePresetComparands(listPage({ source: 'crm_region', filterBy: [eq] }, { object: 'crm_deal' }))).toEqual([]);
+    // No `source`: the page's `object`, as validate-page-field-bindings reads it.
+    expect(validatePresetComparands(listPage({ filterBy: [eq] }, { object: 'crm_deal' })).map((f) => f.path))
+      .toEqual(['pages[0].interfaceConfig.filterBy[0].value']);
+  });
+
+  it("judges equality on lookupFilters against the field's reference, never the owning object", () => {
+    const eq = { field: 'close_date', operator: 'eq', value: 'this_quarter' };
+    // The referenced object declares `close_date` as a date: refused.
+    expect(validatePresetComparands(lookupHolder({ reference: 'crm_deal', lookupFilters: [eq] })).map((f) => f.path))
+      .toEqual(['objects[2].fields.account.lookupFilters[0].value']);
+    // The OWNING object declares a date `close_date`, the referenced one a
+    // select: binding to the owner would be the #16106 B1 false refusal.
+    const owner = { close_date: { type: 'date' } };
+    expect(validatePresetComparands(lookupHolder({ reference: 'crm_region', lookupFilters: [eq] }, owner))).toEqual([]);
+    // No `reference` to follow: unjudged by arm 2, never the owner.
+    expect(validatePresetComparands(lookupHolder({ lookupFilters: [eq] }, owner))).toEqual([]);
+    // A `relatedListFilter` on the SAME field keeps binding to the owner,
+    // whose rows it filters — one field, two filters, two objects.
+    const both = validatePresetComparands(lookupHolder(
+      { reference: 'crm_region', lookupFilters: [eq], relatedListFilter: { close_date: 'this_quarter' } },
+      owner,
+    ));
+    expect(both.map((f) => f.path)).toEqual(['objects[2].fields.account.relatedListFilter.close_date']);
+  });
+
+  it('stays quiet on every legal comparand in both carriers', () => {
+    const legal = [
+      { field: 'close_date', operator: 'gt', value: '{30_days_ago}' },
+      { field: 'close_date', operator: 'gte', value: '2026-01-15' },
+      { field: 'close_date', operator: 'between', value: ['{week_start}', '{week_end}'] },
+      { field: 'name', operator: 'equals', value: 'last_30_days' },
+    ];
+    // The lookup picker's own flat operator vocabulary (`FieldSchema.lookupFilters`).
+    const legalLookup = [
+      { field: 'close_date', operator: 'gt', value: '{30_days_ago}' },
+      { field: 'close_date', operator: 'gte', value: '2026-01-15' },
+      { field: 'name', operator: 'eq', value: 'last_30_days' },
+    ];
+    expect(validatePresetComparands({
+      objects: [
+        ...carrierObjects,
+        { name: 'crm_invoice', fields: { account: { type: 'lookup', reference: 'crm_deal', lookupFilters: legalLookup } } },
+      ],
+      pages: [{ name: 'deals', type: 'list', interfaceConfig: { source: 'crm_deal', filterBy: legal } }],
+    })).toEqual([]);
+  });
+});
