@@ -271,16 +271,22 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   flat `startDateField`, and the `if (!calendarConfig)` arm renders the
  *   "Calendar configuration required" refusal screen, which names
  *   `startDateField` as the key to declare (objectui#8170 corrected that
- *   screen's second clause: `titleField` is NOT required). ⚠️ That literal
- *   is the text RENDERED at the pin: objectui#10101 landed AFTER the pin and
- *   moved it into a `tt('calendar.configRequired', …)` default, so on
- *   objectui's head a non-English locale renders other words for the same
- *   screen. Harmless for the console this repo ships — and the pin citation
- *   below is what reds when the pin moves past it. So the loss is
- *   total rather than partial — every record, on every object — and the
- *   author is told at render time as well as here. Both reads are identical
- *   at the pin this repo builds against (`.objectui-sha` = `87af769e9`), so
- *   this describes the console this repo SHIPS and not only objectui's head.
+ *   screen's second clause: `titleField` is NOT required). ⚠️ The screen's
+ *   copy is LOCALISED at the pin: objectui#10101 (objectui `afb228418`), which
+ *   the pin now contains, routes it through `tt('calendar.configRequired', …)`
+ *   (`ObjectCalendar.tsx:1207-1208`), whose default and the `en` pack both
+ *   read "Calendar configuration required. Please specify startDateField, …",
+ *   while a non-English locale renders its own pack's words for the same
+ *   screen (e.g. `zh`, `de`). The refusal itself — the `if (!calendarConfig)`
+ *   arm and what it names — did not move; only the words are per-locale now,
+ *   so match the screen by that arm or by `startDateField`, never by the
+ *   English sentence. So the loss is total rather than partial — every
+ *   record, on every object — and the author is told at render time as well
+ *   as here. Both reads hold at the pin this repo builds against
+ *   (`.objectui-sha` = `62597c588`, re-read 2026-09-23: `ListView.tsx` is
+ *   byte-identical to `87af769e9`, and `ObjectCalendar.tsx` changed there only
+ *   in its copy), so this describes the console this repo SHIPS and not only
+ *   objectui's head.
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
