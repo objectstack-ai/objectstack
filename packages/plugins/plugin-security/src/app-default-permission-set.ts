@@ -169,18 +169,25 @@ export function appDefaultPermissionSetName(permissions: unknown): string | unde
  * loadable or refused, and which answer this reader gives about it must not
  * depend on whether its flattened level happened to name a default first.
  *
+ * ⛔ This reader has no `packages` guard of its own. Which `packages` values
+ * are absent and which are refused is answered by `resolveArtifactPackageOrder`
+ * alone. The rule is stated once, beside `AssembledPackageBodySchema`
+ * (`@objectstack/spec`, `stack.zod.ts`). A private `undefined` / `null` check
+ * here would be a second spelling of that answer.
+ *
  * ## One thing it deliberately does NOT do
  *
  * It does not look inside the SINGULAR `manifest`. That constraint is #7001's
  * and it still holds — the harness must not honour a declaration `serve.ts`
- * ignores. Note this is not a special case bolted on: an artifact carrying no
- * `packages` key never reaches the package pass at all, so that branch reads
- * `permissions` from exactly where the old code read it and nowhere else.
+ * ignores. Note this is not a special case bolted on. When the artifact carries
+ * no `packages` key, D4's second branch hands back the artifact ITSELF as the
+ * one package body. So the package pass re-reads `permissions` from exactly
+ * where the flattened read did, the top level, and nowhere else. That re-read
+ * cannot change the answer, because the flattened read already returned
+ * `undefined` for the same value.
  */
 function declaredDefaultPermissionSetName(config: unknown): string | undefined {
-  const packages = (config as { packages?: unknown } | null | undefined)?.packages;
-  const bodies =
-    packages === undefined || packages === null ? [] : resolveArtifactPackageOrder(config);
+  const bodies = resolveArtifactPackageOrder(config);
 
   const flattened = (config as { permissions?: unknown } | null | undefined)?.permissions;
   const fromFlattened = appDefaultPermissionSetName(flattened);

@@ -374,15 +374,20 @@ function mergeCollection(key: string, top: unknown, fromBodies: readonly Contrib
  * `server`, `i18n`, `runtimeModule`, `onEnable`, `packages`) are the caller's
  * own references, so it is a drop-in for the artifact at any read site.
  *
- * ⚠️ Returns the ARGUMENT ITSELF, unchanged, for anything that does not carry a
- * `packages` array — which is every single-package artifact and every
- * `defineStack()` config the platform has ever booted. That branch is an
- * identity function on purpose: it is the only way to say "this change cannot
- * have moved the shape that ships today" rather than to hope so.
+ * ⚠️ Returns the ARGUMENT ITSELF, unchanged, for a non-object and for an
+ * artifact whose `packages` is ABSENT. That covers every single-package
+ * artifact and every `defineStack()` config the platform has ever booted. The
+ * branch is an identity function on purpose: it is the only way to say "this
+ * change cannot have moved the shape that ships today" rather than to hope so.
+ * A `packages` that is present but is not an array is not absent, so it does
+ * NOT take that branch. It is malformed, and it reaches the refusal below. The
+ * rule is stated once, beside `AssembledPackageBodySchema`
+ * (`packages/spec/src/stack.zod.ts`).
  *
  * @throws The ADR-0112 refusal `resolveArtifactPackageOrder` raises for a
- *   malformed `packages[]` entry, a package with no usable id, or a duplicate
- *   package — the same refusal `ObjectQLPlugin`'s `manifest` service already
+ *   `packages` that is not an array (`INVALID_ARTIFACT_PACKAGES`), a malformed
+ *   `packages[]` entry, a package with no usable id, or a duplicate package.
+ *   It is the same refusal `ObjectQLPlugin`'s `manifest` service already
  *   raises on the same artifact during boot. Resolving collections out of an
  *   artifact the loader would refuse is not a quieter outcome, it is a
  *   different answer to what the artifact contains.
@@ -402,7 +407,11 @@ function mergeCollection(key: string, top: unknown, fromBodies: readonly Contrib
  */
 export function resolveArtifactCollections<T>(artifact: T): T {
     if (artifact === null || typeof artifact !== 'object') return artifact;
-    if (!Array.isArray((artifact as { packages?: unknown }).packages)) return artifact;
+    // ABSENT only. A present non-array `packages` falls to the refusal in
+    // `resolveArtifactPackageOrder` below; see the docblock for where the rule
+    // lives. `null` is read as absent, as the other readers read it.
+    const declared = (artifact as { packages?: unknown }).packages;
+    if (declared === undefined || declared === null) return artifact;
 
     const bodies = resolveArtifactPackageOrder(artifact) as Array<Record<string, unknown> | null | undefined>;
     // `resolveArtifactPackageOrder` has already refused any entry whose manifest

@@ -1241,6 +1241,29 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  * ⛔ Never re-open this surface with `.loose()` or a `.catchall()` to make an
  * assembled body tolerant: that would leave this declaration the one door in
  * the chain accepting what the manifest it extends refuses.
+ *
+ * ## A non-array `packages` is MALFORMED, not absent
+ *
+ * This is the single statement of the rule. The key is
+ * declared on {@link ObjectStackDefinitionSchema} as an ARRAY of
+ * {@link ArtifactPackageSchema} entries, each wrapping one body of this
+ * schema. It therefore has two readings:
+ *
+ * - **Absent**: a SINGLE-package artifact. This is ADR-0130 D4's second
+ *   branch, where the artifact itself is the one package body.
+ * - **An array**: N package entries, each gated by {@link ArtifactPackageSchema}.
+ *
+ * Any other value, such as `{}`, `0` or `'x'`, is neither reading. It is
+ * malformed and REFUSED; it is never read as absent. `resolveArtifactPackageOrder`
+ * (`@objectstack/core`) raises the refusal as `INVALID_ARTIFACT_PACKAGES`
+ * (ADR-0112, `status: 422`). A reader that fell through to the artifact's
+ * top level instead would answer questions about an artifact the loader
+ * refuses. One reader would then boot what another refuses, which is the
+ * split this rule closes.
+ *
+ * ⚠️ `null` is the one value this rule does not settle. The schema's
+ * `.optional()` refuses it, while the readers treat it as absent. That
+ * disagreement is recorded, not decided, here.
  */
 /*
  * ANNOTATED, not inferred — and annotated with a STRUCTURAL type, not a named
@@ -1569,6 +1592,9 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
    * - `packages` present → iterate it.
    * - `packages` absent → treat `manifest` (singular) as a **single-element
    *   list**.
+   *
+   * A value that is present but is not an array takes neither branch. The rule
+   * for it is stated once, beside {@link AssembledPackageBodySchema}.
    *
    * `manifest` is therefore RETAINED, not replaced. A replacement would break
    * every artifact already built and on disk at every customer; the read-both
@@ -4411,11 +4437,13 @@ function selectManifest(
  * would fold the composed stack's flattened collections onto a package that
  * does not own them.
  *
- * A `packages` value that is not an array cannot be iterated; `defineStack`
- * rejects that shape, so it is reachable only via `strict: false` or a
- * hand-built object, and the concat pass has already warned about it by the
- * time this runs. Such a stack falls back to the `manifest` branch rather than
- * contributing nothing — preserve's whole job is to not lose an identity.
+ * A `packages` value that is present but is not an array never reaches this
+ * function. `composeStacks`' concat pass runs first and REFUSES it as
+ * `STACK_SCHEMA_INVALID`, because such a value is malformed, not absent. The
+ * rule is stated once, beside {@link AssembledPackageBodySchema}. So the
+ * `Array.isArray` test below does not decide what a malformed value means: it
+ * only separates a carried list from an ABSENT key, which takes the `manifest`
+ * branch.
  *
  * @internal
  */
