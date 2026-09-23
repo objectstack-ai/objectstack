@@ -61,10 +61,10 @@ export const viewForm = defineForm({
       ],
     },
     // `pagination` is NOT grid-only: every view type accepts it, and
-    // `pagination.pageSize` is the one row bound a view carries (maintainer
-    // ruling D on #19228) — for a kanban, gallery or timeline view the only
-    // one. Its own section with no `visibleWhen` puts it in front of every
-    // type; inside `table_options` a non-grid author could not reach it.
+    // `pagination.pageSize` is the row bound every view type carries (maintainer
+    // ruling D on #19228 makes it the direction for a view's row bound). Its own
+    // section with no `visibleWhen` puts it in front of every type; inside
+    // `table_options` a non-grid author could not reach it.
     {
       name: 'pagination',
       label: 'Pagination',

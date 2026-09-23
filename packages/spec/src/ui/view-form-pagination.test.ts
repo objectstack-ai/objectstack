@@ -6,9 +6,9 @@
  *
  * ## What is being pinned
  *
- * Maintainer ruling D on #19228: a view carries one row bound,
- * `pagination.pageSize`. For a kanban, gallery or timeline view it is the only
- * one. The form used to offer `pagination` only inside `table_options`
+ * `pagination.pageSize` is the row bound every view type carries; maintainer
+ * ruling D on #19228 makes it the direction for a view's row bound. The form
+ * used to offer `pagination` only inside `table_options`
  * (`visibleWhen: "data.type == 'grid' || data.type == null"`), so an author
  * editing any other view type could not see or set that bound short of editing
  * the metadata by hand. Two halves, both asserted:
