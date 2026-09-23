@@ -762,8 +762,7 @@ function checkViewFilterRuleValueShape(
       + `"${VIEW_FILTER_PAIR_VALUE_OPERATORS.join('" / "')}" takes a [min, max] range — write `
       + `${value.length > 0 ? previewFilterValue(value[0]) : 'the value to compare against'} `
       + `to compare against one value, or use "${VIEW_FILTER_LIST_VALUE_OPERATORS[0]}" to test `
-      + `membership of the list. This is refused at authoring time because the query path `
-      + `refuses it too (400 INVALID_FILTER).`,
+      + `membership of the list.`,
   });
 }
 

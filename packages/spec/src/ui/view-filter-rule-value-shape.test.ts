@@ -255,10 +255,9 @@ describe('#19514 — the scalar arm, in both directions', () => {
     // diagnoses, and an author must be able to tell which one fired.
     expect(issue.message).not.toContain('requires an ARRAY of values');
     expect(issue.message).not.toContain('requires a [min, max] value array');
-    // The refusal carries what to DO, and the query-path code to match it against.
+    // The refusal carries what to DO.
     expect(issue.message).toContain('to compare against one value');
     expect(issue.message).toContain('or use "in" to test membership of the list');
-    expect(issue.message).toContain('400 INVALID_FILTER');
   });
 
   it('prescribes the author OWN first member, not a canned example', () => {
