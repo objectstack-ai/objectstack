@@ -22,7 +22,8 @@
 // live only in the pending seed draft, so there is no live path to hand the
 // query to. It is REFUSED — `INVALID_FILTER` / 400, the envelope this package's
 // `where` door already speaks — and never answered true. See
-// PREVIEW_FIELD_OPERATORS.
+// PREVIEW_FIELD_OPERATORS. [#19835] So is a field constraint carrying ZERO
+// operators (`{ name: {} }`), at any depth — see isEmptyFieldConstraint.
 
 import {
   calendarPartsInTzOrUtc,
@@ -194,6 +195,66 @@ function previewUnevaluableOperatorError(op: string, field: string): Error {
 }
 
 /**
+ * [#19835] Is this field spec `{}` — a field constrained by ZERO operators?
+ *
+ * A plain object with no own enumerable keys, and nothing else — the predicate
+ * `driver-memory`, `driver-mongodb`, `driver-sql` and `@objectstack/formula`
+ * each apply under the same name. A `Date`, a `RegExp` or a class instance also
+ * enumerates to nothing, but it is a COMPARAND rather than a constraint, so the
+ * prototype check keeps it out of this refusal exactly as it does there.
+ *
+ * Mirrored locally, not imported: the exported copy lives in `driver-memory`
+ * (`filter-refusal.ts`), a package this service does not depend on, and a
+ * dependency on a driver for a four-line predicate is the wrong direction.
+ */
+function isEmptyFieldConstraint(spec: unknown): boolean {
+  if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) return false;
+  const proto = Object.getPrototypeOf(spec);
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.keys(spec as Row).length === 0;
+}
+
+/**
+ * [#19835] `{ field: {} }` — a field constrained by ZERO operators — REFUSED,
+ * in the same `INVALID_FILTER` / 400 envelope as
+ * {@link previewUnevaluableOperatorError}.
+ *
+ * ⛔ It used to MATCH EVERY ROW, and not by anyone's decision: the per-field
+ * loop in {@link matchesWhere} iterates the constraint's entries, an empty
+ * object has none, so the loop body never ran and the row fell through to the
+ * function's closing `return true`. The operator-vocabulary refusal (#19810)
+ * could not reach it either — with no key there is no operator to look up and
+ * no lookup to fail.
+ *
+ * Every shipped backend already refuses this shape (#5240 ruled it: refused
+ * everywhere, one wording): `driver-memory`'s and `driver-mongodb`'s
+ * `emptyFieldConstraintError`, and `driver-sql`'s at the top level and inside
+ * `$and`/`$or`/`$not` alike. This package's own `where` door refuses it too
+ * (`filter-normalizer`'s wrapper arm). So the draft preview charted every row
+ * for a filter publish never answers at all — the preview/publish divergence
+ * this evaluator's other refusals exist to make visible.
+ *
+ * ⛔ Refused, NOT answered as "matches nothing". `{ status: {} }` does not mean
+ * "no rows" — read literally it means "rows whose status is anything", and the
+ * shape is almost always an authoring accident (a filter builder that recorded
+ * a field and never its operator). Either silent reading hands the author a row
+ * count they never asked for; only the refusal names the constraint to repair.
+ *
+ * The message follows the drivers' wording (constraint, position, the two legal
+ * repairs) and carries no tracker number, per the runtime-string rule.
+ */
+function previewEmptyFieldConstraintError(field: string, path: string): Error {
+  return invalidFilterError(
+    `[analytics] Field constraint at ${path} carries zero operators ({ "${field}": {} }). A field ` +
+      `constraint must name at least one operator (e.g. { "${field}": { "$eq": "value" } }) or be a ` +
+      `direct comparand (e.g. { "${field}": "value" }). It is refused rather than evaluated: the ` +
+      `draft-data preview used to answer it with EVERY row, while every data driver and the live ` +
+      `analytics filter refuse it — so the drafted chart was drawn over rows the published one never ` +
+      `returns. It does not mean "no rows" either; name the operator the constraint was meant to carry.`,
+  );
+}
+
+/**
  * [#19810] Refuse a `where` this face cannot evaluate BEFORE any row is read.
  *
  * Row-independent on purpose. {@link matchOp}'s refusal can only fire if some
@@ -206,17 +267,30 @@ function previewUnevaluableOperatorError(op: string, field: string): Error {
  *
  * It mirrors {@link matchesWhere}'s own traversal exactly, malformed shapes
  * included — a non-array `$and` is left for `matchesWhere` to fault on as it
- * always has, so this gate widens no refusal beyond the operator vocabulary.
+ * always has, so this gate widens no refusal beyond the operator vocabulary
+ * and the zero-operator constraint.
+ *
+ * [#19835] The zero-operator constraint is judged HERE, for the whole tree,
+ * rather than only where {@link matchesWhere} meets it: that walk
+ * short-circuits (`every`/`some`, and a node returns on its first false entry),
+ * so a `{ $or: [{ name: 'Globex' }, { amount: {} }] }` would refuse or answer
+ * depending on which ROW was being tested. A malformed filter is refused for
+ * every row or none — the posture `@objectstack/formula`'s `assertFilterShape`
+ * takes for the same shape — and nesting under `$and`/`$or`/`$not` cannot
+ * route around it, the position `driver-sql` once dropped it in.
  */
-function assertPreviewCanEvaluate(where: Record<string, unknown> | undefined): void {
+function assertPreviewCanEvaluate(where: Record<string, unknown> | undefined, path = 'where'): void {
   if (!where) return;
   for (const [key, cond] of Object.entries(where)) {
+    const here = `${path}.${key}`;
     if (key === '$and' || key === '$or') {
-      if (Array.isArray(cond)) for (const arm of cond) assertPreviewCanEvaluate(arm as Row);
+      if (Array.isArray(cond)) cond.forEach((arm, i) => assertPreviewCanEvaluate(arm as Row, `${here}[${i}]`));
     } else if (key === '$not') {
       if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
-        assertPreviewCanEvaluate(cond as Row);
+        assertPreviewCanEvaluate(cond as Row, here);
       }
+    } else if (isEmptyFieldConstraint(cond)) {
+      throw previewEmptyFieldConstraintError(key, here);
     } else if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
       for (const op of Object.keys(cond as Row)) {
         if (!PREVIEW_FIELD_OPERATORS.has(op)) throw previewUnevaluableOperatorError(op, key);
@@ -240,6 +314,11 @@ export function matchesWhere(row: Row, where: Record<string, unknown> | undefine
       if (!(cond as Row[]).some((c) => matchesWhere(row, c as Row))) return false;
     } else if (key === '$not') {
       if (matchesWhere(row, cond as Row)) return false;
+    } else if (isEmptyFieldConstraint(cond)) {
+      // [#19835] Zero entries would leave the loop below unrun and fall through
+      // to a MATCH. Refused here too, so a direct caller of this matcher gets
+      // the same answer the row-independent gate gives a whole query.
+      throw previewEmptyFieldConstraintError(key, key);
     } else if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
       for (const [op, expected] of Object.entries(cond as Row)) {
         if (!matchOp(row[key], op, expected, key)) return false;
