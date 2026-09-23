@@ -729,7 +729,8 @@ export function seedFlowActionParams(_deps: ActionExecutionDeps,
  */
 function flowActionRowIdKeys(action: any, objectName: string): Set<string> {
     const keys = new Set<string>(['recordId']);
-    // [#14864] ONE predicate for "object-less", the same one
+    // [066dd3bd06 — the card this comment cited no longer resolves] ONE
+    // predicate for "object-less", the same one
     // `dispatchFlowAction` asks before it decides whether to hand the
     // automation service an `object` at all. This used to be a second,
     // narrower comparison (`objectName !== GLOBAL_ACTION_OBJECT_KEY`), and the
