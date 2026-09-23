@@ -58,8 +58,20 @@ export const viewForm = defineForm({
         { field: 'compactToolbar', colSpan: 1 },
         { field: 'rowHeight', colSpan: 1 },
         { field: 'selection', type: 'composite', colSpan: 2 },
-        { field: 'pagination', type: 'composite', colSpan: 2 },
       ],
+    },
+    // `pagination` is NOT grid-only: every view type accepts it, and
+    // `pagination.pageSize` is the one row bound a view carries (maintainer
+    // ruling D on #19228) — for a kanban, gallery or timeline view the only
+    // one. Its own section with no `visibleWhen` puts it in front of every
+    // type; inside `table_options` a non-grid author could not reach it.
+    {
+      name: 'pagination',
+      label: 'Pagination',
+      description: 'Page size and page-size options — every view type accepts them, not only grids.',
+      collapsible: true,
+      collapsed: true,
+      fields: [{ field: 'pagination', type: 'composite' }],
     },
     {
       name: 'kanban',
