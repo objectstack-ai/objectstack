@@ -1,6 +1,38 @@
 # 入队与落地细则
 
-见 SKILL.md 〈入队与落地〉;本文是 ACCEPT 之后把 PR 送到 MERGED 的操作细则。
+执行席在落地窗口(ACCEPT 之后至 MERGED)读本文;入队与落地条款与 A–D 操作细则都在此。
+
+## 入队与落地
+
+- fork PR = 提案,席位永不放行;采纳 diff 内部落地,见 `references/external-contributions.md`。
+- 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。
+- `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。
+- 路径肢 = diff 触及契约面 `packages/spec/src/**`,含 error-code-ledger 与 `*.zod.ts` 契约 schema。
+- 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
+- 交付后复核按面欠 ⛔ 不按车道(五面见 `references/contract-review.md`);双肢命中即 spec 车道。
+- 子代理起不来 ⇒ 复核缺席,PR 留 draft 队列外等档;唯一旁路是维护者亲审,逐次为准。
+- PASS ⇒ ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
+- 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定。
+- 外部评审链降为可选事后审计,非放行前提。
+- 契约复核的适用面、资格与归属见 `references/contract-review.md`。
+- 碰生成物的 PR 入队前先同步 + 整体重生成:四步序 `bash scripts/pm/os-regen-merge.sh`。
+- 跟到 MERGED 为止,入队后的看护归车道 PM 的落地窗口:每轮同时读队列分支与 `origin/main`。
+- 默认分支 push 即触发对外部署的仓,只在验证层存在时才合并;无验证层 ⛔ 不合并。
+- 验证层 = 部署以 CI 为闸、发布后探测线上面、失败自动回滚并立卡。
+- 该类仓的落地判据是已发布且探测通过,⛔ 不是 MERGED;跟到发布为止。
+- 合并后工作流不在 PR 检查清单上,读 PR 检查的规则对它全盲;按独立检查类登记分开读。
+- 人闸不是验证层的替代:答不了会不会坏的人闸只买延迟,⛔ 不以人闸代替探测。
+- 信任 suite/check 事件前先重读 PR 对象取 head:检查读数绑定该 head,⛔ 不绑事件带的 SHA。
+- 落地记账:座位贴落地清单即账本,逐轮即时记;确需全仓核对时首选 `head:claude/` 精确过滤。
+- 红/踢出处置在同一落地窗口内做:机器输入是 merge-queue triage workflow 的分诊评论。
+- 判据唯一来源是签名台账(锚点 issue),优先于现场判断;只有人工能升级台账。
+- 疑似新 flaky 只留提请,⛔ 不自行加表;纯计数不追记,只有改变修法作用域时才记。
+- 四分支:已知 flaky ⇒ 原样重投;已修签名再现 ⇒ ⛔ 不重投,判新问题重新诊断。
+- 基上缺已合修复 ⇒ merge main 推新提交,重跑无效。
+- 新签名 ⇒ ⛔ 不重投,在 PR 与其 `Fixes` 卡各留完整签名与初判。
+- 每次处置留审计评论,重投写签名与台账依据。
+- 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单 + 解除条件,见 landing-operations C。
+- 多个已实现 PR 全碰生成物 ⇒ 串行接力一次只放行一个,每棒一整圈,见 landing-operations D。
 
 ## A. 碰生成物的 PR:入队前先同步 + 整体重生成
 
@@ -12,7 +44,6 @@
 - 更硬的旁证是查上一单的实现体完好:`git grep` 带引号精确名对 `origin/main` 与实现文件。
 - 锚点断言的正确措辞:断言 `pnpm --filter @objectstack/spec check:authorable-surface` 绿即可。
 - `baseRev` 允许滞后,是一行提示不是错误;⛔ 禁为凑相等手改锚点。
-- ⛔ 不得要求 `baseRev == merge-base`。
 
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
@@ -20,14 +51,16 @@
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
 - 绿即转 ready + 挂 auto-merge;未绿按阶梯重挂定点。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
+- undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
 - 确认 MERGED 要两个读数:每轮同时读队列分支与 `origin/main`。
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
 - 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
 - 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>5000 行(含生成物)照规则层。
-- 受管路径全在本技能 `references/` 者事实层:席内达档复核过落地前检三条即转正式入队。
-- 其余为规则层:四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后认领席落地。
+- 受管路径全在 `.claude/**` 者 Tier S:席内达档复核过落地前检三条即转正式入队。
+- Tier H(其余受管面)者:四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后认领席落地。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 再读 `mergeable_state`:`dirty` ⇒ 先 merge `origin/main` 再挂;生成物在面上按 A 的固定序。
+- 挂 auto-merge 的同一动作里重测生成物漂移,⛔ 不复用更早的零;非零 ⇒ 按 A 的固定序。
 - ready + 全绿 ≠ 已入队:队列从不主动拉 PR,入队是显式动作。
 - 零 `enqueued` 事件按序查三条:① `mergeable_state` 是否 `dirty`。
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `platform-readings.md`。
@@ -47,7 +80,6 @@
 - 暂停或交接时把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。
 - main-red 约定①:p0 fix-forward 允许跳队,限 p0、机械、根因已核实的止血 PR。
 - 也可按既有 governed 例外由维护者人工直合一行修复;仅限 main-red 修复。
-- ⛔ 不放宽其它任何 PR 的 queue-only 落地。
 - main-red 约定②:一个失败 check 只锚一张卡,先立者赢,后见者评论到锚卡,⛔ 不另立。
 
 ## C. 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单

@@ -27,7 +27,7 @@ for both corollaries.
 
 | Type | live | exp | elsewhere | dead | planned | classified |
 |---|---|---|---|---|---|---|
-| `object` | 51 | 0 | 0 | 0 | 1 | 52 |
+| `object` | 50 | 0 | 0 | 0 | 1 | 51 |
 | `field` | 91 | 0 | 0 | 1 | 1 | 93 |
 | `flow` | 34 | 0 | 0 | 6 | 0 | 40 |
 | `action` | 44 | 0 | 0 | 3 | 2 | 49 |
@@ -62,8 +62,9 @@ for both corollaries.
 | `metadata_endpoints` | 7 | 0 | 0 | 2 | 0 | 9 |
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
+| `rest_api` | 12 | 0 | 0 | 14 | 0 | 26 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
 | `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
 | `connector` | 29 | 0 | 0 | 44 | 1 | 74 |
 | `analytics_cube` | 17 | 0 | 0 | 10 | 0 | 27 |
-| **total** | **921** | **5** | **1** | **154** | **11** | **1092** |
+| **total** | **932** | **5** | **1** | **168** | **11** | **1117** |

@@ -11,7 +11,7 @@ export const entry: SemanticMigration = {
     + 'GET /api/v1/packages declared by ListInstalledPackagesRequestSchema. The same entry '
     + 'covers the limit default: the request schema no longer declares default(50)',
   replacement:
-    'the `status` and `type` filters — this route answers the whole installed set and has '
+    'the `status`, `type` and `enabled` filters — this route answers the whole installed set and has '
     + 'no page 2. There is no replacement for `cursor`, deliberately: nothing ever minted '
     + 'one, so no caller holds a value to carry over, and the response `nextCursor` it '
     + 'would have paired with was never emitted. Callers that looped on it were re-reading '
@@ -25,7 +25,7 @@ export const entry: SemanticMigration = {
     + 'item 1, maintainer 「同意」 2026-09-13, route 2 of three; routes 1 — build paging — '
     + 'and 3 — refuse unknown names — were considered and refused). `limit` and `cursor` '
     + 'were declared on the request and honoured on neither: the serving door filters on '
-    + '`status` and `type` and then returns every remaining row, and no emit site has ever '
+    + '`status`, `type` and `enabled` and then returns every remaining row, and no emit site has ever '
     + 'written the response half `nextCursor`. `limit` is the sharper of the two because '
     + "the repo's own ingress rule names it as the parameter whose silent drop is worst, "
     + 'and it is the silent-WIDENING half that was live: a caller asking for one row was '

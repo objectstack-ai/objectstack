@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
 import { normalizeFilterComparandTypes } from './filter-comparand-type';
 import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './date-range-presets';
+import { OPERATOR_PREFIX_KEY_PATTERN, bannedKeyPattern } from '../shared/refinement-projection';
 
 /**
  * Unified Query DSL Specification
@@ -1914,7 +1915,14 @@ function normalizedMemberMessage(position: string, input: unknown): string {
  */
 const normalizedFieldConditionSchema = () =>
   z.record(z.string(), FieldOperatorsSchema).refine(
-    (condition) => !Object.keys(condition).some((key) => key.startsWith('$')),
+    // DECLARED (#18670 item 2, the fifth arm), so the published
+    // `data/NormalizedFilter.json` states this ban instead of accepting the
+    // documents it refuses. `bannedKeyPattern` compiles its `RegExp` from the
+    // very string the file publishes, so the rule below and the keyword in the
+    // artifact cannot come to mean different things. It is the same set of keys
+    // the hand-written `key.startsWith('$')` named: `^\$` is a SEARCH from the
+    // start of input for a literal dollar, which is that predicate exactly.
+    bannedKeyPattern(OPERATOR_PREFIX_KEY_PATTERN),
     {
       message: 'A field condition\'s keys are field names, never $-prefixed operators.',
       // `abort` so this branch cannot become the union's spokesman. Measured on

@@ -299,6 +299,114 @@ describe('Security Service Contract', () => {
     expect(sets).toHaveLength(2);
   });
 
+  it('getEffectiveObjectPermissions is OPTIONAL — absence is NOT an empty map (compile-time)', () => {
+    // THE structural pin behind "a caller that cannot get this answer passes NO
+    // permission data at all". Optional is what makes that a property of the
+    // TYPE: a security service that predates the method still satisfies the
+    // contract, and the unguarded call does not compile, so the absent branch
+    // cannot be dropped on the way to a map whose omissions read as denials.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.getEffectiveObjectPermissions).toBe('undefined');
+
+    // Never invoked — its only job is to make the COMPILER prove the point.
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.getEffectiveObjectPermissions({ userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // ⛔ And the fallback an absent method leaves is NOT `{}`. The guarded call
+    // degrades to `undefined`, which a caller must carry as "no permission data"
+    // — distinguishable from the empty map below, which is a real answer.
+    expect(withoutIt.getEffectiveObjectPermissions?.({ userId: 'u1' })).toBeUndefined();
+
+    // The sets-level sibling is a different question, not an older spelling of
+    // this one, so a service carrying only it is a complete implementation.
+    expect(typeof withoutIt.resolvePermissionSetNames).toBe('function');
+  });
+
+  it('an EMPTY map is a real answer and an ABSENT entry denies — which is why the map is never narrowed', async () => {
+    // The two empty answers this surface distinguishes are ABSENCE OF THE
+    // METHOD (above) and an empty MAP (here) — not `undefined` versus `[]` as on
+    // the field-projection pair. An empty map says this subject holds nothing,
+    // and every object read out of it answers "no grant".
+    const holdsNothing = makeService({ getEffectiveObjectPermissions: async () => ({}) });
+    await expect(holdsNothing.getEffectiveObjectPermissions?.({ userId: 'u1' })).resolves.toEqual({});
+
+    // An entry the map omits is read the same way as an all-`false` entry: no
+    // grant. That is exactly why a caller may not narrow the map to the objects
+    // it expects to be asked about — every object left out silently denies,
+    // indistinguishable from a measured refusal.
+    const map = await makeService({
+      getEffectiveObjectPermissions: async () => ({
+        deal: { allowRead: true, allowEdit: true },
+        contact: { allowRead: false },
+      }),
+    }).getEffectiveObjectPermissions?.({ userId: 'u1' });
+    expect(map?.deal?.allowRead).toBe(true);
+    expect(map?.contact?.allowRead).toBe(false);
+    // `lead` was never mentioned by the subject's resolution…
+    expect(map && 'lead' in map).toBe(false);
+    // …and a reader of that absence cannot tell it from `contact`'s measured
+    // `false`. The contract therefore requires the WHOLE map, not a slice.
+    expect(map?.lead).toBeUndefined();
+  });
+
+  it('a resolution failure THROWS — it never degrades to an empty map', async () => {
+    // Same failure stance as resolvePermissionSetNames / resolvePermissionSetsForContext,
+    // and for a sharper reason: `{}` is a REAL answer on this surface, so a
+    // failure that returned it would publish "this subject holds nothing" as a
+    // measured fact. Callers fail CLOSED on the throw; they may not read it as
+    // "no grants".
+    const failing = makeService({
+      getEffectiveObjectPermissions: async () => {
+        throw new Error('permission-set resolution failed');
+      },
+    });
+    await expect(failing.getEffectiveObjectPermissions?.({ userId: 'u1' })).rejects.toThrow(
+      /resolution failed/,
+    );
+  });
+
+  it('the map is the server-resolved effective entry, not one permission set’s authored block', async () => {
+    // The shape is the published response-side entry (`EffectiveObjectPermission`,
+    // the `objects` slot of /auth/me/permissions): the caller's sets already
+    // merged most-permissively, with `apiOperations` annotated. A consumer that
+    // received one SET's authored `objects` block instead would get a value that
+    // parses and answers confidently about the wrong thing.
+    const service = makeService({
+      resolvePermissionSetsForContext: async () => [
+        { name: 'member_default', objects: { deal: { allowRead: true } } },
+        { name: 'sales_manager', objects: { deal: { allowEdit: true } } },
+      ] as any,
+      getEffectiveObjectPermissions: async () => ({
+        deal: { allowRead: true, allowEdit: true, apiOperations: ['get', 'list'] },
+      }),
+    });
+
+    const sets = await service.resolvePermissionSetsForContext?.({ userId: 'u1' });
+    const effective = await service.getEffectiveObjectPermissions?.({ userId: 'u1' });
+
+    // Neither set's own block carries both bits…
+    expect(sets?.[0]?.objects?.deal).toEqual({ allowRead: true });
+    expect(sets?.[1]?.objects?.deal).toEqual({ allowEdit: true });
+    // …and the merge is what this method answers, annotated with the effective
+    // operation set that exists only on the response surface.
+    expect(effective?.deal).toEqual({ allowRead: true, allowEdit: true, apiOperations: ['get', 'list'] });
+  });
+
+  it('a system context bypasses on this plane too', async () => {
+    const service = makeService({
+      getEffectiveObjectPermissions: async (context) =>
+        context?.isSystem
+          ? { deal: { allowRead: true, allowEdit: true, allowDelete: true } }
+          : { deal: { allowRead: true } },
+    });
+    await expect(service.getEffectiveObjectPermissions?.({ isSystem: true }))
+      .resolves.toEqual({ deal: { allowRead: true, allowEdit: true, allowDelete: true } });
+    await expect(service.getEffectiveObjectPermissions?.({ userId: 'u1' }))
+      .resolves.toEqual({ deal: { allowRead: true } });
+  });
+
   it('a partial implementation is feature-detectable rather than wrong', () => {
     // Consumers probe (`typeof svc.getReadableFields === 'function'`) so an
     // implementation may omit a method it cannot honour and still be usable.

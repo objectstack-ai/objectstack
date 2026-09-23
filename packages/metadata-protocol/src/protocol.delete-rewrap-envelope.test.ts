@@ -304,9 +304,13 @@ describe('#7426 — the repository refusal reaches the caller with its code', ()
             expect(err, `${type}: the delete was accepted`).toBeInstanceOf(Error);
             expect(err.code, type).toBe('NOT_OVERRIDABLE');
             expect(err.status, type).toBe(403);
-            // The prose the operator reads is unchanged — the code is ADDED to
-            // the envelope, it does not replace the message it was trapped in.
-            expect(String(err.message), type).toContain('NOT_OVERRIDABLE');
+            // The prose the operator reads still names the reason and survives
+            // the rewrap whole. It no longer RESTATES the code: #7426 promoted
+            // the token to the envelope, and the bracketed `[NOT_OVERRIDABLE]`
+            // opener it had been trapped in was the duplicate left behind —
+            // `error` is human language, `code` is the machine token.
+            expect(String(err.message), type).toContain('is not allowOrgOverride in the registry');
+            expect(String(err.message), type).not.toContain('[NOT_OVERRIDABLE]');
             // A refusal that already deleted the row is a log line.
             expect(rows.size, type).toBe(1);
         });

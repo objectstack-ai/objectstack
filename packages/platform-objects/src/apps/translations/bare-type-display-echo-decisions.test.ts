@@ -724,7 +724,12 @@ describe('#19403 round 7 — the provenance table agrees these leaves are now au
       // "metadataForms." followed by the flattened path of a real `en` leaf.
       const enPaths = flattenLeaves(enMetadataForms as Record<string, any>);
       const formKeys = Object.keys(table).filter((k) => k.startsWith('metadataForms.'));
-      expect(formKeys.length, `${locale} provenance table records no metadata-form leaf at all`).toBeGreaterThan(10);
+      // ⚠️ NO FLOOR ON THIS COUNT, and the reason is this card's own shape: the
+      // metadata-form surface of these tables SHRINKS every time a round of
+      // #19403 lands, so any measured floor here is a reading that expires. It
+      // was `> 10`, and round 8 took zh-CN to 6. The floor is not lowered — it
+      // is removed, and leg 3 below carries the discrimination instead, over a
+      // population this card does not touch.
       const strays = formKeys.filter((k) => !enPaths.has(k.slice('metadataForms.'.length)));
       expect(strays, 'a provenance key names no leaf of the en catalog — the key rule moved').toEqual([]);
       // Leg 2 — the composer under test obeys that same rule for a type-level
@@ -736,8 +741,12 @@ describe('#19403 round 7 — the provenance table agrees these leaves are now au
       }
       expect(provenanceKey({ ...DECISIONS[0], key: 'k', prop: 'label' })).toBe('metadataForms.k.label');
       // Leg 3 — and the lookup mechanism itself returns something, so `undefined`
-      // is not simply what this table says to everything.
-      expect(table[formKeys[0]], 'the lookup this file performs finds a key the table holds').toBeTruthy();
+      // is not simply what this table says to everything. Sampled off the whole
+      // table rather than its metadata-form slice, which is what makes it
+      // survive the next round of this card emptying that slice.
+      const anyKey = Object.keys(table)[0];
+      expect(anyKey, `${locale} provenance table is empty`).toBeTruthy();
+      expect(table[anyKey], 'the lookup this file performs finds a key the table holds').toBeTruthy();
     });
 
     it(`${locale}: ⭐ the type-level provenance surface is now EMPTY — this round emptied it`, () => {

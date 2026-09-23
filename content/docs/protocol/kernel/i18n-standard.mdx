@@ -398,10 +398,18 @@ Three rules the shape enforces, all of them closed since #4001:
 
 - **The top level is the declared group set and nothing else** — `objects`,
   `apps`, `messages`, `globalActions`, `dashboards`, `datasets`, `pages`,
-  `flows`, `settings`, `metadataForms`, `settingsCommon`. A group invented
-  beside them (`"account"`, `"fields"`, `"list"`, `"industries"`) is rejected
-  **by name** at both authoring doors, with the group to use instead named in
-  the rejection.
+  `flows`, `metadataForms`, `settingsCommon`. A group invented beside them
+  (`"account"`, `"fields"`, `"list"`, `"industries"`) is rejected **by name**
+  at both authoring doors, with the group to use instead named in the
+  rejection.
+- **`settings` is a PLATFORM group and an application bundle may not carry
+  it.** It is keyed by `SettingsManifest.namespace`, and only platform code
+  declares a manifest — so the only namespaces an application could ever
+  address are the platform's own. Writing it in `stack.translations` (or in
+  `defineTranslationBundle`) is refused by name with that prescription; the
+  platform's own bundles author it against `PlatformTranslationData`, and the
+  served document (`GET /i18n/translations/:locale`) carries it because it is
+  the merge of every loaded bundle.
 - **Field options are a map keyed by the option's stored `value`** — never an
   array of `{ value, label }` pairs, and never the display label. See
   [Orphan Keys and Option Keys](#orphan-keys-and-option-keys).
@@ -1046,10 +1054,12 @@ options: { 'Direct Mail': '直邮' }  // ❌ keyed by the label — never resolv
 options: { 'direct-mail': '直邮' }  // ❌ a variant spelling of the value
 ```
 
-`messages`, `settings`, `settingsCommon` and
-`metadataForms` are **not** checked: their keys are owned by application code,
-plugins, and the platform's own metadata-type registry rather than by this
-stack's metadata, so there is no set of legal names to resolve against.
+`messages`, `settingsCommon` and `metadataForms` are **not** checked: their
+keys are owned by application code, plugins, and the platform's own
+metadata-type registry rather than by this stack's metadata, so there is no set
+of legal names to resolve against. (`settings` is not checked either, and since
+it left the per-app bundle it cannot appear in one at all — the parse refuses it
+before any lint runs.)
 
 ### Translation Service Integration
 

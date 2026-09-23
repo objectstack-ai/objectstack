@@ -134,9 +134,22 @@ const modulePackage = (): ObjectStackDefinition =>
     ],
   });
 
-/** Today's emitted shape: flattened top level PLUS `packages[]`. */
-const additiveProject = (): Record<string, unknown> =>
+/** Today's emitted shape: `packages[]` only (#14512's emitter half). */
+const optionBProject = (): Record<string, unknown> =>
   composeStacks([modulePackage(), corePackage()], { manifest: 'preserve' }) as unknown as Record<string, unknown>;
+
+/**
+ * The LEGACY additive shape — flattened top level PLUS `packages[]` — which is
+ * every multi-package artifact built before #14512 and still read off disk
+ * under D4's read-both rule. Synthesized for the one collection this reader
+ * reads, the same way option B used to be.
+ */
+const additiveProject = (): Record<string, unknown> => {
+  const composed = optionBProject();
+  composed.translations = (composed.packages as Array<{ manifest?: { translations?: unknown[] } }>)
+    .flatMap((entry) => entry.manifest?.translations ?? []);
+  return composed;
+};
 
 /**
  * The SAME composition with no i18n anywhere — no `translations` at any level,
@@ -149,17 +162,11 @@ const additiveNoI18nProject = (): Record<string, unknown> => {
     [modulePackage(), { ...corePackage(), translations: undefined } as ObjectStackDefinition],
     { manifest: 'preserve' },
   ) as unknown as Record<string, unknown>;
-  delete composed.translations;
+  delete composed.translations;   // absent already since #14512; deleted so the
+                                  // fixture states the shape it means
   for (const entry of composed.packages as Array<{ manifest?: Record<string, unknown> }>) {
     delete entry.manifest?.translations;
   }
-  return composed;
-};
-
-/** The ruled option-B shape, for the one collection this reader reads. */
-const optionBProject = (): Record<string, unknown> => {
-  const composed = additiveProject();
-  delete composed.translations;
   return composed;
 };
 
@@ -365,8 +372,12 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
     // (packages/spec/src/assembled-package-body.test.ts). That project boots
     // today; a reader that threw here would have stopped it booting — and from
     // the block whose only job is deciding whether to register a translation
-    // service, while `new AppPlugin(...)` twenty lines above degrades the very
-    // same refusal to a log line.
+    // service, while the app-metadata branch degrades the very same refusal to
+    // a log line — `AppPlugin.init()` hands the stack to the `manifest`
+    // service, whose `register()` reaches the SAME `resolveArtifactPackageOrder`
+    // parse, and DevPlugin's child-`init()` loop logs it instead of rethrowing.
+    // ⛔ Not `new AppPlugin(...)`: the constructor reads `manifest.id` /
+    // `manifest.name` only and never sees this malformation (#15292).
     const refused = additiveNoI18nProject();
     (refused.packages as Array<{ manifest: Record<string, unknown> }>)[0]
       .manifest.objects = ['./src/objects/*.object.ts'];

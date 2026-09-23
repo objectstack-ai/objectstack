@@ -1,0 +1,45 @@
+{
+  "skill_name": "objectstack-data",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Support agents want to search tasks by the name of the project they belong to.",
+      "expected_output": "Applies the one prescription: a stored `text` mirror field `project_name` on `task`, listed in `searchableFields: ['name', 'project_name']`, maintained by a `beforeInsert` / `beforeUpdate` hook on `task` (stamp the parent's name for the incoming `project_id`) and an `afterUpdate` hook on `project` (re-stamp on rename), plus a one-off backfill for rows written outside hooks. Never a dotted path (`project_id.name` is refused, `400 INVALID_FIELD`) and never a `formula` mirror (virtual, nothing to scan).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["searchableFields", "project_name", "beforeInsert", "afterUpdate"],
+        "must_not_contain": ["'project_id.name'", "type: 'formula'"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Sales reps may only see their own leads, sales managers see their unit and everything below it, and every signed-in user can read the `product` catalog.",
+      "expected_output": "Access is authored in permission sets, not on the object (an object-level `permissions` key is rejected). `lead` gets `sharingModel: 'private'`; the rep set's grant on `lead` carries `readScope: 'own'`, the manager set's `readScope: 'unit_and_below'` — an ADR-0057 scope that needs the enterprise `@objectstack/security-enterprise` plugin and `requires: ['hierarchy-security']`, failing closed to `own` without it. `product` is `sharingModel: 'public_read'`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["sharingModel: 'private'", "readScope", "unit_and_below", "public_read", "hierarchy-security"],
+        "must_not_contain": ["permissions: {"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "Expose the existing `customers` table from our Postgres reporting database as a read-only `legacy_customer` object.",
+      "expected_output": "Declares a `defineDatasource` entry (credentials by `credentialsRef`, never inline) and points the object at it with `datasource: '<id>'`, mapping the physical table via `remoteName` and column names via `columnMap` — there is no `field.columnName` on an external object. Sets the datasource's `schemaMode` so the platform never alters the remote schema, and keeps the external write gate closed.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineDatasource", "datasource", "remoteName", "columnMap", "schemaMode"],
+        "must_not_contain": ["columnName:"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Seed the `country` reference table for every environment, and add demo `opportunity` rows (dev/test only) that close 45 days after install and are owned by whoever installs the package.",
+      "expected_output": "Uses `defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data and `defineSeed(Opportunity, { env: ['dev', 'test'], ... })` for demo rows, with lookups referenced by natural key and dynamic values as CEL: `close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``. Never `externalId: 'id'`, never `new Date()` / `Date.now()` (breaks build determinism), never `defineDataset` (the analytics layer), parents before children in the exported array.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineSeed", "externalId", "upsert", "env:", "daysFromNow"],
+        "must_not_contain": ["new Date(", "defineDataset", "externalId: 'id'"]
+      }
+    }
+  ]
+}

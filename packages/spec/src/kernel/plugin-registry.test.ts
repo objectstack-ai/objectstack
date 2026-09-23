@@ -111,43 +111,12 @@ describe('Plugin Registry Schemas', () => {
       expect(() => PluginQualityMetricsSchema.parse({ codeQuality: -5 })).toThrow();
     });
 
-    it('should accept valid security scan', () => {
-      const metrics = PluginQualityMetricsSchema.parse({
-        securityScan: {
-          lastScanDate: '2024-01-15T10:00:00Z',
-          vulnerabilities: {
-            critical: 0,
-            high: 1,
-            medium: 2,
-            low: 5,
-          },
-          passed: true,
-        },
-      });
-      expect(metrics.securityScan?.passed).toBe(true);
-      expect(metrics.securityScan?.vulnerabilities?.high).toBe(1);
-    });
-
-    it('should apply defaults in security scan vulnerabilities', () => {
-      const metrics = PluginQualityMetricsSchema.parse({
-        securityScan: {
-          vulnerabilities: {},
-        },
-      });
-      expect(metrics.securityScan?.vulnerabilities?.critical).toBe(0);
-      expect(metrics.securityScan?.vulnerabilities?.high).toBe(0);
-      expect(metrics.securityScan?.vulnerabilities?.medium).toBe(0);
-      expect(metrics.securityScan?.vulnerabilities?.low).toBe(0);
-      expect(metrics.securityScan?.passed).toBe(false);
-    });
-
-    it('should reject negative vulnerability counts', () => {
-      expect(() => PluginQualityMetricsSchema.parse({
-        securityScan: {
-          vulnerabilities: { critical: -1, high: 0, medium: 0, low: 0 },
-        },
-      })).toThrow();
-    });
+    // The three `securityScan` cases that stood here left with the key
+    // (#15932, ADR-0049 enforce-or-remove). Their replacement is not a
+    // narrower version of them: it is the refusal, pinned in
+    // `plugin-security-scan-result-retirement.test.ts` beside the rest of the
+    // family. ⛔ Do not re-add a "valid security scan" case — authoring the key
+    // is now a tsc error (input type `never`) and a parse error.
 
     it('should accept valid conformance tests', () => {
       const metrics = PluginQualityMetricsSchema.parse({

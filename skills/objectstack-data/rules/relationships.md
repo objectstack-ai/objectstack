@@ -1,5 +1,11 @@
 # Relationship Patterns
 
+- [Relationship Types](#relationship-types) · [When to Use lookup vs master_detail](#when-to-use-lookup-vs-master_detail)
+- [Patterns](#patterns) — [lookup](#one-to-many-lookup) · [master_detail](#one-to-many-master_detail) · [Junction Object](#many-to-many-junction-object) · [tree](#hierarchical-tree-self-reference)
+- [Delete Behaviors](#delete-behaviors) · [Roll-up Summaries](#roll-up-summaries)
+- [Inline Editing (Master-Detail Entry)](#inline-editing-master-detail-entry) · [Detail-page related lists](#detail-page-related-lists-the-read-side-mirror)
+- [Incorrect vs Correct](#incorrect-vs-correct)
+
 Guide for modeling relationships between objects using `lookup`, `master_detail`, and junction patterns.
 
 ## Relationship Types

@@ -709,13 +709,20 @@ describe('#19542 — DARK: what the five crossings did NOT widen', () => {
     expect(membersFor('skill')).toEqual([]);
   });
 
-  it('the ledger rule reaches ONLY the two types group C names', () => {
+  it('the ledger rule reaches ONLY the two types group C names, plus the one read onto it since', () => {
     // `RUNTIME_OBJECT_ADVISORY_VOLUME` still holds for `object` — that reason
     // is about ~8 advisories per object write rendered in Studio, and this
     // crossing does not spend it.
+    //
+    // [#19568] `datasource` is the third member and did NOT arrive with this
+    // card: it was outside the ruled ten and was read onto this rule on its
+    // own measurement (same shape, same silence, same ⛔ zero-pull fence). Its
+    // door cases live in `runtime-gate.datasource-writes.test.ts`; this list
+    // stays the single place the rule's whole roster is asserted, so a fourth
+    // crossing still has to come through here.
     const gated = runtimeGatedTypes().filter((t) =>
       runtimeAuthoringRulesFor(t).some((r) => r.name === 'lintLivenessProperties'));
-    expect(gated.sort()).toEqual(['email_template', 'mapping']);
+    expect(gated.sort()).toEqual(['datasource', 'email_template', 'mapping']);
   });
 
   it('crossing these five widened no OTHER type s roster', () => {

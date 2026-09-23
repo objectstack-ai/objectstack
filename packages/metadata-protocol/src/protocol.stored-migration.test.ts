@@ -568,7 +568,7 @@ describe('migrateStoredMetadata — what it declines to touch, loudly (#4327)', 
 
         expect(report.failed).toBe(1);
         expect(report.rewritten).toBe(0);
-        expect(report.rows[0]!.reason).toMatch(/invalid_metadata/);
+        expect(report.rows[0]!.reason).toMatch(/failed spec validation/);
         expect(historyRows(tables)).toHaveLength(0);
         expect(JSON.parse(metaRows(tables)[0]!.metadata).fields.amount.conditionalRequired).toBe('x');
     });
@@ -594,7 +594,7 @@ describe('migrateStoredMetadata — what it declines to touch, loudly (#4327)', 
         const report = await protocol.migrateStoredMetadata({ apply: true });
 
         expect(report.failed).toBe(1);
-        expect(report.rows[0]!.reason).toMatch(/metadata_conflict/);
+        expect(report.rows[0]!.reason).toMatch(/has been modified since you loaded it/);
         // The other writer's row is untouched.
         expect(metaRows(tables)[0]!.checksum).toBe('sha256:moved_by_someone_else');
     });

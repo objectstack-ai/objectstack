@@ -363,7 +363,51 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 - **Features**: Auto-assembles ObjectQL + in-memory driver + auth + security + Hono server + REST + dispatcher + app metadata, plus optional real services when installed (storage, realtime, i18n); registers no stubs — a slot no plugin fills stays empty, as in production (ADR-0115); refuses to boot with `NODE_ENV=production` (`OS_ALLOW_DEV_PLUGIN` escape hatch, which brands the override in the boot log and on the ready banner instead of overriding silently)
 - **When to use**: Zero-config local development and playgrounds
+- **Malformed metadata**: Dev boot **tolerates and reports** — it never refuses, and it never stays quiet
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/plugins/plugin-dev/README.md)
+
+#### Malformed metadata: dev boot tolerates and reports
+
+**`os dev` keeps booting on a stack the platform would reject; refusing belongs to
+the doors an artifact leaves your machine through — and those doors are not uniform
+about it.** `os validate` and `os build` both parse your stack against the same
+protocol schema and exit 1 when it fails; what that schema accepts but a deployment
+still needs comes back from `os validate` as an advisory instead, which `--strict`
+promotes to a failure. The dev server skips only the part it could not read, boots the
+rest, and prints an `error` line naming what was malformed and what was skipped — the
+shape every mainstream dev server takes, where the error overlay stays on screen while
+the server keeps serving.
+
+This is deliberate, and it is one posture rather than two. Metadata that is incomplete
+halfway through an edit is the **normal** state of a project you are actively working
+on, so refusing to start would charge the cost to the only people this plugin exists
+for. The contract is still enforced — just at the doors where an artifact leaves your
+machine. See [Validating metadata](/docs/deployment/validating-metadata) for what
+those doors check.
+
+Tolerating is not hiding. A boot that skipped something is never byte-identical to a
+healthy one: if the diagnostic were dropped, an author — or a coding agent — would
+read "it started" as "I wrote it correctly", which is exactly the outcome this posture
+exists to prevent. If you see one of these lines, the app is running **without** the
+metadata it names.
+
+<Callout type="warn">
+  Two different malformations reach this through two different branches, and they are
+  exact complements — each is invisible to the other, so a clean boot past one is no
+  evidence about the other. An app payload with no `manifest.id` / `manifest.name` is
+  refused as the app metadata is constructed. A `packages[]` entry that is not a
+  package entry (ADR-0130 D4) walks past that construction untouched and is refused
+  one step later, when the app's own `init()` hands the stack to the kernel's
+  `manifest` service and its package list is parsed; it reports as
+  `INVALID_ARTIFACT_PACKAGE_ENTRY` (422) on the `error` line naming the app plugin.
+
+  The two differ at the production doors as well. The malformed `packages[]` fails
+  the protocol schema, so both `os validate` and `os build` exit 1 on it. The missing
+  `manifest.id` parses green for both: `os validate` reports it as the advisory
+  *"Missing manifest.id — required for deployment"*, which exits 0 unless you pass
+  `--strict`, and `os build` does not report it at all. So run `os validate --strict`
+  if you want that half to fail too — a green `os build` is not evidence about it.
+</Callout>
 
 ### @objectstack/plugin-approvals
 

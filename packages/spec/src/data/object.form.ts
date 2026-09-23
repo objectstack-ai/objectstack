@@ -39,6 +39,14 @@ export const objectForm = defineForm({
         { field: 'pluralLabel', type: 'text', colSpan: 1, helpText: 'Plural display name (e.g. "Accounts")' },
         { field: 'icon', type: 'text', colSpan: 1, helpText: 'Lucide icon name (e.g. "building", "users")' },
         { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Developer documentation' },
+        // #19331 — `nameField` is declared by ObjectSchema and was offered by no
+        // control, so the ADR-0079 record-title pointer could only be written
+        // through the Source tab's free-text JSON. A plain text row: the value
+        // names one of THIS object's own fields, and this registry has no
+        // own-field picker to route it to (`field-multi` is multi-valued and
+        // takes its candidates from a `dependsOn` source row, which a top-level
+        // object row has nothing to point at).
+        { field: 'nameField', type: 'text', colSpan: 1, helpText: 'Field whose value titles each record (e.g. "name", "subject"). ADR-0079 canonical pointer — read by record display, ObjectQL search and related-record previews.' },
         { field: 'isSystem', type: 'boolean', colSpan: 1, helpText: 'System object (protected from deletion; defaults sharing to public)' },
       ],
     },
@@ -280,9 +288,16 @@ export const objectForm = defineForm({
             // `expression`, not `formula` — the key is named for what it holds,
             // not for the field type that uses it.
             { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL formula expression', visibleWhen: "data.type == 'formula'" },
+            // The four members are what `FieldSchema.returnType` declares, and
+            // the same explicit list the field designer's own control carries
+            // in `field.form.ts` (#19677). This grid additionally offered
+            // `datetime` and `currency`, so an author who added a formula field
+            // here and picked either wrote a value the parse refuses — the
+            // refusal arriving from the save door, naming a key they never
+            // typed. Declared-vs-enforced, one seam before that door.
             { field: 'returnType', type: 'select', helpText: 'Result type for formulas', visibleWhen: "data.type == 'formula'", options: [
-              { label: 'Text', value: 'text' }, { label: 'Number', value: 'number' }, { label: 'Boolean', value: 'boolean' },
-              { label: 'Date', value: 'date' }, { label: 'Datetime', value: 'datetime' }, { label: 'Currency', value: 'currency' },
+              { label: 'Text', value: 'text' }, { label: 'Number', value: 'number' },
+              { label: 'Boolean', value: 'boolean' }, { label: 'Date', value: 'date' },
             ] },
             // A roll-up is ONE key — `summaryOperations` {object, field, function}.
             // The flat `summaryType` / `summaryField` pair named neither of them
@@ -396,6 +411,36 @@ export const objectForm = defineForm({
         // row's price of admission.
         { field: 'validations', widget: 'json', helpText: 'Object-level validation rules — an array of rule objects, e.g. [{ "type": "script", "name": "amount_positive", "condition": "amount > 0", "message": "Amount must be positive" }]. State-machine transition tables are declared here too (ADR-0020)' },
         { field: 'datasource', type: 'text', helpText: 'Target datasource ID (default: "default")' },
+        // #19331 — five more declared scalars with no control. Each enum gets an
+        // explicit `options` list because the bare member reads as a word and
+        // the choice it stands for is a security or lifecycle contract; the copy
+        // states what the runtime does with the value, including what ABSENCE
+        // resolves to, which is the half an author cannot see from the enum.
+        { field: 'ownership', type: 'select', helpText: 'Record-ownership model. Absent resolves to user.', options: [
+          { label: 'User — reassignable owner_id plus owning_business_unit_id', value: 'user' },
+          { label: 'Business unit — owning_business_unit_id only, no owner_id', value: 'business_unit' },
+          { label: 'Organization', value: 'org' },
+          { label: 'None — no per-record owner, neither anchor', value: 'none' },
+        ] },
+        { field: 'sharingModel', type: 'select', helpText: 'Org-Wide Default record visibility for internal users. A custom object that omits it resolves to private at runtime (ADR-0090 D1).', options: [
+          { label: 'Private — owner only', value: 'private' },
+          { label: 'Public read — everyone reads, owner writes', value: 'public_read' },
+          { label: 'Public read/write — everyone reads and writes', value: 'public_read_write' },
+          { label: 'Controlled by parent — derived from the master record', value: 'controlled_by_parent' },
+        ] },
+        // No inline `options` here, and that is a CONSTRAINT rather than a
+        // preference: `FormSelectOptionSchema.value` is a system identifier
+        // (`^[a-z][a-z0-9_.]*$`), so the four hyphenated members of this enum —
+        // `system-data`, `engine-owned`, `append-only`, `better-auth` — cannot be
+        // spelled as option values at all. The enum derives from the served JSON
+        // Schema, which carries every member verbatim, and the meanings ride the
+        // help text instead of a list the form face would refuse.
+        { field: 'managedBy', helpText: 'Lifecycle bucket: platform (user CRUD), config (admin authored), system-data (platform-defined schema with admin/user-writable data), engine-owned (no user writes), append-only (audit), better-auth (identity). UI clients derive their CRUD affordances from it, so it decides what a user is offered on records of this object.' },
+        { field: 'editMode', type: 'select', helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling.", options: [
+          { label: 'Modal — edit form as a dialog over the current view', value: 'modal' },
+          { label: 'Page — navigate to a dedicated full-page edit route', value: 'page' },
+        ] },
+        { field: 'fileAccessDelegate', type: 'text', helpText: "Kernel service that authorizes downloads of files owned by this object's media fields, instead of testing whether the caller can read the owning row. For objects whose access is mediated by a service. Fails closed." },
         {
           field: 'lifecycle',
           type: 'composite',

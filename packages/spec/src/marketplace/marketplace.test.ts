@@ -323,12 +323,16 @@ describe('MarketplaceSearchResponseSchema', () => {
 });
 
 describe('MarketplaceInstallRequestSchema', () => {
-  it('should accept minimal install request', () => {
+  it('should accept minimal install request — and leave an absent enableOnInstall UNDEFINED', () => {
     const request = {
       listingId: 'listing-001',
     };
     const parsed = MarketplaceInstallRequestSchema.parse(request);
-    expect(parsed.enableOnInstall).toBe(true);
+    // ⭐ [#19273] Was `toBe(true)`. The 缺省 cell moved on all three
+    // `enableOnInstall` declarations together so the consistency matrix in
+    // `src/api/package-install-one-authority.test.ts` stays one row per state.
+    // ⛔ Not a fold — this request's subject is still a marketplace listing.
+    expect(parsed.enableOnInstall).toBeUndefined();
   });
 
   it('should accept full install request with license', () => {

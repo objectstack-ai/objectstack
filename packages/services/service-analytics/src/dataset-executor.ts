@@ -7,6 +7,7 @@ import type {
   DatasetSelection,
   DatasetCompareTo,
 } from '@objectstack/spec/contracts';
+import { datasetCompareKindRefusalMessage } from '@objectstack/spec/api';
 import { emptyGroupValueFor, type FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import {
@@ -717,12 +718,21 @@ function resolveCompareDimension(selection: DatasetSelection): string {
  * ## Why an unrecognised `kind` is REFUSED here, not fallen through
  *
  * `kind` is declared as the closed pair `'previousPeriod' | 'previousYear'`
- * (`DatasetCompareTo`, `spec/contracts/analytics-service.ts`) and enforced on
- * the wire by NOTHING: `DatasetSelection` has no Zod schema anywhere, and
- * `/analytics/dataset/query`'s own door projects `compareTo` away before its
- * parse and forwards the caller's selection untouched (`analytics-selection-door`
- * says so in its header). So a body carrying `compareTo: { kind: 'previousQuarter' }`
- * reaches this function with its declared type unenforced.
+ * (`DatasetCompareTo`, re-exported by `spec/contracts/analytics-service.ts`
+ * from `DatasetCompareToSchema`). ⚠️ When this refusal was written the wire
+ * enforced NOTHING — `DatasetSelection` had no Zod schema anywhere, and
+ * `/analytics/dataset/query`'s door projected `compareTo` away before its
+ * parse — so a body carrying `compareTo: { kind: 'previousQuarter' }` reached
+ * this function with its declared type unenforced. #17551 closed that: the
+ * route now parses the whole selection against `DatasetSelectionSchema`.
+ *
+ * ⛔ That does NOT make this refusal redundant, and the reason is the reason it
+ * was written here: `shiftRange` is a PUBLISHED export of this package
+ * (`src/index.ts:35`, advertised by `README.md:160`) and this module is
+ * reachable in-process through `IAnalyticsService.queryDataset` by a caller
+ * that never posted a body at all. The HTTP door is one of its callers, not its
+ * only one — which is exactly why the SENTENCE is shared rather than copied
+ * (see the `default` arm below).
  *
  * The shape this function used to have — one `if` for `previousYear`, then the
  * previousPeriod arm as a FALL-THROUGH — answered that body with a
@@ -761,11 +771,15 @@ export function shiftRange(range: [string, string], kind: CompareTo['kind']): [s
     }
     default: {
       const exhaustive: never = kind;
+      // ⛔ The sentence is NOT spelled here. It is the one builder the schema
+      // door also raises (`datasetCompareKindRefusalMessage`, @objectstack/spec/api),
+      // called with `'runtime'` because this site is reached by a caller that
+      // never posted a body — one condition, one wording, and the clause that
+      // says WHERE it was refused is the only part that differs (#5240; the
+      // date-range family's `analyticsDateRangeRefusalMessage` is the same
+      // split, for the same reason).
       throw datasetInvalidError(
-        `[dataset-executor] compareTo.kind ${JSON.stringify(exhaustive)} is not a comparison window `
-        + 'this executor implements. The two it runs are \'previousPeriod\' (the equal-length window '
-        + 'ending the day before this one starts) and \'previousYear\' (the same window one calendar '
-        + 'year back). Name one of those, or drop compareTo.',
+        `[dataset-executor] ${datasetCompareKindRefusalMessage(exhaustive, 'runtime')}`,
       );
     }
   }

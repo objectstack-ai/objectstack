@@ -1414,8 +1414,30 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // the whole deliverable»). `runtime-gate.inert-type-writes.test.ts` pins
     // both halves — that the rule is dispatched, and that it is silent — so
     // the day a ledger row lands the door lights up with no second edit here.
+    //
+    // [#19568] `datasource` joins them, on a reading rather than by
+    // inheritance: it was outside the ten types the ADR-0049 ruling graded, so
+    // its group had to be measured. Both arms the card offered were tested
+    // against the ruling's own criteria. RETIREMENT is refuted — that arm is
+    // for a declaration 「no stack collection exists to create into」, and
+    // `ObjectStackDefinitionSchema.datasources` is a first-class collection a
+    // Studio/REST/MCP author really mints into (ADR-0015 Addendum,
+    // `origin: 'runtime'`). The `skill` HOLD-OUT is refuted too, and that is
+    // the one worth stating: `skill` was held back because
+    // `validateAiToolReferences` resolves into `stack.tools` / `stack.actions`
+    // — collections the door's snapshot does not carry — so the door's verdict
+    // differed from the whole-stack verdict and wiring it would have shipped a
+    // FALSE advisory into Studio. This rule resolves into nothing: it judges
+    // each written item's own top-level keys against its type's ledger, so the
+    // door's verdict and the whole-stack verdict are the same value by
+    // construction (pinned as a door-vs-stack comparison, not as an argument).
+    //
+    // ⚠️ MEASURED, same instrument, same run as the two above:
+    // `packages/spec/liveness/datasource.json` is 12 props / 0 warn keys, so
+    // this third type is dispatched and silent exactly as they are. The fence
+    // is inherited with the shape: ⛔ no ledger-population work, zero pull.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['email_template', 'mapping'],
+    runtimeTypes: ['email_template', 'mapping', 'datasource'],
     run: (stack) =>
       lintLivenessProperties(stack).map((f) => ({
         severity: 'warning' as const,

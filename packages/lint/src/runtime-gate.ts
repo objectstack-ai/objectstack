@@ -218,6 +218,31 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // publish door one indexed `sys_metadata` read per write.
   position: 'positions',
   app: 'apps',
+  // [#19568] `datasource` — the THIRD row bridging `lintLivenessProperties`,
+  // beside `email_template` / `mapping` above, and the last
+  // `allowRuntimeCreate: true` type whose classification was open.
+  //
+  // ⛔ NOT a mapping ahead of its rule (the `seed: 'data'` failure above).
+  // `lint-liveness-properties.ts` has carried `{ type: 'datasource', key:
+  // 'datasources' }` in its own `TYPE_COLLECTIONS` since #4487, so the key
+  // named here is the key that rule really opens on — and unlike the two group
+  // C rows, that is proved BEHAVIOURALLY rather than by a string assertion:
+  // `runtime-gate.datasource-writes.test.ts` drives the rule through its
+  // ledger-directory seam over a stack built at `stackKeyForType('datasource')`
+  // itself, so a `datasource: 'datasource'` typo reds a door-shaped case.
+  //
+  // ⚠️ MEASURED, and the reading this row records: the datasource ledger is 12
+  // props / 0 warn keys, so the rule is dispatched here and judges NOTHING
+  // today — the `email_template` / `mapping` end state exactly, and the same
+  // ⛔ no-ledger-population fence applies (zero pull; the wiring is the whole
+  // deliverable). The day a datasource property earns an `authorWarn` row the
+  // door lights up with no second edit here.
+  //
+  // ⛔ NOT a `RuntimeStackContext` row, for the `position` / `app` reason one
+  // paragraph up: the rule judges each written item against the ledger on its
+  // own, resolves nothing into a sibling, and a write's own collection already
+  // holds exactly one member — its own item.
+  datasource: 'datasources',
 };
 
 /**
