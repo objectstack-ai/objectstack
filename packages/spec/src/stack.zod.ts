@@ -4438,11 +4438,13 @@ function selectManifest(
  * would fold the composed stack's flattened collections onto a package that
  * does not own them.
  *
- * A `packages` value that is not an array cannot be iterated; `defineStack`
- * rejects that shape, so it is reachable only via `strict: false` or a
- * hand-built object, and the concat pass has already warned about it by the
- * time this runs. Such a stack falls back to the `manifest` branch rather than
- * contributing nothing — preserve's whole job is to not lose an identity.
+ * A `packages` value that is present but is not an array never reaches this
+ * function. `composeStacks`' concat pass runs first and REFUSES it as
+ * `STACK_SCHEMA_INVALID`, because such a value is malformed, not absent. The
+ * rule is stated once, beside {@link AssembledPackageBodySchema}. So the
+ * `Array.isArray` test below does not decide what a malformed value means: it
+ * only separates a carried list from an ABSENT key, which takes the `manifest`
+ * branch.
  *
  * @internal
  */
