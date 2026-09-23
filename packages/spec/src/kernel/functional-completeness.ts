@@ -284,7 +284,9 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `87af769e9`). ① `ListView.tsx`'s
+ *   this repo builds against (`.objectui-sha` = `62597c588`; `ListView.tsx`
+ *   and `ObjectGantt.tsx` are byte-identical to `87af769e9`, where this was
+ *   first measured, re-checked 2026-09-23). ① `ListView.tsx`'s
  *   `case 'gantt'` spreads `startDateField` / `endDateField` / `titleField`
  *   only when the view DECLARED them — the `'start_date'` / `'end_date'`
  *   floors were deleted by objectui#7070, and the `'progress'` /
@@ -297,7 +299,8 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
  *   which still stands. Measured at the same pin (`.objectui-sha` =
- *   `87af769e9`). ① `ListView.tsx`'s `case 'timeline'` resolves the axis
+ *   `62597c588`; `ObjectTimeline.tsx` is byte-identical to `87af769e9` too).
+ *   ① `ListView.tsx`'s `case 'timeline'` resolves the axis
  *   through `resolveTimelineDateBinding` and spreads it only when one was
  *   declared — the `startDateField || 'created_at'` floor was deleted by
  *   objectui#7070 step ③, on the ruling 日期轴永不虚构 (a date axis is never
@@ -312,7 +315,10 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
  * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `87af769e9`), both faces moved together in
+ *   pin (`.objectui-sha` = `62597c588`; `ObjectMap.tsx` changed on the hop
+ *   from `87af769e9` only in a docblock and a dev-warning string, objectui
+ *   `2252653d0`, and every read named below re-reads unchanged), both faces
+ *   moved together in
  *   objectui#8169. ① `ListView.tsx`'s `case 'map'` forwards
  *   `resolveListMapConfig(schema)` and carries no `locationField || 'location'`
  *   floor any more. ② `ObjectMap`'s `getMapConfig` no longer guesses

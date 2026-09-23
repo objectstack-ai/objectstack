@@ -1231,8 +1231,12 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  *
  * ⚠️ WHAT THIS VIEW-FACE KEY REACHES TODAY — recorded, not repaired (#19228).
  * Measured first-hand at the pin this repo builds against (`.objectui-sha` =
- * `87af769e9`), 2026-09-21T09:15Z, with TWO instruments, because one was not
- * enough and the first one's answer was wrong:
+ * `62597c588`), with TWO instruments, because one was not enough and the
+ * first one's answer was wrong. First taken at `87af769e9` 2026-09-21T09:15Z;
+ * re-taken at `62597c588` 2026-09-23, where instrument 1 returns the SAME hit
+ * set line for line (probe 0; control 13 lines, 6 files) and all nine
+ * objectui files cited below are byte-identical to `87af769e9`, so every
+ * anchor and both verdicts stand unmoved:
  *
  *  1. PROPERTY-ACCESS spellings. ⛔ Published as its EXPRESSION, not as a
  *     number — this card exists because a confident count was wrong once, so
@@ -1949,9 +1953,17 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * downstream refuses one. Measured at the `.objectui-sha` pin `53ded82b` by
  * EXECUTING the pinned declarations, not by reading them, and RE-READ at pin
  * `87af769e9` on 2026-09-20 — every one of the seven anchors below moved on
- * that hop, one of them lost the symbol it quoted, and the quotes now read the
- * NEW tree; each anchor quotes the line it was read at, so the next pin bump
- * reds instead of rotting (`check:objectui-pin-citations`):
+ * that hop, one of them lost the symbol it quoted, and the quotes read that
+ * tree. RE-READ again at pin `62597c588` on 2026-09-23: that bump redded the
+ * two `ObjectMap.tsx` anchors, as designed, and they are re-pointed below —
+ * objectui `2252653d0` rewrote the docblock and dev warning ABOVE
+ * `getMapConfig` (the remedy for a top-level `style` now names the declared
+ * `map: { style }`, which the flatten whitelist carries out as `mapStyle`),
+ * while `getMapConfig` itself is byte-identical, so both read points moved 19
+ * lines and neither changed what it does; the other five anchors sit in files
+ * byte-identical to `87af769e9`. Each anchor quotes the line it was read at,
+ * so the next pin bump reds instead of rotting
+ * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
  *   (`packages/plugin-list/src/ListView.tsx:146` first line
@@ -1972,10 +1984,10 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. `getMapConfig` consults that `safeParse`
- *   (`packages/plugin-map/src/ObjectMap.tsx:385` first line
+ *   (`packages/plugin-map/src/ObjectMap.tsx:404` first line
  *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
  *   whether to `console.warn`, then returns a spread of the AUTHORED block
- *   (`:390` first line `return { ...config, style: config.style || style };`),
+ *   (`:409` first line `return { ...config, style: config.style || style };`),
  *   undeclared key and all. That spread is reached by objectui's own
  *   component-node `map` prop, never by this face's flatten product ("neither
  *   flattener emits a `map` key at all", `getMapConfig`).
@@ -1994,10 +2006,13 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (`schema.map?.style`) while this block did not declare it, so strictness here
  * refused a style URL the renderer honours — an author could not declare a map
  * style through this face at all (#18406, director decision batch #153 item 4).
- * The two key sets match again. Re-read at the `.objectui-sha` pin `87af769e9`
- * (2026-09-20; each of these three moved on the hop and each was re-READ):
+ * The two key sets match again. Re-read at the `.objectui-sha` pin `62597c588`
+ * (2026-09-23: `objectql.zod.ts` and `plugin-map.mdx` are byte-identical to
+ * `87af769e9`, and the `ObjectMap.tsx` read MOVED `377` -> `396` with its line
+ * byte-identical; at `87af769e9`, 2026-09-20, each of these three had moved
+ * and each was re-READ):
  * `packages/types/src/zod/objectql.zod.ts:1574` declares the eight keys,
- * `packages/plugin-map/src/ObjectMap.tsx:377` reads
+ * `packages/plugin-map/src/ObjectMap.tsx:396` reads
  * `schema.mapStyle || schema.map?.style`, and objectui's own
  * `content/docs/plugins/plugin-map.mdx:143` documents `style` in the block —
  * so the divergence was against the documented surface this docblock cites, not
@@ -3040,7 +3055,9 @@ const FormFieldBaseSchema = lazySchema(() => {
   colSpan: z.number().int().min(1).max(4).optional().describe("Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all."),
   /**
    * [#2578] Relative field width. 'full' resolves to the form grid's full
-   * column count (`plugin-form` `resolveColSpan`, `autoLayout.ts:153`); which
+   * column count (`plugin-form` `resolveColSpan`, `autoLayout.ts:154` at
+   * `62597c588`, one line down from `:153` at `87af769e9` — an import was
+   * added above it, the function is unchanged); which
    * container-query tiers receive the span class is the form renderer's, not
    * this key's.
    * At the `.objectui-sha` pin `87af769e9` the renderer emits one clamped
@@ -3052,7 +3069,9 @@ const FormFieldBaseSchema = lazySchema(() => {
    * objectui#9244 / objectui#9253 (objectui `bd09957380`, 2026-09-12) land
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
-   * 720px) no longer reproduces at the pin this repo builds against.
+   * 720px) no longer reproduces at the pin this repo builds against
+   * (`.objectui-sha` = `62597c588`, re-read 2026-09-23: `form.tsx` is
+   * byte-identical to `87af769e9`, so `spanLadderFor` still emits the ladder).
    */
   span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `87af769e9`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
