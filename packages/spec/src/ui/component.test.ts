@@ -286,15 +286,17 @@ describe('PageAccordionProps variant (#6776)', () => {
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:1116` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `87af769e9`. Re-derived at that pin
-// 2026-09-20: `containers.tsx` is NO LONGER byte-identical to the one at
-// `53ded82bf` (300 insertions, 100 deletions), so both anchors were re-READ
-// rather than carried — the icon block MOVED `919-925` to `1069-1075` with its
-// seven lines byte-identical, and the registration input MOVED `966` to `1116`
-// with its LINE rewritten (it now declares `of: 'object'` and carries a longer
-// description, and no longer carries a `label`), while the member list this
-// pin cites is unchanged. Identity preserves a wrong
-// anchor as faithfully as a right one, which is why neither was carried (#10274).
+// builds against — `.objectui-sha` = `62597c588`. Re-derived at that pin
+// 2026-09-23: `containers.tsx` changed again across the hop from `87af769e9`
+// (74 insertions, 16 deletions, objectui `4c6f549ef`, the `page:header`
+// title), so both anchors were re-READ rather than carried — and NEITHER
+// moved: the icon block is still `1069-1075` and the input still `1116`, each
+// byte-identical to its `87af769e9` text. (The hop before, off `53ded82bf`,
+// moved them from `919-925` and `966` and rewrote the input LINE — it now
+// declares `of: 'object'`, carries a longer description and no `label` —
+// while the member list this pin cites stayed unchanged.) Identity preserves a
+// wrong anchor as faithfully as a right one, which is why neither was carried
+// (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving that read point from scratch
 // after the sweep proposed retiring the key. This block plus the `.describe()`
@@ -377,14 +379,15 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:912` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `87af769e9`. Re-derived
-// at that pin 2026-09-20: `containers.tsx` is NO LONGER byte-identical to the
-// one at `53ded82bf` (300 insertions, 100 deletions), so both anchors were
-// re-READ rather than carried — the icon block MOVED `730-736` to `853-859`
-// with its seven lines byte-identical, and the registration input MOVED `789`
-// to `912` with its LINE rewritten (it now declares `of: 'object'` and carries
-// a longer description, and no longer carries a `label`), while the member list
-// this pin cites is unchanged. Never inferred (#10274).
+// the pin this repo builds against — `.objectui-sha` = `62597c588`. Re-derived
+// at that pin 2026-09-23: `containers.tsx` changed again across the hop from
+// `87af769e9` (74 insertions, 16 deletions, objectui `4c6f549ef`), so both
+// anchors were re-READ rather than carried — and NEITHER moved: the icon block
+// is still `853-859` and the input still `912`, each byte-identical to its
+// `87af769e9` text. (The hop before, off `53ded82bf`, moved them from
+// `730-736` and `789` and rewrote the input LINE — `of: 'object'`, a longer
+// description, no `label` — while the member list this pin cites stayed
+// unchanged.) Never inferred (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving the accordion's read point
 // after the sweep proposed retiring it. This block plus the `.describe()` it
@@ -3362,9 +3365,11 @@ describe('#7751 — object-* block props schemas', () => {
 // #16503 — the spec half of objectui#8172 (decision batch #68, 2026-09-07,
 // option A: the contract declares the capability that already ships, is
 // documented and is in use). Measured at the objectui pin this repo builds
-// against (`.objectui-sha` = `87af769e9`; all four anchors re-READ at that pin
-// 2026-09-20 — this hop moved every one of them and renamed one face outright,
-// so none is carried): `plugin-kanban/src/ObjectKanban.tsx:676`
+// against (`.objectui-sha` = `62597c588`; re-measured there 2026-09-23 — all
+// five objectui files this block cites are byte-identical to `87af769e9`
+// (`git diff --quiet`), so the four anchors hold unmoved; they were last
+// re-READ at `87af769e9` 2026-09-20, the hop that moved every one of them and
+// renamed one face outright): `plugin-kanban/src/ObjectKanban.tsx:676`
 // queries `$top: resolveRowLimit(schema.limit, DEFAULT_KANBAN_LIMIT)` (100,
 // `:84`; the bare `??` became `resolveRowLimit` in objectui#9925, which drops
 // and reports a cap the contract refuses),
@@ -3433,8 +3438,10 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // on the React-host `kanban-ui` block). Unlike `limit` above — a key four
 // objectui faces already implemented, so the spec was the half that was wrong
 // — `quickAdd` was FORWARDED and never read: at the pin this repo builds
-// against (`.objectui-sha` = `87af769e9`; re-READ there 2026-09-20, every
-// anchor MOVED with its cited text byte-identical) `ObjectKanban.tsx:1563`
+// against (`.objectui-sha` = `62597c588`; re-measured there 2026-09-23 —
+// `ObjectKanban.tsx` and `KanbanImpl.tsx` are byte-identical to `87af769e9`,
+// where every anchor was re-READ 2026-09-20 and MOVED with its cited text
+// byte-identical, so none moved on this hop) `ObjectKanban.tsx:1563`
 // spreads the
 // authored bag into `KanbanRenderer` and `KanbanImpl` gates the affordance on
 // `quickAdd && onQuickAdd` (`KanbanImpl.tsx:621`, `:634` — the file is spelled
@@ -3499,10 +3506,12 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // #9881 and #9972 recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `87af769e9`, re-derived there 2026-09-20. Both files in
-// this chain moved on this hop — `resolve-icon.ts` +203/-7 and `button.tsx`
-// +6/-11 against `53ded82bf` — so no anchor below is carried and every one
-// was re-READ (#10274). ⚠️ `resolveIcon` itself was rewritten: its tail no
+// `.objectui-sha` = `62597c588`, re-derived there 2026-09-23: `resolve-icon.ts`,
+// `button.tsx` and `lazy-icon.tsx` are all byte-identical to `87af769e9`
+// (`git diff --quiet`), so no anchor moved on this hop. The hop before it,
+// onto `87af769e9` (re-derived 2026-09-20), moved both files in this chain —
+// `resolve-icon.ts` +203/-7 and `button.tsx` +6/-11 against `53ded82bf` — so
+// no anchor below was carried there and every one was re-READ (#10274). ⚠️ `resolveIcon` itself was rewritten: its tail no
 // longer indexes `lucide-react`'s `icons` record, it asks `recordIconName`
 // for the kebab-case name and hands the pair to `lazyIconComponent`, so the
 // glyph arrives lazily. What an author may write did not change with it. The
@@ -3619,9 +3628,13 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
 //
 // The acceptance the card names, pinned: each row's KEY SET is the one the
 // renderer's read points support at the pin this repo builds against
-// (`.objectui-sha` = `87af769e9`; re-READ at that pin 2026-09-22 — all three
-// renderers moved hard on the hop from `53ded82bf`, so NO anchor in this
-// block is carried and every one was re-derived from the pinned tree. Four
+// (`.objectui-sha` = `62597c588`; re-measured there 2026-09-23 — the gantt and
+// tree renderers are byte-identical to `87af769e9`, and the map's
+// `ObjectMap.tsx` changed only in a docblock and a dev-warning string
+// (objectui `2252653d0`), so its anchors MOVED with their cited text
+// byte-identical and no key set moved. They were re-READ at `87af769e9`
+// 2026-09-22 — all three renderers moved hard on the hop from `53ded82bf`,
+// so NO anchor in this block was carried and every one was re-derived. Four
 // changed CONTENT rather than position and say so where they are cited: the
 // map's array-shorthand head, the tree's record-source ARM, the cast on the
 // tree's `schema.data` read, and the tree's `titleField` rung), and
