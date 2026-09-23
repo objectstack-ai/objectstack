@@ -173,11 +173,24 @@ describe("composeStacks objectConflict: 'merge' — what stays accepted", () => 
     expect(s.access).toEqual({ default: 'private' });
   });
 
+  it('judges "identical" on the PARSED objects — a member spelled out at its default is the same declaration', () => {
+    const a = defineStack({ manifest: mf('com.example.a'), objects: [obj('shared', { enable: { apiEnabled: true } })] });
+    const b = defineStack({ manifest: mf('com.example.b'), objects: [obj('shared', { enable: { apiEnabled: true, trackHistory: false } })] });
+    const out = composeStacks([a, b], { objectConflict: 'merge' });
+    expect((shared(out)?.enable as Record<string, unknown>).trackHistory).toBe(false);
+  });
+
   it("keeps the earlier stack's config object when the later object does not declare it", () => {
     const b = defineStack({ manifest: mf('com.example.b'), objects: [obj('shared', { label: 'Shared v2' })] });
     const s = shared(composeStacks([accessStack('com.example.a', 'private'), b], { objectConflict: 'merge' }));
     expect(s?.access).toEqual({ default: 'private' });
     expect(s?.label).toBe('Shared v2');
+  });
+
+  it('reads an explicit `undefined` on the later object as no declaration — neither refused nor erased', () => {
+    const b = defineStack({ manifest: mf('com.example.b'), objects: [{ ...obj('shared'), access: undefined }] });
+    const s = shared(composeStacks([accessStack('com.example.a', 'private'), b], { objectConflict: 'merge' }));
+    expect(s?.access).toEqual({ default: 'private' });
   });
 
   it("'override' is unchanged — it hands the whole object, posture included, to the later stack by choice", () => {
