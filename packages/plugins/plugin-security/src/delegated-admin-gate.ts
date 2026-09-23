@@ -95,6 +95,28 @@ function callerOrganizationId(context: any): string | undefined {
   return typeof id === 'string' && id !== '' ? id : undefined;
 }
 
+/**
+ * Does a `sys_user_position` row take effect in `organizationId`?
+ *
+ * The runtime resolver's own answer (`resolveAuthzContext` step 4, in
+ * `@objectstack/core`): a holding stamped with a DIFFERENT organization grants
+ * nothing there; an organization-less holding grants in every organization;
+ * `organizationId` undefined (a `single`-posture caller) drops nothing.
+ *
+ * Every holding the gate reasons about goes through this, because
+ * `sys_user_position.position` is a position NAME and `sys_position.name` is
+ * unique per organization only — so under a walled posture another
+ * organization's holding of a same-named position is the same string. The
+ * gate must count exactly the holdings the runtime grants: counting another
+ * organization's lets a user self-delegate a position they do not hold there;
+ * dropping organization-less ones refuses holdings the runtime honours.
+ */
+function holdingTakesEffectIn(row: any, organizationId?: string): boolean {
+  if (!organizationId) return true;
+  const org = rowOrganizationId(row);
+  return !org || org === organizationId;
+}
+
 /** Coerce a stored timestamp to epoch ms; undefined = absent, NaN = unparseable. */
 function toEpochMs(value: unknown): number | undefined {
   if (value == null || value === '') return undefined;
@@ -566,7 +588,7 @@ export class DelegatedAdminGate {
       }
 
       // 4. Delegator currently holds it, directly (no re-delegation).
-      const holdings = await this.activeHoldings(String(ctx.userId), positionName, now);
+      const holdings = await this.activeHoldings(String(ctx.userId), positionName, now, organizationId);
       const directHolding = holdings.some((h) => h.direct);
       if (!directHolding) {
         if (holdings.length > 0) {
@@ -629,11 +651,17 @@ export class DelegatedAdminGate {
    *  delegation (only a direct holding is re-delegatable) and carrying each
    *  holding's own `businessUnitId` anchor (null = unanchored). The anchor of a
    *  direct holding bounds what a self-delegation of that position may hand out
-   *  (cloud#830 — the anchor is visibility load-bearing). */
+   *  (cloud#830 — the anchor is visibility load-bearing).
+   *
+   *  Only holdings that take effect in the caller's organization count
+   *  ({@link holdingTakesEffectIn}): a holding stamped for another organization
+   *  never answers "you currently hold it" — nor, through its anchor or its
+   *  directness, widens what the caller may delegate here. */
   private async activeHoldings(
     userId: string,
     positionName: string,
     now: number,
+    organizationId?: string,
   ): Promise<Array<{ direct: boolean; businessUnitId: string | null }>> {
     const ql = this.deps.ql;
     if (!ql?.find) return [];
@@ -648,6 +676,7 @@ export class DelegatedAdminGate {
       rows = [];
     }
     return (Array.isArray(rows) ? rows : [])
+      .filter((r) => holdingTakesEffectIn(r, organizationId))
       .filter((r) => isGrantActive(r, now))
       .map((r) => ({
         direct: r?.delegated_from == null || r.delegated_from === '',
@@ -800,7 +829,8 @@ export class DelegatedAdminGate {
     const targets = await this.materializeTargets(opCtx, 'sys_position_permission_set');
     for (const t of targets) {
       const row = t.next ?? t.prev ?? {};
-      const positionName = await this.positionNameById(row.position_id);
+      const position = await this.positionById(row.position_id);
+      const positionName = position.name;
       if (ANCHOR_POSITIONS.has(positionName)) {
         throw new PermissionDeniedError(
           `[Security] Access denied: bindings of the '${positionName}' audience anchor are ` +
@@ -810,7 +840,9 @@ export class DelegatedAdminGate {
       }
       const setRow = await this.loadSetRowById(row.permission_set_id);
       const setName = String(setRow?.name ?? row.permission_set_id ?? '');
-      const radius = positionName ? await this.assignmentAnchorsOfPosition(positionName) : { anchors: new Set<string>(), overCap: false, unanchored: 0 };
+      const radius = positionName
+        ? await this.assignmentAnchorsOfPosition(positionName, position.organizationId)
+        : { anchors: new Set<string>(), overCap: false, unanchored: 0 };
 
       const failure = this.firstApprovalFailure(held, (s) => {
         if (!s.scope.manageBindings) return 'the scope does not grant manageBindings';
@@ -1210,19 +1242,46 @@ export class DelegatedAdminGate {
     }
   }
 
-  private async positionNameById(id: unknown): Promise<string> {
-    if (id == null || !this.deps.ql?.find) return '';
+  /** A `sys_position` row by id: its name, and the organization that owns it
+   *  (undefined = an organization-less row). */
+  private async positionById(id: unknown): Promise<{ name: string; organizationId: string | undefined }> {
+    const none = { name: '', organizationId: undefined };
+    if (id == null || !this.deps.ql?.find) return none;
     try {
       const rows = await this.deps.ql.find('sys_position', { where: { id }, limit: 1, context: SYSTEM_CTX });
-      return String((Array.isArray(rows) && rows[0] ? (rows[0] as any).name : '') ?? '');
+      const row = Array.isArray(rows) && rows[0] ? (rows[0] as any) : null;
+      if (!row) return none;
+      return { name: String(row.name ?? ''), organizationId: rowOrganizationId(row) || undefined };
     } catch {
-      return '';
+      return none;
     }
   }
 
-  /** BU anchors of every current assignment of a position (blast radius). */
+  /**
+   * BU anchors of every assignment a re-binding of this position row reaches
+   * (blast radius).
+   *
+   * An assignment names the position by NAME, and a binding hangs off one
+   * `sys_position` ROW, which the runtime reaches only from the organization
+   * that owns it. So the holders a binding re-composes are the ones whose
+   * holding takes effect in the bound row's organization
+   * ({@link holdingTakesEffectIn}) — that organization's own holdings plus the
+   * organization-less ones — never another organization's same-named
+   * assignments, which would otherwise refuse the write as outside the
+   * subtree or push it over {@link BLAST_RADIUS_CAP}. Keyed on the bound
+   * row's organization rather than the caller's, so a binding written against
+   * another organization's row is still judged by THAT organization's holders.
+   * An organization-less row reaches every organization: no holding is dropped.
+   *
+   * The organization rides the read's context, so the driver's tenant scope
+   * (`organization_id = :org OR organization_id IS NULL`, the governed spelling
+   * of exactly this rule) applies BEFORE the cap — another organization's rows
+   * can neither fill the page nor trip {@link BLAST_RADIUS_CAP}. The same rule
+   * is re-applied to what comes back, for a driver that does not scope.
+   */
   private async assignmentAnchorsOfPosition(
     positionName: string,
+    positionOrganizationId?: string,
   ): Promise<{ anchors: Set<string>; overCap: boolean; unanchored: number }> {
     const anchors = new Set<string>();
     let unanchored = 0;
@@ -1233,14 +1292,14 @@ export class DelegatedAdminGate {
       rows = await ql.find('sys_user_position', {
         where: { position: positionName },
         limit: BLAST_RADIUS_CAP + 1,
-        context: SYSTEM_CTX,
+        context: organizationScopedCtx(positionOrganizationId),
       });
     } catch {
       rows = [];
     }
     const list = Array.isArray(rows) ? rows : [];
     if (list.length > BLAST_RADIUS_CAP) return { anchors, overCap: true, unanchored };
-    for (const r of list) {
+    for (const r of list.filter((row) => holdingTakesEffectIn(row, positionOrganizationId))) {
       const bu = (r as any)?.business_unit_id;
       if (bu == null || bu === '') unanchored += 1;
       else anchors.add(String(bu));
