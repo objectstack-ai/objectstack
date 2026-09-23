@@ -27,7 +27,7 @@
 // fake enterprise package, i.e. stubbing the very thing under test.
 //
 // `@objectstack/organizations` is SIMULATED absent here, by the same throwing
-// factory the twelve packages below get. That is a change: this file used to let
+// factory the twelve OTHER packages in the block below get. That is a change: this file used to let
 // the REAL dynamic import fail, which it does — ADR-0132's entitlement boundary
 // forbids any framework package declaring the name
 // (`no-framework-dependents.pin.test.ts`), so it is genuinely unresolvable from
@@ -50,12 +50,18 @@
 // So each walled case drew from an unbounded, machine-load-dependent
 // distribution, and a 5000ms per-test budget bounded the DRAW rather than any
 // work this file is about. Under a parallel shard it timed out on a case that
-// asserts a back-compat env-var reading. Scaled repro, same command before and
-// after, timeout scaled down instead of load scaled up: with the per-test budget
-// at 25ms under filesystem contention, 10 runs of this file failed 6 times
-// before this change and 0 times after — and every one of those 10 timeouts
-// landed on a WALLED case, never on the single-org case, which runs three
-// `init()`s and resolves nothing. That control is what names the construct.
+// asserts a back-compat env-var reading.
+//
+// Scaled repro — same command and same filesystem contention on both sides,
+// with the per-test budget scaled DOWN to 25ms rather than the load scaled up,
+// N=10 runs each side: 6 of 10 runs failed before this change, 1 of 10 after.
+// The CASE-level reading is what names the construct: all 10 timeouts before
+// landed on a WALLED case and none on the single-org case; after, the single
+// remaining timeout WAS the single-org case — which resolves nothing and runs
+// three `init()`s, i.e. the scaled harness's own CPU floor at a 25ms budget,
+// not this construct. ⛔ Do not read that residual as a reason to reach for the
+// budget: at the 5000ms CI actually uses, the whole window is now pure
+// in-process CPU measured at 1–9ms.
 //
 // ⛔ Nothing about the absence is given up by the SUITE, only by this file: the
 // real, unmocked resolution failure is still the signal in
