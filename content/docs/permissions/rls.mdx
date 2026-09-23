@@ -77,10 +77,36 @@ to a caller on an object, the `update` / `delete` scope is derived from that
 caller's `select` policies — a record they cannot read is one they cannot
 modify, by id or in bulk. Authoring a write-class policy switches the
 derivation off for that class: an authored `update` predicate then decides
-`update` alone and widens exactly as written. Nothing is derived for `insert`
+the `update` *filter* alone, widening past the platform's owner-scoped write
+floor exactly as written. Nothing is derived for `insert`
 (there is no pre-existing row to be visible), and a caller holding the
 read-side superuser bypass (`viewAllRecords` on a private or platform-global
 object) is not narrowed, because their readable set is already unbounded.
+
+**A write widener never reaches a row the caller cannot read.** "You may not
+modify what you cannot see" is a floor, not a default the write filter
+overrides: before a single-record `update` / `delete` runs, the target row is
+re-read under the caller's **own read scope** together with the write filter,
+and a row that read cannot see is refused with `403 PERMISSION_DENIED`. On a
+`public_read` object that read scope is every row (minus any `select`
+narrowing you authored), so an `update` widener works as written. On a
+**`private`** object — the default OWD — the read scope is the caller's own
+records, their access depth and the records shared with them, so an `update`
+widener reaches **only rows the caller can already read**; everything else it
+admits by predicate is still refused.
+
+<Callout type="warn">
+**Known limitation — an app-authored write widener does nothing on a
+`private` object without a matching read grant.** To let a position edit
+*other people's* records on a `private` object, grant read reach to the same
+rows as well: `viewAllRecords` (or a wider `readScope` depth) on the
+object in the same permission set, or a
+[sharing rule or record share](/docs/permissions/sharing-rules) that shares
+those rows with the position. An additional `select` policy is **not** a read
+grant — RLS only narrows, so it cannot make a `private` row visible. The
+paired spelling is shown in the
+[supervisor recipe](/docs/permissions/sharing-rules#how-viewallrecords--modifyallrecords-interact-with-the-owd).
+</Callout>
 
 ## The expression grammar
 
