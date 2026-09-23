@@ -1137,6 +1137,11 @@ export const GroupingConfigSchema = lazySchema(() => strictObject({
   + 'AND-ed into the view filter. Compiled by `compileListViewGroupQuery` / `compileListViewGroupRowsQuery`',
 ));
 
+/** A view's row bound is `pagination.pageSize`; the per-kind blocks answer `limit` with this. */
+const VIEW_ROW_BOUND_GUIDANCE =
+  'A view\'s row bound is `pagination.pageSize` on the view; this block declares no `limit`. '
+  + 'Delete the key and set `pagination.pageSize` instead.';
+
 /**
  * Gallery View Configuration (Airtable-style)
  * Configures card layout for gallery/card views.
@@ -1144,6 +1149,7 @@ export const GroupingConfigSchema = lazySchema(() => strictObject({
 export const GalleryConfigSchema = lazySchema(() => strictObject({
   surface: 'this gallery configuration',
   history: VIEW_HISTORY,
+  guidance: { limit: VIEW_ROW_BOUND_GUIDANCE },
 }, {
   coverField: z.string().optional().describe('Attachment/image field to display as card cover'),
   coverFit: z.enum(['cover', 'contain']).default('cover').describe('Image fit mode for card cover'),
@@ -1159,6 +1165,7 @@ export const GalleryConfigSchema = lazySchema(() => strictObject({
 export const TimelineConfigSchema = lazySchema(() => strictObject({
   surface: 'this timeline configuration',
   history: VIEW_HISTORY,
+  guidance: { limit: VIEW_ROW_BOUND_GUIDANCE },
 }, {
   startDateField: z.string().describe('Field for timeline item start date'),
   endDateField: z.string().optional().describe('Field for timeline item end date'),
@@ -1446,6 +1453,7 @@ export const AddRecordConfigSchema = lazySchema(() => strictObject({
 export const KanbanConfigSchema = lazySchema(() => strictObject({
   surface: 'this kanban configuration',
   history: VIEW_HISTORY,
+  guidance: { limit: VIEW_ROW_BOUND_GUIDANCE },
 }, {
   groupByField: z.string()
     .superRefine(groupByFieldCheck('kanban'))
