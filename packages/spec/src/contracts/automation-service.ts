@@ -148,6 +148,44 @@ export interface AutomationContext {
     flowRunId?: string;
     /** Additional contextual data */
     params?: Record<string, unknown>;
+    /**
+     * Which keys of {@link params} the run's CALLER supplied as flow input —
+     * stated by the door that started the run, so that no consumer has to guess
+     * it from the bag (#19846). A key listed here carries a value the caller
+     * put in its own `params`; a key missing from it was seeded by the door
+     * itself (a column of the subject {@link record}, or the launched row's id).
+     * An empty array is an answer — "the caller supplied nothing" — and is not
+     * the same as an absent key.
+     *
+     * Who sets it: the two doors that start a flow on a caller's behalf, each
+     * from the caller's bag BEFORE it seeds anything —
+     *  - the action door, `dispatchFlowAction` in `@objectstack/runtime`'s
+     *    `action-execution.ts` (REST `POST /api/v1/actions/...` and the MCP
+     *    `run_action` bridge);
+     *  - the trigger door, `buildAutomationContext` in `@objectstack/runtime`'s
+     *    `domains/automation.ts` (`POST /api/v1/automation/:name/trigger`, the
+     *    legacy `POST /api/v1/automation/trigger/:name`, and a declarative
+     *    `type: 'flow'` endpoint).
+     *
+     * Both doors leave out the keys they use to carry the launched row's id —
+     * `recordId`, the camelCase `<object>Id` alias, and on the action door the
+     * action's own `recordIdParam` — even when the caller's bag names them too:
+     * a client that mirrors the row id into `params.recordId` is addressing the
+     * row, not answering a question the flow asks.
+     *
+     * Absent means the producer does not state provenance: a record-change,
+     * schedule, time-relative or webhook trigger, a `subflow` or `map` child run
+     * (those two nodes drop the parent's list from the child context, because it
+     * describes the PARENT's bag), or code calling `execute` directly. Its
+     * consumer, the `screen` node's headless verdict in
+     * `@objectstack/service-automation`, then falls back to inferring
+     * provenance from the bag, an inference whose failure direction is to pause.
+     *
+     * Provenance, not authorization — no security middleware keys on it.
+     * Additive: no existing key changes value, and a context without it keeps
+     * its prior meaning.
+     */
+    callerParamKeys?: string[];
 }
 
 /** One input field rendered by a paused `screen` node (ADR-0019 / screen-flow runtime). */
