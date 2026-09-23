@@ -6791,11 +6791,11 @@ export class ObjectQL implements IObjectQLEngine {
    * `false` here, exactly like a row that exists nowhere (#19808).
    *
    * Without a `context` the elevation is the bare `{ isSystem: true }` and the
-   * probe spans every organization. That is how
-   * {@link inspectDanglingReferences} calls it — the audit has no caller, and
-   * its semantics are unchanged by #19808 — so the audit does not report a
-   * stored reference whose target lives in ANOTHER organization than the row
-   * holding it; only the write-path guard refuses one.
+   * probe spans every organization. {@link inspectDanglingReferences}, which
+   * has no caller, passes the SCANNED row's own organization as the context's
+   * `tenantId` instead (#19837), and no context only for a row that carries
+   * none — so the audit reports a stored reference into another organization,
+   * the class this guard now refuses.
    */
   private async referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
     try {
@@ -7027,6 +7027,20 @@ export class ObjectQL implements IObjectQLEngine {
    * with one predicate, so the report can never be more or less strict than the
    * rule it reports on.
    *
+   * ## Each row is probed under its OWN organization (#19837)
+   *
+   * One predicate needs one scope, too. The write-path guard probes under the
+   * WRITER's `tenantId` since #19808, and refuses a reference into another
+   * organization; this audit has no writer, so it hands the probe the
+   * organization the scanned row was stamped with — the same one, for every
+   * non-system write — and a NULL-organization row (or an object with no tenant
+   * column) probes unscoped. A stored cross-organization reference — written
+   * before #19808, or by an `isSystem` write — is therefore reported, where the
+   * unscoped probe found the row in the other organization and said nothing.
+   * ⚠️ Under the `group` posture the write rule's reach is the writer's whole
+   * membership set, which the row does not record, so a cross-organization
+   * reference a group member legitimately wrote is reported too (#19837).
+   *
    * See {@link auditDanglingReferences} for the judgments (readonly SPLIT —
    * `readonly` references are read like any other and their findings filed
    * under `provenance` / `provenanceUndetermined` since #4743/#5719, not
@@ -7043,7 +7057,9 @@ export class ObjectQL implements IObjectQLEngine {
       {
         objects: () => this._registry.getAllObjects() as unknown as AuditableObject[],
         find: (object, opts) => this.find(object, opts as any) as Promise<Array<Record<string, unknown>>>,
-        probe: (target, id) => this.referenceExists(target, id),
+        probe: (target, id, organization) => this.referenceExists(
+          target, id, organization === null ? undefined : ({ tenantId: organization } as ExecutionContext),
+        ),
         warn: (msg, meta) => this.logger?.warn?.(msg, meta as any),
       },
       options,

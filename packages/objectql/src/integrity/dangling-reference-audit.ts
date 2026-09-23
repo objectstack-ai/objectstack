@@ -2,6 +2,7 @@
 
 import { referenceTargetOf, unprovisionedInjectedColumns } from '@objectstack/spec/data';
 import { PLATFORM_OBJECTS_BY_PACKAGE } from '@objectstack/spec/system';
+import { carriesOrganization, resolveTenantFieldName } from '../tenancy/system-write-organization.js';
 
 /**
  * [#4551] Read-only inspection for the residual #4441 left open: a stored
@@ -320,8 +321,14 @@ export interface DanglingReferenceAuditPort {
   /**
    * `true` = the row exists, `false` = the probe RAN and found nothing,
    * `null` = it could not run at all (→ `undetermined`).
+   *
+   * [#19837] `organization` is the SCANNED row's own organization — the tenant
+   * its references were written under — or `null` when the row carries none (a
+   * NULL-organization row, or an object with no tenant column). The engine
+   * probes under that organization, as the write-path guard probes under its
+   * caller's; `null` probes unscoped.
    */
-  probe(target: string, id: unknown): Promise<boolean | null>;
+  probe(target: string, id: unknown, organization: string | null): Promise<boolean | null>;
   warn?(message: string, meta?: unknown): void;
 }
 
@@ -464,6 +471,26 @@ function auditableReferenceFields(obj: AuditableObject): AuditableField[] {
   return out;
 }
 
+/**
+ * [#19837] The column a scanned row's organization is read from, or `null`
+ * when the object has none the audit can read.
+ *
+ * The write-path guard probes a reference under the WRITER's organization, so
+ * the audit — which has no writer — probes it under the organization the row
+ * was stamped with, which is the same one for every non-system write. That is
+ * the column the object is tenant-scoped by: {@link resolveTenantFieldName},
+ * the engine's own twin of the driver's rule, so a `tenancy.enabled: false`
+ * object answers `null` and its rows probe unscoped. A column that is one of
+ * the #8414 phantoms (an injected anchor on a federated object, which exists
+ * nowhere to read) answers `null` too, rather than putting that column back
+ * into the projection `auditableReferenceFields` just took it out of.
+ */
+function organizationFieldOf(obj: AuditableObject): string | null {
+  const field = resolveTenantFieldName(obj);
+  if (field === null) return null;
+  return unprovisionedInjectedColumns(obj).includes(field) ? null : field;
+}
+
 /** An object paired with the reference fields the audit will read it for. */
 interface AuditTarget {
   obj: AuditableObject;
@@ -558,6 +585,11 @@ export async function auditDanglingReferences(
   // ripgrep treat the whole file as binary and return ZERO matches, dropping
   // it out of code search and every grep-based lint (`pnpm check:nul-bytes`
   // enforces this). The escape is byte-identical at runtime.
+  //
+  // [#19837] The row's organization is part of the question, so it is part of
+  // the key: the same id can exist for one organization and not for another.
+  // The unscoped probe keys on the empty string, which is never an
+  // organization (`carriesOrganization` refuses it), so the two cannot collide.
   const probed = new Map<string, boolean | null>();
   /**
    * `'called-off'` is a THIRD answer alongside the probe's own three: it means
@@ -565,13 +597,17 @@ export async function auditDanglingReferences(
    * `undetermined` either — that bucket is for probes that ran and could not
    * tell (#4747).
    */
-  const exists = async (target: string, value: string): Promise<boolean | null | 'called-off'> => {
+  const exists = async (
+    target: string,
+    value: string,
+    organization: string | null,
+  ): Promise<boolean | null | 'called-off'> => {
     if (calledOff()) return 'called-off';
-    const key = `${target}\u0000${value}`;
+    const key = `${target}\u0000${organization ?? ''}\u0000${value}`;
     if (probed.has(key)) return probed.get(key)!;
     let answer: boolean | null;
     try {
-      answer = await port.probe(target, value);
+      answer = await port.probe(target, value, organization);
     } catch {
       // A probe that threw because the run was called off underneath it says
       // nothing about the target — it is withdrawn, not undetermined.
@@ -615,10 +651,16 @@ export async function auditDanglingReferences(
     if (!name || (only && !only.has(name))) continue;
 
     const budget = Math.min(rowsPerObject, maxRows - report.scanned);
+    // [#19837] Read beside the references, so each row's probe runs under that
+    // row's own organization. Usually already projected: the injected
+    // `organization_id` is itself an audited (provenance) reference.
+    const organizationField = organizationFieldOf(obj);
+    const projection = ['id', ...refFields.map((f) => f.name)];
+    if (organizationField !== null && !projection.includes(organizationField)) projection.push(organizationField);
     let rows: Array<Record<string, unknown>>;
     try {
       rows = (await port.find(name, {
-        fields: ['id', ...refFields.map((f) => f.name)],
+        fields: projection,
         limit: budget,
         context: { isSystem: true },
       })) ?? [];
@@ -641,6 +683,11 @@ export async function auditDanglingReferences(
     if (rows.length >= budget) report.truncatedObjects.push(name);
 
     for (const row of rows) {
+      // [#19837] The organization this row's references are held to. None — a
+      // NULL-organization row, or an object with no tenant column — probes
+      // unscoped, which is what the write rule answers for an org-less writer.
+      const stamped = organizationField === null ? undefined : row?.[organizationField];
+      const organization = carriesOrganization(stamped) ? String(stamped) : null;
       for (const { name: field, target, provenance } of refFields) {
         const raw = row?.[field];
         if (isEmptyStoredReference(raw)) continue;
@@ -649,7 +696,7 @@ export async function auditDanglingReferences(
           if (isEmptyStoredReference(v)) continue;
           // An expanded record in the slot is a read shape, not an id write.
           if (typeof v === 'object') continue;
-          const answer = await exists(target, v);
+          const answer = await exists(target, v, organization);
           // Called off mid-object: this one WAS opened and partly examined, so
           // it is not unreached — only the objects behind it are (#5718).
           if (answer === 'called-off') {
