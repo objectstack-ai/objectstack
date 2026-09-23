@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #19911 — a `readonlyWhen` lock is judged against the row the write STORES,
-// never against a value ANOTHER `readonlyWhen` lock drops in the same strip.
+// #19911 — a value one `readonlyWhen` lock drops can no longer unlock another
+// `readonlyWhen` lock in the same strip.
 //
 // The conditional strip judged every lock against one `record` view built
 // before any lock was judged. `status` locked by `previous.status ==
@@ -13,10 +13,11 @@
 // another field locked it, though the row never took that value.
 //
 // The strip now settles its drops (`settleReadonlyWhenDrops`): a monotone
-// fixpoint, then one exact release. The drop set it keeps is the one in which
-// every dropped key is locked, and every kept key unlocked, on the row the
-// write stores; where locks read each other in a cycle and no such set exists,
-// the fixpoint's fail-safe answer stands. Every expected row below was checked
+// fixpoint, which never opens a lock, then one release step, kept only when
+// every dropped key is locked and every kept key unlocked on the row the write
+// stores. When that one step does not settle the set — a cycle, or a cascade
+// where releasing one key moves another's verdict (#19927) — the fixpoint's
+// larger, fail-safe drop set stands. Every expected row below was checked
 // against a brute-force enumeration of the drop sets that agree with the row.
 //
 // #19887's `stored` view (`engine-readonly-when-stored-view.test.ts`) and
@@ -105,7 +106,7 @@ function makeDriver() {
   return { driver, storeFor };
 }
 
-describe('a readonlyWhen lock is judged against the row the write STORES (#19911)', () => {
+describe('a value one readonlyWhen lock drops no longer unlocks another (#19911)', () => {
   let engine: ObjectQL;
   let storeFor: ReturnType<typeof makeDriver>['storeFor'];
   let warns: string[];
@@ -234,6 +235,16 @@ describe('a readonlyWhen lock is judged against the row the write STORES (#19911
         amount: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
       },
     } as any);
+    // The FK's own lock reads a value that is itself locked under the header
+    // the update names — the settlement's stays → moves direction.
+    engine.registry.registerObject({
+      name: 'line_big',
+      fields: {
+        invoice: { type: 'master_detail', reference: 'inv', readonlyWhen: "record.amount == 'big'" },
+        amount: { type: 'text', readonlyWhen: "parent.status == 'paid'" },
+        tag: { type: 'text' },
+      },
+    } as any);
     // An FK whose own lock faults (text compared with a number): fail-open.
     engine.registry.registerObject({
       name: 'line_fault',
@@ -264,6 +275,8 @@ describe('a readonlyWhen lock is judged against the row the write STORES (#19911
     storeFor('line_moored').set('m1', { id: 'm1', stage: 'submitted', invoice: 'inv_a', amount: 100 });
     storeFor('line_moored_prev').set('m1', { id: 'm1', stage: 'submitted', invoice: 'inv_a', amount: 100 });
     storeFor('line_fault').set('f1', { id: 'f1', stage: 'draft', invoice: 'inv_a', amount: 100 });
+    storeFor('line_big').set('b1', { id: 'b1', invoice: 'inv_b', amount: 'small', tag: 'y' });
+    storeFor('line_big').set('b2', { id: 'b2', invoice: 'inv_b', amount: 'small', tag: 'y' });
   });
 
   const row = (object: string, id: string) => storeFor(object).get(id);
@@ -509,6 +522,42 @@ describe('a readonlyWhen lock is judged against the row the write STORES (#19911
     await engine.update('line_fault', { id: 'f1', invoice: 'inv_b', amount: 5 });
     expect(row('line_fault', 'f1')).toMatchObject({ invoice: 'inv_b', amount: 5 });
     expect(warns.filter((w) => w.includes("readonlyWhen for 'invoice' failed to evaluate"))).toHaveLength(1);
+  });
+
+  // ── The settlement in the other direction: stays → moves ─────────────
+  //
+  // The FK's own lock reads `record.amount`, and `amount` is locked under the
+  // paid invoice the update names. Judged ALONE, the FK read the incoming
+  // `'big'` and held the line home, and the edit landed under the open header.
+  // Judged WITH the amount's lock on the landing it names, the amount drops,
+  // the FK reads the stored `'small'` and lands, and the edit is dropped under
+  // the paid header. Both rows agree with their locks; the second is the one
+  // the landing-first rule (#4889) now reaches.
+
+  it('STAYS → MOVES: the repoint lands on the paid invoice and the edit under it is dropped', async () => {
+    const { events, options } = dropEvents();
+    const reads = recordHeaderReads();
+    await engine.update('line_big', { id: 'b1', invoice: 'inv_a', amount: 'big' }, options);
+    expect(row('line_big', 'b1')).toMatchObject({ invoice: 'inv_a', amount: 'small' });
+    expect(events).toEqual([{ object: 'line_big', fields: ['amount'], reason: 'readonly_when' }]);
+    // The header the update names, then the repoint's reference check.
+    expect(reads).toEqual(['inv_a', 'inv_a']);
+  });
+
+  it('STAYS → MOVES in BULK: every matched line lands on the paid invoice, every edit is dropped', async () => {
+    const { events, options } = dropEvents();
+    await engine.update('line_big', { invoice: 'inv_a', amount: 'big' }, { ...options, where: { tag: 'y' }, multi: true } as any);
+    expect(row('line_big', 'b1')).toMatchObject({ invoice: 'inv_a', amount: 'small' });
+    expect(row('line_big', 'b2')).toMatchObject({ invoice: 'inv_a', amount: 'small' });
+    expect(events).toEqual([{ object: 'line_big', fields: ['amount'], reason: 'readonly_when' }]);
+  });
+
+  it('STAYS → MOVES under strictReadonlyWrites: still refused, now naming the amount, and nothing lands', async () => {
+    const err = await rejection(engine.update('line_big', { id: 'b1', invoice: 'inv_a', amount: 'big' }, { strictReadonlyWrites: true } as any));
+    expect(err.code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect(err.fields).toEqual(['amount']);
+    expect(err.drops).toEqual([{ object: 'line_big', fields: ['amount'], reason: 'readonly_when' }]);
+    expect(row('line_big', 'b1')).toMatchObject({ invoice: 'inv_b', amount: 'small' });
   });
 });
 

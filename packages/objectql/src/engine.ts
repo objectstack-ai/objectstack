@@ -6913,11 +6913,16 @@ export class ObjectQL implements IObjectQLEngine {
    * after this point:
    *
    *  ① the FK's OWN `readonlyWhen` lock. Judged here first, against the
-   *    header the FK names — #4889's verdict for the FK itself, unmoved.
-   *    [#19911] Judged WITH the other caller-supplied locks, not alone: its
-   *    `record` is the row the write stores, so a value one of them drops is
-   *    reverted before the FK's lock reads it — but only the FK is TAKEN here
-   *    (`only`). When that verdict keeps the FK off the landing it is final:
+   *    header the FK names — #4889's rule for the FK itself, unmoved.
+   *    [#19911] Judged WITH the other caller-supplied locks, not alone, and
+   *    settled with them (`settleReadonlyWhenDrops`), so a value one of them
+   *    drops can no longer unlock it — but only the FK is TAKEN here (`only`).
+   *    That moves the FK's verdict in BOTH directions: a repoint its lock
+   *    used to let through can now stay home, and a repoint it used to hold
+   *    can now LAND, when the value its `record` lock reads is itself locked
+   *    under the header the FK names — that value is dropped, the FK's lock
+   *    reads the stored one, and the rest are then judged under the header
+   *    the row lands on. When that verdict keeps the FK off the landing it is final:
    *    the returned `supplied` no longer holds the FK, so the strip that
    *    judges the other fields never re-asks it against the header the row
    *    keeps, where it could flip and land the FK after the rest were judged

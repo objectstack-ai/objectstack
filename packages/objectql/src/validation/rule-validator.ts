@@ -589,10 +589,11 @@ interface ReadonlyWhenStripOptions {
   stored?: Readonly<Record<string, unknown>>;
   /**
    * [#19911] Take only this key, while every judged key is still judged with
-   * it, so its lock reads the row the write stores. The engine's master-detail
-   * settlement judges the FK's own lock ahead of the rest; judged alone, the
-   * FK's predicate read every other key's incoming value, including one the
-   * rest's own locks then took back out. The key is spoken about (its warnings
+   * it, so its verdict is settled together with theirs
+   * ({@link settleReadonlyWhenDrops}). The engine's master-detail settlement
+   * judges the FK's own lock ahead of the rest; judged alone, the FK's
+   * predicate read every other key's incoming value, including one the rest's
+   * own locks then took back out. The key is spoken about (its warnings
    * and the strip's line) only when it is taken: a key left standing is judged
    * again, with the rest, by the strip that follows. Omit to take every key
    * that locks.
@@ -692,9 +693,10 @@ function isCallerSuppliedValue(
  * The `record` / `previous` bindings are TOTAL over the object's declared
  * fields (#4953) — see {@link readonlyWhenBindings}. `record` is the payload
  * the write STORES over the prior row (`options.stored`, #19887), so a
- * predicate never reads a value the static `readonly` strip takes back out —
- * nor, since #19911, one this strip takes back out
- * ({@link settleReadonlyWhenDrops}).
+ * predicate never reads a value the static `readonly` strip takes back out;
+ * and since #19911 a value this strip takes back out can no longer unlock a
+ * lock ({@link settleReadonlyWhenDrops}, which says where it can still
+ * over-lock).
  */
 export function stripReadonlyWhenFields(
   objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
@@ -765,9 +767,10 @@ function withoutKeys(
 }
 
 /**
- * [#19911] Which judged keys the conditional strip drops — each lock judged
- * against the row this write STORES, never against a value another lock in
- * the same strip takes back out.
+ * [#19911] Which judged keys the conditional strip drops — so that a value
+ * another lock in the same strip takes back out can never unlock a lock, and,
+ * where one release step can settle it, no key is dropped that is unlocked on
+ * the row the write stores.
  *
  * ## Why one pass was not enough
  *
@@ -783,7 +786,7 @@ function withoutKeys(
  * against a `'closed'` the row never took. `stored` (#19887) closed the static
  * strip's twin of both; this is the conditional strip's own.
  *
- * ## The rule: the drop set that agrees with the row it stores
+ * ## The rule: never open a lock, then agree with the stored row where one step can
  *
  * A key is judged with its OWN incoming value (a lock that reads its own field
  * judges the write) and every OTHER dropped key reverted to the prior row's
@@ -801,10 +804,18 @@ function withoutKeys(
  *    once, and the result is kept only if it is exact; otherwise ①'s answer
  *    stands.
  *
- * Locks that read one another in a cycle can leave no exact set at all — `a`
- * locked by `record.b == 'x'`, `b` by `record.a == 'old'`, a write setting
- * both — and then ①'s answer stands: the fail-safe direction, where a lock
+ * ① alone is guaranteed; ② is one step, not a search. When it does not settle
+ * the set, ①'s larger drop set stands, so a key whose own lock is FALSE on
+ * the stored row can still be dropped — the fail-safe direction, where a lock
  * that cannot be settled is not waived (#4889's frozen lines depend on that).
+ * Two shapes, measured:
+ *  - a CYCLE has no exact set at all — `a` locked by `record.b == 'x'`, `b` by
+ *    `record.a == 'old'`, a write setting both;
+ *  - a CASCADE can have one that ② misses (#19927) — `c` locked by
+ *    `previous.c == 'L'`, `x` by `record.c == 'open'`, `y` by `record.x ==
+ *    'xv'`, a write setting all three on a row with `c: 'L'`. The exact set is
+ *    `{c, y}`, but releasing `x` moves `y`'s verdict, so the release fails its
+ *    check and `{c, x, y}` stands, as it did before this function existed.
  *
  * Each key's warnings come from the evaluation that decided it and are handed
  * back rather than logged, so a key judged more than once still warns once.
@@ -1055,7 +1066,7 @@ const RECORD_ROOT = 'record';
  *
  * #4889's rule judges the FK's lock against the master it lands on, so a lock
  * that reads `parent` needs that header — the one question asked before this.
- * The second is new: the FK's lock is judged against the row the write stores
+ * The second is new: the FK's lock is settled together with the other locks
  * ({@link settleReadonlyWhenDrops}), so when it reads `record` it depends on
  * which OTHER payload keys their own locks drop — and a `parent`-scoped one
  * among those is judged, on the landing the FK's verdict is deciding, against
