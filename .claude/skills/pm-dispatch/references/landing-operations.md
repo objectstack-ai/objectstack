@@ -16,7 +16,6 @@
 - 外部评审链降为可选事后审计,非放行前提。
 - 契约复核的适用面、资格与归属见 `references/contract-review.md`。
 - 碰生成物的 PR 入队前先同步 + 整体重生成:四步序 `bash scripts/pm/os-regen-merge.sh`。
-- 跟到 MERGED 为止,入队后的看护归车道 PM 的落地窗口:每轮同时读队列分支与 `origin/main`。
 - 默认分支 push 即触发对外部署的仓,只在验证层存在时才合并;无验证层 ⛔ 不合并。
 - 验证层 = 部署以 CI 为闸、发布后探测线上面、失败自动回滚并立卡。
 - 该类仓的落地判据是已发布且探测通过,⛔ 不是 MERGED;跟到发布为止。
@@ -66,6 +65,7 @@
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `platform-readings.md`。
 - ③ PR 碰 `.github/workflows/**` 而 token 缺 workflows 权限。
 - 确认 MERGED 同一动作里给 `Part of` 卡收口、`Fixes` 卡代关但标也须摘,⛔ 不拆到下轮巡检。
+- 卡以 completed 关闭且带 `Adopts:` 行 ⇒ 同一动作在所指 fork PR 贴致谢与落地链接并关闭它。
 - `Part of` 卡开着不摘 `pm:dispatched`,无在飞物的卡就永远算进 `label:pm:dispatched is:open`。
 - 摘标换回 `pm:queue` 或按剩余物定级,加一条写清交付了什么、剩下归谁的评论。
 - 同刻读相关卡 `closed_by_pull_requests`,确认没有卡被正文闭合关键词误关。
