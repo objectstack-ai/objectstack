@@ -22,6 +22,7 @@ import type {
 import type { Logger } from '@objectstack/core';
 import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
 import type { MetadataSerializer } from '../serializers/serializer-interface.js';
+import { TypeScriptSerializer, serializeTypeScriptForMetadataType } from '../serializers/typescript-serializer.js';
 import { AmbiguousMetadataStemError } from './ambiguous-metadata-stem.js';
 
 /**
@@ -459,12 +460,25 @@ export class FilesystemLoader implements MetadataLoader {
         }
       }
 
-      // Serialize data
-      const content = serializer.serialize(data, {
-        prettify,
-        indent,
-        sortKeys,
-      });
+      // Serialize data. The built-in `typescript` serializer is the one format
+      // that annotates, and the annotation depends on the metadata type, which
+      // only this call knows: it goes through the package-internal
+      // `serializeTypeScriptForMetadataType`, so the published
+      // `SerializeOptions` does not grow a key.
+      //
+      // The test is the METHOD, not the class: only when this module's own,
+      // un-overridden `TypeScriptSerializer.prototype.serialize` is the one
+      // that would run. `instanceof` also matched a subclass whose overridden
+      // `serialize()` must still be called. Any other serializer (a custom
+      // one, a subclass that overrides `serialize()`, or a `TypeScriptSerializer`
+      // from the package's other entry bundle, whose prototype is a different
+      // object) is called as it always was.
+      const serializeOptions = { prettify, indent, sortKeys };
+      const content =
+        serializer.serialize === TypeScriptSerializer.prototype.serialize &&
+        serializer.getFormat() === 'typescript'
+          ? serializeTypeScriptForMetadataType(data, type, serializeOptions)
+          : serializer.serialize(data, serializeOptions);
 
       // Write to disk (atomic or direct)
       if (atomic) {
