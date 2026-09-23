@@ -300,7 +300,11 @@ function rowMatches(row: Record<string, unknown>, where: Record<string, unknown>
   });
 }
 
-async function boot(sets: PermissionSet[], tables?: Tables, opts: { orgScoping?: boolean } = {}) {
+async function boot(
+  sets: PermissionSet[],
+  tables?: Tables,
+  opts: { orgScoping?: boolean; noBaseline?: boolean } = {},
+) {
   const middlewares: Array<(opCtx: any, next: () => Promise<void>) => Promise<void>> = [];
   const services: Record<string, unknown> = {
     // The `isolated` posture, resolved the way the plugin falls back to it when
@@ -348,7 +352,13 @@ async function boot(sets: PermissionSet[], tables?: Tables, opts: { orgScoping?:
       return services[name];
     },
   };
-  const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+  // `noBaseline` leaves NOTHING to resolve — no bootstrap sets, no baseline —
+  // so an authenticated caller reaches arm 4 with an empty resolution.
+  const plugin = new SecurityPlugin(
+    opts.noBaseline
+      ? { defaultPermissionSets: [], fallbackPermissionSet: null }
+      : { fallbackPermissionSet: 'member_default' },
+  );
   await plugin.init(ctx as any);
   await plugin.start(ctx as any);
   if (middlewares.length === 0) throw new Error('SecurityPlugin registered no middleware');
@@ -396,6 +406,8 @@ describe('canWriteObject agrees with the engine middleware, case for case', () =
     data?: unknown;
     /** Boot under the `isolated` posture, so the ADR-0123 D2 wall is armed. */
     orgScoping?: true;
+    /** Boot with nothing to resolve, so the caller reaches arm 4. */
+    noBaseline?: true;
   }> = [
     { label: 'no grant of any kind on the object', object: 'ledger', operation: 'insert', sets: [WRITER_SET], context: WRITER_CTX },
     { label: 'an explicit create grant', object: 'invoice', operation: 'insert', sets: [WRITER_SET], context: WRITER_CTX },
@@ -455,13 +467,14 @@ describe('canWriteObject agrees with the engine middleware, case for case', () =
     // from the control twin below, which the wall admits.
     { label: 'an authenticated caller with no active organization (ADR-0123 D2)', object: 'invoice', operation: 'insert', sets: [WRITER_SET], context: ORGLESS_CTX, orgScoping: true },
     { label: 'the same org-less caller in UPDATE mode', object: 'invoice', operation: 'update', sets: [WRITER_SET], context: ORGLESS_CTX, orgScoping: true },
-    { label: 'an org-less caller who resolves no permission set at all', object: 'invoice', operation: 'insert', sets: [], context: ORGLESS_CTX, orgScoping: true },
+    { label: 'an org-less caller who resolves no permission set at all', object: 'invoice', operation: 'insert', sets: [], context: ORGLESS_CTX, orgScoping: true, noBaseline: true },
+    { label: 'the org-bound twin who resolves no permission set at all', object: 'invoice', operation: 'insert', sets: [], context: WRITER_CTX, orgScoping: true, noBaseline: true },
     { label: 'the same caller WITH an active organization, under the same posture', object: 'invoice', operation: 'insert', sets: [WRITER_SET], context: WRITER_CTX, orgScoping: true },
   ];
 
   for (const c of CASES) {
     it(`agrees on ${c.label}`, async () => {
-      const { plugin, middleware } = await boot(c.sets, undefined, { orgScoping: c.orgScoping });
+      const { plugin, middleware } = await boot(c.sets, undefined, { orgScoping: c.orgScoping, noBaseline: c.noBaseline });
       const data = 'data' in c ? c.data : PLAIN_PAYLOAD;
       const admitted = await middlewareAdmits(middleware, c.object, c.operation, c.context, data);
       const answered = await plugin.canWriteObject(c.object, c.operation, c.context, data);
@@ -639,9 +652,17 @@ describe('the arms the CRUD grant alone does not cover', () => {
     await expect(plugin.canWriteObject('invoice', 'update', ORGLESS_CTX, PLAIN_PAYLOAD)).resolves.toBe(false);
   });
 
-  it('DENIES it when no permission set resolves, too — the wall is not behind the CRUD guard', async () => {
-    const { plugin } = await boot([], undefined, { orgScoping: true });
+  it('DENIES it when no permission set resolves, too — arm 4 does not admit past the wall', async () => {
+    const { plugin } = await boot([], undefined, { orgScoping: true, noBaseline: true });
+    // The premise, or the case proves nothing about arm 4: nothing resolves.
+    await expect((plugin as any).resolvePermissionSetsForContext(ORGLESS_CTX)).resolves.toEqual([]);
     await expect(plugin.canWriteObject('invoice', 'insert', ORGLESS_CTX, PLAIN_PAYLOAD)).resolves.toBe(false);
+  });
+
+  it('ADMITS the org-bound twin who resolves no permission set — arm 4 still admits', async () => {
+    const { plugin } = await boot([], undefined, { orgScoping: true, noBaseline: true });
+    await expect((plugin as any).resolvePermissionSetsForContext(WRITER_CTX)).resolves.toEqual([]);
+    await expect(plugin.canWriteObject('invoice', 'insert', WRITER_CTX, PLAIN_PAYLOAD)).resolves.toBe(true);
   });
 
   it('ADMITS the same caller with an active organization — so the arm is not a blanket deny', async () => {
