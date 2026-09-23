@@ -152,10 +152,10 @@ import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object
 import { resolveTenancyPosture } from '@objectstack/types';
 import {
   normalizeTenancyPosture,
-  postureUsesUnionScope,
   TenantLayer0VerdictSchema,
   type TenancyPosture,
   type TenantLayer0Verdict,
+  postureUsesUnionScope,
 } from '@objectstack/spec/security';
 
 /**
