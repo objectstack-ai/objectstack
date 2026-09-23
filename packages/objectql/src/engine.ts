@@ -7071,9 +7071,7 @@ export class ObjectQL implements IObjectQLEngine {
     if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) return unbound;
     const wanted = collectPredicateRelationships(schema);
     if (wanted.size === 0) return unbound;
-    // ⛔ Under `group` a USER caller with no active organization has no `tenantId` to
-    // scope this read by, while its own reads are walled: it reads nothing, and
-    // every stored reference stays unresolved.
+    // ⛔ `group`: a USER caller with no `tenantId` cannot be scoped here, so it reads nothing.
     const caller = context as ExecutionContext | undefined;
     const readsNothing = !!caller?.userId && !carriesOrganization(caller?.tenantId)
       && postureUsesUnionScope(this.resolveEnginePosture());
