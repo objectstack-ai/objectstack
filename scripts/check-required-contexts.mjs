@@ -166,10 +166,10 @@
  * which is why assertion 7 above judges the trigger and not the job. Asserting
  * "no `if:`" uniformly would have made this gate red on `main` the day it
  * landed, against four jobs that are correct. (`console-pin` has since moved
- * its filter term from the job's `if:` into a first step, so it concludes on
- * every run rather than reading `skipped` — #17673, ruling #18900 ⑤; see its
- * registry row. That is a property of that one job, not a rule this pin
- * asserts of the others.)
+ * its filter term from the job's `if:` onto each of its steps' `if:`s, so it
+ * concludes on every run rather than reading `skipped` — #17673, ruling #18900
+ * ⑤; see its registry row. That is a property of that one job, not a rule this
+ * pin asserts of the others.)
  *
  * The two aggregate gates are a further special case — they need `if: always()`
  * for a reason of their own (#3622: a gate that skips because a dependency
@@ -598,10 +598,10 @@ export const INSTRUCTION_SURFACES = [
       'Temporal Conformance (live PG + MySQL)',
       'Governed Surface Queue Guard',
       // The eighth, re-enrolled ahead of its Settings half by #17673 (ruling
-      // #18900 ⑤). ⚠️ This file already named it in its Post-Task Checklist
-      // item 4, so the literal scan is satisfied by that mention whether or
-      // not the merge-queue sentence above follows — see the PR for that
-      // residual.
+      // #18900 ⑤); the merge-queue sentence names it. ⚠️ Residual: this file
+      // also names it in its Post-Task Checklist item 4, and the literal scan
+      // is a whole-file `includes`, so that mention alone would satisfy it —
+      // the sentence following is held by review, not by this array.
       'Console Pin Gate',
     ],
   },

@@ -513,12 +513,12 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — seven contexts block: `Lint & Repo Gates` (all `check:*` gates),
+   set** — seven block (eight once Settings adds `Console Pin Gate`): `Lint & Repo Gates` (all `check:*` gates),
    `TypeScript Type Check`, `Test Core`, `Dogfood Regression Gate`, `Build Core`,
    `Temporal Conformance (live PG + MySQL)` and `Governed Surface Queue Guard`. A check outside
-   those seven is advisory and rides through, and an advisory red that lands rides `main`'s
+   those eight is advisory and rides through, and an advisory red that lands rides `main`'s
    merge ref into every later PR until stanched. A required context is matched by check-run
-   name, so a rename detaches its gate silently — treat those seven names as contract.
+   name, so a rename detaches its gate silently — treat those eight names as contract.
 
    **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons to
    confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
