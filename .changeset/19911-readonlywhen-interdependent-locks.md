@@ -1,0 +1,68 @@
+---
+"@objectstack/objectql": patch
+---
+
+fix(objectql): a value one `readonlyWhen` lock drops can no longer unlock another `readonlyWhen` lock (#19911)
+
+**What a caller could do before.** When one field's `readonlyWhen` read a field
+that carries its own `readonlyWhen`, a caller with edit rights could change a
+locked field by sending a new value for the other one in the same update. With
+`status: { readonlyWhen: "previous.status == 'closed'" }` and `amount: {
+readonlyWhen: "record.status == 'closed'" }`, `update(c1, { status: 'open',
+amount: 999 })` on a CLOSED row committed `amount = 999`: `status` was dropped
+by its own lock, but `amount` was judged against the dropped `'open'`, so the
+row stayed closed with its frozen amount rewritten. The same happened on bulk
+(`multi: true`) updates for every matched row, and for a master-detail field's
+own `readonlyWhen` lock that reads such a field — the row moved to another
+header although its lock held on the row it kept. `isSystem` callers were
+affected too (a `readonlyWhen` lock binds them).
+
+**What happens now.** A value one `readonlyWhen` lock drops can no longer
+unlock another: no field is written while its `readonlyWhen` is TRUE on the row
+the update stores. The locks are judged together, again with each dropped
+value put back to the row's stored one, until no further field locks; then a
+field that was held only by a value that was later put back is released, if
+the result agrees with the stored row. In the example above `amount` is
+dropped as locked, exactly as `update(c1, { amount: 999 })` on its own always
+was. Values a `beforeUpdate` hook wrote are still stored and read as before.
+
+**What else you may see move:**
+
+- The reverse: a value that WOULD lock another field no longer locks it when
+  its own lock drops it. With `status` frozen by `previous.frozen == true`,
+  `update(r, { status: 'closed', amount: 999 })` now stores the amount (the row
+  stays open, so its amount is unlocked); before, the amount was dropped too.
+- `onFieldsDropped` reports every dropped field in the one `readonly_when`
+  event, and a `strictReadonlyWrites` refusal names the fields the update would
+  have dropped; it was a refusal before and still is.
+- `requiredWhen` and validation rules run on the stripped update, so they see
+  the amount the row keeps: a requirement only the let-through amount raised
+  no longer refuses the write, and clearing a field the kept amount requires is
+  now refused (`VALIDATION_FAILED`).
+- The release is one step, not a search. When it does not settle the drops,
+  every lock involved holds and the field is dropped, never written — so a
+  field whose own lock is FALSE on the stored row can still be dropped. That
+  happens when locks read each other in a cycle (no set of drops agrees with
+  the stored row), and in a cascade where releasing one field changes another's
+  verdict: with `c` locked by `previous.c == 'L'`, `x` by `record.c == 'open'`
+  and `y` by `record.x == 'xv'`, `update(r, { c: 'open', x: 'xv', y: 'yv' })`
+  on a row with `c: 'L'` drops all three, although `x` is unlocked on the
+  stored row. That was dropped before this change too; it is tracked as
+  #19927.
+- A master-detail repoint that the field's own `record`-scoped lock used to
+  hold can now land. Its lock is judged together with the other locks on the
+  header the update names, so when the value that lock reads is itself locked
+  under that header, the value is dropped, the repoint lands, and the edit is
+  dropped under the header the row lands on. With `invoice: { readonlyWhen:
+  "record.amount == 'big'" }` and `amount: { readonlyWhen: "parent.status ==
+  'paid'" }`, `update(line, { invoice: 'inv_a', amount: 'big' })` on a line
+  under an open invoice, naming a paid one, used to keep the line where it was
+  and store `amount: 'big'` (`onFieldsDropped` reported `invoice`); it now
+  moves the line onto the paid invoice and keeps its old amount
+  (`onFieldsDropped` reports `amount`), by id and on bulk updates. A
+  `strictReadonlyWrites` refusal of that write now names `amount` instead of
+  `invoice`. Both outcomes agree with the locks on the row they store.
+- A master-detail field whose own lock reads `record`, on an object where
+  another field in the update has a `parent`-scoped lock, now reads the named
+  header before deciding whether the row moves: one more header read when it
+  does not.

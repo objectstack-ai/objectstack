@@ -587,6 +587,18 @@ interface ReadonlyWhenStripOptions {
    * Every engine call site passes it.
    */
   stored?: Readonly<Record<string, unknown>>;
+  /**
+   * [#19911] Take only this key, while every judged key is still judged with
+   * it, so its verdict is settled together with theirs
+   * ({@link settleReadonlyWhenDrops}). The engine's master-detail settlement
+   * judges the FK's own lock ahead of the rest; judged alone, the FK's
+   * predicate read every other key's incoming value, including one the rest's
+   * own locks then took back out. The key is spoken about (its warnings
+   * and the strip's line) only when it is taken: a key left standing is judged
+   * again, with the rest, by the strip that follows. Omit to take every key
+   * that locks.
+   */
+  only?: string;
 }
 
 /**
@@ -681,7 +693,10 @@ function isCallerSuppliedValue(
  * The `record` / `previous` bindings are TOTAL over the object's declared
  * fields (#4953) — see {@link readonlyWhenBindings}. `record` is the payload
  * the write STORES over the prior row (`options.stored`, #19887), so a
- * predicate never reads a value the static `readonly` strip takes back out.
+ * predicate never reads a value the static `readonly` strip takes back out;
+ * and since #19911 a value this strip takes back out can no longer unlock a
+ * lock ({@link settleReadonlyWhenDrops}, which says where it can still
+ * over-lock).
  */
 export function stripReadonlyWhenFields(
   objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
@@ -694,20 +709,192 @@ export function stripReadonlyWhenFields(
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const supplied = options?.supplied ?? data;
-  const view = readonlyWhenBindings(options?.stored ?? data, previous, fields);
-  let result = data;
+  const stored = options?.stored ?? data;
+  const judged = judgedReadonlyWhenKeys(fields, data, supplied);
+  if (judged.length === 0 || !judgesOnly(judged, options?.only)) return data;
+  const settled = settleReadonlyWhenDrops(
+    judged,
+    (dropped) => readonlyWhenBindings(withoutKeys(stored, dropped), previous, fields),
+    (name, view, warn) => isReadonlyWhenLocked(fields[name]!, view.merged, view.previous, name, { warn }, parent),
+  );
+  return applyReadonlyWhenDrops(data, judged, settled, options?.only, logger, (name) =>
+    `Field '${name}' is read-only (readonlyWhen) — ignoring incoming change`,
+  );
+}
+
+/**
+ * [#19911] The keys the conditional strip JUDGES: every field in the payload
+ * that declares a `readonlyWhen` and still holds the caller's value (#9107,
+ * {@link isCallerSuppliedValue}) — in declaration order, which is the order
+ * the strips have always evaluated, warned and reported in.
+ */
+function judgedReadonlyWhenKeys(
+  fields: Record<string, ConditionalFieldDef>,
+  data: Record<string, unknown>,
+  supplied: Readonly<Record<string, unknown>>,
+): string[] {
+  const judged: string[] = [];
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
-    // [#9107] Asked BEFORE the predicate runs, not after: a hook-written value
+    // [#9107] Asked BEFORE any predicate runs, not after: a hook-written value
     // is not this strip's business at all, so there is nothing to evaluate and
     // nothing to warn about — including the unbound-root LOCKED branch, whose
     // fail-CLOSED verdict exists to protect against an unjudgeable CALLER write.
     if (!isCallerSuppliedValue(data, supplied, name)) continue;
-    if (isReadonlyWhenLocked(def, view.merged, view.previous, name, logger, parent)) {
-      if (result === data) result = { ...data };
-      delete (result as Record<string, unknown>)[name];
-      logger?.warn?.(`Field '${name}' is read-only (readonlyWhen) — ignoring incoming change`);
+    judged.push(name);
+  }
+  return judged;
+}
+
+/**
+ * [#19911] Is `only` (when given) among the keys judged? When it is not — no
+ * `readonlyWhen`, absent, or no longer the caller's — the strip has nothing to
+ * take, and returns before judging the rest just to read their verdicts.
+ */
+function judgesOnly(judged: readonly string[], only: string | undefined): boolean {
+  return only === undefined || judged.includes(only);
+}
+
+/** `data` without `keys`, as a copy; `data` itself when there is none to take. */
+function withoutKeys(
+  data: Readonly<Record<string, unknown>>,
+  keys: ReadonlySet<string>,
+): Readonly<Record<string, unknown>> {
+  if (keys.size === 0) return data;
+  const out: Record<string, unknown> = { ...data };
+  for (const key of keys) delete out[key];
+  return out;
+}
+
+/**
+ * [#19911] Which judged keys the conditional strip drops — so that a value
+ * another lock in the same strip takes back out can never unlock a lock, and,
+ * where one release step can settle it, no key is dropped that is unlocked on
+ * the row the write stores.
+ *
+ * ## Why one pass was not enough
+ *
+ * Every predicate read ONE `record` view, built before any lock was judged —
+ * so it still held every value the pass itself went on to drop. With `status`
+ * locked by `previous.status == 'closed'` and `amount` by `record.status ==
+ * 'closed'`, `update(c1, { status: 'open', amount: 999 })` on a closed row
+ * dropped `status` and judged `amount` against the dropped `'open'`: the row
+ * stayed closed and its locked amount was rewritten. The same mechanism locks
+ * instead of opening when the dropped value is the one that would lock: with
+ * `status` frozen by `previous.frozen == true`, `update(r, { status:
+ * 'closed', amount: 999 })` dropped `status` and then `amount` too, judged
+ * against a `'closed'` the row never took. `stored` (#19887) closed the static
+ * strip's twin of both; this is the conditional strip's own.
+ *
+ * ## The rule: never open a lock, then agree with the stored row where one step can
+ *
+ * A key is judged with its OWN incoming value (a lock that reads its own field
+ * judges the write) and every OTHER dropped key reverted to the prior row's
+ * value. A drop set is EXACT when every key it drops is locked, and every key
+ * it keeps is unlocked, on that view. Reached in two steps:
+ *
+ *  ① A monotone fixpoint. Judge every key; drop the ones that lock; re-judge
+ *    the rest with those reverted; repeat until a pass locks nothing new.
+ *    Drops only grow, so it ends (one pass per key at most), and every key it
+ *    keeps is unlocked on the row it stores: it never opens a lock. Its first
+ *    pass IS the single pass it replaced, so a write whose drops move no
+ *    other lock's verdict is judged exactly as before.
+ *  ② An exact release. A key ① dropped but that is unlocked on ①'s row was
+ *    locked by a value a later pass reverted. Every such key is released at
+ *    once, and the result is kept only if it is exact; otherwise ①'s answer
+ *    stands.
+ *
+ * ① alone is guaranteed; ② is one step, not a search. When it does not settle
+ * the set, ①'s larger drop set stands, so a key whose own lock is FALSE on
+ * the stored row can still be dropped — the fail-safe direction, where a lock
+ * that cannot be settled is not waived (#4889's frozen lines depend on that).
+ * Two shapes, measured:
+ *  - a CYCLE has no exact set at all — `a` locked by `record.b == 'x'`, `b` by
+ *    `record.a == 'old'`, a write setting both;
+ *  - a CASCADE can have one that ② misses (#19927) — `c` locked by
+ *    `previous.c == 'L'`, `x` by `record.c == 'open'`, `y` by `record.x ==
+ *    'xv'`, a write setting all three on a row with `c: 'L'`. The exact set is
+ *    `{c, y}`, but releasing `x` moves `y`'s verdict, so the release fails its
+ *    check and `{c, x, y}` stands, as it did before this function existed.
+ *
+ * Each key's warnings come from the evaluation that decided it and are handed
+ * back rather than logged, so a key judged more than once still warns once.
+ */
+function settleReadonlyWhenDrops<V>(
+  judged: readonly string[],
+  viewFor: (dropped: ReadonlySet<string>) => V,
+  isLocked: (name: string, view: V, warn: (message: string) => void) => boolean,
+): { dropped: Set<string>; warnings: Map<string, string[]> } {
+  // Views are memoised per set of OTHER dropped keys: ① and ② ask for the
+  // same few again and again.
+  const views = new Map<string, V>();
+  const judge = (name: string, dropped: ReadonlySet<string>): { locked: boolean; said: string[] } => {
+    const others = judged.filter((key) => key !== name && dropped.has(key));
+    const signature = others.join(',');
+    let view = views.get(signature);
+    if (view === undefined) {
+      view = viewFor(new Set(others));
+      views.set(signature, view);
     }
+    const said: string[] = [];
+    return { locked: isLocked(name, view, (message) => said.push(message)), said };
+  };
+  // ① Every standing key is judged against the same drop set, and a drop
+  // found in this pass reaches the others in the next one.
+  const dropped = new Set<string>();
+  const warnings = new Map<string, string[]>();
+  let standing: readonly string[] = judged;
+  for (;;) {
+    const locked: string[] = [];
+    for (const name of standing) {
+      const verdict = judge(name, dropped);
+      warnings.set(name, verdict.said);
+      if (verdict.locked) locked.push(name);
+    }
+    if (locked.length === 0) break;
+    for (const name of locked) dropped.add(name);
+    standing = standing.filter((name) => !dropped.has(name));
+  }
+  // ② Every standing key is unlocked on ①'s row; a dropped key unlocked there
+  // too is over-locked.
+  const overLocked = [...dropped].filter((name) => !judge(name, dropped).locked);
+  if (overLocked.length === 0) return { dropped, warnings };
+  const released = new Set([...dropped].filter((name) => !overLocked.includes(name)));
+  const releasedWarnings = new Map<string, string[]>();
+  for (const name of judged) {
+    const verdict = judge(name, released);
+    if (verdict.locked !== released.has(name)) return { dropped, warnings };
+    releasedWarnings.set(name, verdict.said);
+  }
+  return { dropped: released, warnings: releasedWarnings };
+}
+
+/**
+ * [#19911] Apply a settled verdict: say what each judged key's deciding
+ * evaluation said, in declaration order, then the strip's own line for each
+ * key it takes, and return `data` without those keys — the same object when
+ * none is taken. `only` narrows what is TAKEN and SAID to one key, while every
+ * judged key still shaped the view that key was judged against
+ * ({@link ReadonlyWhenStripOptions.only}).
+ */
+function applyReadonlyWhenDrops(
+  data: Record<string, unknown>,
+  judged: readonly string[],
+  settled: { dropped: ReadonlySet<string>; warnings: ReadonlyMap<string, readonly string[]> },
+  only: string | undefined,
+  logger: EvaluateRulesOptions['logger'] | undefined,
+  line: (name: string) => string,
+): Record<string, unknown> {
+  let result = data;
+  for (const name of judged) {
+    // `only`, standing, says nothing either: its caller re-judges it with the
+    // rest when it lands, and that is where its verdict is spoken.
+    if (only !== undefined && (name !== only || !settled.dropped.has(name))) continue;
+    for (const message of settled.warnings.get(name) ?? []) logger?.warn?.(message);
+    if (!settled.dropped.has(name)) continue;
+    if (result === data) result = { ...data };
+    delete result[name];
+    logger?.warn?.(line(name));
   }
   return result;
 }
@@ -840,24 +1027,70 @@ export function hasParentScopedRequiredWhen(
 }
 
 /** Parsed-root memo — metadata predicates are a small, fixed set of sources. */
-const parentRootCache = new Map<string, boolean>();
+const celRootsCache = new Map<string, readonly string[]>();
 
 /** Does this predicate's CEL source reference the `parent` root? */
 function readsParentRoot(cond: string | Expression): boolean {
+  return readsCelRoot(cond, PARENT_ROOT);
+}
+
+/**
+ * Does this predicate's CEL source reference `root`? A predicate that does not
+ * parse reads nothing here — it faults at evaluation, where the fail-open /
+ * fail-closed judgment already lives.
+ */
+function readsCelRoot(cond: string | Expression, root: string): boolean {
   const expr = toExpression(cond);
   if (expr.dialect !== 'cel') return false;
   const source = typeof expr.source === 'string' ? expr.source : '';
   if (!source) return false;
-  const cached = parentRootCache.get(source);
-  if (cached !== undefined) return cached;
-  const roots = collectCelRootIdentifiers(source);
-  const answer = roots.ok && roots.roots.includes(PARENT_ROOT);
-  parentRootCache.set(source, answer);
-  return answer;
+  let roots = celRootsCache.get(source);
+  if (roots === undefined) {
+    const parsed = collectCelRootIdentifiers(source);
+    roots = parsed.ok ? parsed.roots : [];
+    celRootsCache.set(source, roots);
+  }
+  return roots.includes(root);
 }
 
 /** The CEL scope root a master-detail header is bound under (`cel-engine.ts`). */
 const PARENT_ROOT = 'parent';
+
+/** The CEL scope root a field rule reads the row the write stores under. */
+const RECORD_ROOT = 'record';
+
+/**
+ * [#19911] Does judging the master-detail FK's OWN `readonlyWhen` lock need the
+ * header the FK NAMES? The engine's settlement asks this before it judges that
+ * lock, and reads the named header only when the answer is yes.
+ *
+ * #4889's rule judges the FK's lock against the master it lands on, so a lock
+ * that reads `parent` needs that header — the one question asked before this.
+ * The second is new: the FK's lock is settled together with the other locks
+ * ({@link settleReadonlyWhenDrops}), so when it reads `record` it depends on
+ * which OTHER payload keys their own locks drop — and a `parent`-scoped one
+ * among those is judged, on the landing the FK's verdict is deciding, against
+ * the header the FK names. Left unbound it would read as LOCKED (#4889's
+ * fail-closed exit) and revert a value the write may yet store.
+ *
+ * A yes that turns out unneeded costs one header read and moves no verdict.
+ */
+export function readonlyWhenFkJudgementReadsParent(
+  objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
+  data: Record<string, unknown> | undefined | null,
+  fk: string,
+): boolean {
+  const fields = objectSchema?.fields;
+  const own = fields?.[fk]?.readonlyWhen;
+  if (!fields || !data || !own || !(fk in data)) return false;
+  if (readsCelRoot(own, PARENT_ROOT)) return true;
+  if (!readsCelRoot(own, RECORD_ROOT)) return false;
+  for (const [name, def] of Object.entries(fields)) {
+    if (name === fk || !def?.readonlyWhen || !(name in data)) continue;
+    if (readsCelRoot(def.readonlyWhen, PARENT_ROOT)) return true;
+  }
+  return false;
+}
 
 /**
  * True when the UPDATE payload writes at least one field that declares a
@@ -903,10 +1136,11 @@ export function hasReadonlyWhenInPayload(
  * declared fields (#4953, {@link readonlyWhenBindings}) exactly as on the
  * single-id path — a bulk write must not judge the same predicate by a
  * different record shape than a one-row write does, nor over a different payload
- * (`options.stored`, #19887). The views are built ONCE
- * per row (they do not depend on which field is being judged) and only when a
- * `readonlyWhen` field is actually in the payload, so a batch that touches none
- * still pays nothing.
+ * (`options.stored`, #19887), nor settle its drops differently (#19911,
+ * {@link settleReadonlyWhenDrops}). The row views are built once per drop set
+ * the settlement asks about — once in all when nothing locks — and only when a
+ * caller-supplied `readonlyWhen` field is actually in the payload, so a batch
+ * that touches none still pays nothing.
  *
  * Only keys the CALLER supplied at engine entry are judged (#9107), off the SAME
  * entry snapshot the single-id strip uses — one payload, one authorship, so a
@@ -931,37 +1165,38 @@ export function stripReadonlyWhenFieldsMulti(
   // row — the same `stored` view the single-id strip reads.
   const stored = options?.stored ?? data;
   const rows = priorRows ?? [];
-  // Built lazily: a payload writing no `readonlyWhen` field never reaches the
-  // `.some()` below, and then no row view is materialised at all.
-  let views: Array<ReturnType<typeof readonlyWhenBindings>> | null = null;
-  const rowViews = () => (views ??= rows.map((row) => readonlyWhenBindings(stored, row, fields)));
-  let result = data;
-  for (const [name, def] of Object.entries(fields)) {
-    if (!def?.readonlyWhen || !(name in data)) continue;
-    // [#9107] Same authorship gate as the single-id strip, asked before any row
-    // is judged — a hook-written key is exempt for the whole batch, not per row.
-    if (!isCallerSuppliedValue(data, supplied, name)) continue;
-    const lockedInSomeRow = rowViews().some((view, i) =>
-      isReadonlyWhenLocked(
-        def,
-        view.merged,
-        view.previous,
-        name,
-        logger,
-        // Resolved per (field, row) exactly as before — the header lookup is
-        // the caller's, and its call pattern is not this change's business.
-        parentForRow?.(rows[i] ?? undefined),
+  // [#9107] Same authorship gate as the single-id strip, asked before any row
+  // is judged — a hook-written key is exempt for the whole batch, not per row.
+  // A payload that judges no key returns here, before any row view is built.
+  const judged = judgedReadonlyWhenKeys(fields, data, supplied);
+  if (judged.length === 0 || !judgesOnly(judged, options?.only)) return data;
+  // [#19911] The single-id strip's settlement, per matched row: a key is judged
+  // in every row against THAT row's view with the other drops reverted, and is
+  // locked when it locks in ≥1 row — so an exact set drops only keys locked in
+  // some row and keeps only keys unlocked in every row.
+  const settled = settleReadonlyWhenDrops(
+    judged,
+    (dropped) => {
+      const payload = withoutKeys(stored, dropped);
+      return rows.map((row) => readonlyWhenBindings(payload, row, fields));
+    },
+    (name, views, warn) =>
+      views.some((view, i) =>
+        isReadonlyWhenLocked(
+          fields[name]!,
+          view.merged,
+          view.previous,
+          name,
+          { warn },
+          // Resolved per (field, row) exactly as before — the header lookup is
+          // the caller's, and its call pattern is not this change's business.
+          parentForRow?.(rows[i] ?? undefined),
+        ),
       ),
-    );
-    if (lockedInSomeRow) {
-      if (result === data) result = { ...data };
-      delete (result as Record<string, unknown>)[name];
-      logger?.warn?.(
-        `Field '${name}' is read-only (readonlyWhen) in ≥1 matched row — ignoring incoming change on bulk update`,
-      );
-    }
-  }
-  return result;
+  );
+  return applyReadonlyWhenDrops(data, judged, settled, options?.only, logger, (name) =>
+    `Field '${name}' is read-only (readonlyWhen) in ≥1 matched row — ignoring incoming change on bulk update`,
+  );
 }
 
 /**
