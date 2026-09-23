@@ -12228,9 +12228,9 @@ export function residueLines(
  * reads — clause ②'s CONTRACT-REVIEW tier: the tier the clause-② REVIEW runs
  * at, both halves of it — the spec and skills lanes' review of every round
  * they deliver (a card that changes contract accept/reject behaviour or
- * widens the public surface is spec-lane work, whichever seat found it), and
- * the `needs:contract-review` re-review sub-round (its opening self-check
- * reads this). The BUILD of such a card is at the default judgment tier, so
+ * widens the public surface is spec-lane work, whichever seat found it) and
+ * the `Served-tier:` line every `## Contract review` record carries. The
+ * BUILD of such a card is at the default judgment tier, so
  * this constant is a review tier and never a dispatch mandate. Declared HERE
  * and only here, as a constant, so a model upgrade is a one-line change in one
  * file — the clause-① mandate rows below read it, the self-test compares
@@ -12251,7 +12251,7 @@ export function residueLines(
  * and never self-reviewed. A tier that has been RETIRED never comes back, and
  * the two cases differ on WHO MAY ACT: a seat reading 「⛔ 不许降档」 onto a
  * vanished tier holds its whole lane forever, and a seat picking the
- * replacement itself is the silent downgrade the fuse exists to stop. So a
+ * replacement itself is the silent downgrade this rule exists to stop. So a
  * retirement is a maintainer ruling and ⛔ never a seat's reading — and when
  * the ruling lands, this VALUE is the one line that moves. The ceiling of the
  * ladder `tierLines` prints is DERIVED from it ({@link TIER_CEILING}) so the
@@ -12277,7 +12277,7 @@ export function residueLines(
  * that session; this constant is a property of the lane's governance, and the
  * two ⛔ never trade places.
  *
- * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
+ * Rulebook: `.claude/skills/pm-dispatch/references/contract-review.md` — the review of record and its `Served-tier:` line.
  */
 export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
 
@@ -25400,7 +25400,7 @@ function selfTest() {
   // per-file entry under `skills/` has quietly returned.
   t('a catalog file is covered by exactly ONE entry — skills/** — now that the published PM skill and its own entry are gone', catalogHit.hits.length === 1 && catalogHit.hits[0].glob === 'skills/**');
   t('no per-file entry for the deleted published PM skill survives it, and its old path carries the root mandate only', !MANDATORY_TIER_GLOBS.some((g) => g.glob.includes('objectstack-pm-dispatch')) && fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).hits.every((h) => h.glob === 'skills/**'));
-  t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/core-rules.md']).mandatory === false);
+  t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/state-machine.md']).mandatory === false);
   t('the skills/** entry is declared with its one-line exit switched off, as data', MANDATORY_TIER_GLOBS.some((g) => g.glob === 'skills/**' && g.oneLineExit === false && g.tier === CONTRACT_REVIEW_TIER));
   t('every other mandatory entry keeps the one-line exit open (the flag is an opt-out, absent by default)', MANDATORY_TIER_GLOBS.filter((g) => g.glob !== 'skills/**').every((g) => g.oneLineExit === undefined) && catalogHit.hits.every((h) => h.glob !== 'skills/**' || h.oneLineExit === false));
   const catalogLines = tierLines(catalogHit).join('\n');
@@ -25541,12 +25541,12 @@ function selfTest() {
     });
   }
   t(`${SKILL_RULEBOOK_ROOT} spells NO model id at all — ${skillRulebookFiles.length} file(s) read, and a RETIRED id left there is caught HERE, where a current-value pin cannot see it (found: ${skillIdSpellings.join(', ') || 'none'})`, skillRulebookFiles.length > 0 && skillIdSpellings.length === 0);
-  // The rulebook half of the same coupling: the skill names the constant, and
-  // its downgrade fuse carries the case the quota exemption never had.
+  // The rulebook half of the same coupling: the skill names the constant. Its
+  // downgrade-fuse section is retired (maintainer 2026-09-22 「降档保险丝 不留」,
+  // #19061 comment 5772289798), so the guard below reds if that text creeps back.
   const fuseRules = readFileSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/contract-review.md'), 'utf8');
   t('the rulebook names the contract-review tier by its CONSTANT, so a retirement moves the value and the prose follows', fuseRules.includes('`CONTRACT_REVIEW_TIER`'));
-  t('…and its fuse keeps the quota exemption pointed at DISPATCH, never at the review', /额度耗尽豁免[^\n]*⛔[^\n]*不及复核/.test(fuseRules));
-  t('…and carries the case it never had: a RETIRED tier is not an exhausted one, and it is a maintainer ruling, ⛔ never a seat\'s reading', /档位退役[^\n]*≠[^\n]*耗尽[^\n]*维护者裁决[^\n]*⛔[^\n]*非席位读数/.test(fuseRules));
+  t('the rulebook no longer carries the retired 降档保险丝 lines (maintainer 2026-09-22 「降档保险丝 不留」, #19061 comment 5772289798)', !/额度耗尽豁免[^\n]*不及复核/.test(fuseRules) && !/档位退役[^\n]*≠[^\n]*耗尽/.test(fuseRules));
 
   // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
   //
@@ -26505,7 +26505,7 @@ function selfTest() {
   t('and refuses the one-line-class exit on stdout, where the claim comment reads it', (catalogCli.stdout ?? '').includes('NOT available') && !(catalogCli.stdout ?? '').includes('drops to opus execution'));
   const catalogAiCli = runCli(['--tier', 'skills/objectstack-ai/SKILL.md']);
   t('⭐ a second catalog SKILL.md prints the same mandate', catalogAiCli.status === 0 && (catalogAiCli.stdout ?? '').includes('MANDATORY') && (catalogAiCli.stdout ?? '').includes("'skills/**'"));
-  const internalRefsCli = runCli(['--tier', '.claude/skills/pm-dispatch/references/core-rules.md']);
+  const internalRefsCli = runCli(['--tier', '.claude/skills/pm-dispatch/references/state-machine.md']);
   t('⭐ --tier on an internal pm-dispatch references file still prints NO mandate', internalRefsCli.status === 0 && (internalRefsCli.stdout ?? '').includes('no path-derived mandate') && !(internalRefsCli.stdout ?? '').includes('MANDATORY'));
 
   // ── The entry guard (#9757) ───────────────────────────────────────────────

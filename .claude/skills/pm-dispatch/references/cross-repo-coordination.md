@@ -1,0 +1,51 @@
+# 多仓协调
+
+分诊席每次 fire 路由与查重前读本文;执行席跨仓认领、派发或转移时读本文。
+
+- 产品依赖方向固定:`objectstack`(后端,`packages/spec` 是唯一契约)→ `objectui`(前端)与 `cloud`。
+- objectui 构建产物经 `pnpm objectui:refresh` 回流。
+- 多车道仓 `objectstack`、`objectui`:中央分诊是 `domain:*`/type/定级的唯一生产者。
+- 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
+- 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
+- 机械三务 = 自扫 sweep、自打 `type`、自做 `finding` 首触定级。
+- 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点、写身份锁移植(deny + hooks)。
+- 新仓准入判据一句:这个仓真的需要常设席位吗。
+- hotcrm 收卡判据与宪章见 `references/lanes/hotcrm.md`。
+- objectui 卡按修复落点分流三流,`domain:ui` 是唯一新增标签。
+- `domain:devx`(工程面)与 `domain:spec`(契约面)跨仓归各自车道。
+- 其余(发布库与 apps)归 `domain:ui` 执行席;症状位置不改流向,docs 随所记录的面走。
+- 车道可分席(席号 `· seat N`,或域×仓):忙时一车道开多席,闲时收归一席;每席独立座位贴。
+- 认领评论带 `Seat: domain:X#N` 行申报席号(缺省席 1);同席认领互斥,他席认领不触发自退。
+- 拆分触发预登记:单轮逼近 fire 周期,或某仓在全序下持续断粮 ⇒ 按仓拆回多席。
+- seam 卡单一归属:归修复落地仓的席,双仓皆动 objectstack 侧主导。
+- `scripts/pm/**` 等住 objectstack 的全板工具链单写手恒为 objectstack 侧席,他侧上游立卡回链。
+- 工装只答被告知的仓,缺 `--repo`/`PM_SWEEP_REPO` 即答 objectstack;⛔ 不答手上那张卡的仓。
+- 规则 1:issue 住在修复落地的仓,分诊时按判据严格执行。
+- 判据:正文抽掉 objectstack 还成立 ⇒ 当场转仓(console/UI 缺陷即转 objectui);不成立才是缝卡。
+- transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
+- 缝卡收窄为真协调卡:留 objectstack 带 `repo:*`,正文点名读者(哪个座位、哪一步)。
+- 决策收件箱按仓:平台在 objectstack / objectui,元数据项目在本仓;在飞卡 ⛔ 不中途转仓。
+- 规则 2:跨层功能点或 objectui 消费的 `Seam:` 卡恒由分诊立父单 + 逐层子单,spec/后端先行。
+- 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
+- 被链接或同父的两单永不同批。
+- pin 滞后是盲区:本仓 pin 是否已覆盖该 commit 是第二读数,派发前用 REST `compare` 核祖先。
+- 本地 `merge-base` 在浅检出上给假非祖先;未覆盖 ⇒ 派发令要求 PR 正文留档分叉窗口。
+- ⛔ pin bump 不做 rider:走专用 bump 脚本连带 override 与 lockfile。
+- 规则 3:联动杂事立单,不靠记忆。
+- 已验收 PR 的产物流向另一仓,接受该 PR 的执行席立即在消费仓立后续单,带 `Blocked-by:`。
+- 规则 4:纵向拆分,一个分诊 PM + N 个执行 PM;一人恰一车道,一车道可坐多席。
+- 分诊座位唯一生产:定级/路由/type/查重/shadow/`duplicate_of`;执行席永不定级或路由裸卡。
+- 执行座位信任标签,只在本车道认领;误标 ⛔ 不自行改,挂 `pm:retriage` + 异议评论同笔。
+- 突发积压调频率或 `batch`,持续积压按仓拆席走 PR;⛔ 不跨车道借调。
+- 维护者直派通道:当面指挥的 PM 会话直接路由,只对明示指挥的卡成立。
+- 直派的审计评论逐字引用授权指令。
+- 多车道仓分诊空缺时,会话型执行 PM 可代扫:只做分诊动作,不跨车道认领,贴上注明。
+- 代扫在分诊座位有主时立即停止。
+- 规则 5:一块板不设第二跟踪器:pm 标签就是状态机,org Project 只是维护者的聚合视图。
+- 认领即跟到 MERGED:派发后发现的跨车道面(含 spec)不移卡,认领席借契约复审档隔离复核。
+- 复核记录带 `Implemented-by:`/`Reviewed-by:`;`pm:retriage` 改路由只对未派发卡。
+- 转移落对方队列:目标仓立单带 `pm:queue`、出处行与一行可执行判据,依赖用 `Blocked-by:`。
+- 跨座位请求骑在它所关的既有卡上:请求席在自卡写 `Blocked-by:`,并在目标卡留一条评论。
+- 该评论点名席位与步骤;无既有卡承载且请求自身即立卡门 ①②④ 时才立新卡。
+- 等待方同一笔把自卡翻 `pm:blocked` + `Blocked-by:` 指向请求卡;⛔ 不设新标签新 sweep。
+- 目标仓不可达是读数缺口,不是落点:由可达席在目标仓立卡,此前请求记座位贴或协调卡。

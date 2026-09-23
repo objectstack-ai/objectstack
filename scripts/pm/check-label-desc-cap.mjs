@@ -28,9 +28,9 @@
  * ## CHARACTERS, not bytes — the measure is the whole point
  *
  * The cap is on characters, and the descriptions in this file are not ASCII:
- * they carry em dashes, circled digits and CJK. The live specimen is
- * `needs:contract-review`, whose description is 97 characters and 101 BYTES —
- * accepted by GitHub, and red under a naive byte-length guard. A byte guard
+ * they carry em dashes, circled digits and CJK. The specimen that fixed the
+ * measure was a label description of 97 characters and 101 BYTES — accepted
+ * by GitHub, and red under a naive byte-length guard. A byte guard
  * would therefore fail a label that works, and the fix a reader would reach for
  * (rewriting a correct description to please the gate) is worse than no gate.
  *
@@ -379,9 +379,10 @@ function selfTest() {
     }
   };
 
-  // The measure: characters, not bytes, not UTF-16 units.
+  // The measure: characters, not bytes, not UTF-16 units. The specimen is the
+  // retired gate label's description, kept as a fixture for its byte/char gap.
   const live = 'Clause-② enqueue gate: dispatched below contract-review tier — blocked until the review clears it';
-  t('the live 97-char/101-byte description measures 97', charLength(live), 97);
+  t('the 97-char/101-byte specimen measures 97', charLength(live), 97);
   t('…and is over the cap only if you measure BYTES', Buffer.byteLength(live, 'utf8') > MAX_DESCRIPTION_CHARS, true);
   t('…so it passes this gate', violations([{ label: 'x', line: 1, expanded: live, unresolved: [] }]).length, 0);
   t('an astral character counts once, not twice', charLength('🚀'), 1);

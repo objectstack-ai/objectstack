@@ -385,12 +385,11 @@ import { fileURLToPath } from 'node:url';
 
 import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
-// #16055, the level axis below. Both are IMPORTED rather than restated: the
-// clause-② declaration has exactly one legal spelling and exactly one label
-// carrier, and a second copy of either here would be a reader that can drift
-// from the gate the PM protocol actually runs. Both modules import node
-// builtins only, so this file still runs before `pnpm install`.
-import { CONTRACT_REVIEW_LABEL } from './pm/check-half-states.mjs';
+// #16055, the level axis below. IMPORTED rather than restated: the clause-②
+// declaration has exactly one legal spelling, and a second copy of its reader
+// here would be one that can drift from the gate the PM protocol actually
+// runs. The module imports nothing, so this file still runs before
+// `pnpm install`.
 import { readClause2Line } from './pm/clause2-line.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -883,8 +882,8 @@ export function render(result) {
 // Two declarations about the same PR already exist and were never compared:
 //
 //   ① the CLAUSE-② declaration — "this PR puts a new key on a published
-//      payload" — carried by the `needs:contract-review` gate label and/or by
-//      the fixed `Clause-②: yes` line the PM protocol spells (read here through
+//      payload" — carried by the fixed `Clause-②: yes` line the PM protocol
+//      spells (read here through
 //      `clause2-line.mjs`'s own `readClause2Line`, imported rather
 //      than restated, so the two readers cannot drift);
 //   ② the CHANGESET LEVEL for the package whose `packages/**/src/**` the diff
@@ -901,11 +900,9 @@ export function render(result) {
 // the filing card (a precedent lookup, a new obligation on every PR) is
 // deliberately NOT here.
 //
-// ⭐ And it can only ever fire on a PR that is ALREADY held: the clause-②
-// carrier is what keeps a PR outside the merge queue until the contract review
-// clears it. So the refusal adds no new blocking state to the board; it turns a
-// silent wrong level into a loud one inside a window the PR is already waiting
-// out.
+// ⭐ And it fires on a PR that has DECLARED, so the refusal adds no new
+// judgement to the board; it turns a silent wrong level into a loud one on a
+// declaration the seat has already made.
 //
 // ## THE GRAIN: the declaration is PR-scoped, so the predicate is too (#16361)
 //
@@ -925,8 +922,8 @@ export function render(result) {
 //     grow — while never naming the package that did.
 //
 // The per-package predicate could not have done otherwise. Clause ② is declared
-// ONCE, FOR THE PR: the carrier is a PR label and the `Clause-②:` line is a PR
-// body line, and NEITHER NAMES A PACKAGE. Applying a PR-scoped declaration to
+// ONCE, FOR THE PR: the `Clause-②:` line is a PR body line, and it NAMES NO
+// PACKAGE. Applying a PR-scoped declaration to
 // every package the diff moved `src/**` of asserts something the declaration
 // never said — that EACH of them was widened — and #16347 is that assertion
 // being false while the gate printed it as the reason for a refusal.
@@ -964,47 +961,32 @@ export function render(result) {
 //
 // This gate makes NO API call and needs NO token. Its whole input is the
 // `pull_request` payload the job already receives on disk at
-// `$GITHUB_EVENT_PATH` (labels + body) plus the diff it already has. That is a
+// `$GITHUB_EVENT_PATH` (the body) plus the diff it already has. That is a
 // deliberate boundary, not a shortcut: the sibling reading — the card's claim
 // comment — needs a credentialled network read inside a required gate, and
 // MEASURED ON THE ACCEPTANCE CASE it would have answered nothing anyway.
 // `cardDeclaration()` over card #15549's real comment thread returns
 // `{ state: 'absent' }`: that card's claim comment is a `## Claim` heading with
-// no `Clause-②:` line at all. The carrier label is what the #16044 heads
-// actually carried — labelled on the PR at 2026-09-05T21:43:58Z, stripped at
-// 22:38:26Z when the review passed, so it was on for the whole life of BOTH
-// heads (`e0938d3fdce` was HEAD from 21:43:58Z until 22:18:39Z, `98179cae022`
-// from then until the strip).
+// no `Clause-②:` line at all. (The #16044 heads carried their declaration on
+// the contract-review label of the day; that label is retired — ruling record
+// 5770886272 on #19061 — and the body line is the one carrier left.)
 //
 // ## What the payload is read on, and the one residual left
 //
-//   * THE PAYLOAD IS A SNAPSHOT, and both carriers move after it is taken. A
-//     LABEL applied after the event fired is invisible to that run — the same
-//     stale cell this job documents at length for `skip-changeset` and
-//     `allow-major`, and closed the same way: `pull_request` here is triggered
-//     on `labeled`/`unlabeled` too, so hanging the carrier fires a run that DOES
-//     see it. Measured on #16044: the `opened` run at 21:40Z would have read NOT
-//     MEASURED, and the `labeled` run three minutes later reads the carrier and
-//     refuses the `patch`. The BODY moved on no trigger at all until #16776:
-//     there was no `edited` type, so a `Clause-②:` line added to the body after
-//     the last push was never read until somebody pushed again. That is now
-//     subscribed, for the same reason and by the same argument the two other
-//     PR-body-scoped gates in this repo already carry (`duplicate-fix-guard`,
-//     `partof-closing-keyword-guard`): a verdict whose input is the body must
-//     re-fire when the body changes, or its red cannot be cleared without a push
-//     — `rerun_failed_jobs` replays the SAME frozen payload.
-//   * THE CARRIER IS STRIPPED AT REVIEW PASS, so a run after the PASS no longer
-//     reads a `yes` from it. That is the intended order — the human review that
-//     clears the carrier is the authority on the level, and on #16044 its verdict
-//     comment concurred with the `minor` grading explicitly. What it USED to mean
-//     was that the axis silently stood down at exactly that moment (#16776's
-//     composed failure: strip the carrier, add the durable line, push nothing,
-//     and the gate concludes `success` having judged nothing). It no longer does:
-//     a run with no readable declaration and a `patch` on a package the diff grew
-//     REFUSES, so the standing-down is now confined to the diffs where the
-//     declaration could not have changed the answer. The axis is still a
-//     pre-review reading rather than a landing-time one; what it is not any more
-//     is a reading that can vanish without saying so.
+//   * THE PAYLOAD IS A SNAPSHOT. The BODY moved on no trigger at all until
+//     #16776: there was no `edited` type, so a `Clause-②:` line added to the
+//     body after the last push was never read until somebody pushed again. That
+//     is now subscribed, for the same reason and by the same argument the two
+//     other PR-body-scoped gates in this repo already carry
+//     (`duplicate-fix-guard`, `partof-closing-keyword-guard`): a verdict whose
+//     input is the body must re-fire when the body changes, or its red cannot
+//     be cleared without a push — `rerun_failed_jobs` replays the SAME frozen
+//     payload.
+//   * A RUN WITH NO READABLE DECLARATION and a `patch` on a package the diff
+//     grew REFUSES (#16776's composed failure, closed): the standing-down is
+//     confined to the diffs where the declaration could not have changed the
+//     answer. The axis is a pre-review reading rather than a landing-time one;
+//     what it is not is a reading that can vanish without saying so.
 //   * THE `allow-major` LABEL SKIPS THE WHOLE STEP, this block included,
 //     because the step it lives in is the launch-window major guard. A PR that
 //     is granted a whole-stack major and ALSO grades a clause-②-declared
@@ -1094,8 +1076,8 @@ export function render(result) {
 // SOUND. It says the repair is unbought AT TODAY'S RATE. The shape that would
 // buy it is named and still unobserved: a PR genuinely `Clause-②: yes` for
 // package A that also moves a package-internal line under package B's `src/**`
-// — there the author has no exit at all, because a carrier alone forces `yes`
-// (see `declarationFromPullRequest`) and only the review seat can clear it. Two
+// — there the author has no exit at all, because the declared `yes` is the
+// seat's own reading (see `declarationFromPullRequest`). Two
 // of the 128 refusable PRs already have the mixed offender shape; none has the
 // declaration to go with it. ⇒ Re-measure before repairing, not instead of it.
 
@@ -1466,13 +1448,13 @@ export function nearMissReadings(reason, line) {
  *
  * Three answers, never two — `null` is NOT MEASURED and is the reason this
  * function returns readings alongside the value: a run that could not read a
- * declaration must say which carriers it looked at, or its silence is
- * indistinguishable from a `no` (#4690, and the shape `check-clause2-carriers`
- * calls "a missing reading and a decision must not look the same").
+ * declaration must say what it looked at, or its silence is indistinguishable
+ * from a `no` (#4690, and the shape `check-clause2-carriers` calls "a missing
+ * reading and a decision must not look the same").
  *
- * The disjunction is the filing card's own wording — the carrier OR the
- * declaration line — so a seat that hangs the gate without writing the line,
- * which is what #16044 did, is still read.
+ * ONE carrier: the fixed `Clause-②:` line in the PR body. The gate label that
+ * once declared `yes` beside it is retired (ruling record 5770886272 on
+ * #19061), so a PR that carries no line has declared nothing.
  *
  * ## The DIRECTION ARM (#16421)
  *
@@ -1485,17 +1467,8 @@ export function nearMissReadings(reason, line) {
  * and a PR that declares `no (narrowing)` must not be reported as having
  * declared `yes`.
  *
- * ## The CARRIER AXIS (#17229)
- *
- * `carrier` travels beside the value for the same reason `arm` does, and it has
- * THREE values because the reading has three outcomes: `present`, `absent`, and
- * `not-measured`. ⛔ It is NOT folded into `value` — "the carrier is off this
- * PR" and "the carrier was not read" are different facts about different runs,
- * and `renderLevel` must not assert a disagreement between two carriers when it
- * read only one of them.
- *
- * @param {{ labels?: ({ name?: string }|string)[], body?: string }|null} pr
- * @returns {{ value: 'yes'|'no'|null, arm: 'widening'|'narrowing'|null, payload: boolean, carrier: 'present'|'absent'|'not-measured', readings: string[] }}
+ * @param {{ body?: string }|null} pr
+ * @returns {{ value: 'yes'|'no'|null, arm: 'widening'|'narrowing'|null, payload: boolean, readings: string[] }}
  */
 export function declarationFromPullRequest(pr) {
   const readings = [];
@@ -1504,51 +1477,7 @@ export function declarationFromPullRequest(pr) {
     // "no pull request to read" and "a pull request that declared nothing" are
     // different facts about different runs, and #16776 is the card about two
     // facts sharing one exit code. `judgeLevel` routes on this flag.
-    return { value: null, arm: null, payload: false, carrier: 'not-measured', readings: ['no `pull_request` payload was available to read a declaration from'] };
-  }
-
-  const labels = Array.isArray(pr.labels)
-    ? pr.labels.map((l) => (typeof l === 'string' ? l : String(l?.name ?? ''))).filter(Boolean)
-    : null;
-  let carrier = false;
-  // ⭐ #17229. THREE carrier states, never two — and the third is the word this
-  // file already owns: the payload block above says in so many words that "the
-  // `opened` run at 21:40Z would have read NOT MEASURED". This call site did not
-  // spell it, and rendered the unmeasured state as an ABSENCE.
-  //
-  // A payload whose label list reads EMPTY is not a PR with no carrier on it.
-  // The payload is a SNAPSHOT taken when the event fired, so an empty list is
-  // equally consistent with "this PR carries no labels" and "nothing had been
-  // labelled yet", and NOTHING inside the payload separates the two. The firing
-  // control is the list itself: one label read proves the list was populated
-  // when the snapshot was taken, so the carrier's absence AMONG those labels is
-  // a reading a reader can act on; zero labels read is an instrument that saw
-  // nothing, and a zero with no firing control is not a reading.
-  //
-  // ⛔ The repair is the WORD here and what `renderLevel` routes on it — it is
-  // ⛔ NOT a live label read. This gate makes no API call and needs no token, by
-  // the deliberate boundary stated in full in the payload block above, and the
-  // `labeled`/`unlabeled` triggers are the mitigation that already exists.
-  let carrierRead = 'not-measured';
-  if (labels === null) {
-    readings.push(
-      `carrier: NOT MEASURED — the payload carried no readable label list, so \`${CONTRACT_REVIEW_LABEL}\` was read ` +
-        'neither present nor absent',
-    );
-  } else if (labels.includes(CONTRACT_REVIEW_LABEL)) {
-    carrier = true;
-    carrierRead = 'present';
-    readings.push(`carrier: \`${CONTRACT_REVIEW_LABEL}\` IS on this PR`);
-  } else if (labels.length === 0) {
-    readings.push(
-      `carrier: NOT MEASURED — the payload's label list is EMPTY (0 label(s) read), so \`${CONTRACT_REVIEW_LABEL}\` ` +
-        'was read neither present nor absent. Zero labels is what a PR carrying none AND a PR labelled after this ' +
-        'snapshot was taken both look like from inside the payload. Hanging or moving a label fires a ' +
-        '`labeled`/`unlabeled` run whose snapshot DOES carry the list.',
-    );
-  } else {
-    carrierRead = 'absent';
-    readings.push(`carrier: \`${CONTRACT_REVIEW_LABEL}\` is not on this PR (${labels.length} label(s) read)`);
+    return { value: null, arm: null, payload: false, readings: ['no `pull_request` payload was available to read a declaration from'] };
   }
 
   const line = readClause2Line(pr.body ?? '');
@@ -1573,9 +1502,9 @@ export function declarationFromPullRequest(pr) {
       : `direction arm: \`${arm}\`${arm === 'narrowing' ? ' — a BREAKING change; during the launch window it ships `minor`' : ''}`);
   }
 
-  if (carrier || (line?.kind === 'declared' && line.value === 'yes')) return { value: 'yes', arm, payload: true, carrier: carrierRead, readings };
-  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', arm, payload: true, carrier: carrierRead, readings };
-  return { value: null, arm, payload: true, carrier: carrierRead, readings };
+  if (line?.kind === 'declared' && line.value === 'yes') return { value: 'yes', arm, payload: true, readings };
+  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', arm, payload: true, readings };
+  return { value: null, arm, payload: true, readings };
 }
 
 /**
@@ -1611,20 +1540,14 @@ export function declarationFromPullRequest(pr) {
  * @param {{
  *   levels: { file: string, entries: { pkg: string, bump: string }[] }[] | null,
  *   touched: { packages: string[], unreadable: string[] },
- *   declaration: { value: 'yes'|'no'|null, arm?: 'widening'|'narrowing'|null, carrier?: 'present'|'absent'|'not-measured'|null, readings: string[], payload?: boolean },
+ *   declaration: { value: 'yes'|'no'|null, arm?: 'widening'|'narrowing'|null, readings: string[], payload?: boolean },
  *   prEvent?: boolean,
  * }} input
  */
 export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   const readings = declaration?.readings ?? [];
-  // ⭐ #17229. The carrier axis travels beside the readings, for the same reason
-  // `arm` does: `renderLevel` must not assert a disagreement it did not read.
-  // Three values from the reader (`present` / `absent` / `not-measured`); `null`
-  // when a caller hands in a declaration that carries no axis at all, which
-  // keeps the pre-#17229 rendering for every shape that never had one.
-  const carrier = declaration?.carrier ?? null;
-  // ⭐ #19008. The DECLARATION ITSELF travels beside the readings, for the third
-  // time and the same reason `carrier` and `arm` do: `renderLevel` must not
+  // ⭐ #19008. The DECLARATION ITSELF travels beside the readings, for the same
+  // reason `arm` does: `renderLevel` must not
   // assert a declaration it did not read. Past the `not-declared` lane below,
   // this verdict is decided by `refusable` and `offenders.length` ALONE —
   // `value` plays no further part — so `clean`, `discharged` and `enforce` are
@@ -1635,7 +1558,7 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   // this field and the derivation in `renderLevel` — it is ⛔ NOT a reworded
   // branch: a literal in any headline is the same defect one branch along.
   const declared = { value: declaration?.value ?? null, arm: declaration?.arm ?? null };
-  if (!levels) return { verdict: 'unreadable-diff', offenders: [], raised: [], carrier, declared, readings, unreadable: [] };
+  if (!levels) return { verdict: 'unreadable-diff', offenders: [], raised: [], declared, readings, unreadable: [] };
   const unreadable = touched?.unreadable ?? [];
 
   // NO PR TO READ A DECLARATION FROM. This is a different fact from "a PR that
@@ -1660,8 +1583,8 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   // this file takes everywhere else.
   if (declaration?.payload === false) {
     return prEvent
-      ? { verdict: 'payload-unreadable', offenders: [], raised: [], carrier, declared, readings, unreadable }
-      : { verdict: 'no-pull-request', offenders: [], raised: [], carrier, declared, readings, unreadable };
+      ? { verdict: 'payload-unreadable', offenders: [], raised: [], declared, readings, unreadable }
+      : { verdict: 'no-pull-request', offenders: [], raised: [], declared, readings, unreadable };
   }
 
   // The offenders are computed BEFORE the declaration is consulted, because
@@ -1711,8 +1634,8 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
     //     not happen must not be indistinguishable from one that passed at the
     //     only layer anything downstream reads (#4690).
     return refusable
-      ? { verdict: 'not-measured-material', offenders, raised, carrier, declared, readings, unreadable }
-      : { verdict: 'not-measured-moot', offenders, raised, carrier, declared, readings, unreadable };
+      ? { verdict: 'not-measured-material', offenders, raised, declared, readings, unreadable }
+      : { verdict: 'not-measured-moot', offenders, raised, declared, readings, unreadable };
   }
   // #16421. A `no` stands the axis down — UNLESS it carries the narrowing arm.
   // `no (narrowing)` is a truthful `no` to the widening question and a breaking
@@ -1721,19 +1644,19 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   // inferred from the value: `no` alone keeps standing the axis down, which is
   // what every declaration written before the arm existed says.
   if (declaration.value === 'no' && declaration.arm !== 'narrowing') {
-    return { verdict: 'not-declared', offenders: [], raised: [], carrier, declared, readings, unreadable };
+    return { verdict: 'not-declared', offenders: [], raised: [], declared, readings, unreadable };
   }
 
   // An unread manifest can only ever hide an offender, so it cannot be reported
   // under a tick: every green below states it, and the reader is told what was
   // not named.
-  if (refusable) return { verdict: 'enforce', offenders, raised, carrier, declared, readings, unreadable };
+  if (refusable) return { verdict: 'enforce', offenders, raised, declared, readings, unreadable };
   // #16361. A `patch` on a moved package that this gate is NOT refusing is a
   // reading it made and set aside, not an absence — it gets its own verdict so
   // the residual is printed rather than folded into a tick that means "nothing
   // to see".
-  if (offenders.length) return { verdict: 'discharged', offenders, raised, carrier, declared, readings, unreadable };
-  return { verdict: 'clean', offenders: [], raised, carrier, declared, readings, unreadable };
+  if (offenders.length) return { verdict: 'discharged', offenders, raised, declared, readings, unreadable };
+  return { verdict: 'clean', offenders: [], raised, declared, readings, unreadable };
 }
 
 /**
@@ -1802,19 +1725,6 @@ export function renderLevel(result) {
     (result?.unreadable ?? []).length > 0
       ? [`   ⚠️ ${result.unreadable.length} touched package dir(s) could not be named: ${result.unreadable.join(', ')} — an offender there could not be seen.`]
       : [];
-  // ⭐ #17229. WHICH `enforce` header, and which remedy 2, depend on whether the
-  // carrier was READ. `not-measured` is the state the reader now spells instead
-  // of rendering an unread carrier as an absent one, and it is the state in
-  // which this message must not characterise the two carriers as contradicting
-  // each other — on such a run only ONE of them was read, and the other is not
-  // evidence either way. The damage that buys this branch is not the string: it
-  // is remedy 2, whose repair is "clear the carrier", pointed at a carrier this
-  // run never looked at. On the filing PR that read as an instruction to strip a
-  // maintainer-ruled contract-review requirement, to clear a red whose real
-  // cause was remedy 1 — and this file's own text says the two remedies are not
-  // interchangeable. `null` (a caller that hands in no axis) keeps the
-  // pre-#17229 rendering, so only a POSITIVE `not-measured` softens anything.
-  const carrierUnread = result?.carrier === 'not-measured';
   // ⭐ #19008. The headline's subject, DERIVED from the same parsed declaration
   // the `readings` lines below it come from — never a literal. Three of the
   // lanes below are reachable on a `no (narrowing)` (see `declared` in
@@ -1845,7 +1755,7 @@ export function renderLevel(result) {
     case 'payload-unreadable':
       stderr.push(
         '⛔ check-changeset-no-major (level axis): this is a `pull_request` run and its event payload could not be ' +
-          'read, so the clause-② declaration had no carrier to come from. The runner writes that file; a run that ' +
+          'read, so the clause-② declaration had no body to come from. The runner writes that file; a run that ' +
           'cannot read it has verified nothing, and missing input is a failure, never a pass (#4690).',
         ...readings,
       );
@@ -1908,8 +1818,6 @@ export function renderLevel(result) {
           '                    2026-09-04, decision batch #35, on #15294 — written out under "WHICH LEVEL" in the\n' +
           '                    `Check Changeset` step of pr-automation.yml).\n' +
           '\n' +
-          'The review seat\'s `' + CONTRACT_REVIEW_LABEL + '` carrier declares `yes` on its own and needs no line.\n' +
-          '\n' +
           '⛔ The remedy is the declaration, never the deletion: dropping the changeset, or regrading the package to\n' +
           'dodge this message, changes what ships in order to quiet a gate. And the line is read from the body on the\n' +
           'next `edited` event (pr-automation.yml subscribes to it), so this red clears with no push and no re-run.',
@@ -1963,8 +1871,8 @@ export function renderLevel(result) {
         '   ⚠️ Because clause ② is declared once FOR THE PR and names no package, this gate cannot read WHICH ' +
           'package the act landed in. It therefore does not ask every moved package to carry the level — it asks ' +
           'that ONE of them does (#16361). The residual, named rather than left silent: a SECOND widening in this ' +
-          'PR, graded `patch` beside the `minor` above, would not be seen here. The contract review that placed the ' +
-          `\`${CONTRACT_REVIEW_LABEL}\` carrier is what reads the diff; this axis only cross-checks the levels.`,
+          'PR, graded `patch` beside the `minor` above, would not be seen here. The contract review of record is ' +
+          'what reads the diff; this axis only cross-checks the levels.',
         ...readings,
         ...unreadableNote,
       );
@@ -1979,11 +1887,7 @@ export function renderLevel(result) {
       stderr.push(...patchLines(result.offenders));
       stderr.push('   ⇒ none of them is graded `minor` or above.\n');
       stderr.push(
-        (carrierUnread
-          ? 'The clause-② declaration and the changeset level disagree, inside one PR — and the declaration\n' +
-            'read here is the `Clause-②:` LINE ALONE. The carrier was NOT MEASURED, so it is not evidence\n' +
-            'either way and the two carriers below are NOT being reported as contradicting each other:\n'
-          : 'The two declarations disagree, inside one PR:\n') +
+        'The clause-② declaration and the changeset level disagree, inside one PR:\n' +
           `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n` +
           '\n' +
           'A purely additive widening of a published package\'s public surface takes AT LEAST `minor`;\n' +
@@ -1992,8 +1896,8 @@ export function renderLevel(result) {
           'the `Check Changeset` step of .github/workflows/pr-automation.yml).\n' +
           '\n' +
           '⚠️ WHICH of the packages above received that widening is NOT something this gate can read, and it\n' +
-          'does not claim to. Clause ② is declared ONCE, FOR THE PR — the `' + CONTRACT_REVIEW_LABEL + '`\n' +
-          'carrier is a PR label and the `Clause-②:` line is a PR-body line, and neither names a package. So\n' +
+          'does not claim to. Clause ② is declared ONCE, FOR THE PR — the `Clause-②:` line is a PR-body\n' +
+          'line, and it names no package. So\n' +
           'the finding above is not "each of these was widened"; it is the whole of what a PR-scoped\n' +
           'declaration entails: THE WIDENED PACKAGE IS ONE OF THEM, AND NONE OF THEM CARRIES THE LEVEL.\n' +
           'Raise the one that actually grew. Raising a package that only received a comment is not asked\n' +
@@ -2002,19 +1906,9 @@ export function renderLevel(result) {
           'TWO ways forward, and they are not interchangeable:\n' +
           '  1. The declaration is right and the level is wrong -> raise the widened package to `minor`.\n' +
           '     This is the ordinary case; #16044 is the measured one, one word in one changeset.\n' +
-          (carrierUnread
-            ? '  2. The level is right and the `Clause-②:` LINE is wrong -> correct the line at the producer;\n' +
-              '     it is the claim\'s. ⛔ Do not add a tolerance here to route around a declaration that says\n' +
-              '     something its author did not mean.\n' +
-              `     ⛔ THE \`${CONTRACT_REVIEW_LABEL}\` CARRIER IS NOT PART OF THIS REMEDY ON THIS RUN. It was\n` +
-              '     NOT MEASURED above — this run says neither that it is on the PR nor that it is off it — and\n' +
-              '     an unread carrier is never grounds to clear one. It is the review seat\'s to place and to\n' +
-              '     clear, on the review\'s verdict, never to quiet this red. If it IS hanging, the reading you\n' +
-              '     want is one line away: move any label and the `labeled`/`unlabeled` run reads the list.\n'
-            : '  2. The level is right and the DECLARATION is wrong -> correct it at the producer: the\n' +
-              `     \`${CONTRACT_REVIEW_LABEL}\` carrier is the review seat's to place and to clear, and the\n` +
-              '     `Clause-②:` line is the claim\'s. ⛔ Do not add a tolerance here to route around a\n' +
-              '     declaration that says something its author did not mean.\n') +
+          '  2. The level is right and the `Clause-②:` LINE is wrong -> correct the line at the producer;\n' +
+          '     it is the claim\'s. ⛔ Do not add a tolerance here to route around a declaration that says\n' +
+          '     something its author did not mean.\n' +
           '\n' +
           'Only what THIS diff introduces is listed above — an entry the branch point already carried at\n' +
           'the same bump is not this PR\'s to answer for (#7005).',
@@ -2027,11 +1921,7 @@ export function renderLevel(result) {
             `${readingsBlock}\n` +
             'A purely additive widening of a published package\'s public surface takes AT LEAST `minor` (maintainer ' +
             'ruling 2026-09-04, decision batch #35, on #15294). Raise the ONE package that actually grew, or correct ' +
-            'the declaration at its producer. ' +
-            (carrierUnread
-              ? `⚠️ The \`${CONTRACT_REVIEW_LABEL}\` carrier was NOT MEASURED on this run and is not part of the remedy here.`
-              : '') +
-            ' Full text in this step\'s log.',
+            'the declaration at its producer. Full text in this step\'s log.',
         }),
       );
       return { exitCode: 1, stdout, stderr };
@@ -2290,14 +2180,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The GRAIN: a PR-scoped declaration judged at PR scope (#16361)': 25,
   'THE DEPTH: a nested package is a candidate the axis can refuse (#16713)': 21,
   'THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)': 37,
-  '#17229: an UNREAD carrier is NOT MEASURED, never an absent one': 25,
   '#18263: the refusal says its reason, and says it where the API can read it': 35,
   '#19008: the level headline is the parsed declaration, not a literal': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
-// zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 20;
+// zeroing it, so the roster's own size is pinned too. Lowered 20 → 19 when the
+// carrier-axis battery left with the gate label it read (ruling record
+// 5770886272 on #19061): the ordinary direction, one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2965,7 +2856,7 @@ function selfTest() {
       const MINOR_HEAD = `---\n"@objectstack/cli": minor${LEVEL_BODY}`;
       const CHANGESET = '.changeset/lint-eval-generator-load-envelope.md';
       const CLI = '@objectstack/cli';
-      const declaredYes = { value: 'yes', readings: ['carrier: on'] };
+      const declaredYes = { value: 'yes', readings: ['declaration line: `Clause-②: yes`'] };
       const touchedCli = { packages: [CLI], unreadable: [] };
       const levelsFor = (text) => [{ file: CHANGESET, entries: entriesIn(text) }];
 
@@ -3003,7 +2894,7 @@ function selfTest() {
       // whether the unread declaration was immaterial or whether it was the one
       // input that decided the answer — indistinguishable at every surface that
       // reads a conclusion rather than a step log.
-      const noDeclaration = { value: null, payload: true, readings: ['carrier: not on this PR', 'declaration line: the PR body carries no `Clause-②:` line'] };
+      const noDeclaration = { value: null, payload: true, readings: ['declaration line: the PR body carries no `Clause-②:` line'] };
       const notMeasuredMaterial = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noDeclaration });
       const notMeasuredMoot = judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: noDeclaration });
       assert(
@@ -3117,30 +3008,26 @@ function selfTest() {
       // The declaration reader, against the real #16044 PR body.
       const prBody = '## Clause ② — declared per limb, from the delivered diff\n\n- **Mechanical floor — YES.**\n';
       assert(
-        declarationFromPullRequest({ labels: [{ name: 'needs:contract-review' }], body: prBody }).value === 'yes',
-        'the carrier alone is a declaration — it is what #16044 actually carried',
-      );
-      assert(
         declarationFromPullRequest({ labels: [{ name: 'tooling' }], body: prBody }).value === null,
-        "control: #16044's own PR-body prose is NOT a declaration — the same body with the carrier off reads NOT MEASURED, so the positive above is about the label",
+        "#16044's own PR-body prose is NOT a declaration — it reads NOT MEASURED; the label that once declared for it is retired, so nothing reads `yes` here",
       );
       assert(
         declarationFromPullRequest({ labels: [{ name: 'tooling' }], body: prBody }).readings.some((r) => /near miss/.test(r)),
         'and the near miss is QUOTED, so an unread declaration is actionable rather than silent',
       );
-      assert(declarationFromPullRequest({ labels: [], body: 'Clause-②: yes\n' }).value === 'yes', 'the fixed declaration line is read with no carrier at all');
+      assert(declarationFromPullRequest({ labels: [], body: 'Clause-②: yes\n' }).value === 'yes', 'the fixed declaration line is read');
       assert(declarationFromPullRequest({ labels: [], body: 'Clause-②: no\n' }).value === 'no', 'and `no` is read as `no`, not as absent');
       assert(declarationFromPullRequest({ labels: [], body: 'Clause-②: probably\n' }).value === null, 'a malformed value is NOT a declaration (#12409: no tolerant reading)');
-      assert(declarationFromPullRequest({ labels: [], body: 'nothing here\n' }).value === null, 'control: a body with neither reads null, so the three above are about their lines');
-      assert(declarationFromPullRequest(null).value === null && declarationFromPullRequest(null).readings.length > 0, 'no payload is NOT MEASURED and says which carrier it could not read');
+      assert(declarationFromPullRequest({ labels: [], body: 'nothing here\n' }).value === null, 'control: a body with no line reads null, so the three above are about their lines');
+      assert(declarationFromPullRequest(null).value === null && declarationFromPullRequest(null).readings.length > 0, 'no payload is NOT MEASURED and says so');
       assert(
-        declarationFromPullRequest({ labels: [{ name: 'needs:contract-review' }], body: 'Clause-②: no\n' }).value === 'yes',
-        'the carrier wins over a body that says `no`: the carrier is the review seat\'s, and only the seat clears it',
+        declarationFromPullRequest({ labels: [{ name: 'documentation' }], body: 'Clause-②: no\n' }).value === 'no',
+        '⛔ CONTROL: a label list is not read at all — a label beside a body that says `no` changes nothing',
       );
 
       // The event payload reader — `--event` makes the file the WHOLE input.
       const evDir = initRepo('changeset-no-major-event-');
-      writeFileSync(join(evDir, 'ev.json'), JSON.stringify({ pull_request: { labels: [{ name: 'needs:contract-review' }], body: '' } }));
+      writeFileSync(join(evDir, 'ev.json'), JSON.stringify({ pull_request: { labels: [], body: 'Clause-②: yes\n' } }));
       writeFileSync(join(evDir, 'not-json.txt'), 'nope');
       writeFileSync(join(evDir, 'no-pr.json'), JSON.stringify({ action: 'opened' }));
       assert(declarationFromPullRequest(readEventPullRequest(join(evDir, 'ev.json'))).value === 'yes', 'a real event payload on disk is read');
@@ -3348,7 +3235,7 @@ function selfTest() {
       // The axis itself, and the spelling function the four headlines share.
       assert(
         judged('clean', NARROWING).declared.value === 'no' && judged('clean', NARROWING).declared.arm === 'narrowing',
-        'the parsed declaration TRAVELS on the verdict, beside `carrier` and for the same reason — `renderLevel` derives from what it was handed and must never re-parse a body it was never given',
+        'the parsed declaration TRAVELS on the verdict, beside `arm` and for the same reason — `renderLevel` derives from what it was handed and must never re-parse a body it was never given',
       );
       assert(declaredClause2({ value: 'yes', arm: null }) === '`yes`', 'the spelling of a bare `yes`');
       assert(
@@ -3379,8 +3266,8 @@ function selfTest() {
       const SPEC = '@objectstack/spec';
       const RUNTIME = '@objectstack/runtime';
       const LINT = '@objectstack/lint';
-      const yes = { value: 'yes', payload: true, readings: ['carrier: on'] };
-      const unread = { value: null, payload: true, readings: ['carrier: not on this PR'] };
+      const yes = { value: 'yes', payload: true, readings: ['declaration line: `Clause-②: yes`'] };
+      const unread = { value: null, payload: true, readings: ['declaration line: the PR body carries no `Clause-②:` line'] };
       const cs = (file, entries) => ({ file, entries });
 
       // ---- #16342: every moved package graded `patch` -> REFUSED ------------
@@ -3579,108 +3466,6 @@ function selfTest() {
       }
     }
 
-    // ── #17229: THREE carrier states, and what each one ROUTES to ───────────
-    //
-    // The filing red printed ``carrier: `needs:contract-review` is not on this
-    // PR (0 label(s) read)`` for a PR that visibly carried the label, called the
-    // result a disagreement between the two carriers, and routed the reader to
-    // remedy 2 — whose repair is "clear the carrier". On that PR the carrier was
-    // a maintainer-ruled contract-review requirement and the real cause was a
-    // `patch` that owed `minor`, which is remedy 1. This file's own text says
-    // the two remedies are "not interchangeable".
-    //
-    // ⛔ The payload read is NOT what is repaired here. This gate makes no API
-    // call and needs no token; the snapshot boundary is deliberate and stated in
-    // full in the payload block above. What is repaired is the WORD for an
-    // unread carrier and what the refusal routes on it.
-    //
-    // ⭐ EVERY leg below is PAIRED, because only the pair is a reading: the
-    // `not-measured` fixture and the `absent` fixture differ by exactly the
-    // label LIST and by nothing else — same body, same changesets, same diff —
-    // so the softened text going out on one and the original text staying on the
-    // other cannot both be explained by "the message was softened for everyone".
-    battery('#17229: an UNREAD carrier is NOT MEASURED, never an absent one');
-    {
-      const PKG = '@objectstack/cli';
-      const BODY = 'Clause-②: yes\n';
-      const levels = [{ file: '.changeset/widen-cli.md', entries: [{ pkg: PKG, bump: 'patch' }] }];
-      const touched = { packages: [PKG], unreadable: [] };
-      // The filing PR's own label list, as the sibling step enumerated it.
-      const FILING_LABELS = ['documentation', 'size/m', 'tests', 'tooling', CONTRACT_REVIEW_LABEL];
-      const asLabels = (names) => names.map((name) => ({ name }));
-
-      const present = declarationFromPullRequest({ labels: asLabels(FILING_LABELS), body: BODY });
-      const absent = declarationFromPullRequest({ labels: asLabels(FILING_LABELS.filter((n) => n !== CONTRACT_REVIEW_LABEL)), body: BODY });
-      const unread = declarationFromPullRequest({ labels: [], body: BODY });
-
-      // ---- the reader: three states, each named rather than inferred --------
-      assert(present.carrier === 'present', `the carrier on the list reads PRESENT — got ${present.carrier}`);
-      assert(absent.carrier === 'absent', `four labels read and the carrier not among them is a MEASURED absence — got ${absent.carrier}`);
-      assert(unread.carrier === 'not-measured', `an EMPTY label list is NOT MEASURED, not an absence — got ${unread.carrier}`);
-      assert(
-        declarationFromPullRequest({ body: BODY }).carrier === 'not-measured',
-        'a payload whose `labels` is not a list at all is NOT MEASURED too — the two unreadable shapes must not split',
-      );
-      assert(declarationFromPullRequest(null).carrier === 'not-measured', 'no payload at all is NOT MEASURED on this axis as well as on the value');
-      assert(
-        [present, absent, unread].every((d) => ['present', 'absent', 'not-measured'].includes(d.carrier)),
-        'every shape the reader returns carries a carrier in the known set — a dropped field would silently restore the pre-#17229 rendering, which is a phantom repair',
-      );
-
-      // ---- the STRINGS, which is what #17229 is actually about --------------
-      const readingOf = (d) => d.readings.find((r) => /^carrier:/.test(r)) ?? '';
-      assert(
-        /IS on this PR/.test(readingOf(present)),
-        "THE FIXTURE CONTROL the card asks for: a fixture PR carrying the carrier must make the carrier line report PRESENT — without this leg the defect is invisible to this file's own tests, because it is a wrong STRING and the exit code was right",
-      );
-      assert(/is not on this PR \(4 label\(s\) read\)/.test(readingOf(absent)), `a measured absence still says so, and still prints its count — got ${readingOf(absent)}`);
-      assert(/NOT MEASURED/.test(readingOf(unread)), `an empty list must be rendered NOT MEASURED — got ${readingOf(unread)}`);
-      assert(/0 label\(s\) read/.test(readingOf(unread)), 'and it must still print the count it read, so a reader can see WHY it is unmeasured rather than being asked to take it on trust');
-      assert(
-        !/is not on this PR/.test(readingOf(unread)),
-        '⛔ and it must NOT ALSO say "is not on this PR" — that exact string over a zero count is the false line this card is filed on',
-      );
-      assert(!/NOT MEASURED/.test(readingOf(absent)), 'control: the measured absence must NOT pick up the NOT MEASURED wording, or the distinction has been collapsed the other way');
-      assert(
-        readingOf(absent) !== readingOf(unread),
-        'the pair is the control: same body, same PR shape, the label list the only difference — were these two strings equal the repair would be a rewording, not a distinction',
-      );
-
-      // ---- the AXIS survives the judgement ---------------------------------
-      const vUnread = judgeLevel({ levels, touched, declaration: unread });
-      const vAbsent = judgeLevel({ levels, touched, declaration: absent });
-      assert(vUnread.carrier === 'not-measured' && vAbsent.carrier === 'absent', '`judgeLevel` carries the axis through to the renderer — a verdict that drops it cannot route on it');
-      assert(vUnread.verdict === 'enforce' && vAbsent.verdict === 'enforce', 'THE EXIT CODE WAS NEVER THE DEFECT: a `patch` on a package this diff moved, under a declared `yes`, is refused on both readings');
-      const unreadOut = renderLevel(vUnread);
-      const absentOut = renderLevel(vAbsent);
-      assert(unreadOut.exitCode === 1 && absentOut.exitCode === 1, 'and both still exit 1 — #17229 repairs the diagnosis, it does not spend the refusal');
-      const unreadText = unreadOut.stderr.join('\n');
-      const absentText = absentOut.stderr.join('\n');
-
-      // ---- DIRECTION 1: the unmeasured read --------------------------------
-      assert(/NOT MEASURED/.test(unreadText), 'the refusal must SAY the carrier was not measured');
-      assert(!/The two declarations disagree/.test(unreadText), '⛔ and it must not call an unread carrier a disagreement — one side was never read, so there is no disagreement between them to report');
-      assert(
-        !/carrier is the review seat's to place and to clear/.test(unreadText),
-        "⛔ THE ROUTING, which is the damage: remedy 2 must not tell a reader to clear a carrier this run never looked at. On the filing PR that read as an instruction to strip a maintainer-ruled contract-review requirement",
-      );
-      assert(/NOT PART OF THIS REMEDY ON THIS RUN/.test(unreadText), 'and it must say so out loud rather than merely omitting it — a silent omission is not a reading either');
-      assert(/raise the widened package to `minor`/.test(unreadText), 'remedy 1 STAYS — it is the one the filing PR actually needed, and a repair that dropped both remedies would leave the author with no way out');
-
-      // ---- DIRECTION 2: the genuine absence, unchanged ----------------------
-      assert(/The two declarations disagree, inside one PR:/.test(absentText), 'a MEASURED absence keeps the original verdict text — #17229 narrows the softening to the unread read, it does not soften the gate');
-      assert(/carrier is the review seat's to place and to clear/.test(absentText), 'and it keeps remedy 2 verbatim: with both carriers read, "the declaration is wrong" is a live and correctly-routed answer');
-      assert(unreadText !== absentText, '⭐ THE PAIR: one fixture softened and the other untouched, out of one harness — either leg alone is consistent with a message that changed for everyone');
-
-      // ---- a caller that hands in NO axis keeps the pre-#17229 rendering ----
-      assert(
-        /The two declarations disagree, inside one PR:/.test(
-          renderLevel(judgeLevel({ levels, touched, declaration: { value: 'yes', payload: true, readings: ['carrier: not on this PR'] } })).stderr.join('\n'),
-        ),
-        'control: only a POSITIVE `not-measured` softens anything — a declaration carrying no axis at all renders exactly as it did before, so the branch above is about the axis and not about the switch having been rewritten',
-      );
-    }
-
     // ── THE DEPTH: a nested package is a candidate at all (#16713) ───────────
     //
     // The axis used to read the package segment one path segment wide, so it
@@ -3702,7 +3487,7 @@ function selfTest() {
       // green here cannot be coming from the other leg.
       const cliManifest = { name: '@objectstack/cli', version: '0.0.0', files: ['dist'], bin: { os: './bin/os.mjs' } };
       const owners = (p) => JSON.stringify(publishedSourceOwners(p, (dir) => (dir === 'packages/cli' ? cliManifest : null)));
-      const declaredYes = { value: 'yes', payload: true, readings: ['carrier: on'] };
+      const declaredYes = { value: 'yes', payload: true, readings: ['declaration line: `Clause-②: yes`'] };
 
       // The shape reading, at three depths and its controls. Depth-agnostic is
       // the whole point: a repair that merely allowed ONE extra segment passes
@@ -3871,7 +3656,7 @@ function selfTest() {
     // everything now" produce the same red.
     battery('THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)');
     {
-      const declaredYes = { value: 'yes', payload: true, readings: ['carrier: on'] };
+      const declaredYes = { value: 'yes', payload: true, readings: ['declaration line: `Clause-②: yes`'] };
       const CLI = '@objectstack/cli';
       const CS = '.changeset/root-leg.md';
 
@@ -4364,7 +4149,7 @@ function selfTest() {
       judgeLevel({
         levels: materialLevels,
         touched: materialTouched,
-        declaration: declarationFromPullRequest({ labels: [{ name: CONTRACT_REVIEW_LABEL }], body: 'Fixes #1\n' }),
+        declaration: declarationFromPullRequest({ labels: [], body: 'Clause-②: yes\nFixes #1\n' }),
         prEvent: true,
       }),
     );

@@ -99,9 +99,8 @@
  * answer with it — a thrown value's `code` is what a consumer's
  * `catch (e) { switch (e.code) }` pins, and once shipped it cannot be renamed
  * without breaking that consumer. Registering a code widens this face and is
- * therefore a Clause-② change (`needs:contract-review`), door or no door; a
- * code present in `dist` and absent here is a protocol gap, not a tier
- * question.
+ * therefore a Clause-② change, door or no door; a code present in `dist` and
+ * absent here is a protocol gap, not a tier question.
  *
  * ONE shape, no second list: a `door: 'none'` code is a row like any other —
  * the string under the package that stamps it, and a comment that states its
@@ -1091,6 +1090,36 @@ export const ERROR_CODE_LEDGER = {
     // packages is listed once per emitting package — provenance, not identity
     // (see above; #7504).
     'INVALID_METADATA',
+    // [#19441] Provenance rows for the class-field stamps
+    // (`readonly code = '…'`) this package ships in `dist` — a spelling
+    // `check:error-code-provenance` declares itself blind to, which is how
+    // they went unlisted. Each code is already registered by another package;
+    // per this file's header a code emitted by several packages is listed
+    // once per emitting package — provenance, not identity — so the union,
+    // its casing and every other package's rows are unchanged.
+    //
+    // `PermissionSetOverlayStateError` (`permission-set-overlay-discard.ts`),
+    // 409: `discardPermissionSetOverlay` found no active overlay to discard.
+    // Served by `@objectstack/rest`'s `POST …/security/permission-sets/:id/
+    // discard-overlay` route, whose `handleError` reads the thrown `code`
+    // ahead of its `INTERNAL` default.
+    'INVALID_STATE',
+    // `PermissionSetNotFoundError` (`permission-set-overlay-discard.ts`),
+    // 404: the addressed `sys_permission_set` row does not exist. Same route
+    // and door as the row above. A waived synonym of `RESOURCE_NOT_FOUND`
+    // (`STANDARD_SYNONYM_WAIVERS` admits it per code, not per package — this
+    // row widens that waiver's emitter list, never the waiver table).
+    'NOT_FOUND',
+    // `PackagedPermissionSetLockedError` and
+    // `PackagedPermissionSetProvenanceUnknownError`
+    // (`packaged-permission-set-lock.ts`), 403: a data-path write targets a
+    // package-declared permission set, or one whose provenance cannot be
+    // determined (fail-closed). Deliberately the SAME envelope
+    // `@objectstack/metadata-protocol`'s ADR-0005 tier gate answers for this
+    // condition — one condition, one vocabulary. NOT a `StandardErrorCode`
+    // member: it is an extension code registered here, under that package and
+    // now this one.
+    'NOT_OVERRIDABLE',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
     // [#19307] The data door's duplicate-name refusal on `sys_permission_set`
@@ -1508,8 +1537,9 @@ export const STANDARD_SYNONYM_WAIVERS: readonly StandardSynonymWaiver[] = [
   {
     code: 'NOT_FOUND',
     shadows: 'RESOURCE_NOT_FOUND',
-    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing. ' +
-      'Wire value kept; consolidation deferred per #8211.',
+    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing; ' +
+      '#19441 added the plugin-security provenance row for the same pre-existing wire value ' +
+      '(its permission-set overlay-discard 404). Wire value kept; consolidation deferred per #8211.',
   },
   {
     code: 'UNAUTHORIZED',

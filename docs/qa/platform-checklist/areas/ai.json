@@ -672,10 +672,10 @@
     },
     {
       "id": "ai.mcp-oauth-private-host-transport",
-      "title": "the MCP OAuth transport rule is judged on the DEPLOYMENT's own host: a private / link-local plain-HTTP deployment serves the OAuth track and logs the unencrypted-transport warning; a public plain-HTTP one is still refused, fail-closed",
+      "title": "the MCP OAuth transport rule is judged on the DEPLOYMENT's own host: a private / link-local plain-HTTP deployment serves the OAuth track and logs the accepted-transport warning; a public plain-HTTP one is still refused, fail-closed, and logs its own public-plaintext warning",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -694,13 +694,13 @@
         "a non-IP intranet hostname (crm.corp, host.docker.internal) — a name, not an address: refused over plain HTTP by the pinned reading"
       ],
       "steps": [
-        "boot (a) on a private address over plain http; capture the boot log and record whether the unencrypted-transport warning 「OAuth 未加密:仅限可信内网」 appears, how many times, and whether it names the issuer URL",
+        "boot (a) on a private address over plain http; capture the boot log and record whether the accepted-transport warning `OAuth is served UNENCRYPTED` appears, how many times, and whether it names the issuer URL",
         "on boot (a), GET /.well-known/oauth-protected-resource and its path-inserted variant /.well-known/oauth-protected-resource/api/v1/mcp; record status and body",
         "on boot (a), POST /api/v1/mcp with NO credentials; record the 401 and its WWW-Authenticate header, including whether a resource_metadata pointer is present",
         "if a second machine is available, drive a real MCP client from it against boot (a) over http:// and record whether the client completes the OAuth flow, refuses the scheme up front, or fails elsewhere — RECORD WHICH, because a client-side scheme refusal changes what this compatibility is worth",
-        "boot (b) on a PUBLIC host spelling over plain http; capture the boot log and GET both protected-resource paths; record status and body",
+        "boot (b) on a PUBLIC host spelling over plain http; capture the boot log and GET both protected-resource paths; record status and body — and record separately whether the public-plaintext warning `OAuth discovery is served over PUBLIC plain HTTP` appears and how many times",
         "boot (c) on loopback; capture the boot log and the same two GETs",
-        "re-boot (a) with an https base URL (a self-signed terminator is enough — no client needs to trust it, only the deployment's own base URL has to be https); capture the boot log and record the ABSENCE of the warning"
+        "re-boot (a) with an https base URL (a self-signed terminator is enough — no client needs to trust it, only the deployment's own base URL has to be https); capture the boot log and record the ABSENCE of BOTH plain-HTTP warnings"
       ],
       "acceptance": [
         {
@@ -712,13 +712,13 @@
         {
           "clause": "boot (b) — a PUBLIC host over plain HTTP — is still refused, fail-closed and UNCHANGED: both protected-resource paths 404, nothing OAuth is advertised, and the boot log says the OAuth track is not live and why. ⛔ This clause is the security floor of the item: a 200 here means plaintext OAuth was opened to the public internet, which is worse than the refusal the rule relaxed",
           "oracle": "api",
-          "verify": "404 on both paths + the mount-time warning naming the transport rule (auth-plugin.ts, the `MCP server is enabled but the OAuth track is NOT live` branch); confirm the unencrypted-transport warning of the clause below is NOT what was read instead — the two lines are different sentences",
+          "verify": "404 on both paths + a mount-time warning naming the transport rule — `OAuth discovery is served over PUBLIC plain HTTP` unconditionally, and the `MCP server is enabled but the OAuth track is NOT live` line in addition when the MCP surface is on; confirm the ACCEPTED-transport warning of the clause below is NOT what was read instead — the three lines are different sentences",
           "evidence": "the two 404s and the boot-log line"
         },
         {
-          "clause": "the unencrypted-transport warning carries the ruled wording 「OAuth 未加密:仅限可信内网」 and is emitted exactly once, at mount, on every plain-HTTP boot whose origin the transport rule ACCEPTS (a and c); NOT on the https re-boot, and NOT on the public plain-HTTP boot (b), whose OAuth track is dark — there the line would assert a posture that deployment does not have. It names the issuer URL",
+          "clause": "eligibility decides WHICH plain-HTTP warning is emitted, never WHETHER one is: every plain-HTTP boot carries exactly one of the two, once, at mount. On a boot whose origin the transport rule ACCEPTS (a and c) it is the accepted-transport line `OAuth is served UNENCRYPTED`; on the PUBLIC plain-HTTP boot (b), whose OAuth track the same rule left dark, it is the distinct line `OAuth discovery is served over PUBLIC plain HTTP`, which states that the AS discovery surface is served over public plain HTTP, that the MCP OAuth track is disabled, and that TLS is the remedy. Neither line on the https re-boot. Each names the issuer URL. The ruled sentence 「OAuth 未加密:仅限可信内网」 is carried as the line's MEANING and lives verbatim in the code comment beside the call — ruling batch #210 item 5",
           "oracle": "log",
-          "verify": "grep the captured boot logs for the ruled wording 「OAuth 未加密:仅限可信内网」, which the acceptance requires the startup log to CARRY (the English clause `OAuth is served UNENCRYPTED` follows it on the same line and greps to the same count): exactly 1 occurrence on (a), exactly 1 on (c), 0 on (b), 0 on the https re-boot; the line names the issuer, the origin followed by /api/v1/auth",
+          "verify": "grep the captured boot logs for the two ENGLISH anchors separately — `OAuth is served UNENCRYPTED`: exactly 1 on (a), exactly 1 on (c), 0 on (b), 0 on the https re-boot; `OAuth discovery is served over PUBLIC plain HTTP`: exactly 1 on (b), 0 on (a), 0 on (c), 0 on the https re-boot. Each matched line names the issuer, the origin followed by /api/v1/auth. ⛔ Grepping for 「OAuth 未加密:仅限可信内网」 now returns 0 on every boot: ruling batch #210 item 5 moved that sentence out of the emitted string into the code comment, so a run still greping it scores every boot as a miss",
           "evidence": "the matching log lines with their counts, and the two empty results (the public boot and the https re-boot)"
         },
         {
@@ -737,7 +737,7 @@
       "negative": [
         "reading a 200 on boot (b) as 'the feature works' is the inverted verdict this item exists to prevent — the public arm answering anything but a refusal is a FAIL, not a pass with a wider surface",
         "scoring boot (a) from a localhost request on the server itself: the request would be loopback, which was already eligible before this rule, so the private-address arm was never exercised — drive it from the private address, or at minimum assert the ADVERTISED origin is the private one",
-        "reading the mount-time 'OAuth track is NOT live' line as the unencrypted-transport warning (or vice versa): they are different sentences with opposite meanings, and a run that conflates them scores boot (b) as if it had served OAuth. Boot (b) carries the first and never the second",
+        "conflating any two of the three mount-time lines: `OAuth is served UNENCRYPTED` (boot a and c only), `OAuth discovery is served over PUBLIC plain HTTP` (boot b only) and `MCP server is enabled but the OAuth track is NOT live` (only where the MCP surface is on). They are different sentences with different meanings, and a run that reads the accepted-transport line on boot (b) scores that boot as if it had served OAuth",
         "treating an intranet HOSTNAME boot (http://crm.corp) as the private-address case — it is a name, not an address, and the pinned reading refuses it; a run that uses one has tested the hostname reading, not this clause"
       ],
       "traps": [
@@ -752,7 +752,7 @@
       "source": [
         "packages/plugins/plugin-auth/src/auth-manager.ts#isOAuthEligibleBaseUrl (the transport rule, its ruled allow-list and the pinned hostname reading)",
         "packages/plugins/plugin-auth/src/auth-manager.ts#isMcpOAuthEnabled (AS enabled AND transport rule satisfied)",
-        "packages/plugins/plugin-auth/src/auth-plugin.ts (the discovery mount: the unencrypted-transport warning and the 'OAuth track is NOT live' branch)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts (the discovery mount: the accepted-transport warning, its public-plaintext sibling branch, and the 'OAuth track is NOT live' branch inside the MCP-surface condition)",
         "packages/plugins/plugin-auth/src/mcp-oauth-plaintext-notice.test.ts (the warning's fire-once / not-under-TLS pins)",
         "docs/qa/platform-checklist/areas/ai.json — item `ai.mcp-http-surface` (the surface this item shares — that one asserts the endpoint's gates, this one asserts WHICH DEPLOYMENTS get the OAuth track at all)"
       ],
@@ -762,6 +762,12 @@
           "date": "2026-09-21",
           "change": "initial — authored with the card that widened the transport rule from loopback-only to loopback-or-private, under the maintainer ruling of 2026-09-21. No checklist item asserted MCP OAuth from a non-loopback host at all, so neither the arm that opened nor the public arm that must stay closed had a standing run",
           "ref": "claude/issue-19489-oauth-private-host-transport-rule"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-22",
+          "change": "ruling batch #210 item 5 (B/B). D1: eligibility decides WHICH plain-HTTP warning is emitted, never WHETHER one is — boot (b) moves from asserting 0 warnings to asserting exactly 1 occurrence of a new, distinct public-plaintext line, because the .well-known discovery routes are mounted regardless of transport while the 'OAuth track is NOT live' line sits inside the MCP-surface condition, so a public plain-HTTP boot with that surface off used to emit nothing at all. D2: the emitted strings are English and the grep anchors move to them; the ruled Chinese sentence is carried as the line's meaning in the code comment beside the call. Steps, clauses and verifies moved together",
+          "ref": "claude/issue-19571-plaintext-as-warning"
         }
       ]
     }

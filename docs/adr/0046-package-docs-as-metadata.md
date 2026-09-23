@@ -1,6 +1,7 @@
 # ADR-0046: Package documentation as metadata — flat `src/docs/*.md` compiled into the manifest
 
 **Status**: Proposed (2026-06-12, revised — simplified from the original directory/docSet design)
+· **Superseded in part (2026-06-13, ADR-0048)** — the bare-name overwrite premise; note at §3.2.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package + versioned releases), [ADR-0016](./0016-studio-package-authoring-and-publish.md) (publish pipeline, `manifest_json` snapshot), [ADR-0025](./0025-plugin-package-distribution.md) (artifact distribution, trust boundary), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (AI as primary author)
 **Consumers**: `@objectstack/spec` (`DocSchema`, stack `docs` element), `@objectstack/cli` (collection, publish lint), `@objectstack/console` (doc rendering route), cloud control plane (registry rendering, grants), `@objectstack/core` (kernel registers `doc` as inert metadata)
@@ -154,6 +155,13 @@ unbounded, and manifest-size pressure lands here first.
 
 TS-first stacks may also pass `docs: [...]` inline in `defineStack()`;
 the md-file convention is sugar over the same array.
+
+> **Superseded in part (2026-06-13) — the bare-name overwrite premise above.**
+> [ADR-0048](./0048-cross-package-metadata-collision.md) measured the write as already
+> composite-keyed (`packageId:name`) in its §1.2, so two packages on one bare name do
+> not overwrite each other, and its §3.4 retires the cross-package throw. The residual
+> is a context-free *read*, repaired by its §3.3 (package-scoped, prefer-local); the
+> lint above stands on authoring hygiene and the flat link namespace, not on overwrite.
 
 ### 3.3 Cross-references
 

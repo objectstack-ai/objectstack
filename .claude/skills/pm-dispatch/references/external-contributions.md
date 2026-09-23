@@ -1,6 +1,6 @@
 # 外部贡献:fork PR 是提案,不是交付
 
-见 SKILL.md 〈入队与落地〉的 fork PR 行;本文是 fork PR(head 仓 ≠ base 仓)进场到落地的四步。
+见 landing-operations.md 的 fork PR 行;本文是 fork PR(head 仓 ≠ base 仓)进场到落地的四步。
 席位永不翻 ready、入队、挂 auto-merge 或批准它;席位复审是必需输入,⛔ 永不是放行许可。
 
 - ① 先立卡:分诊 fire 扫 open PR 中 head 仓 ≠ base 仓者;无卡的按 PR 正文立卡,常规定级。

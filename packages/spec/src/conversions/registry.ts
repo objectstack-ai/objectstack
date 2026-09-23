@@ -7114,6 +7114,105 @@ const elementFormRemoved: MetadataConversion = {
 };
 
 /**
+ * `translation.<locale>.settings` on a PER-APP bundle — the platform-only
+ * group leaving `stack.translations` with the type split (protocol 18,
+ * #15178, ruling batch #132 item 2 letter ②).
+ *
+ * ⛔ NOT a lossless delete, and this entry says so rather than claiming the
+ * house phrase. `settings` is keyed by `SettingsManifest.namespace`, and only
+ * platform code declares a manifest — so the only namespaces an application
+ * could address were the PLATFORM's own. Both bundles are loaded into ONE
+ * served tree (`AppPlugin.loadTranslations` and each platform plugin's
+ * `kernel:ready` contribution both call `II18nService.loadTranslations`, which
+ * deep-merges), and `resolveSettingsTitle` / the console's `useSettingsLabel`
+ * read that merged tree, so an app-authored entry DID resolve.
+ *
+ * What it did NOT do is override the platform. `AppPlugin` loads the app's
+ * bundles in its own `start()` (kernel Phase 2); `SettingsServicePlugin`
+ * contributes the platform's settings translations from a `kernel:ready` hook
+ * (Phase 3); `deepMerge` gives the LATER source the leaf. So the platform won
+ * every key both bundles defined, and a per-app entry rendered only where the
+ * platform bundle carried no string for that key and locale — a gap filler on
+ * a namespace the application does not own. Dropping it therefore takes those
+ * gaps back to the manifest's own literal (the `?? fallback` every
+ * `resolveSettings*` helper ends in), which is a VISIBLE change and not a
+ * no-op. The semantic entry
+ * `18.translation-per-app-settings-platform-only.ts` is where an author is
+ * told that, because a notice reading "(removed)" does not say it.
+ *
+ * ⚠️ The BUNDLE shape only. `TranslationItemSchema` still declares `settings`
+ * (the registered `translation` metadata type is out of this ruling's scope),
+ * so a bare item entry replaying through this seam is left exactly as it is —
+ * the opposite of the `translation-component-submit-label-removed` neighbour,
+ * which retires its key at both doors and therefore walks both shapes. Getting
+ * this backwards would strip a key its own schema still accepts.
+ *
+ * The bundle is told from an item structurally rather than by key spelling:
+ * `locale` is REQUIRED on an item and never present on a bundle entry (the
+ * bundle's keys ARE the locales), and the candidate value must be a dict whose
+ * every key is a declared translation group — which an `objects` record, the
+ * one other dict-of-dicts at that depth, is not.
+ */
+const translationPerAppSettingsRemoved: MetadataConversion = {
+  id: 'translation-per-app-settings-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'stack.translations[].<locale>.settings',
+  summary:
+    "per-app translation group 'settings' removed (#15178 — it is keyed by SettingsManifest.namespace "
+    + 'and only platform code declares a manifest, so an app-authored entry could only fill gaps the '
+    + "platform's own bundle left in the one merged served tree, and was overwritten wherever both "
+    + 'defined the key; those gaps now fall back to the manifest literal, and the group stays on the '
+    + 'PLATFORM bundle, PlatformTranslationData)',
+  apply(stack, emit) {
+    /** The top-level groups a translation bundle entry may carry (either face). */
+    const GROUPS = new Set([
+      'objects', 'apps', 'messages', 'globalActions', 'dashboards', 'datasets',
+      'pages', 'flows', 'settings', 'metadataForms', 'settingsCommon',
+    ]);
+    return mapCollection(stack, 'translations', (entry, path) => {
+      // A `translation` ITEM, not a bundle — `settings` is still declared
+      // there. Leave it whole.
+      if ('locale' in entry) return entry;
+      let next = entry;
+      for (const [locale, data] of Object.entries(entry)) {
+        if (!isDict(data) || !isDict(data.settings)) continue;
+        if (!Object.keys(data).every((k) => GROUPS.has(k))) continue;
+        const stripped = stripKeys(data, ['settings'], emit, `${path}.${locale}`);
+        if (stripped === data) continue;
+        next = next === entry ? { ...entry } : next;
+        next[locale] = stripped;
+      }
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      translations: [
+        {
+          'zh-CN': {
+            settings: { mail: { title: '邮件投递', keys: { host: { label: '主机' } } } },
+            // A neighbouring group on the same entry rides through untouched.
+            apps: { crm: { label: '客户关系管理' } },
+          },
+        },
+      ],
+    },
+    after: {
+      translations: [
+        {
+          'zh-CN': {
+            apps: { crm: { label: '客户关系管理' } },
+          },
+        },
+      ],
+    },
+    // One per stripped group: the single `zh-CN` entry.
+    expectedNotices: 1,
+  },
+};
+
+/**
  * `translation.pages.<name>.components.<id>.submitLabel` — the component-copy
  * key retired with its only declarer (protocol 18, #10926, ADR-0049).
  *
@@ -9957,6 +10056,103 @@ const dashboardWidgetChartConfigStructureRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * `object.tenancy.organizationField` leaves the authorable surface (protocol
+ * 18, #19054 — ADR-0049 enforce-or-remove; maintainer ruling 2026-09-18,
+ * verbatim and untranslated: 「organizationField 撤出可授权面 同意你的建议」).
+ *
+ * The key named the column a platform row is STAMPED from, as opposed to the
+ * column the object is WALLED by (`tenantField`). On an ordinary object those
+ * are the same column — the spec's own docblock said "for ordinary objects the
+ * two coincide and `organizationField` is never needed" — and the whole
+ * repository declared it exactly once, on `sys_api_key`, a table this platform
+ * ships. An authorable key whose only real declaration is ours makes every
+ * future piece of organization logic ask "what if somebody set this?" for a
+ * divergence no sanctioned consumer would honour: the cloud#1395 scope-pin
+ * allows exactly three readers, all of them platform-row writers.
+ *
+ * The divergence itself is NOT retired — only its authorability. It moves to
+ * `@objectstack/metadata-core`'s `PLATFORM_STAMP_ORGANIZATION_COLUMNS`
+ * (`sys_api_key` → `active_organization_id`, read by the stamp face alone), so
+ * the three writers keep their behaviour unchanged with no authorable input.
+ *
+ * **Retired from the load path** — the `tenancy` block is `.strict()` and
+ * rejects the key with its prescription (`TENANCY_RETIRED_KEY_GUIDANCE`), so a
+ * live author is taught at parse. This entry exists so stored 17.x rows replay
+ * clean (`applyConversionsToStoredItem` — without it a pre-removal row flags
+ * `metadata_spec_invalid` forever, mislabelling chain-owned history as a
+ * current-contract violation) and so `os migrate meta --from 17` lists the
+ * mechanical edits for existing sources.
+ *
+ * Deletion is the whole conversion, and it is behaviour-preserving in both
+ * directions for everything outside this repository: an application that
+ * declared the key was never read by anything (the three sanctioned consumers
+ * are platform writers over platform tables), so dropping it changes no
+ * stamp. A row on a platform object is unreachable from an authored stack —
+ * `sys_api_key` is `managedBy: 'better-auth'` and protection-locked.
+ */
+const objectTenancyOrganizationFieldRemoved: MetadataConversion = {
+  id: 'object-tenancy-organization-field-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'object.tenancy.organizationField',
+  summary:
+    'object `tenancy.organizationField` removed (#19054, ADR-0049 — the stamp-only column '
+    + 'declaration was authorable by every application and declared exactly once in the whole '
+    + 'protocol, on the platform\'s own credential table; the divergence moves to a '
+    + 'platform-internal table in @objectstack/metadata-core and stops being a knob)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'objects', (obj, path) => {
+      // `tenancy.*` sits one level down, so the top-level-only `stripKeys`
+      // cannot reach it — drill in and copy-on-write, so an untouched object
+      // keeps its identity (pattern of `object-enable-trash-mru-removed`).
+      const tenancy = obj.tenancy;
+      if (!tenancy || typeof tenancy !== 'object' || Array.isArray(tenancy)) return obj;
+      const stripped = stripKeys(
+        tenancy as Record<string, unknown>,
+        ['organizationField'],
+        emit,
+        `${path}.tenancy`,
+      );
+      if (stripped === tenancy) return obj;
+      return { ...obj, tenancy: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      objects: [
+        {
+          name: 'billing_api_credential',
+          label: 'Billing API Credential',
+          tenancy: { enabled: false, organizationField: 'active_organization_id' },
+        },
+        // The walled neighbour passes through untouched: `tenantField` is the
+        // key that survives, and it answers the other question.
+        {
+          name: 'billing_invoice',
+          label: 'Invoice',
+          tenancy: { enabled: true, tenantField: 'workspace_id' },
+        },
+      ],
+    },
+    after: {
+      objects: [
+        {
+          name: 'billing_api_credential',
+          label: 'Billing API Credential',
+          tenancy: { enabled: false },
+        },
+        {
+          name: 'billing_invoice',
+          label: 'Invoice',
+          tenancy: { enabled: true, tenantField: 'workspace_id' },
+        },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -10060,6 +10256,8 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     pageAssignedProfilesRemoved,
     chartConfigAriaRemoved,
     dashboardWidgetChartConfigStructureRemoved,
+    translationPerAppSettingsRemoved,
+    objectTenancyOrganizationFieldRemoved,
   ],
 };
 

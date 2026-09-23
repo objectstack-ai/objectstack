@@ -55,8 +55,9 @@
  *             over one fixture that authors a member of every group. The
  *             walker's own output, not a transcription of its header.
  *   ledger    the groups that legitimately have no extractor face at all, each
- *             carrying the REASON. Holds three entries by the 2026-09-04
- *             ruling, and only shrinks from there (below).
+ *             carrying the REASON. Filled with three entries by the 2026-09-04
+ *             ruling and down to two since #15178 paid one off, and it only
+ *             shrinks from there (below).
  *
  * and the assertion is two set differences:
  *
@@ -196,10 +197,15 @@ const DECLARED_WATCH_HINTS = [
  * it — the ⛔ MAINTAINER-ONLY act the unwalked-group message names, performed
  * by the owner it names rather than by a landing author getting past a check.
  *
- * `settings` is the one DEFERRAL among the three, and it says so out loud so
- * that nobody reads the exemption as the answer: its terminal state — a
- * registry-driven emitter on the `metadataForms` precedent, or removal from the
- * per-app schema — is held on #15178.
+ * It held THREE entries until #15178. `settings` was the one DEFERRAL among
+ * them, and it said so out loud so that nobody read the exemption as the
+ * answer. Its terminal state landed on ruling batch #132 item 2 letter ②
+ * (2026-09-13): the translation type split in two, `settings` stayed on the
+ * PLATFORM bundle and left the per-app one — so the group is no longer
+ * declared on the schema this gate reads, the exemption went stale by the
+ * ledger's own `ledger \ declared = ∅` rule, and `LEDGER_CEILING` ratcheted
+ * 3 → 2 in the same PR. That is the ledger working as designed: the deferral
+ * was paid down, not renewed.
  *
  * Read the class-level note above before adding anything here. The one-line
  * version: a red belongs to whoever owns the walker, an entry here is a
@@ -215,12 +221,6 @@ const KNOWN_NO_EXTRACTOR_FACE = Object.freeze({
     'The Settings UI\'s own five source-badge labels (env / global / tenant / user / default) — the '
     + 'console\'s words in every app rather than any app\'s own, ruled out of the per-app bundles on '
     + '#7646.',
-  settings:
-    'Keyed by `SettingsManifest.namespace`, and manifests are platform code '
-    + '(`packages/services/service-settings/src/manifests/*.manifest.ts`), not authored metadata: no stack '
-    + 'config carries them, and no consumer asks for per-app settings translations today. A DEFERRAL, not '
-    + 'a fact — the terminal state (a registry-driven emitter on the `metadataForms` precedent, or removal '
-    + 'from the per-app schema) is held on #15178.',
 });
 
 /**
@@ -229,7 +229,7 @@ const KNOWN_NO_EXTRACTOR_FACE = Object.freeze({
  * act rather than a line nobody re-reads. Shrink-only in both directions — a
  * ceiling above the real size fails as slack, so it can only be walked down.
  */
-const LEDGER_CEILING = 3;
+const LEDGER_CEILING = 2;
 
 /**
  * A reason must be a real sentence. The floor is 24 characters and a
@@ -551,7 +551,7 @@ async function main(wantList) {
  */
 const RECORDED_DECLARED = [
   'apps', 'dashboards', 'datasets', 'flows', 'globalActions', 'messages',
-  'metadataForms', 'objects', 'pages', 'settings', 'settingsCommon',
+  'metadataForms', 'objects', 'pages', 'settingsCommon',
 ];
 const RECORDED_WALKED = [
   'apps', 'dashboards', 'datasets', 'flows', 'globalActions', 'metadataForms', 'objects', 'pages',
@@ -560,7 +560,7 @@ const RECORDED_WALKED = [
  * …and the verdict those two produce against an EMPTY ledger — which, since the
  * 2026-09-04 ruling, is also exactly the shipped ledger's key set.
  */
-const RECORDED_UNWALKED = ['messages', 'settings', 'settingsCommon'];
+const RECORDED_UNWALKED = ['messages', 'settingsCommon'];
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //

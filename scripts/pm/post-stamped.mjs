@@ -866,6 +866,9 @@ import {
   threadReadField,
 } from './check-half-states.mjs';
 import { readClause2Line } from './clause2-line.mjs';
+import { EXIT_UNCONFIRMED, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { MAX_BODY_BYTES, TRANSPORT_ENV } from './fleet-write/ops.mjs';
+import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -897,6 +900,8 @@ export const EXIT_NOT_STORED = 4;
  * number.
  */
 export const EXIT_TOO_LARGE = 5;
+// 6 is EXIT_UNCONFIRMED, imported from fleet-write/dispatch.mjs: the relay was
+// dispatched and its outcome could not be confirmed — go READ, never retry blind.
 
 /**
  * The re-exec guard, per script rather than shared with its neighbours: two
@@ -1919,7 +1924,7 @@ export function claimKeyedLineRefusals(body) {
     rows.push({ key: 'Thread-read', line: keyLine(text, 'Thread-read'), why: `the value reads \`${offendingSpan(thread.value)}\`, which is neither one comment id nor \`none\` — H50 compares it for EQUALITY against one id, so no thread makes this match.` });
   const clause = readClause2Line(text);
   if (clause !== null && clause.kind !== 'declared')
-    rows.push({ key: 'Clause-②', line: clause.line, why: clause.kind === 'malformed' ? 'the value slot holds something `readClause2Line` cannot grade — the two spellings are the closed set.' : `\`readClause2Line\` reads this as a NEAR MISS (${clause.reason}), ⛔ not a declaration — \`check-clause2-carriers.mjs --pair\` answers exit 4 on it.` });
+    rows.push({ key: 'Clause-②', line: clause.line, why: clause.kind === 'malformed' ? 'the value slot holds something `readClause2Line` cannot grade — the two spellings are the closed set.' : `\`readClause2Line\` reads this as a NEAR MISS (${clause.reason}), ⛔ not a declaration — the changeset and ADR-0087 gates read it as absent.` });
   return rows;
 }
 
@@ -2780,6 +2785,98 @@ export function parseOptions(argv) {
 }
 
 // ---------------------------------------------------------------------------
+// The relay transport — pure halves. `OS_FLEET_TRANSPORT` direct | dispatch |
+// auto: `dispatch` packs THIS act's one write — the comment, or the body
+// rewrite — into ONE `repository_dispatch` that the fleet-write relay executes
+// as `objectstack-fleet[bot]`; `auto` (the default) takes it in a cloud seat
+// container and `direct` elsewhere. The stamp is substituted BEFORE packing
+// (the stamp is the seat's act), and the read-back afterwards is the same
+// `readBackVerdict` the direct path runs — what changes is only where the
+// stored body is fetched from.
+// ---------------------------------------------------------------------------
+
+/** The relay action this act's write becomes: the SAME comment or body rewrite, as one op. Pure. */
+export function relayAction(options, body) {
+  return options.mode === 'comment' ? { op: 'comment', issue: options.number, body } : { op: 'issue_patch', issue: options.number, body };
+}
+
+/**
+ * Under the relay the comment's id comes back from the BOARD, not from a
+ * response: the newest comment on the card created at or after the dispatch
+ * (a minute of clock slack) whose stored body is what this act sent — the
+ * platform's own footer appending and newline stripping are the read-back
+ * classes that still count as landed. Pure. Returns the comment, or null.
+ */
+export function pickRelayComment(comments, sent, dispatchedAtMs) {
+  const since = dispatchedAtMs - 60_000;
+  const landed = (c) => {
+    const rb = classifyReadBack({ sent, stored: c?.body });
+    return rb.class !== 'unreadable' && sentBodyLanded(rb);
+  };
+  const candidates = (Array.isArray(comments) ? comments : []).filter((c) => Date.parse(c?.created_at) >= since && landed(c));
+  return candidates.length ? candidates[candidates.length - 1] : null;
+}
+
+/**
+ * What a relay outcome that is not success means for THIS tool's register.
+ * Pure. A refused dispatch is no act at all (3); a run that completed without
+ * success is a write the platform did not keep whole (4 — go READ); no run,
+ * or no completion, is UNCONFIRMED (6).
+ */
+export function relayExitFor(result) {
+  if (result?.state === 'refused') return EXIT_PREREQUISITE_NOT_MET;
+  if (result?.state === 'failure') return EXIT_NOT_STORED;
+  return EXIT_UNCONFIRMED;
+}
+
+/**
+ * The size route: the relay's body cap decides the transport for THIS write,
+ * and nothing else does. Pure.
+ *
+ * The relay carries a body of at most `MAX_BODY_BYTES` UTF-8 bytes (a
+ * `repository_dispatch` `client_payload` is capped by the platform at 64 KB,
+ * hence the 60,000-byte body cap in `fleet-write/ops.mjs`), so a body over it
+ * cannot take the relay however live the relay is:
+ *
+ *   - under `auto`, THIS write goes DIRECT — as the seat's own user, the token
+ *     this process holds — and the route's reason becomes the ONE printed line
+ *     that says so, naming the bytes, the cap and the identity. ⛔ Never silent.
+ *   - under an explicit `OS_FLEET_TRANSPORT=dispatch` the route becomes a
+ *     PREREQUISITE refusal (exit 3) naming the bytes: the operator asked for
+ *     the relay, and a fall-back would change the identity the write is booked
+ *     against.
+ *
+ * ⛔ Only the size re-routes. A refused op, a failed run and an UNCONFIRMED
+ * outcome keep the register `relayExitFor` gives them; and ⛔ there is no
+ * compression codec — a body this size is the thing to shrink, not to encode.
+ * A route that is not `dispatch`, one already carrying an error, or a body at
+ * or under the cap comes back unchanged (flagged `sizeRouted: false`).
+ */
+export function sizeRoute(route, body) {
+  const bytes = Buffer.byteLength(String(body ?? ''), 'utf8');
+  const cap = MAX_BODY_BYTES;
+  if (!route || route.transport !== 'dispatch' || route.error || bytes <= cap) return { ...route, bytes, cap, sizeRouted: false };
+  const size = `the body is ${grouped(bytes)} UTF-8 bytes, ${grouped(bytes - cap)} over the relay's ${grouped(cap)}-byte body cap (a repository_dispatch client_payload is capped by the platform at 64 KB)`;
+  if (route.requested === 'auto') {
+    return {
+      ...route,
+      transport: 'direct',
+      bytes,
+      cap,
+      sizeRouted: true,
+      reason: `${TRANSPORT_ENV} is auto → direct for THIS write: ${size}, so it cannot take the relay. Written DIRECT as the seat's own user (the token this process holds), not as objectstack-fleet[bot]. ⛔ Not compressed: a body this size is the thing to shrink.`,
+    };
+  }
+  return {
+    ...route,
+    bytes,
+    cap,
+    sizeRouted: true,
+    error: `${TRANSPORT_ENV}=dispatch but ${size} — the relay cannot carry it. ⛔ Not falling back to direct: the operator asked for the relay, and the fall-back would change the identity the write is booked against. Shrink the body, or run under ${TRANSPORT_ENV}=auto to let THIS write go direct as the seat's own user.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Live layer
 // ---------------------------------------------------------------------------
 
@@ -2846,6 +2943,33 @@ async function writeArtefact(repo, options, body) {
   const patched = await rest(`/repos/${repo}/issues/${options.number}`, { method: 'PATCH', body: { body } });
   const back = await rest(`/repos/${repo}/issues/${options.number}`);
   return { id: options.number, url: back?.html_url ?? patched?.html_url ?? null, writtenAt: back?.updated_at ?? patched?.updated_at ?? null, stored: back?.body };
+}
+
+/**
+ * The same act through the relay: one dispatch, its run, then the stored
+ * body read from the board. Returns the shape `writeArtefact` returns on
+ * success; `{ refused }` when the packed payload failed the validator;
+ * `{ sent }` when the relay did not succeed; `{ sent, unfound }` when the run
+ * succeeded and the board does not show the write.
+ */
+async function writeViaRelay(repo, options, body, route) {
+  const packed = packRequest({ repo, session: route.session, actions: [relayAction(options, body)] });
+  if (!packed.ok) return { refused: packed.errors };
+  const dispatchedAt = Date.now();
+  const sent = await sendFleetWrite(packed.payload, { token: TOKEN });
+  if (!sent.ok) return { sent };
+  try {
+    if (options.mode === 'comment') {
+      const tail = await readCardTail(repo, options.number, dispatchedAt - 60_000);
+      const hit = pickRelayComment(tail.comments, body, dispatchedAt);
+      if (!hit) return { sent, unfound: true };
+      return { id: hit.id, url: hit.html_url ?? null, writtenAt: hit.created_at ?? null, stored: hit.body, sent };
+    }
+    const back = await rest(`/repos/${repo}/issues/${options.number}`);
+    return { id: options.number, url: back?.html_url ?? null, writtenAt: back?.updated_at ?? null, stored: back?.body, sent };
+  } catch (err) {
+    return { sent, unfound: true, error: err?.message ?? 'the read-back threw' };
+  }
 }
 
 /**
@@ -2996,6 +3120,18 @@ async function main(argv) {
     return EXIT_REFUSED;
   }
 
+  // The transport, decided and SAID before anything leaves. A dry run makes no
+  // request, so a route that cannot be resolved is a note there, not a refusal.
+  // The size route runs on the RENDERED body (the stamp is part of what is
+  // sent): over the relay's cap, `auto` takes direct for this write and the
+  // line below says so; explicit dispatch is refused.
+  const route = sizeRoute(await resolveRoute(process.env), rendered.body);
+  if (route.error && !options.dryRun) {
+    console.error(`post-stamped: PREREQUISITE NOT MET — ${route.error}\n  NOTHING WAS WRITTEN.`);
+    return EXIT_PREREQUISITE_NOT_MET;
+  }
+  console.error(route.error ? `post-stamped: transport undecidable on a live run — ${route.error}` : `post-stamped: transport ${route.transport} — ${route.reason}`);
+
   if (options.dryRun) {
     console.error(
       `post-stamped: DRY RUN — nothing was written. Substituted with \`${rendered.stamp}\` — ` +
@@ -3026,8 +3162,38 @@ async function main(argv) {
   }
 
   let written;
+  let relayed = null;
   try {
-    written = await writeArtefact(repoRes.repo, options, rendered.body);
+    if (route.transport === 'dispatch') {
+      relayed = await writeViaRelay(repoRes.repo, options, rendered.body, route);
+      if (relayed.refused) {
+        console.error(relayRefusalText(relayed.refused));
+        return EXIT_REFUSED;
+      }
+      if (relayed.sent && !relayed.sent.ok) {
+        if (route.requested === 'auto' && relayed.sent.state === 'no-run') {
+          console.error(`post-stamped: ${fallbackText(relayed.sent, 'post-stamped')}`);
+          relayed = null;
+        } else if (relayed.sent.state === 'no-run' || relayed.sent.state === 'timeout') {
+          console.error(unconfirmedText(relayed.sent, 'post-stamped'));
+          return EXIT_UNCONFIRMED;
+        } else {
+          console.error(
+            `post-stamped: relay ${relayed.sent.state === 'refused' ? `REFUSED the dispatch (HTTP ${relayed.sent.status})` : 'run FAILED'} — ${relayed.sent.detail}` +
+              `${relayed.sent.run?.url ? ` ${relayed.sent.run.url}` : ''}. ⛔ Not retried and not fallen back: go READ the run and the card.`,
+          );
+          return relayExitFor(relayed.sent);
+        }
+      } else if (relayed.unfound) {
+        console.error(
+          `post-stamped: UNCONFIRMED — the relay run ${relayed.sent.run?.url ?? relayed.sent.run?.id ?? ''} completed, but ` +
+            `${relayed.error ? `the read-back threw (${relayed.error})` : `no comment created since the dispatch on ${repoRes.repo}#${options.number} stores the body this act sent`}. ` +
+            `Go READ the card; ⛔ do not re-run blind — a second dispatch is a second write. Exit ${EXIT_UNCONFIRMED}.`,
+        );
+        return EXIT_UNCONFIRMED;
+      }
+    }
+    written = relayed ?? (await writeArtefact(repoRes.repo, options, rendered.body));
   } catch (err) {
     // ⛔ Only the WRITE path is classified. A read sends no body, so a size
     // refusal cannot be what it was answered with, and the pre-read above keeps
@@ -3075,6 +3241,8 @@ async function main(argv) {
           drift_minutes: verdict.drift,
           body_mutated: verdict.mutated,
           body_landed: verdict.landed,
+          transport: route.transport,
+          relay_run: relayed?.sent?.run?.url ?? null,
           read_back: {
             class: verdict.readBack.class,
             first_difference_byte: verdict.readBack.offset,
@@ -3103,6 +3271,7 @@ async function main(argv) {
         ...verdict.lines,
         ...(unread ? [unreadPassText(unread)] : []),
         `  substitutions: ${substitutionSummary(rendered)}`,
+        ...(relayed ? [`  transport: dispatch — via the relay run ${relayed.sent?.run?.url ?? relayed.sent?.run?.id ?? ''}`] : []),
       ].join('\n'),
     );
   }
@@ -3145,8 +3314,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the two positions: a declaration renders as bare digits, and the patrol reads digits': 24,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 20,
+  'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 12,
+  "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
 });
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -4210,6 +4381,62 @@ export function selfTest() {
     t('the refusal names all three readers, and that no flag turns it off', ['claimSeatNumber', 'h50ThreadReadMismatch', 'readClause2Line', 'No flag turns it off'].every((s) => keyedLineRefusalText(claimKeyedLineRefusals(MISLAID_SEAT)).includes(s)));
   }
 
+  // ── the relay transport ──────────────────────────────────────────────────
+  battery('the relay transport: the same act as one op, the comment found on the board, the exit register kept apart');
+  {
+    const body = 'A stamped body.\n';
+    t('a comment becomes ONE `comment` op on the card', JSON.stringify(relayAction({ mode: 'comment', number: 17 }, body)) === JSON.stringify({ op: 'comment', issue: 17, body }));
+    t('a body rewrite becomes ONE `issue_patch` op carrying only the body', JSON.stringify(relayAction({ mode: 'body', number: 17 }, body)) === JSON.stringify({ op: 'issue_patch', issue: 17, body }));
+    const NOW = Date.UTC(2026, 8, 22, 9, 4, 0);
+    const at = (s) => new Date(NOW + s * 1000).toISOString();
+    const comments = [
+      { id: 1, body, created_at: at(-3600) },
+      { id: 2, body: 'another seat\'s comment', created_at: at(20) },
+      { id: 3, body: `${body.replace(/\n$/, '')}${PLATFORM_COMMENT_FOOTER}`, created_at: at(30) },
+    ];
+    t('the newest comment since the dispatch whose stored body is the sent one is picked — the platform footer counts as landed', pickRelayComment(comments, body, NOW)?.id === 3);
+    t('…a comment from before the dispatch is never it, however equal', pickRelayComment([comments[0]], body, NOW) === null);
+    t('…another body is never it', pickRelayComment([comments[1]], body, NOW) === null);
+    t('…a mutated body is never it', pickRelayComment([{ id: 4, body: 'A stamped body, edited.', created_at: at(5) }], body, NOW) === null);
+    t('…and a minute of clock slack before the dispatch is allowed', pickRelayComment([{ id: 5, body, created_at: at(-30) }], body, NOW)?.id === 5);
+    t('no comments at all is null, not a crash', pickRelayComment(null, body, NOW) === null && pickRelayComment([], body, NOW) === null);
+    t('a refused dispatch is exit 3 (no act at all)', relayExitFor({ state: 'refused' }) === EXIT_PREREQUISITE_NOT_MET);
+    t('a run that completed without success is exit 4 (go READ)', relayExitFor({ state: 'failure' }) === EXIT_NOT_STORED);
+    t('no run, or no completion, is exit 6 UNCONFIRMED', relayExitFor({ state: 'no-run' }) === EXIT_UNCONFIRMED && relayExitFor({ state: 'timeout' }) === EXIT_UNCONFIRMED);
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    const mainSource = ownSource.slice(ownSource.indexOf('async function main(argv)'), ownSource.indexOf('// --self-test — offline'));
+    t('structural: in main a dry run returns before the relay can be reached, and ONE read-back verdict serves both transports', mainSource.indexOf('if (options.dryRun) {') < mainSource.indexOf('await writeViaRelay(') && (mainSource.match(/readBackVerdict\(\{/g) ?? []).length === 1);
+  }
+
+  // ── the size route ───────────────────────────────────────────────────────
+  battery("the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes");
+  {
+    const AUTO = { requested: 'auto', transport: 'dispatch', reason: 'auto → dispatch (fixture)', error: null, failed: null, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ' };
+    const STRICT = { ...AUTO, requested: 'dispatch', reason: 'OS_FLEET_TRANSPORT=dispatch (fixture)' };
+    const ofBytes = (n) => 'x'.repeat(n);
+    const over = sizeRoute(AUTO, ofBytes(MAX_BODY_BYTES + 1));
+    t('one byte over the cap under auto: DIRECT for this write, flagged as size-routed, no error', over.transport === 'direct' && over.sizeRouted === true && over.error === null);
+    t('…and the ONE line names the bytes sent', over.reason.includes(`${grouped(MAX_BODY_BYTES + 1)} UTF-8 bytes`));
+    t('…the cap', over.reason.includes(`${grouped(MAX_BODY_BYTES)}-byte body cap`));
+    t("…and the identity used — the seat's own user, not the fleet bot", over.reason.includes("seat's own user") && over.reason.includes('not as objectstack-fleet[bot]'));
+    const under = sizeRoute(AUTO, ofBytes(MAX_BODY_BYTES - 1));
+    t('one byte under the cap under auto: the relay, the route untouched', under.transport === 'dispatch' && under.sizeRouted === false && under.reason === AUTO.reason && under.error === null);
+    t('…and exactly AT the cap is still the relay (the validator admits it)', sizeRoute(AUTO, ofBytes(MAX_BODY_BYTES)).transport === 'dispatch');
+    const strict = sizeRoute(STRICT, ofBytes(MAX_BODY_BYTES + 1));
+    t('⛔ explicit dispatch one byte over: a PREREQUISITE refusal naming the bytes and saying it will NOT fall back, the transport NOT changed', strict.transport === 'dispatch' && typeof strict.error === 'string' && strict.error.includes(grouped(MAX_BODY_BYTES + 1)) && strict.error.includes('Not falling back'));
+    t('bytes are UTF-8 BYTES, not characters: 20,001 three-byte characters are over the cap, 20,000 are not', sizeRoute(AUTO, '中'.repeat(20_001)).transport === 'direct' && sizeRoute(AUTO, '中'.repeat(20_000)).transport === 'dispatch');
+    t('a route already direct is never touched, whatever the size', sizeRoute({ ...AUTO, transport: 'direct' }, ofBytes(MAX_BODY_BYTES + 1)).sizeRouted === false);
+    t('a route that already carries an error is never touched — the size never masks a missing session', sizeRoute({ ...STRICT, error: 'no session' }, ofBytes(MAX_BODY_BYTES + 1)).error === 'no session');
+    t('⛔ nothing else re-routes: a refused dispatch, a failed run and UNCONFIRMED keep their register', relayExitFor({ state: 'refused' }) === EXIT_PREREQUISITE_NOT_MET && relayExitFor({ state: 'failure' }) === EXIT_NOT_STORED && relayExitFor({ state: 'timeout' }) === EXIT_UNCONFIRMED);
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    const mainSource = ownSource.slice(ownSource.indexOf('async function main(argv)'), ownSource.indexOf('// --self-test — offline'));
+    t('structural: main hands the resolved route through sizeRoute on the RENDERED body before the transport line is printed', mainSource.includes('sizeRoute(await resolveRoute(process.env), rendered.body)') && mainSource.indexOf('sizeRoute(') < mainSource.indexOf('transport ${route.transport}'));
+    // An import SHAPE, not the module's bare name: the name is spelled in this very line, so a name test could never fail.
+    t('⛔ no compression codec: this file imports nothing from zlib', /from '(node:)?zlib'/.test(ownSource) === false && /require\('(node:)?zlib'\)/.test(ownSource) === false);
+    const entrySource = ownSource.slice(ownSource.indexOf('if (isEntrypoint(import.meta.url))'));
+    t('⛔ the proxy re-exec at the entrypoint is UNCONDITIONAL — a dry run resolves the route, which is a read, so it re-execs too', entrySource.includes('rearmThroughProxy(process.argv.slice(2))') && /--dry-run'\)\s*\?\s*null\s*:\s*rearmThroughProxy/.test(entrySource) === false);
+  }
+
   // The floor, evaluated last: a battery that stops running names itself here.
   const failed = cases.filter((c) => !c.ok);
   for (const c of cases) console.log(`  ${c.ok ? '✓' : '✗'} ${c.name}`);
@@ -4258,9 +4485,11 @@ if (isEntrypoint(import.meta.url)) {
     }
     process.exit(code);
   } else {
-    // ⛔ Not on a dry run: that path makes no request, so re-execing it would
-    // spawn a second process to prove a route nothing is about to use.
-    const rearmed = process.argv.includes('--dry-run') ? null : rearmThroughProxy(process.argv.slice(2));
+    // A dry run too: it WRITES nothing, but it resolves the route, and the
+    // route's liveness read is a request — from a process whose fetch bypasses
+    // HTTPS_PROXY it answers 401 for a live relay, the reading that once turned
+    // a seat `direct`. Route resolution runs only behind the re-exec.
+    const rearmed = rearmThroughProxy(process.argv.slice(2));
     if (rearmed !== null) process.exit(rearmed);
     main(process.argv.slice(2)).then((code) => process.exit(code));
   }

@@ -1087,7 +1087,11 @@ export const FieldSchema = lazySchema(() => {
   label: z.string().optional().describe('Human readable label'),
   type: FieldType.describe('Field Data Type'),
   description: z.string().optional().describe('Tooltip/Help text'),
-  format: z.string().optional().describe('Format string (e.g. email, phone)'),
+  format: z.string().optional().describe('Free-form string whose meaning depends on the field type and on the reader. The spec declares NO vocabulary for it and checks nothing but that it is a string, so any string parses on any field type. '
+    + 'On an `autonumber` field it is the record-number PATTERN — the shorthand that predates `autonumberFormat`, which wins when both are present: `format: \'INV-{0000}\'` mints `INV-0001` on both the query engine and the SQL driver, while a value carrying no `{...}` token is emitted as literal text with the bare counter appended (`format: \'email\'` mints `email1`). Prefer `autonumberFormat` on a new field. '
+    + 'On any other field type the server does not act on it: it picks no column type, coerces no value and runs no check from it. '
+    + 'The Studio UI reads it as a display hint, in words and with defaults that its renderers own and declare. For example, the `date` and `datetime` cells read it as a display STYLE, and on a plain-text field the shared cell-renderer resolver reads a small set of words that promote the cell to a richer renderer, such as a link; each of those falls back silently to a default rendering when it does not recognise the word. '
+    + 'To constrain a VALUE, use the field `type` (the write-time record validator\'s built-in email, url and phone checks key on `type`, never on this key) or a `format` validation rule, whose own `format` key is the closed set `email` | `url` | `phone` | `json`.'),
 
   // `columnName` removed in the 16.x line (#2377, ADR-0049): the SQL driver
   // hardcodes the physical column = field key (createColumn never reads it), so
