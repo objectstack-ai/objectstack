@@ -730,6 +730,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "テーブルオプション",
         description: "グリッド専用の表示オプション。"
       },
+      pagination: {
+        label: "Pagination",
+        description: "Page size and page-size options — every view type accepts them, not only grids."
+      },
       kanban: {
         label: "カンバン",
         description: "カンバン専用のボード設定。"
