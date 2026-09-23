@@ -895,14 +895,14 @@ export const PageCardProps = strictObject({
  *    the `every` at `:416` and gates.
  *
  * Unlike the field's own `requiredPermissions` (ADR-0066 D3, enforced by the
- * server before the payload leaves it), this key hides a block and authorises
+ * server before the payload leaves it), this key authorises
  * nothing.
  */
 const RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION =
   '[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object\'s read or edit permission. '
   + 'When the client has resolved the user\'s capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. '
   + 'Presentation only: it authorises nothing, and the data API still serves the same data to the same user. '
-  + 'A client that cannot resolve the user\'s capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open; a resolved empty set gates like any other.';
+  + 'A client that cannot resolve the user\'s capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open.';
 
 export const RecordDetailsProps = strictObject({
   surface: 'this `record:details`',
@@ -1175,7 +1175,7 @@ export const RecordDetailsProps = strictObject({
    * `requiredPermissions`, is declared below them — a different mechanism
    * from this pair and from the field's own `requiredPermissions` above. It
    * is the block-level ADR-0066 capability gate, read through the capability
-   * set and fail-closed, with the one describe it shares word for word with
+   * set, with the one describe it shares word for word with
    * `record:quick_actions` ({@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}
    * carries the renderer read points). Like this pair it is presentation
    * only: it hides the whole block and authorises nothing.
