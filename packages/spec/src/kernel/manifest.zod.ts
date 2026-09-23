@@ -379,7 +379,8 @@ export const ManifestSchema = strictObject({
    * multiple packages installed in the same database cannot collide.
    *
    * Rules:
-   * - 2-20 characters, lowercase letters, digits, and underscores only.
+   * - 2-20 characters, starting with a lowercase letter; lowercase letters,
+   *   digits, and underscores only (`1leave` and `_leave` are refused).
    * - Must be unique within a running instance.
    * - Platform-reserved namespaces: "base", "system", "sys".
    * - Object names starting with `sys_` are reserved for the platform
@@ -387,7 +388,7 @@ export const ManifestSchema = strictObject({
    *   them but never define them).
    */
   namespace: z.string()
-    .regex(/^[a-z][a-z0-9_]{1,19}$/, 'Namespace must be 2-20 chars, lowercase alphanumeric + underscore')
+    .regex(/^[a-z][a-z0-9_]{1,19}$/, 'Namespace must be 2-20 chars, start with a lowercase letter, and contain only lowercase letters, digits and underscores')
     .optional()
     .describe('Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project")'),
 
