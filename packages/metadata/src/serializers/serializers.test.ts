@@ -206,5 +206,96 @@ describe('Serializers', () => {
       const js = new TypeScriptSerializer('javascript');
       expect(js.getExtension()).toBe('.js');
     });
+
+    // #19872: `sortKeys` was declared (`MetadataSaveOptionsSchema`), honoured
+    // by `json`/`yaml`, and silently ignored by `typescript` (the default
+    // format `FilesystemLoader.save()` routes to) — and by `javascript`, the
+    // same class on the same `renderModule()` code path.
+    describe('sortKeys (#19872)', () => {
+      // Deliberately unsorted at BOTH levels, so a top-level-only sort would
+      // pass while a deep one is the only one this can't fake: the nested
+      // `fields` object's own keys are unsorted too.
+      const unsortedObject = {
+        name: 'account',
+        label: 'Account',
+        fields: {
+          zeta_field: { type: 'text', label: 'Zeta' },
+          alpha_field: { type: 'text', label: 'Alpha' },
+        },
+      };
+      const jsonSerializer = new JSONSerializer();
+
+      it('the public serialize() sorts the JSON body deep, byte-identical to JSONSerializer\'s own sort — reused, not reimplemented', () => {
+        const sortedBody = jsonSerializer.serialize(unsortedObject, { sortKeys: true });
+        expect(serializer.serialize(unsortedObject, { sortKeys: true })).toBe(
+          `export const metadata = ${sortedBody};\n\nexport default metadata;\n`
+        );
+      });
+
+      it('serializeTypeScriptForMetadataType() sorts the JSON body deep too, annotated', () => {
+        const sortedBody = jsonSerializer.serialize(unsortedObject, { sortKeys: true });
+        expect(serializeTypeScriptForMetadataType(unsortedObject, 'object', { sortKeys: true })).toBe(
+          `import type { ServiceObject } from '@objectstack/spec/data';\n\n` +
+          `export const metadata: ServiceObject = ${sortedBody};\n\n` +
+          `export default metadata;\n`
+        );
+      });
+
+      it('the javascript format honours it too — A1: same TypeScriptSerializer class, same renderModule() path', () => {
+        const sortedBody = jsonSerializer.serialize(unsortedObject, { sortKeys: true });
+        expect(new TypeScriptSerializer('javascript').serialize(unsortedObject, { sortKeys: true })).toBe(
+          `export const metadata = ${sortedBody};\n\nexport default metadata;\n`
+        );
+      });
+
+      it('sortKeys absent or false: byte-identical to origin/main, through both serialize() and serializeTypeScriptForMetadataType()', () => {
+        expect(serializer.serialize(object)).toBe(plain(object));
+        expect(serializer.serialize(object, { sortKeys: false })).toBe(plain(object));
+        expect(serializeTypeScriptForMetadataType(object, 'object')).toBe(annotatedObject);
+        expect(serializeTypeScriptForMetadataType(object, 'object', { sortKeys: false })).toBe(annotatedObject);
+      });
+
+      it('round-trips a view and an object with sortKeys: true, through both paths', () => {
+        for (const [metadataType, item] of [['view', view], ['object', object]] as const) {
+          expect(
+            serializer.deserialize(serializeTypeScriptForMetadataType(item, metadataType, { sortKeys: true }))
+          ).toEqual(item);
+          expect(serializer.deserialize(serializer.serialize(item, { sortKeys: true }))).toEqual(item);
+        }
+      });
+
+      it('FilesystemLoader.save() honours sortKeys: true for object, through the loader path (A3)', async () => {
+        const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'objectstack-ts-serializer-sortkeys-on-'));
+        try {
+          const manager = new NodeMetadataManager({ rootDir, watch: false });
+          await manager.save('object', 'account', unsortedObject, { sortKeys: true });
+          const objectFile = await fs.readFile(path.join(rootDir, 'object', 'account.ts'), 'utf-8');
+          const sortedBody = jsonSerializer.serialize(unsortedObject, { sortKeys: true });
+          expect(objectFile).toBe(
+            `import type { ServiceObject } from '@objectstack/spec/data';\n\n` +
+            `export const metadata: ServiceObject = ${sortedBody};\n\n` +
+            `export default metadata;\n`
+          );
+        } finally {
+          await fs.rm(rootDir, { recursive: true, force: true });
+        }
+      });
+
+      it('FilesystemLoader.save() with sortKeys absent or explicitly false is byte-identical to origin/main, for object, through the loader path (A3)', async () => {
+        const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'objectstack-ts-serializer-sortkeys-off-'));
+        try {
+          const manager = new NodeMetadataManager({ rootDir, watch: false });
+          await manager.save('object', 'account', object);
+          const noOptionFile = await fs.readFile(path.join(rootDir, 'object', 'account.ts'), 'utf-8');
+          expect(noOptionFile).toBe(annotatedObject);
+
+          await manager.save('object', 'account2', object, { sortKeys: false });
+          const explicitFalseFile = await fs.readFile(path.join(rootDir, 'object', 'account2.ts'), 'utf-8');
+          expect(explicitFalseFile).toBe(annotatedObject);
+        } finally {
+          await fs.rm(rootDir, { recursive: true, force: true });
+        }
+      });
+    });
   });
 });
