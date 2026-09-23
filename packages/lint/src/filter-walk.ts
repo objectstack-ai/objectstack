@@ -72,10 +72,7 @@ type AnyRec = Record<string, unknown>;
  * console to a Mongo `$filter` on the REFERENCED object). Both values reach
  * the engine's `where` verbatim. Their schemas carry no preset check, so
  * before this entry an ordering preset in either parsed green, linted green,
- * and was refused only at query time. What the entry changes per walking rule,
- * measured: preset comparands and filter tokens now judge both carriers (the
- * engine resolves the same two placeholder vocabularies there and refuses the
- * same residue). The binding half — which object a condition on each carrier
+ * and was refused only at query time. The binding half — which object a condition on each carrier
  * addresses — is `validate-preset-comparands.ts`'s, not this walk's.
  */
 export const FILTER_KEYS: ReadonlySet<string> = new Set([
