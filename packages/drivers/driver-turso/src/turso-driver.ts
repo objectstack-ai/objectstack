@@ -2120,9 +2120,13 @@ export class TursoDriver extends SqlDriver {
    * built with, so its remote answer was always `[]`. Refused with or without
    * explicit `objects`, because both read the same placeholder. Local and
    * replica modes inherit the Knex detector unchanged.
+   *
+   * The parameter repeats the base's declared shape key for key rather than
+   * deriving it (`check:object-def-param-keys` arm C), so the keys a caller may
+   * pass stay visible on this override's own declaration.
    */
   override async detectManagedDrift(
-    objects?: Parameters<SqlDriver['detectManagedDrift']>[0],
+    objects?: Array<{ name: string; fields?: Record<string, any>; indexes?: any[] }>,
   ): ReturnType<SqlDriver['detectManagedDrift']> {
     if (this.isRemote) refuseRemoteDriftDetection();
     return super.detectManagedDrift(objects);
