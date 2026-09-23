@@ -878,3 +878,104 @@ describe('DelegatedAdminGate — the anchor is picked by organization, not by ar
     expect(stranger.scopes[0].businessUnitIds).toEqual([]);
   });
 });
+
+// ── A position NAME is resolved to the caller's own organization's row ─────
+// The companion of `delegated-admin-gate-position-organization.test.ts` (a
+// real engine), on the same context-ignoring double as the block above: every
+// organization's `sys_position` rows — and an organization-less residue row —
+// are handed to the gate, listed in id order, so the row-level selection is
+// the only thing standing between another organization's row and the two
+// position-keyed authority decisions (delegatable; bound sets).
+describe('DelegatedAdminGate — a position is picked by organization, not by arrival order', () => {
+  const ORG_A = 'org_a_acme';
+  /** Sorts first, and is listed first — the row an unscoped `limit: 1` read answered with. */
+  const ORG_B = 'org_0_globex';
+  const FUTURE = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const SALES_SCOPE = {
+    businessUnit: 'sales',
+    includeSubtree: true,
+    manageAssignments: true,
+    manageBindings: false,
+    authorEnvironmentSets: false,
+    assignablePermissionSets: ['sales_user'],
+  };
+  const DELEGATE_SETS = [{ name: 'sales_admin', objects: {}, adminScope: SALES_SCOPE }] as any[];
+
+  /** Ignores `context` on purpose — see the block comment above. */
+  function unscopedQl() {
+    const tables: Record<string, any[]> = {
+      sys_business_unit: [
+        { id: 'bu_a_sales', name: 'sales', parent_business_unit_id: null, organization_id: ORG_A },
+      ],
+      sys_position: [
+        // An organization-less residue row: invalid state under a walled
+        // posture, so it answers for no organization's caller.
+        { id: 'pos_', name: 'night_shift', delegatable: true, organization_id: null },
+        { id: 'pos_0_closer', name: 'closer', delegatable: true, organization_id: ORG_B },
+        { id: 'pos_a_closer', name: 'closer', delegatable: false, organization_id: ORG_A },
+      ],
+      sys_permission_set: [
+        { id: 'ps_0_sales_user', name: 'sales_user', organization_id: ORG_B },
+        { id: 'ps_a_finance_user', name: 'finance_user', organization_id: ORG_A },
+      ],
+      sys_position_permission_set: [
+        { id: 'bind_0', position_id: 'pos_0_closer', permission_set_id: 'ps_0_sales_user', organization_id: ORG_B },
+        { id: 'bind_a', position_id: 'pos_a_closer', permission_set_id: 'ps_a_finance_user', organization_id: ORG_A },
+      ],
+      sys_user_position: [
+        { id: 'up_1', user_id: 'usr_holder', position: 'closer', organization_id: ORG_A },
+        { id: 'up_2', user_id: 'usr_holder', position: 'night_shift', organization_id: ORG_A },
+      ],
+      sys_business_unit_member: [],
+      sys_user: [],
+    };
+    const matches = (row: any, where: any): boolean =>
+      Object.entries(where ?? {}).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+        if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
+          return (v as any).$in.includes(row[k]);
+        }
+        return row[k] === v;
+      });
+    return {
+      async find(object: string, opts: any) {
+        const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
+        return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+      },
+      async findOne(object: string, opts: any) {
+        return (tables[object] ?? []).filter((r) => matches(r, opts?.where))[0] ?? null;
+      },
+    } as any;
+  }
+
+  const makeGate = () =>
+    new DelegatedAdminGate({
+      ql: unscopedQl(),
+      resolveSets: async (ctx: any) => (ctx?.principal === 'delegate' ? DELEGATE_SETS : []),
+    });
+  const selfDelegate = (position: string) =>
+    makeGate().assert({
+      object: 'sys_user_position',
+      operation: 'insert',
+      data: { user_id: 'usr_colleague', position, delegated_from: 'usr_holder', valid_until: FUTURE, reason: 'leave' },
+      context: { principal: 'holder', userId: 'usr_holder', tenantId: ORG_A },
+    });
+
+  it("refuses a self-delegation org A never opted in to, whatever org B's first row says", async () => {
+    await expect(selfDelegate('closer')).rejects.toThrow(/position 'closer' is not delegatable/);
+  });
+
+  it('an organization-less residue row does not make a position delegatable for a walled caller', async () => {
+    await expect(selfDelegate('night_shift')).rejects.toThrow(/position 'night_shift' is not delegatable/);
+  });
+
+  it("judges a delegated assignment by org A's own bindings, not org B's first row", async () => {
+    await expect(makeGate().assert({
+      object: 'sys_user_position',
+      operation: 'insert',
+      data: { user_id: 'usr_x', position: 'closer', business_unit_id: 'bu_a_sales' },
+      context: { principal: 'delegate', userId: 'usr_delegate', tenantId: ORG_A },
+    })).rejects.toThrow(/position 'closer' distributes permission set 'finance_user', which is not in the scope's allowlist/);
+  });
+});
