@@ -37,7 +37,7 @@
   ],
   "entries": [
     {
-      "key": "type:action|component|dashboard|group|object|page|report|separator|url",
+      "key": "type:action|component|dashboard|doc|group|object|page|report|separator|url",
       "label": "app navigation item",
       "docs": [
         "content/docs/ui/apps.mdx"
