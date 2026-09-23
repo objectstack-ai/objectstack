@@ -98,7 +98,6 @@ function huskDef(name: string): Connector {
         status: 'error',
         enabled: true,
         authentication: { type: 'none' },
-        connectionTimeoutMs: 30000,
         requestTimeoutMs: 30000,
         actions: [],
     } as Connector;

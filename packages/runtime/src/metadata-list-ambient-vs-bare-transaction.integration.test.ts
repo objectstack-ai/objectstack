@@ -87,7 +87,8 @@ const STALLED_OBJECT = 'sys_metadata';
 //   2. the driver's `[sql-driver] DATABASE_ERROR — the backend refused a read
 //      on 'sys_metadata'…`, from `SqlDriver.backendStatementFault`;
 //   3. the engine's `ERROR Find operation failed {"object":"sys_metadata",…}`
-//      one frame up (`engine.ts`), carrying the same fault as a stack.
+//      one frame up (`engine.ts`), carrying the same fault as a stack —
+//      `WARN` since [#17212] (the stack still carried, in the meta).
 //
 // Turbo interleaves package logs without attribution, so in that shard log
 // these are indistinguishable from a real failure. Not a hypothetical: they
@@ -176,13 +177,18 @@ function newNoiseCapture() {
     },
 
     /**
-     * The engine's `error` channel, reached through a Proxy so every OTHER
-     * logger method stays the engine's own.
+     * The engine's `warn` channel, reached through a Proxy so every OTHER
+     * logger method stays the engine's own. [#17212] `warn`, not `error`: the
+     * engine reports a non-benign `find` failure there because `find`
+     * rethrows it. `warn(msg, meta)` has no Error argument — the engine builds
+     * the meta with `writeFailureLogMeta`, so the envelope's message arrives
+     * as `meta.error.message`.
      */
-    engineError: (msg: string, err?: unknown, meta?: unknown): boolean => {
+    engineWarn: (msg: string, meta?: unknown): boolean => {
       if (pendingRefusals === 0 || msg !== 'Find operation failed') return false;
-      if ((meta as { object?: string } | undefined)?.object !== STALLED_OBJECT) return false;
-      const detail = String((err as { message?: string } | undefined)?.message ?? '');
+      const m = meta as { object?: string; error?: { message?: unknown } } | undefined;
+      if (m?.object !== STALLED_OBJECT) return false;
+      const detail = String(m?.error?.message ?? '');
       if (!detail.includes(`refused to run this query for object '${STALLED_OBJECT}'`)) return false;
       pendingRefusals -= 1;
       withheld.engineFind += 1;
@@ -247,15 +253,16 @@ async function boot(): Promise<Fixture> {
 
   const engine = new ObjectQL();
   // [#10380] Channel 3 of 3 — the engine frame above the driver's exit. A
-  // Proxy on `error` ALONE, the idiom `engine-readonly-when-parent.test.ts`
+  // Proxy on ONE method, the idiom `engine-readonly-when-parent.test.ts`
   // established: every other logger method resolves to the engine's own.
+  // [#17212] That method is `warn` — the level the engine reports this frame at.
   const engineLogger = (engine as any).logger;
   (engine as any).logger = new Proxy(engineLogger, {
     get: (target: any, key: string) =>
-      key === 'error'
-        ? (msg: string, err?: unknown, meta?: unknown) => {
-            if (noise.engineError(msg, err, meta)) return;
-            target.error(msg, err, meta);
+      key === 'warn'
+        ? (msg: string, meta?: unknown, ...rest: unknown[]) => {
+            if (noise.engineWarn(msg, meta)) return;
+            target.warn(msg, meta, ...rest);
           }
         : target[key],
   });

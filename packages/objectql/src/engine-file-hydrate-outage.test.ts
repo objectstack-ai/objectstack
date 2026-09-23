@@ -20,7 +20,8 @@
  * sub-read only — never the parent object, the fields left un-hydrated, or the
  * consequence. ⚠️ [#13273] That block was rewritten when the generic frame
  * stopped being `error` for every cause: it is `debug` for the benign
- * "table was never provisioned" class now, and `error` for everything else.
+ * "table was never provisioned" class now, and — [#17212], because `find`
+ * rethrows and so tells its caller — `warn` for everything else.
  * The consequence gap this file exists to close is unchanged either way.
  *
  * The pass-through itself is correct and is NOT what this fixes. A file-metadata
@@ -221,6 +222,16 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
     logger = makeCapturingLogger();
   });
 
+  /**
+   * [#17212] The generic read handler's frame for the failed `sys_file`
+   * sub-read (`engine.ts`) sits on `warn` now, beside the seam's own line, so
+   * the two are told apart by message. ⛔ Exact match, not a substring.
+   */
+  const GENERIC_FRAME = 'Find operation failed';
+  const genericWarns = () => logger.lines.warn.filter((l: any) => l.msg === GENERIC_FRAME);
+  /** The seam's OWN `warn` — every `warn` that is not the generic frame. */
+  const seamWarns = () => logger.lines.warn.filter((l: any) => l.msg !== GENERIC_FRAME);
+
   // -------------------------------------------------- fail-open, both sides --
 
   describe('fail-open is UNCHANGED — ids pass through on every failure', () => {
@@ -293,8 +304,10 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
    * line. The re-pinned facts below are therefore:
    *
    *   1. the generic frame DOES now separate the two causes by channel — the
-   *      benign read leaves the `error` channel empty (#13273's own acceptance,
-   *      re-measured from this file's fake driver);
+   *      benign read reaches `debug` only (#13273's own acceptance,
+   *      re-measured from this file's fake driver), the outage the loud
+   *      branch, which is `warn` since [#17212] (`find` rethrows into this
+   *      seam's catch, so its caller was told) — and neither reaches `error`;
    *   2. and it STILL does not satisfy #6116's acceptance, because on the
    *      outage branch it describes the sub-read only — never the parent
    *      object, the fields left un-hydrated, or the consequence that those
@@ -302,66 +315,74 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
    *      is what the seam's own `warn` closes, and it is unchanged.
    */
   describe('the generic line separates the two causes but still cannot name the loss', () => {
-    async function errorCensus(make: () => unknown) {
-      await boot(async () => {
-        throw make();
-      });
-      await engine.find('doc');
-      return logger.lines.error.map((l: any) => l.msg);
-    }
-
     /**
-     * The `debug` channel carries the engine's ordinary read tracing too, so
-     * this census is narrowed to the one frame under test. ⛔ Narrowed by an
-     * EXACT message match, not a substring: a filter that also admitted
+     * The generic frame one read produced, per channel. ⛔ Narrowed by an
+     * EXACT message match, not a substring: `debug` carries the engine's
+     * ordinary read tracing too (a filter that also admitted
      * `'Find operation starting'` would report a frame this block did not
-     * measure.
+     * measure), and `warn` carries the seam's own line, a different frame.
      */
-    async function debugCensus(make: () => unknown) {
+    async function census(make: () => unknown) {
       await boot(async () => {
         throw make();
       });
       await engine.find('doc');
-      return logger.lines.debug.filter((l: any) => l.msg === 'Find operation failed');
+      const pick = (level: string) =>
+        logger.lines[level].filter((l: any) => l.msg === GENERIC_FRAME);
+      return { error: pick('error'), warn: pick('warn'), debug: pick('debug') };
     }
 
-    it('[#13273] the benign cause no longer reaches `error` — it reaches `debug`', async () => {
-      const benign = await errorCensus(() => new Error('no such table: sys_file'));
-      const outage = await errorCensus(() =>
+    it('[#13273] the benign cause reaches `debug`; [#17212] the outage reaches `warn`; neither reaches `error`', async () => {
+      const benign = await census(() => new Error('no such table: sys_file'));
+      const outage = await census(() =>
         Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' }));
 
       // "The table was never provisioned" is a routine state, not a failure to
       // report — and every caller on that path treats it as a normal answer.
-      expect(benign).toEqual([]);
-      // ⭐ The positive control on that zero: the SAME read, one cause over,
-      // still reaches `error`. So the empty census above measures the
+      expect(benign.warn).toEqual([]);
+      expect(benign.error).toEqual([]);
+      expect(benign.debug).toHaveLength(1);
+      // ⭐ The positive control on those zeros: the SAME read, one cause over,
+      // reaches the loud branch. So the empty census above measures the
       // classification and not a broken fixture.
-      expect(outage).toEqual(['Find operation failed']);
+      expect(outage.warn.map((l: any) => l.msg)).toEqual([GENERIC_FRAME]);
+      expect(outage.debug).toEqual([]);
+      // [#17212] …and the loud branch is `warn`, not `error`: `find` rethrows
+      // into the seam's catch, so the read's caller WAS told.
+      expect(outage.error).toEqual([]);
     });
 
     it('[#13273] the benign frame is still recorded, one channel down', async () => {
       // ⛔ Demoted, not muted: the frame is still emitted, still names the
       // object, and now carries its own classification instead of a stack.
-      const benign = await debugCensus(() => new Error('no such table: sys_file'));
-      expect(benign.map((l: any) => l.msg)).toEqual(['Find operation failed']);
+      const { debug: benign } = await census(() => new Error('no such table: sys_file'));
+      expect(benign.map((l: any) => l.msg)).toEqual([GENERIC_FRAME]);
 
       const [meta] = benign[0].args;
       expect(meta).toMatchObject({ object: 'sys_file', reason: 'table-not-provisioned' });
     });
 
     it('names only the sub-read, not the degradation it caused', async () => {
-      await boot(async () => {
-        throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' });
+      const { warn } = await census(() =>
+        Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' }));
+
+      // `warn(message, meta)` — [#17212] the meta says which object was read,
+      // and carries the sub-read's own message AND stack (`warn` has no Error
+      // slot, so the engine builds them into `meta.error`)…
+      expect(warn).toHaveLength(1);
+      expect(warn[0].args).toHaveLength(1);
+      const [meta] = warn[0].args;
+      expect(meta).toMatchObject({
+        object: 'sys_file',
+        error: { message: 'connect ECONNREFUSED 127.0.0.1:5432' },
       });
-
-      await engine.find('doc');
-
-      // `error(message, error, meta)` — the meta says which object was read…
-      const [, meta] = logger.lines.error[0].args;
-      expect(meta).toMatchObject({ object: 'sys_file' });
+      expect(String(meta.error.stack)).toContain('    at ');
       // …and nothing about `doc`, `attachment`, or the un-hydrated answer that
-      // was nevertheless returned to the caller. That gap is this issue.
-      expect(JSON.stringify(meta)).not.toMatch(/doc|attachment/);
+      // was nevertheless returned to the caller. That gap is this issue. Asked
+      // of the meta's keys and the reported message — the stack is code
+      // locations, not a statement about the read.
+      expect(Object.keys(meta).sort()).toEqual(['error', 'object']);
+      expect(JSON.stringify({ ...meta, error: meta.error.message })).not.toMatch(/doc|attachment/);
     });
   });
 
@@ -369,21 +390,23 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
 
   describe('read outage → exactly one `warn` that names the loss', () => {
     for (const [label, make] of OUTAGE_ERRORS) {
-      it(`warns exactly once — ${label}`, async () => {
+      it(`the seam warns exactly once — ${label}`, async () => {
         await boot(async () => {
           throw make();
         });
 
         await engine.find('doc');
 
-        expect(logger.lines.warn).toHaveLength(1);
+        expect(seamWarns()).toHaveLength(1);
         // Functional degradation, not durability: nothing here claims to have
         // persisted anything, so escalating to `error` would be the
         // mirror-image failure AGENTS "Degradation log levels" warns about.
-        // The seam adds no loud line of its own — the single `error` present
-        // is the generic read handler's, pinned in its own block above.
-        expect(logger.lines.error).toHaveLength(1);
-        expect(logger.lines.error[0].msg).toBe('Find operation failed');
+        // [#17212] The generic read handler's frame for the failed sub-read is
+        // the one other `warn` (it used to be the single `error` here), pinned
+        // in its own block above — so nothing on this path reaches `error`.
+        expect(genericWarns()).toHaveLength(1);
+        expect(logger.lines.warn).toHaveLength(2);
+        expect(logger.lines.error).toHaveLength(0);
         expect(logger.lines.fatal).toHaveLength(0);
       });
     }
@@ -395,7 +418,8 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
 
       await engine.find('doc');
 
-      const [line] = logger.lines.warn;
+      expect(seamWarns()).toHaveLength(1);
+      const [line] = seamWarns();
       // The CONSEQUENCE, spelled out — this is the whole point of the issue:
       // the reader must learn that bare ids will read as "no file".
       expect(line.msg).toMatch(/sys_file/);
@@ -421,8 +445,10 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
       expect(rows).toHaveLength(3);
       // One batched lookup fails once, so it is reported once — AGENTS: "Say it
       // once, at the first degradation, not once per failed write."
-      expect(logger.lines.warn).toHaveLength(1);
-      expect(metaOfWarn(logger.lines.warn[0])).toMatchObject({ unresolvedIds: 3 });
+      expect(seamWarns()).toHaveLength(1);
+      expect(metaOfWarn(seamWarns()[0])).toMatchObject({ unresolvedIds: 3 });
+      // [#17212] The generic frame is ONE too — the lookup is one batched read.
+      expect(genericWarns()).toHaveLength(1);
     });
   });
 

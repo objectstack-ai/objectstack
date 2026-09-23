@@ -15,11 +15,17 @@ describe('connectorFetchOptions', () => {
     });
 
     it('⛔ does NOT map connectionTimeoutMs — one fetch signal cannot bound the connect phase', () => {
-        // The key is deliberately absent from ConnectorFetchPolicy, so the only
-        // way it could reach the wrapper is an alias onto `timeoutMs`. This pin
-        // goes red the moment someone adds one, which is the whole reason it
-        // exists: two keys silently meaning one thing is the shape this card
-        // removes, not a shape it may introduce elsewhere.
+        // The key is absent from ConnectorFetchPolicy, so the only way it could
+        // reach the wrapper is an alias onto `timeoutMs`. This pin goes red the
+        // moment someone adds one, which is the whole reason it exists: two keys
+        // silently meaning one thing is the shape this mapping removes, not a
+        // shape it may introduce elsewhere.
+        //
+        // The key is now RETIRED from `ConnectorSchema` and from
+        // `ConnectorProviderContext` (ADR-0049) — precisely because it could
+        // never be mapped here. The pin survives the retirement on purpose: it
+        // is what makes a re-introduction as a silent alias fail, and a stray
+        // leftover in a caller-built policy object still has to reach nothing.
         const opts = connectorFetchOptions(
             { connectionTimeoutMs: 1500 } as unknown as ConnectorFetchPolicy,
         );
