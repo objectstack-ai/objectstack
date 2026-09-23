@@ -1101,7 +1101,7 @@
       "title": "Linked accounts: link a social/OIDC identity through the redirect round-trip → a sys_account row appears in mine-view; unlink removes it; provider-less boot degrades honestly",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a signed-in user linking a second identity", "the same user after unlinking"],
@@ -1116,7 +1116,7 @@
       "steps": [
         "as a signed-in user, open Account → Identity Links (sys_account `mine` view, filter user_id={current_user_id}); screenshot the initial link set",
         "invoke link_social for a configured provider: the action is type:'url' — GET /api/v1/auth/sign-in/social?provider=<p>&callbackURL=<origin>/_console/apps/account/sys_account (full-page navigation, NOT XHR, so the OAuth 302 dance and link cookie work); complete the provider round-trip and land back on the Identity Links view",
-        "confirm a sys_account row now exists for that provider in the caller's mine-view (provider_id = the provider, user_id = the caller, issuer stamped)",
+        "confirm a sys_account row now exists for that provider in the caller's mine-view (provider_id = the provider, user_id = the caller) — (provider_id, account_id) is the whole account identity; there is no issuer to check, sys_account.issuer retired with better-auth 1.7.3 (packages/spec/src/migrations/entries/semantic/18.sys-account-issuer-retired.ts)",
         "unlink it: the unlink_account action → POST /api/v1/auth/unlink-account with accountId = the sys_account ROW id (better-auth 1.7 keys on the row id); confirm the row is gone from mine-view",
         "both-sides / degradation: on a boot with NO provider configured, confirm link_social degrades honestly — the affordance is absent or names the missing provider, rather than offering a link that dead-ends (open-edition honest-degradation posture)",
         "confirm sys_account is read-only over the data API — a forged direct insert/delete is refused (apiMethods ['get','list'], writes 405)"
@@ -1125,7 +1125,7 @@
         {
           "clause": "linking a social identity creates a sys_account row in the caller's mine-view after the redirect round-trip completes",
           "oracle": "api",
-          "verify": "GET /api/v1/data/sys_account (mine view) after the link shows a new row with provider_id = the provider and user_id = the caller; issuer is stamped",
+          "verify": "GET /api/v1/data/sys_account (mine view) after the link shows a new row with provider_id = the provider and user_id = the caller; a row with no issuer is the healthy shape, never a FAIL — the column is retired",
           "evidence": "the post-link mine-view read"
         },
         {
@@ -1166,7 +1166,8 @@
         "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_accounts (nav_accounts → 'Identity Links', objectName sys_account)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: social/OIDC account linking round-trip → sys_account mine-view row, unlink removal, provider-less honest degradation; blocked(fixture) pending a configured IdP (PENDING-GAPS §C)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: social/OIDC account linking round-trip → sys_account mine-view row, unlink removal, provider-less honest degradation; blocked(fixture) pending a configured IdP (PENDING-GAPS §C)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-09-23", "change": "the 'issuer stamped' requirement is withdrawn from both the step and the first acceptance clause's verify: better-auth 1.7.3 rolled the issuer-scoped account identity back and sys_account.issuer retired with it, so nothing stamps it and the old verify failed a healthy system. The reason is kept — the step now says (provider_id, account_id) is the whole identity and names the retirement's migration entry in packages/spec — and the verify states that an issuer-less row is the expected shape", "ref": "#19217" }
       ]
     },
     {
