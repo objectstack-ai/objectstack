@@ -367,8 +367,9 @@ export const RECENSUS_17242 = {
    * anchors have different LIFETIMES, not different contents: `measuredOn` is a
    * commit this branch was cut from, `boundAgainstSha` is a commit ON it, and a
    * squash merge leaves only the first resolvable. The pin block in `selfTest()`
-   * states the consequence and takes both; the equivalence is held there too, so
-   * this sentence is checked rather than trusted whenever both still resolve. */
+   * states the consequence and takes both, and because it requires BOTH to read
+   * `objectuiPinSha`, this sentence is checked rather than trusted on any tree
+   * where both anchors still resolve. */
   boundAgainstSha: 'cdd68cf15ed863468ce6eecdd5c0824b760ea22a',
   objectuiPinSha: '87af769e9a3ee28ace099fdd653d3ebd79fe82e2',
   objectuiMainSha: '0cf2d6644bdb96a9a6784ef801ee6a60a5306bd8',
@@ -1158,8 +1159,8 @@ export function selfTest() {
   // on every run, before and after the squash. The pin file is byte-identical at
   // the two commits — the only file differing between them is this gate, which is
   // the record's own claim at `boundAgainstSha` — so reading at `measuredOn` reads
-  // the same pin, and the equivalence case below holds that claim whenever both
-  // anchors resolve rather than leaving it as prose.
+  // the same pin, and the loop below holds that claim by requiring BOTH anchors to
+  // read `objectuiPinSha` rather than by leaving it as prose.
   //
   // ⇒ `measuredOn` is the PRIMARY pin and is expected to be taken on main forever;
   // `boundAgainstSha` is a SECOND, conditional one that lapses after the squash.
