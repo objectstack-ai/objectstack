@@ -464,6 +464,9 @@ export class FilesystemLoader implements MetadataLoader {
         prettify,
         indent,
         sortKeys,
+        // The `typescript` format annotates the file with this metadata type's
+        // spec type, or with nothing when the type has none.
+        metadataType: type,
       });
 
       // Write to disk (atomic or direct)

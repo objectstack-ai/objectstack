@@ -10,22 +10,78 @@ import type { z } from 'zod';
 import type { MetadataFormat } from '@objectstack/spec/system';
 import type { MetadataSerializer, SerializeOptions } from './serializer-interface.js';
 
+/**
+ * The spec type a `typescript`-format file's `metadata` constant is annotated
+ * with, per metadata type: `[type name, @objectstack/spec subpath]`.
+ *
+ * An emitted annotation must never be false. So a metadata type is listed only
+ * when the spec exports a type that IS the input type of the schema
+ * `getMetadataTypeSchema()` resolves for it (`z.input<typeof XSchema>`, the
+ * ADR-0122 authoring name): then any body that metadata type's contract accepts
+ * also type-checks. A metadata type that is not listed (a plugin's own type,
+ * a misspelling, or one whose spec type is narrower than its schema) gets no
+ * annotation and no `import type`, never `any`, `unknown` or another type's
+ * shape.
+ *
+ * `book` is deliberately absent: `Book` is written by hand and lacks the
+ * `_packageId` / `_provenance` protection keys `BookSchema` accepts, so a book
+ * the loader has stamped would fail against it.
+ *
+ * Every entry is compiled with `tsc` in `serializers.test.ts`, so a renamed or
+ * moved spec type fails there instead of in a saved file.
+ */
+const ANNOTATION_BY_METADATA_TYPE: ReadonlyMap<string, readonly [typeName: string, subpath: string]> = new Map([
+  ['object', ['ServiceObject', 'data']],
+  ['field', ['Field', 'data']],
+  ['hook', ['Hook', 'data']],
+  ['seed', ['Seed', 'data']],
+  ['mapping', ['Mapping', 'data']],
+  ['datasource', ['Datasource', 'data']],
+  ['analytics_cube', ['Cube', 'data']],
+  ['view', ['ViewMetadata', 'ui']],
+  ['page', ['Page', 'ui']],
+  ['dashboard', ['Dashboard', 'ui']],
+  ['app', ['App', 'ui']],
+  ['action', ['Action', 'ui']],
+  ['report', ['Report', 'ui']],
+  ['dataset', ['Dataset', 'ui']],
+  ['flow', ['Flow', 'automation']],
+  ['webhook', ['Webhook', 'automation']],
+  ['job', ['Job', 'system']],
+  ['translation', ['TranslationItem', 'system']],
+  ['email_template', ['EmailTemplateDefinition', 'system']],
+  ['doc', ['Doc', 'system']],
+  ['api', ['ApiEndpoint', 'api']],
+  ['permission', ['PermissionSet', 'security']],
+  ['sharing_rule', ['SharingRule', 'security']],
+  ['capability', ['CapabilityDeclarationInput', 'security']],
+  ['position', ['Position', 'identity']],
+  ['agent', ['Agent', 'ai']],
+  ['tool', ['Tool', 'ai']],
+  ['skill', ['Skill', 'ai']],
+  ['connector', ['DeclarativeConnectorEntry', 'integration']],
+]);
+
 export class TypeScriptSerializer implements MetadataSerializer {
   constructor(private format: 'typescript' | 'javascript' = 'typescript') {}
 
   serialize<T>(item: T, options?: SerializeOptions): string {
-    const { prettify = true, indent = 2 } = options || {};
+    const { prettify = true, indent = 2, metadataType } = options || {};
 
     const jsonStr = JSON.stringify(item, null, prettify ? indent : 0);
-    
-    if (this.format === 'typescript') {
-      return `import type { ServiceObject } from '@objectstack/spec/data';\n\n` +
-        `export const metadata: ServiceObject = ${jsonStr};\n\n` +
-        `export default metadata;\n`;
-    } else {
-      return `export const metadata = ${jsonStr};\n\n` +
+
+    const annotation =
+      this.format === 'typescript' && metadataType !== undefined
+        ? ANNOTATION_BY_METADATA_TYPE.get(metadataType)
+        : undefined;
+    if (annotation) {
+      const [typeName, subpath] = annotation;
+      return `import type { ${typeName} } from '@objectstack/spec/${subpath}';\n\n` +
+        `export const metadata: ${typeName} = ${jsonStr};\n\n` +
         `export default metadata;\n`;
     }
+    return `export const metadata = ${jsonStr};\n\n` +
+      `export default metadata;\n`;
   }
 
   deserialize<T>(content: string, schema?: z.ZodSchema): T {

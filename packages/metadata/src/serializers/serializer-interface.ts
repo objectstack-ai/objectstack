@@ -21,6 +21,14 @@ export interface SerializeOptions {
   sortKeys?: boolean;
   /** Include default values in output */
   includeDefaults?: boolean;
+  /**
+   * The metadata type of the item being serialized (`'object'`, `'view'`,
+   * `'flow'`, …). Only the `typescript` format reads it: it picks the spec
+   * authoring type the emitted constant is annotated with, and an item with no
+   * type, or with a type that has no such spec type, is written with no
+   * annotation. `FilesystemLoader.save()` passes the type it was given.
+   */
+  metadataType?: string;
 }
 
 /**
