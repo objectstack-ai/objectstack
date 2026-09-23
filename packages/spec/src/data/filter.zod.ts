@@ -1590,8 +1590,8 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
  * shape `FILTER_COMPARAND_TYPE_CASES` calls the mongo silent-edit worst cell.
  * The view vocabulary, which DOES have an absent, carves it out on its own side.
  *
- * ⛔ **Scoped to the one operator the table writes rows for.** `$contains` /
- * `$startsWith` / `$endsWith` / `$like` / `$ilike` have no such row and keep the
+ * ⛔ `$contains` /
+ * `$startsWith` / `$endsWith` / `$like` / `$ilike` keep the
  * answer they give today; widening by analogy is the table's decision.
  */
 function checkFilterConditionComparands(
@@ -1619,8 +1619,7 @@ function checkFilterConditionComparands(
           code: 'custom',
           path: [...path, key, op],
           message:
-            `The ${textComparandRefusalReason(key, op, comparand)}. This is refused at `
-            + `authoring time because the query path refuses it too (400 INVALID_FILTER).`,
+            `The ${textComparandRefusalReason(key, op, comparand)}.`,
         });
         continue;
       }
