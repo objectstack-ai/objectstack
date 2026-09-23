@@ -35,7 +35,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "Rol de plataforma",
-        help: "Rol a nivel de plataforma (admin, user, …). Se establece mediante la acción Establecer rol de plataforma."
+        help: "Valor de rol heredado de better-auth (admin, user, …). ObjectStack ya no lo escribe (ADR-0068 D2). Para conceder la condición de administrador de la plataforma, incluya el correo verificado del usuario en `OS_PLATFORM_OWNER_EMAIL`; bajo la postura de tenencia `single`, una asignación sin ámbito de `admin_full_access` en `sys_user_permission_set` también la concede."
       },
       banned: {
         label: "Bloqueado",
