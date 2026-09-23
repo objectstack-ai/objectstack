@@ -359,8 +359,9 @@ function refuseRemoteTransaction(door: string, detail: string): never {
  * only when the method is absent) never fired — while every remote schema door
  * (`syncSchemasBatch`, the engine's boot sync; `syncSchema` / `initObjects`)
  * routes through `RemoteTransport`, which performs the DDL immediately, and the
- * latter two also run the #5770 canonical temporal backfill, which rewrites
- * stored rows. Measured (`turso-remote-deferred-ddl.test.ts`): the deferral was
+ * latter two also ran the #5770 canonical temporal backfill, which rewrites
+ * stored rows (the batch door runs it too since #19844). Measured
+ * (`turso-remote-deferred-ddl.test.ts`, before this refusal existed): the deferral was
  * accepted, CREATE/ALTER ran on every door, the backfill rewrote rows on two of
  * them, and preview and flush both answered `[]` — a dry run that changed the
  * database and then reported no pending work.
@@ -1698,9 +1699,10 @@ export class TursoDriver extends SqlDriver {
    *
    * It also records the object as one whose table this driver created, which is
    * the whole input to {@link paginationTieBreaker} in remote mode. That goes
-   * FIRST and outside the `try`: both callers reach here only after the DDL has
-   * already succeeded, so the table exists with its `id` primary key whether or
-   * not the best-effort coercion registration below does.
+   * FIRST and outside the `try`: its only caller, {@link completeRemoteSchemaSync},
+   * runs only after the DDL has already succeeded, so the table exists with its
+   * `id` primary key whether or not the best-effort coercion registration below
+   * does.
    */
   private registerRemoteFieldMetadata(obj: { name: string; fields?: Record<string, any>; tenancy?: any }): void {
     this.remoteManagedObjects.add(obj.name);
@@ -1709,6 +1711,39 @@ export class TursoDriver extends SqlDriver {
     } catch {
       /* metadata registration is best-effort; never block schema sync on it */
     }
+  }
+
+  /**
+   * The post-DDL half every REMOTE schema door owes, in its one order: register
+   * each synced object's field metadata, then run the canonical temporal
+   * backfill ONCE for the whole call.
+   *
+   * All three remote doors (`syncSchema`, `initObjects`, `syncSchemasBatch`)
+   * send their DDL through `RemoteTransport` and so never reach
+   * `SqlDriver.initObjects`, which is what fills the read-coercion registries
+   * and runs the Knex backfill on the local faces. Each door has to finish the
+   * job itself, and they drifted apart once: `syncSchemasBatch` — the door
+   * `ObjectQLPlugin`'s boot sync takes whenever `supports.batchSchemaSync`
+   * holds, so every remote-Turso boot — returned straight after its DDL. A
+   * booted remote app then read a boolean back as `1` and JSON as a string, got
+   * no `id` tie-breaker on a paged read, and never converged its temporal
+   * columns (#19844). One helper called by all three is what keeps them from
+   * drifting again.
+   *
+   * Callers reach here only after their DDL resolved, so a DDL failure throws
+   * before anything is registered and no object is recorded as a table this
+   * driver created unless it exists. Registration precedes the backfill because
+   * the backfill reads it to learn which columns are temporal. The backfill
+   * probes every column it finds in one round-trip, so calling it once per call
+   * rather than once per object is what keeps a boot's steady state at a single
+   * round-trip.
+   */
+  private async completeRemoteSchemaSync(
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>,
+  ): Promise<void> {
+    if (objects.length === 0) return;
+    for (const obj of objects) this.registerRemoteFieldMetadata(obj);
+    await this.backfillRemoteCanonicalTemporalQuietly();
   }
 
   /**
@@ -2014,14 +2049,10 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'syncSchema');
     if (this.isRemote) {
       await this.remoteTransport!.syncSchema(object, schema);
-      // See initObjects(): populate the read-coercion registries for remote mode.
-      // Key strictly by `object` (what find()/formatOutput look up) — never let a
+      // Registration + canonical backfill, see completeRemoteSchemaSync(). Key
+      // strictly by `object` (what find()/formatOutput look up) — never let a
       // stray `schema.name` shadow it.
-      this.registerRemoteFieldMetadata({ ...(schema as Record<string, any>), name: object });
-      // #5770: the remote twin of the `backfillCanonicalDatetimes` call
-      // `SqlDriver.initObjects` makes at exactly this point. Must run AFTER the
-      // registration above — that is what tells it which columns are temporal.
-      await this.backfillRemoteCanonicalTemporalQuietly();
+      await this.completeRemoteSchemaSync([{ ...(schema as Record<string, any>), name: object }]);
       return;
     }
     return super.syncSchema(object, schema, options);
@@ -2064,17 +2095,11 @@ export class TursoDriver extends SqlDriver {
         objects.map((obj) => ({ object: obj.name, schema: obj })),
       );
       // Remote DDL bypasses SqlDriver.initObjects, which is what normally
-      // populates the boolean/json/date/numeric read-coercion registries.
-      // Register the field-type metadata explicitly (no DDL) so remote reads
-      // run the same formatOutput() coercion as local/replica mode — otherwise
-      // a boolean reads back as raw 0/1, JSON as a string, dates as raw text.
+      // populates the boolean/json/date/numeric read-coercion registries and
+      // runs the canonical temporal backfill. Without the registration a
+      // boolean reads back as raw 0/1, JSON as a string, dates as raw text.
       // (Root cause of the 2026-07-06 case_escalation `1 != true` incident.)
-      for (const obj of objects) this.registerRemoteFieldMetadata(obj);
-      // #5770: the remote twin of the `backfillCanonicalDatetimes` /
-      // `backfillCanonicalTimes` calls `SqlDriver.initObjects` makes per table.
-      // One batched probe covers every column synced here, so the steady state
-      // (nothing to converge) costs a single round-trip for the whole boot.
-      await this.backfillRemoteCanonicalTemporalQuietly();
+      await this.completeRemoteSchemaSync(objects);
       return;
     }
     return super.initObjects(objects);
@@ -2084,14 +2109,24 @@ export class TursoDriver extends SqlDriver {
    * Batch-synchronize multiple schemas in a single round-trip.
    *
    * In remote mode, delegates to `RemoteTransport.syncSchemasBatch()` which
-   * uses `client.batch()` to submit all DDL as one network call.
+   * uses `client.batch()` to submit all DDL as one network call, then finishes
+   * exactly as the other two remote doors do (see
+   * {@link completeRemoteSchemaSync}). This is the door `ObjectQLPlugin`'s boot
+   * sync takes on this driver, so it is the one that decides what a booted
+   * remote app reads back.
    * In local/replica mode, falls back to sequential `syncSchema()` calls
    * (Knex + better-sqlite3 is already local, so batching has no benefit).
    */
   async syncSchemasBatch(schemas: Array<{ object: string; schema: unknown }>, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'syncSchemasBatch');
     if (this.isRemote) {
-      return this.remoteTransport!.syncSchemasBatch(schemas);
+      await this.remoteTransport!.syncSchemasBatch(schemas);
+      // Key strictly by `object`, as syncSchema() does: it is the name the
+      // engine hands every later read and write for this table.
+      await this.completeRemoteSchemaSync(
+        schemas.map(({ object, schema }) => ({ ...(schema as Record<string, any>), name: object })),
+      );
+      return;
     }
     // Local/replica fallback: sequential sync (already fast with local SQLite)
     for (const { object, schema } of schemas) {
