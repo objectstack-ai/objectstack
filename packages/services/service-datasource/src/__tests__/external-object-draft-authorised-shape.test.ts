@@ -167,7 +167,15 @@ describe('round-trip — the factory call inside the emitted file accepts the dr
       'name',
       'signed_up_at',
     ]);
-    expect(evaluated.external).toEqual({ remoteSchema: 'mart', remoteName: 'customers' });
+    // `writable` is NOT emitted by the renderer — it is the schema default,
+    // applied because the evaluated file really parsed. Spelled out rather than
+    // loosened to `toMatchObject`: this key is the cheapest standing evidence
+    // that the factory ran instead of an object literal being handed back.
+    expect(evaluated.external).toEqual({
+      remoteSchema: 'mart',
+      remoteName: 'customers',
+      writable: false,
+    });
   });
 
   it('round-trips the no-namespace draft too — the TODO comment is inert to the factory', async () => {
