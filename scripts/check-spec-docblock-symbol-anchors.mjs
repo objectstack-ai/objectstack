@@ -1179,8 +1179,9 @@ export function selfTest() {
   //
   // ⛔ NOT TAKEN is printed only for an anchor naming no commit in this clone, and
   // for the primary only when git reports the clone as shallow. Every other failed
-  // read is a hard red: a renamed or mistyped pin file lands there, and so does a
-  // mistyped primary literal in a clone git does not report as shallow.
+  // read is a hard red: a renamed or mistyped pin file lands there at any anchor
+  // that resolves, and so does a mistyped primary literal in a clone git does not
+  // report as shallow.
   const realityPins = [
     ['primary', 'measuredOn', RECENSUS_17242.measuredOn],
     ['second', 'boundAgainstSha', RECENSUS_17242.boundAgainstSha],
@@ -1203,8 +1204,8 @@ export function selfTest() {
     check(read.status === 'ok' || skipped,
       `the ${role} reality pin was NOT taken, and not for a reason this battery skips: the read of `
         + `\`${OBJECTUI_PIN_FILE}\` at \`${commit}\` (\`${field}\`) answered \`${read.status}\`. \`commit-absent\` `
-        + 'is a failure only for the primary anchor, in a clone git does not report as shallow — a mistyped literal '
-        + 'lands here. `path-absent` means the anchor RESOLVED and the pin file is not readable at it — a renamed or '
+        + 'is a failure only for the primary anchor, in a clone git does not report as shallow — a mistyped '
+        + '`measuredOn` in such a clone lands here. `path-absent` means the anchor RESOLVED and the pin file is not readable at it — a renamed or '
         + 'mistyped pin path lands here, and reporting that as an unreachable anchor is how this pin gets switched off '
         + 'while its own notice tells the reader to expect the skip. `no-repo` means `git rev-parse --git-dir` failed '
         + 'here. ⛔ In every case the pin is NOT MEASURED, and NOT MEASURED is not a pass.');
