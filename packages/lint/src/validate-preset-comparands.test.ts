@@ -673,7 +673,7 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
   });
 });
 
-// ── [#19791] The two consumed rule-array carriers the walk never entered ────
+// ── [#19791] consumed rule-array carriers the walk never entered ────
 //
 // A list page's `interfaceConfig.filterBy` and a lookup field's
 // `lookupFilters` both reach the engine's `where` verbatim, and neither schema
