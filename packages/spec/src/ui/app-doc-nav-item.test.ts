@@ -95,7 +95,7 @@ describe('DocNavItemSchema — the per-variant strict surface', () => {
 
 describe('DocNavItemSchema — the "at least one target" rule reaches the JSON Schema', () => {
   it('the published projection carries it as anyOf-of-required, not only the refinement', () => {
-    const json = JSON.stringify(projectPublishedJsonSchema(DocNavItemSchema as unknown as z.ZodType));
+    const json = JSON.stringify(projectPublishedJsonSchema(DocNavItemSchema as unknown as z.ZodType, { io: 'input' }));
     expect(json).toContain('"required":["book"]');
     expect(json).toContain('"required":["doc"]');
   });

@@ -545,12 +545,12 @@ describe('alias integrity — coverage', () => {
     // both name a mechanism that can break silently, and both moved into the
     // shape-backed registry at #5593 rather than disappearing with it.
     //
-    // (a) `ui/app.zod.ts`'s nine navigation branches share ONE
-    //     `navItemSurface(variant)` options factory. Nine variants in, nine
+    // (a) `ui/app.zod.ts`'s ten navigation branches share ONE
+    //     `navItemSurface(variant)` options factory. Ten variants in, ten
     //     tables out — the count IS the coverage, and it is the assertion that
     //     fails if the de-duplication above ever collapses them onto one.
     const navTables = SURFACES.filter((s) => PROSE_TARGET_SURFACE.test(s.options.surface));
-    expect(navTables.length, 'one strict branch per nav-item `type`').toBe(9);
+    expect(navTables.length, 'one strict branch per nav-item `type`').toBe(10);
 
     // (b) `data/object.zod.ts` used to build its error map on FIRST USE, to
     //     step around a temporal dead zone, and needed a synthetic-issue poke in
