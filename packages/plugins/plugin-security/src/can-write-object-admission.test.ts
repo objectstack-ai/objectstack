@@ -277,10 +277,10 @@ type Tables = Record<string, Array<Record<string, unknown>>>;
  */
 const delegateTables = (): Tables => ({
   sys_business_unit: [
-    { id: 'bu_hq', name: 'hq', parent_business_unit_id: null },
-    { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
-    { id: 'bu_es', name: 'east_sales', parent_business_unit_id: 'bu_east' },
-    { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq' },
+    { id: 'bu_hq', name: 'hq', parent_business_unit_id: null, organization_id: 'org-1' },
+    { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq', organization_id: 'org-1' },
+    { id: 'bu_es', name: 'east_sales', parent_business_unit_id: 'bu_east', organization_id: 'org-1' },
+    { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq', organization_id: 'org-1' },
   ],
   sys_position: [{ id: 'pos_sales', name: 'sales_rep' }],
   sys_position_permission_set: [{ id: 'b1', position_id: 'pos_sales', permission_set_id: 'ps_sales' }],
