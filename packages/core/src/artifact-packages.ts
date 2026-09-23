@@ -35,8 +35,7 @@
  * - `packages` absent  → treat `manifest` (singular) as a **single-element list**.
  *
  * A `packages` that is present but is not an array takes neither branch. It is
- * refused here as `INVALID_ARTIFACT_PACKAGES`, and this function is the one
- * place every reader reaches that refusal through. The rule is stated once,
+ * refused here as `INVALID_ARTIFACT_PACKAGES`. The rule is stated once,
  * beside `AssembledPackageBodySchema` (`@objectstack/spec`, `stack.zod.ts`).
  *
  * The second branch is not a convenience: it is the term ADR-0130's whole

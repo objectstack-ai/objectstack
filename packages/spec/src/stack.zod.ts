@@ -1244,8 +1244,7 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  *
  * ## A non-array `packages` is MALFORMED, not absent
  *
- * This is the single statement of the rule. Every reader of a release
- * artifact's `packages` points here and does not restate it. The key is
+ * This is the single statement of the rule. The key is
  * declared on {@link ObjectStackDefinitionSchema} as an ARRAY of
  * {@link ArtifactPackageSchema} entries, each wrapping one body of this
  * schema. It therefore has two readings:
@@ -1257,10 +1256,10 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  * Any other value, such as `{}`, `0` or `'x'`, is neither reading. It is
  * malformed and REFUSED; it is never read as absent. `resolveArtifactPackageOrder`
  * (`@objectstack/core`) raises the refusal as `INVALID_ARTIFACT_PACKAGES`
- * (ADR-0112, `status: 422`), and every reader reaches it through that one
- * function. A reader that fell through to the artifact's top level instead
- * would answer questions about an artifact the loader refuses. One reader would
- * then boot what another refuses, which is the split this rule closes.
+ * (ADR-0112, `status: 422`). A reader that fell through to the artifact's
+ * top level instead would answer questions about an artifact the loader
+ * refuses. One reader would then boot what another refuses, which is the
+ * split this rule closes.
  *
  * ⚠️ `null` is the one value this rule does not settle. The schema's
  * `.optional()` refuses it, while the readers treat it as absent. That
