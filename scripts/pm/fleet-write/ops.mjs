@@ -40,10 +40,16 @@
  * Read from GitHub's own permission ledger for server-to-server tokens
  * (`github/docs`, `src/github-apps/data/fpt-2022-11-28/server-to-server-permissions.json`):
  * every `/issues/**` write here is `issues: write`; `/pulls/**` and the
- * pull-request GraphQL mutations are `pull-requests: write`; the sender gate's
- * `GET /repos/{o}/{r}/collaborators/{login}/permission` is `metadata: read`.
- * `PERMISSIONS` is that set and nothing wider; the workflow declares exactly it
- * on `actions/create-github-app-token`.
+ * ready / draft GraphQL mutations are `pull-requests: write`; the two
+ * auto-merge mutations (`enablePullRequestAutoMerge` /
+ * `disablePullRequestAutoMerge`) additionally require `contents: write` —
+ * measured on the first live use, where a token without it answered
+ * "Resource not accessible by integration" — and those two rows are the ONLY
+ * spenders of it: the table has no contents op (no file, ref or branch write);
+ * the sender gate's `GET /repos/{o}/{r}/collaborators/{login}/permission` is
+ * `metadata: read`. `PERMISSIONS` is that set and nothing wider; the workflow
+ * declares exactly it on `actions/create-github-app-token`, and
+ * `validate.mjs --self-test` pins the two spellings equal.
  *
  * ## The platform's `client_payload` ceilings — pinned, with their source
  *
@@ -154,8 +160,13 @@ export const FIELDS = Object.freeze({
   state_reason: Object.freeze({ kind: 'enum', values: Object.freeze(['completed', 'not_planned', 'duplicate', 'reopened']) }),
 });
 
-/** The App permissions the relay token is narrowed to — the union of every row's `permission`, plus the sender gate's read. */
-export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', metadata: 'read' });
+/**
+ * The App permissions the relay token is narrowed to — the union of every
+ * row's `permission`, plus the sender gate's read. `contents: write` is spent
+ * by the two auto-merge rows alone (GitHub's requirement for those mutations);
+ * no row writes a file, a ref or a branch.
+ */
+export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read' });
 
 const issues = (repo, n) => `/repos/${repo}/issues/${n}`;
 const pulls = (repo, n) => `/repos/${repo}/pulls/${n}`;
@@ -276,14 +287,16 @@ export const OPS = Object.freeze({
     optional: Object.freeze([]),
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'convertPullRequestToDraft', query: PR_MUTATIONS.pr_draft, pull: a.pull } }],
   }),
+  // The two auto-merge mutations spend `contents` — GitHub requires `contents: write`
+  // on the token for enable/disablePullRequestAutoMerge, over and above `pull-requests`.
   automerge_enable: Object.freeze({
-    permission: 'pull-requests',
+    permission: 'contents',
     required: Object.freeze(['pull']),
     optional: Object.freeze([]),
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: PR_MUTATIONS.automerge_enable, pull: a.pull } }],
   }),
   automerge_disable: Object.freeze({
-    permission: 'pull-requests',
+    permission: 'contents',
     required: Object.freeze(['pull']),
     optional: Object.freeze([]),
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'disablePullRequestAutoMerge', query: PR_MUTATIONS.automerge_disable, pull: a.pull } }],
