@@ -123,7 +123,7 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo } from './check-half-states.mjs';
 import { classifyHttp } from './label-write.mjs';
-import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceFilePath, paceWrite, releaseWriteLease } from './write-pace.mjs';
+import { EXIT_WRITE_PACE_REFUSED, isProxyRefusal, isWriteMethod, noteResponse, paceFilePath, paceWrite, releaseWriteLease } from './write-pace.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const PROXY_REARM_GUARD = 'OS_FLEET_TOKEN_PROXY_REARMED';
@@ -457,8 +457,8 @@ function rateRemainingOf(headers) {
   return raw === null || String(raw).trim() === '' ? null : Number(raw);
 }
 
-function exitForStatus(status, headers) {
-  const verdict = classifyHttp({ status, rateRemaining: rateRemainingOf(headers) });
+function exitForStatus(status, headers, body = null) {
+  const verdict = classifyHttp({ status, rateRemaining: rateRemainingOf(headers), body });
   if (verdict === 'prerequisite' || verdict === 'ratelimit') return EXIT_PREREQUISITE;
   if (status >= 500 || status === 0) return EXIT_PREREQUISITE;
   return EXIT_PLATFORM_REFUSAL;
@@ -542,16 +542,19 @@ export async function mintInstallationToken(inputs, deps = {}) {
       status: res.status,
       headers: res.headers,
       body: minted,
-      verdict: classifyHttp({ status: res.status, rateRemaining: rateRemainingOf(res.headers) }),
+      verdict: classifyHttp({ status: res.status, rateRemaining: rateRemainingOf(res.headers), body: minted }),
     },
     paceDeps,
   );
   if (res.status !== 201 || !minted || typeof minted.token !== 'string' || !minted.token) {
     throw new FleetTokenError(
       `POST ${mintPath} → HTTP ${res.status} ${scrub(platformSentence(minted), secrets)}`.trim() +
+        (isProxyRefusal(minted)
+          ? ' — the egress PROXY refused the /app/** path; GitHub was never asked. A cloud seat container cannot mint the fleet identity: no stop marker was written and no budget was spent — take the relay instead (scripts/pm/with-fleet.sh --via dispatch --repo owner/name --actions FILE)'
+          : '') +
         (res.status === 401 ? ' — the JWT was refused: check OS_FLEET_APP_ID and the private key belong to the same App, and the host clock' : '') +
         (res.status === 404 ? ' — the installation was not found under this App: check OS_FLEET_INSTALLATION_ID' : ''),
-      exitForStatus(res.status, res.headers),
+      exitForStatus(res.status, res.headers, minted),
     );
   }
   secrets.push(minted.token);
@@ -635,7 +638,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the JWT: RS256 over node crypto, the claims the platform reads, no library': 9,
   'the key: PEM, PEM with literal \\n, base64 of the PEM — one key out of three spellings': 7,
   'the cache: 0600, refreshed five minutes early, keyed to the installation': 8,
-  'the mint: what a fake platform answers, and what this tool does with it': 11,
+  'the mint: what a fake platform answers, and what this tool does with it': 13,
   'redaction: a known token and a known key fed through every output path never come back out': 12,
   'the CLI: --print prints the token alone, --export prints shell, --status prints neither': 10,
   'the repository-variables route: read when the environment has none, environment wins, the key never lands anywhere': 11,
@@ -794,6 +797,13 @@ export async function selfTest() {
       t('a 404 on the installation is a platform refusal (exit 5) that names the installation id', [notFound.error?.exitCode, notFound.error?.message.includes('OS_FLEET_INSTALLATION_ID')], [EXIT_PLATFORM_REFUSAL, true]);
       const down = await mintWith({ ...happy, 'POST /app/installations/163654544/access_tokens': { throws: 'getaddrinfo ENOTFOUND api.example.test' } });
       t('an unreachable platform is a prerequisite failure, and the mint left no cache', [down.error?.exitCode, existsSync(down.file)], [EXIT_PREREQUISITE, false]);
+      // The egress proxy's 403 on the /app/** path (measured in a cloud seat container): the route, not the platform.
+      const PROXY_403 = { message: 'Access to this GitHub API path is not permitted through this proxy.', documentation_url: 'https://docs.anthropic.com/en/docs/claude-code/github-actions' };
+      const writesBefore = existsSync(paceFile) ? readFileSync(paceFile, 'utf8').split('\n').filter((l) => l.includes('"t":')).length : 0;
+      const proxied = await mintWith({ ...happy, 'POST /app/installations/163654544/access_tokens': { status: 403, json: PROXY_403 } });
+      const paceText = existsSync(paceFile) ? readFileSync(paceFile, 'utf8') : '';
+      t("⭐ the egress PROXY's 403 on the mint is a prerequisite failure (exit 3) whose message names the proxy and the relay spelling — not a platform refusal", [proxied.error?.exitCode, proxied.error?.message.includes('egress PROXY') && proxied.error?.message.includes('--via dispatch')], [EXIT_PREREQUISITE, true]);
+      t('⛔ …and it wrote NO stop marker and spent NO budget: the pace log holds no marker and the write record was given back', [paceText.includes('"stop":'), paceText.split('\n').filter((l) => l.includes('"t":')).length, proxied.logs.some((l) => l.includes('No stop marker'))], [false, writesBefore, true]);
       const sibling = { token: 'ghs_SiblingMintedFirst00000000000000000000', expires_at: new Date(NOW + 3600_000).toISOString(), bot: { login: 'objectstack-fleet[bot]', id: 332303061 }, installation_id: inputs.installationId };
       const reused = await mintWith(happy, { recheck: () => sibling });
       t('⛔ a sibling\'s fresh mint, found after the lease was granted, is used and no second POST leaves', [reused.result?.token, reused.seen.length], [sibling.token, 0]);

@@ -86,7 +86,11 @@ import { readDeclared } from './bootstrap-declared-permissions.js';
 import { PermissionDeniedError } from './errors.js';
 import { isTenantAdmin } from './delegated-admin-gate.js';
 
-/** Thrown when the referenced `sys_permission_set` row does not exist → HTTP 404. */
+/**
+ * Thrown when the referenced `sys_permission_set` row does not exist → HTTP 404.
+ * `NOT_FOUND` is listed under `ERROR_CODE_LEDGER['@objectstack/plugin-security']`
+ * (provenance row — this package stamps it).
+ */
 export class PermissionSetNotFoundError extends Error {
   readonly code = 'NOT_FOUND';
   readonly statusCode = 404;
@@ -96,7 +100,11 @@ export class PermissionSetNotFoundError extends Error {
   }
 }
 
-/** Thrown when there is no active overlay to discard → HTTP 409. */
+/**
+ * Thrown when there is no active overlay to discard → HTTP 409.
+ * `INVALID_STATE` is listed under `ERROR_CODE_LEDGER['@objectstack/plugin-security']`
+ * (provenance row — this package stamps it).
+ */
 export class PermissionSetOverlayStateError extends Error {
   readonly code = 'INVALID_STATE';
   readonly statusCode = 409;
