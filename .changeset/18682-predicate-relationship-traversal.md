@@ -86,7 +86,9 @@ then no resolved permission sets, unresolvable posture, the ADR-0066 D3
 the ADR-0090 D10 delegator check, and — when the caller's payload is supplied —
 the field-level security WRITE gate over it (`getFieldPermissions`, folded
 through the D3 field-capability contract, intersected with the delegator's mask
-under D10, then the forbidden-write detection). It exists for doors that must ask
+under D10, then the forbidden-write detection); and last, the ADR-0123 D2
+no-active-organization wall, the same verdict the middleware's step 3.7 throws
+on. It exists for doors that must ask
 "could this caller perform this write" without running the engine middleware —
 the write preview is the first.
 
@@ -95,12 +97,12 @@ write decision: the ADR-0103 engine-owned affordance gate, the ADR-0090 D12
 delegated-admin gate, the fail-closed postures (#3545's unresolvable posture and
 the D10 dangling delegator), the ADR-0066 D3 capability AND-gate for both
 principals, the `allowCreate`/`allowEdit` CRUD grant, the D10 delegator's
-independent grant, and the step 2.5 FLS write gate over the keys the payload
-names. It says nothing about any refusal not in that list.
-`@objectstack/plugin-security`'s `can-write-object-admission.test.ts` pins the
-method's answer equal to the registered middleware's on the cases it lists, and
-pins one D12 UPDATE case as a direction: the method `false`, the middleware
-`true`.
+independent grant, the step 2.5 FLS write gate over the keys the payload
+names, and the ADR-0123 D2 organization wall. It says nothing about any refusal
+not in that list. `@objectstack/plugin-security`'s
+`can-write-object-admission.test.ts` pins the method's answer equal to the
+registered middleware's on its equivalence block's cases, and pins one D12
+UPDATE case as a direction: the method `false`, the middleware `true`.
 
 ⛔ `true` never means the write will succeed, and ⛔ what follows is not an
 enumeration of the distance to success: the middleware refuses both before and

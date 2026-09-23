@@ -220,6 +220,12 @@ const TENANT_ADMIN_CTX = {
   userId: 'u_admin', tenantId: 'org-1', positions: [],
   permissions: [ADMIN_FULL_ACCESS], posture: 'PLATFORM_ADMIN',
 };
+/**
+ * ⭐ An authenticated session with NO active organization (ADR-0123 D2): the
+ * writer's context minus its `tenantId`. Under a walled posture the write path
+ * refuses it before `next()`.
+ */
+const ORGLESS_CTX = { userId: 'u_writer', positions: [], permissions: [], posture: 'MEMBER' };
 /** A principal-less context — no positions, no sets, no `userId`. */
 const PRINCIPAL_LESS_CTX = { positions: [], permissions: [] };
 /** The system bypass, spelled the way every door spells it. */
@@ -297,9 +303,12 @@ function rowMatches(row: Record<string, unknown>, where: Record<string, unknown>
   });
 }
 
-async function boot(sets: PermissionSet[], tables?: Tables) {
+async function boot(sets: PermissionSet[], tables?: Tables, opts: { orgScoping?: boolean } = {}) {
   const middlewares: Array<(opCtx: any, next: () => Promise<void>) => Promise<void>> = [];
   const services: Record<string, unknown> = {
+    // The `isolated` posture, resolved the way the plugin falls back to it when
+    // no `tenancy` service is wired: only an ADR-0123 D2 case asks for it.
+    ...(opts.orgScoping ? { 'org-scoping': { name: 'org-scoping' } } : {}),
     manifest: { register: vi.fn() },
     objectql: {
       registerMiddleware: (mw: any) => middlewares.push(mw),
@@ -388,6 +397,8 @@ describe('canWriteObject agrees with the engine middleware, case for case', () =
     context: Record<string, unknown>;
     /** The caller's payload, reaching BOTH doors. Defaults to `PLAIN_PAYLOAD`. */
     data?: unknown;
+    /** Boot under the `isolated` posture, so the ADR-0123 D2 wall is armed. */
+    orgScoping?: true;
   }> = [
     { label: 'no grant of any kind on the object', object: 'ledger', operation: 'insert', sets: [WRITER_SET], context: WRITER_CTX },
     { label: 'an explicit create grant', object: 'invoice', operation: 'insert', sets: [WRITER_SET], context: WRITER_CTX },
@@ -442,11 +453,18 @@ describe('canWriteObject agrees with the engine middleware, case for case', () =
     { label: 'an RBAC link table for a tenant-level admin', object: 'sys_user_position', operation: 'insert', sets: [ADMIN_SET], context: TENANT_ADMIN_CTX, data: RBAC_PAYLOAD },
     { label: 'an RBAC link table for a SYSTEM context', object: 'sys_user_position', operation: 'insert', sets: [RBAC_CRUD_SET], context: SYSTEM_CTX, data: RBAC_PAYLOAD },
     { label: 'an RBAC link table for a principal-less context', object: 'sys_user_position', operation: 'insert', sets: [RBAC_CRUD_SET], context: PRINCIPAL_LESS_CTX, data: RBAC_PAYLOAD },
+    // ⭐ ADR-0123 D2 — the no-active-organization wall, under the `isolated`
+    // posture. The write grant is held; only the missing organization differs
+    // from the control twin below, which the wall admits.
+    { label: 'an authenticated caller with no active organization (ADR-0123 D2)', object: 'invoice', operation: 'insert', sets: [WRITER_SET], context: ORGLESS_CTX, orgScoping: true },
+    { label: 'the same org-less caller in UPDATE mode', object: 'invoice', operation: 'update', sets: [WRITER_SET], context: ORGLESS_CTX, orgScoping: true },
+    { label: 'an org-less caller who resolves no permission set at all', object: 'invoice', operation: 'insert', sets: [], context: ORGLESS_CTX, orgScoping: true },
+    { label: 'the same caller WITH an active organization, under the same posture', object: 'invoice', operation: 'insert', sets: [WRITER_SET], context: WRITER_CTX, orgScoping: true },
   ];
 
   for (const c of CASES) {
     it(`agrees on ${c.label}`, async () => {
-      const { plugin, middleware } = await boot(c.sets);
+      const { plugin, middleware } = await boot(c.sets, undefined, { orgScoping: c.orgScoping });
       const data = 'data' in c ? c.data : PLAIN_PAYLOAD;
       const admitted = await middlewareAdmits(middleware, c.object, c.operation, c.context, data);
       const answered = await plugin.canWriteObject(c.object, c.operation, c.context, data);
@@ -614,6 +632,29 @@ describe('the arms the CRUD grant alone does not cover', () => {
   it('leaves an ordinary object untouched by either pre-resolution arm', async () => {
     const { plugin } = await boot([WRITER_SET]);
     await expect(plugin.canWriteObject('invoice', 'insert', WRITER_CTX, PLAIN_PAYLOAD)).resolves.toBe(true);
+  });
+
+  // ── arm 10: the ADR-0123 D2 no-active-organization wall (step 3.7) ─────────
+
+  it('DENIES an authenticated caller with no active organization under a walled posture (ADR-0123 D2)', async () => {
+    const { plugin } = await boot([WRITER_SET], undefined, { orgScoping: true });
+    await expect(plugin.canWriteObject('invoice', 'insert', ORGLESS_CTX, PLAIN_PAYLOAD)).resolves.toBe(false);
+    await expect(plugin.canWriteObject('invoice', 'update', ORGLESS_CTX, PLAIN_PAYLOAD)).resolves.toBe(false);
+  });
+
+  it('DENIES it when no permission set resolves, too — the wall is not behind the CRUD guard', async () => {
+    const { plugin } = await boot([], undefined, { orgScoping: true });
+    await expect(plugin.canWriteObject('invoice', 'insert', ORGLESS_CTX, PLAIN_PAYLOAD)).resolves.toBe(false);
+  });
+
+  it('ADMITS the same caller with an active organization — so the arm is not a blanket deny', async () => {
+    const { plugin } = await boot([WRITER_SET], undefined, { orgScoping: true });
+    await expect(plugin.canWriteObject('invoice', 'insert', WRITER_CTX, PLAIN_PAYLOAD)).resolves.toBe(true);
+  });
+
+  it('ADMITS the org-less caller under the `single` posture — the wall arms only where the posture walls', async () => {
+    const { plugin } = await boot([WRITER_SET]);
+    await expect(plugin.canWriteObject('invoice', 'insert', ORGLESS_CTX, PLAIN_PAYLOAD)).resolves.toBe(true);
   });
 });
 

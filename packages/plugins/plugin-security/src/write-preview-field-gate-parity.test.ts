@@ -113,6 +113,25 @@ const ENG_LOG = {
   }],
 };
 
+/**
+ * ⭐ ADR-0123 D2 — an ORGANIZATION-SCOPED object (it declares `organization_id`)
+ * carrying the same traversing rule, for the no-active-organization wall.
+ */
+const ORG_TASK = {
+  name: 'crm_task',
+  fields: {
+    organization_id: { type: 'text' },
+    name: { type: 'text' },
+    amount: { type: 'number' },
+    account: { type: 'lookup', reference: 'crm_account' },
+  },
+  validations: [{
+    name: 'partner_cap', type: 'script', severity: 'error',
+    message: RULE_MESSAGE,
+    condition: "record.account.type == 'partner' && record.amount > 10000",
+  }],
+};
+
 /** …and the control: the SAME bucket with `userActions` reopening create. */
 const ENG_LOG_AMENDABLE = { ...ENG_LOG, name: 'eng_log_amendable', userActions: { create: true, edit: true } };
 
@@ -171,6 +190,14 @@ const FULL_CRUD: PermissionSet = {
   },
 } as unknown as PermissionSet;
 
+/** Full write on the organization-scoped task, lookup column included. */
+const TASK_EDITOR: PermissionSet = {
+  name: 'member_default',
+  label: 'Task editor',
+  objects: { crm_task: { allowRead: true, allowCreate: true, allowEdit: true } },
+  fields: { 'crm_task.account': { readable: true, editable: true } },
+} as unknown as PermissionSet;
+
 /** …and the tenant-level admin ADR-0090 D12 exists to let through. */
 const TENANT_ADMIN: PermissionSet = {
   name: 'tenant_admin',
@@ -182,6 +209,8 @@ const CALLER = { userId: 'u_editor', tenantId: 'org-1', positions: [], permissio
 /** The admin caller NAMES its set — the harness resolves only what is asked for. */
 const ADMIN_CALLER = { userId: 'u_admin', tenantId: 'org-1', positions: [], permissions: ['tenant_admin'], posture: 'PLATFORM_ADMIN' };
 const SYS_CTX = { isSystem: true, userId: 'usr_system' };
+/** ⭐ ADR-0123 D2 — `CALLER` minus its `tenantId`: authenticated, no active organization. */
+const ORGLESS_CALLER = { userId: 'u_editor', positions: [], permissions: [], posture: 'MEMBER' };
 
 /** The payload under test: it names the restricted column, and it trips the rule. */
 const PARTNER_PAYLOAD = { name: 'A', amount: 50000, account: 'acc_p' };
@@ -275,7 +304,7 @@ const attempt = async (run: () => Promise<unknown>): Promise<Outcome> => {
   }
 };
 
-async function boot(sets: PermissionSet[]) {
+async function boot(sets: PermissionSet[], opts: { orgScoping?: boolean } = {}) {
   const engine = new ObjectQL();
   const d = makeDriver();
   engine.registerDriver(d.driver, true);
@@ -288,10 +317,14 @@ async function boot(sets: PermissionSet[]) {
   engine.registry.registerObject(ENG_LOG as any, 'test-package');
   engine.registry.registerObject(ENG_LOG_AMENDABLE as any, 'test-package');
   engine.registry.registerObject(USER_POSITION as any, 'test-package');
+  engine.registry.registerObject(ORG_TASK as any, 'test-package');
   d.storeFor('crm_account').set('acc_p', { id: 'acc_p', name: 'P', type: 'partner' });
   d.storeFor('crm_account').set('acc_d', { id: 'acc_d', name: 'D', type: 'direct' });
 
   const services: Record<string, unknown> = {
+    // The `isolated` posture, as the plugin resolves it with no `tenancy`
+    // service wired: only the ADR-0123 D2 block asks for it.
+    ...(opts.orgScoping ? { 'org-scoping': { name: 'org-scoping' } } : {}),
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
@@ -311,18 +344,21 @@ async function boot(sets: PermissionSet[]) {
   await plugin.init(ctx as any);
   await plugin.start(ctx as any);
 
+  // A system write under a walled posture must name its organization, so the
+  // seeds carry one there; everywhere else they are exactly `SYS_CTX`.
+  const seedCtx = opts.orgScoping ? { ...SYS_CTX, tenantId: 'org-1' } : SYS_CTX;
   // A row the caller may edit, seeded past every gate.
   await engine.insert(
     'crm_opportunity',
     { id: 'opp_1', name: 'seed', amount: 1, account: 'acc_d' },
-    { context: SYS_CTX } as any,
+    { context: seedCtx } as any,
   );
   // …and the update targets for the two pre-resolution cases, seeded the same way.
-  await engine.insert('eng_log', { id: 'log_1', name: 'seed', amount: 1, account: 'acc_d' }, { context: SYS_CTX } as any);
+  await engine.insert('eng_log', { id: 'log_1', name: 'seed', amount: 1, account: 'acc_d' }, { context: seedCtx } as any);
   await engine.insert(
     'sys_user_position',
     { id: 'pos_1', user: 'u_target', position: 'sales', amount: 1, account: 'acc_d' },
-    { context: SYS_CTX } as any,
+    { context: seedCtx } as any,
   );
   d.calls.length = 0;
   return {
@@ -567,6 +603,73 @@ describe('#18682 — the preview answers nobody the two pre-resolution gates ref
     it('validate() agrees with it, after ONE related read', async () => {
       const preview = await h.engine.validate(
         'sys_user_position', { ...RBAC_PARTNER_PAYLOAD }, { mode: 'insert', context: ADMIN_CALLER } as any,
+      );
+      expect(h.relatedReads()).toBe(1);
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).toContain(RULE_MESSAGE);
+    });
+  });
+});
+
+/**
+ * ⭐ [#18682] The ADR-0123 D2 no-active-organization wall, on the same composed
+ * runtime under the `isolated` posture. The write path refuses an authenticated
+ * session with no active organization before `next()`, on a verdict handed no
+ * row, so a preview that answered it would hand the rule's verdict to a caller
+ * the write path refuses. The control is the identical caller WITH an active
+ * organization, which both doors admit to the rule.
+ */
+describe('#18682 — the preview answers nobody the organization wall refuses', () => {
+  describe('ADR-0123 D2 — an authenticated session with no active organization', () => {
+    let h: Awaited<ReturnType<typeof boot>>;
+    beforeEach(async () => { h = await boot([TASK_EDITOR], { orgScoping: true }); });
+
+    it('insert() refuses on the PERMISSION_DENIED envelope, having read nothing related', async () => {
+      const outcome = await attempt(
+        () => h.engine.insert('crm_task', { ...PARTNER_PAYLOAD }, { context: ORGLESS_CALLER } as any),
+      );
+      expect(outcome.ok).toBe(false);
+      expect(outcome.code).toBe('PERMISSION_DENIED');
+      expect(outcome.status).toBe(403);
+      expect(outcome.message).toMatch(/no active organization/);
+      expect(h.relatedReads()).toBe(0);
+    });
+
+    it('validate() reads nothing related either, and never returns the rule verdict', async () => {
+      const preview = await h.engine.validate(
+        'crm_task', { ...PARTNER_PAYLOAD }, { mode: 'insert', context: ORGLESS_CALLER } as any,
+      );
+      expect(h.relatedReads()).toBe(0);
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).not.toContain(RULE_MESSAGE);
+    });
+
+    it('validate({ mode: update }) reads nothing related and returns no rule verdict', async () => {
+      const preview = await h.engine.validate(
+        'crm_task', { amount: 50000, account: 'acc_p' }, { mode: 'update', context: ORGLESS_CALLER } as any,
+      );
+      expect(h.relatedReads()).toBe(0);
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect(JSON.stringify(preview.results?.[0]?.errors ?? [])).not.toContain(RULE_MESSAGE);
+    });
+  });
+
+  describe('the D2 control: the same caller WITH an active organization', () => {
+    let h: Awaited<ReturnType<typeof boot>>;
+    beforeEach(async () => { h = await boot([TASK_EDITOR], { orgScoping: true }); });
+
+    it('insert() reaches the rule and refuses with the rule, after ONE related read', async () => {
+      const outcome = await attempt(
+        () => h.engine.insert('crm_task', { ...PARTNER_PAYLOAD }, { context: CALLER } as any),
+      );
+      expect(outcome.ok).toBe(false);
+      expect(outcome.message).toContain(RULE_MESSAGE);
+      expect(h.relatedReads()).toBe(1);
+    });
+
+    it('validate() agrees with it, after ONE related read', async () => {
+      const preview = await h.engine.validate(
+        'crm_task', { ...PARTNER_PAYLOAD }, { mode: 'insert', context: CALLER } as any,
       );
       expect(h.relatedReads()).toBe(1);
       expect(preview.results?.[0]?.valid).toBe(false);

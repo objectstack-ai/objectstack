@@ -3160,7 +3160,8 @@ export class SecurityPlugin implements Plugin {
         //
         // The cheap posture/context pre-test comes first on purpose: the common
         // deployment is `single` (Layer 0 inert), and the common caller HAS an
-        // active organization. Neither pays for the layered compile below.
+        // active organization. Neither pays for the layered compile inside
+        // `organizationWallRefusal` — the one verdict `canWriteObject` asks too.
         //
         // Ordered AHEAD of the forge guard deliberately. A caller with no
         // organization scope at all who also supplies a foreign `organization_id`
@@ -3170,49 +3171,32 @@ export class SecurityPlugin implements Plugin {
         // tenant, so its target is selected through the Layer 0 ROW wall, which
         // already resolves to nothing (ADR-0123 D2, stated there as a boundary
         // rather than left as an omission).
-        if (this.orgScopingEnabled && !callerHasOrganizationScope(opCtx.context, this.tenancyPosture)) {
-          const callerWall = await this.computeWriteTenantCheckFilter(
-            permissionSets,
-            opCtx.object,
-            opCtx.operation,
-            opCtx.context,
+        const denied = await this.organizationWallRefusal(
+          permissionSets,
+          opCtx.object,
+          opCtx.operation,
+          opCtx.context,
+          delegatorSets,
+          delegatorContext,
+        );
+        if (denied) {
+          const principal = denied === 'delegator' ? 'the delegating principal' : 'this session';
+          this.logger.warn?.(
+            `[Security] Layer 0 tenant wall REFUSED ${opCtx.operation} '${opCtx.object}' — ` +
+              `${principal} has no active organization to place the record in (ADR-0123 D2, fail-closed)`,
           );
-          // [ADR-0090 D10] The delegator is walled on its own context, exactly as
-          // the forge guard walls it — an on-behalf-of write may not land a row
-          // the delegator itself could not place.
-          const delegatorWall =
-            delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
-              ? await this.computeWriteTenantCheckFilter(
-                  delegatorSets,
-                  opCtx.object,
-                  opCtx.operation,
-                  delegatorContext,
-                )
-              : null;
-          const denied = isTenantWallDenial(callerWall)
-            ? 'caller'
-            : isTenantWallDenial(delegatorWall)
-              ? 'delegator'
-              : null;
-          if (denied) {
-            const principal = denied === 'delegator' ? 'the delegating principal' : 'this session';
-            this.logger.warn?.(
-              `[Security] Layer 0 tenant wall REFUSED ${opCtx.operation} '${opCtx.object}' — ` +
-                `${principal} has no active organization to place the record in (ADR-0123 D2, fail-closed)`,
-            );
-            throw new PermissionDeniedError(
-              `[Security] Access denied: '${opCtx.object}' is scoped to an organization, and ` +
-                `${principal} has no active organization — so this ${opCtx.operation} has no ` +
-                `organization to place the record in. Join or select an active organization and retry.`,
-              { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
-              `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
-                `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
-                `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
-                `\`tenantId\` nor a non-empty \`accessible_org_ids\`. Reads under this state resolve to nothing; ` +
-                `writes are refused rather than landing a row with a NULL organization that no reader — ` +
-                `including its own author — could ever see. System contexts and platform operators are unaffected.`,
-            );
-          }
+          throw new PermissionDeniedError(
+            `[Security] Access denied: '${opCtx.object}' is scoped to an organization, and ` +
+              `${principal} has no active organization — so this ${opCtx.operation} has no ` +
+              `organization to place the record in. Join or select an active organization and retry.`,
+            { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+            `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
+              `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
+              `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
+              `\`tenantId\` nor a non-empty \`accessible_org_ids\`. Reads under this state resolve to nothing; ` +
+              `writes are refused rather than landing a row with a NULL organization that no reader — ` +
+              `including its own author — could ever see. System contexts and platform operators are unaffected.`,
+          );
         }
 
         const suppliedRows = writeRows.filter(
@@ -5107,8 +5091,8 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [#18682] Whether `context` may CREATE or UPDATE `object` under the nine
-   * arms enumerated below — the WRITE admission the preview asks for, and the
+   * [#18682] Whether `context` may CREATE or UPDATE `object` under the arms
+   * enumerated below — the WRITE admission the preview asks for, and the
    * exact sibling of {@link canReadObject}.
    *
    * ## Why it exists
@@ -5142,11 +5126,11 @@ export class SecurityPlugin implements Plugin {
    *      `append-only` object whose `userActions` do not open the verb DENIES,
    *      ahead of the fall-open below and of every resolution;
    *   3. ADR-0090 D12 `delegatedAdminGate.assert` — the same gate object the
-   *      middleware calls, handed the members its `assert` reads (`object`,
-   *      `operation`, `context`, the rows of `data`). A plain-CRUD holder on an
-   *      RBAC link table DENIES; a tenant admin passes to the arms below;
-   *   4. no permission sets resolved → admit (the middleware guards its whole
-   *      CRUD gate with `if (permissionSets.length > 0)`);
+   *      middleware calls, handed `object`, `operation`, `context` and the rows
+   *      of `data`. A plain-CRUD holder on an RBAC link table DENIES; a tenant
+   *      admin passes to the arms below;
+   *   4. no permission sets resolved → arm 10 decides (the middleware guards its
+   *      whole CRUD gate with `if (permissionSets.length > 0)`, not that wall);
    *   5. `secMeta.unresolved` → DENY (#3545);
    *   6. ADR-0066 D3/⑤ `requiredPermissions` capability AND-gate for the WRITE
    *      CRUD class, checked BEFORE the grant, for the caller AND (D10) the
@@ -5161,9 +5145,9 @@ export class SecurityPlugin implements Plugin {
    * object at all, for that verb, under any payload. Arms 6 and 8 were added on
    * that same ground one gate later.
    *
-   * ## …and the ninth, which needs the PAYLOAD
+   * ## …and the arm that needs the PAYLOAD
    *
-   * The eight above are not the whole write decision either. The middleware
+   * The arms above are not the whole write decision either. The middleware
    * also refuses payload-dependent writes, and the first of them is the
    * field-level-security write gate (step 2.5): a caller holding the object's
    * CRUD grant but not `editable` on a field the payload names is refused
@@ -5183,9 +5167,18 @@ export class SecurityPlugin implements Plugin {
    * carries. ⛔ Not a post-default image: a key the runtime filled is not a
    * field the caller wrote.
    *
+   * ## …and the organization wall
+   *
+   *  10. ADR-0123 D2 `organizationWallRefusal` — the method the middleware's
+   *      step 3.7 throws on, asked under that step's guard (a payload is
+   *      supplied, the context names a user) at that step's point, after arm
+   *      9; arm 4 asks it too, as the middleware does with no set resolved. It
+   *      is handed no row, so no payload changes its answer: it refuses a
+   *      CALLER CLASS, as arms 2 and 3 do.
+   *
    * `can-write-object-admission.test.ts` pins this method's answer equal to the
-   * registered middleware's on the cases it lists, and pins one arm-3 UPDATE
-   * case as a direction: this method `false`, the middleware `true`.
+   * registered middleware's on its equivalence block's cases, and pins one
+   * arm-3 UPDATE case as a direction: this method `false`, the middleware `true`.
    *
    * Fails CLOSED: a throw anywhere denies, and callers must treat a throw as a
    * denial too.
@@ -5197,9 +5190,9 @@ export class SecurityPlugin implements Plugin {
    * middleware's own point in its order), the fail-closed postures (#3545's
    * unresolvable posture and the D10 dangling delegator), the ADR-0066 D3
    * capability AND-gate for both principals, the `allowCreate`/`allowEdit` CRUD
-   * grant, the D10 delegator's independent grant, and the step 2.5 FLS write
-   * gate over the keys THIS payload names. It means nothing about any refusal
-   * not in that list.
+   * grant, the D10 delegator's independent grant, the step 2.5 FLS write gate
+   * over the keys THIS payload names, and the ADR-0123 D2 organization wall. It
+   * means nothing about any refusal not in that list.
    *
    * ⛔ `true` never means "this write will succeed", and ⛔ what follows is not
    * an enumeration of the distance to success: the middleware refuses both
@@ -5307,21 +5300,39 @@ export class SecurityPlugin implements Plugin {
       }
 
       const permissionSets = await this.resolvePermissionSetsForContext(context);
-      // 4. No sets resolved → no permission-set restriction applies.
-      if (permissionSets.length === 0) return true;
+      // 10. [ADR-0123 D2] The no-active-organization write wall — the
+      //     middleware's own verdict, `organizationWallRefusal`, under its step
+      //     3.7 guard: a payload is supplied and the context names a user. Its
+      //     point is last, after the field gate; it is spelled here because
+      //     arm 4 returns through it — the middleware asks it with no set
+      //     resolved as well.
+      const organizationWallAdmits = async (
+        delegatorSets: PermissionSet[] | null,
+        delegatorContext: unknown,
+      ): Promise<boolean> =>
+        !(data && typeof data === 'object' && context?.userId
+          && (await this.organizationWallRefusal(
+            permissionSets, objectName, operation, context, delegatorSets, delegatorContext,
+          )));
+      // 4. No sets resolved → no permission-set restriction applies (the
+      //    middleware guards its whole CRUD gate with `if (permissionSets.length > 0)`),
+      //    and arm 10 is not behind that guard.
+      if (permissionSets.length === 0) return await organizationWallAdmits(null, null);
 
       const { isPrivate, unresolved, requiredPermissions, fieldRequiredPermissions } =
         await this.getObjectSecurityMeta(objectName);
       // 5. [#3545] Posture unresolvable → deny.
       if (unresolved) return false;
 
-      // [ADR-0090 D10] Resolve the delegator ONCE — arms 6 and 8 both need it,
-      // and a dangling link denies before either runs.
+      // [ADR-0090 D10] Resolve the delegator ONCE — the arms below need it,
+      // and a dangling link denies before any of them runs.
       let delegatorSets: PermissionSet[] | null = null;
+      let delegatorContext: unknown = null;
       if (context?.onBehalfOf?.userId) {
         const del = await resolveDelegatorContext(this.ql, context);
         if (del.kind === 'missing') return false;
         if (del.kind === 'resolved') {
+          delegatorContext = del.context;
           delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         }
       }
@@ -5379,7 +5390,8 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
-      return true;
+      // 10. [ADR-0123 D2] At the middleware's point — see above.
+      return await organizationWallAdmits(delegatorSets, delegatorContext);
     } catch (e) {
       this.logger.error?.(
         `[security] canWriteObject could not resolve the write admission for ` +
@@ -6933,6 +6945,36 @@ export class SecurityPlugin implements Plugin {
   ): Promise<Record<string, unknown> | null> {
     const { layer0 } = await this.computeLayeredRlsFilter(permissionSets, object, operation, context);
     return layer0;
+  }
+
+  /**
+   * [ADR-0123 D2] Which principal the no-active-organization write wall
+   * refuses, or `null` — the verdict the middleware's step 3.7 throws on.
+   * {@link canWriteObject} asks this same method, so the two doors share one
+   * spelling of the wall. It is handed no row, stored or written.
+   */
+  private async organizationWallRefusal(
+    permissionSets: PermissionSet[],
+    object: string,
+    operation: string,
+    context: any,
+    delegatorSets: PermissionSet[] | null,
+    delegatorContext: any,
+  ): Promise<'caller' | 'delegator' | null> {
+    if (!this.orgScopingEnabled || callerHasOrganizationScope(context, this.tenancyPosture)) return null;
+    const callerWall = await this.computeWriteTenantCheckFilter(permissionSets, object, operation, context);
+    // [ADR-0090 D10] The delegator is walled on its own context, exactly as
+    // the forge guard walls it — an on-behalf-of write may not land a row
+    // the delegator itself could not place.
+    const delegatorWall =
+      delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
+        ? await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext)
+        : null;
+    return isTenantWallDenial(callerWall)
+      ? 'caller'
+      : isTenantWallDenial(delegatorWall)
+        ? 'delegator'
+        : null;
   }
 
   /**
