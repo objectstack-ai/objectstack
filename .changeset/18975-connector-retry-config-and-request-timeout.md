@@ -28,7 +28,7 @@ declared policy onto those options — one execution site, not one per connector
 package.
 
 **How the authored value gets there.** `ConnectorProviderContext` gains
-`retryConfig`, `connectionTimeoutMs` and `requestTimeoutMs`, read-only and
+`retryConfig` and `requestTimeoutMs`, read-only and
 resolved from the entry (the automation service parses `retryConfig` so a
 factory reads real values instead of re-deriving the schema's defaults), so a
 custom provider that does its own I/O can honour them. The built-in HTTP
@@ -56,19 +56,20 @@ policy could never reach. They now go through the same wrapper as
 `connector-rest` and `connector-slack`, which gives them the 30s per-attempt
 timeout and bounded retry those two already had.
 
-**⚠️ `connectionTimeoutMs` is NOT enforced, deliberately, and is the one thing
+**⚠️ `connectionTimeoutMs` is NOT made live, deliberately, and is the one thing
 the ruling assumed that measurement refused.** A connector's call is a WHATWG
 `fetch`, whose only cancellation surface is one `AbortSignal` over the whole
 operation; nothing in that interface observes the connection phase separately.
 Bounding time-to-response with it would kill a slow-but-connected upstream the
 author meant to allow with a large `requestTimeoutMs` — breaking the very
-promise the key makes. So it is carried onto `ConnectorProviderContext` (a
-custom provider on a transport that *can* separate the phases may honour it)
-and left unenforced by the platform, with the reason recorded at the mapping and
-in `packages/spec/liveness/connector.json`, which keeps that one row `dead`. It
-is owed a second, narrower ADR-0049 decision: retire it, or re-describe it as
-something the platform can enforce.
+promise the key makes. So this change leaves it unenforced, with the reason
+recorded at the mapping and in `packages/spec/liveness/connector.json`, whose
+row for it stays `dead`. That left it owed a second, narrower ADR-0049
+decision, and this same release takes it: `connector.connectionTimeoutMs` is
+**retired** — its own entry carries the FROM → TO. The key never reaches
+`ConnectorProviderContext` in any release.
 
-Nine of the ten ledger rows flip `dead` → `live` with the consumer site named.
-No declaration moves: the connector schema keeps every key, every bound and
-every default it had.
+Nine of the ten ledger rows flip `dead` → `live` with the consumer site named;
+the tenth is `connectionTimeoutMs`, above. This change itself moves no
+declaration: it leaves every key, every bound and every default on the
+connector schema as it found them.
