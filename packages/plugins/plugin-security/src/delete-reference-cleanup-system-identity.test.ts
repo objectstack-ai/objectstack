@@ -253,6 +253,11 @@ function makeStubDriver() {
         return values.some((v) => v != null && typeof v !== 'object' && String(v) === String(cmp));
       }
       if (op === '$eq') return (stored ?? null) === ((cmp as any) ?? null);
+      // [#18682] The by-id batch a validation rule's related read issues. A
+      // double that ignored it would answer "no such record", and a traversing
+      // rule would refuse for the double's reason — the #18682 pins below
+      // would hold while pinning nothing.
+      if (op === '$in') return Array.isArray(cmp) && cmp.some((c) => (stored ?? null) === (c ?? null));
       return false;
     }
     return (stored ?? null) === ((spec as any) ?? null);
@@ -307,7 +312,7 @@ function makeStubDriver() {
 
 interface LogRecord { msg: string; meta?: Record<string, unknown> }
 
-async function boot(sets: PermissionSet[] = [LINE_LEAD]) {
+async function boot(sets: PermissionSet[] = [LINE_LEAD], extraObjects: Array<{ name: string }> = []) {
   const info: LogRecord[] = [];
   const engineLogger = {
     info: vi.fn((msg: string, meta?: Record<string, unknown>) => { info.push({ msg, meta }); }),
@@ -317,10 +322,11 @@ async function boot(sets: PermissionSet[] = [LINE_LEAD]) {
   const { driver, stores } = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const o of [PRODUCT, ANDON, BATCH]) engine.registry.registerObject(o as any, 'test');
+  for (const o of [PRODUCT, ANDON, BATCH, ...extraObjects]) engine.registry.registerObject(o as any, 'test');
 
   const schemas: Record<string, unknown> = {
     os_ehr_product: PRODUCT, os_ehr_andon_record: ANDON, os_ehr_batch: BATCH,
+    ...Object.fromEntries(extraObjects.map((o) => [o.name, o])),
   };
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
@@ -687,5 +693,129 @@ describe('#12597 — the referential FK clear is exempt from the object-level CR
     expect(err.details?.object).toBe('os_ehr_andon_record');
     expect(err.details?.operation).toBe('update');
     expect(h.stores.get('os_ehr_andon_record')?.get(a.id)?.product).toBe(p.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #18682 — the referential FK clear resolves no relationship a rule reads.
+//
+// The cleanup UPDATE is exempt from the object-level CRUD check (the describe
+// above), so a deleter holding NO grant on the referencing object reaches its
+// validation rules. A rule there that reads one hop through a lookup, handed
+// the related row under system authority, would decide the delete by a value
+// of a THIRD record the deleter cannot read — one bit of it per delete. So the
+// cleanup resolves nothing, and the rule meets the bare id, as it did before
+// relationship traversal existed.
+// ---------------------------------------------------------------------------
+
+/** C — a record the deleter holds no grant on, not even read. */
+const LINE = {
+  name: 'os_ehr_line',
+  label: 'Line',
+  sharingModel: 'private',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    organization_id: { name: 'organization_id', type: 'text' as const },
+    owner_id: { name: 'owner_id', type: 'text' as const },
+    kind: { name: 'kind', type: 'text' as const },
+  },
+};
+
+const SECRET_LINE_MESSAGE = 'Inspections on a secret line are frozen.';
+
+/**
+ * B — references A through an OPTIONAL lookup (so the delete clears it) and C
+ * through `line`, with a rule that reads C through that lookup.
+ */
+const INSPECTION = {
+  name: 'os_ehr_inspection',
+  label: 'Inspection',
+  sharingModel: 'private',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    organization_id: { name: 'organization_id', type: 'text' as const },
+    owner_id: { name: 'owner_id', type: 'text' as const },
+    product: { name: 'product', type: 'lookup' as const, reference: 'os_ehr_product' },
+    line: { name: 'line', type: 'lookup' as const, reference: 'os_ehr_line' },
+  },
+  validations: [{
+    name: 'no_secret_line', type: 'script', severity: 'error',
+    message: SECRET_LINE_MESSAGE,
+    condition: "record.line.kind == 'secret'",
+  }],
+};
+
+describe('#18682 — the referential FK clear resolves no relationship, so a rule cannot turn a delete into an oracle', () => {
+  /** Boot with B referencing a fresh A and a C of the given `kind`. */
+  async function withLine(kind: 'secret' | 'public', inspection: typeof INSPECTION = INSPECTION) {
+    const h = await boot([LINE_LEAD], [LINE, inspection]);
+    const p = await h.seed('os_ehr_product', { name: 'Widget' });
+    const line = await h.seed('os_ehr_line', { kind });
+    // Straight into the store: a seed through the engine is judged by the very
+    // rule under test, and the fixture is not the subject.
+    h.stores.set('os_ehr_inspection', new Map([
+      ['insp_1', { id: 'insp_1', product: p.id, line: line.id, owner_id: 'u_other' }],
+    ]));
+    const readsOfLine = vi.spyOn(h.engine, 'find');
+    return {
+      h,
+      productId: p.id as string,
+      linesRead: () => readsOfLine.mock.calls.filter(([object]) => object === 'os_ehr_line').length,
+    };
+  }
+
+  async function deleteProductAsLead(kind: 'secret' | 'public', inspection?: typeof INSPECTION) {
+    const { h, productId, linesRead } = await withLine(kind, inspection);
+    const err = await h.deleteAs('os_ehr_product', productId, h.caller());
+    return {
+      linesRead: linesRead(),
+      outcome: {
+        code: err?.code ?? null,
+        message: err?.message ?? null,
+        productStored: h.stores.get('os_ehr_product')?.has(productId) ?? false,
+        fkKept: h.stores.get('os_ehr_inspection')?.get('insp_1')?.product === productId,
+      },
+    };
+  }
+
+  it('the deleter cannot read C — the premise every case below rests on', async () => {
+    const { h } = await withLine('secret');
+    const err = await h.engine
+      .find('os_ehr_line', { context: h.caller() } as any)
+      .then(() => null, (e: any) => e);
+    expect(err?.code).toBe('PERMISSION_DENIED');
+  });
+
+  it('THE CONTRACT: a secret C and a public C end the delete identically — refused, C never read', async () => {
+    const secret = await deleteProductAsLead('secret');
+    const open = await deleteProductAsLead('public');
+
+    expect(open.outcome).toEqual(secret.outcome);
+    // The outcome the rule has always produced here: it meets the bare id,
+    // faults, and refuses the cleanup — so the delete does not land.
+    expect(secret.outcome.code).toBe('VALIDATION_FAILED');
+    expect(secret.outcome.message).not.toContain(SECRET_LINE_MESSAGE);
+    expect(secret.outcome.productStored).toBe(true);
+    expect(secret.outcome.fkKept).toBe(true);
+    // ⛔ And nothing was read from C on the deleter's behalf.
+    expect(secret.linesRead).toBe(0);
+    expect(open.linesRead).toBe(0);
+  });
+
+  it('CONTROL: with no rule on B the same delete succeeds and clears the FK', async () => {
+    const unruled = await deleteProductAsLead('secret', { ...INSPECTION, validations: [] });
+    expect(unruled.outcome.code).toBe(null);
+    expect(unruled.outcome.productStored).toBe(false);
+    expect(unruled.outcome.fkKept).toBe(false);
+  });
+
+  it('CONTROL: an ordinary update of B DOES read C and refuses with the rule — the harness can answer the read', async () => {
+    const { h, linesRead } = await withLine('secret');
+    const err = await h.engine
+      .update('os_ehr_inspection', { id: 'insp_1', owner_id: 'u_next' }, { context: { isSystem: true } } as any)
+      .then(() => null, (e: any) => e);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toContain(SECRET_LINE_MESSAGE);
+    expect(linesRead()).toBe(1);
   });
 });

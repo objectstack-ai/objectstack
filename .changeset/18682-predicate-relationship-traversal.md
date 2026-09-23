@@ -127,4 +127,7 @@ Object validation rules (`script` / `cross_field`) — and the system-authority
 read is confined to that one seam. The field-level
 `requiredWhen` / `readonlyWhen` / option `visibleWhen` predicates fail **open**
 and are deliberately not covered here; RLS predicates are out too. Depth is one
-hop.
+hop. The cleanup UPDATE a `set_null` delete issues on a referencing record
+resolves no relationship, so a rule there is evaluated as before this release —
+against the bare id, where reading through it faults and refuses the cleanup,
+and with it the delete.
