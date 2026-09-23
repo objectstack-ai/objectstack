@@ -4277,6 +4277,16 @@ function mergeObjects(
  *
  * Runs BEFORE `mergeActionsIntoObjects` so the composed output's own echo is
  * not counted either. Returns one line per colliding key, in first-seen order.
+ *
+ * [ADR-0112 · #19816] Reads only what is shaped like an action. A non-object
+ * entry (`null`, `undefined`, a string, …) and an object's non-array `actions`
+ * declare no key, so they are SKIPPED here, never dereferenced into a bare
+ * `TypeError` and never keyed `global:undefined` (two such entries used to be
+ * reported as a cross-stack collision). Skipping loses nothing: the entry is
+ * still in the composed `actions` step 3 concatenated, and the object is the
+ * same composed object, so step 7's guard in `mergeActionsIntoObjects` refuses
+ * every one of them with its `STACK_SCHEMA_INVALID` / 422 envelope. That guard
+ * holds the one refusal for this condition; this pass does not word a second.
  * @internal
  */
 function collectComposedActionKeyCollisions(
@@ -4297,11 +4307,13 @@ function collectComposedActionKeyCollisions(
   };
 
   for (const [i, stack] of stacks.entries()) {
-    // A non-array `actions` never reaches the output: the concat pass drops it
-    // (and warns), so it declares nothing here either.
+    // An absent `actions` declares nothing. A present non-array one never
+    // reaches this pass: step 3 refuses it (`STACK_SCHEMA_INVALID`).
     const declared = (stack as Record<string, unknown>).actions;
     if (!Array.isArray(declared)) continue;
     for (const [j, action] of (declared as Action[]).entries()) {
+      // A non-object entry declares no key; step 7 refuses it (see above).
+      if (!isRecord(action)) continue;
       // Truthiness, not nullish: an empty-string `objectName` (type-legal;
       // refused by ActionSchema's regex only under strict parse) keys as
       // global here exactly as `collectDuplicateActionKeyErrors`,
@@ -4318,7 +4330,12 @@ function collectComposedActionKeyCollisions(
       // and skipping would hide exactly the collisions this walk exists for.
       throw new Error(`composeStacks internal error: no source stack recorded for composed object '${obj.name}'.`);
     }
-    for (const [j, action] of (obj.actions ?? []).entries()) {
+    // An absent `actions` declares nothing; a non-array one and a non-object
+    // entry declare no key either, and step 7 refuses both (see above).
+    const embedded: unknown = obj.actions;
+    if (!Array.isArray(embedded)) continue;
+    for (const [j, action] of (embedded as Action[]).entries()) {
+      if (!isRecord(action)) continue;
       note(obj.name, action.name, owner, `objects['${obj.name}'].actions[${j}]`);
     }
   }
