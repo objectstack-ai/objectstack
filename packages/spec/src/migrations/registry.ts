@@ -13138,7 +13138,8 @@ const step18: MigrationStep = {
         + 'two on equals has no honest single value, and picking the first is a different '
         + 'predicate. The read path does not re-validate stored rows, so a stored view keeps '
         + 'loading; what changes is that RE-SAVING it is refused at the value path, instead of '
-        + 'storing a filter that 400s. ADR-0049 / ADR-0087 / ADR-0112.',
+        + 'storing a filter that the SQL family and driver-memory answer with a 400. ADR-0049 / '
+        + 'ADR-0087 / ADR-0112.',
       acceptanceCriteria:
         'Grep your authored views, pages and object-* blocks for a filter rule whose operator is '
         + 'none of in / not_in / between / the four unary operators and whose value is an array, '
