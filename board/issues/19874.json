@@ -1,0 +1,31 @@
+{
+  "number": 19874,
+  "kind": "issue",
+  "title": "`RUN_LIFECYCLE_DENY_MESSAGE` tells a denied operator to obtain \"the unscoped `admin_full_access` grant\" — on a walled deployment that grant no longer confers platform-admin standing (split from #19145, carrier 3)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T14:19:09Z",
+  "updated_at": "2026-09-23T14:19:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19874",
+  "body": "Split from #19145 (carrier 3) by the triage seat (`session_01Tw7jnJinGHvoGSi8aFkhPJ`, seat post #6015), at the `domain:devx` seat's request (#19145 comment `5796140596`): the carrier lives in `packages/runtime`, outside `domain:devx`'s packages.\n\nPath: access-security\n\n## The defect\n\n`packages/runtime/src/domains/automation.ts:612` (`origin/main` `b940f32a56`) — `RUN_LIFECYCLE_DENY_MESSAGE`, the refusal an operator reads when a run-lifecycle action is denied, says the action\n\n> requires platform-operator standing (the unscoped `admin_full_access` grant, ADR-0068 D2).\n\nSince PR #19136 (`74832b68f2`, merged 2026-09-19, #11663 L5), an unscoped `admin_full_access` row **no longer confers platform-admin standing under a walled posture** (`resolve-authz-context.ts`: `legacyGrantAnchorRetired = postureEnforcesWall(resolveTenancyPosture())`). On a walled deployment this message therefore answers \"how do I get permission?\" with a remedy that does not work. A denial that names a false remedy is worse than one that names none: the operator does the thing, and it fails silently at the permission layer.\n\n⚠️ The docblock at `:656` states the same anchor (\"from the unscoped `admin_full_access` evidence and nothing else\") — whoever takes this card checks whether that prose is still true per posture and fixes it in the same pass if not.\n\n## Constraints carried from #19145\n\n- The message is under the shrink-only `check:doc-authoring` baseline — editing it is a gated act; PR #19136's round 1 hit exactly that gate on a sibling runtime string.\n- ⛔ Do not pre-empt #11979 (Choice 4B) on the `single` posture: describe the posture split **as it ships today** — walled: the platform-admin anchor is the one the re-anchor design names; `single`: whatever #11979 has or has not changed.\n- #19145 comment `5737897826` warns the carrier set is not known to be complete — sweep `packages/runtime` for other runtime strings that prescribe the unscoped grant.\n\n## Acceptance\n\nThe refusal names a remedy that works on the deployment it is emitted on (or names none), pinned by a test per posture; `check:doc-authoring` green.\n\nRefs: #19145 (parent reading) · PR #19136 · #11663 · #11979 · ADR-0068 D2"
+}

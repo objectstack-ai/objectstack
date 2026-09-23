@@ -2,8 +2,8 @@
   "number": 18974,
   "kind": "issue",
   "title": "[finding] driver-memory's default export is not a kernel Plugin — kernel.use() refuses it at type-check and assertPluginContract refuses it at boot",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-try-charles",
@@ -12,16 +12,19 @@
   },
   "labels": [
     "domain:engine",
-    "pm:on-hold",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T08:57:06Z",
-  "updated_at": "2026-09-18T09:03:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-23T11:21:53Z",
+  "closed_at": "2026-09-23T11:21:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 1,
   "locked": false,

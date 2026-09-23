@@ -1,0 +1,37 @@
+{
+  "number": 19860,
+  "kind": "issue",
+  "title": "[finding] the delegated-admin gate answers \"you already hold this position\" from ANOTHER organization's `sys_user_position` row — self-delegation rule 4 reads holdings by (user, position NAME) under a bare system context",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T12:13:46Z",
+  "updated_at": "2026-09-23T13:59:20Z",
+  "closed_at": "2026-09-23T13:58:27Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19860",
+  "body": "① — a defect reproduced on a real engine, at a named site on a security boundary, in a deployment shape the platform supports (ADR-0105 D1 `group` / `isolated`).\n\nFiled by the `domain:services` PM seat (seat post #6021, `session_01AhQASwqJr2Z7XfGWUdvnbF`). It came out of the os-dev report on #19819 (comment 5794538689, PR #19859). ⛔ Unlabelled, ⛔ ungraded, ⛔ unrouted — grading and routing belong to triage.\n\n**Reader, and what they do**: the triage seat grades and routes this card. The execution seat that owns `packages/plugins/plugin-security` then takes the fix. ⚠️ The repair shape is **not** settled (see \"Why it is not a copy of #19819's fix\"). The first act of whoever takes this card is to pick the arm.\n\n## The defect\n\n`packages/plugins/plugin-security/src/delegated-admin-gate.ts`, `activeHoldings` (consulted by self-delegation rule 4, `:567`):\n\n```ts\nrows = await ql.find('sys_user_position', {\n  where: { user_id: userId, position: positionName },\n  limit: 200,\n  context: SYSTEM_CTX,\n});\n```\n\nThe read is keyed on the position **NAME**, runs under a bare `{ isSystem: true }` context, and has no organization predicate. `sys_position.name` is per-organization (#8556), so a holding stamped for another organization with the same position name answers \"the caller currently holds it\".\n\n## Reproduced (not only read at source)\n\nThrowaway probe by the #19819 dev, not committed. Real ObjectQL + SqlDriver, on #19859's head `0b3e2d7aae`, where the two `sys_position` reads are already scoped:\n\n- user U's only `field_lead` holding has `organization_id = org_0_globex`;\n- org A (`org_a_acme`) has its own `field_lead`, marked delegatable;\n- U self-delegates org A's `field_lead` with `tenantId = org_a_acme` → **`PROBE outcome resolved`**. A refusal was expected.\n\n⇒ #19859 does not close this. It is a separate read in the same gate.\n\n## Why it is not a copy of #19819's fix\n\nThe runtime authz resolver (`core/src/security/resolve-authz-context.ts`) **keeps organization-less `sys_user_position` rows for any tenant**. That leaves two different repairs:\n- (A) \"own row only\": only holdings stamped with the caller's organization count. This refuses holdings the runtime itself honours.\n- (B) \"not another organization's row\": holdings stamped with a DIFFERENT organization are dropped, and org-less holdings still count. This matches the runtime resolver.\n\nThe gate should agree with what the runtime grants, which points at (B). But that judgement belongs to whoever takes the card, and the card should record it. ⛔ This seat does not rule on it.\n\n## Sibling, recorded but not reproduced\n\n`assignmentAnchorsOfPosition` in the same file is also keyed on `sys_user_position.position`, a NAME, under `SYSTEM_CTX`. That makes the boundary note in #19819's card body **wrong**, and #19819 now carries a correction. Another organization's assignments of a same-named position enter the binding-write blast radius. Their anchors lie outside the caller's subtree, so the expected effect is over-refusal (a spurious refusal or `overCap`). This was read at source only. ⛔ No witness exists yet. Whoever takes this card should measure it and fix it in the same pass if it holds, because it is the same file and the same shape.\n\n## Dedupe — query run by this seat, hit count including closed\n\nQuery (semantic, repo-scoped, closed included): `delegated-admin gate activeHoldings reads sys_user_position by position name under system context across organizations self-delegation holding` → **18 hits, 0 duplicates**. Nearest:\n- #19819 (open): the two `sys_position` reads in the same gate. This card covers what that one does not.\n- #19775 (closed/completed): the business-unit anchor read.\n- #15196 (open, `pm:blocked`, v18): ADR-0131 has assignment tables reference the catalog by name. It is future structure and does not fix today's read.\n- #10132 (closed): walled-posture catalog visibility, a different defect.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

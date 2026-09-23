@@ -1,0 +1,28 @@
+{
+  "number": 19843,
+  "kind": "pull_request",
+  "title": "docs(qa): key the permission-matrix publish refusal on code NO_DRAFT, not a retired message spelling",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T10:35:41Z",
+  "updated_at": "2026-09-23T11:00:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19843",
+  "body": "Fixes #19705\nClause-②: no\n\n## What\n\n`docs/qa/platform-checklist/areas/access-security.json`, item `access-security.permission-matrix-edit-loop` (P1): clause 2 and its `verify` quoted the nothing-to-publish refusal by a bracketed lowercase opener inside the message text. That opener was retired from every metadata-protocol refusal in `7a25a3ee9c` (PR #19683), so a checker following the clause verbatim against a live answer recorded a false failure.\n\nPer the card's fix shape (adopted by triage): the clause and verify now key on the **code axis**: HTTP 404 whose body carries `code: 'NO_DRAFT'`, and say explicitly to judge the refusal on status + `code`, never on message prose. Pass/fail semantics are unchanged.\n\n- `revision` 2 -> 3, with a new append-only `history` entry (revision 3, ref #19705). The revision-2 history entry that quotes the old spelling is untouched (history is append-only).\n- New `source` row: `packages/metadata-protocol/src/sys-metadata-repository.ts#promoteDraft`, the producer.\n\n## Runtime site (verified on `origin/main` 71ef2219)\n\n- Producer: `SysMetadataRepository.promoteDraft` (`packages/metadata-protocol/src/sys-metadata-repository.ts`) throws message `No pending draft exists for TYPE/NAME — nothing to publish.` with `code = 'NO_DRAFT'`, `status = 404`. No bracketed opener.\n- Route: `POST /meta/:type/:name/publish` in `packages/rest/src/rest-server.ts` routes the throw through `handleRouteError`; the wire body shape `{ error, code: 'NO_DRAFT' }` is pinned in `rest-4xx-message-truncation.test.ts` and `rest-5xx-message-sanitization.test.ts`.\n- Status and code match the card. Absence of the opener family is pinned by `protocol.bracketed-refusal-opener-absence.test.ts`.\n\n## Carrier re-derivation over `docs/qa/**`\n\nInstrument: `git grep -ni no_draft -- docs/qa` plus a family census `git grep -noE '[0-9]{3} \\[[a-z][a-z_]+\\]' -- docs/qa`, at 71ef2219 (base). Radius: every tracked file under `docs/qa/`. Lit control: `git grep -nic invalid_metadata -- docs/qa` answers 3 hits in each of two area files, so the instrument reaches both files.\n\n- Before: `no_draft` 3 lines, all in `access-security.json` (clause, verify, revision-2 history).\n- After (db81a89b): 1 line, the immutable revision-2 history entry. No other `docs/qa/**` carrier of the retired `no_draft` spelling exists.\n\n## Gates (all at `db81a89b`)\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` derived 13 commands; all 13 run, reconciled with `--ran` (13 derived, 13 run, 0 NOT-MEASURED, derived from recorded exit codes). All exit 0. `check:doc-formula-expressions` first exited 3 (PREREQUISITE NOT MET, formula/lint unbuilt, nothing measured); after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` it re-ran exit 0.\n\n`check:platform-checklist` anchor counts: symbol anchors before 620/638 resolved against 310 cited sources, after 621/639 against 311 (the one new source row resolves); residual 18 unchanged; 17 file floors held; line citations 0 before and after. No floor or ledger touched.\n\n## Changeset\n\nNone. Docs/QA-only: `docs/qa/**` ships in no package's `files[]` (`git grep -l docs/qa -- '**/package.json'` = 0 hits; positive control: the `files` arrays exist and list `dist`). This is `skip-changeset` territory; per the dispatch, no label write was attempted from this seat.\n\n## Acceptance notes\n\n- `docs/qa/platform-checklist/areas/studio-authoring.json` is off-limits for this card by the triage ruling. Its `[invalid_metadata]` lines have already been re-spelled on `main` (its item revision 3, dated 2026-09-23). It still carries `422 [writable_package_required]` in one clause and one source row, for the metadata-protocol write door, which no longer emits that opener (`SysMetadataRepository` throws `WRITABLE_PACKAGE_REQUIRED` / 422 with plain prose). Same false-failure class as this card; reported for the seat to file or attach to #19709, not edited here.\n- `packages/runtime/src/domains/packages.ts` still opens two refusals with a bracketed restatement of their declared code (`[writable_package_required]` and `[duplicate_source_not_a_base]`). The absence pin covers only `metadata-protocol`. Reported, not edited here (outside `docs/qa/**`).\n- `packages/rest/src/rest-server.ts`: the comment above the publish route still reads `404 [no_draft] when nothing to publish`. This is a code comment, not a refusal, so it goes here as a note only.\n- `packages/client` JSDoc carrying the same spelling is #19704 (a `domain:cli` card). #19704 is not addressed here.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv)_\n"
+}

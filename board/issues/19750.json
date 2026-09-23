@@ -2,9 +2,9 @@
   "number": 19750,
   "kind": "pull_request",
   "title": "fix(spec)!: the filter doors refuse the three shapes they already declared refused (#19514)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "os-justin",
     "id": 323634890,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs:contract-review",
     "protocol:data",
     "protocol:ui",
     "size/xl",
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T21:56:17Z",
-  "updated_at": "2026-09-23T08:04:28Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 13,
+  "updated_at": "2026-09-23T10:07:16Z",
+  "closed_at": "2026-09-23T10:07:14Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-23T10:07:14Z",
+  "comments": 16,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19750",
   "body": "Part of #19514\n\nClause-②: no\n\n⚠️ **Rewritten short by the dispatching seat (2026-09-23T08:03Z).** Over six rounds the previous body drifted from the code; its history, with each correction, is in this PR's comments. Measured readings live in the valid at-tier review records on this PR (`5786365089`, `5790830105`); notice `5790486118` names two earlier records that do not count. This body does not restate them.\n\n## What changes\n\nThree accept-set narrowings in `@objectstack/spec`.\n\n1. **A scalar operator carrying an array.** A view filter rule whose operator takes one value (`equals`, `not_equals`, `greater_than`, …) is refused at parse when its `value` is an array. The refusal names the list operator to use instead. Two carve-outs stay accepted: an omitted `value`, and the unary operators (`is_empty`, `is_not_empty`, `is_null`, `is_not_null`).\n2. **`icontains` comparands the conformance table rejects.** The empty string and a non-string comparand are refused at both filter doors: the view rule and the `$` dialect. Both doors call `isRefusedTextComparand`.\n3. **`ObjectGridProps.defaultFilters`** narrows from an unconstrained value to the same rule-array shape as `filter`. Per triage's rider, only the narrow-to-the-declared-shape arm is taken; refusing the key outright is not in this diff.\n\n## Migration\n\nThree ADR-0087 semantic entries: `view-filter-rule-scalar-operator-array-refused`, `filter-icontains-comparand-refused-at-parse` and `object-grid-default-filters-rule-array`. Each entry's `reason` and `acceptanceCriteria` say what an upgrading author meets.\n\n## Changeset\n\n`minor` on `@objectstack/spec` with a **BREAKING** banner, under the launch-window convention.\n\n## 维护者速读\n\n- 三种筛选写法现在改为**保存时就拒绝**:标量运算符后面跟数组;`icontains` 跟空字符串或非字符串;表格 `defaultFilters` 写成不合规的形状。\n- 这是破坏性变更(`minor` 加 BREAKING 标注),附三条迁移说明,会进升级指南。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"

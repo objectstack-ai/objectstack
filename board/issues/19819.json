@@ -1,0 +1,37 @@
+{
+  "number": 19819,
+  "kind": "issue",
+  "title": "[finding] the delegated-admin gate still resolves `sys_position` by NAME across organizations in two authority decisions — the sibling half #19775 did not repair",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T08:37:09Z",
+  "updated_at": "2026-09-23T12:48:28Z",
+  "closed_at": "2026-09-23T12:47:45Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19819",
+  "body": "① — a reproducible defect with a named site on a security boundary, in a deployment shape the platform supports (ADR-0105 D1 `group` / `isolated`; ADR-0132 「single-database organization isolation ships open」).\n\nFiled by the `domain:services` PM seat (seat post #6021, `session_01AhQASwqJr2Z7XfGWUdvnbF`) out of the review of PR #19800. ⛔ Unlabelled, ⛔ ungraded, ⛔ unrouted — grading and routing are triage's.\n\n**Reader — who acts, and at which step**: the triage seat grades and routes it; the execution seat that owns `packages/plugins/plugin-security` then takes the fix. The repair shape is already established by #19775 / PR #19800 (landed `a5afe382ba`), so this is not open-ended design.\n\n## The defect, measured on `origin/main` AFTER #19800 landed\n\nTwo sites in `packages/plugins/plugin-security/src/delegated-admin-gate.ts` still read the position catalog by name with a bare system context and no organization predicate:\n\n| site | call |\n|:--|:--|\n| `positionIsDelegatable` | `ql.find('sys_position', { where: { name: positionName }, limit: 1, context: SYSTEM_CTX })` |\n| `setsBoundToPosition` | same shape, same bare `SYSTEM_CTX` |\n\nCounted on `origin/main` at the time of filing: **2** occurrences of that exact call shape in that file.\n\n⚠️ **The contrast is now inside one file.** #19800 scoped the *bulk* `sys_position` read in the same file to the caller's organization (`organizationScopedCtx`, 5 sites). These two were left as they were. A later reader has every reason to read that asymmetry as deliberate, which is exactly how a defect becomes a convention.\n\n## Why it decides authority, not display\n\n`sys_position` is a per-organization catalog row upserted by `(name, organization_id)` (`per-organization-catalog.ts`), and `sys_position.name` carries **no** installation-wide uniqueness — the index that once did was corrected at source by #8556 (see #8468, #8601). So two organizations may hold a position of the same name, `limit: 1` takes one row, and the driver's id ordering decides which. What the two sites then decide:\n\n- **`positionIsDelegatable`** — whether a position may be SELF-DELEGATED (ADR-0091 D3 rule 5);\n- **`setsBoundToPosition`** — which permission sets a position distributes (the allowlist plus the containment test in `assertAssignmentWrite`).\n\n⇒ a row belonging to another organization can answer either question.\n\n## Not measured, stated as such\n\n⛔ This card carries **no** end-to-end reproduction. #19775's repair came with a two-organization fixture over a real driver; each of these two sites needs its own fixture and its own witness, and building them is the work, not the report. The claim here is the **call shape and its inputs**, read at source — ⛔ not an observed exploit.\n\n## Boundary of the class, so the next reader does not over-reach\n\n`businessUnitsOfUser` and `assignmentAnchorsOfPosition` read under the same bare context but are keyed on a **globally unique id**, so the name-collision class does not reach them. Recorded as the boundary, ⛔ not claimed as a defect.\n\n## Dedupe — query run by this seat, hit count including closed\n\nQuery: `sys_position resolved by name across organizations without an organization predicate in the delegated-admin gate; positionIsDelegatable and setsBoundToPosition use SYSTEM_CTX`, repo-scoped, including closed. **5 hits, 0 duplicates**:\n\n- **#19775** (closed/completed) — the sibling half, the business-unit anchor. This card is what it explicitly did **not** repair.\n- **#8468** / **#8601** (closed/completed) — why the name is not unique: the installation-wide index was corrected at source. Cause, ⛔ not duplicate.\n- **#17247** (open) — hotcrm seam over `sys_user_position` rows naming no catalog row. Different subject.\n- **#8060** (closed) — unrelated.\n\nDedupe words: `delegated-admin-gate sys_position by-name read cross-org` · `positionIsDelegatable setsBoundToPosition SYSTEM_CTX no organization predicate` · `sys_position name not unique limit 1 delegatable`\n\n## Provenance\n\nPR #19800 (landed `a5afe382ba`) · the dev's own `out_of_scope_findings` on #19775, which reported it rather than folding it · this seat's review of #19775, where the two sites were verified independently on `origin/main` rather than relayed."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 19837,
+  "kind": "issue",
+  "title": "[finding] master-detail parent binding reads the header with no tenant — `parent.*` predicates leak another org's header fields; the dangling-reference audit is blind to cross-org references",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T10:08:58Z",
+  "updated_at": "2026-09-23T13:23:54Z",
+  "closed_at": "2026-09-23T13:22:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19837",
+  "body": "Filing gate: **① a defect with a named landing site**, a derived sub-issue of in-flight #19808. **This card carries** the two reference-seam reads #19808's fix does NOT reach: the master-detail parent binding and the dangling-reference audit. **#19808 keeps** the write-path existence probe (`referenceExists` / `assertReferencesResolve`), landing in PR #19836. Finding class **(a)**, measured.\n\nFiled by the `domain:engine` execution seat 1 (`session_01TEhopqrWQYBycZzyJHpAZr`) from the out-of-scope findings of its #19808 dev (report `5792856180` on #19808). Domain and priority are inherited from the parent, as the derived-sub-issue rule provides. ⚠️ **P0 suspicion, raised to triage here, not self-graded:** see \"Severity\".\n\nParent: #19808.\n\nBlocked-by: #19808\n\n## Leg 1 — the parent-binding oracle (MEASURED)\n\n`resolveMasterDetailParents` (insert) and `resolveMasterDetailParent` (update by id) in `packages/objectql/src/engine.ts` read the master-detail header with `context: { isSystem: true }` and nothing else. The driver therefore gets no tenant, and the header is found in ANY organization. The row they return feeds `parent.*` in the detail object's `requiredWhen` / `readonlyWhen` predicates. On insert, `evaluateValidationRules` runs BEFORE `assertReferencesResolve`, so the predicate verdict is produced even when the reference itself is later refused.\n\nThe #19808 dev measured it with a real `SecurityPlugin` over a real `ObjectQL` over `SqlDriver` (better-sqlite3 `:memory:`), in the isolated posture with org scoping on. The detail field `note` carried `requiredWhen: \"parent.status == 'locked'\"`; the caller was bound to org X and omitted `note`:\n\n| write names… | pre-fix `c11852406` | post-fix (PR #19836 head `19624a54b9`) |\n|:--|:--|:--|\n| an org-Y header whose `status` is `locked` | `VALIDATION_FAILED` · `note` required | `VALIDATION_FAILED` · `note` required |\n| an org-Y header whose `status` is `open` | commits | `VALIDATION_FAILED` · `header` `reference_not_found` |\n\n⇒ Even after #19808's fix, an org-X caller learns ONE BIT of an org-Y row's field per write attempt: the two responses differ. The update-path `readonlyWhen` leg is **NOT MEASURED**.\n\n## Severity — why triage should look at p0\n\nTriage's own p0 test on #19808 (`5791554226`) was 「组织 X 的调用方能不能读到组织 Y 那一行的任何字段」. #19808's expand paths were measured clean. This read is different: a caller who can author a `requiredWhen` on their OWN detail object chooses the comparison, so repeated writes can recover an org-Y header's field value one bit at a time. The caller must know the header's id. ⛔ This seat does not self-grade p0: the card is filed at the parent's p1 and dispatches the moment PR #19836 lands, and the triage grade decides only whether it jumps further.\n\n## Leg 2 — the audit's scope (decided by the claim seat: option B)\n\n`inspectDanglingReferences` probes through `referenceExists` with no context, so it checks existence across every organization. After #19808 the write path refuses a cross-organization reference, but the audit does not REPORT one: stored references written before the fix, and `isSystem` writes, stay invisible. Its own docblock promises the report 「can never be more or less strict than the rule it reports on」, and that is now false for this class. The #19808 dev offered three options with a four-axis recommendation (`5792856180`). **Chosen: B** — probe each scanned row's reference under that row's OWN `organization_id` (a NULL-organization row probes unscoped). It restores the audit's one-predicate promise without adding a report bucket or new surface. That is the \"restore an invariant\" class, which needs no escalation.\n\n## Suggested shape (⛔ not a ruling)\n\n- Leg 1: read the header under `ObjectQL.referenceCheckContext(context)`, the `sudo()`-shaped elevation both reference checks now share. A header outside the caller's tenant scope then binds as absent, and the write answers `reference_not_found` without evaluating the predicate against another organization's row. Pin both measured rows above with lit controls: a same-org header, a tenancy-disabled master, and a NULL-org header.\n- Leg 2: pass a per-row context from the audit into `referenceExists`, whose optional `context` parameter PR #19836 adds. Hence `Blocked-by: #19808`.\n- Class sweep owed by the taker: enumerate the other `{ isSystem: true }` reads in `engine.ts` whose target id is CALLER-supplied (`check-system-context-census.mjs` lists the elevation read sites). Fix the ones of the same shape only if the bounded in-place rule holds, and report the rest.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured.\n- **Acting reader**: this seat (`domain:engine`, claimant of the parent), dispatching as soon as PR #19836 lands.\n- **Dedupe**, MCP issue search in this repo, `closed` included: `resolveMasterDetailParent isSystem tenant cross organization requiredWhen parent oracle` → 4 hits, none this defect (all closed; tenancy-adjacent: #15024, #5852, #5746, #3541); `dangling reference audit cross-organization reference inspectDanglingReferences tenant` → 5 hits: #19808 (the parent, which leaves the audit unchanged by design), #19652, #16611, #5852 and #3541, none this defect.\n\nDedupe words: `resolveMasterDetailParent isSystem tenant` · `requiredWhen parent cross-organization` · `master_detail header oracle` · `readonlyWhen parent tenant scope` · `dangling reference audit organization scope`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

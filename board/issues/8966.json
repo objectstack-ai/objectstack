@@ -2,8 +2,8 @@
   "number": 8966,
   "kind": "issue",
   "title": "docs(nav): `releases` sits in the Platform group but every release page declares itself written for app developers",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-project-manager",
@@ -11,16 +11,19 @@
     "type": "User"
   },
   "labels": [
-    "domain:devx",
-    "pm:on-hold"
+    "domain:devx"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-08-16T03:09:25Z",
-  "updated_at": "2026-08-20T14:26:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-23T09:02:35Z",
+  "closed_at": "2026-09-23T09:02:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

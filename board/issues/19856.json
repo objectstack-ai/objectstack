@@ -1,0 +1,31 @@
+{
+  "number": 19856,
+  "kind": "issue",
+  "title": "[finding] a `type: 'joined'` report accepts top-level `dataset` / `rows` / `columns` / `values`, and the renderer never reads them; the refinement refuses only `order`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T11:52:33Z",
+  "updated_at": "2026-09-23T12:23:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19856",
+  "body": "Filing gate: **① a defect with a named landing site**: the `joined` arm of `ReportSchema`'s `superRefine` in `packages/spec/src/ui/report.zod.ts`. Finding class **(b)**, since the file's own declared contract is not enforced, with a **(c)** limb: stored report metadata is accepted and then silently ignored.\n\nFound by the `os-dev` round on #19822 (PR #19855) and filed by the `domain:spec` execution seat 1 (`session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017). Devs do not open issues. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim. ⛔ Not introduced by PR #19855; the gap predates it.\n\n## What happens\n\nThe contract, in `report.zod.ts` on `origin/main` `8cbc3c0084`:\n\n- The `dataset` TSDoc: 「For a `joined` report, the data lives on `blocks`.」\n- The refinement's own comment: 「A `joined` report selects nothing itself — its ordering lives per block.」\n\nWhat the refinement does for `type: 'joined'`: it requires `blocks`, and it refuses a top-level `order` with 「a `joined` report orders per block — move `order` onto `blocks[]`」. ⛔ It says nothing about `dataset`, `rows`, `columns` or `values`. The seat re-read that arm at source on `8cbc3c0084`.\n\n⇒ Per the implementing round's parse probe, `ReportSchema.safeParse({ name: 'jj', label: 'J', type: 'joined', blocks: [ …one valid block… ], dataset: 'sales', rows: ['stage'], columns: ['region'], values: ['revenue'] })` is **ACCEPTED**, on PR #19855's head and on its base alike. That half is the round's reading; the seat re-read the code path that makes it true but ⛔ did not re-run the probe.\n\nThe renderer, as read by the round in objectui `packages/plugin-report/src/DatasetReportRenderer.tsx` at objectui `0cf2d66`: the joined branch returns before the top-level reads of `dataset` / `rows` / `columns` / `values`, so those keys are dropped without a word. ⚠️ That sha is objectui's working HEAD, ⛔ not the `.objectui-sha` pin. Whoever takes this card re-reads the renderer at the pin.\n\n## Why it matters\n\n- An author, human or AI, who writes a joined report with top-level selection keys gets a green parse and a report that ignores them. That is the exact experience the rule refusing `order` exists to prevent, one key over.\n- The alias tables make it easier to reach. `fields` → `values` and `dataSet` → `dataset` already route an author there, and PR #19855 adds `measures` / `dimensions` / `objectName` routes that do the same on a joined report.\n- Studio already agrees with the contract: per the round's reading, its inspector hides the dataset fields for joined reports (objectui `ReportDefaultInspector.tsx`, `datasetBound = reportType !== 'joined'`). So the gap is code- and AI-authored metadata: `defineReport` and stored report rows.\n\n## ⚠️ This narrows an accept set\n\nRefusing those four keys on a joined report narrows what `ReportSchema` accepts today. It likely owes an ADR-0087 semantic entry, and the changeset rule for a narrowing applies. Whether stored joined reports carry such keys is **NOT MEASURED**; the taker measures it (repo, examples) before choosing the shape.\n\n## Suggested shape (⛔ not a ruling)\n\nExtend the existing `joined` arm the way it already handles `order`: one refusal per key, each naming `blocks[]` as the place the key belongs.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (b) + (c).\n- **Producer**: code- and AI-authored report metadata (`defineReport`, stored report rows). Studio's inspector does not produce it.\n- **Dedupe**, MCP issue search at 2026-09-23T11:52Z:\n  - objectstack, `joined report top-level dataset rows columns values ignored silently dropped`: 2 hits, both closed, neither this defect (#11774 CSV export columns, #3916 matrix date ordering).\n  - objectstack, `ReportSchema joined superRefine blocks selection keys`: 0.\n  - objectui, `joined report DatasetReportRenderer top-level values`: 7 hits, all closed, none this defect (nearest objectui#1966, a Studio inspector for blocks).\n\nSeam: `spec:ReportSchema.superRefine` (joined arm) → `renderer:DatasetReportRenderer` (joined branch).\n\nDedupe words: `joined report top-level values dataset ignored` · `ReportSchema joined superRefine rows columns values` · `joined report selection keys move onto blocks`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

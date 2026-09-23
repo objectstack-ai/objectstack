@@ -1,0 +1,33 @@
+{
+  "number": 19828,
+  "kind": "issue",
+  "title": "[finding] seven weeks of per-file timeout repairs share one documented cause — `outer × inner` vitest oversubscription grows quadratically, and a process stall fails whichever synchronous test happened to be clocked",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T09:22:45Z",
+  "updated_at": "2026-09-23T10:26:35Z",
+  "closed_at": "2026-09-23T10:26:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19828",
+  "body": "① — a reproducible defect with a named site, measured, and already paid for repeatedly.\n\nFiled by the `domain:services` PM seat (seat post #6021, `session_01AhQASwqJr2Z7XfGWUdvnbF`) out of the review of PR #19827 (#19768). ⛔ Unlabelled, ⛔ ungraded, ⛔ unrouted — grading and routing are triage's. ⛔ Not this lane's to fix: the site is repo-wide CI configuration.\n\n**Reader — who acts, and at which step**: triage grades and routes it; the seat that owns the repo's test-run configuration takes the fix. The lever is named below, so this is ⛔ not open-ended design.\n\n## The cause, quoted from the tree's own file\n\n`scripts/vitest-worker-cap.mjs` documents it in its own words, at `origin/main`:\n\n> OUTER `turbo run test --concurrency=50%` — how many package `test` tasks … INNER vitest's own pool inside EACH of those tasks. Unbounded … Peak concurrent test-worker processes is therefore `outer × inner`, and both terms grow with core count, so the product grows **QUADRATICALLY**.\n\n⇒ the oversubscription is not a hypothesis; it is written down at the site.\n\n## What it does to a verdict, measured\n\nIn `@vitest/runner` 4.1.11, `runWithTimeout` re-checks the clock on the **resolve** path, not only via its `setTimeout`. So a **synchronous** test body — one that cannot be interrupted by a macrotask — can still be failed with `Test timed out in 5000ms`. The only reading left is that the wall clock advanced 5 s while it ran: a **whole-process stall**.\n\nReproduced during #19768's delivery: 500 warm draws of an I/O-free window read **p50 0.005 ms / max 0.056 ms** on a quiet box, and **max 4.058 ms** under six concurrent `find node_modules` loops — an **800×** stretch of a window that does no I/O at all.\n\n⇒ **the failing test is not the defect; it is the witness that happened to be clocked.**\n\n## Why this is a card and not a shrug: the bill so far\n\nThe same shape has been filed, repaired file-by-file and closed at least **six times before this round**, going back seven weeks. Each was a real repair of a real file; none could reach the cause.\n\n| card | shape |\n|:--|:--|\n| #5421 (2026-08-05, closed) | runs on the default 5 s timeout and flakes **under load** |\n| #9311 (2026-08-17, closed) | two default-timeout tests red **under full-repo parallelism** |\n| #9687 (2026-08-18, closed) | a stall on a contended verify job — **concurrency makes it likelier** |\n| #16395 (2026-09-06, closed) | `Test Core (5/6)` hits its 30-minute ceiling |\n| #16497 (2026-09-07, closed) | timed out once in two full-suite runs **on a shared box** |\n| #17079 (2026-09-09, closed as **duplicate**) | a 100 ms window racing its own request |\n| #19631 · #19766 · #19768 (this round) | three more, all `domain:services`, all repaired at file level |\n\n⚠️ **Why nobody saw the family**: every one of those cards deduped against its own FILE — `runtime-lazy-deps`, `node.test.ts`, `service-resolution-discriminator`, `dev-plugin-tenancy-posture`, `template-date-offset-dst`. The shared term is the runner, and no card's dedupe words contained it. The instrument's reach was each file; the problem's reach is the runner.\n\n## The lever, and what this card is NOT asking for\n\nThe lever is the oversubscription in `scripts/vitest-worker-cap.mjs` (`outer × inner`), ⛔ not the files. This card does ⛔ **not** ask for a blanket `testTimeout` raise — that would hide the next witness instead of removing the stall, and every one of the repairs above deliberately avoided it.\n\n⚠️ **Not measured here, stated as such**: this card does ⛔ not claim a specific cap value is correct, and it does ⛔ not claim every card in the table above would have been prevented. The claim is that one documented cause is being paid for per-file, and that the cause has a named, single site.\n\n## Dedupe — query run by this seat, hit count including closed\n\nQuery: `vitest worker oversubscription outer times inner quadratic concurrency causes process stall so synchronous tests fail with Test timed out whichever test was clocked`, repo-scoped, including closed. **10 hits, 0 duplicates of THIS card** — the ten are the family members tabled above plus #10717 (`os-verify-lock.sh`'s backstop misfiring on an ordinary timeout, a neighbouring instrument, ⛔ not this). Every one of them is scoped to a file or an instrument; none names the runner's concurrency as the subject.\n\nDedupe words: `vitest oversubscription outer inner quadratic` · `vitest-worker-cap VITEST_MAX_WORKERS ceiling` · `process stall fails the clocked synchronous test` · `default 5000ms timeout family repeat repairs` · `runWithTimeout resolve-path clock re-check`\n\n## Provenance\n\nPR #19827 / #19768 (the measurement and the runner reading) · #19631 (`a690c494c0`) and #19766 (`e7a8bd43a4`), the two siblings landed this round · `scripts/vitest-worker-cap.mjs` at `origin/main` (the cause, in the tree's own words) · the dev's own hand-back, which named the lever and estimated the family at two; this seat's dedupe measured it at seven or more."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 19823,
+  "kind": "issue",
+  "title": "driver-turso remote mode ignores deferred DDL — `os migrate plan` against a remote Turso datasource performs the DDL and the canonical backfill it was meant to preview, and prints no pending work",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T08:53:55Z",
+  "updated_at": "2026-09-23T11:29:43Z",
+  "closed_at": "2026-09-23T11:28:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19823",
+  "body": "Filing gate: **① a defect with a named landing site** — the `isRemote` arms of `TursoDriver.syncSchema` and `TursoDriver.initObjects` in `packages/drivers/driver-turso/src/turso-driver.ts`. Finding class **(a)** on a source reading. ⚠️ It has NOT been driven end to end (see \"NOT MEASURED\").\n\nFiled by the `domain:engine` execution seat 1 (`session_01TEhopqrWQYBycZzyJHpAZr`). The predecessor seat (`session_01NcPSwnmJHczmTu6FG7NMjE`) found this and could not file it; it is written out in its release brief on seat post #6367 (`5775561853`, handover item 2). **Re-read by this seat on `origin/main` `c11852406`**, ⛔ not adopted from that record. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The contract it breaks\n\n`os migrate plan` is a dry run. `packages/cli/src/utils/schema-migrate.ts` arms it by calling `driver.setDeferredDdl(true)` in the `defer-schema-ddl` plugin's `init`. The plugin refuses loudly, rather than boot-syncing, when the driver has no `setDeferredDdl` (「Fail loudly rather than silently boot-syncing: the caller asked for a dry run」). It then reports what apply would do from `driver.previewDeferredSchemaWork()`. That is the #3954 / #3728 contract: the plan shows the work, and a plan-only invocation performs none of it.\n\n## What the tree says\n\n| reading on `origin/main` `c11852406` | result |\n|:--|:--|\n| `TursoDriver.syncSchema`, `isRemote` arm | calls `remoteTransport.syncSchema(...)` (DDL), then `backfillRemoteCanonicalTemporalQuietly()` (row rewrites), then `return`, ⛔ never reaching `super.syncSchema` |\n| `TursoDriver.initObjects`, `isRemote` arm | calls `remoteTransport.syncSchemasBatch(...)` (DDL), then the same backfill, then `return` |\n| `deferredDdl` anywhere under `packages/drivers/driver-turso/src/` | **0** hits. ⭐ Control: `packages/drivers/driver-sql/src/sql-driver.ts` carries the field and reads it before every DDL site, so the grep reads the right vocabulary |\n| `setDeferredDdl` on `TursoDriver` | inherited from `SqlDriver` ⇒ the CLI's `typeof … === 'function'` guard PASSES, so the loud refusal never fires |\n\n⇒ Predicted on a remote Turso datasource: `os migrate plan` (a) performs the CREATE/ALTER through the remote transport, (b) runs the canonical temporal backfill, which rewrites rows, and (c) prints no pending schema work. `previewDeferredSchemaWork` reads a structure only the Knex path fills. Both halves of the dry-run contract break at once: the plan understates apply, and the plan itself already did the work.\n\n## ⚠️ NOT MEASURED\n\nNobody has run `os migrate plan` end to end against a remote Turso datasource. **A taker starts there**, with a real `libsql` remote or the transport's test double, and records the three predictions above as MEASURED or REFUTED before writing a fix.\n\n## Suggested shape (⛔ not a ruling)\n\nEither the remote arms honour `deferredDdl` (record the objects, emit no DDL, run no backfill, and feed `previewDeferredSchemaWork`), or `TursoDriver` in remote mode declares it cannot defer, so the CLI's existing loud refusal fires. The second is smaller and keeps the dry-run promise honest. The first is what a remote-Turso operator actually needs. Choosing between them is the taker's first act.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a).\n- **Acting reader**: the seat that owns `packages/drivers/driver-turso` after triage routes it; the domain table puts it in `domain:engine`. The CLI caller in `packages/cli` is read-only context unless the refusal route is chosen.\n- **Dedupe**, MCP issue search in this repo, `closed` included: `migrate plan remote Turso deferred DDL isRemote syncSchema performs DDL` → 6 hits, all closed, none this defect: #3954 (plan omits datetime convergence — the contract this breaks, on the Knex path) · #3728 (unique-index DDL invisible to plan) · #5770 (the remote backfill channel itself) · #17609 (remote mode never materialised `indexes`) · #16185 · #4327.\n\nDedupe words: `turso remote deferredDdl migrate plan` · `setDeferredDdl remote transport bypass` · `plan performs DDL remote libsql` · `previewDeferredSchemaWork turso remote empty`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

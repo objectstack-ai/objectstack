@@ -1,0 +1,35 @@
+{
+  "number": 19834,
+  "kind": "issue",
+  "title": "automation: accept a per-kernel `ScheduledWorkPolicy` in the engine and the two schedule triggers, keeping the zero-argument deployment default (the seam cloud#2337 ruling ①′ needs)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T09:54:47Z",
+  "updated_at": "2026-09-23T12:40:38Z",
+  "closed_at": "2026-09-23T12:39:39Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19834",
+  "body": "Filed by the director seat, summon #28 (`session_01GLdRPcbaCBQCTvVmU6YEUY`), under ruling **batch #216 item 1 · letter ①′** on objectstack-ai/cloud#2337 (record: the `Ruling:` comment on that card, maintainer 「216 同意」). Filing gate ③ (a ruled task). ⛔ Not a claim. Lane and grade set by the ruling: `domain:services` · `priority:p1` — p1 because the hosted product's pin-bump chain (objectstack-ai/cloud#2332 → objectstack-ai/cloud#1975) and objectstack-ai/cloud#2182 leg A wait on it. ⛔ Not parked as `domain:cloud`: the seam is a framework capability any multi-kernel host needs (a deployment default plus a per-kernel override), not a cloud-only journey — the ruling says so.\n\n## The gap, measured on `origin/main` `502f179` this summon\n\n- `resolveScheduledWorkEnabled(): boolean` (`packages/types/src/env.ts:237`) and `resolveScheduledWorkPolicy(): ScheduledWorkPolicy` (`:369`) take **no argument** and read `process.env` live.\n- Every consumer calls them bare. Re-read here: `packages/services/service-automation/src/engine.ts:3519` (`isTimeTriggeredKind(...) && !resolveScheduledWorkPolicy().enabled`). The cloud dev's list at its pin (re-take on the current tree first): `runtime/src/app-plugin.ts`, `cli/src/commands/doctor.ts`, `triggers/trigger-schedule/src/time-relative-trigger.ts` (two sites).\n- `AutomationEngineOptions` carries no policy field. A host that runs ONE Node process holding up to 50 per-environment kernels of MIXED plans (cloud's hosted runtime, `OS_KERNEL_CACHE_SIZE: '50'`) therefore has nowhere to say 「this kernel: scheduled work OFF」.\n\n## Ruled shape\n\n1. `ScheduledWorkPolicy` (already declared at `packages/types/src/env.ts:330`) becomes injectable per kernel: `AutomationEngineOptions`, and the options of the two schedule trigger plugins, accept an optional `scheduledWorkPolicy` (a value or a resolver); every consumer reads THAT when present, else the zero-argument deployment resolver exactly as today. ⛔ The deployment-level default keeps its meaning and its spelling (`OS_AUTOMATION_SCHEDULED_WORK_ENABLED`); nothing about `objectstack serve` changes.\n2. The refusal stays structured: a time-triggered flow the policy leaves unarmed is reported by the engine the way it is today (the diagnostic names the policy, ⛔ never 「add `requires: triggers`」), so a host can render 「本档位未武装」 in its flow list.\n3. Tests: two kernels in one process — one constructed with `enabled: false` arms no package-authored schedule while its sibling with `enabled: true` does; that two-kernels-one-process case IS the acceptance test. The zero-argument path is pinned unchanged.\n4. Changeset `minor` on each package whose options widen. `Clause-②: no` — this widens a runtime options surface, not `packages/spec`; cite this line in the claim. The dispatch gate's path rule decides the tier.\n\n## Consumer (lands after this ships in a version cloud can pin)\n\nobjectstack-ai/cloud#2337: cloud sets the policy in `artifact-kernel-factory.ts`, the first point that knows an environment's plan (`free` ⇒ OFF, `team` and above ⇒ ON), beside the existing `assertScimEnvDoesNotOverridePlanGate`. Until then cloud runs the deployment default ON (ruling ①′'s interim), so nothing changes for hosted tenants before the seam.\n\nDedupe (searched this summon: `ScheduledWorkPolicy per-kernel seam automation engine policy argument` → 0 cards in this repo): `resolveScheduledWorkPolicy argument` · `AutomationEngineOptions scheduledWorkPolicy` · `per-kernel scheduled work policy` · `cloud#2337`."
+}

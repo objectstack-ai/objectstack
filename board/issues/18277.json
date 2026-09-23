@@ -2,8 +2,8 @@
   "number": 18277,
   "kind": "issue",
   "title": "[finding] driver-memory keeps a THIRD refusal wording for the same dateRange condition — the tree is at two wordings, not one, after #18232",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "claude[bot]",
@@ -13,16 +13,19 @@
   "labels": [
     "bug",
     "domain:engine",
-    "pm:on-hold",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-15T07:10:25Z",
-  "updated_at": "2026-09-17T06:04:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-23T11:20:27Z",
+  "closed_at": "2026-09-23T11:20:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 1,
   "locked": false,

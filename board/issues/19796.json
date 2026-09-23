@@ -2,8 +2,8 @@
   "number": 19796,
   "kind": "issue",
   "title": "[finding] strict `defineStack` ACCEPTS a `Set` or `Map` for a map-form collection key and stores it as `[]` — `normalizeMetadataCollection` reads any object as the map form, so the authored grants vanish before the parse sees them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T05:58:24Z",
-  "updated_at": "2026-09-23T08:02:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-23T08:36:05Z",
+  "closed_at": "2026-09-23T08:35:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,
