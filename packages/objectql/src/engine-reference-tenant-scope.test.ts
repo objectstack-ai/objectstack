@@ -361,6 +361,9 @@ describe('[#19808] the lookup existence probe is scoped to the caller\'s organiz
   it('[#19837] the audit REPORTS a stored cross-organization reference — probed under the row\'s own organization', async () => {
     // Written before #19808, or by an `isSystem` write: the guard never saw it.
     storeFor('rts_contact').set('ct_cross', { id: 'ct_cross', title: 'legacy', account: 'acc_y', organization_id: ORG_X });
+    // Named, not inherited from the environment: the per-row probe is the
+    // non-union postures' behaviour (see the `group` case below).
+    engine.setTenancyPostureProvider(() => 'isolated');
     observed.length = 0;
 
     const out = await engine.inspectDanglingReferences({ objects: ['rts_contact'] });
@@ -392,19 +395,33 @@ describe('[#19808] the lookup existence probe is scoped to the caller\'s organiz
     expect(out.dangling.map((d) => d.recordId)).toEqual(['ct_gone']);
   });
 
-  it('[#19837] ⚠️ `group` posture: a cross-organization reference a group member legitimately wrote is reported too', async () => {
-    // Pinned so this moves only by decision. The guard's reach under `group` is
-    // the WRITER's membership set, which the stored row does not record, so the
-    // audit — probing under the row's own organization alone — is stricter than
-    // the rule here. Raised on the card as an open question.
+  it('[#19837] `group` posture: a cross-organization reference to an EXISTING row is not reported — the probe stays unscoped', async () => {
+    // Claim-seat decision completing option B: under a union posture the
+    // guard's reach is the WRITER's membership set, which the stored row does
+    // not record, so a per-row probe would be STRICTER than the rule and fire
+    // on healthy group data every sweep. The probe stays unscoped there.
     engine.setTenancyPostureProvider(() => 'group');
     const GROUP_MEMBER = { ...MEMBER_X, accessible_org_ids: [ORG_X, ORG_Y] } as unknown as ExecutionContext;
     await engine.insert('rts_contact', { id: 'ct_grp', title: 'g', account: 'acc_y' }, { context: GROUP_MEMBER } as any);
     expect(storeFor('rts_contact').get('ct_grp')).toMatchObject({ account: 'acc_y', organization_id: ORG_X });
+    // The lit half: the same run still reports what resolves nowhere.
+    storeFor('rts_contact').set('ct_gone', { id: 'ct_gone', title: 'g', account: 'acc_nowhere', organization_id: ORG_X });
+    observed.length = 0;
 
     const out = await engine.inspectDanglingReferences({ objects: ['rts_contact'] });
 
-    expect(out.dangling.map((d) => d.recordId)).toEqual(['ct_grp']);
+    expect(out.undetermined).toBe(0);
+    expect(out.dangling.map((d) => d.recordId)).toEqual(['ct_gone']);
+    // Unscoped: no probe of `rts_account` carried a tenant.
+    const probe = observed.filter((c) => c.object === 'rts_account' && c.method === 'findOne');
+    expect(probe.length).toBeGreaterThan(0);
+    expect(probe.every((c) => c.options?.tenantId === undefined)).toBe(true);
+
+    // Lit control: the SAME stored rows under `isolated` — the per-row probe applies.
+    engine.setTenancyPostureProvider(() => 'isolated');
+    const isolated = await engine.inspectDanglingReferences({ objects: ['rts_contact'] });
+
+    expect(isolated.dangling.map((d) => d.recordId)).toEqual(['ct_grp', 'ct_gone']);
   });
 });
 

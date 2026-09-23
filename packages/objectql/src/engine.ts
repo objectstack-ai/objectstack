@@ -152,6 +152,7 @@ import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object
 import { resolveTenancyPosture } from '@objectstack/types';
 import {
   normalizeTenancyPosture,
+  postureUsesUnionScope,
   TenantLayer0VerdictSchema,
   type TenancyPosture,
   type TenantLayer0Verdict,
@@ -6794,8 +6795,9 @@ export class ObjectQL implements IObjectQLEngine {
    * probe spans every organization. {@link inspectDanglingReferences}, which
    * has no caller, passes the SCANNED row's own organization as the context's
    * `tenantId` instead (#19837), and no context only for a row that carries
-   * none — so the audit reports a stored reference into another organization,
-   * the class this guard now refuses.
+   * none or under a union (`group`) posture — so outside `group` the audit
+   * reports a stored reference into another organization, the class this guard
+   * now refuses.
    */
   private async referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
     try {
@@ -7037,9 +7039,19 @@ export class ObjectQL implements IObjectQLEngine {
    * column) probes unscoped. A stored cross-organization reference — written
    * before #19808, or by an `isSystem` write — is therefore reported, where the
    * unscoped probe found the row in the other organization and said nothing.
-   * ⚠️ Under the `group` posture the write rule's reach is the writer's whole
-   * membership set, which the row does not record, so a cross-organization
-   * reference a group member legitimately wrote is reported too (#19837).
+   *
+   * ## …except under a UNION posture, where it stays unscoped
+   *
+   * Under `group` ({@link postureUsesUnionScope}) the write rule's reach is the
+   * WRITER's whole membership set, and the stored row does not record it. A
+   * probe scoped to the row's own organization would be STRICTER than that
+   * rule: it would report every cross-organization reference a group member
+   * legitimately wrote, on every sweep of healthy data. So the probe stays
+   * unscoped there, as before #19837 — never stricter than the rule. ⚠️ The
+   * blind spot this leaves, stated rather than implied: under `group` a stored
+   * reference into an organization NO writer of that row could reach (an
+   * `isSystem` write, or a membership since revoked) resolves and is NOT
+   * reported; only a reference that resolves nowhere is.
    *
    * See {@link auditDanglingReferences} for the judgments (readonly SPLIT —
    * `readonly` references are read like any other and their findings filed
@@ -7053,12 +7065,14 @@ export class ObjectQL implements IObjectQLEngine {
   async inspectDanglingReferences(
     options?: DanglingReferenceAuditOptions,
   ): Promise<DanglingReferenceReport> {
+    // Read once per run, live — the posture IN FORCE, by the engine's one reader.
+    const unionScope = postureUsesUnionScope(this.resolveEnginePosture());
     return auditDanglingReferences(
       {
         objects: () => this._registry.getAllObjects() as unknown as AuditableObject[],
         find: (object, opts) => this.find(object, opts as any) as Promise<Array<Record<string, unknown>>>,
         probe: (target, id, organization) => this.referenceExists(
-          target, id, organization == null ? undefined : ({ tenantId: organization } as ExecutionContext),
+          target, id, organization == null || unionScope ? undefined : ({ tenantId: organization } as ExecutionContext),
         ),
         warn: (msg, meta) => this.logger?.warn?.(msg, meta as any),
       },
