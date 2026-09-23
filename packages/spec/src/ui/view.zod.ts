@@ -869,7 +869,11 @@ export const PaginationConfigSchema = lazySchema(() => strictObject({
   surface: 'this pagination configuration',
   history: VIEW_HISTORY,
 }, {
-  pageSize: z.number().int().positive().default(25).describe('Number of records per page'),
+  pageSize: z.number().int().positive().default(25).describe(
+    'Number of records per page. On a view with no pager (kanban, gallery, timeline) it is the fetch '
+    + 'ceiling, and the renderer owes two things: bound its fetch at this number, and, when the filtered '
+    + 'set is larger than it, show a visible truncation signal saying what is on screen is not the whole set',
+  ),
   pageSizeOptions: z.array(z.number().int().positive()).optional().describe('Available page size options'),
 }));
 
@@ -1133,199 +1137,6 @@ export const GroupingConfigSchema = lazySchema(() => strictObject({
   + 'AND-ed into the view filter. Compiled by `compileListViewGroupQuery` / `compileListViewGroupRowsQuery`',
 ));
 
-/*
- * ---------------------------------------------------------------------------
- * `limit` — the author-settable row ceiling of the page-shaped views (#17393)
- * ---------------------------------------------------------------------------
- *
- * Declared here because the PROTOCOL was the thing that was wrong: two
- * renderers already cap by author choice, and the key they read was never a
- * protocol key. Measured in objectui at `dda8f3815d`:
- *
- *   - `ObjectKanban.tsx:573` fetches `$top: schema.limit ?? DEFAULT_KANBAN_LIMIT`
- *     (`= 100` at `:84`), and that `limit` is declared in `@object-ui/types`
- *     alone (`zod/objectql.zod.ts:1762`, `z.number().int().positive().optional()`);
- *   - `ObjectTimeline.tsx:328` fetches `$top: schema.limit ?? DEFAULT_TIMELINE_LIMIT`
- *     (`= 100` at `:29`), with `limit` on that component's own props interface
- *     (`:129`) and on no published schema at all;
- *   - `ObjectGallery.tsx` sends no `$top` and reads no ceiling at all — the
- *     unbounded fetch objectui#7390 is ruled to close by reading this key.
- *
- * Consumer-local author-settable keys the protocol never declared are the
- * divergence the contract-first directive forbids, so the knob enters the
- * protocol first and the three spellings come under one declaration (the
- * director seat's amendment of 2026-09-10T11:0xZ on objectui#7390, on the
- * maintainer's principle 「我们的项目以objectstack 协议为准，文档应该以实际实现
- * 为准。协议不正确的应该先修改协议。」).
- *
- * ## Why on the per-view config blocks, and not as a member of the list view
- *
- * The alternative shape — one row ceiling on {@link ListViewShapeSchema}
- * itself — is rejected on three properties of this tree:
- *
- *   1. The base shape ALREADY carries the row-bounding knob every view type
- *      reaches: `pagination.pageSize` ({@link PaginationConfigSchema}, default
- *      25). A second base-level row key would leave one view with two
- *      base-level row bounds and no declared precedence between them — and the
- *      `virtualScroll` tombstone at the bottom of this same shape prescribes
- *      `pagination` for exactly that question.
- *   2. A base member is reachable from EVERY `type`, the non-grid four
- *      (gantt / calendar / map / tree) included. Their ceiling is a platform
- *      constant the renderer owns (objectui#7210) and this card does not touch
- *      them, so a base member would publish an authorable ceiling on four view
- *      kinds no renderer reads — declared-but-unenforced on the day it lands.
- *   3. The per-kind block is what actually REACHES the renderer: objectui's
- *      `ListView` merges `schema.<kind>` into the generated node — its kanban
- *      branch spreads the rest of the block flat onto `object-kanban`, so
- *      `kanban.limit` lands exactly where `schema.limit` is read — while a
- *      base-level key is forwarded into no per-kind node at all.
- *
- * The NAME is `limit` for the same reason: it is the name the consumer already
- * reads, so this declaration absorbs the two consumer-local keys instead of
- * buying a second divergence spelled differently.
- *
- * ⚠️ NOT the kanban LANE's `limit`. objectui's node-level
- * `ObjectKanbanLaneSchema.limit` is a WIP warning threshold that never reaches
- * a query; no lane object exists on this face at all
- * ({@link KanbanConfigSchema}'s `columns` is a list of card FIELD names), so
- * the two cannot be confused here.
- */
-export const DEFAULT_VIEW_ROW_LIMIT = 100;
-
-/** What a page-shaped view's ceiling bounds, per view type. */
-const ROW_LIMIT_SUBJECT = {
-  gallery: 'cards the gallery fetches and draws',
-  kanban: 'records the board fetches across all its lanes',
-  timeline: 'rows the timeline fetches onto its rail',
-} as const;
-
-/** The three view configs that cap by AUTHOR choice (not by platform ceiling). */
-type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
-
-/**
- * The `limit` declaration for one page-shaped view config.
- *
- * The default is APPLIED, not merely described: a `.describe()` naming a
- * default the schema does not apply is a second contract that nothing
- * enforces, and the two drift the first time either is edited. The agreement
- * is pinned from both sides in `view.test.ts` (#17393) — the parsed default is
- * compared against the number the describe text states.
- *
- * ⛔ The truncation signal is the renderer's half and cannot be enforced from
- * here; it is stated in the describe because a bounded-and-silent view reads
- * as complete, which is worse than the unbounded-and-silent one this key
- * replaces — the author needs to know the cap is visible, and the renderer
- * author needs to know it is owed.
- *
- * ⚠️ WHICH FACE THIS KEY IS ON, and why that has to be said first. There are
- * TWO `limit`s a reader can confuse, on two different documents, and three
- * rounds of #19228 went wrong on the boundary:
- *   · **VIEW FACE** — THIS key. A member of a `ListViewSchema` document's
- *     `kanban` / `gallery` / `timeline` block. An ADAPTER turns that document
- *     into a rendered node; no renderer reads this document directly.
- *   · **ELEMENT FACE** — a page component node's OWN `limit`
- *     (`ObjectKanbanPropsSchema`, `ObjectTimelinePropsSchema`),
- *     declared in `component.zod.ts`, with no applied default. That is the key
- *     every renderer and `ElementDataSourceGate` actually read.
- * Every sentence below names its face before it says anything else.
- *
- * ⚠️ WHAT THIS VIEW-FACE KEY REACHES TODAY — recorded, not repaired (#19228).
- * Measured first-hand at the pin this repo builds against (`.objectui-sha` =
- * `87af769e9`), 2026-09-21T09:15Z, with TWO instruments, because one was not
- * enough and the first one's answer was wrong:
- *
- *  1. PROPERTY-ACCESS spellings. ⛔ Published as its EXPRESSION, not as a
- *     number — this card exists because a confident count was wrong once, so
- *     a control nobody can re-derive is not a control. Run at the pin, from
- *     an objectui checkout, over every tracked file:
- *       probe:   git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.limit\b'
- *       control: git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.(groupByField|scale|coverField)\b'
- *     Probe: **0** lines, 0 files. Control: **13** lines across **6** files —
- *     `app-shell/src/views/ObjectView.galleryBinding-7547.test.tsx:41`,
- *     `app-shell/src/views/ObjectView.tsx:450`,
- *     `plugin-list/src/ListView.tsx:2538`, `:2540`, `:2547`, `:3057`, `:3114`,
- *     `:3116`,
- *     `plugin-list/src/__tests__/ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`,
- *     `:99`, `plugin-view/src/ObjectView.tsx:1695`, and
- *     `types/src/__tests__/object-kanban-group-by-limit-7322.test.ts:146`, `:148`.
- *     ⚠️ Filtering changes that number and the filter must be stated with it.
- *     Of the 13: **2 are COMMENTS** (`ObjectView.galleryBinding-7547.test.tsx:41`,
- *     `ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`), **1 is an
- *     `it()` TITLE string** (same file, `:99` — ⛔ not a comment), and **2 are
- *     lines inside a QUOTED source-text pin**
- *     (`object-kanban-group-by-limit-7322.test.ts:146`, `:148`). So a reader
- *     counting executable reads only gets **8**. All three readings are of one
- *     hit set. A live instrument — and a WRONG answer.
- *  2. ⭐ SPREADS — a spread carries a key without ever spelling it, so it is
- *     the hole instrument 1 cannot see by construction. ⛔ Re-take it by its
- *     PREDICATE, not by its count: **a spread whose target is the object
- *     literal an adapter RETURNS as the node** — flattening onto the node —
- *     as against a merge that builds a nested config (`...mergedTimeline` is
- *     the lit control for the instrument AND the example of what the predicate
- *     excludes). A grep broad enough to find these also returns the nested
- *     merges, so the rule, not the number, is what makes it reproducible.
- *     ⛔ And name what the predicate EXCLUDES, or the next reader re-finds
- *     it and wonders: `app-shell/src/views/ObjectView.tsx:206` and `:342`
- *     ARE spreads of a view block, inside `timelineViewOptions` (`:201`) and
- *     `galleryViewOptions` (`:334`). They build an OPTIONS BAG that feeds
- *     `ListView`'s nested forward, not the object literal an adapter returns
- *     as the node, so the predicate excludes them — deliberately, not by
- *     oversight. Two more the predicate excludes for their own reasons:
- *     `plugin-list/src/ListView.tsx:3044-3046` (`mergedGallery`) builds a
- *     NESTED gallery prop, the `...mergedTimeline` family; and
- *     `app-shell/src/views/ObjectView.tsx:1284`
- *     (`spec.kanban = { ...(spec.kanban || {}), columns }`) writes back into a
- *     VIEW document's own block — a metadata write, not a node build.
- *     Under that predicate, at that pin, the VIEW-face per-kind blocks give:
- *       `plugin-list/src/ListView.tsx:2979`   `...restKanban`
- *       `plugin-view/src/ObjectView.tsx:1638`  `...restKanban`
- *       `plugin-view/src/ObjectView.tsx:1697`  `...(viewOptions.gallery || {})`
- *       `plugin-view/src/ObjectView.tsx:1725`  `...(viewOptions.timeline || {})`
- *     Neither `restKanban` destructure strips `limit` (`ListView.tsx:2952`,
- *     `ObjectView.tsx:1579`), so a VIEW's per-kind `limit` — INCLUDING the 100
- *     this applied default materializes — becomes the generated node's
- *     ELEMENT-face flat `limit`, which is the key the renderers read.
- *
- * ⇒ **A view's `kanban.limit`: flattened on BOTH adapter routes, and read.**
- *   `ObjectKanban.tsx:553` runs `describeRefusedRowLimit(schema.limit, …)`
- *   unconditionally.
- * ⇒ **A view's `timeline.limit`: ROUTE-DEPENDENT.** `plugin-view` flattens it
- *   (`ObjectView.tsx:1725`) and the node it returns carries no `timeline`
- *   block at all, so the value arrives as the node's flat `limit` and
- *   `ObjectTimeline.tsx:279` reads it. `plugin-list` instead forwards the
- *   block NESTED (`ListView.tsx:3084`), where nothing reads it.
- * ⇒ **A view's `gallery.limit`: flattened by `ObjectView.tsx:1697` and read by
- *   NOBODY** — `ObjectGallery.tsx` contains no `limit` at all (0 occurrences,
- *   case-insensitive, against a lit control `schema.imageField` /
- *   `schema.titleField` at `:340` / `:348`). ⛔ Do not generalise that
- *   asymmetry to the other two; it is gallery's alone.
- *
- * ⚠️ Where it IS read, the `$top` it would govern (`ObjectKanban.tsx:676`,
- * `ObjectTimeline.tsx:407`) is still not issued on either adapter route today:
- * both hosts hand rows down as a React `data` prop (`ListView.tsx:4702`,
- * `ObjectView.tsx:2319`) and both children short-circuit their own fetch on it
- * (`ObjectKanban.tsx:559`, `ObjectTimeline.tsx:420`). ⛔ That is a statement
- * about the QUERY, not about the key being unread.
- *
- * ⚠️ A consequence of APPLIED that the open decision needs: through those
- * spreads a spec-parsed view emits a node carrying an authored-LOOKING
- * ELEMENT-face `limit: 100` that no author wrote. ⛔ Flagged, not acted on —
- * changing it is a contract direction, not a tidy-up.
- *
- * ⛔ Which of the row bounds wins is NOT decided here and NOT implied by this
- * declaration: #19228 opens that question and picks nothing, and neither does
- * this note. What is recorded is only what each key reaches today.
- */
-const rowLimitKey = (view: RowLimitView) =>
-  z.number().int().positive().default(DEFAULT_VIEW_ROW_LIMIT).describe(
-    `Row ceiling — the most ${ROW_LIMIT_SUBJECT[view]}; default `
-    + `${DEFAULT_VIEW_ROW_LIMIT} when the key is absent. The renderer owes two things: bound its `
-    + 'fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), '
-    + 'show a visible truncation signal saying what is on screen is not the whole set — a bounded '
-    + 'view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a '
-    + 'renderer that reads this key yet; which do is recorded on the declaration.',
-  );
-
 /**
  * Gallery View Configuration (Airtable-style)
  * Configures card layout for gallery/card views.
@@ -1339,7 +1150,6 @@ export const GalleryConfigSchema = lazySchema(() => strictObject({
   cardSize: z.enum(['small', 'medium', 'large']).default('medium').describe('Card size in gallery view'),
   titleField: z.string().optional().describe('Field to display as card title'),
   visibleFields: z.array(z.string()).optional().describe('Fields to display on card body'),
-  limit: rowLimitKey('gallery'),
 }).describe('Gallery/card view configuration'));
 
 /**
@@ -1362,7 +1172,6 @@ export const TimelineConfigSchema = lazySchema(() => strictObject({
     ),
   colorField: z.string().optional().describe('Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color'),
   scale: z.enum(['hour', 'day', 'week', 'month', 'quarter', 'year']).default('week').describe('Default timeline scale'),
-  limit: rowLimitKey('timeline'),
 }).describe('Timeline view configuration'));
 
 /**
@@ -1666,7 +1475,6 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
    */
   titleField: z.string().optional().describe('Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   columns: z.array(z.string()).describe('Fields to show on cards'),
-  limit: rowLimitKey('kanban'),
 }));
 
 /**
@@ -6113,8 +5921,6 @@ export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
 export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
-/** Post-parse shape of {@link KanbanConfig} — defaults applied, transforms run (ADR-0122). */
-export type KanbanConfigParsed = z.infer<typeof KanbanConfigSchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;

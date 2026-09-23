@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 789 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 790 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1612,12 +1612,11 @@ export type Iso823 = Assert<Eq< z.input< typeof M164.ReportType >, z.infer< type
 export type Iso826 = Assert<Eq< z.input< typeof M167.CalendarConfigSchema >, z.infer< typeof M167.CalendarConfigSchema > >>;
 export type Iso827 = Assert<Eq< z.input< typeof M167.GanttConfigSchema >, z.infer< typeof M167.GanttConfigSchema > >>;
 export type Iso828 = Assert<Eq< z.input< typeof M167.GanttQuickFilterSchema >, z.infer< typeof M167.GanttQuickFilterSchema > >>;
-// (Iso829 `KanbanConfigSchema` left this list in #17393: the author-settable
-// row ceiling `limit` APPLIES its default, which is exactly the "a nested field
-// gains a `.default()`" event this file exists to catch — so the schema now has
-// two shapes and `KanbanConfigParsed` is declared beside the bare alias, as
-// ADR-0122 prescribes. Its two page-shaped siblings needed no line moved: both
-// already carried defaults and therefore both halves of the pair.)
+// `KanbanConfigSchema` left this list as Iso829 when #17393 gave it a `limit`
+// with an APPLIED default, and returns as Iso882 now that #19228 removed that
+// member before it was published: the two shapes coincide again, so
+// `KanbanConfigParsed` is deleted (ADR-0122 D3). Iso829 stays vacant.
+export type Iso882 = Assert<Eq< z.input< typeof M167.KanbanConfigSchema >, z.infer< typeof M167.KanbanConfigSchema > >>;
 export type Iso851 = Assert<Eq< z.input< typeof M167.ListMapConfigSchema >, z.infer< typeof M167.ListMapConfigSchema > >>;
 export type Iso830 = Assert<Eq< z.input< typeof M167.NavigationModeSchema >, z.infer< typeof M167.NavigationModeSchema > >>;
 export type Iso831 = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
@@ -1696,7 +1695,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 789 isomorphic pins', () => {
+  it('still declares all 790 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2301,7 +2300,11 @@ describe('ADR-0122 type-alias convention', () => {
     // Iso877/Iso878; #17551 landed on main first, so its ids stand and this
     // card's pins renumbered to Iso880/Iso881 — ids are claims about pins, not
     // positions, so the renumbering asserts nothing new.
-    expect(pins).toHaveLength(789);
+    // 789 -> 790 is #19228's removal of that same row ceiling before any
+    // release carried it: `KanbanConfigSchema` loses the `limit` whose applied
+    // default had split its two shapes, `KanbanConfigParsed` is deleted and the
+    // schema is re-pinned as Iso882. +1 added.
+    expect(pins).toHaveLength(790);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

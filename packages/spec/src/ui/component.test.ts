@@ -26,7 +26,7 @@ import {
 import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 import {
   GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema, ListColumnSchema, ListViewSchema,
-  TimelineConfigSchema, DEFAULT_VIEW_ROW_LIMIT,
+  TimelineConfigSchema,
 } from './view.zod';
 import { FieldSchema } from '../data/field.zod';
 import { ALL_CONVERSIONS } from '../conversions/registry';
@@ -3831,11 +3831,9 @@ describe('the three #18305 object blocks — key sets derived from the renderers
   });
 });
 
-// #19228 — two authorable row bounds land on one `object-timeline` node, and
-// the react tier's own precedence sentence was narrower than the guard it
-// names. ⛔ This card picks NO precedence and changes no `.default()`; these
-// pins only hold the two structural facts the repair rests on, measured
-// first-hand at the objectui pin `87af769e9` on 2026-09-21T06:30-06:40Z.
+// #19228 — the react tier's own precedence sentence was narrower than the
+// guard it names. These pins hold the structural facts the repair rests on,
+// measured first-hand at the objectui pin `87af769e9` on 2026-09-21T06:30-06:40Z.
 describe('row caps on the object-bound blocks — what #19228 recorded', () => {
   const timeline = ComponentPropsMap['object-timeline'];
   const kanban = ComponentPropsMap['object-kanban'];
@@ -3853,36 +3851,10 @@ describe('row caps on the object-bound blocks — what #19228 recorded', () => {
     }
 
     // LIT CONTROL, same instrument (a Zod applied default, observed through
-    // `parse`): the VIEW-face sibling DOES materialize one, so the zeros above
-    // are a reading rather than a parse that never ran.
-    const viewSide = TimelineConfigSchema.parse({ startDateField: 'start_date', titleField: 'name' }) as { limit?: number };
-    expect(viewSide.limit).toBe(DEFAULT_VIEW_ROW_LIMIT);
-  });
-
-  it('materializes the NESTED `timeline.limit` on a node whose flat `limit` stays absent', () => {
-    // The shape the record is about: one strictObject, two authorable row
-    // caps, and an applied default on the nested one. ⚠️ Faces, because this
-    // card keeps confusing them: the NESTED key asserted below is the ELEMENT
-    // face, and at the pin no renderer reads it on any route. The
-    // route-dependent one is a VIEW document's `timeline.limit`, a different
-    // key on a different document, which `ObjectView.tsx:1725` flattens onto
-    // a generated node's FLAT `limit`. Neither is asserted here: this pin is
-    // about the PARSE, which is the only half a schema owns.
-    const result = timeline.safeParse({
-      objectName: 'task',
-      timeline: { startDateField: 'start_date', titleField: 'name' },
-    });
-    expect(result.success).toBe(true);
-    const data = (result.success ? result.data : undefined) as
-      { limit?: unknown; timeline?: { limit?: unknown } } | undefined;
-    expect(data?.timeline?.limit).toBe(DEFAULT_VIEW_ROW_LIMIT);
-    expect(Object.prototype.hasOwnProperty.call(data ?? {}, 'limit')).toBe(false);
-
-    // CONTROL — the node is still strict, so the acceptance above is not the
-    // verdict of a map that has stopped refusing anything.
-    const control = timeline.safeParse({ objectName: 'task', zzUnlikelyBogusKey__: 1 });
-    expect(control.success).toBe(false);
-    expect(JSON.stringify(control.error?.issues)).toContain('unrecognized_keys');
+    // `parse`): a VIEW-face block DOES materialize its `scale`, so the zeros
+    // above are a reading rather than a parse that never ran.
+    const viewSide = TimelineConfigSchema.parse({ startDateField: 'start_date', titleField: 'name' }) as { scale?: string };
+    expect(viewSide.scale).toBe('week');
   });
 
   it('admits only caps the binding gate calls usable — the SUBSET that makes 「unset」 the whole rule', () => {

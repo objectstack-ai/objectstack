@@ -4159,8 +4159,7 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  *    `ListView.tsx:3084` forwards it nested instead, where nothing reads it.
  *    The package is spelled because objectui carries a second `ObjectView.tsx`
  *    (in `app-shell`), where that same line number is an unrelated `catch` —
- *    a bare spelling here names neither file. Recorded on
- *    `rowLimitKey` in `view.zod.ts`, which is where that key lives.
+ *    a bare spelling here names neither file.
  *
  * ⚠️ Flagged, not fixed — a THIRD route neither the card nor the first two
  * reviews described: a hand-authored `object-timeline` node reaching
