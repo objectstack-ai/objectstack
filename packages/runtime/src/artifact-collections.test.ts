@@ -29,6 +29,8 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { composeStacks } from '@objectstack/spec';
+
 import { resolveArtifactCollections, packageOwnedCollectionKeys } from './artifact-collections';
 
 /** A schema-valid object definition — `ArtifactPackageSchema` parses each body WHOLE. */
@@ -294,6 +296,53 @@ describe('resolveArtifactCollections', () => {
         }) as Record<string, any>;
         expect(Object.keys(resolved.functions).sort()).toEqual(['sendMail', 'syncBilling']);
         expect(resolved.functions.syncBilling.effect).toBe('writes');
+    });
+
+    it('#14512 — what the EMITTER hands this reader never loses a reconciled object', () => {
+        // The case above is a hand-built artifact: it proves the reader claims
+        // by NAME when the merged copy is present. This one asks the question
+        // that pairs with it — does the producer ever hand this reader an
+        // artifact where there is nothing to claim WITH?
+        //
+        // `composeStacks(…, { manifest: 'preserve' })` drops the flattened copy
+        // for a multi-package artifact (#14512), and two packages declaring one
+        // object under `objectConflict: 'merge'` are RECONCILED into a single
+        // top-level object that neither body carries. Dropping that copy would
+        // hand this reader the two unreconciled halves — measured, on the first
+        // shape of that emitter: `count=2 -> [{account,[a]},{account,[b]}]`
+        // where the same input answered `count=1 -> [{account,[a,b]}]` before.
+        // The emitter keeps the flattened half exactly when the bodies do not
+        // reproduce it, and this is that contract read from the consumer end.
+        //
+        // ⚠️ `composeStacks` resolves from `@objectstack/spec`'s BUILD, so a
+        // stale `dist/` measures the previous emitter. Build spec first.
+        const pkg = (id: string, field: string) => ({
+            manifest: { id, name: id, version: '1.0.0', type: 'module' as const, namespace: 'probe' },
+            objects: [{ name: 'probe_account', label: 'Account', fields: { [field]: { type: 'text' as const, label: field } } }],
+        });
+        const artifact = composeStacks(
+            [pkg('com.example.a', 'from_a'), pkg('com.example.b', 'from_b')] as never,
+            { manifest: 'preserve', objectConflict: 'merge' } as never,
+        ) as Record<string, any>;
+
+        const resolved = resolveArtifactCollections(artifact) as Record<string, any>;
+        expect(resolved.objects).toHaveLength(1);
+        expect(Object.keys(resolved.objects[0].fields).sort()).toEqual(['from_a', 'from_b']);
+
+        // Anti-vacuity: the same two packages with DISJOINT objects are emitted
+        // with no flattened copy at all, and this reader still answers both —
+        // so the assertion above is about reconciliation, not about the emitter
+        // having quietly stopped stripping anything.
+        const disjoint = composeStacks(
+            [
+                { manifest: { id: 'com.example.a', name: 'a', version: '1.0.0', type: 'module' as const, namespace: 'probe' }, objects: [{ name: 'probe_a', label: 'A', fields: {} }] },
+                { manifest: { id: 'com.example.b', name: 'b', version: '1.0.0', type: 'module' as const, namespace: 'probe' }, objects: [{ name: 'probe_b', label: 'B', fields: {} }] },
+            ] as never,
+            { manifest: 'preserve' } as never,
+        ) as Record<string, any>;
+        expect(disjoint.objects).toBeUndefined();
+        expect((resolveArtifactCollections(disjoint) as Record<string, any>).objects.map((o: any) => o.name))
+            .toEqual(['probe_a', 'probe_b']);
     });
 
     it('raises the load path\'s OWN refusal for a malformed `packages[]`', () => {

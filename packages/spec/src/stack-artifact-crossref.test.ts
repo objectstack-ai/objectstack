@@ -175,8 +175,15 @@ describe('#18202 — `artifactObjects` widens exactly the two ARTIFACT-SCOPED cl
     const app = defineStack(appConfig('crm_case', 'crm_case'), { artifactObjects: ['crm_case'] });
     const artifact = composeStacks([service, app], { manifest: 'preserve' });
 
-    expect((artifact as { packages?: unknown[] }).packages).toHaveLength(2);
-    expect((artifact.objects ?? []).map((o) => o.name).sort()).toEqual(['crm_account', 'crm_case']);
+    const entries = ((artifact as { packages?: { manifest: Record<string, unknown> }[] }).packages ?? []);
+    expect(entries).toHaveLength(2);
+    // ⭐ #14512: the artifact carries each definition ONCE, under its package —
+    // the flattened top level is not emitted for a multi-package artifact, so
+    // the object set is read across the bodies.
+    expect(artifact.objects).toBeUndefined();
+    expect(
+      entries.flatMap((e) => (e.manifest.objects as { name: string }[] | undefined) ?? []).map((o) => o.name).sort(),
+    ).toEqual(['crm_account', 'crm_case']);
   });
 
   it('does NOT widen `hooks[].object` — ADR-0130 §1.5, the split follows hook ownership', () => {
