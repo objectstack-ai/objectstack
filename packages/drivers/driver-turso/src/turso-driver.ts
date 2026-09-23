@@ -458,13 +458,13 @@ function refuseRemoteDriftDetection(): never {
     'transport mode is `remote`), so this driver cannot say whether the database\'s physical ' +
     'schema matches the declared objects. Drift detection reads the physical schema through the ' +
     'SQL driver\'s Knex connection, and in remote mode that connection is a placeholder in-memory ' +
-    'database holding none of this datasource\'s tables. Until this change it therefore answered ' +
-    '"no drift" for every remote database, whatever its tables held. The call is spelled correctly ' +
-    'and `SqlDriver` declares it, so this is a capability gap of the remote transport rather than a ' +
-    'mistake in the request, which is why it answers NOT_IMPLEMENTED/501 and not a 400. To check ' +
-    'this database for drift, run `os migrate plan` against a local SQLite copy of it (a `file:` ' +
-    'URL), where the physical schema is introspected. Pointed at the remote URL, `os migrate plan` ' +
-    'refuses, because the remote transport cannot defer schema DDL.',
+    'database holding none of this datasource\'s tables. Answering from it would report "no drift" ' +
+    'for every remote database, whatever its tables hold, so the call refuses. The call is spelled ' +
+    'correctly and `SqlDriver` declares it, so this is a capability gap of the remote transport ' +
+    'rather than a mistake in the request, which is why it answers NOT_IMPLEMENTED/501 and not a ' +
+    '400. To check this database for drift, run `os migrate plan` against a local SQLite copy of it ' +
+    '(a `file:` URL), where the physical schema is introspected. Pointed at the remote URL, ' +
+    '`os migrate plan` refuses, because the remote transport cannot defer schema DDL.',
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
