@@ -1944,7 +1944,7 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
     });
     expect(result.success).toBe(false);
     const message = result.error!.issues.map((i) => i.message).join('\n');
-    expect(message).toContain('`tenancy.organizationField` was removed in @objectstack/spec 18');
+    expect(message).toContain('`tenancy.organizationField` was removed in @objectstack/spec 17');
     expect(message).toContain('ADR-0049');
     // The prescription must say what to do INSTEAD, not only that the key is
     // gone: delete it, and reach for `tenancy.tenantField` when the object's

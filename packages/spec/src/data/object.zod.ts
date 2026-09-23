@@ -537,7 +537,7 @@ const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     'governed by sharing rules / OWD (ADR-0056), `externalSharingModel` (ADR-0090 ' +
     'D11), and the object access posture. Delete the key.',
   organizationField:
-    '`tenancy.organizationField` was removed in @objectstack/spec 18 (ADR-0049) — it ' +
+    '`tenancy.organizationField` was removed in @objectstack/spec 17 (ADR-0049) — it ' +
     'named the column a platform row is stamped from, and exactly one table in the ' +
     'whole protocol ever needed one: the better-auth credential table, whose rows are ' +
     'about the organization a key authenticates into while the table itself must stay ' +
