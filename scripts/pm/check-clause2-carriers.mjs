@@ -710,7 +710,6 @@ import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CLAIM_COMMENT_MARKER,
   CONTRACT_REVIEW_HEADING_MARKER,
-  CONTRACT_REVIEW_LABEL,
   DEFAULT_SWEEP_REPO,
   EXIT_PREREQUISITE_NOT_MET,
   H51_SHA_MIN_HEX,
@@ -726,7 +725,6 @@ import {
   claimGovernance,
   claimedBranches,
   governingClaim,
-  isGateSemanticLabel,
   labelNames,
   latestMarkedComment,
   markerMatches,
@@ -755,6 +753,23 @@ import { CONTRACT_REVIEW_TIER } from './dispatch-gates.mjs';
 // reader, its closed sets and the quoting helper live in exactly one place;
 // this file is the SWEEP around them, never a second reading of them.
 import { CLAUSE2_ARMS, CLAUSE2_VALUES, quoteLine, readClause2Line } from './clause2-line.mjs';
+
+/**
+ * ⛔ RETIRED — the clause-② gate label and its dual-carrier discipline left the
+ * tree with ruling record 5770886272 on #19061 (letter B): `ensure-pm-labels.sh`
+ * no longer creates it, the queue guard's label leg is gone, and the half-state
+ * rows that patrolled it (H31/H35/H51/H53/H61) are deleted. The constant lives
+ * HERE, in the one file that still reads it, because this file's `--pair` sweep
+ * — itself retired by the same ruling, and run by nothing — compares the label
+ * on its C1/C3 rows and the self-test pins that comparison. The file survives
+ * only until the record recognisers and `--template` the queue guard imports
+ * (`locateReviewOfRecord`, `deliveredCardNumber`, `servedTierStands`,
+ * `isModelIdentifierToken`, `REVIEW_OF_RECORD_THREADS`,
+ * `REVIEW_OF_RECORD_LOCATION`) are extracted into a module of their own, and
+ * this constant goes with it. ⛔ Nothing new may import it.
+ */
+const CONTRACT_REVIEW_LABEL = 'needs:contract-review';
+const isGateSemanticLabel = (name) => String(name ?? '') === CONTRACT_REVIEW_LABEL;
 
 /**
  * The lanes that OWE a review of record on EVERY round they deliver -- the
