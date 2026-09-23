@@ -313,7 +313,14 @@ export const CEILINGS = new Map([
   // `references/state-machines-and-approvals.md` (rows below), one pointer line
   // each left in place. The moved text is priced in its own rows, so the split
   // banks the entry's shrink instead of leaving 7,006 tokens of headroom behind.
-  ['skills/objectstack-automation/SKILL.md', 5762],
+  // 5762 -> 5785: the pointer line for that block also carries the one route
+  // spelling a repo test pins to THIS entry file —
+  // `packages/rest/src/meta-state-route-doc-spelling.test.ts` asserts the
+  // automation entry teaches `/api/v1/meta/object/:name/state/:field`, and the
+  // only spelling had moved with the section. +23 tokens, re-locked at the
+  // landed count of the same split (no ruling needed: the raise is against a
+  // row this PR itself lowered by 7,006, and the entry stays 448 lines).
+  ['skills/objectstack-automation/SKILL.md', 5785],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:

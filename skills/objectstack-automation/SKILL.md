@@ -309,7 +309,7 @@ them right the first time:
 
 ---
 
-→ State Machines & Approvals moved verbatim to [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) (State Machine — a `state_machine` validation rule · Approvals (Flow Nodes) · Send-back for revision · Recording a decision · Approver Types · Dynamic approvers (`type: 'expression'`) · Node Config (`ApprovalNodeConfigSchema`) · Branching, side-effects & rejection · Approval Best Practices).
+→ State Machines & Approvals moved verbatim to [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) (State Machine — a `state_machine` validation rule · Approvals (Flow Nodes) · Send-back for revision · Recording a decision · Approver Types · Dynamic approvers (`type: 'expression'`) · Node Config (`ApprovalNodeConfigSchema`) · Branching, side-effects & rejection · Approval Best Practices) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
 
 ---
 
