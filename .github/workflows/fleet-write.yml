@@ -16,8 +16,9 @@
 # need in front.
 #
 # ⛔ The token this run WRITES with is the App installation token step 3
-# mints — narrowed to the one target repository and to the permissions the
-# op table declares (`issues: write`, `pull-requests: write`, the
+# mints — narrowed to the payload's repository (and, for a `transfer` stroke
+# alone, that transfer's one target too: `transferIssue` needs issues write on
+# both ends) and to the permissions the op table declares (`issues: write`, `pull-requests: write`, the
 # `contents: write` GitHub's auto-merge mutations require, and the
 # `metadata: read` the sender gate's permission read needs) — and revoked by
 # that action's post step. The workflow's own `GITHUB_TOKEN` gets nothing
@@ -82,7 +83,8 @@ jobs:
       # unknown key, an unknown op, a target outside the organization, a
       # non-integer number, an over-cap string or an over-cap payload with
       # every reason in the step summary and zero writes; on success it hands
-      # the target's NAME to the mint below through `$GITHUB_OUTPUT`.
+      # the mint below the repository NAMES its token must reach through
+      # `$GITHUB_OUTPUT` — one for every stroke, two for a transfer stroke.
       - name: Validate the payload (closed schema, zero writes on refusal)
         id: validate
         env:
@@ -92,10 +94,14 @@ jobs:
       # The fleet identity, minted on the runner and never held by a seat:
       # `OS_FLEET_APP_ID` is an organization variable, `OS_FLEET_PRIVATE_KEY`
       # an organization secret (both set by the maintainer). `repositories`
-      # narrows the token to the ONE repository the payload named — the
-      # validator's output, never the payload read again here — and the
-      # `permission-*` inputs narrow it to what `scripts/pm/fleet-write/ops.mjs`
-      # declares. The action revokes the token in its post step.
+      # narrows the token to the list the validator computed — the payload's
+      # ONE repository, or for a `transfer` stroke that repository plus the
+      # transfer's one target from the governed roster — the validator's
+      # output, never the payload read again here; its `--self-test` pins one
+      # name for every other op. The `permission-*` inputs narrow it to what
+      # `scripts/pm/fleet-write/ops.mjs` declares. A target the App's
+      # installation does not cover fails THIS step, loudly, with zero writes.
+      # The action revokes the token in its post step.
       - name: Mint the fleet App token, narrowed to the target and the op table
         id: token
         uses: actions/create-github-app-token@v2
@@ -103,7 +109,7 @@ jobs:
           app-id: ${{ vars.OS_FLEET_APP_ID }}
           private-key: ${{ secrets.OS_FLEET_PRIVATE_KEY }}
           owner: objectstack-ai
-          repositories: ${{ steps.validate.outputs.repo_name }}
+          repositories: ${{ steps.validate.outputs.repositories }}
           permission-issues: write
           permission-pull-requests: write
           # ONE consumer: GitHub's `enablePullRequestAutoMerge` / `disablePullRequestAutoMerge`

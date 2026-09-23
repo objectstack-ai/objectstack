@@ -7,7 +7,7 @@
  *
  *   node scripts/pm/fleet-write/validate.mjs --file payload.json          # judge a payload on disk
  *   node scripts/pm/fleet-write/validate.mjs --from-env                   # judge $FLEET_WRITE_PAYLOAD (the runner)
- *   node scripts/pm/fleet-write/validate.mjs --from-env --github-output   # …and write repo_name / request_id / action_count to $GITHUB_OUTPUT
+ *   node scripts/pm/fleet-write/validate.mjs --from-env --github-output   # …and write repositories / request_id / action_count to $GITHUB_OUTPUT
  *   node scripts/pm/fleet-write/validate.mjs --self-test                  # offline, no network
  *
  * ## One validator, imported by both ends
@@ -32,7 +32,20 @@
  *     capped in length and per item; an enum is one of its values;
  *   - the whole payload respects the platform's own `client_payload` limits
  *     (ten top-level properties, under 64KB — the header of `ops.mjs` quotes
- *     the source), so what this file accepts the platform accepts.
+ *     the source), so what this file accepts the platform accepts;
+ *   - a stroke carrying a `transfer` carries transfers alone, to ONE target
+ *     from `TRANSFER_TARGETS` that is not `repo`, each card once — so the
+ *     token list below is `repo` alone for every other stroke and exactly
+ *     `repo` + that target for a transfer stroke.
+ *
+ * ## The token list — the one place a second repository enters
+ *
+ * `--github-output` writes `repositories=<name>[,<name>]`, the list the
+ * workflow's mint step narrows the App token to (`tokenRepositoriesOf`): the
+ * payload's repository, plus the `secondRepo` a row declares — `transfer`'s
+ * target, the only such row. The workflow reads that output and never the
+ * payload, and `--self-test` pins the list to ONE name for every other op,
+ * two for a transfer, and the workflow line that reads it.
  *
  * A refusal is the WHOLE list of reasons, not the first one: a seat fixing a
  * payload reads every problem in one pass, and the runner's step summary
@@ -52,6 +65,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../../invoked-as.mjs';
+import { GOVERNED_REPOS } from '../check-governed-merges.mjs';
 import {
   ALLOWED_MUTATIONS,
   CLIENT_PAYLOAD_MAX_BYTES,
@@ -71,6 +85,7 @@ import {
   SESSION_SHAPE,
   TARGET_OWNER,
   TARGET_REPO_SHAPE,
+  TRANSFER_TARGETS,
 } from './ops.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -147,6 +162,57 @@ export function validateAction(action, index) {
 }
 
 /**
+ * The rules that span actions — today, the one row whose token reaches a
+ * second repository (`secondRepo`, `transfer`'s alone): such a stroke carries
+ * that op alone, names ONE second repository, never `repo` itself, and each
+ * card once. Runs only over actions that passed `validateAction`. Pure.
+ */
+export function strokeErrors(repo, actions) {
+  const errors = [];
+  const widening = actions.map((a, i) => ({ a, i })).filter(({ a }) => OPS[a.op].secondRepo);
+  if (widening.length === 0) return errors;
+  const op = widening[0].a.op;
+  const key = OPS[op].secondRepo;
+  for (const [i, a] of actions.entries()) {
+    if (a.op !== op) errors.push(`actions[${i}] is \`${a.op}\` in a stroke that carries a \`${op}\` — its token reaches a second repository, so that stroke carries \`${op}\` alone; send \`${a.op}\` in its own dispatch`);
+  }
+  const seconds = [...new Set(widening.map(({ a }) => a[key]))];
+  if (seconds.length > 1) errors.push(`the \`${op}\` actions name ${seconds.length} ${key} values (${seconds.join(', ')}) — one stroke reaches ONE second repository; split them into one dispatch per ${key}`);
+  for (const { a, i } of widening) {
+    if (a[key] === repo) errors.push(`actions[${i}].${key} is ${repo}, the stroke's own repository — a \`${op}\` moves a card to ANOTHER repository`);
+  }
+  const seen = new Set();
+  for (const { a, i } of widening) {
+    if (seen.has(a.issue)) errors.push(`actions[${i}].issue #${a.issue} is named twice in one \`${op}\` stroke`);
+    seen.add(a.issue);
+  }
+  return errors;
+}
+
+/**
+ * Every action, then the rules that span them — the stroke without its
+ * envelope, for a door that plans one before it knows its transport.
+ */
+export function validateStroke(repo, actions) {
+  const errors = actions.flatMap((a, i) => validateAction(a, i));
+  return errors.length ? errors : strokeErrors(repo, actions);
+}
+
+/**
+ * The repositories the relay's token must reach for a JUDGED payload: its
+ * `repo`, then the one second repository a `secondRepo` row names. One entry
+ * for every stroke but a transfer; two for a transfer stroke.
+ */
+export function tokenRepositoriesOf(payload) {
+  const out = [payload.repo];
+  for (const a of payload.actions) {
+    const key = OPS[a.op].secondRepo;
+    if (key && !out.includes(a[key])) out.push(a[key]);
+  }
+  return out;
+}
+
+/**
  * The whole payload. Pure. Returns `{ ok, errors, payload }` where `payload`
  * is a normalised copy carrying ONLY the keys this file admitted (so a caller
  * that sends `payload` sends nothing it did not judge); `payload` is `null`
@@ -184,7 +250,7 @@ export function validatePayload(input) {
   if (!Array.isArray(actions)) errors.push(`actions must be an array, got ${actions === undefined ? 'nothing' : isPlainObject(actions) ? 'an object' : typeof actions}`);
   else if (actions.length === 0) errors.push('actions must carry at least one action');
   else if (actions.length > MAX_ACTIONS) errors.push(`actions carries ${actions.length} actions, over the cap of ${MAX_ACTIONS}`);
-  else for (let i = 0; i < actions.length; i++) errors.push(...validateAction(actions[i], i));
+  else errors.push(...validateStroke(typeof repo === 'string' ? repo : '', actions));
 
   if (errors.length) return { ok: false, errors, payload: null };
 
@@ -261,7 +327,8 @@ export function readPayloadSource(opts, { env = process.env, read = (p) => readF
 
 /** The `$GITHUB_OUTPUT` lines the workflow's later steps read. Values are single-line by construction of the validator. */
 export function githubOutputLines(payload) {
-  return [`repo_name=${payload.repo.split('/')[1]}`, `request_id=${payload.request_id}`, `action_count=${payload.actions.length}`, `session=${payload.session}`].join('\n') + '\n';
+  const repositories = tokenRepositoriesOf(payload).map((r) => r.split('/')[1]).join(',');
+  return [`repositories=${repositories}`, `request_id=${payload.request_id}`, `action_count=${payload.actions.length}`, `session=${payload.session}`].join('\n') + '\n';
 }
 
 const USAGE = [
@@ -328,8 +395,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 14,
   'the normalised payload: only judged keys travel': 3,
   'the CLI: a file, the environment, GitHub outputs, and the exit ladder': 10,
+  'the transfer row: an issue never a pull, a target from the governed roster never the source, a stroke of its own to one target, labels never created': 12,
+  'the token scope: ONE repository for every op but transfer, source + target for a transfer stroke, and the workflow mints from that list': 8,
 });
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 9;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -441,6 +510,7 @@ export async function selfTest() {
       pr_draft: { pull: 1 },
       automerge_enable: { pull: 1 },
       automerge_disable: { pull: 1 },
+      transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
     };
     t('every op in the table has a minimal shape this validator accepts', OP_NAMES.filter((op) => !validatePayload(one({ op, ...minimal[op] })).ok), []);
     t('…and the minimal-shape ledger names every op, no more and no less', Object.keys(minimal).sort(), [...OP_NAMES].sort());
@@ -464,7 +534,7 @@ export async function selfTest() {
   battery('refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint');
   {
     const sample = {
-      issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a b'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed',
+      issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a b'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', target_repo: `${TARGET_OWNER}/objectui`,
     };
     const everyRequest = OP_NAMES.flatMap((op) => {
       const spec = OPS[op];
@@ -534,9 +604,59 @@ export async function selfTest() {
     t('a file that is not JSON is exit 3', (await drive(['--file', 'notjson.json'])).code, EXIT_PREREQUISITE);
     t('--from-env with the variable absent is exit 3 naming the variable', (await drive(['--from-env'], {})).err.includes(PAYLOAD_ENV) && (await drive(['--from-env'], {})).code === EXIT_PREREQUISITE);
     const env = await drive(['--from-env', '--github-output'], { [PAYLOAD_ENV]: good, GITHUB_OUTPUT: '/out.txt' });
-    t('--from-env --github-output writes repo_name, request_id, action_count and session to $GITHUB_OUTPUT', [env.code, env.appended[0]?.file, env.appended[0]?.text], [EXIT_OK, '/out.txt', 'repo_name=objectstack\nrequest_id=fw-20260922T090000Z-abc123\naction_count=1\nsession=session_01ABCDEFGHJKMNPQRSTVWXYZ\n']);
+    t('--from-env --github-output writes repositories, request_id, action_count and session to $GITHUB_OUTPUT', [env.code, env.appended[0]?.file, env.appended[0]?.text], [EXIT_OK, '/out.txt', 'repositories=objectstack\nrequest_id=fw-20260922T090000Z-abc123\naction_count=1\nsession=session_01ABCDEFGHJKMNPQRSTVWXYZ\n']);
     t('--github-output without GITHUB_OUTPUT is exit 3', (await drive(['--from-env', '--github-output'], { [PAYLOAD_ENV]: good })).code, EXIT_PREREQUISITE);
     t('--json prints the normalised payload as one line after the OK line', JSON.parse((await drive(['--file', 'good.json', '--json'])).out.split('\n')[1]).request_id, 'fw-20260922T090000Z-abc123');
+  }
+
+  // ── the transfer row ──────────────────────────────────────────────────────
+  battery('the transfer row: an issue never a pull, a target from the governed roster never the source, a stroke of its own to one target, labels never created');
+  {
+    const UI = `${TARGET_OWNER}/objectui`;
+    const move = (issue, target = UI) => ({ op: 'transfer', issue, target_repo: target });
+    const spec = OPS.transfer;
+    t('the transfer row: issue and target_repo required, nothing optional, spending issues, reaching a second repository through target_repo', [spec.required, spec.optional, spec.permission, spec.secondRepo], [['issue', 'target_repo'], [], 'issues', 'target_repo']);
+    const req = spec.requests(move(7), 'objectstack-ai/objectstack');
+    t('…and its one request is the transferIssue mutation, carrying the issue and the target the executor resolves to node ids', [req.length, req[0].verb, req[0].path, req[0].graphql.mutation, req[0].graphql.issue, req[0].graphql.target_repo], [1, 'POST', '/graphql', 'transferIssue', 7, UI]);
+    t('the query takes both node ids as variables and asks for the new number, url and repository', ['$issueId: ID!', '$repositoryId: ID!', 'issueId: $issueId', 'repositoryId: $repositoryId', 'number url repository { nameWithOwner }'].every((needle) => req[0].graphql.query.includes(needle)));
+    t('⛔ the mutation never sets createLabelsIfMissing — a label the target lacks is dropped, never created there', req[0].graphql.query.includes('createLabelsIfMissing'), false);
+    t('the target roster IS the governed-repository roster — reused, never a second list', [...TRANSFER_TARGETS], GOVERNED_REPOS.map((r) => r.slug));
+    t('…every entry of which is in the one organization', TRANSFER_TARGETS.every((r) => TARGET_REPO_SHAPE.test(r)) && TRANSFER_TARGETS.length >= 2);
+    t('a target outside the roster is refused, naming the roster', refuses(fixturePayload({ actions: [move(7, `${TARGET_OWNER}/not-a-fleet-repo`)] }), `actions[0].target_repo must be one of "${TRANSFER_TARGETS[0]}"`));
+    t('…and so is one in another organization', refuses(fixturePayload({ actions: [move(7, 'someone-else/objectui')] }), 'target_repo must be one of'));
+    t('the source itself is refused as a target', refuses(fixturePayload({ actions: [move(7, `${TARGET_OWNER}/objectstack`)] }), 'the stroke\'s own repository'));
+    const pull = validatePayload(fixturePayload({ actions: [{ op: 'transfer', pull: 7, target_repo: UI }] }));
+    t('⛔ a pull is refused: transfer takes no pull key, and its issue is required', [pull.ok, pull.errors.some((e) => e.includes('actions[0].pull is not a key `transfer` takes')), pull.errors.some((e) => e.includes('actions[0].issue is required'))], [false, true, true]);
+    t('a transfer beside any other op is refused — the stroke carries transfers alone', refuses(fixturePayload({ actions: [move(7), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `transfer`'));
+    t('two targets in one stroke are refused, as is one card named twice; four cards to one target (the consumer\'s shape) pass', [
+      refuses(fixturePayload({ actions: [move(7), move(8, `${TARGET_OWNER}/cloud`)] }), 'one stroke reaches ONE second repository'),
+      refuses(fixturePayload({ actions: [move(7), move(7)] }), 'named twice'),
+      validatePayload(fixturePayload({ actions: [move(1), move(2), move(3), move(4)] })).ok,
+    ], [true, true, true]);
+  }
+
+  // ── the token scope ───────────────────────────────────────────────────────
+  battery('the token scope: ONE repository for every op but transfer, source + target for a transfer stroke, and the workflow mints from that list');
+  {
+    const one = (action) => fixturePayload({ actions: [action] });
+    const minimal = {
+      comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
+      assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
+      pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 },
+    };
+    const narrow = OP_NAMES.filter((op) => !OPS[op].secondRepo);
+    t('transfer is the ONLY row that reaches a second repository', OP_NAMES.filter((op) => OPS[op].secondRepo), ['transfer']);
+    t('…and every other op is exercised here, no more and no less', Object.keys(minimal).sort(), [...narrow].sort());
+    t('⛔ every other op\'s stroke mints for exactly ONE repository — the payload\'s own', narrow.map((op) => tokenRepositoriesOf(validatePayload(one({ op, ...minimal[op] })).payload)).filter((list) => list.length !== 1 || list[0] !== `${TARGET_OWNER}/objectstack`), []);
+    t('…and so does a mixed stroke of them all', tokenRepositoriesOf(validatePayload(fixturePayload({ actions: narrow.map((op) => ({ op, ...minimal[op] })) })).payload), [`${TARGET_OWNER}/objectstack`]);
+    const moves = validatePayload(fixturePayload({ actions: [{ op: 'transfer', issue: 1, target_repo: `${TARGET_OWNER}/objectui` }, { op: 'transfer', issue: 2, target_repo: `${TARGET_OWNER}/objectui` }] })).payload;
+    t('a transfer stroke mints for its source and its one target — two, never more', tokenRepositoriesOf(moves), [`${TARGET_OWNER}/objectstack`, `${TARGET_OWNER}/objectui`]);
+    t('the GitHub output spells that list as names: one for a comment, two for a transfer', [githubOutputLines(fixturePayload()).split('\n')[0], githubOutputLines(moves).split('\n')[0]], ['repositories=objectstack', 'repositories=objectstack,objectui']);
+    const workflow = readFileSync(resolve(SELF_PATH, '../../../..', '.github/workflows/fleet-write.yml'), 'utf8');
+    const repoInputs = [...workflow.matchAll(/^\s+repositories:\s*(.*?)\s*$/gm)].map((m) => m[1]);
+    t('the workflow\'s mint reads that list — the validate step\'s output, never the payload — and nothing else names one', repoInputs, ['${{ steps.validate.outputs.repositories }}']);
+    t('…under the one organization, as owner', /^\s+owner:\s*objectstack-ai\s*$/m.test(workflow) && TARGET_OWNER === 'objectstack-ai');
   }
 
   // ── the floor, BEFORE the verdict ─────────────────────────────────────────

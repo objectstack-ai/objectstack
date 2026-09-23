@@ -51,6 +51,24 @@
  * declares exactly it on `actions/create-github-app-token`, and
  * `validate.mjs --self-test` pins the two spellings equal.
  *
+ * ## The one row whose token reaches a SECOND repository — `transfer`
+ *
+ * GitHub's `transferIssue` mutation (GraphQL only; REST has no transfer
+ * endpoint) needs `issues: write` on the repository the card is in AND on the
+ * one it moves to, so a transfer stroke's token is minted for both. That is
+ * the only widening the relay makes, and it is fenced four ways: the target is
+ * a closed enum — `TRANSFER_TARGETS`, the fleet's governed-repository roster
+ * reused from `check-governed-merges.mjs`, never a second roster and never
+ * free text; the target is never the source; a stroke carrying a transfer
+ * carries transfers alone, to ONE target; and the executor gates the sender on
+ * BOTH repositories before the first write. Every other op keeps the
+ * single-repository token — `validate.mjs` computes the list the workflow
+ * mints for (`tokenRepositoriesOf`) and its `--self-test` pins both halves.
+ * The mutation never sets `createLabelsIfMissing` (GitHub's default is false):
+ * a label with no same-named label on the target is dropped, never created
+ * there. Comments and assignees travel with the card and the old URL
+ * redirects — GitHub's documented transfer semantics.
+ *
  * ## The platform's `client_payload` ceilings — pinned, with their source
  *
  * "The maximum number of top-level properties is 10. The total size of the
@@ -63,6 +81,8 @@
  * these ceilings BEFORE the dispatch leaves, so a payload the platform would
  * reject with a 422 is refused locally with the reason.
  */
+
+import { GOVERNED_REPOS } from '../check-governed-merges.mjs';
 
 /**
  * The relay's four files, repo-relative — the population a card touching any
@@ -85,6 +105,14 @@ export const RELAY_EVENT_TYPE = 'fleet-write';
 
 /** The one organization the App is installed on; a target outside it is refused. */
 export const TARGET_OWNER = 'objectstack-ai';
+
+/**
+ * The repositories a `transfer` may move a card to — the fleet's governed
+ * roster, reused, so a repository joins the fleet in ONE place and becomes a
+ * transfer target there. `validate.mjs --self-test` pins that every entry is
+ * in `TARGET_OWNER`.
+ */
+export const TRANSFER_TARGETS = Object.freeze(GOVERNED_REPOS.map((r) => r.slug));
 
 /** The seat-side transport selector and its three values. */
 export const TRANSPORT_ENV = 'OS_FLEET_TRANSPORT';
@@ -158,6 +186,7 @@ export const FIELDS = Object.freeze({
   team_reviewers: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS }),
   state: Object.freeze({ kind: 'enum', values: Object.freeze(['open', 'closed']) }),
   state_reason: Object.freeze({ kind: 'enum', values: Object.freeze(['completed', 'not_planned', 'duplicate', 'reopened']) }),
+  target_repo: Object.freeze({ kind: 'enum', values: TRANSFER_TARGETS }),
 });
 
 /**
@@ -185,15 +214,40 @@ const PR_MUTATIONS = Object.freeze({
 });
 
 /**
+ * The transfer mutation. The executor resolves both node ids first —
+ * `GET /repos/{repo}/issues/{n}` (refusing a pull request, or a card no longer
+ * on `repo`) and `GET /repos/{target}` — then sends
+ * `{ query, variables: { issueId, repositoryId } }`. `createLabelsIfMissing`
+ * is deliberately absent: GitHub's default (false) drops a label the target
+ * does not carry instead of creating it there.
+ */
+const TRANSFER_MUTATION = 'mutation($issueId: ID!, $repositoryId: ID!) { transferIssue(input: { issueId: $issueId, repositoryId: $repositoryId }) { issue { number url repository { nameWithOwner } } } }';
+
+/**
+ * What a seat reads when a transfer fails at the mint or at the mutation —
+ * spelled once, printed by the executor's summary and by the door.
+ */
+export function transferRemedy(source, target) {
+  return (
+    `a transfer needs the fleet App installed on BOTH ${source} and ${target} with issues write on each: a failed mint, a target whose ` +
+    `node id cannot be read, or "Resource not accessible by integration" / "Could not resolve to a Repository" on the mutation means ` +
+    `the installation does not cover ${target} — the maintainer adds it to the objectstack-fleet App's repository access. ` +
+    '⛔ Not rebuilt by hand meanwhile: a rebuild is only for a target GitHub refuses (outside the organization).'
+  );
+}
+
+/**
  * The closed op list. Each row:
  *   `permission`  the App permission the row spends (a key of `PERMISSIONS`);
  *   `required`    keys that must be present;
  *   `optional`    keys that may be; anything else on the action is refused;
  *   `atLeastOne`  (optional) of these keys, at least one must be present;
+ *   `secondRepo`  (optional) the key naming a SECOND repository the token
+ *                 must reach — `transfer`'s alone (header above);
  *   `requests`    the request descriptors the executor issues, in order:
  *                 `{ verb, path, body?, idempotent404?, graphql? }` — a
- *                 `graphql` descriptor names the mutation and the pull whose
- *                 node id it needs.
+ *                 `graphql` descriptor names the mutation and the pull (or
+ *                 the issue and target) whose node ids it needs.
  */
 export const OPS = Object.freeze({
   comment: Object.freeze({
@@ -301,6 +355,15 @@ export const OPS = Object.freeze({
     optional: Object.freeze([]),
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'disablePullRequestAutoMerge', query: PR_MUTATIONS.automerge_disable, pull: a.pull } }],
   }),
+  // The one row whose token reaches a second repository — see the header.
+  // `issue`, never `pull`: a pull request does not transfer.
+  transfer: Object.freeze({
+    permission: 'issues',
+    required: Object.freeze(['issue', 'target_repo']),
+    optional: Object.freeze([]),
+    secondRepo: 'target_repo',
+    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'transferIssue', query: TRANSFER_MUTATION, issue: a.issue, target_repo: a.target_repo } }],
+  }),
 });
 
 export const OP_NAMES = Object.freeze(Object.keys(OPS));
@@ -326,4 +389,4 @@ export const REFUSED_PATH_FAMILIES = Object.freeze([
 ]);
 
 /** The GraphQL mutations the table may name — anything else in a `graphql` descriptor is a bug this pins. */
-export const ALLOWED_MUTATIONS = Object.freeze(['markPullRequestReadyForReview', 'convertPullRequestToDraft', 'enablePullRequestAutoMerge', 'disablePullRequestAutoMerge']);
+export const ALLOWED_MUTATIONS = Object.freeze(['markPullRequestReadyForReview', 'convertPullRequestToDraft', 'enablePullRequestAutoMerge', 'disablePullRequestAutoMerge', 'transferIssue']);
