@@ -4,9 +4,9 @@
 
 `ListViewSchema` declares the `columns` x `hiddenFields` x `fieldOrder` composition instead of leaving it to be inferred from a renderer (#15184)
 
-The three keys that decide which fields a list view shows, and in what order, now say so in their own `.describe()` text — the string that ships into `json-schema/`, into the generated `content/docs/references/ui/view.mdx`, and into the TSDoc an author hovers:
+The three keys that together build a list view's field list now say how they compose, in their own `.describe()` text — the string that ships into `json-schema/` and into the generated `content/docs/references/ui/view.mdx`:
 
-- `columns` is the **projection**: the candidate set and the baseline order. A field omitted here is not displayed, and neither other key can add it back.
+- `columns` is the **projection**: the candidate set and the baseline order, and neither other key can add a field it omits. An **empty** `columns` declares no projection, so neither other key applies: which columns show is left to the renderer (objectui's `ListView` grid derives the object's default columns).
 - `hiddenFields` **subtracts** from that projection, before any ordering runs. A name `columns` never projected subtracts nothing.
 - `fieldOrder` **orders what survives** and never adds a field. A surviving column absent from `fieldOrder` sorts **last**, after every listed one, keeping its `columns`-relative order; a name listed there that did not survive orders nothing.
 

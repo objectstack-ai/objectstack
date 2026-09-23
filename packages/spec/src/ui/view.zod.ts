@@ -2438,8 +2438,9 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
    * `columns` is the PROJECTION member of the per-view field composition
    * declared on `hiddenFields` / `fieldOrder` below: it is the candidate set
    * and the baseline order, `hiddenFields` subtracts from it, and `fieldOrder`
-   * orders what survives. Nothing downstream may re-add a field this list
-   * omits.
+   * orders what survives. Neither of those two keys can add a field this list
+   * omits. An EMPTY list declares no projection, so neither of them applies
+   * (step 1 of the composition docblock below states the boundary).
    */
   columns: z.union([
     z.array(z.string()), // Legacy: simple field names
@@ -2448,7 +2449,9 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     'Fields to display as columns — the PROJECTION of the per-view field composition '
     + '`columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the '
     + 'baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. '
-    + 'A field omitted here is not displayed: `hiddenFields` and `fieldOrder` cannot add it back.',
+    + '`hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares '
+    + 'no projection, so neither of them applies: which columns show is then left to the '
+    + 'renderer (objectui\'s `ListView` grid derives the object\'s default columns).',
   ),
   filter: z.array(ViewFilterRuleSchema).optional().describe('Filter criteria (JSON Rules)'),
   /**
@@ -2582,12 +2585,15 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
    *
    * ## The composition, declared (#15184 ruling B, 2026-09-11)
    *
-   * Three keys on this schema decide which fields a list view shows and in
-   * what order, and they COMPOSE — they are not three ways to say the same
-   * thing, and none of them is a fallback for another:
+   * Three keys on this schema together build one field list, and they
+   * COMPOSE — they are not three ways to say the same thing, and none of them
+   * is a fallback for another:
    *
    * 1. `columns` is the **projection**: the candidate set and the baseline
-   *    order.
+   *    order. An EMPTY `columns` declares no projection, so steps 2 and 3 do
+   *    not apply: which columns show is left to the renderer (objectui's
+   *    `ListView` hands its grid no columns, and the grid derives the
+   *    object's default ones).
    * 2. `hiddenFields` **subtracts** from that projection: every name it lists
    *    is removed. A name it lists that `columns` never projected subtracts
    *    nothing.
@@ -2599,14 +2605,14 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
    *
    * ⛔ This is a DECLARATION of the order of application, not a precedence
    * rule between rival spellings: `columns` and `fieldOrder` never contradict
-   * each other, because one selects and the other sorts. An author who wants a
-   * field gone edits `columns` or `hiddenFields`; an author who wants it moved
-   * edits `fieldOrder`.
+   * each other, because one selects and the other sorts.
    *
    * The composition was ruled into the contract rather than retired to one key
-   * because it is the shape the renderer already applies — objectui
+   * because it is the shape objectui's list-view renderer already applies —
    * `packages/plugin-list/src/ListView.tsx`, the `effectiveFields` memo, runs
-   * exactly these three steps in this order. The ledger row
+   * these three steps in this order, with one more between steps 1 and 2: it
+   * drops the columns field-level security denies the current user read on.
+   * The ledger row
    * (`packages/spec/liveness/view.json`, `/props/list/children/fieldOrder`)
    * carries the measured citation; `view-field-order-composition.pin.test.ts`
    * holds this declaration and the accept set together.

@@ -24,10 +24,11 @@
  *
  * - **The declaration half** reads the three `.describe()` strings off the
  *   LIVE schema, not off the source text. Those strings are the published
- *   authoring surface: they ship into `json-schema/`, into the generated
- *   `content/docs/references/ui/view.mdx`, and into the TSDoc an author (often
- *   an AI author, ADR-0033) hovers. Dropping the composition from any one of
- *   them reds here, naming the key that lost it.
+ *   authoring surface: they ship into `json-schema/` and into the generated
+ *   `content/docs/references/ui/view.mdx`. Dropping the composition from any
+ *   one of them reds here, naming the key that lost it. So does dropping the
+ *   EMPTY-`columns` boundary, from the `columns` description or from the
+ *   docblock's projection step.
  * - **The door half** parses documents carrying all three keys through the
  *   four doors a list view really arrives by, and asserts the values survive
  *   VERBATIM. The spec declares the composition; it does not perform it. A
@@ -37,8 +38,9 @@
  *
  * ⛔ Scope: the RELATION, not the wording. Rewording any of the three
  * descriptions is fine — what they may not do is stop naming the other two
- * keys, stop stating their own role in the composition, or start claiming that
- * `fieldOrder` selects fields or that `hiddenFields` orders them.
+ * keys, stop stating their own role in the composition, drop the boundary an
+ * empty `columns` sets, or start claiming that `fieldOrder` selects fields or
+ * that `hiddenFields` orders them.
  *
  * ⛔ This pin deliberately asserts nothing about HOW a renderer sorts. That
  * behaviour is objectui's, measured in the liveness ledger row
@@ -120,12 +122,25 @@ describe('[#15184] the list-view field composition is declared, not implied', ()
       }
     });
 
-    it('`columns` declares itself the PROJECTION, and that nothing re-adds what it omits', () => {
+    it('`columns` declares itself the PROJECTION, and that neither other key re-adds what it omits', () => {
       const text = description('columns');
       expect(text).toContain('projection');
       // The half that makes it a contract rather than a label: the other two
       // keys cannot widen the set.
       expect(text).toMatch(/cannot add|not add|never add/);
+    });
+
+    it('`columns` states the EMPTY-list boundary: no projection, and neither other key applies', () => {
+      // Every door admits `columns: []` (pinned in the door half below), and
+      // the reference renderer reads it as UNAUTHORED: objectui's ListView
+      // hands its grid no columns and the grid derives the object's defaults,
+      // which neither `hiddenFields` nor `fieldOrder` reaches. A projection
+      // clause silent on that boundary promises a subtraction and an ordering
+      // that never happen.
+      const text = description('columns');
+      expect(text).toContain('empty list declares no projection');
+      expect(text).toContain('neither of them applies');
+      expect(text).toContain('default columns');
     });
 
     it('`hiddenFields` declares itself the SUBTRACTION, applied before the ordering', () => {
@@ -165,6 +180,17 @@ describe('[#15184] the list-view field composition is declared, not implied', ()
       expect(iOrder, 'the docblock no longer states the ordering step').toBeGreaterThan(-1);
       expect(iColumns).toBeLessThan(iHidden);
       expect(iHidden).toBeLessThan(iOrder);
+    });
+
+    it('the block docblock states the EMPTY-`columns` boundary on the projection step', () => {
+      const doc = compositionDocblock();
+      const iColumns = doc.indexOf('`columns` is the **projection**');
+      const iHidden = doc.indexOf('`hiddenfields` **subtracts**');
+      expect(iColumns, 'the docblock no longer states the projection step').toBeGreaterThan(-1);
+      expect(iHidden, 'the docblock no longer states the subtraction step').toBeGreaterThan(iColumns);
+      const projectionStep = doc.slice(iColumns, iHidden);
+      expect(projectionStep).toContain('empty `columns` declares no projection');
+      expect(projectionStep).toContain('steps 2 and 3 do not apply');
     });
   });
 
@@ -209,6 +235,25 @@ describe('[#15184] the list-view field composition is declared, not implied', ()
       const r = ListViewSchema.safeParse({ ...COMPOSED_LIST } as never);
       expect(r.success).toBe(true);
       expect(JSON.stringify(r.error?.issues ?? [])).not.toContain('unrecognized_keys');
+    });
+
+    it('every door ADMITS `columns: []` verbatim — the boundary the declaration states is reachable', () => {
+      // This is why the `columns` description and the docblock state what an
+      // empty list means. If a later ruling refuses `[]` at the door, this case
+      // and that boundary sentence retire together.
+      const EMPTY = { type: 'grid' as const, columns: [] as string[], hiddenFields: ['owner'], fieldOrder: ['name'] };
+      const viaList = ListViewSchema.parse({ ...EMPTY } as never) as typeof EMPTY;
+      const viaViews = ObjectListViewSchema.parse({ ...EMPTY } as never) as typeof EMPTY;
+      const viaDefine = (defineView({ name: 'crm_lead', list: { ...EMPTY } } as never) as { list?: typeof EMPTY }).list;
+      const viaRegistered = (getMetadataTypeSchema('view')!.parse({
+        name: 'crm_lead',
+        list: { ...EMPTY },
+      } as never) as { list?: typeof EMPTY }).list;
+      for (const list of [viaList, viaViews, viaDefine, viaRegistered]) {
+        expect(list?.columns).toEqual([]);
+        expect(list?.hiddenFields).toEqual(EMPTY.hiddenFields);
+        expect(list?.fieldOrder).toEqual(EMPTY.fieldOrder);
+      }
     });
   });
 
