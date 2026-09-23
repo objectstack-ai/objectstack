@@ -23,12 +23,18 @@ import type { MetadataSerializer, SerializeOptions } from './serializer-interfac
  * annotation and no `import type`, never `any`, `unknown` or another type's
  * shape.
  *
- * `book` is deliberately absent: `Book` is written by hand and lacks the
- * `_packageId` / `_provenance` protection keys `BookSchema` accepts, so a book
- * the loader has stamped would fail against it.
+ * Two metadata types are deliberately absent:
+ * - `view`: `ViewMetadataSchema` is a `z.preprocess`, so its input type, and
+ *   with it `ViewMetadata`, is `unknown`. Annotating with it would check
+ *   nothing.
+ * - `book`: `Book` is written by hand and lacks the `_packageId` /
+ *   `_provenance` protection keys `BookSchema` accepts, so a book the loader
+ *   has stamped would fail against it.
  *
- * Every entry is compiled with `tsc` in `serializers.test.ts`, so a renamed or
- * moved spec type fails there instead of in a saved file.
+ * `typescript-serializer-annotation.test.ts` compiles every entry with `tsc`:
+ * a valid body must type-check and an undeclared key must not, so a renamed,
+ * moved or widened-to-`unknown` spec type fails there instead of in a saved
+ * file.
  */
 const ANNOTATION_BY_METADATA_TYPE: ReadonlyMap<string, readonly [typeName: string, subpath: string]> = new Map([
   ['object', ['ServiceObject', 'data']],
@@ -38,7 +44,6 @@ const ANNOTATION_BY_METADATA_TYPE: ReadonlyMap<string, readonly [typeName: strin
   ['mapping', ['Mapping', 'data']],
   ['datasource', ['Datasource', 'data']],
   ['analytics_cube', ['Cube', 'data']],
-  ['view', ['ViewMetadata', 'ui']],
   ['page', ['Page', 'ui']],
   ['dashboard', ['Dashboard', 'ui']],
   ['app', ['App', 'ui']],
