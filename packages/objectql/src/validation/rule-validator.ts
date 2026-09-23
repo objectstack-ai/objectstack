@@ -537,8 +537,8 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
 
 /**
  * [#18682] Reference FIELD name → the related row, or `null` when it could not
- * be read (no reference stored, the row is gone, the related object declares no
- * such column, or the read failed). They do NOT collapse: each names itself in
+ * be read (no reference stored, the related record was not found, the related
+ * object declares no such column, or the read failed). They do NOT collapse: each names itself in
  * the refusal, because "there is no parent" and "that column does not exist"
  * send an author to different repairs.
  */
@@ -553,7 +553,7 @@ export type RelatedUnavailableReason =
    * empty: the latter evaluates as `null`, this one refuses.
    */
   | 'undeclared-field'
-  /** A reference is stored but the row it names does not exist. */
+  /** A reference is stored but the related record was not found. */
   | 'unresolved';
 
 /**
@@ -3043,10 +3043,7 @@ function traversalRefusal(
     case 'unresolved':
       return {
         summary: `cannot read ${columns} through ${on}: the related record was not found`,
-        detail:
-          ` The rule reads ${columns} through ${on}, but no record with that id exists — it`
-          + ' has most likely been deleted, leaving the reference dangling. This read is made'
-          + ' under system authority, so it is NOT a question of what the caller may see.',
+        detail: '',
       };
     case 'unreadable':
     default:

@@ -132,10 +132,8 @@ describe('#18682 — the three acceptance outcomes (ADR-0137 D2)', () => {
 
   // ── REFUSES LOUDLY when the rule cannot be evaluated at all ───────────────
   //
-  // The related row is read under SYSTEM authority, so a permission verdict is
-  // not among the causes here at all. What remains is: no reference stored, the
-  // row is gone, the related object declares no such column, or the read
-  // failed outright. Each
+  // The causes: no reference stored, the related record was not found, the
+  // related object declares no such column, or the read failed outright. Each
   // is refused with a sentence naming the related object, and the write is
   // REJECTED rather than judged on a rule that produced no verdict. Never
   // silently true, and never silently false either.
@@ -274,7 +272,7 @@ describe('#18682 — the refusal names the RELATED object, not the referencing o
     ['read failed', unavailable('unreadable'), ['could not read', "'crm_account'"]],
     ['undeclared related field', unavailable('undeclared-field', ['type']), ['declares no', "'type'"]],
     ['no reference stored', unavailable('no-reference'), ['no single related record', 'MULTIPLE references']],
-    ['related row gone', unavailable('unresolved'), ['no record with that id exists', 'system authority']],
+    ['related record not found', unavailable('unresolved'), ["'crm_account'", 'the related record was not found']],
   ];
 
   for (const [name, binding, expected] of cases) {

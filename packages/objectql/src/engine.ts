@@ -7039,8 +7039,8 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * ## An unresolved row is left UNAVAILABLE, and it says which kind
    *
-   * No reference stored, row gone, the related object declares no such column,
-   * or the read failed: each is recorded as its own reason, and
+   * No reference stored, the related record not found, the related object
+   * declares no such column, or the read failed: each is its own reason, and
    * {@link checkPredicate} turns it into a refusal naming the related object and
    * column. The write is REJECTED rather than judged on a rule that produced no
    * verdict. ⛔ Never silently true, and never silently false.
