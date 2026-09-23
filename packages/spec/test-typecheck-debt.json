@@ -30,8 +30,8 @@
       "TS18046: 'branch' is of type 'unknown'.": 1
     },
     "src/compose-stacks-key-loss.test.ts": {
-      "TS7006: Parameter 'c' implicitly has an 'any' type.": 4,
-      "TS7006: Parameter 'w' implicitly has an 'any' type.": 3
+      "TS7006: Parameter 'c' implicitly has an 'any' type.": 3,
+      "TS7006: Parameter 'w' implicitly has an 'any' type.": 2
     },
     "src/compose-stacks.test.ts": {
       "TS2322: Type '…' is not assignable to type 'undefined'.": 2,
