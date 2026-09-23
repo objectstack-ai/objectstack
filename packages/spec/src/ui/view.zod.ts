@@ -3231,8 +3231,21 @@ const FormFieldBaseSchema = lazySchema(() => {
    * [#12868] `FormSelectOptionSchema`, not `SelectOptionSchema`: the form-view
    * face refuses the per-option `default` key the object-field face enforces —
    * see the narrowed schema's docblock for the ruling and the census.
+   *
+   * [#19678] Enum members come from the schema, never hand-listed (ruling
+   * 不动 + 声明, 2026-09-23). An option `value` keeps the system-identifier
+   * bound it shares by reference with the object-field face, so an enum member
+   * carrying a hyphen or a capital (`system-data`, `new-tab`, `perRecord`)
+   * cannot be written as one at all. On a metadata form — schema-bound,
+   * built by {@link defineForm} — a row whose key is a spec enum therefore
+   * omits `options`: the control derives the members from the served JSON
+   * Schema, and their meanings go in `helpText` (the `object.managedBy` /
+   * `action.openIn` / `action.execution` rows are the reference shape). The
+   * describe below states the rule where an author meets it, and
+   * `defineForm`'s module-load refusal of an unspellable value names the same
+   * path as its remedy.
    */
-  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition)'),
+  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), a row whose key is a spec enum omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`. An option `value` is a lowercase system identifier, so an enum member carrying a hyphen or a capital cannot be listed here at all.'),
   
   /** Reference object for lookup/master_detail fields */
   reference: z.string().optional().describe('Target object name for lookup/master_detail fields'),
@@ -6269,6 +6282,11 @@ export function expandViewContainer(object: string, container: any): ExpandedVie
  * and pulls field metadata from the resolved JSON Schema instead of from
  * ObjectQL.
  *
+ * A row whose key is a spec enum omits `options` — the control derives the
+ * members from that JSON Schema, and their meanings go in `helpText`. An
+ * inline option `value` that fails the system-identifier grammar is refused
+ * here, at module load, and the refusal names that path as its remedy.
+ *
  * @example
  * ```ts
  * export const reportForm = defineForm({
@@ -6294,9 +6312,70 @@ export function defineForm(
   config: Omit<z.input<typeof FormViewSchema>, 'data'> & { schemaId: string },
 ): FormViewParsed {
   const { schemaId, ...rest } = config;
-  return FormViewSchema.parse({
+  const parsed = FormViewSchema.safeParse({
     ...rest,
     data: { provider: 'schema', schemaId },
+  });
+  if (parsed.success) return parsed.data;
+  throw new z.ZodError(withOptionValueDeriveRemedy(parsed.error.issues));
+}
+
+/**
+ * [#19678] The remedy {@link defineForm}'s refusal of an unspellable inline
+ * option `value` carries — ruling 不动 + 声明 (2026-09-23): the bound stays,
+ * and the wall says what to do.
+ *
+ * The refusal itself is `SystemIdentifierSchema`'s grammar message
+ * (`shared/identifiers.zod.ts`), reached through `SelectOptionSchema.value`,
+ * which the form face reuses BY REFERENCE (pinned in
+ * `form-select-option.test.ts`). That message cannot carry this remedy where it
+ * is declared: the same grammar bounds object-field options and three
+ * object-storage names, and "derive the members from the served JSON Schema"
+ * is true only on a schema-bound form. `defineForm` is exactly that door — it
+ * stamps `data.provider: 'schema'` on every form it builds — so the remedy is
+ * appended here, to the issue that door raises, and nowhere else.
+ */
+const FORM_OPTION_VALUE_DERIVE_REMEDY =
+  'An enum member carrying a hyphen, a capital or a single character cannot be a form option '
+  + '`value`, which is a lowercase system identifier. When this row edits a spec enum, omit '
+  + '`options`: the control derives the members from the served JSON Schema, and their '
+  + 'meanings go in `helpText`.';
+
+/**
+ * The two issue codes the system-identifier grammar raises on a string: the
+ * pattern (`invalid_format`) and the two-character floor (`too_small`).
+ */
+const OPTION_VALUE_GRAMMAR_CODES: ReadonlySet<string> = new Set(['invalid_format', 'too_small']);
+
+/** `…options.<index>.value` — an inline option's `value` on a form field row. */
+function isInlineOptionValuePath(path: readonly PropertyKey[]): boolean {
+  const n = path.length;
+  return n >= 3 && path[n - 1] === 'value' && typeof path[n - 2] === 'number' && path[n - 3] === 'options';
+}
+
+/**
+ * [#19678] Append {@link FORM_OPTION_VALUE_DERIVE_REMEDY} to every grammar
+ * refusal of an inline option `value` in a failed `FormViewSchema` parse.
+ *
+ * A field row is a union (bare field name | row object), so the option's issue
+ * usually sits inside an `invalid_union` issue's `errors`, with a path relative
+ * to the union's — the walk carries the prefix down so the full path is judged.
+ * Nothing is added, removed or re-coded: the verdict and the issue list are the
+ * parse's own, and only the matching messages grow the remedy sentence.
+ */
+function withOptionValueDeriveRemedy(
+  issues: readonly z.core.$ZodIssue[],
+  at: readonly PropertyKey[] = [],
+): z.core.$ZodIssue[] {
+  return issues.map((issue) => {
+    const path = [...at, ...issue.path];
+    if (issue.code === 'invalid_union') {
+      return { ...issue, errors: issue.errors.map((branch) => withOptionValueDeriveRemedy(branch, path)) };
+    }
+    if (OPTION_VALUE_GRAMMAR_CODES.has(issue.code) && isInlineOptionValuePath(path)) {
+      return { ...issue, message: `${issue.message}. ${FORM_OPTION_VALUE_DERIVE_REMEDY}` };
+    }
+    return issue;
   });
 }
 
