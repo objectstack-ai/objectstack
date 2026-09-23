@@ -730,6 +730,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Opciones de tabla",
         description: "Opciones de visualización solo de cuadrícula."
       },
+      pagination: {
+        label: "Paginación",
+        description: "Tamaño de página y opciones de tamaño de página — los aceptan todos los tipos de vista, no solo la cuadrícula."
+      },
       kanban: {
         label: "Tablero Kanban",
         description: "Configuración de tablero específica de Kanban."
