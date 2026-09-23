@@ -403,6 +403,74 @@ function refuseRemoteDeferredDdl(): never {
   throw err;
 }
 
+// ── Remote schema drift detection: refused, never "no drift" ─────────────────
+
+/**
+ * [#19845] The Turso REMOTE face cannot detect schema drift, and now says so
+ * instead of answering that there is none.
+ *
+ * # The defect this replaces
+ *
+ * `SqlDriver.detectManagedDrift` reads the physical schema through Knex: a
+ * `hasTable` probe per table, then column and index introspection fed to the
+ * shared differ. In remote mode that Knex instance is the placeholder
+ * `:memory:` database {@link TursoDriver.toKnexConfig} hands the base
+ * constructor. It holds none of this datasource's tables, so every table was
+ * skipped as absent and the answer was `[]` whatever the remote database held.
+ * The no-argument call had a second reason to answer `[]`: it iterates
+ * `managedObjectFields`, which only the Knex `initObjects` fills and no remote
+ * schema door reaches. Measured on the transport's SQLite-backed double
+ * (`turso-remote-drift-detection-refusal.test.ts`): a synced table carrying an
+ * extra physical column the declaration omits reads `unmapped_column` /
+ * `drop_column` on the local face and `[]` on the remote one, with or without
+ * explicit objects. The artifact-pinned boot gate of `os serve`, whose job is
+ * to refuse a boot on destructive drift, therefore let every remote-Turso boot
+ * through as never drifted.
+ *
+ * # Why a refusal rather than an implementation
+ *
+ * The shared differ would serve a remote table: a clean remote-synced table,
+ * judged through a local Knex connection to the same SQLite file, reports no
+ * entries, as the local face does. But every read that feeds the differ goes
+ * through `this.knex` (table existence, column facts and order, the index set,
+ * the NULL-safe duplicate probe), so a remote implementation is a second copy
+ * of each of those SQLite arms. It also needs a remote answer for
+ * `applyMigrationEntries`, which the gate calls on whatever it finds and which
+ * runs on the same placeholder. Until that exists the refusal is the honest
+ * answer, in the envelope and for the reason {@link refuseRemoteDeferredDdl}
+ * records for its sibling gap on this transport: the call is spelled correctly
+ * and the base class declares it, so the gap is the backend's.
+ * `NOT_IMPLEMENTED`/501 is a {@link StandardErrorCode} member, so there is no
+ * new code.
+ *
+ * # What a caller sees
+ *
+ * The boot gate already has a channel for "the check did not run": a throw
+ * from `detectManagedDrift` becomes a warning carrying this message, and the
+ * boot continues. That is the right reading of a driver that cannot judge. It
+ * is neither a drift verdict that would refuse every remote boot nor a
+ * silence. The `os migrate` commands that read drift never get this far on a
+ * remote datasource, because they arm deferred DDL first and that is refused.
+ */
+function refuseRemoteDriftDetection(): never {
+  const err = new Error(
+    'Schema drift detection is not supported by the Turso REMOTE transport (this datasource\'s ' +
+    'transport mode is `remote`), so this driver cannot say whether the database\'s physical ' +
+    'schema matches the declared objects. Drift detection reads the physical schema through the ' +
+    'SQL driver\'s Knex connection, and in remote mode that connection is a placeholder in-memory ' +
+    'database holding none of this datasource\'s tables. Answering from it would report "no drift" ' +
+    'for every remote database, whatever its tables hold, so the call refuses. The call is spelled ' +
+    'correctly and `SqlDriver` declares it, so this is a capability gap of the remote transport ' +
+    'rather than a mistake in the request, which is why it answers NOT_IMPLEMENTED/501 and not a ' +
+    '400. To check this database for drift, run `os migrate plan` against a local SQLite copy of it ' +
+    '(a `file:` URL), where the physical schema is introspected. Pointed at the remote URL, ' +
+    '`os migrate plan` refuses, because the remote transport cannot defer schema DDL.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
 // ── Remote operation timeout ─────────────────────────────────────────────────
 
 /**
@@ -2043,6 +2111,25 @@ export class TursoDriver extends SqlDriver {
   override setDeferredDdl(deferred: boolean): void {
     if (deferred && this.isRemote) refuseRemoteDeferredDdl();
     super.setDeferredDdl(deferred);
+  }
+
+  /**
+   * Detect managed-schema drift — refused on the REMOTE face, see
+   * {@link refuseRemoteDriftDetection}. The inherited detector reads the
+   * physical schema through the placeholder Knex connection remote mode is
+   * built with, so its remote answer was always `[]`. Refused with or without
+   * explicit `objects`, because both read the same placeholder. Local and
+   * replica modes inherit the Knex detector unchanged.
+   *
+   * The parameter repeats the base's declared shape key for key rather than
+   * deriving it (`check:object-def-param-keys` arm C), so the keys a caller may
+   * pass stay visible on this override's own declaration.
+   */
+  override async detectManagedDrift(
+    objects?: Array<{ name: string; fields?: Record<string, any>; indexes?: any[] }>,
+  ): ReturnType<SqlDriver['detectManagedDrift']> {
+    if (this.isRemote) refuseRemoteDriftDetection();
+    return super.detectManagedDrift(objects);
   }
 
   override async syncSchema(object: string, schema: unknown, options?: DriverOptions): Promise<void> {
