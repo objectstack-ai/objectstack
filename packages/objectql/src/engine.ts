@@ -229,6 +229,9 @@ import {
 import { UnscopedHookApi, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
+// [#19911] The settlement's question "does judging the FK's own lock need the
+// header it names?" — asked of the same root reader the strips use.
+import { readonlyWhenFkJudgementReadsParent } from './validation/rule-validator.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
 // same helper every other server seam materialises with (#1871/#4649/#4953).
@@ -6909,14 +6912,17 @@ export class ObjectQL implements IObjectQLEngine {
    * rewritten, still under the paid invoice. The strips, in the order they run
    * after this point:
    *
-   *  ① the FK's OWN `readonlyWhen` lock. Judged here first, ALONE (the
-   *    `supplied` subset holds only the FK, so the strip evaluates nothing
-   *    else and warns about nothing else) and against the header the FK names
-   *    — #4889's verdict for the FK itself, unmoved. That verdict is final:
+   *  ① the FK's OWN `readonlyWhen` lock. Judged here first, against the
+   *    header the FK names — #4889's verdict for the FK itself, unmoved.
+   *    [#19911] Judged WITH the other caller-supplied locks, not alone: its
+   *    `record` is the row the write stores, so a value one of them drops is
+   *    reverted before the FK's lock reads it — but only the FK is TAKEN here
+   *    (`only`). When that verdict keeps the FK off the landing it is final:
    *    the returned `supplied` no longer holds the FK, so the strip that
    *    judges the other fields never re-asks it against the header the row
    *    keeps, where it could flip and land the FK after the rest were judged
-   *    against the header it left.
+   *    against the header it left. When the FK lands, that strip re-judges it
+   *    on the same landing and reaches the same verdict.
    *  ② the static `readonly` strip (`staticReadonlyStripTakes`), which runs
    *    after the conditional one and takes a non-system caller's forged FK.
    *
@@ -6929,15 +6935,18 @@ export class ObjectQL implements IObjectQLEngine {
    * Returns:
    *  - `subject` — the payload the `readonlyWhen` strip judges next: `data`,
    *    or `data` without the FK when ①'s verdict locked it;
-   *  - `supplied` — the entry snapshot that strip judges against, without the
-   *    FK when the FK is in `data` (its verdict is in);
+   *  - `supplied` — the entry snapshot that strip judges against: without the
+   *    FK when the FK does not land (its verdict is in), whole when it does;
    *  - `view` — the payload the header id is read from: `data` when the FK
    *    lands, else `data` without it, so `masterIdOf` falls through to the
    *    prior row's FK;
    *  - `header` — what `resolve(view)` answers. ① needs the NAMED header only
-   *    when the FK's own lock reads `parent`; when the FK then lands that is
-   *    the same header and is reused, so the write still reads one header —
-   *    two only when a parent-scoped lock on the FK itself refuses the landing.
+   *    when judging the FK's lock reads `parent` — its own predicate, or
+   *    [#19911] a `record`-reading one whose view another payload key's
+   *    `parent`-scoped lock shapes (`readonlyWhenFkJudgementReadsParent`);
+   *    when the FK then lands that is the same header and is reused, so the
+   *    write still reads one header — two only when ① read the named header
+   *    and the FK does not land.
    */
   private async settleMasterDetailLanding<H>(args: {
     schema: unknown;
@@ -6945,7 +6954,7 @@ export class ObjectQL implements IObjectQLEngine {
     supplied: Readonly<Record<string, unknown>>;
     staticStrip: { runs: boolean; preserveAudit: boolean; hookWrittenKeys: ReadonlySet<string> | undefined };
     resolve: (view: Record<string, unknown>) => Promise<H>;
-    judgeFkLock: (named: H | undefined, fkSupplied: Readonly<Record<string, unknown>>) => Record<string, unknown>;
+    judgeFkLock: (named: H | undefined, fk: string) => Record<string, unknown>;
   }): Promise<{
     subject: Record<string, unknown>;
     supplied: Readonly<Record<string, unknown>>;
@@ -6957,17 +6966,20 @@ export class ObjectQL implements IObjectQLEngine {
     if (fk === undefined || !(fk in data)) {
       return { subject: data, supplied, view: data, header: await resolve(data) };
     }
-    // ① Own-property, never `in`, for the same reason the strips give: a
-    // field name can be `constructor`, which every plain object inherits.
-    const fkSupplied = Object.prototype.hasOwnProperty.call(supplied, fk) ? { [fk]: supplied[fk] } : {};
-    const namedNeeded = hasParentScopedReadonlyWhenInPayload(schema as any, { [fk]: data[fk] });
+    // ① Whether the FK is still the caller's is the strip's own question
+    // (`isCallerSuppliedValue`, own-property): a hook-written FK is not judged.
+    const namedNeeded = readonlyWhenFkJudgementReadsParent(schema as any, data, fk);
     const named = namedNeeded ? await resolve(data) : undefined;
-    const subject = judgeFkLock(named, fkSupplied);
+    const subject = judgeFkLock(named, fk);
     const rest = withoutKey(supplied as Record<string, unknown>, fk);
     // ②
     const lands = fk in subject && !staticReadonlyStripTakes(schema, subject, fk, supplied, staticStrip);
     if (lands) {
-      return { subject, supplied: rest, view: data, header: namedNeeded ? (named as H) : await resolve(data) };
+      // [#19911] A landing FK stays in `supplied`: the strip that judges the
+      // rest re-judges it on the SAME landing — the header ① read, or one its
+      // verdict never reads — so it reaches ①'s verdict again, now over the
+      // same drops as everything else, and says it once.
+      return { subject, supplied, view: data, header: namedNeeded ? (named as H) : await resolve(data) };
     }
     const view = withoutKey(data, fk);
     return { subject, supplied: rest, view, header: await resolve(view) };
@@ -12924,7 +12936,7 @@ export class ObjectQL implements IObjectQLEngine {
                        schema: updateSchema, data: preRoWhen, supplied: suppliedValues,
                        staticStrip,
                        resolve: (view) => this.resolveMasterDetailParent(updateSchema, view, priorRecord, opCtx.context),
-                       judgeFkLock: (named, fkSupplied) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: fkSupplied, stored: staticReadonlyStoredView(updateSchema, preRoWhen, suppliedValues, staticStrip) }) as Record<string, unknown>,
+                       judgeFkLock: (named, fk) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: suppliedValues, only: fk, stored: staticReadonlyStoredView(updateSchema, preRoWhen, suppliedValues, staticStrip) }) as Record<string, unknown>,
                      })
                    : undefined;
                const roWhenParent = landing?.header;
@@ -13156,7 +13168,7 @@ export class ObjectQL implements IObjectQLEngine {
                            schema: updateSchema, data: preRoWhenMulti, supplied: suppliedValues,
                            staticStrip: staticStripMulti,
                            resolve: (view) => this.resolveMasterDetailParents(updateSchema, view, priorRows, opCtx.context),
-                           judgeFkLock: (named, fkSupplied) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: fkSupplied, stored: staticReadonlyStoredView(updateSchema, preRoWhenMulti, suppliedValues, staticStripMulti) }) as Record<string, unknown>,
+                           judgeFkLock: (named, fk) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: suppliedValues, only: fk, stored: staticReadonlyStoredView(updateSchema, preRoWhenMulti, suppliedValues, staticStripMulti) }) as Record<string, unknown>,
                          })
                        : undefined;
                const parentForRow = landingMulti?.header;
