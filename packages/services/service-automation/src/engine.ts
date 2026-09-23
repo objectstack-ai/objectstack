@@ -28,6 +28,7 @@ import { resolveFlowTriggerKind, resolveScheduleOrganization } from '@objectstac
 import {
     resolveScheduledWorkPolicy,
     SCHEDULED_WORK_DISABLED_REASON,
+    type ScheduledWorkPolicy,
 } from '@objectstack/types';
 import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRefusal } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half of the ledger. Both halves of "is this envelope
@@ -851,6 +852,31 @@ export interface AutomationEngineOptions {
      * See {@link RunSummaryLogLevel}.
      */
     runSummaryLog?: RunSummaryLogLevel;
+    /**
+     * [#19834] THIS kernel's scheduled-work policy — a value, or a resolver
+     * called at each bind. Absent (the default), the engine reads the
+     * zero-argument deployment resolver `resolveScheduledWorkPolicy()` exactly
+     * as before, so `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` keeps its meaning.
+     *
+     * For a host that runs several kernels in one process whose plans differ
+     * (one scheduled work OFF, its sibling ON): the per-kernel answer has
+     * nowhere else to live, because the deployment resolver reads one
+     * process-wide environment. A time-triggered flow this policy leaves
+     * unarmed is reported exactly as a deployment-disabled one —
+     * `SCHEDULED_WORK_DISABLED_REASON` on the binding audit and the status row.
+     *
+     * ⚠️ Hand the SAME policy to `ScheduleTriggerPlugin` and
+     * `TimeRelativeTriggerPlugin` of the same kernel: each trigger keeps its own
+     * gate (for a host that drives it without this engine), and a trigger
+     * reading a different answer from this engine refuses what the engine let
+     * through, which the audit then reports as a binding failure.
+     *
+     * ⚠️ A hand-built value owes the resolver's invariant:
+     * `requiresActingOrganization === enabled && runOwnership === 'declared'`.
+     * Spreading the deployment's reading and overriding only `enabled` breaks
+     * it under an `isolated` posture.
+     */
+    scheduledWorkPolicy?: ScheduledWorkPolicy | (() => ScheduledWorkPolicy);
 }
 
 /**
@@ -2376,6 +2402,8 @@ export class AutomationEngine implements IAutomationService {
     private readonly maxLogSize: number;
     /** Level for the per-run summary line (#4354). See {@link RunSummaryLogLevel}. */
     private readonly runSummaryLog: RunSummaryLogLevel;
+    /** [#19834] Per-kernel policy override; see {@link AutomationEngineOptions.scheduledWorkPolicy}. */
+    private readonly scheduledWorkPolicy: AutomationEngineOptions['scheduledWorkPolicy'];
     private logger: Logger;
     /**
      * Runs paused at a node, keyed by runId (ADR-0019). Process-local copy of
@@ -2493,6 +2521,18 @@ export class AutomationEngine implements IAutomationService {
         this.store = store;
         this.maxLogSize = options?.maxLogSize ?? DEFAULT_MAX_EXECUTION_LOG_SIZE;
         this.runSummaryLog = options?.runSummaryLog ?? 'info';
+        this.scheduledWorkPolicy = options?.scheduledWorkPolicy;
+    }
+
+    /**
+     * [#19834] The scheduled-work policy for THIS engine, read at each bind:
+     * the per-kernel option when one was given, else the zero-argument
+     * deployment resolver, unchanged.
+     */
+    private readScheduledWorkPolicy(): ScheduledWorkPolicy {
+        const source = this.scheduledWorkPolicy;
+        if (source === undefined) return resolveScheduledWorkPolicy();
+        return typeof source === 'function' ? source() : source;
     }
 
     /**
@@ -3511,12 +3551,14 @@ export class AutomationEngine implements IAutomationService {
         // ⛔ The POLICY is not cached — the resolver reads `process.env` live,
         // so a host that rebinds after changing the environment (the CLI's
         // `--fresh` harness, a test flipping the switch between kernels in one
-        // process) sees the value current at the bind. What IS recorded is the
+        // process) sees the value current at the bind. [#19834] A per-kernel
+        // `scheduledWorkPolicy` option replaces that read for this engine only;
+        // a resolver given there is likewise called at each bind. What IS recorded is the
         // REFUSAL, on {@link policyDisabledFlows}, and that is the difference
         // between the two: see its own docblock for why the audit must read
         // what happened rather than re-derive it from an environment that may
         // have moved since.
-        if (isTimeTriggeredKind(resolved.triggerType) && !resolveScheduledWorkPolicy().enabled) {
+        if (isTimeTriggeredKind(resolved.triggerType) && !this.readScheduledWorkPolicy().enabled) {
             if (!this.policyDisabledFlows.has(flowName)) {
                 this.policyDisabledFlows.add(flowName);
                 // Said once per flow while it stays refused, at `info`, for the
