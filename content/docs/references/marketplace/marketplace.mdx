@@ -145,7 +145,7 @@ Install from marketplace request
 | **version** | `string` | optional | Version to install |
 | **licenseKey** | `string` | optional | License key for paid packages |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install — the marketplace channel's own install option, not the platform install-door key (api/PackageInstallRequest) |
+| **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install — the marketplace channel's own install option, not the platform install-door key (api/PackageInstallRequest); `true` asks the channel to enable, `false` not to, and ABSENT leaves the package's current lifecycle state alone |
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for direct installation |
 | **tenantId** | `string` | optional | Tenant identifier |
 

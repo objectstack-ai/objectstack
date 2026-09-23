@@ -1711,7 +1711,10 @@ export class SecurityPlugin implements Plugin {
               assignablePositions: [],
             };
           }
-          return this.delegatedAdminGate.describeDelegableScope(sets);
+          // The caller's context, not just their sets: the gate resolves every
+          // business-unit anchor inside the organization this names, so the
+          // report can never offer another organization's units.
+          return this.delegatedAdminGate.describeDelegableScope(sets, callerContext);
         },
         // [ADR-0090 D5/D9] Install-time suggestion surface: packages suggest
         // audience-anchor bindings; a tenant admin confirms (the binding is
@@ -4268,7 +4271,9 @@ export class SecurityPlugin implements Plugin {
           // inside their delegation boundary (fail-closed on any error).
           const delegated = this.delegatedAdminGate
             ? await this.delegatedAdminGate
-                .scopesCoverUser(callerSets, request.userId)
+                // Same organization the caller's sets were resolved in — a
+                // delegation boundary is never read across organizations.
+                .scopesCoverUser(callerSets, request.userId, callerContext)
                 .catch(() => false)
             : false;
           if (!delegated) {

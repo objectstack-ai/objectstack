@@ -346,7 +346,7 @@ Sample 422 response:
 ```json
 {
   "error": "[invalid_metadata] view/test_bad_view failed spec validation: columns: Invalid input",
-  "code": "invalid_metadata"
+  "code": "INVALID_METADATA"
 }
 ```
 

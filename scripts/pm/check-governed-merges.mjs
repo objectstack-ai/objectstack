@@ -327,8 +327,8 @@
  *   S  席内达档复核落地 — the whole `.claude/**` tree: the owning seat lands it
  *      through the queue once the PR thread (or its card) carries a
  *      `## Contract review` record for the PR's CURRENT head with
- *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**`,
- *      `check-clause2-carriers.mjs --pair N` reads 0 and every check is green.
+ *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**` and every
+ *      check is green.
  *      Exactly the path the fact layer (`.claude/skills/pm-dispatch/references/`)
  *      used since #17950, generalised to the tier; the post-merge audit (this
  *      sweep) and the director seat's 职责四 are the compensating control, and a
@@ -1025,7 +1025,7 @@ export const GOVERNED_TIERS = Object.freeze({
     name: 'Tier S(席内达档复核落地)',
     landing:
       'the owning seat lands it through the queue on a `## Contract review` record for the CURRENT head ' +
-      '(`Served-tier: CONTRACT_REVIEW_TIER`, `**VERDICT: PASS**`), `check-clause2-carriers.mjs --pair N` at 0 and every check green',
+      '(`Served-tier: CONTRACT_REVIEW_TIER`, `**VERDICT: PASS**`) and every check green',
   }),
 });
 
@@ -1581,8 +1581,8 @@ export function renderTestVerdict(verdict) {
       `${head}\n` +
       `  ⛔  GOVERNED — Tier S(席内达档复核落地): every governed path here lies under a Tier S surface, so the OWNING\n` +
       `      seat lands this PR through the queue once its thread (or its card) carries a \`## Contract review\` record\n` +
-      `      for the CURRENT head — \`Served-tier: CONTRACT_REVIEW_TIER\`, \`**VERDICT: PASS**\` — with\n` +
-      `      \`check-clause2-carriers.mjs --pair N\` at 0 and every check green (AGENTS.md Prime Directive #14).\n` +
+      `      for the CURRENT head — \`Served-tier: CONTRACT_REVIEW_TIER\`, \`**VERDICT: PASS**\` — and every\n` +
+      `      check green (AGENTS.md Prime Directive #14).\n` +
       `      Before that record no seat flips it ready, enqueues it, or arms auto-merge; ⛔ no seat approves it either,\n` +
       `      and no maintainer click is waited for. One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」;\n` +
       `      one Tier H path among the hits and the whole PR would be Tier H.\n` +
@@ -2753,14 +2753,14 @@ export const PROXY_REARM_GUARD = 'OS_GOVERNED_MERGES_PROXY_REARMED';
  * scope with a top-level `await loadGovernedRegister()`, which awaits
  * `import('./check-governed-queue-guard.mjs')`, which imports THIS file at
  * module scope. The lazy door `check-governed-queue-guard.mjs`'s
- * `CONTRACT_REVIEW_LABEL` describes is shut here too, because this file's own
+ * `REVIEW_OF_RECORD_LOCATION` describes is shut here too, because this file's own
  * `--self-test` dispatch is a module-scope `await`. And the reverse edge is
  * barred for a second, independent reason the patrol's own header records: that
  * file TRAVELS — a sibling repo's `scripts/pm/` holds it alone — so it can
  * never statically import the governed pair either.
  *
  * So the mirror stays, and the `--self-test` battery pins it to its OWNER the
- * way `CONTRACT_REVIEW_LABEL` is pinned: by reading that file's SOURCE off disk,
+ * way the guard's mirror is pinned: by reading that file's SOURCE off disk,
  * plus the REASON — when the patrol's module-scope `await` goes away, the case
  * that fails says to make this a real import.
  *
@@ -3951,7 +3951,7 @@ async function selfTest() {
   const tierHCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md', 'AGENTS.md']);
   const tierSText = renderTestVerdict(tierSCase);
   const tierHText = renderTestVerdict(tierHCase);
-  assert('a-Tier-S-verdict-renders-its-OWN-block-naming-the-record-on-thread-landing', /Tier S/.test(tierSText) && /## Contract review/.test(tierSText) && /CONTRACT_REVIEW_TIER/.test(tierSText) && /--pair/.test(tierSText), tierSText);
+  assert('a-Tier-S-verdict-renders-its-OWN-block-naming-the-record-on-thread-landing', /Tier S/.test(tierSText) && /## Contract review/.test(tierSText) && /CONTRACT_REVIEW_TIER/.test(tierSText) && !/--pair/.test(tierSText), tierSText);
   assert('and-still-says-GOVERNED-with-the-three-verbs-so-every-grep-reader-keeps-its-answer', /GOVERNED/.test(tierSText) && /arms auto-merge/.test(tierSText) && !/human merge is the review record/.test(tierSText), tierSText);
   assert('a-Tier-H-verdict-keeps-its-wording-word-for-word-and-names-its-tier', /a human merge is the review record for this PR/.test(tierHText) && /landing tier: H/.test(tierHText) && !/Tier S/.test(tierHText), tierHText);
   assert('a-mixed-list-renders-H-the-one-Tier-H-path-decides', tierHCase.tier === GOVERNED_TIER_H && tierHCase.hitPaths.join() === '.claude/agents/os-dev.md,AGENTS.md', JSON.stringify(tierHCase.hitPaths));
@@ -3966,7 +3966,7 @@ async function selfTest() {
   assert('the-tier-is-recomputed-on-the-LIFTED-slice', preLift.tier === GOVERNED_TIER_H && postLift.tier === GOVERNED_TIER_S && postLift.governed === true, JSON.stringify([preLift.tier, postLift.tier]));
   const allLifted = applyGeneratedExceptions(testVerdict([liftPath]), lifted);
   assert('and-null-once-every-hit-is-lifted', allLifted.governed === false && allLifted.tier === null, JSON.stringify(allLifted.tier));
-  assert('the-tier-words-name-the-landing-each-waits-for', /GOVERNED_APPROVERS/.test(GOVERNED_TIERS.H.landing) && /Contract review/.test(GOVERNED_TIERS.S.landing) && /--pair/.test(GOVERNED_TIERS.S.landing));
+  assert('the-tier-words-name-the-landing-each-waits-for', /GOVERNED_APPROVERS/.test(GOVERNED_TIERS.H.landing) && /Contract review/.test(GOVERNED_TIERS.S.landing) && !/--pair/.test(GOVERNED_TIERS.S.landing));
 
   // ── --since parsing ───────────────────────────────────────────────────────
   battery('since parsing');

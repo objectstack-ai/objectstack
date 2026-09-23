@@ -2777,7 +2777,7 @@ export const FormSelectOptionSchema = lazySchema(() => {
     guidance: {
       default:
         '`options[].default` on a form-view field was removed from the FormView vocabulary in '
-        + '@objectstack/spec 18 (ADR-0049 declared-but-unenforced) — on this surface the key '
+        + '@objectstack/spec 17.3.0 (ADR-0049 declared-but-unenforced) — on this surface the key '
         + 'parsed clean and nothing read it: the insert-path default falls back to the OBJECT '
         + "definition's option list, never a form view's, and no form renderer seeds a value "
         + 'from it. Delete the key. Declare the pre-selected choice on the object definition '
@@ -3312,8 +3312,56 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   name: z.string().optional().describe('Stable section identifier for i18n lookup (snake_case)'),
   label: I18nLabelSchema.optional(),
   description: z.string().optional().describe('Optional description rendered under the section header.'),
-  collapsible: z.boolean().default(false),
-  collapsed: z.boolean().default(false),
+  /**
+   * ## The collapse pair, declared once for both members
+   *
+   * Two independent booleans, both `.default(false)`, and the dependency
+   * between them is a RENDERER rule rather than anything parse does — so it
+   * has to be stated on the declaration or it reaches nobody. `collapsed`
+   * IMPLIES `collapsible`: a section that starts closed always carries the
+   * disclosure control that reopens it, `collapsed: true` needs no
+   * `collapsible` beside it, and it outranks an explicit `collapsible: false`
+   * (maintainer ruling 2026-09-18, letter A). Letter B — refusing the
+   * combination at the declaration — and letter C — a dev-only warning — were
+   * both REFUSED, so ⛔ neither this schema nor a lint rule may grow one:
+   * `collapsed: true` alone is a CORRECT spelling of "collapsed by default",
+   * which is why the ruling made the renderer widen instead.
+   *
+   * ⚠️ The pair is NOT normalized at parse, in either direction — measured
+   * against the built package: `{ collapsed: true }` parses to
+   * `{ collapsible: false, collapsed: true }`, verbatim, and
+   * `safeParseAsync` agrees. So a consumer reading the parsed `collapsible`
+   * is reading what the author typed, NOT whether a control renders; it
+   * applies the implication itself, from the declaration and never from live
+   * collapse state (deriving it from the latter deletes the control the
+   * moment the reader opens the section). That is the opposite of the
+   * `fieldGroups` pair on `ObjectSchema`, which a parse-time mapping folds
+   * onto the `collapse` enum — ⛔ do not carry a reading across.
+   *
+   * Only `true` is refused on a wizard step and beside `group`; `false` is
+   * accepted in both, because it declares exactly what those surfaces already
+   * deliver (see `trueOnlyDerivedKeys` below and the FormViewSchema wizard
+   * refinement).
+   */
+  collapsible: z.boolean().default(false).describe(
+    'Whether the section renders a disclosure control, so a reader can close it and open it again. '
+    + 'Default `false`: a section declaring neither collapse key is always open and shows no control. '
+    + '⚠️ `collapsed: true` IMPLIES this key — an explicit `collapsible: false` beside it does NOT take '
+    + 'the control away (ruled 2026-09-18). The renderer resolves that from the DECLARATION; parse never '
+    + 'rewrites the pair, so a parsed section still reports the `false` that was authored. Only `true` is '
+    + 'refused on a wizard step and beside `group`; `false` is accepted in both, because it declares '
+    + 'exactly what those surfaces already deliver.',
+  ),
+  collapsed: z.boolean().default(false).describe(
+    'Whether the section starts closed. Default `false`. ⚠️ `collapsed: true` IMPLIES `collapsible` and is '
+    + 'sufficient ON ITS OWN — a section that starts closed always carries the disclosure control that '
+    + 'reopens it, and it outranks an explicit `collapsible: false` (ruled 2026-09-18; refusing the '
+    + 'combination at the declaration, and warning on it, were both rejected — nobody can depend on a '
+    + 'section that cannot be opened). The implication is a renderer rule, never a parse-time rewrite: '
+    + '`{ collapsed: true }` still parses to `collapsible: false, collapsed: true`, so the parsed '
+    + '`collapsible` must never be read as "a control renders". Only `true` is refused on a wizard step (steps do not '
+    + 'collapse) and beside `group`, whose field group declares the pair.',
+  ),
   /**
    * Conditional-visibility predicate (CEL) — the whole section is shown only
    * when TRUE (ADR-0089, canonical `*When` name). Same per-layer binding root as

@@ -545,7 +545,7 @@ deleting or renaming a proof re-runs this check and the dangling reference is ca
 ## Author warnings — closing the loop (`authorWarn`)
 
 Classification is also fed back to the *author* at build time. The CLI `compile`
-lint (`packages/cli/src/utils/lint-liveness-properties.ts`) reads these ledgers and
+lint (`packages/lint/src/lint-liveness-properties.ts`) reads these ledgers and
 emits an advisory **warning** when an authored object/field sets a property that is
 misleading — "you set this expecting it to do something; at runtime it does nothing /
 isn't enforced" — with a corrective hint. Never fails the build.

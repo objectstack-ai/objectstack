@@ -404,8 +404,9 @@ export const CEILINGS = new Map([
   // (maintainer ruling: provenance narratives, incident post-mortems and rationale
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
-  // legitimate).
-  ['.claude/skills/pm-dispatch/references/state-machine.md', 42],
+  // legitimate). Lowered 42 → 41 when the retired contract-review label's
+  // card-side-first line left (ruling record 5770886272 on #19061).
+  ['.claude/skills/pm-dispatch/references/state-machine.md', 41],
   // Raised 48 → 51 by the clause-② CONTENT-limb applicability ruling (maintainer
   // 2026-08-31, 第 6 场总监席决裁批 #12, verbatim 「同意」, adopting A + C: published
   // `skills/**` changes making a falsifiable operator/contract semantic claim fall
@@ -1339,8 +1340,10 @@ export const CEILINGS = new Map([
   // narratives, incident post-mortems and rationale tails leave the corpus; one
   // rule per ≤120-byte line; the frontmatter, section order, pinned spellings and
   // the report JSON keep their operative content). Landed count, headroom 0, same
-  // convention (lowering is always legitimate).
-  ['.claude/agents/os-dev.md', 403],
+  // convention (lowering is always legitimate). Lowered 403 → 402 when the
+  // retired contract-review label's reporting line left (ruling record
+  // 5770886272 on #19061).
+  ['.claude/agents/os-dev.md', 402],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on
@@ -1495,7 +1498,17 @@ export const CEILINGS = new Map([
   // standing letter-C ruling 5716260390 left unruled when it named the text.
   // AGENTS.md is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
   // applies. Landed count, headroom 0, same convention.
-  ['AGENTS.md', 1109],
+  //
+  // 1109 → 1116 (card #19641, PR #19642): the six-line rule that every GitHub
+  // write leaves through scripts/pm/ as the fleet's App identity, behind the
+  // shared write gate — bought by CONTENT (a rule with no prior spelling
+  // anywhere in the file), after the paragraph was first compressed from
+  // sixteen lines to six. Maintainer ruling, verbatim and untranslated:
+  // 「同意 A（推荐）」 — the maintainer's live instruction to the desktop session
+  // that raised it, recorded on #19641 comment 5771401251 together with the
+  // option A text it accepted (raise to 1116, ruling quoted in the PR body).
+  // Landed count, headroom 0, same convention.
+  ['AGENTS.md', 1116],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to

@@ -57,7 +57,11 @@
 
 import { mapFlowNodeList } from '../conversions/walk.js';
 
-import type { TranslationBundle, TranslationData } from './translation.zod';
+import type {
+  PlatformTranslationBundle,
+  TranslationBundle,
+  TranslationData,
+} from './translation.zod';
 
 /**
  * Minimal view shape consumed by `resolveViewLabel`.
@@ -310,10 +314,10 @@ export function resolveBundleLocale(
   return undefined;
 }
 
-function pickData(
-  bundle: TranslationBundle | undefined,
+function pickData<D>(
+  bundle: Record<string, D> | undefined,
   locale: string,
-): TranslationData | undefined {
+): D | undefined {
   if (!bundle) return undefined;
   const exact = bundle[locale];
   if (exact !== undefined) return exact;
@@ -2664,7 +2668,7 @@ export function translateObject<T extends ObjectLike>(
 // ────────────────────────────────────────────────────────────────────────────
 
 function pickSettingsEntry(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   locale: string,
 ) {
@@ -2672,7 +2676,7 @@ function pickSettingsEntry(
 }
 
 function resolveOptionalString(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   pick: (entry: NonNullable<ReturnType<typeof pickSettingsEntry>>) => string | undefined,
   opts?: ResolveOptions,
@@ -2689,7 +2693,7 @@ function resolveOptionalString(
 
 /** Resolve manifest title; falls back to literal. */
 export function resolveSettingsTitle(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   fallback: string,
   opts?: ResolveOptions,
@@ -2699,7 +2703,7 @@ export function resolveSettingsTitle(
 
 /** Resolve manifest description. Returns literal (possibly undefined) when no translation found. */
 export function resolveSettingsDescription(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   fallback: string | undefined,
   opts?: ResolveOptions,
@@ -2709,7 +2713,7 @@ export function resolveSettingsDescription(
 
 /** Resolve a group title under `settings.<namespace>.groups.<group>.title`. */
 export function resolveSettingsGroupTitle(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   groupKey: string,
   fallback: string,
@@ -2722,7 +2726,7 @@ export function resolveSettingsGroupTitle(
 }
 
 export function resolveSettingsGroupDescription(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   groupKey: string,
   fallback: string | undefined,
@@ -2736,7 +2740,7 @@ export function resolveSettingsGroupDescription(
 
 /** Resolve a setting field label under `settings.<namespace>.keys.<key>.label`. */
 export function resolveSettingsFieldLabel(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   key: string,
   fallback: string,
@@ -2748,7 +2752,7 @@ export function resolveSettingsFieldLabel(
 }
 
 export function resolveSettingsFieldHelp(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   key: string,
   fallback: string | undefined,
@@ -2760,7 +2764,7 @@ export function resolveSettingsFieldHelp(
 }
 
 export function resolveSettingsFieldPlaceholder(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   key: string,
   fallback: string | undefined,
@@ -2774,7 +2778,7 @@ export function resolveSettingsFieldPlaceholder(
 
 /** Resolve an enum option label under `settings.<namespace>.keys.<key>.options.<value>`. */
 export function resolveSettingsOptionLabel(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   key: string,
   optionValue: string,
@@ -2793,7 +2797,7 @@ export function resolveSettingsOptionLabel(
 
 /** Resolve an action button label under `settings.<namespace>.actions.<actionId>.label`. */
 export function resolveSettingsActionLabel(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   actionId: string,
   fallback: string,
@@ -2806,7 +2810,7 @@ export function resolveSettingsActionLabel(
 }
 
 export function resolveSettingsActionConfirm(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   actionId: string,
   fallback: string | undefined,
@@ -2819,7 +2823,7 @@ export function resolveSettingsActionConfirm(
 }
 
 export function resolveSettingsActionSuccess(
-  bundle: TranslationBundle | undefined,
+  bundle: PlatformTranslationBundle | undefined,
   namespace: string,
   actionId: string,
   fallback: string | undefined,

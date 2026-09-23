@@ -248,11 +248,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # Stays in the caller on purpose: `scripts/check-node-version.mjs` scans
-      # `.github/workflows/*.yml` only and reports how many setup-node steps it
-      # audited, so a step moved into the composite action would drop out of
-      # that census while the gate still printed OK. `.github/actions/setup-pnpm`
-      # records the same reasoning for the same gate.
+      # Stays in the caller on purpose, and ⛔ NOT for a census reason: the Node
+      # census reads `.github/actions/**` too. The patrol action holds no Node
+      # pin of its own and only asserts a floor from the `.nvmrc` it shipped
+      # with, so the runner's Node has to be the CALLER's choice for that check
+      # to be a reading about anything. The action's header carries the measure.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -316,15 +316,9 @@ jobs:
         # close-time hygiene rather than the backfill the 2026-08-31 maintainer
         # ruling refused.
         #
-        # ⛔ NOT in the composite action, for two reasons that both say the same
-        # thing. It is the one step of the old file that was never
-        # repo-agnostic: it WRITES to cards under a ruling this repo's board
-        # took, and no sibling has taken it. And this workflow is the only place
-        # in CI that runs `scripts/pm/sweep-closed-cards.mjs --self-test`, which
-        # is how `scripts/check-self-test-wired.mjs` knows that self-test is
-        # run at all — that gate builds its population from `.github/workflows/`
-        # and nowhere else, so moving this step would leave it green while
-        # auditing one script fewer.
+        # ⛔ NOT in the composite action. It is the one step of the old file
+        # that was never repo-agnostic: it WRITES to cards under a ruling this
+        # repo's board took, and no sibling has taken it.
         #
         # ⛔ This step never fails the job, whatever the sweep returns; the
         # alarm rides an annotation and the run summary instead. Findings are

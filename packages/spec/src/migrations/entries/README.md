@@ -63,7 +63,7 @@ export const entry: SemanticMigration = {
 The copyright header and the type import are file scaffolding and are **not** carried
 into the registry; the run of `//` comments immediately above `export const entry` is.
 
-## Three rules that are not style
+## Four rules that are not style
 
 - **Touch no other file, and never edit inside the markers.** `registry.ts`'s
   `<os-generated …>` regions are output. A hand edit there is reverted by the next
@@ -76,6 +76,23 @@ into the registry; the run of `//` comments immediately above `export const entr
   the *same* entry collide in git — on a registry where a dropped entry produces no
   error anywhere, a layout in which the second case merges quietly is a layout that
   loses one of the two edits.
+- **Entry prose is scanned as source, twice over — ⛔ never spell a shape a live
+  textual ratchet matches.** Every string an entry declares is concatenated verbatim
+  into `registry.ts`, which is ordinary `.ts`, so a repo-wide scan reads the same
+  sentence once here and once there. This tree's one code/prose separator masks
+  **comments** and leaves **string literals** intact on purpose, so to every scan built
+  on it a quoted example is code — which is how prose in `packages/spec` turns
+  **another package's** test red. Measured on #14526: the new entry named four retired
+  call sites in their call spelling — the method with its opening parenthesis —
+  `packages/client/src/envelope-caller-census.test.ts` counted 46 against the 28 it
+  pins (nine mentions, each counted twice) and `Test Core` went red; respelling them
+  without the parenthesis restored 28 and changed nothing the entry meant. Name the
+  surface, ⛔ don't spell a call of it.
+
+  ⚠️ The parenthesis is the instance, not the rule. An older entry that does spell a
+  call is not thereby wrong — it goes unmatched only because no live ratchet
+  enumerates *that* method, which is a fact about today's ratchets and not a licence;
+  the pattern that catches you is whichever one exists when your entry lands.
 
 ## What this does not fix
 

@@ -47,23 +47,25 @@
 #
 # ## What deliberately did NOT move into here, and why
 #
-# Two steps stay in the CALLING workflow, both because a gate in this repo
-# derives its population from `.github/workflows/` and only from there:
+# Two steps stay in the CALLING workflow, each for its OWN reason -- and ⛔ not
+# for the census reason this block used to give. `check-node-version` and
+# `check-self-test-wired` read `.github/actions/**` as well as
+# `.github/workflows/`; their scope lines say "2 composite action(s)", so a
+# step moved in here stays audited, under this file's name, in both.
 #
-#   - `actions/setup-node`. `scripts/check-node-version.mjs` scans
-#     `.github/workflows/*.yml` and reports how many setup-node steps it
-#     audited; a step moved in here would drop out of that census and the gate
-#     would still print OK. `.github/actions/setup-pnpm` records the same
-#     reasoning for the same gate, and the same answer: callers keep their own
-#     setup-node step with its literal `node-version` pin.
-#   - the closed-card sweep. `scripts/check-self-test-wired.mjs` builds its
-#     population from the scripts a WORKFLOW names, and the only CI invocation
-#     of `scripts/pm/sweep-closed-cards.mjs --self-test` in this repo is the one
-#     in that workflow. Moved in here it would leave that gate green while
-#     auditing one script fewer. It is also the one step in the old file that
-#     was never repo-agnostic -- it WRITES to cards and was gated on the
-#     repository name -- so leaving it in the objectstack caller states plainly
-#     what the `if:` used to state obliquely.
+#   - `actions/setup-node`. This action holds NO Node pin of its own -- the
+#     floor in `Locate the patrol sources` is read from the `.nvmrc` that
+#     shipped with it, and `check-node-version.mjs` holds every setup-node pin
+#     in this repo equal to that same file. A `setup-node` step in here would
+#     install the very version that floor is then compared against: equal by
+#     construction, unable to fail, and no longer a reading about the CALLER's
+#     runner. The caller picks the Node it runs on; this action only refuses
+#     one that is too old, by name. (`setup-pnpm` keeps the same separation for
+#     NO constraint -- there the census was the whole reason, and it is gone.)
+#   - the closed-card sweep. It is the one step in the old file that was never
+#     repo-agnostic -- it WRITES to cards and was gated on the repository name
+#     -- so leaving it in the objectstack caller states plainly what the `if:`
+#     used to state obliquely.
 #
 # ## Where this runs, and against which board
 #

@@ -192,3 +192,127 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
     expect(registry.getNamespaceOwners('showcase')).toEqual(['com.example.showcase']);
   });
 });
+
+/**
+ * #17518 — the record reports EVERY declared function, in one shape.
+ *
+ * The projection above is structural and stays so: 「a live object reached the
+ * record」, ⛔ never a key denylist. That rule treated the two authored
+ * `functions` spellings unequally through no fault of its own — a DECLARED
+ * entry (`{ handler, effect }`) is a plain object, so it survived with its
+ * callable dropped, while a BARE callable entry IS the callable, so the whole
+ * key disappeared. `examples/app-showcase` ships one of each, so a package
+ * declaring two functions was reported as declaring one on `GET /packages`.
+ *
+ * The repair makes the two spellings structurally EQUAL before the projection
+ * runs, at the assembly boundary. ⛔ No ref is minted: `objectstack build`
+ * mints refs with `uniqueName(base, taken)` and dedupes by function identity,
+ * so a ref minted here could name a handler that resolves in no sibling module.
+ * An ABSENT `handler` is the honest statement 「declared here, not
+ * serialisable」, and `RecordStagePackageBodySchema` in `@objectstack/spec`
+ * declares exactly that.
+ */
+describe('SchemaRegistry.installPackage — the record reports every declared function', () => {
+  let registry: SchemaRegistry;
+
+  beforeEach(() => {
+    registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
+    registry.logLevel = 'silent';
+  });
+
+  /** The two spellings `examples/app-showcase/objectstack.config.ts` ships. */
+  const showcaseFunctions = () => ({
+    summarizeCompletedTask: () => 'summary',
+    sweepProjectHealth: { handler: () => 'swept', effect: 'writes' as const },
+  });
+
+  it('records BOTH spellings — the bare one as a handler-less declaration', () => {
+    registry.installPackage(baseManifest({ functions: showcaseFunctions() }));
+    const stored = registry.getPackage('com.example.showcase')!.manifest as any;
+
+    expect(Object.keys(stored.functions).sort()).toEqual(['summarizeCompletedTask', 'sweepProjectHealth']);
+    // The bare entry keeps what the bare spelling MEANS — the declaration
+    // `effect: 'pure'`, written the short way — read off the declaration
+    // schema's own default rather than invented here.
+    expect(stored.functions.summarizeCompletedTask).toEqual({ effect: 'pure' });
+    // The declared entry is unchanged in substance: only the callable is gone.
+    expect(stored.functions.sweepProjectHealth).toEqual({ effect: 'writes' });
+  });
+
+  it('⛔ mints no handler ref — an absent `handler` is the honest statement', () => {
+    registry.installPackage(baseManifest({ functions: showcaseFunctions() }));
+    const stored = registry.getPackage('com.example.showcase')!.manifest as any;
+
+    for (const entry of Object.values(stored.functions) as Array<Record<string, unknown>>) {
+      expect('handler' in entry).toBe(false);
+    }
+  });
+
+  it('leaves an ALREADY LOWERED body exactly as it found it', () => {
+    // What `objectstack build` writes, and what an artifact boot installs when
+    // no runtime module re-attached the callables: a bare ref and a lowered
+    // record. Neither is a callable, so neither is normalised.
+    const lowered = { bare: 'bare', declared: { handler: 'declared', effect: 'writes' } };
+    registry.installPackage(baseManifest({ functions: lowered }));
+
+    expect((registry.getPackage('com.example.showcase')!.manifest as any).functions).toEqual(lowered);
+  });
+
+  it('leaves the ARRAY form alone — its entries are objects that name themselves', () => {
+    // An array entry carries its own `name`, so the projection already keeps
+    // it; only its callable goes. Its `effect` is `.optional()` with NO
+    // default, so ⛔ nothing is written where the schema declares nothing.
+    registry.installPackage(baseManifest({
+      functions: [{ name: 'syncBilling', handler: () => 'billed', effect: 'writes' }],
+    }));
+    const stored = registry.getPackage('com.example.showcase')!.manifest as any;
+
+    expect(stored.functions).toEqual([{ name: 'syncBilling', effect: 'writes' }]);
+    const bare = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
+    bare.logLevel = 'silent';
+    bare.installPackage(baseManifest({ functions: [{ name: 'syncBilling', handler: () => 'billed' }] }));
+    expect((bare.getPackage('com.example.showcase')!.manifest as any).functions)
+      .toEqual([{ name: 'syncBilling' }]);
+  });
+
+  it('⛔ does not mutate the caller’s manifest — the live callables stay live', () => {
+    // `ObjectQL.registerApp` and the hook binder read the callables off THIS
+    // object. Normalising must copy, exactly as the projection does.
+    const functions = showcaseFunctions();
+    const manifest = baseManifest({ functions });
+    registry.installPackage(manifest);
+
+    expect(typeof manifest.functions.summarizeCompletedTask).toBe('function');
+    expect(manifest.functions).toBe(functions);
+    expect(typeof functions.sweepProjectHealth.handler).toBe('function');
+  });
+
+  it('touches nothing when there is nothing to normalise', () => {
+    // A manifest with no `functions` key, and one whose entries are all already
+    // declared, must reach the projection as the SAME object — the normaliser
+    // copies only when it really rewrote an entry.
+    const untouched = baseManifest();
+    registry.installPackage(untouched);
+    const stored = registry.getPackage('com.example.showcase')!.manifest as any;
+    expect('functions' in stored).toBe(false);
+    expect(stored.objects).toEqual(untouched.objects);
+  });
+
+  it('hooks are NOT normalised — an inline handler is simply dropped', () => {
+    // `hooks[].handler` is optional on its own declaration, so a hook whose
+    // inline callable is projected away is still a well-formed record. ⛔ This
+    // repair does not reach into a second collection.
+    registry.installPackage(baseManifest({
+      hooks: [
+        { name: 'on_insert', object: 'invoice', events: ['beforeInsert'], handler: () => 'hooked' },
+        { name: 'on_update', object: 'invoice', events: ['beforeUpdate'], handler: 'on_update' },
+      ],
+    }));
+    const stored = registry.getPackage('com.example.showcase')!.manifest as any;
+
+    expect(stored.hooks).toEqual([
+      { name: 'on_insert', object: 'invoice', events: ['beforeInsert'] },
+      { name: 'on_update', object: 'invoice', events: ['beforeUpdate'], handler: 'on_update' },
+    ]);
+  });
+});
