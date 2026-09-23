@@ -15,8 +15,8 @@
  * [#19514] The SCALAR arm joined them, and it moved three pins in this file from
  * the accepted side to the refused side. It is not an extension of #6227's
  * reasoning but a correction of one of its readings: an array on a scalar
- * operator was recorded here as accepted because it 「lowers to a bare
- * deep-equality comparand, which every backend answers」, and re-measurement
+ * operator was recorded here as accepted because it 「lowers to a
+ * deep-equality comparand」, and re-measurement
  * found the opposite. The pins below carry both
  * directions of that arm, and the carve-outs
  * (an absent value, the four valueless operators) keep their
