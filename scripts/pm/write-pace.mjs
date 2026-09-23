@@ -418,6 +418,9 @@ export function decidePace({ records = [], key, nowMs, minGapMs = DEFAULT_MIN_GA
  * seat stop BEFORE the first refusal rather than after it.
  */
 export function stopSignalFrom({ status, headers, body, verdict } = {}, nowMs = Date.now()) {
+  // ⛔ A refusal the egress PROXY answered never reached GitHub, so nothing in it is a platform back-off
+  // signal — whatever a caller's verdict says. Read first, so a misclassified proxy 403 cannot write a marker.
+  if (isProxyRefusal(body)) return null;
   const code = Number(status);
   const retryAfterMs = parseRetryAfter(headerValue(headers, 'retry-after'), nowMs);
   const remaining = headerValue(headers, 'x-ratelimit-remaining');
@@ -436,6 +439,31 @@ export function stopSignalFrom({ status, headers, body, verdict } = {}, nowMs = 
     triggers,
     retryAfterMs,
   };
+}
+
+/**
+ * Is this body the egress PROXY's refusal rather than GitHub's answer? The
+ * discriminant, measured in a cloud seat container on the `/app/**` mint path:
+ * `{"message":"Access to this GitHub API path is not permitted through this
+ * proxy.","documentation_url":"https://docs.anthropic.com/…"}` — the message
+ * names the proxy, and the `documentation_url` points at Claude Code's docs,
+ * never at GitHub's. Either mark is enough. Accepts a string or a parsed object.
+ */
+export function isProxyRefusal(body) {
+  if (body === null || body === undefined) return false;
+  const obj = typeof body === 'string' ? safeParse(body) : body;
+  const message = typeof obj?.message === 'string' ? obj.message : typeof body === 'string' ? body : '';
+  if (/not permitted through this proxy/i.test(message)) return true;
+  const doc = typeof obj?.documentation_url === 'string' ? obj.documentation_url : '';
+  return doc !== '' && !/^https?:\/\/([a-z0-9-]+\.)*github\.com\//i.test(doc);
+}
+
+function safeParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 /** Does a response body name the secondary / abuse limit? Accepts a string or a parsed object. */
@@ -1101,6 +1129,38 @@ export function noteResponse({ token, status, headers, body, verdict } = {}, dep
   const file = deps.file ?? paceFilePath(env, deps.home ?? homedir());
 
   const nowMs = now();
+  // A refusal the egress proxy answered is a ROUTE failure: the request never reached GitHub, so the slot
+  // `paceWrite` recorded for it is given back (no budget spent), no marker is written, and ONE line says so.
+  if (isProxyRefusal(body)) {
+    const key = tokenKey(token);
+    let retracted = false;
+    try {
+      withPaceLock(
+        file,
+        () => {
+          const kept = pruneRecords(readRecordsFrom(file), nowMs);
+          // The lease held this write's turn since `paceWrite`, so the newest write record for this key is ours.
+          for (let i = kept.length - 1; i >= 0; i--) {
+            if (kept[i]?.k === key && typeof kept[i]?.t === 'number' && kept[i]?.stop === undefined) {
+              kept.splice(i, 1);
+              retracted = true;
+              break;
+            }
+          }
+          if (retracted) writeRecordsTo(file, kept);
+        },
+        { now, sleep: deps.sleepSync ?? sleepSync },
+      );
+    } catch {
+      retracted = false;
+    }
+    releaseWriteLease(file);
+    log(
+      `write-pace: HTTP ${status} was the egress PROXY refusing this request's path, not GitHub answering — a route refusal. ` +
+        `No stop marker written, ${retracted ? 'and the slot this write took is given back (no budget spent)' : 'and no slot could be given back'}; fix the route rather than waiting.`,
+    );
+    return { proxyRefusal: true, retracted, key, file };
+  }
   const signal = stopSignalFrom({ status, headers, body, verdict }, nowMs);
   if (!signal) {
     releaseWriteLease(file); // rule ④: the response is in hand, the turn is over
@@ -1202,7 +1262,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the limits: overrides are for tests, and a malformed one never loosens': 10,
   'rule ①: the remainder is slept, and the pause is said out loud': 7,
   'rule ②: the 41st is REFUSED, with a prescription': 8,
-  'rule ③: what writes a stop marker, how long it lasts, what it refuses': 10,
+  'rule ③: what writes a stop marker, how long it lasts, what it refuses': 14,
   'the prune: the trailing hour for writes, the expiry for markers': 8,
   'the log, --status and the CLI: what lands on disk, and what must never': 14,
   'rule ④: the lease — one write in flight, fleet-wide, measured on real processes': 12,
@@ -1405,6 +1465,20 @@ export async function selfTest() {
         stopSignalFrom({ status: 429, headers: { 'retry-after': '5400' } }, T0).untilMs - T0,
         stopSignalFrom({ status: 429, headers: { 'retry-after': '60' } }, T0).untilMs - T0,
       ], [5400_000, STOP_MARKER_MS]);
+      const PROXY_403 = { message: 'Access to this GitHub API path is not permitted through this proxy.', documentation_url: 'https://docs.anthropic.com/en/docs/claude-code/github-actions' };
+      t('⭐ the egress PROXY\'s 403 is recognised by its body (measured shape): the message naming the proxy, or a documentation_url that is not GitHub\'s', [isProxyRefusal(PROXY_403), isProxyRefusal({ documentation_url: 'https://docs.anthropic.com/x' }), isProxyRefusal(JSON.stringify(PROXY_403)), isProxyRefusal({ message: 'Bad credentials', documentation_url: 'https://docs.github.com/rest' }), isProxyRefusal({ message: 'You have exceeded a secondary rate limit', documentation_url: 'https://docs.github.com/en/rest/overview/rate-limits-for-the-rest-api' }), isProxyRefusal(null)], [true, true, true, false, false, false]);
+      t('⛔ …and it NEVER writes a marker — even handed a ratelimit verdict or a zero header, the request never reached GitHub', [stopSignalFrom({ status: 403, body: PROXY_403 }, T0), stopSignalFrom({ status: 403, body: PROXY_403, verdict: 'ratelimit' }, T0), stopSignalFrom({ status: 403, body: PROXY_403, headers: { 'x-ratelimit-remaining': '0' } }, T0)], [null, null, null]);
+      {
+        const pf = join(dir, 'proxy-refusal.jsonl');
+        const ph = harness(pf, { env: { OS_PM_WRITE_MIN_GAP_MS: '0' } });
+        await paceWrite({ token: TOKEN, kind: 'fleet-token POST' }, ph.deps);
+        const before = readRecordsFrom(pf).filter((r) => typeof r.t === 'number').length;
+        const noted = noteResponse({ token: TOKEN, status: 403, body: PROXY_403 }, ph.deps);
+        const after = readRecordsFrom(pf);
+        t('noteResponse on a proxy refusal: no marker on disk, the slot paceWrite took is given back, the lease released, ONE line naming the proxy', [noted.proxyRefusal, noted.retracted, after.some((r) => r.stop !== undefined), after.filter((r) => typeof r.t === 'number').length, before, existsSync(`${pf}.lease`), ph.text().includes('egress PROXY') && ph.text().includes('No stop marker')], [true, true, false, 0, 1, false, true]);
+        const next = await paceWrite({ token: TOKEN, kind: 'fleet-token POST' }, ph.deps);
+        t('…and the next write by that token is allowed at once — nothing was spent, nothing is stopped', next.verdict, 'ok');
+      }
 
       const file = join(dir, 'marker.jsonl');
       const h = harness(file, { env: { OS_PM_WRITE_MIN_GAP_MS: '0' } });

@@ -122,7 +122,7 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import { EXIT_UNCONFIRMED, exitForResult, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
-import { isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
+import { isProxyRefusal, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
   PM_EXCLUSIVE_STATE_LABELS,
@@ -336,12 +336,23 @@ export function relayActions({ issue, labels, assignees } = {}) {
  *     identity, every seat on this board shares that identity, and continuing
  *     the same write through another channel is the same act as retrying;
  *   - `401`/`407` is the ROUTE or the credential — nothing about this card;
- *   - a thrown fetch (status 0) is the route too.
+ *   - a thrown fetch (status 0) is the route too;
+ *   - a 403 whose BODY is the egress proxy's ("not permitted through this
+ *     proxy", a `documentation_url` that is not GitHub's) is the ROUTE as well
+ *     — the request never reached the platform — so it is `prerequisite`,
+ *     ⛔ never `ratelimit`: a proxy refusal carries no rate header, and an
+ *     absent header is NOT a zero. Measured once as a zero, it wrote a
+ *     30-minute STOP MARKER for the fleet's token key against a channel that
+ *     was never spoken to.
  */
-export function classifyHttp({ status, op, rateRemaining } = {}) {
+export function classifyHttp({ status, op, rateRemaining, body } = {}) {
   if (status === 200 || status === 201 || status === 204) return 'ok';
   if (status === 404 && op === 'label-delete') return 'idempotent';
-  if ((status === 403 || status === 429) && Number(rateRemaining) === 0) return 'ratelimit';
+  if (isProxyRefusal(body)) return 'prerequisite';
+  // `x-ratelimit-remaining` must be PRESENT and zero; `Number(null)` is 0, which is how an absent header once read as exhaustion.
+  const remaining = rateRemaining === null || rateRemaining === undefined || String(rateRemaining).trim() === '' ? null : Number(rateRemaining);
+  if (status === 429) return 'ratelimit';
+  if (status === 403 && remaining === 0) return 'ratelimit';
   if (status === 401 || status === 407 || status === 0) return 'prerequisite';
   if (status === 403 || status === 404 || status === 405) return 'refusal';
   return 'error';
@@ -918,7 +929,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the arithmetic: union, difference, and the two idempotent no-ops': 12,
   'the ONE-OF refusal, and the one declared exception': 6,
   'the read-back verdict: three buckets, three different meanings': 7,
-  'the classifier: a 404 that is success, and a 403 that must not fall back': 9,
+  'the classifier: a 404 that is success, and a 403 that must not fall back': 12,
   'the four steps, end to end against a fake board': 10,
   'the fallback: one PATCH, and the assignee echo that makes it survivable': 7,
   'the remaining exits: refusal, mismatch, the ONE-OF block and the dry run': 5,
@@ -1023,6 +1034,10 @@ export async function selfTest() {
   t('401/407 are the credential or the route', [classifyHttp({ status: 401 }), classifyHttp({ status: 407 })], ['prerequisite', 'prerequisite']);
   t('a thrown fetch (status 0) is the route', classifyHttp({ status: 0 }), 'prerequisite');
   t('a 422 is an API error, neither a refusal nor a success', classifyHttp({ status: 422, op: 'label-add' }), 'error');
+  const PROXY_403 = { message: 'Access to this GitHub API path is not permitted through this proxy.', documentation_url: 'https://docs.anthropic.com/en/docs/claude-code/github-actions' };
+  t("⭐ a 403 whose body is the egress PROXY's (measured shape) is the ROUTE — prerequisite — ⛔ never a rate limit, whatever the header says", [classifyHttp({ status: 403, op: 'label-add', body: PROXY_403 }), classifyHttp({ status: 403, op: 'label-add', rateRemaining: null, body: PROXY_403 })], ['prerequisite', 'prerequisite']);
+  t('⛔ a 403 with NO rate header is a refusal, not exhaustion: an absent header is not a zero', [classifyHttp({ status: 403, op: 'label-add' }), classifyHttp({ status: 403, op: 'label-add', rateRemaining: null }), classifyHttp({ status: 403, op: 'label-add', rateRemaining: '' })], ['refusal', 'refusal', 'refusal']);
+  t('…while a 429 is a rate limit with or without the header, and a 403 with the header at 0 still is', [classifyHttp({ status: 429 }), classifyHttp({ status: 403, rateRemaining: '0' })], ['ratelimit', 'ratelimit']);
 
   // ── the four steps, end to end ───────────────────────────────────────────
   battery('the four steps, end to end against a fake board');

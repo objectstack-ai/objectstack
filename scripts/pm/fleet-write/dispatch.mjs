@@ -44,25 +44,44 @@
  *   ③ the relay is LIVE on the board — BOTH the file and its Actions state:
  *      `GET /repos/{board}/contents/.github/workflows/fleet-write.yml?ref=main`
  *      answers 200, AND `GET /repos/{board}/actions/workflows/fleet-write.yml`
- *      answers 200 with `state === 'active'`. A 404 or any other answer (or no
- *      answer) on either, or any other state, is "not live", the line naming
- *      it — `disabled_manually` verbatim when that is the state, which is the
- *      maintainer's KILL SWITCH: disabling the workflow in the Actions UI turns
- *      every seat back to `direct` with no prompt or environment change. Read
- *      ONCE per process and cached, and only reached once ① and ② hold, so a
- *      seat outside the cloud never makes it.
+ *      answers 200 with `state === 'active'`. Read ONCE per process and cached,
+ *      and only reached once ① and ② hold, so a seat outside the cloud never
+ *      makes it. The read is judged in THREE buckets, not two:
+ *        - LIVE: 200 + `active` ⇒ `dispatch`;
+ *        - DEFINITELY NOT LIVE — exactly two signals: the file's GET answers
+ *          404 (no relay on the board), or the state is `disabled_manually`
+ *          (the maintainer's KILL SWITCH: disabling the workflow in the Actions
+ *          UI turns every seat back to `direct` with no prompt or environment
+ *          change) ⇒ `direct`, with ONE printed line naming the signal;
+ *        - INDETERMINATE — any other status (401, 403, 5xx …), a 200 without a
+ *          readable state, any other state, or no answer ⇒ a PREREQUISITE
+ *          refusal (exit 3) naming the status and the read. ⛔ Never `direct`:
+ *          an unreadable relay is not evidence the relay is gone, and falling
+ *          back would exchange the fleet identity for the seat's personal
+ *          account without its say-so — the shape that put two seat accounts
+ *          on the platform's abuse ledger in one day. The seat re-runs or fixes
+ *          its route; `OS_FLEET_TRANSPORT=direct` is the ONLY way to write as
+ *          the personal account in a cloud container, and the tool prints it.
  *
- * Any condition failing ⇒ `direct`, with ONE printed line naming the failed
- * condition, and ⛔ no 90 s wait on that path: a seat outside the cloud, or a
- * board without the listening workflow, gets today's behaviour at today's
- * speed. Every selection PRINTS which transport it took and why; a silent
- * choice between two identities is the one thing this file must never make.
+ *      ⛔ The read runs only BEHIND the proxy: node's fetch does not read
+ *      `HTTPS_PROXY`, and a read from a process that is not re-exec'd with
+ *      `--use-env-proxy` leaves the container unproxied and answers 401 for a
+ *      relay that is alive — the very reading that once turned a seat `direct`
+ *      mid-session. `relayLive` therefore refuses to read at all from such a
+ *      process (INDETERMINATE, naming the flag), and every tool re-execs before
+ *      it resolves the route, `--dry-run` and `--route` included.
+ *
+ * ① or ② failing ⇒ `direct`, with ONE printed line naming the failed condition,
+ * and ⛔ no 90 s wait on that path: a seat outside the cloud gets today's
+ * behaviour at today's speed. Every selection PRINTS which transport it took
+ * and why; a silent choice between two identities is the one thing this file
+ * must never make.
  *
  * An explicit `OS_FLEET_TRANSPORT=dispatch` stays STRICT: a missing session or
- * a relay that is not live — the file gone OR the workflow disabled — is a
- * PREREQUISITE refusal (exit 3), never an invented value and never a silent
- * fall-back to `direct` — the operator asked for the relay, and the fall-back
- * would change the identity every write is booked against. `OS_FLEET_RELAY_LIVE=1|0`
+ * a relay that is not live — definitely or indeterminately — is a PREREQUISITE
+ * refusal (exit 3), never an invented value and never a silent fall-back to
+ * `direct` — the operator asked for the relay, and the fall-back would change
+ * the identity every write is booked against. `OS_FLEET_RELAY_LIVE=1|0`
  * overrides condition ③ FOR TESTS (the self-tests and with-fleet's), and says
  * so when it is read.
  *
@@ -113,7 +132,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../../invoked-as.mjs';
-import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan } from '../check-half-states.mjs';
+import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute } from '../check-half-states.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
 import { CONTAINER_SESSION_ENV, CONTAINER_SESSION_SHAPE, MAX_REQUEST_ID_CHARS, RELAY_EVENT_TYPE, RELAY_REPO, SESSION_ENV, SESSION_SHAPE, TRANSPORTS, TRANSPORT_ENV } from './ops.mjs';
@@ -170,6 +189,21 @@ export function selectTransport(env = process.env, { relay = null } = {}) {
   if (!cloud) return direct('cloud', `${CLOUD_DISCRIMINATOR} is not 1 — not a cloud seat container, so the tool's own requests go out directly`);
   const src = sessionSource(env);
   if (!src.session) return direct('session', `${CLOUD_DISCRIMINATOR}=1 but no session: ${src.reason} — the envelope cannot carry this seat's identity, so the tool's own requests go out directly (a cloud seat's session is read from the container's ${CONTAINER_SESSION_ENV}; ${SESSION_ENV}=session_… overrides it)`);
+  // ③ read and INDETERMINATE: fail CLOSED. Only the two definite signals (no file, or the kill switch) may turn a
+  // cloud seat with a session back to its personal account; anything else is a refusal the seat can see and act on.
+  if (relay && !relay.live && relay.definite === false) {
+    return {
+      requested,
+      transport: null,
+      failed: 'relay',
+      reason: `${TRANSPORT_ENV} is auto → REFUSED: ${relay.reason}`,
+      error:
+        `${TRANSPORT_ENV} is auto in a cloud seat container with a session, and ${relay.reason}. An indeterminate liveness reading is not evidence ` +
+        `that the relay is gone, so this tool does NOT fall back to direct — that would write as the seat's personal account instead of ` +
+        `objectstack-fleet[bot]. Re-run once the read answers (or fix the route it failed on); ${TRANSPORT_ENV}=direct is the only way to write as ` +
+        'the personal account here, on purpose and printed.',
+    };
+  }
   if (!relay || !relay.live) return direct('relay', relay ? relay.reason : `the relay's liveness was not read`);
   return {
     requested,
@@ -211,51 +245,71 @@ async function boardGet(fetchImpl, api, token, path) {
 
 const answered = (r) => (r.status === 404 ? '404' : r.status === 0 ? `no answer — ${r.detail}` : `HTTP ${r.status}`);
 
+/** The two states the kill switch can put the workflow in, spelled once; only the first is a DEFINITE not-live signal. */
+export const RELAY_WORKFLOW_KILL_SWITCH_STATE = 'disabled_manually';
+
 /**
  * Is the relay LIVE on the board — the workflow file on its default branch AND
  * the workflow's Actions state `active`? Read ONCE per process and cached
  * whatever it answered (the state read happens only once the file read
  * answered 200); `OS_FLEET_RELAY_LIVE=1|0` short-circuits both FOR TESTS and is
  * named in the reason. Never throws.
- * @returns {Promise<{ live: boolean, status: number, state: string|null, reason: string, source: 'read'|'cache'|'override' }>}
+ *
+ * `definite` is the third bucket's flag: `live: false, definite: true` is one
+ * of the two signals that MEAN no relay (the file's 404, the kill switch's
+ * `disabled_manually`); `live: false, definite: false` is an INDETERMINATE
+ * reading — another status, a 200 without a readable state, another state, no
+ * answer, or a read this process must not make because its fetch would bypass
+ * `HTTPS_PROXY` (`source: 'unrouted'`, not cached: the re-exec'd child reads).
+ * The selector refuses on it; it never turns a seat `direct`.
+ * @returns {Promise<{ live: boolean, definite: boolean, status: number|null, state: string|null, reason: string, source: 'read'|'cache'|'override'|'unrouted' }>}
  */
 export async function relayLive(deps = {}) {
   const env = deps.env ?? process.env;
   const override = String(env[RELAY_LIVE_OVERRIDE_ENV] ?? '').trim();
   if (override === '1' || override === '0') {
     const live = override === '1';
-    return { live, status: live ? 200 : 404, state: live ? RELAY_WORKFLOW_ACTIVE_STATE : null, reason: `${RELAY_LIVE_OVERRIDE_ENV}=${override} (a test override) says the relay is ${live ? 'live' : 'not live'}`, source: 'override' };
+    return { live, definite: true, status: live ? 200 : 404, state: live ? RELAY_WORKFLOW_ACTIVE_STATE : null, reason: `${RELAY_LIVE_OVERRIDE_ENV}=${override} (a test override) says the relay is ${live ? 'live' : 'not live'}`, source: 'override' };
   }
   if (relayLiveCache) return { ...relayLiveCache, source: 'cache' };
+  // ⛔ Never read from a process whose fetch would bypass the egress proxy: that read answers 401 for a live relay.
+  const { proxy, routed } = proxyRoute({ env, execArgv: deps.execArgv ?? process.execArgv });
+  if (proxy && !routed) {
+    return {
+      live: false,
+      definite: false,
+      status: null,
+      state: null,
+      reason: `the relay's liveness was NOT read — HTTPS_PROXY is set (${proxy}) and this process is not routed through it (no ${PROXY_FLAG}), so the read would bypass the egress proxy and answer 401 for a relay that is alive; re-exec with ${PROXY_FLAG} first`,
+      source: 'unrouted',
+    };
+  }
   const fetchImpl = deps.fetch ?? globalThis.fetch;
   const api = deps.api ?? DEFAULT_API;
   const token = deps.token ?? env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
+  const filePath = `/repos/${RELAY_REPO}/contents/${RELAY_WORKFLOW_PATH}?ref=main`;
+  const statePath = `/repos/${RELAY_REPO}/actions/workflows/${RELAY_WORKFLOW_FILE}`;
   const onMain = `the relay workflow ${RELAY_WORKFLOW_PATH} is on ${RELAY_REPO}@main (GET answered 200)`;
   const notLive = (why) => `the relay workflow ${RELAY_WORKFLOW_PATH} is NOT live on ${RELAY_REPO}@main: ${why}`;
+  const indeterminate = (why) => `the relay's liveness is INDETERMINATE: ${why}`;
+  const remember = (entry) => {
+    relayLiveCache = entry;
+    return { ...entry, source: 'read' };
+  };
 
-  const file = await boardGet(fetchImpl, api, token, `/repos/${RELAY_REPO}/contents/${RELAY_WORKFLOW_PATH}?ref=main`);
-  if (file.status !== 200) {
-    relayLiveCache = { live: false, status: file.status, state: null, reason: notLive(`the file's GET answered ${answered(file)}`) };
-    return { ...relayLiveCache, source: 'read' };
-  }
+  const file = await boardGet(fetchImpl, api, token, filePath);
+  if (file.status === 404) return remember({ live: false, definite: true, status: 404, state: null, reason: notLive(`the file's GET answered 404 — no relay workflow on the board`) });
+  if (file.status !== 200) return remember({ live: false, definite: false, status: file.status, state: null, reason: indeterminate(`the file's GET ${filePath} answered ${answered(file)} — not the 404 that means no relay`) });
   // The file is there; is the workflow ENABLED? Only an `active` workflow runs a repository_dispatch.
-  const statePath = `/repos/${RELAY_REPO}/actions/workflows/${RELAY_WORKFLOW_FILE}`;
   const wf = await boardGet(fetchImpl, api, token, statePath);
-  if (wf.status !== 200) {
-    relayLiveCache = { live: false, status: wf.status, state: null, reason: notLive(`${onMain} but its Actions state could not be read (GET ${statePath} answered ${answered(wf)})`) };
-    return { ...relayLiveCache, source: 'read' };
-  }
+  if (wf.status !== 200) return remember({ live: false, definite: false, status: wf.status, state: null, reason: indeterminate(`${onMain} but its Actions state could not be read — GET ${statePath} answered ${answered(wf)}`) });
   const state = typeof wf.json?.state === 'string' ? wf.json.state : null;
-  if (state !== RELAY_WORKFLOW_ACTIVE_STATE) {
-    const why =
-      state === null
-        ? `its Actions state is unknown — GET ${statePath} answered 200 without a state`
-        : `its Actions state is ${state}, not ${RELAY_WORKFLOW_ACTIVE_STATE}${state === 'disabled_manually' ? ' — the workflow was disabled in the Actions UI, the fleet\'s kill switch; every seat writes direct as its own user until it is re-enabled there' : ' — only an active workflow runs a repository_dispatch'}`;
-    relayLiveCache = { live: false, status: 200, state, reason: notLive(`${onMain} but ${why}`) };
-    return { ...relayLiveCache, source: 'read' };
+  if (state === RELAY_WORKFLOW_ACTIVE_STATE) return remember({ live: true, definite: true, status: 200, state, reason: `${onMain} and its Actions state is ${state} (GET ${statePath} answered 200)` });
+  if (state === RELAY_WORKFLOW_KILL_SWITCH_STATE) {
+    return remember({ live: false, definite: true, status: 200, state, reason: notLive(`${onMain} but its Actions state is ${state}, not ${RELAY_WORKFLOW_ACTIVE_STATE} — the workflow was disabled in the Actions UI, the fleet's kill switch; every seat writes direct as its own user until it is re-enabled there`) });
   }
-  relayLiveCache = { live: true, status: 200, state, reason: `${onMain} and its Actions state is ${state} (GET ${statePath} answered 200)` };
-  return { ...relayLiveCache, source: 'read' };
+  const why = state === null ? `${onMain} but its Actions state is unknown — GET ${statePath} answered 200 without a state` : `${onMain} but its Actions state is ${state}, neither ${RELAY_WORKFLOW_ACTIVE_STATE} nor ${RELAY_WORKFLOW_KILL_SWITCH_STATE}`;
+  return remember({ live: false, definite: false, status: 200, state, reason: indeterminate(why) });
 }
 
 /**
@@ -378,7 +432,7 @@ async function rest(api, path, { method = 'GET', body = null } = {}, deps = {}) 
   }
   if (paced) {
     noteResponse(
-      { token, status: res.status, headers: res.headers, body: json, verdict: classifyHttp({ status: res.status, rateRemaining: rateRemaining === null ? null : Number(rateRemaining) }) },
+      { token, status: res.status, headers: res.headers, body: json, verdict: classifyHttp({ status: res.status, rateRemaining: rateRemaining === null ? null : Number(rateRemaining), body: json }) },
       paceDeps,
     );
   }
@@ -405,7 +459,7 @@ export async function sendFleetWrite(payload, deps = {}) {
 
   const dispatchedAt = now();
   const sent = await rest(api, `/repos/${RELAY_REPO}/dispatches`, { method: 'POST', body: { event_type: RELAY_EVENT_TYPE, client_payload: payload } }, t);
-  const verdict = classifyHttp({ status: sent.status, rateRemaining: sent.rateRemaining });
+  const verdict = classifyHttp({ status: sent.status, rateRemaining: sent.rateRemaining, body: sent.json });
   if (sent.status !== 204) {
     log(`fleet-write: ${sent.call} -> HTTP ${sent.status}${sent.detail ? ` (${sent.detail})` : ''} — the dispatch was NOT accepted (${verdict}); nothing ran.`);
     return { ...base, state: 'refused', ok: false, status: sent.status, verdict, dispatchedAt, detail: sent.detail };
@@ -483,14 +537,20 @@ export async function resolveRoute(env = process.env, deps = {}) {
     }
     const relay = await relayLive({ ...deps, env });
     if (!relay.live) {
-      return { ...first, session, sessionSource: src.source, error: `${TRANSPORT_ENV}=dispatch but ${relay.reason}. ⛔ Not falling back to direct: the operator asked for the relay; use ${TRANSPORT_ENV}=auto to let a relay that is not live fall back, or bring the relay back first (land the workflow, or re-enable it in the Actions UI).` };
+      return {
+        ...first,
+        session,
+        sessionSource: src.source,
+        error: `${TRANSPORT_ENV}=dispatch but ${relay.reason}. ⛔ Not falling back to direct: the operator asked for the relay${relay.definite ? `; use ${TRANSPORT_ENV}=auto to let a relay that is definitely gone or disabled fall back, or bring the relay back first (land the workflow, or re-enable it in the Actions UI)` : ' — and an indeterminate reading is not evidence the relay is gone; re-run once the read answers, or fix the route it failed on'}.`,
+      };
     }
     return { ...first, session, sessionSource: src.source, reason: `${first.reason} — ${src.reason} — ${relay.reason}` };
   }
-  // auto: ① and ② held (selectTransport would have answered direct otherwise), so ③ is read now.
+  // auto: ① and ② held (selectTransport would have answered direct otherwise), so ③ is read now. A definite
+  // not-live reading is direct with its line; an INDETERMINATE one is a refusal the selector spells (fail closed).
   const relay = await relayLive({ ...deps, env });
   const sel = selectTransport(env, { relay });
-  return { ...sel, session: sel.transport === 'dispatch' ? session : null, sessionSource: sel.transport === 'dispatch' ? src.source : null };
+  return { ...sel, session: sel.transport === 'dispatch' || sel.error ? session : null, sessionSource: sel.transport === 'dispatch' || sel.error ? src.source : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -502,15 +562,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the selector: OS_FLEET_TRANSPORT wins; auto is dispatch only under all three conditions and direct otherwise': 8,
   'the session: OS_FLEET_SESSION first, else derived from the container (cse_<id> → session_<id>), the reason naming the source; refused in dispatch mode when absent, never invented': 14,
   'the three conditions of auto: cloud, session and a live relay — each alone failing is direct with its line, all three is dispatch, explicit dispatch stays strict': 16,
-  "condition ③'s second half — the workflow's Actions state: active is live; disabled_manually, any other state, status or no answer is not, named; read once after the file, cached; explicit dispatch refuses": 11,
+  "condition ③'s second half — the workflow's Actions state: active is live; disabled_manually is the one other DEFINITE signal (direct with the line); any other state, a missing state, another status or no answer is indeterminate and refuses; read once after the file, cached; explicit dispatch refuses": 11,
+  'fail closed: an indeterminate liveness read — 401, 403, 5xx, a malformed answer, no answer, or a read this process must not make — refuses naming the status, under auto and explicit dispatch alike; only 404 and disabled_manually turn a seat direct': 10,
   'the packer: one payload per stroke, a fresh request id under the cap, judged by the shared validator': 6,
   'the dispatch: one paced POST to the board repo with event_type and client_payload; 204 is acceptance, anything else a refusal': 7,
   'the run-poller: the run named after the request id, its completion, its conclusion': 6,
   'the ceilings: no run in the start window, no completion in the ceiling — UNCONFIRMED, never retried': 7,
   'the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log': 4,
-  'the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container': 10,
+  'the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container, a route read behind a dead proxy refuses': 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -623,9 +684,9 @@ export async function selfTest() {
     const derivedLive = await route({ ...CLOUD, [CONTAINER_SESSION_ENV]: 'cse_01ABCDEFGHJKMNPQRSTVWXYZ' }, 200);
     t('② from the CONTAINER alone (no OS_FLEET_SESSION): dispatch, the derived session on the route, the reason naming the container variable', [derivedLive.transport, derivedLive.session, derivedLive.sessionSource, derivedLive.reason.includes(CONTAINER_SESSION_ENV)], ['dispatch', SESSION, CONTAINER_SESSION_ENV, true]);
     const odd = await route(OPTED, 500);
-    t('any other answer (HTTP 500) is not live: direct, and the line says which status', [odd.transport, odd.failed, odd.reason.includes('HTTP 500')], ['direct', 'relay', true]);
+    t('⛔ any other answer on the file (HTTP 500) is INDETERMINATE: a REFUSAL (exit-3 shaped, transport null), never direct, the error naming the status', [odd.transport, odd.failed, typeof odd.error, odd.error?.includes('HTTP 500') && odd.error?.includes('INDETERMINATE')], [null, 'relay', 'string', true]);
     const down = await route(OPTED, 200, 'ECONNRESET');
-    t('no answer at all is not live: direct, never a throw', [down.transport, down.failed, down.reason.includes('no answer')], ['direct', 'relay', true]);
+    t('no answer at all is INDETERMINATE too: a refusal naming no answer, never a throw, never direct', [down.transport, down.failed, down.error?.includes('no answer')], [null, 'relay', true]);
     // The cache: two routes in one process, one read of each half.
     resetRelayLiveCache();
     const seenOnce = [];
@@ -648,7 +709,7 @@ export async function selfTest() {
     resetRelayLiveCache();
 
     // ── condition ③'s second half: the workflow's Actions state ─────────────
-    battery("condition ③'s second half — the workflow's Actions state: active is live; disabled_manually, any other state, status or no answer is not, named; read once after the file, cached; explicit dispatch refuses");
+    battery("condition ③'s second half — the workflow's Actions state: active is live; disabled_manually is the one other DEFINITE signal (direct with the line); any other state, a missing state, another status or no answer is indeterminate and refuses; read once after the file, cached; explicit dispatch refuses");
     {
       const withState = (state) => ({ contents: 200, workflow: { status: 200, json: { id: 364389970, name: 'Fleet Write', state } } });
       const active = await route(OPTED, withState('active'));
@@ -658,15 +719,15 @@ export async function selfTest() {
       t('⭐ state disabled_manually (the maintainer\'s kill switch): NOT live — direct, the line naming the state VERBATIM and the switch', [killed.transport, killed.failed, killed.reason.includes('disabled_manually'), killed.reason.includes('kill switch')], ['direct', 'relay', true, true]);
       t('…and it names the file as present: the file is on main, the workflow is what is off', killed.reason.includes('is on') && killed.reason.includes('NOT live'));
       const inactive = await route(OPTED, withState('disabled_inactivity'));
-      t('any other state (disabled_inactivity) is not live either, named verbatim', [inactive.transport, inactive.failed, inactive.reason.includes('disabled_inactivity')], ['direct', 'relay', true]);
+      t('⛔ any other state (disabled_inactivity) is INDETERMINATE — not the kill switch, not active: a refusal naming the state verbatim, never direct', [inactive.transport, inactive.failed, inactive.error?.includes('disabled_inactivity')], [null, 'relay', true]);
       const noState = await route(OPTED, { contents: 200, workflow: { status: 200, json: { id: 1 } } });
-      t('a 200 that carries no state is NOT read as active: direct, the line saying the state is unknown', [noState.transport, noState.failed, noState.reason.includes('unknown')], ['direct', 'relay', true]);
+      t('a 200 that carries no state is NOT read as active nor as absent: a refusal saying the state is unknown', [noState.transport, noState.failed, noState.error?.includes('unknown')], [null, 'relay', true]);
       const gone = await route(OPTED, { contents: 200, workflow: { status: 404, json: { message: 'Not Found' } } });
-      t('the state GET answering 404: not live, the line naming the endpoint and the 404', [gone.transport, gone.failed, gone.reason.includes('404') && gone.reason.includes('actions/workflows')], ['direct', 'relay', true]);
+      t('the state GET answering 404 (the file exists, so this 404 is not "no relay"): a refusal naming the endpoint and the 404', [gone.transport, gone.failed, gone.error?.includes('404') && gone.error?.includes('actions/workflows')], [null, 'relay', true]);
       const broken = await route(OPTED, { contents: 200, workflow: { status: 500, json: {} } });
-      t('the state GET answering 500: not live, the line saying HTTP 500', [broken.transport, broken.failed, broken.reason.includes('HTTP 500')], ['direct', 'relay', true]);
+      t('the state GET answering 500: a refusal saying HTTP 500', [broken.transport, broken.failed, broken.error?.includes('HTTP 500')], [null, 'relay', true]);
       const silent = await route(OPTED, { contents: 200, workflow: { throws: 'ECONNRESET' } });
-      t('the state GET getting no answer: not live, never a throw, the line saying no answer', [silent.transport, silent.failed, silent.reason.includes('no answer')], ['direct', 'relay', true]);
+      t('the state GET getting no answer: a refusal saying no answer, never a throw', [silent.transport, silent.failed, silent.error?.includes('no answer')], [null, 'relay', true]);
       // Cached once per process, whatever it answered — a disabled reading is not re-read on the next route either.
       resetRelayLiveCache();
       const seenKilled = [];
@@ -677,6 +738,41 @@ export async function selfTest() {
       const strictKilled = await route({ [TRANSPORT_ENV]: 'dispatch', [SESSION_ENV]: SESSION }, withState('disabled_manually'));
       t('⛔ explicit dispatch with a disabled workflow is a PREREQUISITE refusal (exit-3 shaped) naming the state, never a silent fall-back', [strictKilled.transport, typeof strictKilled.error, strictKilled.error?.includes('disabled_manually') && strictKilled.error?.includes('Not falling back')], ['dispatch', 'string', true]);
       resetRelayLiveCache();
+
+      // ── fail closed ─────────────────────────────────────────────────────────
+      battery('fail closed: an indeterminate liveness read — 401, 403, 5xx, a malformed answer, no answer, or a read this process must not make — refuses naming the status, under auto and explicit dispatch alike; only 404 and disabled_manually turn a seat direct');
+      {
+        const unauth = await route(OPTED, 401);
+        t("⭐ the file GET answering 401 (an unproxied read's signature) under auto is a REFUSAL naming HTTP 401 — never direct, never silent", [unauth.transport, unauth.failed, unauth.error?.includes('HTTP 401'), unauth.reason.includes('REFUSED')], [null, 'relay', true, true]);
+        const forbidden = await route(OPTED, 403);
+        t('403 likewise, and the error says why no fall-back: an indeterminate reading is not evidence the relay is gone', [forbidden.transport, forbidden.error?.includes('HTTP 403') && forbidden.error?.includes('not evidence')], [null, true]);
+        const strict401 = await route({ [TRANSPORT_ENV]: 'dispatch', [SESSION_ENV]: SESSION }, 401);
+        t('explicit dispatch on a 401: a refusal naming the status, saying the reading is indeterminate, transport kept at dispatch', [strict401.transport, strict401.error?.includes('HTTP 401') && strict401.error?.includes('not evidence')], ['dispatch', true]);
+        const strict500 = await route({ [TRANSPORT_ENV]: 'dispatch', [SESSION_ENV]: SESSION }, { contents: 200, workflow: { status: 500, json: {} } });
+        t('explicit dispatch on a 500 from the state read: a refusal naming HTTP 500', strict500.error?.includes('HTTP 500'));
+        t('the two DEFINITE signals still turn auto direct — the file 404 and disabled_manually — and nothing else does', [(await route(OPTED, 404)).transport, (await route(OPTED, withState('disabled_manually'))).transport], ['direct', 'direct']);
+        t('…while 200 + active is dispatch', (await route(OPTED, withState('active'))).transport, 'dispatch');
+        t('a refusal under auto still carries the session it would have put on the envelope, so a tool can say who was refused', unauth.session, SESSION);
+        // The read never leaves an unrouted process — and a reading it did not take is not cached.
+        resetRelayLiveCache();
+        let fetched = 0;
+        const PROXIED = { ...OPTED, HTTPS_PROXY: 'http://127.0.0.1:9' };
+        const unrouted = await relayLive({
+          env: PROXIED,
+          execArgv: [],
+          token: 'x',
+          fetch: async () => {
+            fetched += 1;
+            throw new Error('the read left an unrouted process');
+          },
+        });
+        t(`⛔ with HTTPS_PROXY set and no ${PROXY_FLAG} on this process, relayLive makes NO request: indeterminate, source unrouted, the reason naming the flag`, [fetched, unrouted.live, unrouted.definite, unrouted.source, unrouted.reason.includes(PROXY_FLAG)], [0, false, false, 'unrouted', true]);
+        t('…and the selector turns that reading into a refusal, not direct', [selectTransport(OPTED, { relay: unrouted }).transport, typeof selectTransport(OPTED, { relay: unrouted }).error], [null, 'string']);
+        const routedSeen = [];
+        const routed = await relayLive({ env: PROXIED, execArgv: [PROXY_FLAG], fetch: board(200, routedSeen), token: 'x' });
+        t(`the same process carrying ${PROXY_FLAG} reads normally — two GETs, live — which also proves the unrouted reading was NOT cached`, [routed.live, routed.source, routedSeen.map((s) => s.call)], [true, 'read', [CONTENTS, WORKFLOW]]);
+        resetRelayLiveCache();
+      }
     }
   }
 
@@ -825,7 +921,7 @@ export async function selfTest() {
     }
 
     // ── the CLI ─────────────────────────────────────────────────────────────
-    battery('the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container');
+    battery('the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container, a route read behind a dead proxy refuses');
     {
       writeFileSync(join(dir, 'actions.json'), JSON.stringify(ACTIONS), 'utf8');
       writeFileSync(join(dir, 'bad.json'), JSON.stringify([{ op: 'merge', pull: 1 }]), 'utf8');
@@ -850,6 +946,10 @@ export async function selfTest() {
       t('…and under all three conditions (the relay stood in by the test override): dispatch, no network, the session and its source printed', [routeLive.status, JSON.parse(routeLive.stdout.trim()).transport, JSON.parse(routeLive.stdout.trim()).session, JSON.parse(routeLive.stdout.trim()).session_source], [EXIT_OK, 'dispatch', SESSION, SESSION_ENV]);
       const routeDerived = spawn(['--route'], { [CLOUD_DISCRIMINATOR]: '1', [TRANSPORT_ENV]: '', [RELAY_LIVE_OVERRIDE_ENV]: '1', [SESSION_ENV]: '', [CONTAINER_SESSION_ENV]: 'cse_01ABCDEFGHJKMNPQRSTVWXYZ' });
       t('⭐ --route with NO OS_FLEET_SESSION in a cloud container: "transport":"dispatch" with the DERIVED session, its source the container variable', [routeDerived.status, JSON.parse(routeDerived.stdout.trim()).transport, JSON.parse(routeDerived.stdout.trim()).session, JSON.parse(routeDerived.stdout.trim()).session_source], [EXIT_OK, 'dispatch', SESSION, CONTAINER_SESSION_ENV]);
+      // End to end through the real re-exec: a proxy that answers nothing. The child carries the flag, the read gets no answer, the answer is a refusal.
+      const routeDeadProxy = spawn(['--route'], { [CLOUD_DISCRIMINATOR]: '1', [TRANSPORT_ENV]: '', HTTPS_PROXY: 'http://127.0.0.1:9', https_proxy: 'http://127.0.0.1:9', OS_FLEET_DISPATCH_PROXY_REARMED: '' });
+      const deadOut = routeDeadProxy.stdout.trim() ? JSON.parse(routeDeadProxy.stdout.trim()) : null;
+      t(`⭐ --route behind a proxy that answers nothing: the process re-execs with ${PROXY_FLAG}, the read gets no answer, and the verdict is exit 3 with the error naming it — never direct`, [routeDeadProxy.status, deadOut?.transport ?? null, (deadOut?.error ?? '').includes('no answer'), routeDeadProxy.stderr.includes(PROXY_FLAG)], [EXIT_PREREQUISITE, null, true, true], routeDeadProxy.stderr.slice(-300));
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
