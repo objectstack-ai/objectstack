@@ -240,6 +240,13 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  * the evidence that ruling rests on. ⛔ Reopening it takes a new ruling,
  * not a re-read; a row going stale is a reason to re-measure the ROW.
  *
+ * [#19630] The `gantt`, `timeline` and `map` rows below were re-measured the
+ * same way and now describe the same two-door shape: no literal floor, and a
+ * named refusal screen at render. That makes them CONSISTENT with ruling B,
+ * not an extension of it — the ruling was made for the `calendar` route and
+ * stays that route's; these rows only stop resting on the retired "renders
+ * empty" premise. No row's severity moved and no row's firing moved.
+ *
  * Every entry names its measured renderer binding. The verify-then-enforce
  * gate this table sits behind (the audit's Tier-A had named only the first
  * three) was discharged for `timeline` / `map` / `tree` by two measurements
@@ -276,50 +283,74 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   this describes the console this repo SHIPS and not only objectui's head.
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
- * - `gantt`    → `startDateField || 'start_date'`, `endDateField || 'end_date'`,
- *   `progressField || 'progress'`, `dependenciesField || 'dependencies'` —
- *   fails CLOSED (`null` unless both dates resolve): a blank chart
- * - `timeline` → `startDateField || 'created_at'`, `titleField || 'name'` — the
- *   sharpest member: `created_at` is a plausible-looking name many objects do
- *   not declare, and the renderer drops every row whose start date fails to
- *   parse, so the view is blank rather than merely mis-titled
- * - `map`      → `locationField || 'location'` — rows whose coordinates do not
- *   parse are dropped and the chrome renders over nothing. ⚠️ Unlike the
+ * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
+ *   this repo builds against (`.objectui-sha` = `87af769e9`). ① `ListView.tsx`'s
+ *   `case 'gantt'` spreads `startDateField` / `endDateField` / `titleField`
+ *   only when the view DECLARED them — the `'start_date'` / `'end_date'`
+ *   floors were deleted by objectui#7070, and the `'progress'` /
+ *   `'dependencies'` floors by objectui#7499 (OMITTED, not refused: an absent
+ *   progress or dependency binding is a legitimate state). ② `ObjectGantt`'s
+ *   `getGanttConfig` takes its flat branch only when BOTH dates are present
+ *   and otherwise returns `null`, and the `if (!ganttConfig)` arm renders the
+ *   "Gantt configuration required" refusal screen naming `startDateField`,
+ *   `endDateField` and `titleField` — the three keys `GanttConfigSchema`
+ *   requires. So the view does not draw a blank chart: it refuses, by name.
+ * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
+ *   which still stands. Measured at the same pin (`.objectui-sha` =
+ *   `87af769e9`). ① `ListView.tsx`'s `case 'timeline'` resolves the axis
+ *   through `resolveTimelineDateBinding` and spreads it only when one was
+ *   declared — the `startDateField || 'created_at'` floor was deleted by
+ *   objectui#7070 step ③, on the ruling 日期轴永不虚构 (a date axis is never
+ *   fabricated) — while its `titleField: dateBinding.titleField || 'name'`
+ *   line is kept on purpose (a title is not an axis). ② `ObjectTimeline`'s
+ *   start-date chain now ENDS without a literal rung, and with no authored
+ *   items and no start date the component renders its "Timeline date axis
+ *   required" refusal (`data-testid="timeline-missing-date-axis"`) instead of
+ *   bucketing every record into "No date". ⚠️ `resolveTimelineDateBinding`
+ *   also reads a `calendar` block's `startDateField` as a timeline axis, so a
+ *   `type: 'timeline'` view carrying a `calendar` block but no `timeline`
+ *   block does render; the warning still fires there, because the block the
+ *   view TYPE names is the one that is missing. Unchanged by this row.
+ * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
+ *   pin (`.objectui-sha` = `87af769e9`), both faces moved together in
+ *   objectui#8169. ① `ListView.tsx`'s `case 'map'` forwards
+ *   `resolveListMapConfig(schema)` and carries no `locationField || 'location'`
+ *   floor any more. ② `ObjectMap`'s `getMapConfig` no longer guesses
+ *   `latitude` / `longitude` / `location` names in its unconfigured branch,
+ *   and its `hasCoordinateBinding` gate — applied to EVERY branch, a declared
+ *   block included — renders the "Map configuration required" refusal
+ *   (`data-testid="map-missing-location-binding"`), naming `map.locationField`
+ *   or the `map.latitudeField` + `map.longitudeField` pair. ⚠️ Unlike the
  *   others, `ListMapConfigSchema` requires NO key: its docblock says the
  *   coordinates come from EITHER a `latitudeField`/`longitudeField` pair OR a
  *   `locationField`, and nothing in the schema demands one form. A present
  *   block declaring neither is the same unbound view with an extra pair of
- *   braces, so {@link checkViewCompleteness} reads a `map` block for its
- *   coordinate binding, not merely for its presence.
+ *   braces — the renderer refuses it exactly as it refuses an absent block —
+ *   so {@link checkViewCompleteness} reads a `map` block for its coordinate
+ *   binding, not merely for its presence.
  * - `tree`     → `labelField || titleField || 'name'`; the load-bearing binding
  *   is `parentField`, and a missing one puts every record at depth 0. Every
  *   `TreeConfigSchema` key is optional, so `tree: {}` satisfies THIS table and
  *   still renders flat — the parent pointer has its own rule,
  *   {@link VIEW_TREE_WITHOUT_PARENT_FIELD}, below.
  *
- * ⚠️ RE-MEASUREMENT [#17445], objectui `main` at `0cf2d6644` (2026-09-21).
- * The `calendar` row above is the one that card corrected. The same reading
- * found three siblings still naming floors objectui has since deleted, and
- * they are RECORDED here rather than corrected, because that correction is a
- * separate finding to rule on and not a rider (the card scoped itself to
- * `calendar`, and each of the three changes what its row's severity rests
- * on):
+ * RE-MEASUREMENT HISTORY. [#17445] corrected the `calendar` row, reading
+ * objectui `main` at `0cf2d6644` (2026-09-21), and found the `gantt`,
+ * `timeline` and `map` rows naming floors objectui had since deleted; it
+ * recorded them rather than correcting them, out of its own scope. [#19630]
+ * re-derived all three at the pin itself rather than at objectui's head —
+ * every verdict held there — and corrected them together with the carriers
+ * they feed: the per-type bodies in {@link VIEW_BINDING_MESSAGE}, the
+ * block-present `map` message in {@link checkViewCompleteness} (which had
+ * quoted `locationField || 'location'` as the renderer's read), and the
+ * `functional-completeness.test.ts` pin that held that literal. Each row
+ * above now carries an asserting pin citation, so the next `.objectui-sha`
+ * bump reds on these rows instead of leaving them to rot quietly.
  *
- * - `gantt` — all four floors gone (objectui#7070 for the dates, #7499 for
- *   `progressField` / `dependenciesField`); `ObjectGantt` REFUSES an absent
- *   date binding rather than drawing the blank chart this row describes.
- * - `timeline` — `startDateField || 'created_at'` gone (objectui#7070 step
- *   ③, on the ruling 日期轴永不虚构), with a refusal screen in its place;
- *   the `titleField || 'name'` half of the row still stands.
- * - `map` — `locationField || 'location'` gone on BOTH faces (objectui#8169):
- *   `ObjectMap` renders "Map configuration required" instead of an empty map.
- *   ⛔ That literal is also quoted in this rule's `map`-specific message
- *   below and pinned by `functional-completeness.test.ts`, so correcting the
- *   row means correcting the message and the pin together.
- *
- * `kanban` and `tree` were re-read at the same ref and still say what they
- * say. ⛔ Until the three above are corrected, do not cite them — or the
- * warning text they feed — as a current measurement.
+ * `kanban` (`groupByField || groupField || detectStatusField(objectDef)`) and
+ * `tree` (`labelField || titleField || 'name'`, `parentField` auto-detected)
+ * were re-read at the pin as well and still say what they say — they are
+ * the two rows the generic {@link unboundBlockMessage} body is still true of.
  *
  * `gallery` is measured too (`titleField || 'name'`) and is deliberately NOT
  * here: `GalleryConfigSchema` requires no key, so "has a `gallery` block"
@@ -374,7 +405,10 @@ const VIEW_BINDING_FIX: Readonly<Record<string, string>> = {
  * `calendar` row and this rule's message BOTH asserted a
  * `startDateField || 'start_date'` fallback that objectui#7029 had deleted,
  * and correcting one without the other would have left the author reading the
- * stale half.
+ * stale half. The `gantt`, `timeline` and `map` entries were added the same
+ * way [#19630], each from its row's reading at the pin; the block-present
+ * `map` message in {@link checkViewCompleteness} is the third carrier of the
+ * `map` reading and moved with them.
  *
  * ⚠️ What the correction must PRESERVE is the prescription. The old sentence
  * was wrong about the mechanism and still right about the remedy, and the
@@ -391,14 +425,40 @@ const VIEW_BINDING_MESSAGE: Readonly<Record<string, string>> = {
     + 'happens to lack a field. Declare `calendar.startDateField`, the block\'s one required key; '
     + 'the event title resolves through the ADR-0079 record display-name chain when `titleField` '
     + 'is omitted.',
+  gantt:
+    'A `gantt` view with no `gantt` block declares no date axis, and the renderer does not '
+    + 'invent one: objectui\'s `ListView.tsx` gantt branch forwards only the bindings the view '
+    + 'DECLARED, so `getGanttConfig` (objectui `ObjectGantt.tsx`) resolves `null` without both '
+    + 'dates and the view renders its "Gantt configuration required" refusal screen instead of '
+    + 'tasks — it parses and publishes clean, then shows no task on any object, not just on one '
+    + 'that happens to lack a field. Declare `gantt.startDateField`, `gantt.endDateField` and '
+    + '`gantt.titleField`, the three keys `GanttConfigSchema` requires; `progressField` and '
+    + '`dependenciesField` are optional and stay unbound when omitted.',
+  timeline:
+    'A `timeline` view with no `timeline` block declares no date axis, and the renderer does not '
+    + 'invent one: objectui\'s `ListView.tsx` timeline branch forwards a start date only when the '
+    + 'view declared one, so `ObjectTimeline.tsx` resolves no date field and renders its '
+    + '"Timeline date axis required" refusal instead of records — it parses and publishes clean, '
+    + 'then shows no item on any object. Only the title has a renderer default (`name`); the date '
+    + 'axis never does. Declare `timeline.startDateField` and `timeline.titleField`, the two keys '
+    + '`TimelineConfigSchema` requires.',
+  map:
+    'A `map` view with no `map` block declares no coordinate binding, and the renderer does not '
+    + 'guess one: objectui\'s `ListView.tsx` map branch forwards only the keys the view declared, '
+    + 'and `ObjectMap.tsx` no longer guesses `location` / `latitude` / `longitude` field names, so '
+    + 'its `hasCoordinateBinding` gate fails and the view renders its "Map configuration required" '
+    + 'refusal instead of markers — it parses and publishes clean, then plots nothing on any '
+    + 'object. Declare `map.locationField`, or both `map.latitudeField` and `map.longitudeField`; '
+    + '`ListMapConfigSchema` requires neither form, so this warning is where the requirement is '
+    + 'stated.',
 };
 
 /**
  * The generic body — a view type whose renderer still floors the binding at a
- * literal field name. It is what the five types with no
- * {@link VIEW_BINDING_MESSAGE} entry receive, and the re-measurement note on
- * {@link VIEW_BINDING_BLOCKS} says which of those five it is still true of
- * (`kanban`, `tree`) and which three inherit it pending their own correction.
+ * literal field name. It is what the two types with no
+ * {@link VIEW_BINDING_MESSAGE} entry receive — `kanban` and `tree`, the two
+ * rows the re-measurement history on {@link VIEW_BINDING_BLOCKS} records as
+ * still flooring a literal (or inferring) at the pin.
  * ⛔ So it is the DEFAULT, never a universal: a type that stops flooring gets
  * an entry above, not a reworded sentence here.
  */
@@ -635,10 +695,12 @@ export function checkViewCompleteness(view: unknown, boundObject?: unknown): Com
       path: 'map.locationField',
       message:
         'A `map` view whose `map` block declares neither `locationField` nor the `latitudeField`/'
-        + '`longitudeField` pair is bound to nothing: the renderer reads `locationField || '
-        + "'location'` (objectui `ListView.tsx`), which works only if the object happens to declare "
-        + 'a `location` field — on any other object every marker is dropped and the map renders '
-        + 'empty while authoring reports success.',
+        + '`longitudeField` pair is bound to nothing, and the renderer does not guess: objectui '
+        + '`ObjectMap.tsx` applies its `hasCoordinateBinding` gate to a declared block exactly as '
+        + 'to an absent one, so the view renders its "Map configuration required" refusal instead '
+        + 'of markers — while the block parses and publishes clean, because `ListMapConfigSchema` '
+        + 'requires neither form. Declare `map.locationField`, or both `map.latitudeField` and '
+        + '`map.longitudeField` (half a pair is not a binding).',
       fix: VIEW_BINDING_FIX.map,
     });
   }
