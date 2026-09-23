@@ -33,7 +33,8 @@ function register(doc: Record<string, unknown>): AuditableObject {
 interface Probe {
   target: string;
   id: string;
-  organization: string | null;
+  /** Recorded as received: `undefined` would fail every `null` below. */
+  organization: string | null | undefined;
 }
 
 function makePort(
