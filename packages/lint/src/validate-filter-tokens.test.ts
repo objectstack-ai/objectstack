@@ -182,8 +182,7 @@ describe('validateFilterTokens', () => {
 
   // [#19791] A list page's `interfaceConfig.filterBy` and a lookup field's
   // `lookupFilters` reach the engine's `where` verbatim, where the same two
-  // placeholder vocabularies resolve — so an unknown token there is the same
-  // silent literal it is in a view's `filter`, and the known ones are fine.
+  // placeholder vocabularies resolve.
   it('reaches a page filterBy and a lookup field lookupFilters', () => {
     const findings = validateFilterTokens({
       objects: [{

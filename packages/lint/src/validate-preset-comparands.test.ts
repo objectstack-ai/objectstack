@@ -680,7 +680,7 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
 // carries a preset check. Before `FILTER_KEYS` named them, the card's rule
 // `{ field: 'close_date', operator: 'gt', value: 'last_30_days' }` parsed
 // green AND linted green on both, while the identical rule on a component
-// `dataSource.filter` was refused — the lit control every block below keeps.
+// `dataSource.filter` was refused.
 describe('validatePresetComparands — page filterBy and lookup-field lookupFilters (#19791)', () => {
   const card = { field: 'close_date', operator: 'gt', value: 'last_30_days' };
   // `close_date` is a DATE on `crm_deal` and a SELECT on `crm_region`, whose
