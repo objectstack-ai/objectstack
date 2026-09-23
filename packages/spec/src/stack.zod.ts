@@ -2960,22 +2960,13 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
   // `mergeObjects` draws for the same key.
   const declaredObjects: unknown = (config as { objects?: unknown }).objects;
   if (declaredObjects !== undefined && !Array.isArray(declaredObjects)) {
-    const parsed = z.array(z.unknown()).safeParse(declaredObjects);
-    const issues = parsed.success
-      ? []
-      : parsed.error.issues.map((issue) => ({ ...issue, path: ['objects', ...issue.path] }));
-    const kind =
-      declaredObjects === null
-        ? 'null'
-        : typeof declaredObjects !== 'object'
-          ? `a ${typeof declaredObjects}`
-          : `a ${(declaredObjects as object).constructor?.name ?? 'non-plain'} object`;
+    const { kind, issues } = describeNonArrayCollection('objects', declaredObjects);
     throw new StackSchemaInvalidError(
       `defineStack validation failed: 'objects' is ${kind}, not an array. Bound actions cannot be ` +
         `merged into it, and \`strict: false\` skips validation, not this shape — \`composeStacks\` ` +
         `refuses the same stack with the same code. Author 'objects' as an array or in the map form ` +
         `(\`{ name: { … } }\`), or drop \`strict: false\` to have every schema check run.`,
-      issues as z.core.$ZodIssue[],
+      issues,
     );
   }
 
