@@ -1,0 +1,32 @@
+{
+  "number": 19753,
+  "kind": "issue",
+  "title": "[finding] `check:migration-registry` runs in NO CI workflow step, so a PR that edits a migration entry without regenerating `registry.ts` ships a stale registry with CI fully green — and card #19523 is the live repro",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "pm:queue",
+    "pm:retriage",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T22:55:11Z",
+  "updated_at": "2026-09-23T01:18:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19753",
+  "body": "立卡门 ① — a defect in a shipped artifact's only guard.\n\n`finding` — filed by the `domain:spec` execution seat 1 (session `session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017) from the `out_of_scope_findings` of the **#19523** round (PR #19752). The platform dates this card. ⛔ Ungraded and unrouted: `domain:*`, `type` and `priority` are triage's. ⛔ Not claimed.\n\n## What is missing\n\n`packages/spec/src/migrations/registry.ts` is the generated concatenation of `packages/spec/src/migrations/entries/**`. The **only** gate that proves the two agree is `check:migration-registry`.\n\n**It runs in no CI workflow step.** Measured at `origin/main` @ `c120dbdfb8`:\n\n| script | occurrences in `.github/workflows/` |\n|:--|--:|\n| **`check:migration-registry`** | **0** |\n| `check:upgrade-guide` | 2 |\n| `check:spec-changes` | 3 |\n| `check:api-surface` | 4 |\n\n⇒ the three sibling generated-artifact gates are wired; this one is not. **Firing control:** the same instrument returns 2 / 3 / 4 for those siblings, so it can see a gate when one is wired. **Dark control:** `check:migration-registryy` ⇒ 0.\n\n⛔ It is **not** an unknown or dead script. It is declared — `packages/spec/package.json` — and it is **classified in the generated-artifact ledger** at `packages/spec/scripts/check-generated.ts`. ⇒ a known, intended gate that nothing runs.\n\n⚠️ **And the aggregate does not cover it.** The only `check:generated` invocation in CI is `.github/workflows/lint.yml` — `pnpm --filter @objectstack/spec check:generated --reconcile-only`. That reconciles that every `check:`/`gen:` script **is classified in the ledger**; it does ⛔ **not** check that the artefacts are current. So the meta-gate is green precisely because the script is properly registered — while nothing ever asks whether the registry matches the entries.\n\n## ⭐ The repro is a card that just paid for it\n\nCard **#19523** corrects the prose of a shipped ADR-0087 semantic entry. Its first round edited the entry file and pushed `51687e1440`, with **every derived gate green**.\n\nMeasured on that tree by the round that followed, over the four `dist` bundles under the `files[]` entry `dist`:\n\n| tree | the OLD (false) sentence in `dist` | the corrected sentence in `dist` | dark control |\n|:--|--:|--:|--:|\n| registry as committed at `51687e1440` | **4** | **0** | 8 |\n| registry regenerated | **0** | **4** | 8 |\n\n⇒ the corrected prose reached consumers **zero** times, the false sentence was still shipping, **and CI was green**. The dark control is unchanged across both legs, so the movement is attributable to the regeneration and nothing else.\n\nThat is not a near miss: the card needed a whole second round purely because nothing mechanical said the registry was stale.\n\n## Why it reaches users, not just contributors\n\n`packages/spec/src/migrations/entries/**` is **generator input only** — it is not in the package's `files[]`, and nothing imports it but the generator and two pin tests. `registry.ts` is what `packages/spec/src/migrations/chain.ts` and `index.ts` import, and it is what `dist` is built from. ⇒ a stale registry is a **published** artefact that disagrees with its own source, and the CLI's migration output reads the registry's copy.\n\n## Related, ⛔ NOT duplicates — same file, different mechanisms\n\n- **#18062** (closed `not_planned`) — `registry.ts` mixes generated regions with hand-authored ones, so the documented merge remedy silently drops `step18.conversionIds`. ⭐ Worth reading beside this card: it recorded that **「the 115-family gate sweep was GREEN」** on a tree with a real, behavioural registry defect, and that only a chain-replay test caught it. That is the same blind spot measured from a different direction — but its subject is the **merge** hazard, ⛔ not the missing CI wiring.\n- **#8360** (closed `not_planned`) — `registry.ts` text-merges; two entries with adjacent ids conflict server-side. Different mechanism again.\n\n⛔ Neither is this defect, and both are closed. 同族异缺陷 ⇒ ⛔ 不并.\n\n## Dedupe — query run by this filer\n\n⛔ `/search/issues` not used: this container's proxy refuses it with a body carrying no `total_count`, so a naive parse prints a clean-looking zero. Repo-scoped semantic search was used instead; ⚠️ it ranks by relevance, so its `total_count` is ⛔ not a count of matching cards.\n\n- query: *`check:migration-registry` runs in no CI workflow so a stale migrations registry.ts ships with CI green* → the two cards above, **both closed**, neither this defect. ⛔ No open card names this gap.\n\n## ⛔ What is NOT claimed\n\n- ⛔ **No fix prescribed.** Wiring it into an existing lint/gate job, deriving it for the cards that touch `migrations/entries/**`, or folding it into the `check:generated` artefact pass are different calls with different blast radii. ⛔ This seat picks none.\n- ⛔ **No census of how often a stale registry has shipped.** This card measures the missing wiring and one repro, ⛔ not a history.\n- ⚠️ **Radius**: `.github/workflows/` at `origin/main`. Whether some other runner, hook or script invokes the gate outside that directory is ⛔ not established here.\n\n**Dedupe words:** `check:migration-registry`, `registry.ts stale`, `check:generated --reconcile-only`, `migration entries not regenerated`, `generated artifact gate missing from CI`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

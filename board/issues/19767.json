@@ -1,0 +1,31 @@
+{
+  "number": 19767,
+  "kind": "pull_request",
+  "title": "ci(fleet-write): grant permission-contents: write to the mint step so the relay can arm auto-merge",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "needs-user-decision",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T01:25:19Z",
+  "updated_at": "2026-09-23T01:50:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19767",
+  "body": "Fixes #19762\n\n## What changed\n\nTouches `.github/workflows/**`, so this is a draft the maintainer merges by hand.\n\n1. **The mint step grants `permission-contents: write`.** In `.github/workflows/fleet-write.yml`, `actions/create-github-app-token@v2` gains `permission-contents: write` beside the three existing `permission-*` inputs, with a comment naming the one consumer — GitHub's `enablePullRequestAutoMerge` / `disablePullRequestAutoMerge` mutations require `contents: write` on the token (measured on the relay's first live `automerge_enable`: \"Resource not accessible by integration\") — and stating that the op table has no contents op, so the grant is spent only by those two mutations. The header's permission list says the same.\n2. **The op table spends it truthfully.** `PERMISSIONS` in `scripts/pm/fleet-write/ops.mjs` gains `contents: 'write'`; the `automerge_enable` and `automerge_disable` rows carry `permission: 'contents'`, so the validator's permission read stays a true statement of what each row spends. The header paragraph on permissions is updated.\n3. **Self-tests** (`validate.mjs --self-test`, the refused-by-construction battery, 9 → 14 pinned cases): the map is exactly `issues` / `pull-requests` / `contents` write and `metadata` read; the two auto-merge rows spend `contents`; no other row does; every `contents` spender is an auto-merge GraphQL mutation, never a REST path; and the workflow's `permission-*` inputs, read from the file on disk, mirror `PERMISSIONS` exactly — a grant added on one side without the other reds.\n4. **Nothing else.** No new op, no change to the sender gate, caps, ceilings, the executor or the four write tools.\n\n## Verification record\n\n**Batteries, each run alone with its exit captured before any pipe** (worktree at 182209b, base `origin/main` dc1b986):\n\n| command | exit | verdict line |\n|---|---|---|\n| `pnpm check:pm-fleet-write-validate` | 0 | 74 cases pass across 7 batteries (was 69) |\n| `pnpm check:pm-fleet-write-execute` | 0 | 48 cases pass across 9 batteries |\n| `pnpm check:pm-fleet-write-dispatch` | 0 | 64 cases pass across 9 batteries |\n| `pnpm check:pm-with-fleet` | 0 | 31 cases pass |\n| `pnpm check:pm-post-stamped` | 0 | 596 cases pass across 20 batteries |\n| `pnpm check:pm-label-write` | 0 | 88 cases pass across 10 batteries |\n| `pnpm check:pm-issue-create` | 0 | 42 cases pass across 6 batteries |\n| `pnpm check:pm-close-cards` | 0 | 111 cases pass across 12 batteries |\n| `pnpm check:pm-write-pace` | 0 | 109 cases pass across 12 batteries |\n| `pnpm check:workflow-status-functions` | 0 | OK (39 workflow files) |\n| `pnpm check:workflow-step-name-quoting` | 0 | OK (39 workflow files + 2 composite actions) |\n| `pnpm check:required-contexts` | 0 | OK |\n\n`npx eslint --no-inline-config` on the two changed `.mjs` files: exit 0.\n\n**Gates** — `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` on the edited tree derived 54 families (3 paths vs merge base dc1b986; 52 changed lines, under the human-merge threshold). Each was run alone with its exit code captured before any pipe; all 54 exited 0. `--ran` with the codes recorded: `54 derived famil(ies) accounted for — 54 run, 0 NOT-MEASURED (a DERIVED zero — all 54 recorded an exit code and none of them is 3)`. Repo-wide `pnpm lint` is CI's run; the changed files were linted directly (above).\n\nThe live grant itself cannot be proven before merge (a workflow change runs only once it is on `main`); the card's post-merge verification is the director seat's: a two-action relay request (`pr_draft` + `pr_ready`, or `automerge_enable` on the next queued PR) reading back `enabledBy` = `objectstack-fleet[bot]`.\n\n## Changeset\n\nNone: `.github/workflows/**` and `scripts/pm/**` publish nothing from any released package, so `skip-changeset` applies. This dispatch forbids label writes, so the label is the seat's to apply.\n\n## Acceptance notes\n\n- Branch cut from `origin/main` at dc1b986, not on top of the #19755 branch; PR #19760 is still landing and is not touched here. Both edit `scripts/pm/fleet-write/ops.mjs` in disjoint regions (the session constants there, the permission map and two rows here), so no textual conflict is expected once #19760 merges; if one appears, this branch rebases onto `main`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GnJon4xkRvphn4w28xx3An)_\n"
+}

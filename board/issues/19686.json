@@ -2,24 +2,30 @@
   "number": 19686,
   "kind": "issue",
   "title": "Split `Lint & Repo Gates` into parallel lanes behind an aggregator, the way `TypeScript Type Check` already is: 193 serial steps are 28 minutes of every PR's critical path and one step is 41% of them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "duplicate",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "tooling"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-22T07:45:57Z",
-  "updated_at": "2026-09-22T07:45:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-22T20:25:23Z",
+  "closed_at": "2026-09-22T20:25:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19686",
   "body": "## The measurement\n\n`Lint & Repo Gates` is the longest job in this repository's CI and it is the critical path: every other job finishes in 12 minutes or less and they all run in parallel with it.\n\n| reading | value |\n|:--|:--|\n| `Lint & Repo Gates` duration | 28 minutes |\n| steps in it | 193, all sequential |\n| longest single step, `PM dispatch-gates self-test` | 692 s, **41%** of the job |\n| next four steps | 116 s, 100 s, 72 s, 61 s |\n| PRs merged in the trailing 7 days | 633 (about 90 a day) |\n| cost of the PR leg alone | about 295 compute-hours a week |\n\nTaken at head `dc82eaf` of objectstack-ai/objectstack#19642, run of 2026-09-22T05:47Z.\n\n⛔ This card does not propose removing, weakening or skipping a single check. Measured on the same window, the PR leg of this workflow fails on **12 of 100 runs** across 8 distinct branches, so it is catching real defects at a rate of roughly eleven a day. The job's CONTENT earns its place. Its SHAPE does not: 193 steps run one after another when almost none of them depend on the one before.\n\n## Why this is the cheap change\n\nThree of the four other heavy jobs in this repository are already split, and one of them carries the exact pattern this card asks for. `Type Check` is four separate jobs — `typecheck-source-gates`, `typecheck-workspace`, `typecheck-debt`, `typecheck-consumers` — plus a fifth job named `TypeScript Type Check` whose whole body is `needs:` on the other four. That fifth job is the one the branch protection requires; it takes zero minutes and stands in for the lanes behind it.\n\nThat solves the hazard this card would otherwise carry. `Lint & Repo Gates` is one of the seven required contexts, and AGENTS.md is explicit that a required context is matched by check-run NAME, so a rename detaches its gate silently. The aggregator pattern keeps the name: the lanes get new names, and a job still called `Lint & Repo Gates` waits on them. **No branch-protection setting changes, and nothing can ride through green as an advisory check-run.**\n\nThe pattern also ships its own anti-drift control, which this card must adopt rather than reinvent: the aggregator declares a ROSTER in real YAML, `scripts/check-aggregator-roster.mjs` asserts statically that the roster equals the job's `needs:` in both directions, and the aggregate re-checks the same equality at run time against `toJSON(needs)`. Without it, a lane added and forgotten rides green behind a context that appears required and blocks nothing.\n\n## What to do\n\n1. Group the 193 steps into lanes by what they read, not by duration. `PM dispatch-gates self-test` (692 s) belongs alone or with the other PM-tooling self-tests: it re-spawns its own CLI as a child process many times against the real checkout and builds temporary git repositories, so it shares almost nothing with the source-scanning gates.\n2. Give each lane its own job and its own `needs:`-free setup, exactly as the `typecheck-*` lanes do.\n3. Keep a job named **exactly** `Lint & Repo Gates` whose body is the roster declaration plus the verdict step.\n4. Wire the roster into `scripts/check-aggregator-roster.mjs` so the new aggregate is held to the same equality as the existing one.\n\n## Acceptance\n\n- The seven required contexts are unchanged by name; branch protection is not edited.\n- Every step that runs today still runs, on the same triggers. ⛔ Nothing is dropped, skipped or moved behind a paths filter as part of this card.\n- `check-aggregator-roster.mjs` covers the new aggregate, and a lane added without a roster entry is red.\n- Wall-clock for the aggregate measured on a real PR is reported in the PR body against the 28-minute reading above. The expected landing zone is the longest single lane, which is bounded below by the 692 s step until that step is separately optimised.\n- ⛔ Out of scope: making `dispatch-gates.mjs`'s self-test faster. Its cost is real and has a documented reason (its companion gate's header explains why a fixture cannot prove the point); this card only stops it from holding 192 other steps behind it."

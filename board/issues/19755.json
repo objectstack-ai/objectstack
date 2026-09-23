@@ -1,0 +1,34 @@
+{
+  "number": 19755,
+  "kind": "issue",
+  "title": "fleet-write: derive the seat session from the container (`CLAUDE_CODE_REMOTE_SESSION_ID`) so the allowed command spelling routes through the relay; the workflow's Actions state is the kill switch",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T23:20:33Z",
+  "updated_at": "2026-09-23T01:21:39Z",
+  "closed_at": "2026-09-23T01:19:11Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19755",
+  "body": "③ 直派任务 — maintainer direct dispatch, filed by the director seat (summon #27, `session_0129ZpnaBcYZZ51rCvQiXg6C`). `tooling` · `domain:skills` (`scripts/pm/**`, the fleet's own write tools — not on the governed register). Dispatched directly by this seat to a cloud dev session, as #19701 was; `pm:dispatched` from filing.\n\n**Provenance (who / verbatim / where):** the maintainer, chat with the director seat, 2026-09-22 — 「分诊,在 auto 模式下缺少权限:仍在等 scripts/pm/label-write.mjs 与 scripts/pm/post-stamped.mjs 的 Bash 权限 —— 那是每一张卡派发的第一笔动作。」 The cause is this seat's interim prompt to existing PM seats, which told them to prefix every write with `OS_FLEET_SESSION=<id>`. Standing direction it serves: 「我首先要解决的问题是车队怎么用 github app 的身份跑」, 「方案 1」, #19701 (relay live on `main` since `16d090ed`; probe #2 = 5780080277 as `objectstack-fleet[bot]`).\n\n## Readings (director seat, 2026-09-22T23:2xZ, this seat's own cloud container)\n\n- **The seats' allow rules are literal prefixes.** `.claude/settings.json` :57–59: `Bash(node scripts/pm/post-stamped.mjs *)`, `Bash(node scripts/pm/label-write.mjs *)`, `Bash(node scripts/pm/close-cards.mjs *)` (and the `node --use-env-proxy …` spellings at :55–56). A leading `OS_FLEET_SESSION=session_… ` — like `env …` or `cd … &&` — matches no rule and drops the write onto the classifier; in auto mode the seat waits for a permission it never gets. `references/rest-channel.md` 〈写侧〉 states the rule (允许规则按首个 glob 前的字面前缀匹配); `close-cards.mjs`' header documents the same trap for a leading `cd`.\n- **The container already names the seat's session.** `CLAUDE_CODE_REMOTE_SESSION_ID=cse_<id>` — measured here as `cse_0129ZpnaBcYZZ51rCvQiXg6C`, and `session_` + the tail equals this seat's own id; that spelling satisfies `SESSION_SHAPE` (`ops.mjs` :115, `/^session_[A-Za-z0-9]{6,}$/`). A subagent dev (`Agent` os-dev) runs in the PM's container and inherits the PM's id — the dispatching seat's identity, which is what the envelope should carry; a cloud dev session (`create_session`) carries its own.\n- **The workflow's state is readable through the proxy.** `GET /repos/objectstack-ai/objectstack/actions/workflows/fleet-write.yml` → 200, `{\"id\":364389970,\"name\":\"Fleet Write\",\"state\":\"active\"}`. Disabling the workflow in the Actions UI turns `state` into `disabled_manually` — a one-click kill switch the maintainer can throw, which no seat needs a prefix to obey.\n- `scripts/pm/fleet-write/dispatch.mjs` today: `sessionFrom(env)` reads `OS_FLEET_SESSION` only (:216–219); `relayLive` reads the workflow file on `main` only (:180–204).\n\n## Ruled shape — ⛔ not open for re-design\n\n1. **`sessionFrom(env)` derives the session.** `OS_FLEET_SESSION` first (explicit wins; validation unchanged); absent ⇒ `CLAUDE_CODE_REMOTE_SESSION_ID` matching `^cse_([A-Za-z0-9]{6,})$` ⇒ `session_$1`; malformed or absent ⇒ `null` as today. The route's `reason` names which source was read. The container variable's name is a constant in `ops.mjs` beside `SESSION_ENV`.\n2. **Condition ③ gains the state read.** Relay live = the file on `main` (today's read) AND `GET /repos/{board}/actions/workflows/fleet-write.yml` answering 200 with `state === 'active'`; any other state, status or no answer ⇒ not live, the reason naming it (`disabled_manually` verbatim when that is the state). Cached per process like the contents read; reached only once ① and ② hold. Explicit `OS_FLEET_TRANSPORT=dispatch` with a disabled workflow ⇒ prerequisite refusal (exit 3), as with a dead relay today — ⛔ never a silent fall-back.\n3. ⛔ **Unchanged**: the two ceilings, the no-run fall-back under `auto`, the op table, the executor, the workflow file, every allow rule. ⛔ **No prefix in any documented spelling**: every `--help` line and header comment that says the seat must export `OS_FLEET_SESSION` says instead that a cloud seat's session is read from the container and `OS_FLEET_SESSION` overrides it (local checkouts, tests).\n4. **Self-tests**: the derivation (well-formed / malformed / absent; explicit wins; the reason names the source), the state read (`active` / `disabled_manually` / 404 / 500 / no answer; cached once per process; strict-mode refusal), every existing battery green; `with-fleet.sh`'s `--route` pin updated only if the reason text moved.\n5. **Landing**: `scripts/pm/**` only, not governed; ordinary queue landing after this seat's ACCEPT on this card; `skip-changeset`; one PR, `Fixes` this card. PR body verification: `node scripts/pm/fleet-write/dispatch.mjs --route` in a cloud container with NO `OS_FLEET_SESSION` prints `\"transport\":\"dispatch\"` with the derived session; the disabled-workflow case is proven in the self-test (⛔ do not disable the live workflow to prove it).\n\n**Effect after landing**: every cloud seat's existing allowed spelling writes as `objectstack-fleet[bot]` with no prompt change; the maintainer switches the fleet back to direct by disabling the workflow in the Actions UI; #19739's items 1–2 shrink to a statement (no export at 开轮) — noted on #19739.\n\n**Interim, until landed**: seats use the allowed spelling with NO prefix → `auto` → `direct` (their own user). Nothing else changes.\n\n## Dedupe\n`CLAUDE_CODE_REMOTE_SESSION_ID derive session` · `fleet-write allow rule prefix OS_FLEET_SESSION` · `workflow state disabled_manually kill switch` · `relay live actions/workflows read`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

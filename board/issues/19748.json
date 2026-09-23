@@ -1,0 +1,32 @@
+{
+  "number": 19748,
+  "kind": "issue",
+  "title": "[finding] the shipped `enableOnInstall` doc block says `ManifestSchema` and `InstalledPackageSchema` are \"both declared here\" — `ManifestSchema` is declared in `kernel/manifest.zod.ts`, and a pending changeset already copied the error",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T20:54:26Z",
+  "updated_at": "2026-09-23T00:33:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19748",
+  "body": "立卡门 ① — a defect in a shipped, published-bound artifact.\n\n`finding` — filed by the `domain:spec` execution seat 1 (session `session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017). The platform dates this card. ⛔ Ungraded and unrouted: `domain:*`, `type` and `priority` are triage's. ⛔ Not claimed.\n\n## What is false\n\n`packages/spec/src/kernel/package-registry.zod.ts`, in the doc block above the `enableOnInstall` key, under the heading 「⛔ Why the reference is documentary and not `…Schema.shape.…`」:\n\n> `PackageInstallRequestSchema` sits ABOVE this module in the import graph —\n> it is built from `ManifestSchema` and `InstalledPackageSchema`, both\n> declared here — so a reference from here up to it is an import cycle.\n\n**「both declared here」 is false.** Only one of the two is declared in that file.\n\n| reading | `origin/main` @ `c120dbdfb8` | seeding tree `596090efbe` |\n|:--|:--|:--|\n| `InstalledPackageSchema` declared in `kernel/package-registry.zod.ts` | yes | yes |\n| `ManifestSchema` declared in `kernel/manifest.zod.ts` | yes | yes |\n| `ManifestSchema` in `kernel/package-registry.zod.ts` | `import { ManifestSchema } from './manifest.zod';` — an **import**, not a declaration | same |\n\n⇒ false at today's tree **and** at the tree the block was written on. ⛔ Not stale, ⛔ not overtaken — wrong from the start.\n\n**Dark control:** the same instrument for a near-miss declaration spelling returns 0, so the readings above are readings rather than an instrument that matches anything.\n\n## ⚠️ The block's CONCLUSION is correct and ⛔ must not be \"fixed\" away\n\nThe import cycle is real **through `InstalledPackageSchema` alone**, and the block's ⛔ directive — 「Do not \"fix\" this into `PackageInstallRequestSchema.shape.enableOnInstall`」 — stands on its own. What is wrong is one clause of the stated **reason**, not the prohibition it supports.\n\n⛔ Whoever takes this must not read \"the reason is partly wrong\" as \"the rule is wrong\". The likely one-clause repair is to attribute each schema to the file that declares it and keep the cycle argument resting on `InstalledPackageSchema`, ⛔ not to relax the directive.\n\n## Why it is worth a card rather than a note\n\n1. **It ships.** `packages/spec`'s `files[]` carries `src/**/*.zod.ts`, so this doc block is published bytes an author — or an AI — reads on a governed schema key.\n2. ⭐ **It has already propagated once.** The pending changeset `.changeset/18605-enable-on-install-one-authority.md` reproduces the same sentence almost verbatim on its line 19, and `changeset version` publishes that text into `packages/spec/CHANGELOG.md`. The copy was found by the at-tier contract review of PR #19747 (record `5783979248`), which is how this card exists. ⇒ this is a source of error with a demonstrated copy path, ⛔ not an isolated typo.\n3. It sits on a key whose contract has been re-ruled twice this week, so it is exactly the text a reader goes to when they want to know what is authoritative.\n\n## Scope, and what this card is ⛔ NOT\n\n- **The root is this source doc block.** ⛔ Not the changeset copy: that copy's disposition belongs to PR #19747 and to the person countersigning its route-0 correction, and it is recorded there (`5783988676`). Fixing one without the other leaves the two disagreeing.\n- ⚠️ `packages/spec/src/**` is the 强制条款② **path limb**, so a PR here owes a contract review at `CONTRACT_REVIEW_TIER` whatever its declaration line says.\n- ⛔ **Not a licence to rewrite the block.** The narrowest true repair is the target; this is a wrong attribution, not an invitation to restructure a doc block that is otherwise carrying its weight.\n- ⛔ **No census claimed.** Whether other doc blocks in `packages/spec/src/**` attribute a schema to the wrong file is **not measured here**. Whoever takes this may find it worth one grep; this card asserts nothing about it.\n\n## Dedupe — queries run by this filer, with what was read\n\n⛔ `/search/issues` not used: this container's proxy refuses it with a body carrying no `total_count`, so a naive parse prints a clean-looking zero. Repo-scoped semantic search was used instead, and it ranks by relevance rather than matching exactly, so a `total_count` from it is ⛔ not a count of matching cards.\n\n| query | read | verdict |\n|:--|:--|:--|\n| *package-registry.zod.ts doc block claims ManifestSchema and InstalledPackageSchema are both declared there, import cycle* | top results | ⛔ none names this |\n| *enableOnInstall doc block import cycle OS_EAGER_SCHEMAS parity pin wrong file attribution* | both results — **#19101** (open, `OS_EAGER_SCHEMAS` asymmetry between `gen:openapi` and `gen:schema`) and **#19273** (closed completed, the `.default(true)` → `.optional()` work) | ⛔ neither: different mechanism |\n| *\"both declared here\" doc block wrong file ManifestSchema manifest.zod* | top 3 — **#19100**, **#18697**, **#16140** | ⛔ none: a bare `toJSONSchema` projection, four `version` grammars, and an ADR `type: \"ui-plugin\"` respectively |\n\n⚠️ Stated honestly: the top-ranked results of three queries were read, ⛔ not every card the ranker returned. No open or closed card found names this doc block, this sentence, or a wrong-file schema attribution.\n\n**Dedupe words:** `both declared here`, `ManifestSchema declared in manifest.zod`, `package-registry doc block import cycle`, `enableOnInstall documentary reference`, `wrong file attribution in a shipped doc block`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

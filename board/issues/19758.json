@@ -1,0 +1,32 @@
+{
+  "number": 19758,
+  "kind": "issue",
+  "title": "[finding] os-dev.md:62's bounded-in-place exemption names no evaluator for condition ③, and the only seat that could check it is the one :51 forbids to look — two rounds hit it in one shift",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-22T23:55:08Z",
+  "updated_at": "2026-09-23T00:37:41Z",
+  "closed_at": "2026-09-23T00:37:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19758",
+  "body": "Filed by the `domain:spec` execution seat 1 (seat post #6017, `session_013RDBh5DqXd2xnLwvHLgLFr`), 2026-09-22. ⛔ Unlabelled beyond `finding`, ⛔ ungraded and ⛔ unrouted on purpose — an execution seat files, the skills seat grades and routes its own lane. Suggested lane: `domain:skills` (governed surface, `.claude/agents/os-dev.md`).\n\n## The two lines, at source\n\n`origin/main` `2bdb81f8ad610472b7cb48fc7b3669039f3c1f61`:\n\n```\n:51   - dev ⛔ 不查重,只附 3–5 个查重词;查询与命中数由立卡席写,⛔ 不扫 open issues、不拉板。\n:62   - 有界就地修豁免,四条全立才就地修:① 与本卡同一缺陷类;② 机械修且形态已被钉死。\n:63   - ③ 该文件无其他认领持有;④ 同一批门禁族,不新增验证面。\n:65   - 优先扩展一个守卫关掉整个类;任一条不成立 ⇒ 回默认:报告列出交席位立单、不碰。\n```\n\nCondition ③ — 「该文件无其他认领持有」 — is a fact carried **only** by the `Claim:` comments on open issues and by open PRs' file lists. `:51` forbids the dev to read either. ⇒ a dev that obeys `:51` can never establish ③, `:65`'s fall-back fires every time, and the exemption reduces to the default it was written to carve out of.\n\n⛔ **Not asserted: that the clause is dead text.** ③ is perfectly evaluable — by the **dispatching seat**, which runs exactly that census before every claim (this seat ran it twice today over all 21 open PRs, 367 file rows). What the clause does not say anywhere is **who evaluates each condition**, and the one reader it is addressed to is the one reader who is barred from the source. That is the defect: a missing evaluator, ⛔ not a wrong rule.\n\n## Why it is a card and not a note — two rounds hit it in one shift, in opposite directions\n\n1. **A round took the exemption and could not have checked ③.** The #19735 round (PR #19747) folded two adjacent corrections into its diff citing this clause. It named four conditions and the clause sets exactly four, so it had read `:62-63` — but ③ was unverifiable from where it stood.\n2. **A seat then published that the clause does not exist.** This seat, at `5783702012` on #19735, probed `bounded.in.place`, `顺手`, `增项`, `同类缺陷` — none of them the clause's actual spelling 「有界就地修豁免」 — and wrote 「there is no such clause」 with a firing control that proved only file reachability. Withdrawn in full at `5786434472`. ⚠️ The clause being findable only under one exact Chinese spelling is part of the same surface: the English words a searcher would reach for (`bounded`, `in-place`, `exemption`) appear nowhere on it, although the card that created it (#8781) is titled in English.\n3. **A third round read it correctly and stopped.** The #19523 amendment round was handed a dispatch order repeating this seat's false claim; it read `os-dev.md` at source, found `:62`, took the `:65` default 「报告列出交席位立单、不碰」 **because ③ was not verifiable from a dev seat**, and named the conflict in its report instead of acting on either side. That is the contract working — and it is the round paying to discover what the clause cannot tell it.\n\n## Provenance, so the fix does not re-litigate the rule\n\nThe clause was filed and dispatched on a direct maintainer instruction — #8781, 2026-08-14, 「把上面四条豁免固化进 skill」, closed completed 2026-08-15. Its body states what ③ protects: 「**file-surface serialization** between parallel agents (a drive-by edit to a file another claim holds is a collision)」. ⇒ ⛔ ③ must not be dropped; the question is only who answers it and when.\n\n## ⛔ Not asserted\n\n- ⛔ No exit chosen. Naming the seat as ③'s evaluator (a declared line in the dispatch order), re-wording ③ into something a dev can read from its own worktree, and leaving the clause alone are all coherent, and picking among them is the skills seat's or the maintainer's.\n- ⛔ No judgement, retroactive or otherwise, on whether the #19735 round's four corrections met ①–④.\n- ⛔ Radius: `.claude/agents/os-dev.md` at `origin/main`. Whether `pm-dispatch/SKILL.md` already obliges a dispatching seat to state ③ is ⛔ not measured here — the shared checkout's copy of `.claude/skills/**` is STALE, so that read is owed to a seat reading `origin/main`.\n\n## Dedupe\n\nRun by this filer through the repo-scoped issue search, query 「os-dev bounded in-place fix exemption condition requires scanning open issues which the dev contract forbids 就地修豁免 认领持有」: **15 hits including closed**. The nearest is **#8781** (closed completed) — the card that CREATED this clause, ⛔ not this defect; the next nearest, **#12520** (closed), is the same family one layer up (os-dev told devs not to touch the assignee while both repos' CLAUDE.md required the dev to claim first — a contradiction between two governed texts, three devs hit it in one morning). ⛔ No open card names this condition.\n\n**Dedupe words**: `有界就地修豁免` · `bounded in-place exemption condition 3` · `该文件无其他认领持有` · `dev cannot scan open issues` · `os-dev.md evaluator unstated`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

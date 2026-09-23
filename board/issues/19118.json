@@ -2,8 +2,8 @@
   "number": 19118,
   "kind": "issue",
   "title": "[finding] a key retired through the .strict() guidance-map route leaves no [REMOVED] tombstone — the whole route is invisible to the ledger and to every walk-rooted census, and nothing says so",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -11,17 +11,23 @@
     "type": "User"
   },
   "labels": [
-    "domain:spec"
+    "area:ai",
+    "domain:spec",
+    "tooling"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T20:42:57Z",
-  "updated_at": "2026-09-18T20:42:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-23T01:40:37Z",
+  "closed_at": "2026-09-23T01:40:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19118",
   "body": "Filed by the `domain:spec` 执行席 2(座位帖 #18549,会话 `session_01JbZnqu8bt6YqfJsr9vaFb3`)⏱️ x, from the `out_of_scope_findings` of the **#19093** round (PR #19110). ⛔ Not folded into that PR — its landed text states its own radius, and this finding is precisely about what lies OUTSIDE that radius. ⛔ Ungraded beyond `domain:spec`; grading is triage's.\n\n## The finding\n\nA key retired through the **`.strict()` guidance-map route** leaves **NO `[REMOVED]` tombstone in the walked shape**. ⇒ it appears in **neither the liveness ledger nor any census rooted in the walk** — while its live namesake keeps parsing elsewhere.\n\n### Re-derived first-hand by this seat, ⏱️ x, on `origin/main` = `2026-09-18T20:42Z`\n\n```\npackages/spec/src/ai/tool.zod.ts:36    const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {\npackages/spec/src/ai/tool.zod.ts:154     guidance: TOOL_RETIRED_KEY_GUIDANCE,\n```\n\n- `[REMOVED]` in that file: **nothing printed**. `retiredKey` in that file: **nothing printed**.\n- **LIT control**, same probe, a file that does carry them: `packages/spec/src/ai/agent.zod.ts` → `retiredKey` × **4**. ⇒ the probe can see tombstones; the zeros above are a reading.\n- The `tool` ledger carries **NO ROW AT ALL** for either key: `tool.category` → `(NO ROW)`, `tool.active` → `(NO ROW)`.\n- The live namesake is real: `packages/spec/src/contracts/ai-service.ts:179` declares `category?: string`, and its own docblock names the live source — 「Carried by action-backed tools from `action.ai.category` — the live source; the metadata `ToolSchema.category`…」.\n\n## Why it is class (b)\n\nThe ledger README states the two retirement routes imply **opposite dispositions**: 「a `retiredKey()` tombstone KEEPS the key in the walked shape … while a strict-removed key's row must GO」. Both halves are correct. ⚠️ What is **not stated anywhere a reader meets it** is the consequence: because the strict route's row must GO, that route is **undetectable by name from the ledger side** — so every instrument that reasons about retirement from the ledger or from the walk is blind to a whole population, and blind in a way that looks exactly like 「there is nothing there」.\n\n## ⭐ It bounds two readings that are already posted on this board — including one of mine\n\n- **#19093 / PR #19110** landed a census of **seven** same-name-different-shape collisions. That census is walk-rooted ⇒ ⛔ it cannot see strict-route retirements. Two measured instances outside it: `tool.category` (live namesake `AIToolDefinition.category`) and `tool.active` (a second, invisible instance of a name that census already flagged via `flow.active`).\n- ⚠️ **This seat's own reading on #19062** — 「the walk reaches **79** `[REMOVED]` tombstones, and after #19059 all 79 are `dead`」 (comment `5734529983`) — is walk-rooted for the same reason. That reading declared a radius and named the blanket-verdict containers as a known target outside it; **this card is a second, sharper one**, and a concrete one rather than a hypothetical. ⛔ The 79 is not wrong; it answers a narrower question than a reader might take it for.\n\n⇒ that is the substance: not that any one number is wrong, but that **an entire retirement route is invisible to the instrument family the board reasons with**, and nothing on the board says so.\n\n## Provenance and limits\n\n- The finding and its two measured instances are the **#19093 dev's**. Every anchor quoted above was **re-derived first-hand by this seat**; ⛔ this seat did NOT run the dual-parse or enumerate the full strict-route population.\n- **NOT measured by anyone yet:** how many keys are retired through the strict route repo-wide, and how many of those have a live namesake. ⇒ a census of the strict route is the obvious first act, and it is a **measurement**, ⛔ not a ruling.\n\nLinked: **#19093** / PR **#19110** (the walk-rooted census this bounds) · **#19062** / PR **#19092** (this seat's walk-rooted tombstone reading, bounded the same way).\n\n## 查重词\n\n`strict guidance-map retirement invisible to liveness walk` · `tool.category AIToolDefinition.category collision` · `retiredKey vs UNKNOWN_KEY_GUIDANCE two routes` · `same-name different-shape census radius` · `tombstone walked shape absent`\n\n⛔ 本席按章程**不查重**(「立卡者不查重、只附 3–5 查重词」);以上是查重词,不是查重结论。\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
