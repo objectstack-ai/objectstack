@@ -16,10 +16,11 @@
 // fixpoint, which never opens a lock, then a release, kept only when every
 // dropped key is locked and every kept key unlocked on the row the write
 // stores. Since #19927 the release repeats until a set gives back itself
-// (`engine-readonly-when-exact-drop-set.test.ts`); when none does — a cycle
-// with no such set — the fixpoint's larger, fail-safe drop set stands. Every
-// expected row below was checked against a brute-force enumeration of the
-// drop sets that agree with the row.
+// (`engine-readonly-when-exact-drop-set.test.ts`); when none does within its
+// bound — always on a cycle with no drop set that agrees with the row — the
+// fixpoint's larger, fail-safe drop set stands. Every expected row below was
+// checked against a brute-force enumeration of the drop sets that agree with
+// the row.
 //
 // #19887's `stored` view (`engine-readonly-when-stored-view.test.ts`) and
 // #19853's master-detail settlement (`engine-readonly-when-parent.test.ts`)

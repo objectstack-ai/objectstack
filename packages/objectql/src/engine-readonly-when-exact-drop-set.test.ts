@@ -143,16 +143,16 @@ describe('a chain of readonlyWhen locks settles on the drop set the stored row a
         x5: { type: 'text', readonlyWhen: "record.x4 == 'v'" },
       },
     } as any);
-    // No cycle, and the exact set is not inside the fixpoint's: releasing `j2`
-    // locks `k`, which the fixpoint kept. Exact set {p, j1, m, k}.
+    // No cycle, and the exact set is not inside the fixpoint's: releasing `j`
+    // locks `k`, which the fixpoint kept. Exact set {p, m, k}.
     engine.registry.registerObject({
       name: 'knock_on',
       fields: {
         p: { type: 'text', readonlyWhen: "previous.p == 'L'" },
-        j1: { type: 'text', readonlyWhen: "previous.j1 == 'L'" },
         m: { type: 'text', readonlyWhen: "record.p == 'L'" },
-        j2: { type: 'text', readonlyWhen: "record.m == 'new'" },
-        k: { type: 'text', readonlyWhen: "record.j1 == 'L' && record.j2 == 'new'" },
+        j: { type: 'text', readonlyWhen: "record.m == 'new'" },
+        k: { type: 'text', readonlyWhen: "record.p == 'L' && record.j == 'new'" },
+        tag: { type: 'text' },
       },
     } as any);
     // A cycle with NO exact set.
@@ -200,7 +200,8 @@ describe('a chain of readonlyWhen locks settles on the drop set the stored row a
     storeFor('cascade').set('r1', { id: 'r1', c: 'L', x: 'old', y: 'old', tag: 't' });
     storeFor('cascade').set('r2', { id: 'r2', c: 'L', x: 'old', y: 'old', tag: 't' });
     storeFor('cascade_six').set('s1', { id: 's1', c: 'L', x1: 'o', x2: 'o', x3: 'o', x4: 'o', x5: 'o' });
-    storeFor('knock_on').set('k1', { id: 'k1', p: 'L', j1: 'L', m: 'old', j2: 'old', k: 'old' });
+    storeFor('knock_on').set('k1', { id: 'k1', p: 'L', m: 'old', j: 'old', k: 'old', tag: 't' });
+    storeFor('knock_on').set('k2', { id: 'k2', p: 'L', m: 'old', j: 'old', k: 'old', tag: 't' });
     storeFor('cycle_none').set('n1', { id: 'n1', a: 'old_a', b: 'y', tag: 't' });
     storeFor('cycle_none').set('n2', { id: 'n2', a: 'old_a', b: 'y', tag: 't' });
     storeFor('cycle_two').set('w1', { id: 'w1', a: 'old', b: 'old', tag: 't' });
@@ -287,11 +288,24 @@ describe('a chain of readonlyWhen locks settles on the drop set the stored row a
     expect(events).toEqual([{ object: 'cascade_six', fields: ['c', 'x2', 'x4'], reason: 'readonly_when' }]);
   });
 
-  it('KNOCK-ON: releasing j2 locks k, which the fixpoint had let through, so k drops and j2 lands', async () => {
+  it('KNOCK-ON: j, unlocked on the stored row, lands; that locks k, which used to land, so k drops', async () => {
     const { events, options } = dropEvents();
-    await engine.update('knock_on', { id: 'k1', p: 'new', j1: 'new', m: 'new', j2: 'new', k: 'new' }, options);
-    expect(row('knock_on', 'k1')).toMatchObject({ p: 'L', j1: 'L', m: 'old', j2: 'new', k: 'old' });
-    expect(events).toEqual([{ object: 'knock_on', fields: ['p', 'j1', 'm', 'k'], reason: 'readonly_when' }]);
+    await engine.update('knock_on', { id: 'k1', p: 'new', m: 'new', j: 'new', k: 'new' }, options);
+    expect(row('knock_on', 'k1')).toMatchObject({ p: 'L', m: 'old', j: 'new', k: 'old' });
+    expect(events).toEqual([{ object: 'knock_on', fields: ['p', 'm', 'k'], reason: 'readonly_when' }]);
+  });
+
+  it('KNOCK-ON in BULK: every matched row takes j and keeps k', async () => {
+    await engine.update('knock_on', { p: 'new', m: 'new', j: 'new', k: 'new' }, { where: { tag: 't' }, multi: true } as any);
+    expect(row('knock_on', 'k1')).toMatchObject({ p: 'L', m: 'old', j: 'new', k: 'old' });
+    expect(row('knock_on', 'k2')).toMatchObject({ p: 'L', m: 'old', j: 'new', k: 'old' });
+  });
+
+  it('KNOCK-ON under strictReadonlyWrites: still refused, now naming k instead of j', async () => {
+    const err = await rejection(engine.update('knock_on', { id: 'k1', p: 'new', m: 'new', j: 'new', k: 'new' }, { strictReadonlyWrites: true } as any));
+    expect(err.code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect(err.fields).toEqual(['p', 'm', 'k']);
+    expect(row('knock_on', 'k1')).toMatchObject({ p: 'L', m: 'old', j: 'old', k: 'old' });
   });
 
   // ── Cycles ────────────────────────────────────────────────────────────
