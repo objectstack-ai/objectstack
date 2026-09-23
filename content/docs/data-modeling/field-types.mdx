@@ -21,7 +21,7 @@ Single-line plain text input.
 |:---|:---|:---|:---|
 | `maxLength` | `number` | — | Maximum character length |
 | `minLength` | `number` | — | Minimum character length |
-| `format` | `string` | — | Validation format pattern |
+| `format` | `string` | — | Display hint, **not validation** — the server runs no check from it. The UI's cell-renderer resolver reads a small set of words and renders the cell as the richer type: `phone` / `tel` / `telephone` (a `tel:` link), `email` (a `mailto:` link), `url` / `uri` / `link` (a clickable link), `currency` / `money`, `percent` / `percentage`; any other word renders as plain text. To reject a malformed email, URL or phone number, use that field `type` instead, or a [`format` validation rule](/docs/data-modeling/validation#format-validation) |
 | `valueDomain` | `'iana_time_zone' \| 'iso_4217_currency' \| 'iso_3166_alpha2'` | — | Standard the written value must be a member of (IANA time zone, ISO 4217 currency code, ISO 3166-1 alpha-2 country code); `text` only |
 
 ```typescript
@@ -68,7 +68,6 @@ Phone number field.
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `maxLength` | `number` | — | Maximum character length |
-| `format` | `string` | — | Phone format pattern |
 
 ```typescript
 { name: 'phone', label: 'Phone', type: 'phone' }
