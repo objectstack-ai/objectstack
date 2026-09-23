@@ -2978,9 +2978,9 @@ function resolveTraversalScope(
     if (!isReference(field)) continue;
     const binding = related?.[field];
     // No binding at all means the engine resolved nothing for this write (an
-    // embedding that never called `collectPredicateRelationships`). Leave the
-    // record alone and let evaluation fault as it did before — this function
-    // does not invent a verdict for a seam that was never wired.
+    // embedding that never called `collectPredicateRelationships`, or the
+    // referential FK clear). Leave the record alone and let evaluation meet the
+    // bare id as it did before — this function invents no verdict for it.
     if (!binding) continue;
     if (binding.row) {
       if (!copy) copy = { ...record };

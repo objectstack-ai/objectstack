@@ -5168,8 +5168,8 @@ export class SecurityPlugin implements Plugin {
    *      step 3.7 throws on, asked under that step's guard (a payload is
    *      supplied, the context names a user) at that step's point, after arm
    *      9; arm 4 asks it too, as the middleware does with no set resolved. It
-   *      is handed no row, so no payload changes its answer: it refuses a
-   *      CALLER CLASS, as arms 2 and 3 do.
+   *      is handed no row — the payload decides only whether it is asked — so
+   *      it refuses a CALLER CLASS, as arms 2 and 3 do.
    *
    * `can-write-object-admission.test.ts` pins this method's answer equal to the
    * registered middleware's on its equivalence block's cases, and pins one

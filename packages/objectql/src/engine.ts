@@ -7058,13 +7058,14 @@ export class ObjectQL implements IObjectQLEngine {
     const unbound = () => undefined;
     // ⛔ A referential FK clear resolves NOTHING. `cascadeDeleteRelations`
     // stamps `__referentialFieldClear` on its cleanup UPDATE, and plugin-security
-    // exempts exactly that write from its object-level CRUD check — so the
+    // exempts an update carrying it from its object-level CRUD check — so the
     // cleanup reaches this seam for a deleter holding no grant on the
     // referencing object, and a system read here would let a traversing rule's
     // verdict decide their delete: one bit of a related record they cannot
-    // read, per delete. Left unbound, such a rule faults and refuses the cleanup
-    // as it did before this seam existed (`resolveTraversalScope` leaves an
-    // unbound record to CEL). Pinned end to end in plugin-security's
+    // read, per delete. Left unbound, such a rule meets the bare id as it did
+    // before this seam existed (`resolveTraversalScope` leaves an unbound record
+    // to CEL), where reading through it faults and refuses the cleanup. Pinned
+    // end to end in plugin-security's
     // `delete-reference-cleanup-system-identity.test.ts`.
     if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) return unbound;
     const wanted = collectPredicateRelationships(schema);
