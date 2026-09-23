@@ -23,7 +23,7 @@
 - `list_pull_requests` 的 `fields` 请求 `merged_by` 不返回该字段 ⇒ 字段缺席不是值读数。
 - `mergeable_state` 惰性计算,`unknown` 不是读数 —— 挂 unknown 等于挂在可能脏的头上。
 - `dirty` 即入队否决(冲突对象是当前 main);draft PR 照答 `clean`/`blocked`/`unknown`,不答 `draft`。
-- `needs:contract-review` 是合并闸:实测 `blocked` 而 `mergeable: true`,无标签同形兄弟回 `clean`。
+- `mergeable_state: blocked` 且 `mergeable: true` = 规则或必需检查在挡,非冲突;无阻兄弟回 `clean`。
 - ready 翻转实测两序列 `clean→blocked→clean` 与 `blocked→unstable→clean`;`unstable` 瞬态非失败。
 - `unstable` 可源自 check-runs 看不见的 commit STATUS(如 `Vercel`)⇒ ③ 另读 `/commits/{sha}/status`。
 - 零 legacy status 的仓恒答空集默认值 `pending`+`total_count: 0`,⛔ 非门禁读数,门禁读 check-runs。

@@ -12228,9 +12228,9 @@ export function residueLines(
  * reads — clause ②'s CONTRACT-REVIEW tier: the tier the clause-② REVIEW runs
  * at, both halves of it — the spec and skills lanes' review of every round
  * they deliver (a card that changes contract accept/reject behaviour or
- * widens the public surface is spec-lane work, whichever seat found it), and
- * the `needs:contract-review` re-review sub-round (its opening self-check
- * reads this). The BUILD of such a card is at the default judgment tier, so
+ * widens the public surface is spec-lane work, whichever seat found it) and
+ * the `Served-tier:` line every `## Contract review` record carries. The
+ * BUILD of such a card is at the default judgment tier, so
  * this constant is a review tier and never a dispatch mandate. Declared HERE
  * and only here, as a constant, so a model upgrade is a one-line change in one
  * file — the clause-① mandate rows below read it, the self-test compares
@@ -12251,7 +12251,7 @@ export function residueLines(
  * and never self-reviewed. A tier that has been RETIRED never comes back, and
  * the two cases differ on WHO MAY ACT: a seat reading 「⛔ 不许降档」 onto a
  * vanished tier holds its whole lane forever, and a seat picking the
- * replacement itself is the silent downgrade the fuse exists to stop. So a
+ * replacement itself is the silent downgrade this rule exists to stop. So a
  * retirement is a maintainer ruling and ⛔ never a seat's reading — and when
  * the ruling lands, this VALUE is the one line that moves. The ceiling of the
  * ladder `tierLines` prints is DERIVED from it ({@link TIER_CEILING}) so the
@@ -12277,7 +12277,7 @@ export function residueLines(
  * that session; this constant is a property of the lane's governance, and the
  * two ⛔ never trade places.
  *
- * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
+ * Rulebook: `.claude/skills/pm-dispatch/references/contract-review.md` — the review of record and its `Served-tier:` line.
  */
 export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
 

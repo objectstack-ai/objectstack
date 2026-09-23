@@ -1924,7 +1924,7 @@ export function claimKeyedLineRefusals(body) {
     rows.push({ key: 'Thread-read', line: keyLine(text, 'Thread-read'), why: `the value reads \`${offendingSpan(thread.value)}\`, which is neither one comment id nor \`none\` — H50 compares it for EQUALITY against one id, so no thread makes this match.` });
   const clause = readClause2Line(text);
   if (clause !== null && clause.kind !== 'declared')
-    rows.push({ key: 'Clause-②', line: clause.line, why: clause.kind === 'malformed' ? 'the value slot holds something `readClause2Line` cannot grade — the two spellings are the closed set.' : `\`readClause2Line\` reads this as a NEAR MISS (${clause.reason}), ⛔ not a declaration — \`check-clause2-carriers.mjs --pair\` answers exit 4 on it.` });
+    rows.push({ key: 'Clause-②', line: clause.line, why: clause.kind === 'malformed' ? 'the value slot holds something `readClause2Line` cannot grade — the two spellings are the closed set.' : `\`readClause2Line\` reads this as a NEAR MISS (${clause.reason}), ⛔ not a declaration — the changeset and ADR-0087 gates read it as absent.` });
   return rows;
 }
 

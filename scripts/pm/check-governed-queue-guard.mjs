@@ -226,46 +226,7 @@
  * governed is still never blocked by any of it: the path test runs first and
  * returns before provenance is consulted at all.
  *
- * ## The SECOND leg: the contract-review carrier (#17040)
- *
- * Everything above is about GOVERNED SURFACES. This file also carries a second,
- * independent queue predicate, and it is keyed on a LABEL rather than on paths.
- *
- * `.claude/skills/pm-dispatch/SKILL.md` 〈入队与落地〉 states the rule, and the
- * quote IS the operative criterion so it is reproduced rather than paraphrased:
- *
- *   > 双肢命中任一 ⇒ 无席内条款②复核 PASS 在案 ⛔ 禁止入队
- *
- * with `references/contract-review.md` 〈载体纪律〉 supplying the reading of the
- * label itself: 「开着的载体恒 = 真实待审」. So `needs:contract-review` on a pull
- * request IS the gate, and until #17040 nothing mechanical read it at the queue:
- * `git grep needs:contract-review -- .github/workflows scripts/pm/check-governed-queue-guard.mjs`
- * answered with ONE comment line in `lint.yml` about a label description's byte
- * length, and nothing at the queue at all. The gate was advisory in practice
- * while the protocol treated it as binding, and eleven measured enqueues in a
- * single day (2026-09-09, both repos, event logs read per PR) is what that
- * costs.
- *
- * ⭐ THE HONEST BOUNDARY, and it is not a detail: this leg reads the LABEL, not
- * the verdict. Of those eleven measured enqueues, FIVE carried the label into
- * the queue and this leg refuses them; the other SIX had the carrier stripped
- * seconds before the enqueue with no PASS on record for that head, and this leg
- * passes them — 「被剥」 and 「从未挂过」 are the same bytes to a label reader. One
- * of those six (objectui#8164) landed a real published-face defect. Whether a
- * VERDICT exists is `check-clause2-carriers.mjs`'s question and this file does
- * not pretend to answer it; the CLEAR rendering says so out loud, so nobody
- * reads a green carrier leg as "the review happened".
- *
- * ⚖️ THE ACCEPTED COST: there is no cheap local pre-filter for this leg, because
- * a carrier is remote state a seat hangs rather than a property of the diff. So
- * unlike the governed leg, every merge group now costs one label read per queued
- * pull request, and a GitHub outage refuses a merge group whose diff touches
- * nothing governed. The zero-cost-clear rendering is scoped to say so rather
- * than left making a promise this leg has taken away (#15406's lesson: a verdict
- * may not deny its own evidence). Fail-open was the alternative, and this is the
- * one file where it is ruled out by construction.
- *
- * ## The THIRD leg: the references TIER of the governed surface (#17950/#18020)
+ * ## The TIER leg: the references TIER of the governed surface (#17950/#18020)
  *
  * Everything above judges a governed diff as ONE population. On 2026-09-13 the
  * maintainer tiered it, and the boundary put to them is the operative text, so
@@ -337,8 +298,8 @@
  *
  * ⭐ RECOGNITION IS IMPORTED, NEVER RE-IMPLEMENTED — and since #18701 the
  * WHOLE reading is, not only the facts it is made of. `locateReviewOfRecord`
- * (`check-clause2-carriers.mjs`, the function `--pair` judges C6 and C7 with)
- * is what this leg calls: heading marker, head-sha span test, newest-of
+ * (`check-clause2-carriers.mjs`, the function that file composes the record
+ * reading with) is what this leg calls: heading marker, head-sha span test, newest-of
  * resolution, `Reviewed-by:` key line, `Served-tier:` reader — and THE SET OF
  * THREADS to run them over. That last one is the fact a spelled-out filter here
  * could not copy, and it is what dequeued #18689.
@@ -350,7 +311,7 @@
  * them, which imports them at module scope — so a rename there stops that
  * module loading and this leg fails CLOSED with the loader's own reason.
  *
- * ⚠️ THE IMPORT IS LAZY, AND THAT IS LOAD-BEARING — see `CONTRACT_REVIEW_LABEL`
+ * ⚠️ THE IMPORT IS LAZY, AND THAT IS LOAD-BEARING — see `REVIEW_OF_RECORD_LOCATION`
  * for the cycle it walks around, and `loadRecordRecognisers` for the rule that
  * keeps the walk legal. A failed load is a REFUSAL, never a pass.
  *
@@ -402,9 +363,7 @@
  * `makePullReader` the governed leg uses (the pull object already carries
  * `additions` / `deletions`; the reader's shape grew a `size`, no second
  * endpoint) and under the same `pull-requests: read` scope, nothing wider.
- * Merge groups are small, so the bill is one read per PR per build — the
- * carrier leg's own bill, on the same endpoint, paid a second time rather than
- * shared, because each leg's refusal must stay separable in a log and each
+ * Merge groups are small, so the bill is one read per PR per build, and the
  * block prints its own count. The zero-cost-clear rendering above is scoped
  * to say so (#15406's lesson, a third time).
  *
@@ -431,7 +390,7 @@
  * how gates acquire policy nobody agreed to. Widening it is a one-line
  * maintainer decision — in the sibling, where the predicate lives.
  *
- * ⚠️ `pull_request` leg: SILENT, byte-identical, like the carrier leg. The
+ * ⚠️ `pull_request` leg: SILENT, byte-identical, like the governed leg. The
  * seat-side pre-check already refuses an oversized PR before it is armed, and
  * the ruling this leg implements is about the LANDING. (The `pull_request`
  * payload carries `additions` / `deletions` for free; a forecast there is a
@@ -463,11 +422,6 @@
  *                 since 2026-09-04 the head decides nothing, so it is recorded
  *                 as a missing reading and the review list alone judges.
  *   5  REFUSED  — governed paths on a commit attributable to no pull request.
- *   6  REFUSED  — a queued pull request carries `needs:contract-review`
- *                 (#17040). The carrier leg, not the governed one.
- *   7  REFUSED  — the carrier leg could not READ a queued pull request's labels,
- *                 or the merge group names no pull request to read them from.
- *                 Split from 6 for the same reason 4 is split from 3.
  *   8  REFUSED  — a queued pull request is over the human-merge line:
  *                 `additions + deletions` strictly greater than the sibling's
  *                 `HUMAN_MERGE_LINE_THRESHOLD`, generated files included
@@ -476,19 +430,17 @@
  *   9  REFUSED  — the SIZE leg could not READ a queued pull request's size (the
  *                 pull read failed, or the object carries no pair), or the merge
  *                 group names no pull request to read it from. Split from 8 the
- *                 way 4 is split from 3 and 7 from 6.
+ *                 way 4 is split from 3.
  *   1  CANNOT RUN — unusable event payload, unsupported event, unreadable git.
  *                 Still non-zero, still red: this file has no green that means
  *                 "did not look".
  *
- *   ⭐ THREE legs, ONE exit, and the precedence is pinned: every leg's block is
+ *   ⭐ TWO legs, ONE exit, and the precedence is pinned: every leg's block is
  *   always printed, and the code is the GOVERNED leg's when it refuses, else
- *   the SIZE leg's, else the CARRIER's (`groupExitCode`). The governed refusal
- *   already sat above the carrier because its remedy is the stricter one; the
- *   size refusal's remedy (a human merge) is the same terminal as Tier H, so it
- *   sits above the carrier for the same reason and below the governed code
- *   because that code was already the top of this table — a group that is
- *   both governed-unsatisfied and oversized prints both limbs and exits 3.
+ *   the SIZE leg's (`groupExitCode`). The governed refusal sits on top because
+ *   its remedy is the stricter one; the size refusal's remedy (a human merge)
+ *   is the same terminal as Tier H — a group that is both governed-unsatisfied
+ *   and oversized prints both limbs and exits 3.
  *
  * ## What this file does NOT do
  *
@@ -561,7 +513,6 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the WIRING pin: the workflow still spells this context name': 8,
   '⭐ #14063: the environment the exemption needs, pinned to the YAML': 7,
   '⭐ #15406: a CLEAR reached through a lift is not a clear that saw nothing': 10,
-  '⛔ #17040: the contract-review carrier is the enqueue gate': 39,
   '⭐ #18020 → #19133 Tier S: a review of record, not an approval': 43,
   '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
   '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 30,
@@ -570,8 +521,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
-// zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 24;
+// zeroing it, so the roster's own size is pinned too. Lowered 24 → 23 when the
+// contract-review carrier battery left with the label it read (ruling record
+// 5770886272 on #19061, letter B): the ordinary direction, one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 23;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -588,19 +541,11 @@ export const EXIT_REFUSED_UNAPPROVED = 3;
 export const EXIT_REFUSED_UNREADABLE = 4;
 export const EXIT_REFUSED_UNATTRIBUTED = 5;
 /**
- * The contract-review carrier leg's two refusals (#17040). Split for the same
- * reason 3 and 4 are split on the governed leg: "the carrier is open" and "we
- * could not find out" are different facts and a queue log must be able to tell
- * them apart. ⛔ Neither may ever be folded into the other to tidy the table.
- */
-export const EXIT_REFUSED_CARRIER = 6;
-export const EXIT_REFUSED_CARRIER_UNREADABLE = 7;
-/**
  * The SIZE leg's two refusals (#19036, the 2026-09-18 ruling). The same split,
  * for the same reason: "this pull request is over the line" and "we could not
  * read its size" are different facts, and the second one DECIDES here — unlike
  * the PR head, whose read failing is a note — so it refuses on a code of its
- * own. ⛔ Neither may ever be folded into the other, nor into 3/4 or 6/7.
+ * own. ⛔ Neither may ever be folded into the other, nor into 3/4.
  */
 export const EXIT_REFUSED_OVERSIZED = 8;
 export const EXIT_REFUSED_SIZE_UNREADABLE = 9;
@@ -629,45 +574,6 @@ export const EVENT_PULL_REQUEST = 'pull_request';
  * refusal/cleared renderings derive their named accounts from this array.
  */
 export const GOVERNED_APPROVERS = Object.freeze(['os-zhuang', 'hotlong']);
-
-/**
- * The clause-② enqueue gate's label (#17040).
- *
- * ⚠️ THIS IS A MIRROR, NOT THE SOURCE, and the distinction is the whole comment.
- * `scripts/pm/check-half-states.mjs` OWNS this constant — H31 declares it and
- * H51/H53 pin that ownership ("the gate constant is the one H31 already owns,
- * not a second spelling") — and `check-clause2-carriers.mjs` imports it from
- * there rather than restating it, which is what this file would do too.
- *
- * ⛔ IT CANNOT — as a MODULE-SCOPE import, which is what a mirrored constant
- * would need. Importing `check-half-states.mjs` from here at module scope is a
- * MODULE-EVAL CYCLE: that file's H43 resolves its governed register at module
- * scope with a top-level `await loadGovernedRegister()`, and that awaits
- * `import('./check-governed-queue-guard.mjs')` — this file — for
- * `GOVERNED_APPROVERS`. Adding the reverse edge deadlocks BOTH modules; measured
- * on 2026-09-10, node exits 13 with "Detected unsettled top-level await" and
- * `check-half-states.mjs` stops loading standalone as well. Re-measured on
- * 2026-09-13 through `check-clause2-carriers.mjs`, which imports H31's file:
- * the INDIRECT edge deadlocks identically, exit 13 at the same line.
- *
- * ⭐ WHAT CHANGED on 2026-09-13, and it does not release this constant: the
- * references tier (#18020) needs those recognisers too, and reaches them with a
- * LAZY import taken after this module has finished evaluating — legal only
- * because this file's own dispatch no longer carries a top-level `await`, which
- * `loadRecordRecognisers` states as a rule and the battery pins. That door is
- * open to a FUNCTION BODY and shut to a module-scope binding, so this constant
- * stays a mirror: it is read at module scope, by `carrierVerdict` and by two
- * renderings, and no lazy import can supply that. ⛔ Do not "modernise" it into
- * an await at module scope — that is the 2026-09-10 deadlock, restored.
- *
- * So the spelling is mirrored here and PINNED to H31's by reading that file's
- * SOURCE in the self-test — the same "read it from disk, a constant asserting
- * against itself proves nothing" idiom the workflow wiring pin below uses. Drift
- * in either direction reddens. ⭐ The self-test also pins the REASON: when H31's
- * module-scope await goes away, the mirror should become a real import, and the
- * case that fails will say so.
- */
-export const CONTRACT_REVIEW_LABEL = 'needs:contract-review';
 
 // ── the landing TIER: Tier S lands on a review of record, Tier H on an approval ─
 
@@ -716,10 +622,22 @@ export function tierSGlobs() {
  * of `REVIEW_OF_RECORD_LOCATION` in `check-clause2-carriers.mjs`, which is the
  * one place the set itself is declared (#18701).
  *
- * ⛔ A mirror for the same reason `CONTRACT_REVIEW_LABEL` is one, and read that
- * constant's docblock before touching this: the module-scope import this would
- * need is a MODULE-EVAL CYCLE, and `renderGuardVerdict` is pure and synchronous,
- * so no lazy import can supply it there. The READING half takes no mirror —
+ * ⚠️ THIS IS A MIRROR, NOT THE SOURCE, and the reason is a MODULE-EVAL CYCLE.
+ * Importing `check-clause2-carriers.mjs` — or `check-half-states.mjs`, which
+ * it imports — from here at MODULE SCOPE deadlocks both modules: that file's
+ * H43 resolves its governed register at module scope with a top-level
+ * `await loadGovernedRegister()`, which awaits `import('./check-governed-queue-guard.mjs')`
+ * — this file — for `GOVERNED_APPROVERS`. Adding the reverse edge deadlocks
+ * BOTH modules; measured on 2026-09-10, node exits 13 with "Detected unsettled
+ * top-level await" and `check-half-states.mjs` stops loading standalone as well.
+ * Re-measured on 2026-09-13 through `check-clause2-carriers.mjs`, which imports
+ * that file: the INDIRECT edge deadlocks identically, exit 13 at the same line.
+ * The references tier reaches the recognisers with a LAZY import taken after
+ * this module has finished evaluating — legal only because this file's own
+ * dispatch carries no top-level `await`, which `loadRecordRecognisers` states
+ * as a rule and the battery pins. That door is open to a FUNCTION BODY and shut
+ * to a module-scope binding, and `renderGuardVerdict` is pure and synchronous,
+ * so no lazy import can supply the words there. The READING half takes no mirror —
  * `runGuard` fetches one thread per entry in the loaded `threads` list, so the
  * set this file ACTS on is never a copy. Only the WORDS are copied, and the
  * battery pins them to the constant loaded through the real lazy import, so
@@ -750,7 +668,7 @@ export const RECOGNISER_SOURCES = Object.freeze({
  * module-scope import from here — direct, or indirect through
  * `check-clause2-carriers.mjs`, which imports that file — deadlocks both
  * modules (node exits 13, "Detected unsettled top-level await"; measured both
- * ways, see `CONTRACT_REVIEW_LABEL`). The cycle closes only while THIS module
+ * ways, see `REVIEW_OF_RECORD_LOCATION`). The cycle closes only while THIS module
  * is still evaluating, so the import is taken from a function body, after
  * evaluation has finished — which is true only because this file's dispatch
  * carries NO top-level `await`. ⛔ Restore one and this leg deadlocks the merge
@@ -824,8 +742,8 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
  * Measured: PR #18689, dequeued `CI_FAILURE` with 「0 comment(s) read on the PR
  * thread」 against a record sitting on card #18426, cured only by a second copy.
  *
- * So the whole reading is now `locateReviewOfRecord`, imported — the function
- * `--pair` judges C6 and C7 with. Two tools, one derivation of "the record on
+ * So the whole reading is now `locateReviewOfRecord`, imported from the file
+ * that composes it. Two tools, one derivation of "the record on
  * this head", and the thread set travels inside it rather than beside it. What
  * is left here is the TIER gate on top of it, which is this leg's own fact:
  * whether the record's `Served-tier:` stands, and whether its token is a model
@@ -1186,7 +1104,7 @@ export function renderGuardVerdict(verdict) {
           `        ⚖️ landing tier: S(席内达档复核落地) — every governed path above lies under a Tier S surface (${tierSGlobs()}),`,
           '           so a review of record on the CURRENT head lands it in place of an authorized approval: a `## Contract',
           `           review\` comment on ${REVIEW_OF_RECORD_LOCATION} naming this head, \`Served-tier: CONTRACT_REVIEW_TIER\`,`,
-          '           `**VERDICT: PASS**`, `check-clause2-carriers.mjs --pair N` at 0 and every check green; then the OWNING seat',
+          '           `**VERDICT: PASS**` and every check green; then the OWNING seat',
           '           lands it (#19133, maintainer 2026-09-18 「同意改规则。」). One Tier H path here and this line would read H.',
         ]
       : [
@@ -1223,18 +1141,18 @@ export function renderGuardVerdict(verdict) {
         '      never from a restated list. ⛔ ZERO review lookups were made: the path test runs first and returns,',
         '      so a GitHub API outage can never block a diff that touches nothing governed.',
       );
-      // ⭐ #17040, and #15406's lesson applied rather than re-learned: a verdict
-      // may not deny its own evidence. The three lines above are byte-identical
-      // and stay that way — the `pull_request` leg's byte-identity constraint
-      // (2026-08-27) reaches them, and that leg does not run the carrier read at
-      // all. But on `merge_group` this file now DOES make an unconditional API
+      // ⭐ #15406's lesson applied rather than re-learned: a verdict may not
+      // deny its own evidence. The three lines above are byte-identical and
+      // stay that way — the `pull_request` leg's byte-identity constraint
+      // (2026-08-27) reaches them, and that leg does not run the size read at
+      // all. But on `merge_group` this file DOES make an unconditional API
       // call, so the last of those lines would otherwise be a claim this run has
       // already falsified. It is scoped here instead of rewritten.
       if (verdict.event === EVENT_MERGE_GROUP) {
         lines.push(
           '      ⚠️ Scoped to the GOVERNED-SURFACE leg. On merge_group this file ALSO reads every queued pull request',
-          '      for its SIZE and for the contract-review carrier — one pull read each, fail-closed — and those two',
-          '      legs report separately below. An outage there DOES refuse this merge group.',
+          '      for its SIZE — one pull read each, fail-closed — and that leg reports separately below.',
+          '      An outage there DOES refuse this merge group.',
         );
       }
       return lines.join('\n');
@@ -1422,7 +1340,7 @@ export function renderGuardVerdict(verdict) {
         '         the thread: flip it ready, enqueue it, or arm auto-merge — and ⛔ no seat submits an approving review',
         '         in its place. ✅ What lifts those: a `## Contract review` comment on',
         `         ${REVIEW_OF_RECORD_LOCATION} naming this head with \`Served-tier: CONTRACT_REVIEW_TIER\` and \`**VERDICT: PASS**\`,`,
-        '         `check-clause2-carriers.mjs --pair N` at 0 and every check green; then the OWNING seat lands it through',
+        '         and every check green; then the OWNING seat lands it through',
         '         the queue — no maintainer click is waited for (#19133, maintainer 2026-09-18 「同意改规则。」). A record',
         '         on an OLDER head does not carry forward: a record names the head it judged.',
       );
@@ -1663,28 +1581,21 @@ export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComm
   return guardVerdict({ event, governed, unattributed, approvals, records, apiCalls, headNotes, lifted });
 }
 
-// ── the contract-review carrier: the SECOND leg, and the label IS the gate ──
-
-/**
- * The leg's own name in a log. Deliberately NOT `CHECK_CONTEXT_NAME`: this is a
- * second predicate inside the same check run, not a second check run, and a
- * reader must be able to see which leg answered which way.
- */
-export const CARRIER_LEG_NAME = 'Contract-Review Carrier (enqueue gate)';
+// ── every queued pull request: the enumeration the SIZE leg reads ──────────
 
 /**
  * Every pull request this merge group is landing — deduplicated, in group order.
  *
  * ⭐ It reads the SAME per-commit decomposition the governed leg reads, and that
  * is load-bearing rather than convenient. `merge_group.head_ref` names only the
- * LAST pull request in the group, so keying this leg to it would let PR A's open
- * carrier ride into `main` behind PR B — under-enumeration, the one direction a
+ * LAST pull request in the group, so keying this leg to it would let an oversized
+ * PR A ride into `main` behind PR B — under-enumeration, the one direction a
  * queue reading must never be wrong in (#9902), and the same trap the governed
  * leg's header documents. The queue ref is consulted ONLY when the decomposition
  * attributes no pull request at all, where it cannot mis-attribute because there
  * is nothing else to attribute to.
  */
-export function carrierPullsInGroup(rows, namedPull = null) {
+export function queuedPullsInGroup(rows, namedPull = null) {
   const pulls = [];
   const seen = new Set();
   for (const row of Array.isArray(rows) ? rows : []) {
@@ -1698,169 +1609,11 @@ export function carrierPullsInGroup(rows, namedPull = null) {
   return pulls;
 }
 
-/**
- * The carrier verdict, as data. Pure, exactly like `guardVerdict` — the renderer
- * and the exit code both read it rather than re-deriving it.
- *
- * ⚠️ `merge_group` ONLY. The `pull_request` leg returns `not-applicable` and
- * renders the empty string, so that leg's output stays byte-identical to what it
- * was before this predicate existed (the 2026-08-27 card's own constraint). An
- * early warning on the PR leg would be useful and is deliberately NOT taken
- * here: the ruling this leg implements is about ENQUEUE, and widening a
- * governance gate past its own ruling is how gates acquire policy nobody agreed
- * to. Widening it is a one-line maintainer decision.
- */
-export function carrierVerdict({ event, pulls = [], readings = new Map(), apiCalls = 0 }) {
-  const base = { event, entries: [], apiCalls, legName: CARRIER_LEG_NAME, label: CONTRACT_REVIEW_LABEL };
-  if (event !== EVENT_MERGE_GROUP) {
-    return { ...base, conclusion: 'not-applicable', exitCode: EXIT_CLEAR, refusalKind: null };
-  }
-  if (pulls.length === 0) {
-    return { ...base, conclusion: 'refused', exitCode: EXIT_REFUSED_CARRIER_UNREADABLE, refusalKind: 'no-pull' };
-  }
-  const entries = pulls.map(
-    (pr) =>
-      readings.get(pr) ?? {
-        pr,
-        state: 'unreadable',
-        labels: [],
-        reason: 'no label reading was recorded for this pull request',
-      },
-  );
-  const out = { ...base, entries };
-  if (entries.some((e) => e.state === 'unreadable')) {
-    return { ...out, conclusion: 'refused', exitCode: EXIT_REFUSED_CARRIER_UNREADABLE, refusalKind: 'unreadable' };
-  }
-  if (entries.some((e) => e.state === 'gated')) {
-    return { ...out, conclusion: 'refused', exitCode: EXIT_REFUSED_CARRIER, refusalKind: 'gated' };
-  }
-  return { ...out, conclusion: 'clear', exitCode: EXIT_CLEAR, refusalKind: null };
-}
+// ── the SIZE line: the SECOND leg, and the number IS the gate (#19036) ──────
 
 /**
- * The carrier orchestrator, with its one IO dependency injected.
- *
- * ⚠️ Unlike the governed leg there is no cheap local pre-filter to run first,
- * and there cannot be one: the carrier is REMOTE state hung by a seat, not a
- * property of the diff. So every merge group pays one label read per queued pull
- * request. ⚖️ THE ACCEPTED COST, stated here rather than left to be discovered:
- * a GitHub outage now refuses a merge group whose diff touches nothing governed,
- * which the governed leg alone never did. The alternative is a carrier read that
- * passes when it cannot see the label — and 「门禁被剥不是红灯是放行」 is precisely
- * the fail-open shape this whole regime exists to end. The cost is bounded: one
- * GET per queued PR, against the same endpoint the governed leg already calls.
- */
-export async function runCarrierGuard({ event, rows, namedPull = null, fetchLabels }) {
-  if (event !== EVENT_MERGE_GROUP) return carrierVerdict({ event });
-  const pulls = carrierPullsInGroup(rows, namedPull);
-  const readings = new Map();
-  let apiCalls = 0;
-  for (const pr of pulls) {
-    try {
-      apiCalls += 1;
-      const names = (await fetchLabels(pr)).map((n) => String(n));
-      readings.set(pr, { pr, state: names.includes(CONTRACT_REVIEW_LABEL) ? 'gated' : 'bare', labels: names });
-    } catch (error) {
-      readings.set(pr, { pr, state: 'unreadable', labels: [], reason: String(error?.message ?? error).split('\n')[0] });
-    }
-  }
-  return carrierVerdict({ event, pulls, readings, apiCalls });
-}
-
-/**
- * The words a reader acts on for this leg. Returns '' on the `pull_request` leg,
- * so nothing is appended to that leg's byte-identical output.
- *
- * The refusal QUOTES the governing rule rather than paraphrasing it — the quote
- * IS the operative criterion here, so it is reproduced from SKILL.md's own bytes
- * and left untranslated — and it names WHO can act, because a refusal a reader
- * cannot act on is a refusal they route around.
- */
-export function renderCarrierVerdict(verdict) {
-  if (verdict.conclusion === 'not-applicable') return '';
-  const lines = [];
-  lines.push(
-    `${CARRIER_LEG_NAME} — ${verdict.event} — ${verdict.entries.length} queued pull request(s), ` +
-      `${verdict.apiCalls} label read(s).`,
-  );
-
-  // ⚠️ The boundary, printed on the CLEAR path too and not only on the refusal:
-  // this leg reads the LABEL, never the verdict. A carrier stripped seconds
-  // before any PASS existed is, to this predicate, identical to a carrier that
-  // was never hung — 「被剥」 and 「从未挂过」 are indistinguishable in the evidence.
-  // Six of the eleven measured #17040 enqueues are exactly that shape, so a
-  // reader who takes this CLEAR as "the review happened" has misread it.
-  const boundary = [
-    '      ⚠️ This leg reads the LABEL, not the verdict. A carrier stripped before any PASS was on record',
-    '      is indistinguishable here from one that was never hung. Whether a verdict EXISTS is a question',
-    '      for `scripts/pm/check-clause2-carriers.mjs`, not for this one.',
-  ];
-
-  if (verdict.conclusion === 'clear') {
-    lines.push(`  ✅  CLEAR — no queued pull request carries \`${CONTRACT_REVIEW_LABEL}\`.`, ...boundary);
-    return lines.join('\n');
-  }
-
-  for (const entry of verdict.entries) {
-    if (entry.state === 'gated') {
-      lines.push(
-        '',
-        `  #${entry.pr} — ⛔ CARRIES \`${CONTRACT_REVIEW_LABEL}\` — this pull request may not be in the queue.`,
-        `        labels read: ${entry.labels.join(', ') || '(none)'}`,
-      );
-    } else if (entry.state === 'unreadable') {
-      lines.push('', `  #${entry.pr} — ⛔ the label set could NOT be read — ${entry.reason}`);
-    } else {
-      lines.push('', `  #${entry.pr} — ✅ does not carry the gate label.`);
-    }
-  }
-
-  lines.push('', '  ⛔  REFUSED — this merge group must not land.');
-  if (verdict.refusalKind === 'no-pull') {
-    lines.push(
-      '      This merge group names NO pull request — neither its commit subjects nor its queue head ref',
-      '      resolve to one — so there is no carrier to read at all. Fail closed: a queue entry nobody can',
-      '      point at a pull request for cannot be shown to have cleared the gate.',
-    );
-  } else if (verdict.refusalKind === 'unreadable') {
-    lines.push(
-      '      The label set could not be READ for at least one queued pull request above. ⛔ This is a refusal',
-      '      and not a pass, deliberately: 「门禁被剥不是红灯是放行」 — a gate label that cannot be seen and',
-      '      one that is absent are the same bytes to a reader that shrugs. Re-run once the API is reachable.',
-    );
-  } else {
-    lines.push(
-      '      At least one pull request above entered the merge queue while the contract-review carrier was',
-      '      still open on it. The governing rule, from `.claude/skills/pm-dispatch/SKILL.md` 〈入队与落地〉:',
-      '',
-      '        「双肢命中任一 ⇒ 无席内条款②复核 PASS 在案 ⛔ 禁止入队」',
-      '',
-      '      and `references/contract-review.md` 〈载体纪律〉: 「开着的载体恒 = 真实待审」.',
-    );
-  }
-  lines.push(
-    '',
-    '      What satisfies this check:',
-    '        1. ⭐ Take the pull request out of the queue: convert it back to DRAFT (disarming auto-merge',
-    '           alone does NOT dequeue it), and leave it parked. 「挂标后复核完成前短暂停靠」 — parked',
-    '           outside the queue is the SAFE state, not a stalled one.',
-    '        2. Then the dispatching seat completes the in-seat clause-② review and posts the verdict as a',
-    '           comment on the PR or the card. On PASS that same seat strips the carrier from BOTH carriers,',
-    '           cites the record, and re-enqueues: 「PASS ⇒ 同席剥标并引记录、ready、auto-merge」. On FAIL',
-    '           it is a patch round.',
-    '',
-    '      ⛔ Stripping the label to get past this check, with no verdict on record, is the defect this leg',
-    '         was built from — not a way through it. ⛔ Neither is "edit this check".',
-    ...boundary,
-  );
-  return lines.join('\n');
-}
-
-// ── the SIZE line: the FOURTH leg, and the number IS the gate (#19036) ──────
-
-/**
- * The leg's own name in a log — a third predicate inside the same check run,
- * named apart from the other two for the same reason the carrier leg is.
+ * The leg's own name in a log — a second predicate inside the same check run,
+ * named apart from the governed one so a reader can see which leg answered.
  */
 export const SIZE_LEG_NAME = 'Human-Merge Size Line (2026-09-18 ruling)';
 
@@ -1895,14 +1648,14 @@ export function sizeReading(pr, size) {
 }
 
 /**
- * The size verdict, as data. Pure, the same shape as `carrierVerdict` — the
+ * The size verdict, as data. Pure, the same shape as `guardVerdict` — the
  * renderer and the exit code both read it rather than re-deriving it.
  *
  * ⚠️ `merge_group` ONLY: the `pull_request` leg returns `not-applicable` and
  * renders the empty string, so that leg's output stays byte-identical (the
- * 2026-08-27 constraint, kept by the carrier leg and kept here). A group that
- * names no pull request has no size to read and refuses the way the carrier
- * leg does; a reading that never arrived is `unreadable`, never `within`.
+ * 2026-08-27 constraint, kept here). A group that names no pull request has
+ * no size to read and refuses; a reading that never arrived is `unreadable`,
+ * never `within`.
  */
 export function sizeGuardVerdict({ event, pulls = [], readings = new Map(), apiCalls = 0 }) {
   const base = { event, entries: [], apiCalls, legName: SIZE_LEG_NAME };
@@ -1936,8 +1689,8 @@ export function sizeGuardVerdict({ event, pulls = [], readings = new Map(), apiC
  * `fetchPull` the governed leg reads heads with, so the pull object is read by
  * one reader with one contract.
  *
- * Every queued pull request is read, and the enumeration is the carrier leg's
- * (`carrierPullsInGroup`): per commit, deduplicated, the queue ref consulted
+ * Every queued pull request is read, and the enumeration is
+ * `queuedPullsInGroup`: per commit, deduplicated, the queue ref consulted
  * only when nothing is attributed — so a bare sibling cannot carry an
  * oversized PR through, the #9902 direction. One pull read per queued PR; the
  * count is printed and pinned. A throw is caught into an `unreadable` reading,
@@ -1945,7 +1698,7 @@ export function sizeGuardVerdict({ event, pulls = [], readings = new Map(), apiC
  */
 export async function runSizeGuard({ event, rows, namedPull = null, fetchPull }) {
   if (event !== EVENT_MERGE_GROUP) return sizeGuardVerdict({ event });
-  const pulls = carrierPullsInGroup(rows, namedPull);
+  const pulls = queuedPullsInGroup(rows, namedPull);
   const readings = new Map();
   let apiCalls = 0;
   for (const pr of pulls) {
@@ -2079,7 +1832,7 @@ export function renderSizeVerdict(verdict) {
     '           maintainer\'s one-line decision in the sibling, not this file\'s.',
     '',
     '      When the governed-surface leg above ALSO refused, both limbs fired on this group: the exit code is',
-    '      the governed leg\'s (precedence governed > size > carrier, pinned) and this limb stands regardless.',
+    '      the governed leg\'s (precedence governed > size, pinned) and this limb stands regardless.',
     '      ⛔ "Edit this check" and moving the threshold here are not ways through — the threshold lives in ONE',
     '         place, and this file only reads it.',
     '',
@@ -2089,21 +1842,18 @@ export function renderSizeVerdict(verdict) {
 }
 
 /**
- * THREE legs, ONE exit code. Pure, and pinned: the governed leg's refusal
- * wins, then the size leg's, then the carrier's. The governed refusal already
- * sat above the carrier because its remedy is the stricter one (no landing at
- * all without an authorized approval, a record, or the maintainer's own direct
- * merge); the size refusal's remedy is the same human terminal as Tier H, so
- * it sits above the carrier for the same reason, and below the governed code
- * because that code was already the top of the table — a group that is both
+ * TWO legs, ONE exit code. Pure, and pinned: the governed leg's refusal
+ * wins, then the size leg's. The governed refusal sits on top because its
+ * remedy is the stricter one (no landing at all without an authorized
+ * approval, a record, or the maintainer's own direct merge); the size
+ * refusal's remedy is the same human terminal as Tier H — a group that is both
  * governed-unsatisfied and oversized prints both limbs and exits on the
  * governed one. ⛔ No leg's code is swallowed silently: every block is always
  * printed, whichever code the run exits on.
  */
-export function groupExitCode({ governed, size, carrier }) {
+export function groupExitCode({ governed, size }) {
   if (governed?.exitCode !== EXIT_CLEAR) return governed.exitCode;
-  if (size?.exitCode !== EXIT_CLEAR) return size.exitCode;
-  return carrier.exitCode;
+  return size.exitCode;
 }
 
 
@@ -2358,38 +2108,6 @@ export function makePullReader({ apiUrl, slug, token, fetchImpl = fetch }) {
 }
 
 /**
- * The label names on a pull request.
- *
- * ⭐ READ FROM THE PULL OBJECT, deliberately, and this choice is what makes the
- * carrier leg cost ZERO new workflow permission. The labels endpoint proper
- * (`GET /repos/{o}/{r}/issues/{n}/labels`) is an ISSUES-API route and needs
- * `issues: read`, which this workflow does not grant and would have to be
- * widened to grant; the pull object carries the same `labels[]` and is already
- * covered by the `pull-requests: read` the review read needs. Measured on
- * #17442: `labels` came back `["ci/cd","size/l","skip-changeset"]` from
- * `GET /repos/{o}/{r}/pulls/{n}`. ⛔ Do not "simplify" this to the issues route
- * without adding the scope in the same edit — the failure is a 403 on every
- * queue build, which this leg then correctly turns into a REFUSAL.
- *
- * Same channel and same shape as the two readers above: throws on any non-2xx
- * and on a body whose `labels` is not an array, and the caller turns the throw
- * into a REFUSAL (exit 7), never a pass. A reader that quietly returned `[]`
- * would be the fail-open bug this whole leg exists to close: an unreadable
- * carrier would render as a carrier that is not there.
- */
-export function makeLabelReader({ apiUrl, slug, token, fetchImpl = fetch }) {
-  return async function fetchLabels(pull) {
-    const res = await fetchImpl(`${apiUrl}/repos/${slug}/pulls/${pull}`, { headers: apiHeaders(token) });
-    if (!res.ok) throw new Error(`GET /repos/${slug}/pulls/${pull} answered HTTP ${res.status}`);
-    const body = await res.json();
-    if (!Array.isArray(body?.labels)) {
-      throw new Error(`GET /repos/${slug}/pulls/${pull} answered no labels array — the carrier cannot be read`);
-    }
-    return body.labels.map((entry) => String(entry?.name ?? ''));
-  };
-}
-
-/**
  * The pull request THREAD, paginated — the comments a review of record lives in
  * (#18020).
  *
@@ -2481,7 +2199,6 @@ async function main() {
   };
   const fetchReviews = makeReviewReader(reader);
   const fetchPull = makePullReader(reader);
-  const fetchLabels = makeLabelReader(reader);
   const fetchComments = makeCommentReader(reader);
 
   const runGit = (args, input) => git(repoRoot, args, input);
@@ -2491,15 +2208,11 @@ async function main() {
   // other leg, so the `pull_request` output is byte-identical to what it was.
   const size = await runSizeGuard({ event: context.event, rows, namedPull: context.namedPull, fetchPull });
   const sizeBlock = renderSizeVerdict(size);
-  // The carrier leg (#17040). Same event split, same silence on `pull_request`.
-  const carrier = await runCarrierGuard({ event: context.event, rows, namedPull: context.namedPull, fetchLabels });
-  const carrierBlock = renderCarrierVerdict(carrier);
   const report = [
     `${context.label} — ${rows.length} commit(s) in range`,
     ...notes,
     renderGuardVerdict(verdict),
     ...(sizeBlock === '' ? [] : ['', sizeBlock]),
-    ...(carrierBlock === '' ? [] : ['', carrierBlock]),
   ].join('\n');
   console.log(report);
 
@@ -2511,15 +2224,14 @@ async function main() {
       /* a summary that cannot be written changes no verdict */
     }
   }
-  // ALL THREE legs are always evaluated and ALL THREE blocks are always printed,
-  // so no reading is lost whichever refuses. The precedence is `groupExitCode`'s
-  // and is pinned there: governed, then size, then carrier — the governed
-  // refusal's remedy is the stricter one (no landing at all without an
-  // authorized approval, a record, or the maintainer's own direct merge, Prime
-  // Directive #14), the size refusal's is the same human terminal, and both
-  // subsume the carrier's "take it out of the queue". ⛔ No leg's code is
-  // swallowed silently — every block states its refusal in full either way.
-  return groupExitCode({ governed: verdict, size, carrier });
+  // BOTH legs are always evaluated and BOTH blocks are always printed, so no
+  // reading is lost whichever refuses. The precedence is `groupExitCode`'s and
+  // is pinned there: governed, then size — the governed refusal's remedy is the
+  // stricter one (no landing at all without an authorized approval, a record,
+  // or the maintainer's own direct merge, Prime Directive #14), the size
+  // refusal's is the same human terminal. ⛔ No leg's code is swallowed
+  // silently — every block states its refusal in full either way.
+  return groupExitCode({ governed: verdict, size });
 }
 
 // ⛔ NOT `process.exitCode = await main()`, and this is not a style choice.
@@ -3418,242 +3130,6 @@ export async function selfTest() {
   assert('a-non-2xx-pull-read-throws-with-its-status', /HTTP 502/.test(await readerThrow(fakeRes({}, false, 502))));
   assert('a-body-with-no-parseable-head-sha-throws-never-pins-nothing-silently', /head\.sha/.test(await readerThrow(fakeRes({ head: {} }))));
 
-  // ── ⛔ #17040: the contract-review carrier is the enqueue gate ───────────
-  //
-  // The eleven measured enqueues of 2026-09-09 are replayed as fixtures at the
-  // bottom of this battery, with their PREDICTED DIRECTION, because the whole
-  // claim of this leg is "it would have refused these" — and six of them it
-  // would NOT have, which is the boundary that must keep being measured rather
-  // than remembered.
-  battery('⛔ #17040: the contract-review carrier is the enqueue gate');
-  // ⭐ The mirror pin. H31 in `check-half-states.mjs` OWNS this spelling; this
-  // file cannot import it (module-eval cycle — see the constant's own comment),
-  // so the two are held equal by reading that file's source. A constant
-  // asserting against itself would prove nothing.
-  let h31Source = '';
-  try {
-    h31Source = readFileSync(join(repoRoot, 'scripts', 'pm', 'check-half-states.mjs'), 'utf8');
-  } catch (error) {
-    h31Source = '';
-    assert('H31s-file-is-readable-so-the-mirror-can-be-pinned-at-all', false, String(error?.message ?? error).split('\n')[0]);
-  }
-  const h31Spelling = /^export const CONTRACT_REVIEW_LABEL = '([^']+)';$/m.exec(h31Source)?.[1] ?? null;
-  assert(
-    '⭐ the-carrier-label-MIRRORS-H31s-OWNED-constant-read-from-that-files-source',
-    h31Spelling !== null && h31Spelling === CONTRACT_REVIEW_LABEL,
-    `H31 spells ${JSON.stringify(h31Spelling)}, this mirror spells ${JSON.stringify(CONTRACT_REVIEW_LABEL)}`,
-  );
-  assert(
-    '⭐ the-REASON-the-label-is-mirrored-instead-of-imported-is-still-true',
-    /^export const GOVERNED_REGISTER = await loadGovernedRegister\(\);$/m.test(h31Source) &&
-      /check-governed-queue-guard\.mjs/.test(h31Source),
-    'H31 no longer awaits this file at module scope — the cycle is gone, so replace the mirror with a real import',
-  );
-  assert(
-    'the-two-carrier-codes-are-distinct-non-zero-and-collide-with-no-governed-code',
-    new Set([EXIT_CLEAR, EXIT_CANNOT_RUN, EXIT_REFUSED_UNAPPROVED, EXIT_REFUSED_UNREADABLE, EXIT_REFUSED_UNATTRIBUTED, EXIT_REFUSED_CARRIER, EXIT_REFUSED_CARRIER_UNREADABLE]).size === 7 &&
-      EXIT_REFUSED_CARRIER !== 0 &&
-      EXIT_REFUSED_CARRIER_UNREADABLE !== 0,
-    JSON.stringify([EXIT_REFUSED_CARRIER, EXIT_REFUSED_CARRIER_UNREADABLE]),
-  );
-
-  // Enumeration — the under-enumeration trap, which is this leg's #9902.
-  const carrierRow = (pr, sha = 'a'.repeat(40)) => ({ sha, subject: `x (#${pr})`, pr, paths: ['README.md'] });
-  assert(
-    'group-pulls-dedupe-and-keep-group-order',
-    JSON.stringify(carrierPullsInGroup([carrierRow(7), carrierRow(3), carrierRow(7)])) === JSON.stringify([7, 3]),
-    JSON.stringify(carrierPullsInGroup([carrierRow(7), carrierRow(3), carrierRow(7)])),
-  );
-  assert(
-    '⭐ a-multi-PR-group-does-NOT-collapse-to-the-queue-refs-LAST-pr',
-    JSON.stringify(carrierPullsInGroup([carrierRow(11), carrierRow(22)], 22)) === JSON.stringify([11, 22]),
-    'the head ref names only the last PR; keying the leg to it lets an earlier open carrier ride in behind it',
-  );
-  assert(
-    'the-queue-ref-is-the-fallback-ONLY-when-nothing-is-attributed',
-    JSON.stringify(carrierPullsInGroup([{ sha: 'b'.repeat(40), subject: 'no pr here', pr: null, paths: [] }], 99)) === JSON.stringify([99]),
-  );
-  assert(
-    'no-rows-and-no-named-pull-yields-no-pulls-never-a-phantom-zero',
-    carrierPullsInGroup([], null).length === 0 && carrierPullsInGroup(undefined, 0).length === 0,
-  );
-
-  // The verdict table.
-  const carrierRun = (event, pulls, states) => {
-    const readings = new Map();
-    for (const [pr, state] of Object.entries(states)) {
-      const n = Number(pr);
-      readings.set(
-        n,
-        state === 'unreadable'
-          ? { pr: n, state: 'unreadable', labels: [], reason: 'HTTP 403 (fixture)' }
-          : { pr: n, state, labels: state === 'gated' ? ['priority:p2', CONTRACT_REVIEW_LABEL] : ['priority:p2'] },
-      );
-    }
-    return carrierVerdict({ event, pulls, readings, apiCalls: pulls.length });
-  };
-  const gatedOne = carrierRun(EVENT_MERGE_GROUP, [5], { 5: 'gated' });
-  assert('an-OPEN-carrier-on-a-queued-PR-REFUSES', gatedOne.exitCode === EXIT_REFUSED_CARRIER && gatedOne.conclusion === 'refused', JSON.stringify(gatedOne.exitCode));
-  const bareOne = carrierRun(EVENT_MERGE_GROUP, [5], { 5: 'bare' });
-  assert('a-queued-PR-without-the-carrier-PASSES', bareOne.exitCode === EXIT_CLEAR && bareOne.conclusion === 'clear', JSON.stringify(bareOne.exitCode));
-  const unreadableOne = carrierRun(EVENT_MERGE_GROUP, [5], { 5: 'unreadable' });
-  assert(
-    'an-unreadable-label-set-REFUSES-with-its-OWN-code-never-passes',
-    unreadableOne.exitCode === EXIT_REFUSED_CARRIER_UNREADABLE && unreadableOne.conclusion === 'refused',
-    JSON.stringify(unreadableOne.exitCode),
-  );
-  const noPull = carrierVerdict({ event: EVENT_MERGE_GROUP, pulls: [], readings: new Map(), apiCalls: 0 });
-  assert('a-merge-group-naming-NO-pull-request-REFUSES', noPull.exitCode === EXIT_REFUSED_CARRIER_UNREADABLE && noPull.refusalKind === 'no-pull');
-  const carrierMixed = carrierRun(EVENT_MERGE_GROUP, [11, 22], { 11: 'gated', 22: 'bare' });
-  assert(
-    '⭐ a-bare-PR-does-NOT-carry-a-gated-sibling-through-the-group',
-    carrierMixed.exitCode === EXIT_REFUSED_CARRIER,
-    'PR B being clean is not a reading about PR A',
-  );
-  // A reading that never arrived is not a pass either — the same fail-closed
-  // default `guardVerdict` gives an approval nobody recorded.
-  const missingReading = carrierVerdict({ event: EVENT_MERGE_GROUP, pulls: [5], readings: new Map(), apiCalls: 1 });
-  assert('a-pull-with-NO-recorded-reading-REFUSES-rather-than-defaulting-to-bare', missingReading.exitCode === EXIT_REFUSED_CARRIER_UNREADABLE);
-
-  // The pull_request leg: not applicable, silent, and it never reads a label.
-  const carrierPrLeg = carrierVerdict({ event: EVENT_PULL_REQUEST, pulls: [5], readings: new Map() });
-  assert('the-pull_request-leg-is-NOT-APPLICABLE-and-exits-clear', carrierPrLeg.conclusion === 'not-applicable' && carrierPrLeg.exitCode === EXIT_CLEAR);
-  assert('the-pull_request-leg-renders-NOTHING-so-that-legs-output-stays-byte-identical', renderCarrierVerdict(carrierPrLeg) === '');
-  let labelsTouched = 0;
-  const explodeLabels = () => {
-    labelsTouched += 1;
-    throw new Error('the carrier leg must not read a label on the pull_request leg');
-  };
-  const prLegRun = await runCarrierGuard({ event: EVENT_PULL_REQUEST, rows: [carrierRow(5)], fetchLabels: explodeLabels });
-  assert(
-    'the-pull_request-leg-makes-ZERO-label-reads-measured-with-a-spy-that-THROWS',
-    labelsTouched === 0 && prLegRun.apiCalls === 0 && prLegRun.conclusion === 'not-applicable',
-    `labelsTouched=${labelsTouched}`,
-  );
-
-  // End to end through `runCarrierGuard`, with the reader injected.
-  const e2eGated = await runCarrierGuard({
-    event: EVENT_MERGE_GROUP,
-    rows: [carrierRow(11), carrierRow(22)],
-    fetchLabels: async (pull) => (pull === 11 ? ['size/s', CONTRACT_REVIEW_LABEL] : ['size/s']),
-  });
-  assert(
-    'end-to-end-one-label-read-per-queued-PR-and-the-open-carrier-refuses',
-    e2eGated.apiCalls === 2 && e2eGated.exitCode === EXIT_REFUSED_CARRIER,
-    JSON.stringify({ apiCalls: e2eGated.apiCalls, exit: e2eGated.exitCode }),
-  );
-  const e2eThrows = await runCarrierGuard({
-    event: EVENT_MERGE_GROUP,
-    rows: [carrierRow(11)],
-    fetchLabels: async () => {
-      throw new Error('GET /repos/o/r/pulls/11 answered HTTP 403');
-    },
-  });
-  assert(
-    'a-throwing-label-read-becomes-a-REFUSAL-and-never-escapes-as-a-rejection',
-    e2eThrows.exitCode === EXIT_REFUSED_CARRIER_UNREADABLE && /403/.test(renderCarrierVerdict(e2eThrows)),
-    renderCarrierVerdict(e2eThrows),
-  );
-
-  // The words a reader acts on.
-  const gatedText = renderCarrierVerdict(gatedOne);
-  assert(
-    'the-refusal-QUOTES-the-rule-verbatim-untranslated',
-    gatedText.includes('双肢命中任一 ⇒ 无席内条款②复核 PASS 在案 ⛔ 禁止入队') && gatedText.includes('开着的载体恒 = 真实待审'),
-    gatedText,
-  );
-  assert(
-    'the-refusal-NAMES-WHO-CAN-ACT-and-forbids-stripping-the-label-to-get-past-it',
-    /同席剥标/.test(gatedText) && /Stripping the label to get past this check/.test(gatedText) && /DRAFT/.test(gatedText),
-    gatedText,
-  );
-  assert(
-    'the-unreadable-refusal-names-the-cause-and-reads-as-a-refusal-not-a-pass',
-    /could NOT be read/.test(renderCarrierVerdict(unreadableOne)) && /REFUSED/.test(renderCarrierVerdict(unreadableOne)),
-    renderCarrierVerdict(unreadableOne),
-  );
-  assert(
-    '⭐ the-CLEAR-states-the-label-not-verdict-boundary-so-green-is-never-read-as-the-review-happened',
-    /reads the LABEL, not the verdict/.test(renderCarrierVerdict(bareOne)) && /check-clause2-carriers/.test(renderCarrierVerdict(bareOne)),
-    renderCarrierVerdict(bareOne),
-  );
-
-  // The label reader's own contract — same shape as the two readers beside it.
-  const labelArgs = { apiUrl: 'https://api.example', slug: 'o/r', token: null };
-  const fakeLabelRes = (body, ok = true, status = 200) => async () => ({ ok, status, json: async () => body });
-  assert(
-    'the-label-reader-answers-the-names-on-the-PULL-object-the-scope-already-granted',
-    JSON.stringify(await makeLabelReader({ ...labelArgs, fetchImpl: fakeLabelRes({ labels: [{ name: 'a' }, { name: CONTRACT_REVIEW_LABEL }] }) })(7)) ===
-      JSON.stringify(['a', CONTRACT_REVIEW_LABEL]),
-  );
-  const labelReaderThrow = async (fetchImpl) => {
-    try {
-      await makeLabelReader({ ...labelArgs, fetchImpl })(7);
-      return null;
-    } catch (error) {
-      return String(error?.message ?? error);
-    }
-  };
-  assert('a-non-2xx-label-read-throws-with-its-status', /HTTP 403/.test(await labelReaderThrow(fakeLabelRes({}, false, 403))));
-  assert(
-    'a-body-with-no-labels-array-throws-never-silently-reads-as-an-absent-carrier',
-    /no labels array/.test(await labelReaderThrow(fakeLabelRes({}))),
-  );
-
-  // ⭐ #15406's constraint, re-measured for this leg: the merge_group zero-cost
-  // clear is now SCOPED (this leg took its promise away), while the
-  // pull_request one keeps its pre-#17040 bytes exactly.
-  const clearMg = renderGuardVerdict(guardVerdict({ event: EVENT_MERGE_GROUP, governed: [], unattributed: [], apiCalls: 0 }));
-  const clearPr = renderGuardVerdict(guardVerdict({ event: EVENT_PULL_REQUEST, governed: [], unattributed: [], apiCalls: 0 }));
-  assert(
-    '⭐ the-merge_group-zero-cost-clear-SCOPES-its-outage-promise-because-the-carrier-leg-took-it-away',
-    clearMg.includes('Scoped to the GOVERNED-SURFACE leg') && clearMg.includes('An outage there DOES refuse this merge group.'),
-    clearMg,
-  );
-  assert(
-    'the-pull_request-zero-cost-clear-keeps-its-pre-17040-bytes-carrying-NO-carrier-note',
-    !clearPr.includes('Scoped to the GOVERNED-SURFACE leg') && clearPr.includes('so a GitHub API outage can never block a diff that touches nothing governed.'),
-    clearPr,
-  );
-
-  // ── the replay: the eleven measured enqueues of 2026-09-09 ───────────────
-  //
-  // Carrier state at `added_to_merge_queue`, read from each PR's own event log
-  // (`GET /repos/{o}/{r}/issues/{n}/events`), not from the card's prose. The
-  // six `carrier: false` rows are the boundary this leg does NOT cover: the
-  // label was stripped before the enqueue with no verdict on record for that
-  // head, and one of them (objectui#8164) landed a real published-face defect.
-  const INCIDENTS_17040 = [
-    { pr: 8723, repo: 'objectui', carrier: true, note: 'enqueued 01:58:38Z, carrier stripped 02:11:28Z — after' },
-    { pr: 16998, repo: 'objectstack', carrier: true, note: 'enqueued 02:02:08Z, carrier stripped 02:10:51Z — after' },
-    { pr: 16783, repo: 'objectstack', carrier: true, note: 'enqueued 06:11:15Z, carrier NEVER stripped, merged carrying it' },
-    { pr: 17036, repo: 'objectstack', carrier: true, note: 'enqueued 04:46:19Z, carrier NEVER stripped, merged carrying it' },
-    { pr: 8779, repo: 'objectui', carrier: true, note: 'enqueued 06:26:20Z, carrier NEVER stripped, merged carrying it' },
-    { pr: 17085, repo: 'objectstack', carrier: false, note: 'stripped 07:38:11Z, enqueued 07:39:41Z — 90s, no verdict on record' },
-    { pr: 8795, repo: 'objectui', carrier: false, note: 'stripped 09:41:40Z, enqueued 09:42:27Z — 47s, PASS posted 6s after the strip' },
-    { pr: 8796, repo: 'objectui', carrier: false, note: 'stripped 10:28:43Z, enqueued 10:28:53Z — 10s, verdict of record was CHANGES REQUIRED' },
-    { pr: 17067, repo: 'objectstack', carrier: false, note: 'stripped 07:51:52Z, enqueued 11:42:45Z — newest verdict was FAIL' },
-    { pr: 8799, repo: 'objectui', carrier: false, note: 'stripped 11:23:13Z, enqueued 11:23:24Z — 11s, no verdict on the new head' },
-    { pr: 8164, repo: 'objectui', carrier: false, note: 'stripped 2026-09-08, enqueued 11:59:19Z — SELF-REVIEW, real defect landed' },
-  ];
-  for (const incident of INCIDENTS_17040) {
-    const replay = await runCarrierGuard({
-      event: EVENT_MERGE_GROUP,
-      rows: [carrierRow(incident.pr)],
-      fetchLabels: async () => (incident.carrier ? ['priority:p2', CONTRACT_REVIEW_LABEL] : ['priority:p2']),
-    });
-    const expected = incident.carrier ? EXIT_REFUSED_CARRIER : EXIT_CLEAR;
-    assert(
-      `replay-${incident.repo}#${incident.pr}-${incident.carrier ? 'REFUSED' : 'passes (the boundary)'}`,
-      replay.exitCode === expected,
-      `${incident.note} — expected ${expected}, got ${replay.exitCode}`,
-    );
-  }
-  assert(
-    '⭐ the-replay-population-splits-5-refused-6-passed-and-that-second-number-is-the-honest-limit',
-    INCIDENTS_17040.filter((i) => i.carrier).length === 5 && INCIDENTS_17040.filter((i) => !i.carrier).length === 6,
-    JSON.stringify(INCIDENTS_17040.map((i) => [i.pr, i.carrier])),
-  );
 
   // ── ⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed ─
   //
@@ -3670,12 +3146,45 @@ export async function selfTest() {
   battery('⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed');
   const LINE = HUMAN_MERGE_LINE_THRESHOLD;
   const sizePair = (additions, deletions, source = 'GET /repos/o/r/pulls/1') => ({ additions, deletions, source });
+  // The enumeration this leg reads: per commit, deduplicated, the queue ref
+  // consulted only when nothing is attributed (#9902's direction).
+  const queuedRow = (pr, sha = 'a'.repeat(40)) => ({ sha, subject: `x (#${pr})`, pr, paths: ['README.md'] });
+  assert(
+    'the-group-enumeration-is-per-commit-deduplicated-and-in-group-order',
+    JSON.stringify(queuedPullsInGroup([queuedRow(7), queuedRow(3), queuedRow(7)])) === JSON.stringify([7, 3]),
+    JSON.stringify(queuedPullsInGroup([queuedRow(7), queuedRow(3), queuedRow(7)])),
+  );
+  assert(
+    '⛔ the-queue-head-ref-is-NOT-the-key-when-the-decomposition-attributed-pull-requests',
+    JSON.stringify(queuedPullsInGroup([queuedRow(11), queuedRow(22)], 22)) === JSON.stringify([11, 22]),
+    'the head ref names only the last PR; keying the leg to it lets an earlier oversized PR ride in behind it',
+  );
+  assert(
+    'the-queue-head-ref-IS-consulted-when-nothing-else-attributes-a-pull-request',
+    JSON.stringify(queuedPullsInGroup([{ sha: 'b'.repeat(40), subject: 'no pr here', pr: null, paths: [] }], 99)) === JSON.stringify([99]),
+  );
+  assert('no-rows-and-no-head-ref-enumerate-nothing', queuedPullsInGroup([], null).length === 0 && queuedPullsInGroup(undefined, 0).length === 0);
+  // ⭐ #15406's constraint, re-measured for this leg: the merge_group zero-cost
+  // clear is SCOPED (this leg reads every queued pull request there), while the
+  // pull_request one keeps its 2026-08-27 bytes exactly.
+  const clearMg = renderGuardVerdict(guardVerdict({ event: EVENT_MERGE_GROUP, governed: [], unattributed: [], apiCalls: 0 }));
+  const clearPr = renderGuardVerdict(guardVerdict({ event: EVENT_PULL_REQUEST, governed: [], unattributed: [], apiCalls: 0 }));
+  assert(
+    '⭐ the-merge_group-zero-cost-clear-SCOPES-its-outage-promise-because-the-size-leg-reads-every-queued-PR',
+    clearMg.includes('Scoped to the GOVERNED-SURFACE leg') && clearMg.includes('An outage there DOES refuse this merge group.'),
+    clearMg,
+  );
+  assert(
+    'the-pull_request-zero-cost-clear-keeps-its-2026-08-27-bytes-carrying-NO-size-note',
+    !clearPr.includes('Scoped to the GOVERNED-SURFACE leg') && clearPr.includes('so a GitHub API outage can never block a diff that touches nothing governed.'),
+    clearPr,
+  );
   assert(
     'the-two-size-codes-are-distinct-non-zero-and-collide-with-no-other-code',
     new Set([
       EXIT_CLEAR, EXIT_CANNOT_RUN, EXIT_REFUSED_UNAPPROVED, EXIT_REFUSED_UNREADABLE, EXIT_REFUSED_UNATTRIBUTED,
-      EXIT_REFUSED_CARRIER, EXIT_REFUSED_CARRIER_UNREADABLE, EXIT_REFUSED_OVERSIZED, EXIT_REFUSED_SIZE_UNREADABLE,
-    ]).size === 9 && EXIT_REFUSED_OVERSIZED !== 0 && EXIT_REFUSED_SIZE_UNREADABLE !== 0,
+      EXIT_REFUSED_OVERSIZED, EXIT_REFUSED_SIZE_UNREADABLE,
+    ]).size === 7 && EXIT_REFUSED_OVERSIZED !== 0 && EXIT_REFUSED_SIZE_UNREADABLE !== 0,
     JSON.stringify([EXIT_REFUSED_OVERSIZED, EXIT_REFUSED_SIZE_UNREADABLE]),
   );
   // The reader: the pair rides the SAME pull read the head does.
@@ -3742,18 +3251,18 @@ export async function selfTest() {
   let sizeReadsOnPr = 0;
   const sizePrRun = await runSizeGuard({
     event: EVENT_PULL_REQUEST,
-    rows: [carrierRow(5)],
+    rows: [queuedRow(5)],
     fetchPull: () => {
       sizeReadsOnPr += 1;
       throw new Error('the size leg must not read on the pull_request leg');
     },
   });
   assert('and-makes-ZERO-pull-reads-there-measured-with-a-spy-that-THROWS', sizeReadsOnPr === 0 && sizePrRun.apiCalls === 0 && sizePrRun.conclusion === 'not-applicable');
-  // End to end through the orchestrator: one pull read per queued PR, the enumeration the carrier leg's.
+  // End to end through the orchestrator: one pull read per queued PR, the enumeration `queuedPullsInGroup`'s.
   const sizeReads = [];
   const e2eSize = await runSizeGuard({
     event: EVENT_MERGE_GROUP,
-    rows: [carrierRow(11), carrierRow(22), carrierRow(11)],
+    rows: [queuedRow(11), queuedRow(22), queuedRow(11)],
     fetchPull: async (pr) => {
       sizeReads.push(pr);
       return pull(HEAD, { size: pr === 11 ? sizePair(LINE, 1) : sizePair(1, 0) });
@@ -3762,13 +3271,13 @@ export async function selfTest() {
   assert(
     '⭐ end-to-end-ONE-pull-read-per-queued-PR-deduplicated-in-group-order-and-the-oversized-one-refuses',
     sizeReads.join() === '11,22' && e2eSize.apiCalls === 2 &&
-      e2eSize.apiCalls === carrierPullsInGroup([carrierRow(11), carrierRow(22), carrierRow(11)]).length && e2eSize.exitCode === EXIT_REFUSED_OVERSIZED,
+      e2eSize.apiCalls === queuedPullsInGroup([queuedRow(11), queuedRow(22), queuedRow(11)]).length && e2eSize.exitCode === EXIT_REFUSED_OVERSIZED,
     JSON.stringify({ reads: sizeReads, apiCalls: e2eSize.apiCalls, exit: e2eSize.exitCode }),
   );
   let sizeUrl = '';
   const e2eReader = await runSizeGuard({
     event: EVENT_MERGE_GROUP,
-    rows: [carrierRow(42)],
+    rows: [queuedRow(42)],
     fetchPull: makePullReader({
       ...readerArgs,
       fetchImpl: async (url) => {
@@ -3784,7 +3293,7 @@ export async function selfTest() {
   );
   const e2eSizeThrows = await runSizeGuard({
     event: EVENT_MERGE_GROUP,
-    rows: [carrierRow(11)],
+    rows: [queuedRow(11)],
     fetchPull: async () => {
       throw new Error('GET /repos/o/r/pulls/11 answered HTTP 403');
     },
@@ -3794,7 +3303,7 @@ export async function selfTest() {
     e2eSizeThrows.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && /403/.test(renderSizeVerdict(e2eSizeThrows)) && /REFUSED/.test(renderSizeVerdict(e2eSizeThrows)),
     renderSizeVerdict(e2eSizeThrows),
   );
-  const e2eNoPair = await runSizeGuard({ event: EVENT_MERGE_GROUP, rows: [carrierRow(11)], fetchPull: async () => pull() });
+  const e2eNoPair = await runSizeGuard({ event: EVENT_MERGE_GROUP, rows: [queuedRow(11)], fetchPull: async () => pull() });
   assert(
     '⛔ a-pull-object-with-no-pair-is-exit-9-too',
     e2eNoPair.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && /no `additions` \/ `deletions` pair/.test(renderSizeVerdict(e2eNoPair)),
@@ -3813,12 +3322,11 @@ export async function selfTest() {
     rows: pr18971,
     fetchPull: async () => pull(HEAD, { size: sizePair(238310, 119, 'GET /repos/objectstack-ai/objectstack/pulls/18971') }),
   });
-  const c18971 = await runCarrierGuard({ event: EVENT_MERGE_GROUP, rows: pr18971, fetchLabels: async () => ['size/xl'] });
-  const exit18971 = groupExitCode({ governed: g18971, size: s18971, carrier: c18971 });
+  const exit18971 = groupExitCode({ governed: g18971, size: s18971 });
   assert(
     '⭐ #18971-replay-an-OVERSIZED-PR-with-NO-governed-path-is-REFUSED-at-the-queue-on-the-size-code',
-    g18971.conclusion === 'clear' && g18971.apiCalls === 0 && s18971.exitCode === EXIT_REFUSED_OVERSIZED && c18971.exitCode === EXIT_CLEAR && exit18971 === EXIT_REFUSED_OVERSIZED,
-    JSON.stringify({ governed: g18971.conclusion, size: s18971.exitCode, carrier: c18971.exitCode, exit: exit18971 }),
+    g18971.conclusion === 'clear' && g18971.apiCalls === 0 && s18971.exitCode === EXIT_REFUSED_OVERSIZED && exit18971 === EXIT_REFUSED_OVERSIZED,
+    JSON.stringify({ governed: g18971.conclusion, size: s18971.exitCode, exit: exit18971 }),
   );
   const text18971 = renderSizeVerdict(s18971);
   assert(
@@ -3842,11 +3350,10 @@ export async function selfTest() {
   const bothRows = [row(9527, ['AGENTS.md', 'packages/x.ts'])];
   const gBoth = await runGuard({ event: EVENT_MERGE_GROUP, rows: bothRows, fetchReviews: async () => [], fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }), fetchComments: async () => [] });
   const sBoth = await runSizeGuard({ event: EVENT_MERGE_GROUP, rows: bothRows, fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }) });
-  const cBare = carrierVerdict({ event: EVENT_MERGE_GROUP, pulls: [9527], readings: new Map([[9527, { pr: 9527, state: 'bare', labels: [] }]]), apiCalls: 1 });
   assert(
     '⭐ governed-AND-oversized-prints-BOTH-limbs-and-exits-on-the-GOVERNED-code',
     gBoth.exitCode === EXIT_REFUSED_UNAPPROVED && sBoth.exitCode === EXIT_REFUSED_OVERSIZED &&
-      groupExitCode({ governed: gBoth, size: sBoth, carrier: cBare }) === EXIT_REFUSED_UNAPPROVED &&
+      groupExitCode({ governed: gBoth, size: sBoth }) === EXIT_REFUSED_UNAPPROVED &&
       /REFUSED/.test(renderGuardVerdict(gBoth)) && /REFUSED/.test(renderSizeVerdict(sBoth)),
     JSON.stringify([gBoth.exitCode, sBoth.exitCode]),
   );
@@ -3859,7 +3366,7 @@ export async function selfTest() {
   });
   assert(
     '⛔ an-authorized-APPROVAL-clears-the-path-limb-and-lifts-NOTHING-from-the-size-the-group-still-exits-8',
-    gApprovedBig.conclusion === 'cleared' && groupExitCode({ governed: gApprovedBig, size: sBoth, carrier: cBare }) === EXIT_REFUSED_OVERSIZED,
+    gApprovedBig.conclusion === 'cleared' && groupExitCode({ governed: gApprovedBig, size: sBoth }) === EXIT_REFUSED_OVERSIZED,
   );
   // The lift lifts a PATH, never the number: rows whose every path the register
   // lifted still pay the size.
@@ -3869,19 +3376,17 @@ export async function selfTest() {
     fetchPull: async () => pull(HEAD, { size: sizePair(237706, 0) }),
   });
   assert('⭐ a-certified-pure-regeneration-lifts-the-PATH-and-lifts-NOTHING-from-the-size-at-the-queue-either', liftedAll.exitCode === EXIT_REFUSED_OVERSIZED);
-  // The exit precedence, the whole table. A group naming NO pull request now
-  // answers on 9 rather than the carrier's 7 — both blocks still print their
-  // own refusal; only the code changed hands, and it is pinned here.
+  // The exit precedence, the whole table: a group naming NO pull request
+  // answers on 9 — both blocks still print their own refusal, and the code is
+  // pinned here.
   const exitOf = (n) => ({ exitCode: n });
   assert(
-    '⭐ groupExitCode-precedence-governed-THEN-size-THEN-carrier-pinned-on-every-combination',
-    groupExitCode({ governed: exitOf(0), size: exitOf(0), carrier: exitOf(0) }) === EXIT_CLEAR &&
-      groupExitCode({ governed: exitOf(0), size: exitOf(0), carrier: exitOf(EXIT_REFUSED_CARRIER) }) === EXIT_REFUSED_CARRIER &&
-      groupExitCode({ governed: exitOf(0), size: exitOf(EXIT_REFUSED_OVERSIZED), carrier: exitOf(EXIT_REFUSED_CARRIER) }) === EXIT_REFUSED_OVERSIZED &&
-      groupExitCode({ governed: exitOf(EXIT_REFUSED_UNAPPROVED), size: exitOf(EXIT_REFUSED_OVERSIZED), carrier: exitOf(EXIT_REFUSED_CARRIER) }) === EXIT_REFUSED_UNAPPROVED &&
-      groupExitCode({ governed: exitOf(EXIT_REFUSED_UNREADABLE), size: exitOf(0), carrier: exitOf(EXIT_REFUSED_CARRIER_UNREADABLE) }) === EXIT_REFUSED_UNREADABLE &&
-      groupExitCode({ governed: exitOf(0), size: exitOf(EXIT_REFUSED_SIZE_UNREADABLE), carrier: exitOf(0) }) === EXIT_REFUSED_SIZE_UNREADABLE &&
-      groupExitCode({ governed: exitOf(0), size: exitOf(EXIT_REFUSED_SIZE_UNREADABLE), carrier: exitOf(EXIT_REFUSED_CARRIER_UNREADABLE) }) === EXIT_REFUSED_SIZE_UNREADABLE,
+    '⭐ groupExitCode-precedence-governed-THEN-size-pinned-on-every-combination',
+    groupExitCode({ governed: exitOf(0), size: exitOf(0) }) === EXIT_CLEAR &&
+      groupExitCode({ governed: exitOf(0), size: exitOf(EXIT_REFUSED_OVERSIZED) }) === EXIT_REFUSED_OVERSIZED &&
+      groupExitCode({ governed: exitOf(EXIT_REFUSED_UNAPPROVED), size: exitOf(EXIT_REFUSED_OVERSIZED) }) === EXIT_REFUSED_UNAPPROVED &&
+      groupExitCode({ governed: exitOf(EXIT_REFUSED_UNREADABLE), size: exitOf(0) }) === EXIT_REFUSED_UNREADABLE &&
+      groupExitCode({ governed: exitOf(0), size: exitOf(EXIT_REFUSED_SIZE_UNREADABLE) }) === EXIT_REFUSED_SIZE_UNREADABLE,
   );
   // The words on the clear path: the numbers are printed, so a log shows what a
   // landing was judged on.
@@ -4560,12 +4065,8 @@ export async function selfTest() {
       'dependency install the recompute needs, its register-agnostic filter-free form, and its continue-on-error ' +
       'degradation), and the #15406 replay of PR #15284 — a clear reached THROUGH a lift no longer reports itself as a ' +
       'clear that matched nothing, while the zero-cost clear keeps its wording byte-for-byte on the pull_request ' +
-      'leg and is SCOPED on the merge_group one, because #17040 added a second queue predicate there: the ' +
-      'contract-review carrier, read from the pull object under the scope the review read already needs, ' +
-      'fail-closed on an unreadable label set and on a group naming no pull request, enumerated per commit so a ' +
-      'bare PR cannot carry a gated sibling through, silent and read-free on the pull_request leg, and replayed ' +
-      'against the eleven measured enqueues of 2026-09-09 — five refused, six passed, that second number being ' +
-      'the boundary a label reader cannot cross — and the #18020 references TIER, re-keyed to Tier S by #19133: a ' +
+      'leg and is SCOPED on the merge_group one, because the size leg reads every queued pull request there — ' +
+      'and the #18020 references TIER, re-keyed to Tier S by #19133: a ' +
       'governed diff whose governed paths are ALL Tier S — the register\'s `.claude/**` row, asked through ' +
       '`governedTierFor`, never a prefix repeated here — lands on the owning seat\'s review of record instead of an ' +
       'authorized approval, with the record recognisers IMPORTED through a lazy load whose precondition (no ' +
@@ -4581,7 +4082,7 @@ export async function selfTest() {
       'remedy printed; exactly the threshold clear; a governed AND oversized group printing both limbs and exiting ' +
       'on the governed code; an authorized approval lifting nothing from the size; a certified regeneration lifting ' +
       'nothing from it either; an unreadable size or a pull object without the pair FAIL-CLOSED on exit 9; the ' +
-      'pull_request leg silent and read-free; and the three-leg exit precedence (governed, size, carrier) pinned on ' +
+      'pull_request leg silent and read-free; and the two-leg exit precedence (governed, size) pinned on ' +
       'every combination — and the #19344 remedy pin: every limb names the Merge button\'s bypass-rules option, ' +
       'judged against the recorded ruleset reading, red on a present-and-empty `bypass_actors` and on a remedy ' +
       'drifting back to a bare click, and passing with the reading PRINTED when the field is unreadable.',

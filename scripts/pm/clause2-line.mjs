@@ -30,13 +30,13 @@
  * `pnpm install`, and both gates stage their own first-party closure into a
  * throwaway repo for their I1/I2 fixtures.
  *
- * ⚠️ This file is STEP ① of that ruling and nothing else of it has landed yet:
- * the `needs:contract-review` label, `check-clause2-carriers.mjs --pair`, the
- * double-carrier discipline and the independence pair are retired BY THE RULING
- * and still RUN in this tree — the label exists, `--pair` still judges its C4 /
- * C6 / C7 rows, and `check-governed-merges.mjs` still prescribes `--pair N` at
- * 0 — until step ② (the rule text) and step ③ (the label) land. ⛔ Read the
- * paragraph above as what was DECIDED, never as what this tree already does.
+ * This file was STEP ① of that ruling; step ② retired the rule text and step ③
+ * the label — its constant, the queue guard's label leg, the half-state rows
+ * that patrolled it and the changeset gate's label carrier are gone from this
+ * tree. What still stands beside this reader is `check-clause2-carriers.mjs`,
+ * kept only because the queue guard's Tier S leg lazily imports its record
+ * recognisers and `--template`; its `--pair` sweep is retired by the ruling and
+ * nothing runs it, and the file goes once those recognisers are extracted.
  *
  * ## ⛔ One reader, and this is it
  *

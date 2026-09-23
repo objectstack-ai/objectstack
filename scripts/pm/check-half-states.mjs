@@ -2705,18 +2705,17 @@ export function branchNameTarget(ref) {
  *
  * ⚠️ This relation answers "is there a PR on this card", NOT "is the card
  * finished". H8's MERGED side needs the second question and asks it of
- * `prFullyDeliversCard` below; every other reader here — H8's open side, H31's
- * carrier comparison, `claimDelivery`, and the pairing `check-clause2-carriers`
- * derives — wants this wide one, because a half in flight is live work. ⛔ Do
+ * `prFullyDeliversCard` below; every other reader here — H8's open side,
+ * `claimDelivery`, and the pairing `check-clause2-carriers` derives — wants
+ * this wide one, because a half in flight is live work. ⛔ Do
  * not narrow it here to serve H8: that would make the live half invisible to
  * the rows that exist to see it.
  *
- * ⭐ And ⛔ not to serve H31 either (#18229). That row needs a stronger question
- * — "does this PR CLOSE the card", because the gate's clearing stroke rides the
- * landing — and it asks it of `bindingClosesCard` as a filter over the
- * population THIS relation hands it. The narrowing is the READER's and lives
- * beside the row that needs it; the relation stays wide, so H8, H31, H35 and
- * H53 still cannot disagree about which PR delivers which card.
+ * ⭐ And ⛔ not narrowed for a reader that needs the stronger question either
+ * (#18229) — "does this PR CLOSE the card" is asked of `bindingClosesCard` as a
+ * filter over the population THIS relation hands it. The narrowing is the
+ * READER's and lives beside the reader that needs it; the relation stays wide,
+ * so every reader still agrees about which PR delivers which card.
  *
  * ## The boolean is DERIVED from `deliveryEvidence`, and stays byte-identical
  *
@@ -2737,9 +2736,9 @@ export function prDeliversCard(pr, n) {
  *
  * ## The defect this exists for (#16706)
  *
- * `prDeliversCard` answers one bit, and five readers print rows from it — H8's
- * open side, H31's carrier comparison, `claimDelivery`, the pairing
- * `check-clause2-carriers` derives, and `prFullyDeliversCard`, which calls it
+ * `prDeliversCard` answers one bit, and four readers print rows from it — H8's
+ * open side, `claimDelivery`, the pairing `check-clause2-carriers` derives, and
+ * `prFullyDeliversCard`, which calls it
  * first. A `true` sourced from a closing keyword and a `true` sourced from the
  * two words `part of` landing in an accounting sentence printed IDENTICALLY, so
  * a row manufactured by the second was indistinguishable from a real finding —
@@ -3595,8 +3594,7 @@ export const PM_STATE_LABELS = [
  * The ruling-anchor state: a card that stays OPEN by design, so nothing that
  * fires on a CLOSURE ever fires on it. H9's header carries the measurement
  * (`Restart-when: closed …#5499` parked a card forever because #5499 is one of
- * these), and H31 reads it for the same structural reason — a gate hung on a
- * card nothing closes is never cleared by the stroke that clears gates.
+ * these).
  *
  * One spelling, two readers: a second literal here is exactly the drift that
  * lets one reader move and the other keep answering the old way.
@@ -6681,101 +6679,12 @@ export function h30QueueRotting(issue, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
-// H31 — the contract-review gate carried on ONE of its two carriers (#11179).
-//
-// `needs:contract-review` is a DUAL-carrier gate: the ruling
-// (maintainer 2026-08-22, 「简化一点是否可以直接挂 PR 侧」「两边都挂好」) puts it
-// on the card AND on the PR, hung in one stroke and — the half that failed —
-// cleared in one stroke, each carrier written through the label discipline's
-// read-modify-write + read-back (SKILL.md 2026-08-18: 「承载闸门语义的标签……挂与
-// 清两向同此四步,闸门被剥不是红灯是放行」).
-//
-// Two writes, one postcondition, and nothing ever checked the pair. The
-// measured miss: a PASS verdict was posted, the PR carrier was cleared, and the
-// card carrier was not — so the card stayed gated behind a review that had
-// already passed, and the only evidence that anything was wrong was the label
-// itself, on a card nobody was looking at.
-//
-// The other direction is the dangerous one and the same row catches it: a gate
-// stripped from the card while the PR still carries it reads, to the enqueue
-// path, as a card that was never gated. 「闸门被剥不是红灯是放行」 — a stripped
-// gate is a GREEN light, and 「被剥」 and 「从未挂过」 are indistinguishable in
-// the evidence. A row comparing the two carriers is the only reader that can
-// tell them apart.
-//
-// LIVE at the time of writing (2026-08-24): card #11427 carries the gate while
-// its delivering open PR #11844 does not.
-//
-// ## The silence that is NOT a bug: a card with no delivering open PR
-//
-// `references/contract-review.md` makes card-side-FIRST legal and expected:
-// 「PR 一存在即挂,报告先于 PR 到达则先挂卡侧、ACCEPT 时补齐 PR 侧」. So a gated
-// card with no PR yet is a correct intermediate state, not a premature hang,
-// and this row stays silent on it — deliberately declining the "gate label on a
-// card with no PR carrier is premature" shape, which would report the protocol's
-// own prescribed sequence as a defect. The comparison begins when a delivering
-// PR exists, which is exactly when the pair becomes checkable.
-//
-// ## Free, and bounded
-//
-// The open-PR listing is already in hand (H7/H12/H21 list it, H8 already passes
-// it around for the same delivery question), and the delivery relation is
-// `prDeliversCard` — the same body-first/branch-fallback relation H8 reads, so
-// this row can never disagree with H8 about which PR delivers which card. No
-// request, no new parser. MERGED PRs are deliberately out of scope: the gate
-// governs enqueue and landing while the PR is open, and a merged carrier is a
-// closed-out stroke rather than a live half-write.
-//
-// ## Which binding makes a CARRIER PAIR (#18229)
-//
-// The comparison needs two carriers of ONE gate, and the gate is cleared by the
-// stroke that lands the increment. So the binding that puts a card into it is
-// the one that makes that landing reach the card: a CLOSING KEYWORD. A
-// `Part of #N` line is the opposite declaration — it says the PR is a MEMBER of
-// what #N tracks — and an epic tracker is by construction a card no PR closes.
-//
-// Measured, anchor #9857's 2026-09-14T19:45Z sweep: card #14122 (`tracking`, the
-// one-artifact/N-packages epic) drew a row saying the gate was missing from the
-// card half of a dual carrier, while the two PRs the row named — #18212 and
-// #18213 — each carried `Fixes` for their OWN card (#18202, #18204), each of
-// which carried the gate, and each said in the same line the predicate read that
-// #14122 is a tracker that stays open. Both real dual carriers were intact. The
-// row's own remedy text is action-shaped, so acting on it means hanging
-// `needs:contract-review` on a card nothing closes: the clearing stroke never
-// arrives and the gate sits there as a permanent false blocker. This false
-// positive costs a WRITE nothing later removes, and every correctly gated
-// sub-PR re-manufactures it on every sweep, forever.
-//
-// ⛔ The shared relation is NOT narrowed — `prDeliversCard`'s docblock forbids
-// that, and H8's open side, H35's sibling resolver, `claimDelivery` and the
-// pairing `check-clause2-carriers` derives all still read it wide. The narrowing
-// is H31's OWN, one filter over the population THIS row judges, so the rows
-// still agree about which PR delivers which card and differ only about which
-// binding makes a carrier pair — which is a question only this row asks.
-//
-// ## …and every other binding is DECLINED, never silently dropped
-//
-// A silent drop would be #4690 in this row's own uniform: a split that was never
-// judged would render exactly like a board whose two carriers agree, and this is
-// the one row that can tell 「被剥」 from 「从未挂过」. So a weak-bound delivering PR
-// whose carrier DISAGREES with the card's still produces a row — one that names
-// both carriers and the binding it read, says the comparison is not answerable
-// from that binding, and prescribes NOTHING. A weak-bound PR whose carrier
-// AGREES produces nothing, exactly as before: there is no split to report, and a
-// standing row per tracker per sweep is the disease above, not its cure.
-//
-// Report-only, and emphatically: this is a GATE. ⛔ Never a label written from
-// this script — a sweeper that hung or cleared a review gate would be issuing
-// the review verdict, and the one thing the whole clause-② chain forbids is
-// 自查放行.
+// The closing-keyword binding — the stronger delivery question a sibling reads.
 // ---------------------------------------------------------------------------
 
-/** The clause-② gate label — one constant, both carriers. */
-export const CONTRACT_REVIEW_LABEL = 'needs:contract-review';
-
 /**
- * Does this PR's binding to card `n` make GitHub CLOSE the card on merge — the
- * binding H31's carrier comparison needs (#18229)?
+ * Does this PR's binding to card `n` make GitHub CLOSE the card on merge
+ * (#18229)?
  *
  * One read of `deliveryEvidence`'s grading, ⛔ never a second keyword parser:
  * that function grades the closing keyword FIRST and never lets position
@@ -6789,111 +6698,12 @@ export const CONTRACT_REVIEW_LABEL = 'needs:contract-review';
  * `prDeliversCard` owns the second question and stays wide for the readers that
  * need a half in flight to be visible. ⛔ Do not substitute one for the other.
  *
- * Exported because the sibling shape is live one file over: the clause-② dual
- * carrier that `check-clause2-carriers --pair` demands on an epic tracker
- * reached through a `Part of` line (#18214) is the same question, and that fix
- * wants this predicate rather than a second copy of it.
+ * Exported because `check-clause2-carriers.mjs` asks the same question of an
+ * epic tracker reached through a `Part of` line (#18214), and wants this
+ * predicate rather than a second copy of it.
  */
 export function bindingClosesCard(pr, n) {
   return deliveryEvidence(pr, n) === 'closing-keyword';
-}
-
-/**
- * H31 — null when the two carriers agree (or the comparison is not yet
- * possible), else the finding sentence, else — for a delivering PR bound to
- * this card by something other than a closing keyword — the DECLINED sentence.
- *
- * Three outcomes, never two (#18229). A closing-keyword binding is adjudicated
- * exactly as before, byte for byte. A weaker binding is never adjudicated and
- * never silently dropped: it produces a row only when the two carriers actually
- * differ, and that row states that it declined and prescribes no write. The
- * declined row is deliberately NOT marked `UNJUDGED_MARKER`: that marker buys
- * trim priority ahead of judged rows, and a decline must never sort ahead of a
- * real carrier split in the same `gate` band.
- *
- * A PR row whose `labels` is not an array is one this sweep could not read, and
- * it is EXCLUDED from the comparison rather than counted as unlabelled: reading
- * an unreadable carrier as a bare one would manufacture a finding out of a read
- * failure, which is the #4690 direction this file keeps in the one place it
- * actually matters — the direction that invents evidence.
- *
- * @param {object} issue — an OPEN issue.
- * @param {object[]} openPrs — the open-PR listing the sweep already holds.
- */
-export function h31ContractReviewCarrierSplit(issue, openPrs) {
-  if (issue?.state === 'closed') return null;
-  const n = String(issue?.number ?? '');
-  if (!n || n === '0') return null;
-  const delivering = (openPrs ?? []).filter(
-    (pr) => pr && !pr.merged_at && Array.isArray(pr.labels) && prDeliversCard(pr, n),
-  );
-  if (delivering.length === 0) return null; // card-side-first is legal — see the header note.
-  const cardGated = labelNames(issue ?? {}).includes(CONTRACT_REVIEW_LABEL);
-  // The population split the header argues for (#18229): only a closing keyword
-  // makes a landing that reaches THIS card, so only those PRs are a carrier pair
-  // with it. The rest are reported below, never judged, and never dropped.
-  const judged = delivering.filter((pr) => bindingClosesCard(pr, n));
-  const declined = delivering.filter((pr) => !bindingClosesCard(pr, n));
-  const gatedIn = (prs) => prs.filter((pr) => labelNames(pr).includes(CONTRACT_REVIEW_LABEL));
-  const bareIn = (prs) => prs.filter((pr) => !labelNames(pr).includes(CONTRACT_REVIEW_LABEL));
-  const gatedPrs = gatedIn(judged);
-  const barePrs = bareIn(judged);
-  // With its evidence (#16706) — this row names a PR as DELIVERING the card,
-  // and a reader clearing a gate off it needs to know whether that rests on a
-  // closing keyword or on a `Part of` that sat mid-line.
-  const list = (prs) => prs.map((p) => deliveryRef(p, n)).join(', ');
-  const contract =
-    'The gate is a DUAL carrier — 「两边都挂好」, hung in one stroke and cleared in one ' +
-    'stroke, each carrier written read-modify-write with a READ-BACK ' +
-    '(「闸门被剥不是红灯是放行」: a stripped gate is a GREEN light, and 「被剥」 and 「从未挂过」 are ' +
-    'indistinguishable in the evidence, so the read-back is the only way either is ever ' +
-    'noticed). Report-only: ⛔ never a label written from this script — hanging or clearing a ' +
-    'review gate from a sweeper would be issuing the verdict, which is 自查放行.';
-  if (cardGated && barePrs.length > 0) {
-    return (
-      `\`${CONTRACT_REVIEW_LABEL}\` on the CARD while its delivering open PR ${list(barePrs)} ` +
-      'does NOT carry it — the two carriers of one gate disagree, so the pair was written half ' +
-      'way: either the hang never reached the PR side (「PR 一存在即挂」, and the PR exists), or ' +
-      'a PASS cleared the PR side and stopped there, leaving the card gated behind a review that ' +
-      `has already passed. ${contract}`
-    );
-  }
-  if (!cardGated && gatedPrs.length > 0) {
-    return (
-      `\`${CONTRACT_REVIEW_LABEL}\` on the delivering open PR ${list(gatedPrs)} while the CARD ` +
-      'does NOT carry it — the more dangerous half of the same split: to the enqueue path an ' +
-      'ungated card is a card that was never gated, so the review chain this PR is still waiting ' +
-      'on is invisible to the queue, and the card can be enqueued straight past a gate that is ' +
-      `demonstrably still live one carrier over. ${contract}`
-    );
-  }
-  // Nothing adjudicable, or the adjudicable pair agrees. What is left is the
-  // weak-bound half: a PR this sweep believes delivers the card on evidence
-  // that does not close it. A DIFFERENCE there is still reportable — silence
-  // would render it identically to agreement, which is the one confusion this
-  // row exists to end — but it is not adjudicable, so the row says exactly that
-  // and asks for no write. Agreement here stays silent, as it was before.
-  const unjudgeable = cardGated ? bareIn(declined) : gatedIn(declined);
-  if (unjudgeable.length === 0) return null;
-  const anchorClause = labelNames(issue ?? {}).includes(TRACKING_ANCHOR_LABEL)
-    ? ` The card carries \`${TRACKING_ANCHOR_LABEL}\` — a ruling-anchor state that stays OPEN by design, the ` +
-      'same property that keeps a `Restart-when: closed …#N` exit from ever firing on one — so no PR will ' +
-      'close it, a gate hung here would never be reached by the stroke that clears gates, and it would sit ' +
-      'as a permanent blocker on a card whose sub-PRs are gated correctly one level down. '
-    : ' ';
-  const direction = cardGated
-    ? `the CARD carries \`${CONTRACT_REVIEW_LABEL}\` while the open PR ${list(unjudgeable)} does NOT`
-    : `\`${CONTRACT_REVIEW_LABEL}\` is on the open PR ${list(unjudgeable)} while the CARD does NOT carry it`;
-  return (
-    `${direction} — and this row DECLINES to judge that pair, which is NOT the same as reporting it ` +
-    'clean. The binding between the two is the one printed beside the PR number, and it is not a closing ' +
-    'keyword: a `Part of` line declares MEMBERSHIP in what this card tracks and a branch-name fallback ' +
-    'declares nothing at all, so neither says this PR\'s landing closes this card — and the gate\'s clearing ' +
-    `stroke rides that landing.${anchorClause}⛔ The row prescribes NOTHING: do not hang the gate on the ` +
-    'card and do not clear it off the PR on the strength of it. What is owed first is a reading of the PR ' +
-    'body — decide which card that PR actually delivers; only if a real half-write is behind it does anyone ' +
-    `write a carrier, and then it is the review's owner writing both in one stroke. ${contract}`
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -8407,359 +8217,6 @@ export function h34ClaimShapedNonCanonicalSeparator(issue, commentBodies) {
     '⛔ The patrol predicate is NOT widened to accept the separator this card used; that is the one ' +
     'repair the ruling closes. Report-only: ⛔ never a label written from this script.'
   );
-}
-
-// ---------------------------------------------------------------------------
-// H35 — a gate label REMOVED with no matching review-chain evidence (#11881).
-//
-// H31 above compares the gate's two carriers as they stand NOW and says, in its
-// own header, exactly what it cannot do: 「闸门被剥不是红灯是放行」 — a stripped
-// gate is a GREEN light, and 「被剥」 and 「从未挂过」 are indistinguishable in
-// the evidence. A label that was removed is ABSENT, and absence has two causes.
-// Every reader in this file until now has been a reader of STATE, so none of
-// them can separate the two. This row reads the EVENT that produced the state.
-//
-// The filing card's measurement is what makes the question concrete: on PR
-// #11470 the erasing actor was a SEAT (`claude[bot]`, 33 and 92 minutes after
-// the Auto Label job), not a workflow — so the whole-set-PUT gate that shipped
-// for that incident sweeps `.github/workflows/**`, `.github/actions/**` and
-// `scripts/**` and cannot reach the actor at all. Seats write through the API at
-// runtime. The compensating control the card asks for is DETECTION, and the
-// triage ruling (2026-08-25 14:58Z) scoped this card to exactly that: a
-// report-only patrol, adding detection and weakening no gate. ⛔ Escalation and
-// enforcement are a LATER card and deliberately absent here.
-//
-// ## The transport, and why this row costs no per-card fetch
-//
-// The obvious reading — fetch each card's timeline — is the trade this sweep
-// declines everywhere it arises (H15 declines it by name for the age of a
-// label; H16's header forbids "fixing" its proxy with one). This row does not
-// need it. `GET /repos/{repo}/issues/events` is a REPO-WIDE, newest-first
-// stream of the same `labeled`/`unlabeled` rows, and it carries the full issue
-// payload — number, state, CURRENT labels, body — on every row. So the whole
-// population is one paginated window of the shape this file already keeps three
-// of (H8's merged-PR window, H23's commit window, H22's closed-issue window),
-// and the per-card cost is zero. PRs arrive through it too: a pull request IS
-// an issue to this endpoint, which is what lets one window see both carriers of
-// a dual-carrier gate.
-//
-// MEASURED 2026-08-26T01:26:58Z, 160 pages: 16,000 events spanning
-// 2026-08-22T15:35:07Z … 2026-08-26T01:26:58Z = 3.41 days ⇒ ~4,691 events/day.
-//
-// ## What counts as "matching review-chain evidence" — and why it is STRUCTURAL
-//
-// `references/contract-review.md` names the evidence for a legitimate clear:
-// 「PASS 评论 + 标签缺失 + PR head 自复审后未动 = 已复审清标,不是被剥」. Read
-// literally that makes the discriminator a PASS COMMENT, and a predicate built
-// on it does not survive measurement. The verdicts are free prose and their
-// wording varies card to card — `**Contract review: PASS**`,
-// `**Contract review — PASS**`, `## Post-merge contract-review verdict: **PASS**`
-// were all live in one 18-hour window — so over the 35 card-side removals in
-// that window a strict marker matched 5 and a loose one matched 10. Widening
-// the regex until the rest match is the tolerant-consumer antipattern this repo
-// forbids by name, and its end state is worse than noise: an "any PASS token"
-// reading matched 26 of 35, including threads whose PASS was about something
-// else entirely — a check that can barely fail, which is the shape this file
-// exists to CATCH rather than to add.
-//
-// The protocol leaves a second, MACHINE-READABLE definition of the same event,
-// and this row uses that one: 「PR 与卡双载体同笔挂」…「PASS 双载体同笔清标」 —
-// the gate is hung in one stroke and cleared in one stroke, ACROSS BOTH
-// CARRIERS. A legitimate clear therefore leaves TWO removals, one per carrier,
-// seconds apart, by the same actor. A strip leaves ONE. That is a structural
-// invariant taken from the protocol's own words, not a parse of prose, and it
-// is the reason this row can decline the comment fetch as well as the timeline
-// fetch.
-//
-// ## The stroke window, derived from the measured gap distribution
-//
-// Same corpus, 206 gate removals: for each, the gap to the nearest removal on
-// the OPPOSITE carrier kind by the SAME actor.
-//
-//   ≤1s  50 | ≤2s  65 | ≤3s   5 | ≤5s  21 | ≤10s 16 | ≤30s 11 | ≤60s  4
-//   (60,90]s  0   ← the distribution is EMPTY here
-//   ≤120s 4 | ≤300s 1 | then 1000s, 3344s, … hours
-//
-// The same-stroke cluster ends at 101s and the next observation is 275s — a
-// 2.7x jump across an empty region. `H35_SAME_STROKE_SECONDS = 120` sits inside
-// that gap, so the threshold is a reading rather than a preference: no value
-// between 102 and 274 classifies the corpus differently. The tail past 120s is
-// hours wide, which is a different stroke by any reading. The batching is why
-// the cluster has width at all — the review Routine runs hourly and 「每小时一轮
-// 即天然攒批」, and a measured batch cleared 4 PRs + 4 cards in 14 seconds.
-//
-// ## Three outcomes, never two (#4690)
-//
-// A lone removal is NOT automatically a strip, and the corpus says so loudly.
-// 34 of 36 lone removals were gates that had been hung on the CARD ONLY — the
-// PR carrier never carried the label at all (verified per-PR: PR #12401 and PR
-// #12287, the two most recent, have zero gate events in their entire history).
-// For a single-carrier gate there is no second carrier to clear, so a lone
-// clear is exactly what a CORRECT clear looks like, and flagging it would
-// report the majority shape of the board as a violation.
-//
-// So the removal is judged against its own HANG, which the same window already
-// carries: a gate hung in a dual stroke and cleared in a lone one is the pair
-// written half way — that is the finding. A gate hung lone and cleared lone is
-// internally consistent and gets the file's UNJUDGED treatment instead of a
-// verdict: there is no structural evidence in EITHER direction, which is not
-// the same as evidence of correctness, and 「read, and it carries nothing」 vs
-// 「could not be read」 is the pair this whole file refuses to conflate. A
-// removal whose hang predates the window is `undated` and is counted, never
-// guessed at.
-//
-// ⚠️ The unjudgeable class is the honest residue of this card, and it is the
-// LARGER half: measured 29 over 3.41 days against 0 half-writes. Where the
-// dual-carrier discipline is actually followed it holds — 0 half-write clears
-// in 206 removals — and the exposure has moved to single-carrier gates, which
-// no carrier comparison (H31's or this one's) can ever adjudicate. Closing THAT
-// half needs a producer-side change (a canonical machine-readable verdict, or
-// the PR-side hang that 「PR 一存在即挂」 already requires), which is a decision
-// this row records rather than takes.
-//
-// ## What is reported, and the deliberate asymmetry in the two classes
-//
-// `half-write` is reported for any carrier, open or closed: a gate cleared half
-// way on a PR that then merged is the bypass that already happened, and the
-// population is ~0/day so it cannot flood the report. `unjudgeable` is reported
-// only while the carrier is still OPEN and the label still ABSENT — that is the
-// subset a reader can still act on, and it is the difference between 0.22 rows
-// per run and 8.5. Measured live subset: 3 cards over 3.41 days.
-//
-// A removal whose label is back is SILENT in both classes. That is the
-// read-back working — the card's own §2 names the 13-minute re-application on
-// #11470 as「consistent with an accidental loss caught by read-back」— and a row
-// for it would report the control functioning as a defect.
-//
-// Report-only, and emphatically: like H31 this row's subject is a GATE. ⛔ Never
-// a label written from this script — a sweeper that re-hung a review gate would
-// be issuing the review verdict, which is 自查放行.
-// ---------------------------------------------------------------------------
-
-/**
- * The gate-semantic label family this row patrols.
- *
- * MEASURED on the live repo 2026-08-26 (`GET /labels`, 57 labels): the family
- * has exactly ONE member. It is a LIST rather than the bare constant because
- * the ruling names a family and the next gate label must join it here rather
- * than fork a row — but the list is not speculative padding, and
- * `needs-user-decision` deliberately stays out of it: it marks a card awaiting
- * a maintainer, not a review chain with a dual-carrier hang/clear protocol, so
- * the same-stroke invariant below is meaningless for it.
- */
-export const GATE_SEMANTIC_LABELS = [CONTRACT_REVIEW_LABEL];
-
-/** Is this label one the row patrols? */
-export function isGateSemanticLabel(name) {
-  return GATE_SEMANTIC_LABELS.includes(String(name ?? ''));
-}
-
-/**
- * How far apart two carrier writes can be and still be 「同笔」 — 120s, read
- * out of the empty region between the measured 101s and 275s (header above).
- */
-export const H35_SAME_STROKE_SECONDS = 120;
-
-/**
- * The issue-event production rate, MEASURED — the divisor the window below
- * uses, in the same executable shape H8's window uses `MEASURED_MERGES_PER_DAY`.
- *
- *   read     2026-08-26T01:26:58Z, `GET /repos/{repo}/issues/events`, 160 pages
- *   window   2026-08-22T15:35:07Z … 2026-08-26T01:26:58Z  (3.41 days)
- *   rows     16,000 events, of which 415 carried a gate-semantic label
- *   rate     16,000 / 3.41 = ~4,691 events/day
- */
-export const MEASURED_ISSUE_EVENTS_PER_DAY = 4691;
-
-/**
- * The detection horizon — 12h, i.e. TWO patrol cycles at the 6-hourly cadence.
- *
- * One cycle would put every removal within one run of aging out, so a single
- * failed or skipped run loses the finding permanently (this is a horizon, not a
- * retry budget — H8's window states the same thing). Two cycles means every
- * removal is seen by at least two consecutive runs. Past the horizon the
- * finding is not delayed, it is gone: nothing else in this file reads events.
- */
-export const H35_EVENT_WINDOW_HOURS = 12;
-
-/**
- * The quota backstop, in pages of 100.
- *
- * At the measured rate the horizon needs `eventWindowPages()` = 24 pages; the
- * cap is 30, which absorbs a day ~25% busier than the corpus before truncating.
- * A run that HITS the cap has a short window, and the summary line says so —
- * a truncated window must never read as a clean one (#4690).
- */
-export const H35_EVENT_PAGE_CAP = 30;
-
-/**
- * Pages of 100 needed to cover `hours` at the measured event rate. The
- * arithmetic is executable rather than prose for the reason `windowCoverageDays`
- * exists: a rate that moves must move the derivation with it, where a test can
- * see it.
- */
-export function eventWindowPages(
-  hours = H35_EVENT_WINDOW_HOURS,
-  ratePerDay = MEASURED_ISSUE_EVENTS_PER_DAY,
-  perPage = 100,
-) {
-  if (!Number.isFinite(hours) || !Number.isFinite(ratePerDay) || ratePerDay <= 0) return null;
-  if (!Number.isFinite(perPage) || perPage <= 0) return null;
-  return Math.ceil(((hours / 24) * ratePerDay) / perPage);
-}
-
-/** Every `labeled`/`unlabeled` event in a window that carries a gate-semantic label. */
-export function gateLabelEvents(events) {
-  return (events ?? []).filter(
-    (e) =>
-      e &&
-      (e.event === 'labeled' || e.event === 'unlabeled') &&
-      isGateSemanticLabel(e.label?.name),
-  );
-}
-
-/** Is this event row on a PULL REQUEST carrier rather than a card? */
-function eventOnPullRequest(event) {
-  return Boolean(event?.issue?.pull_request);
-}
-
-/** Does the carrier this event names still carry the label the event moved? */
-function carrierStillLabelled(event) {
-  const name = String(event?.label?.name ?? '');
-  return (event?.issue?.labels ?? []).some((l) => l?.name === name);
-}
-
-/**
- * Is `event` half of a 「同笔」 dual-carrier stroke? True when the SIBLING
- * carrier saw the same verb, on the same label, by the same actor, within the
- * stroke window.
- *
- * `siblingNumbers` resolves the other carrier and is INJECTED rather than
- * derived here: the sweep answers it with `prDeliversCard` over the PR windows
- * it already holds, which is the same delivery relation H8 and H31 read — so
- * the three rows can never disagree about which PR delivers which card. It
- * returns `null` when the relation is unresolvable (no delivering PR in the
- * windows, a body that declares nothing), and an unresolvable sibling means NOT
- * PAIRED — which routes the removal to a judged-against-its-hang path below,
- * never straight to a finding.
- */
-export function pairedAcrossCarriers(event, gateEvents, options = {}) {
-  const { sameStrokeSeconds = H35_SAME_STROKE_SECONDS, siblingNumbers = () => null } = options;
-  const at = Date.parse(event?.created_at ?? '');
-  if (!Number.isFinite(at)) return false;
-  const siblings = siblingNumbers(event);
-  if (!Array.isArray(siblings) || siblings.length === 0) return false;
-  const wanted = new Set(siblings.map((n) => Number(n)));
-  const actor = String(event?.actor?.login ?? '');
-  const label = String(event?.label?.name ?? '');
-  const onPr = eventOnPullRequest(event);
-  return (gateEvents ?? []).some((o) => {
-    if (!o || o === event) return false;
-    if (o.event !== event.event) return false;
-    if (String(o.label?.name ?? '') !== label) return false;
-    if (String(o.actor?.login ?? '') !== actor) return false;
-    if (eventOnPullRequest(o) === onPr) return false;
-    if (!wanted.has(Number(o.issue?.number))) return false;
-    const t = Date.parse(o.created_at ?? '');
-    return Number.isFinite(t) && Math.abs(t - at) <= sameStrokeSeconds * 1000;
-  });
-}
-
-/** The most recent hang of the same label on the same carrier BEFORE `removal`. */
-export function precedingHang(removal, gateEvents) {
-  const at = Date.parse(removal?.created_at ?? '');
-  if (!Number.isFinite(at)) return null;
-  const label = String(removal?.label?.name ?? '');
-  const number = Number(removal?.issue?.number);
-  const hangs = (gateEvents ?? [])
-    .filter(
-      (e) =>
-        e &&
-        e.event === 'labeled' &&
-        String(e.label?.name ?? '') === label &&
-        Number(e.issue?.number) === number &&
-        Number.isFinite(Date.parse(e.created_at ?? '')) &&
-        Date.parse(e.created_at) < at,
-    )
-    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-  return hangs[0] ?? null;
-}
-
-/**
- * H35's classifier — the three-valued half, asserted directly by the self-test.
- *
- * @returns one of:
- *   `'not-applicable'` the row is not an `unlabeled` of a gate-semantic label
- *   `'rehung'`         the carrier carries the label again (read-back worked)
- *   `'paired'`         cleared in a 「同笔」 dual-carrier stroke — the evidence
- *   `'half-write'`     hung in a dual stroke, cleared in a lone one — FINDING
- *   `'unjudgeable'`    hung lone and cleared lone (single-carrier gate)
- *   `'undated'`        no hang inside the window; declines to judge
- */
-export function h35RemovalVerdict(removal, gateEvents, options = {}) {
-  if (!removal || removal.event !== 'unlabeled') return 'not-applicable';
-  if (!isGateSemanticLabel(removal.label?.name)) return 'not-applicable';
-  if (carrierStillLabelled(removal)) return 'rehung';
-  if (pairedAcrossCarriers(removal, gateEvents, options)) return 'paired';
-  const hang = precedingHang(removal, gateEvents);
-  if (!hang) return 'undated';
-  return pairedAcrossCarriers(hang, gateEvents, options) ? 'half-write' : 'unjudgeable';
-}
-
-/** Shared tail — the posture, stated on every row this block emits. */
-const H35_CONTRACT =
-  'Report-only: ⛔ never a label written from this script — re-hanging a review gate from a sweeper ' +
-  'would be issuing the verdict, which is 自查放行. Detection only; escalation and enforcement are ' +
-  'a later card by the 2026-08-25 ruling.';
-
-/**
- * H35 — null when the removal needs no row, else the finding sentence.
- *
- * Two classes reach a row, and they say different things on purpose. The
- * `open`/`absent` narrowing applies to `unjudgeable` ONLY and the header states
- * why: that class is common and actionable only while the carrier is live,
- * while `half-write` is ~0/day and names damage that may already have landed.
- *
- * @param {object} removal — an `unlabeled` event row from the repo-wide window.
- * @param {object[]} gateEvents — every gate-semantic label event in that window.
- */
-export function h35GateRemovalWithoutEvidence(removal, gateEvents, options = {}) {
-  const verdict = h35RemovalVerdict(removal, gateEvents, options);
-  const label = String(removal?.label?.name ?? '');
-  const actor = String(removal?.actor?.login ?? 'an unreadable actor');
-  const at = String(removal?.created_at ?? 'an unreadable time');
-  const carrier = eventOnPullRequest(removal) ? 'PULL REQUEST' : 'CARD';
-
-  if (verdict === 'half-write') {
-    return (
-      `\`${label}\` was REMOVED from this ${carrier} by \`${actor}\` at ${at} in a LONE stroke, ` +
-      'while the hang it clears was written across BOTH carriers — so the pair was cleared half way. ' +
-      '「PASS 双载体同笔清标」 makes a legitimate clear two removals seconds apart, one per carrier; ' +
-      'this one has no sibling within ' +
-      `${H35_SAME_STROKE_SECONDS}s. Either the clear never reached the second carrier, or the label ` +
-      'was stripped — and 「闸门被剥不是红灯是放行」, so the failure direction is TOWARD release: an ' +
-      'ungated carrier reads to the enqueue path as one that was never gated. Remedy is a READ, not a ' +
-      'write: check the card thread for a current review verdict before re-hanging — 「PASS 评论 + 标签' +
-      `缺失 + PR head 自复审后未动 = 已复审清标,不是被剥」. ${H35_CONTRACT}`
-    );
-  }
-
-  if (verdict === 'unjudgeable') {
-    if (removal?.issue?.state !== 'open') return null;
-    return (
-      `\`${label}\` was removed from this open ${carrier} by \`${actor}\` at ${at} and the gate is ` +
-      'still absent — UNJUDGED, not clean. The hang it clears was ALSO a lone stroke: this gate only ' +
-      'ever had ONE carrier, so 「双载体同笔清标」 leaves no structural evidence in either direction ' +
-      'and no carrier comparison — H31\'s or this row\'s — can say whether it was cleared or stripped. ' +
-      'The only remaining evidence is a review verdict written as free prose, which has no canonical ' +
-      'machine-readable form (measured: a strict marker matched 5 of 35 removals, a loose one 10), so ' +
-      'this row declines to parse it rather than widen into a check that cannot fail. Two producer-side ' +
-      'repairs would each make this judgeable: hang the PR carrier as 「PR 一存在即挂」 already ' +
-      `requires, or give the verdict a canonical marker. ${H35_CONTRACT}`
-    );
-  }
-
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -12400,87 +11857,13 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
 }
 
 // ---------------------------------------------------------------------------
-// H51 — an OPEN gated PR whose thread already holds a contract-review verdict
-// for the CURRENT head, with no label stroke behind it.
-//
-// ## The defect this row reads
-//
-// `needs:contract-review` is a DUAL-carrier gate, and a verdict on it is a
-// HANDOFF rather than a note: PASS clears both carriers, FAIL clears both and
-// leaves a handoff comment on the card. Either way the verdict's second act is
-// a LABEL STROKE, and the seats' sweeps read labels — not PR prose. So a
-// verdict recorded only as a comment reaches nobody: the PR keeps reading
-// 「真实待审」 to the enqueue path, to the board and to every candidate query,
-// while the review it is waiting on has already concluded on that exact head.
-//
-// Measured in one shift: twelve PRs across two repos took a verdict between
-// 03:59Z and 07:34Z and NO owning seat responded on any of them for 2–5 hours.
-// The maintainer noticed first (「已审 9 个 objectstack PR,为什么还是挂着待契约
-// 复审的 label」), and the repair was done by hand. Nothing mechanical could
-// have found it: H31 compares the two CARRIERS with each other and is perfectly
-// clean while both of them are on, which is exactly the state a written-but-
-// unstruck verdict leaves behind.
-//
-// ⛔ VERDICT-AGNOSTIC on purpose, and that is the whole shape of the row: it
-// never reads which verdict was given, only that one was given on this head.
-// Both branches owe a stroke inside the window — PASS ⇒ carriers off, FAIL ⇒
-// carriers off plus the handoff comment — so the row can ask for the stroke
-// without ever holding an opinion about the review. A row that parsed the
-// verdict would be issuing one, which is 自查放行 (H31's ⛔, one file over).
-//
-// ## The head-identity test, and why it is the whole negative side
-//
-// A gated PR whose review names an OLDER head is CLEAN, and this is not an
-// indulgence: the head moved, so the review that concluded is about a tree
-// nobody is being asked to land, and the carrier is genuinely live again —
-// 「head 后移或无结论才重挂」 (`references/contract-review.md` 载体纪律), read
-// from the other direction. Only a verdict on the CURRENT head is a verdict
-// that owed a stroke, so the row's subject is the pair (this head, a verdict on
-// it) and never the label's age.
-//
-// Live on the board this landed against, and both directions fired: of seven
-// gated open PRs, four carried a verdict on the current head aged 80–309
-// minutes (rows), two carried one naming a head that had since moved (clean),
-// and one had no verdict at all (clean).
-//
-// ## The anchor is MEASURED rather than quoted, and that is a correction
-//
-// The filing card states the title shape as one literal format and calls the
-// anchor structural on that basis. Measured over the live board it is not one
-// format — three dialects were in use on the same day, and a regex pinned to
-// the card's literal would have been silent on two of them while reporting a
-// clean board:
-//
-//   heading + `— PR #N @ \`sha\``        the card's cited form
-//   heading + `· head \`sha\``            the same fact, another separator
-//   heading with NO sha, the head named on the FIRST BODY LINE
-//
-// A fourth shape is the one that matters most: a director seat's ADOPTION
-// RECORD, whose own first line is the adoption and which carries the review —
-// heading and all — verbatim beneath it. That is a verdict on the head by every
-// reading the protocol has (「逐字采纳」 is one of the two legal acts on a
-// subagent verdict), so the marker is LINE-ANCHORED like H48's brief marker
-// rather than body-anchored like H52's report marker, and the adoption record
-// is IN.
-//
-// What all four share is exactly two things, so those two are what this row
-// reads: a level-2 heading whose line begins `## Contract review`, and the head
-// sha written as a code span somewhere in the comment. Neither is prose, and
-// neither is a verdict word.
-//
-// ## Cost — one thread per GATED open PR, and the cache is already there
-//
-// `prCommentCache` is H48's, and its own header says a future PR-comment reader
-// finds a thread it already bought and pays nothing for it. This is that
-// reader. The two populations overlap without being equal — governed and gated
-// are independent properties — so the marginal cost is one issue-comment walk
-// per gated open PR that is NOT governed. Measured: 7 gated of 16 open PRs, of
-// which H48 had already bought some; a bounded, single-page walk each.
-//
-// That purchase is stated rather than hidden because it is a decision: the
-// alternative (judge only the threads other rows happened to buy) would leave
-// the row's coverage a function of which PRs were governed that day, and a row
-// whose population silently shrinks is the shape #4690 refuses.
+// The contract-review RECORD readers — the heading marker, the head-sha span
+// and the newest-on-head finder. Read by H48/H64 here and, through
+// `check-clause2-carriers.mjs`, by the queue guard's record recognisers. The
+// rows that patrolled the retired `needs:contract-review` label around these
+// readers are gone (ruling record 5770886272 on #19061, letter B); the
+// `H51_` prefix on the two span constants is kept so their importer keeps one
+// name.
 // ---------------------------------------------------------------------------
 
 /**
@@ -12521,18 +11904,6 @@ export const CONTRACT_REVIEW_HEADING_MARKER = /^\s*>?\s*## Contract review\b/m;
  */
 export const H51_SHA_MIN_HEX = 7;
 export const H51_SHA_SPAN = /`([0-9a-fA-F]{7,40})`/g;
-
-/**
- * How long a verdict may sit on the current head before the stroke is late.
- *
- * Sixty minutes, and the number is the measured gap between the two
- * distributions rather than a preference: a review-to-handoff stroke is two
- * label writes and a comment, done in minutes by the seat that just finished
- * reading the diff, while the misses this row exists for ran 2–5 HOURS. A
- * threshold inside that gap separates them without pricing an ordinary
- * hand-over as a defect.
- */
-export const H51_HANDOFF_THRESHOLD_MINUTES = 60;
 
 /**
  * Which head this comment says it reviewed — the matched span, or `null`.
@@ -12584,200 +11955,6 @@ export function latestContractReviewOnHead(commentRows, headSha) {
   if (!newest) return null;
   const row = onHead[newest.index];
   return { ...newest, id: row?.id ?? null, sha: contractReviewHeadMatch(row?.body, headSha) };
-}
-
-/**
- * Which PRs this row can speak about AT ALL — exported for the reason every
- * gathering policy here is: the predicate that decides what is even COUNTED is
- * where a silent hole would live, and the summary's coverage pair reads
- * `judged of these`.
- *
- * A DRAFT is IN. The gate governs enqueue, a draft is precisely where the
- * carrier still has work to do, and every PR in the measured population was a
- * draft — excluding drafts would have emptied the row on the board it was
- * written against. A merged or closed PR is OUT: the stroke is moot once the
- * PR is gone, and 「载体不迁移」 leaves nothing to repair.
- */
-export function h51SpeaksAbout(pr) {
-  if (pr?.merged_at) return false;
-  if (String(pr?.state ?? 'open') === 'closed') return false;
-  if (!Array.isArray(pr?.labels)) return false;
-  return labelNames(pr).includes(CONTRACT_REVIEW_LABEL);
-}
-
-/**
- * H51 — null when clean OR unjudged, else the finding sentence.
- *
- * Three input states, never two (#4690), the H48 contract verbatim:
- *
- *   undefined  the thread was never consulted. UNJUDGED.
- *   null       consulted and unreadable — a failed request, or a walk that hit
- *              the page ceiling. UNJUDGED.
- *   rows       judged.
- *
- * @param {{ number?: number, state?: string, draft?: boolean, merged_at?: string|null,
- *   labels?: any[], head?: { sha?: string } }} pr — an open-PR LIST row; `head.sha`
- *   and `labels` both ride it, so the head-identity test costs no request.
- * @param {{ id?: number, body?: string, created_at?: string }[]|null|undefined} commentRows
- * @param {number} nowMs
- */
-export function h51VerdictWithoutHandoff(pr, commentRows, nowMs = Date.now()) {
-  if (commentRows === undefined || commentRows === null) return null;
-  if (!h51SpeaksAbout(pr)) return null;
-  const head = String(pr?.head?.sha ?? '');
-  const verdict = latestContractReviewOnHead(commentRows, head);
-  if (!verdict) return null;
-  const parsed = verdict.stamp;
-  // An unreadable stamp must not read as FRESH (H18's direction): a verdict
-  // this row cannot date is one it cannot call late, so it declines.
-  if (parsed === null) return null;
-  const ageMinutes = (nowMs - parsed) / 60_000;
-  if (ageMinutes <= H51_HANDOFF_THRESHOLD_MINUTES) return null;
-  const named = verdict.id ? `comment ${verdict.id}` : 'a comment carrying no readable id';
-  return (
-    `open and carrying \`${CONTRACT_REVIEW_LABEL}\` while its own thread already holds a contract-review ` +
-    `verdict for the CURRENT head \`${head.slice(0, 10)}\` (${named}, ${verdict.createdAt}, ~` +
-    `${Math.round(ageMinutes)} minutes ago against a ${H51_HANDOFF_THRESHOLD_MINUTES}-minute threshold; ` +
-    `the comment names \`${verdict.sha}\`). A verdict is a HANDOFF rather than a note, and its second act ` +
-    'is a LABEL STROKE: PASS clears both carriers, FAIL clears both and leaves the handoff comment on the ' +
-    'card. The seats read LABELS, not PR prose — so with the stroke unwritten this PR still reads ' +
-    '「真实待审」 to the enqueue path, to the board and to every candidate query, while the review it is ' +
-    'waiting on concluded on this exact tree. ⛔ Verdict-agnostic by construction: this row does not read ' +
-    'WHICH verdict was given and holds no opinion about the review — a row that parsed the verdict would ' +
-    'be issuing one, which is 自查放行. Remedy: verdict recorded, handoff not written — apply the FAIL ' +
-    'end-state in `references/contract-review.md` 载体纪律 (同笔剥双载体 plus the handoff comment on the ' +
-    'card; PASS clears both and leaves the provenance comment), re-hanging both carriers when the patch ' +
-    'head lands. A review naming an OLDER head is NOT this row: the head moved, the carrier is genuinely ' +
-    'live again, and this row is silent on it. Report-only patrol INPUT: ⛔ never a label written from ' +
-    'this script — striking a review gate from a sweeper would be issuing the verdict.'
-  );
-}
-
-
-// ---------------------------------------------------------------------------
-// H53 — an OPEN card carrying the contract-review gate with NO increment behind
-// it: no claim, and no PR.
-//
-// ## The defect this row reads
-//
-// The gate rides an INCREMENT. `references/contract-review.md` 载体纪律 says
-// where it is hung — 「PR 与卡双载体同笔挂:PR 一存在即挂;报告先于 PR 到达则先
-// 挂卡侧」 — and 「⛔ 不前瞻预挂」 says when it is not. The invariant both serve
-// is one line: 「开着的载体恒 = 真实待审」. A carrier hung ahead of any work
-// breaks it, and the break is invisible: the card announces that a real
-// contract review is pending, and no review exists.
-//
-// Measured across two repos in one day: fourteen open cards carried the gate
-// with no `Claim:` comment and no PR at all — thirteen written by one triage
-// seat between 03:08Z and 10:12Z, the morning AFTER a ruling restating the
-// discipline had merged into the text that seat reads. All fourteen were
-// retired by hand, found by a director summon rather than by any sweep.
-//
-// ## Why no existing row sees it, and this is H31's own boundary
-//
-// H31 compares the gate's two CARRIERS with each other, so it needs two: with
-// no PR there is no pair, and the comparison is not merely clean but
-// INAPPLICABLE. H31's header says so in its own words, and goes further — it
-// deliberately DECLINED 「gate label on a card with no PR carrier is
-// premature」, because card-side-first is legal and expected and reporting it
-// would flag the protocol's own prescribed sequence as a defect.
-//
-// ⭐ That boundary is exactly why this row carries the CLAIM leg, and the leg
-// is not decoration: a dev executing card-side-first has been dispatched, so
-// its thread carries a `Claim:`. Claim present ⇒ the sequence H31 protects, and
-// this row is silent. Claim absent AND no PR ⇒ nobody is executing anything,
-// which is the only shape left. So this row does not re-open the question H31
-// closed; it reads the half H31's premise excluded.
-//
-// H35 is no help either: it reads gate REMOVAL events, and nothing was removed.
-//
-// ## ⛔ Report-only, and emphatically — like H31, this row's subject is a GATE
-//
-// It never removes a carrier and never asks a script to. Removal is a person's
-// audited act, taken with the provenance comment that says which ruling
-// authorised it — a sweeper stripping a review gate would be issuing the
-// verdict, which is 自查放行. The row's whole output is a row.
-//
-// ## Cost — one COMPLETE card thread per gated open card
-//
-// A purchase, stated rather than hidden. The claim leg cannot be read off the
-// caches other rows fill: H2 buys a thread only for an ASSIGNED card, and the
-// measured population is unassigned by construction (a card nobody is executing
-// has no assignee), so a cache-only reading would report the entire target
-// shape UNJUDGED while looking healthy — H52's own note on what a row judged at
-// the wrong point becomes.
-//
-// The thread is bought COMPLETE (H50's walk, in the same cache), because a full
-// first page may hide the newest `Claim:` on a later one, and reading "no
-// claim" off a partial thread would INVENT the absence this row fires on. An
-// incomplete or failed walk is UNJUDGED, never clean.
-//
-// Bounded by the gated population rather than the open one: 9 gated of 599 open
-// cards on the board this landed against, each a single-page walk.
-// ---------------------------------------------------------------------------
-
-/**
- * Which cards this row can speak about AT ALL — exported for the reason every
- * gathering policy here is: the predicate that decides what is even COUNTED is
- * where a silent hole would live, and the summary's coverage pair reads
- * `judged of these`.
- *
- * A CLOSED card is out: the carrier went with it, and nothing is repairable.
- */
-export function h53SpeaksAbout(issue) {
-  if (issue?.state === 'closed') return false;
-  if (!Array.isArray(issue?.labels)) return false;
-  return labelNames(issue).includes(CONTRACT_REVIEW_LABEL);
-}
-
-/**
- * H53 — null when clean OR unjudged, else the finding sentence.
- *
- * Three input states, never two (#4690):
- *
- *   undefined  the thread was never consulted. UNJUDGED.
- *   null       consulted and INCOMPLETE or unreadable — a full page may hide
- *              the newest `Claim:`. UNJUDGED.
- *   rows       judged.
- *
- * @param {object} issue — an OPEN card.
- * @param {{ body?: string }[]|null|undefined} commentRows — the COMPLETE thread.
- * @param {object[]} openPrs — the open-PR listing the sweep already holds.
- * @param {object[]} mergedPrs — H8's bounded merged window.
- */
-export function h53CarrierWithoutIncrement(issue, commentRows, openPrs, mergedPrs) {
-  if (!Array.isArray(commentRows)) return null;
-  if (!h53SpeaksAbout(issue)) return null;
-  const n = String(issue?.number ?? '');
-  if (!n || n === '0') return null;
-  // ⭐ The leg that keeps this row clear of the shape H31 declined: a dev
-  // executing card-side-first has been dispatched, so its thread carries a
-  // claim, and this row is silent on the protocol's own prescribed sequence.
-  if (latestMarkedComment(commentRows, CLAIM_COMMENT_MARKER)) return null;
-  // `prDeliversCard` and never a prose mention: it is this file's ONE delivery
-  // relation, so H8, H31, H35 and this row can never disagree about which PR
-  // belongs to which card.
-  const prs = [...(openPrs ?? []), ...(mergedPrs ?? [])];
-  if (prs.some((pr) => pr && Array.isArray(pr.labels) && prDeliversCard(pr, n))) return null;
-  return (
-    `open and carrying \`${CONTRACT_REVIEW_LABEL}\` with NO increment behind it — no \`Claim:\` comment on ` +
-    'the thread and no open or merged PR delivering it. The gate rides an increment: 「PR 一存在即挂;报告 ' +
-    '先于 PR 到达则先挂卡侧」 is where it is hung and 「⛔ 不前瞻预挂」 is where it is not, and the ' +
-    'invariant both serve is 「开着的载体恒 = 真实待审」. A carrier with nothing executing behind it breaks ' +
-    'that invariant silently: the card announces a real contract review is pending and no review exists, ' +
-    'so every reader who trusts the label — the board, the enqueue path, a seat deciding what is safe to ' +
-    'pick up — is told something false, and nothing visible contradicts it. ⭐ A card-side-FIRST hang is ' +
-    'NOT this row and never fires here: that sequence is legal and expected, and a dev executing it has ' +
-    'been dispatched, so its thread carries a `Claim:` — the claim leg is what separates the two, which ' +
-    'is why H31 could decline the premature-hang shape and this row can read the half its premise ' +
-    'excluded (with no PR there is no carrier PAIR, so H31 is not clean here but INAPPLICABLE). ' +
-    'Remedy: check the thread for a ruling first — if the gate was hung ahead of any work, a person ' +
-    'strips it with a provenance comment naming the ruling that authorises the removal; if a review ' +
-    'genuinely is owed, the increment it rides is what is missing. ⛔ Report-only, and emphatically: ' +
-    "like H31 this row's subject is a GATE, and it never removes a carrier and never asks a script to — " +
-    'removal is a person\'s audited act, because a sweeper striking a review gate would be issuing the ' +
-    'verdict, which is 自查放行. Nothing is blocked and no label is written.'
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -12940,7 +12117,7 @@ export function h54DecisionTitledQueueCard(issue) {
 // 55 → 55 across ~14h while `pm:queue` moved −84 — because a wrong entry had
 // exactly one reviewer, the director seat, and no machine could notice it:
 // the state has no machine EXIT by construction (H11's note says so, and it
-// is right) and, until this row, no machine ENTRY either. H25 and H29–H31
+// is right) and, until this row, no machine ENTRY either. H25, H29 and H30
 // read the label's SHAPE and the important-parked ager reads its TIME;
 // nothing read its MEANING.
 //
@@ -12974,10 +12151,9 @@ export function h54DecisionTitledQueueCard(issue) {
 // ON/AFTER it is judged and can be a row.
 //
 // ⚠️ The split reads `updated_at`, not the `labeled` event. This sweep makes no
-// per-card timeline fetch for THIS population (H35's header carries the
-// reasoning; the repo-wide event stream it reads instead keeps only
-// gate-semantic labels, and H59's one timeline page is bought for a handful of
-// merged-PR mentions, never for a label page), so the entry instant is in no
+// per-card timeline fetch for THIS population (H59's one timeline page is
+// bought for a handful of merged-PR mentions, never for a label page), so the
+// entry instant is in no
 // payload this loop already holds. `updated_at` is the
 // cheapest HONEST proxy and its error runs one way: `updated_at` is never
 // earlier than the labelling, so a card last touched before the pin certainly
@@ -14417,7 +13593,7 @@ export function h58QueuedRulingRow(issue, commentBodies) {
 //
 // ⚠️ This is the FIRST per-card timeline fetch in this file, and the rows that
 // decline one by name (H11/H15's label age, H18/H13's `updated_at` proxy,
-// H35's repo-wide event stream, H55's entry instant) still decline it — their
+// H55's entry instant) still decline it — their
 // notes are narrowed to say so rather than deleted. The fetch is bought here
 // for a population that is at most a handful of cards a sweep, never for the
 // board.
@@ -14829,259 +14005,6 @@ export function h60ClaimBranchUnparsed(issue, governance) {
 }
 
 // ---------------------------------------------------------------------------
-// H61 — a LANDED carrier: a MERGED pull request, or a CLOSED card, still
-// wearing `needs:contract-review`.
-//
-// ## The class, and why it is not any row already here
-//
-// `references/contract-review.md` 载体纪律 states the invariant this row reads,
-// verbatim and untranslated: 「开着的载体恒 = 真实待审」 — an OPEN carrier is a
-// real pending review — and the clearing act that keeps it true: 「清标即落地:
-// PASS ⇒ 同席同笔剥双载体;凡清标同笔留 provenance 评论,引记录 id 与所判 head。」
-// So the carrier's whole meaning is tied to a live increment. When the
-// increment LANDS and the stroke is never written, the label outlives the thing
-// it was hung on: the PR is merged, the review it announces can no longer be
-// owed, and the sentence the board still reads is 「真实待审」.
-//
-// That is residue rather than a bypass, and the distinction is the point. The
-// FRONT end is closed: the queue guard's carrier leg (`33e07f7c`, PR #17484)
-// refuses a merge group whose queued PR still carries the label, so from that
-// commit forward a gated PR cannot enter the queue. What no reader has is the
-// list of carriers already past it — and a later reader (a seat, a post-merge
-// tier audit, a candidate query that forgets to scope `state=open`) reads each
-// one as a review still owed.
-//
-// Every neighbouring row declines this population for a stated reason of its
-// own, so none of them is a narrower version of this one:
-//
-//   H31  compares the gate's TWO CARRIERS on an OPEN card against its OPEN
-//        delivering PRs. Its own population test excludes a merged delivering
-//        PR by name, and a closed card by name.
-//   H35  reads the gate REMOVAL event — 「被剥」 vs 「从未挂过」. Here nothing
-//        was removed; the label is still on.
-//   H51  reads a carrier still present on an OPEN PR whose thread already holds
-//        a verdict for the CURRENT head. `h51SpeaksAbout` excludes a merged or
-//        closed PR in as many words — 「载体不迁移」 leaves nothing to repair on
-//        a PR that is gone — so the moment the PR merges, H51 goes silent and
-//        nothing takes over. This row is that handover.
-//   H53  reads an OPEN card carrying the gate with NO increment behind it.
-//        Opposite end: there the increment never existed, here it landed.
-//   H8   reads a MERGED PR whose card still says `pm:dispatched` — the same
-//        window, a different label and a different duty.
-//   H22  reads `pm:*` residue on a CLOSED card and files no row at all since
-//        #14072; `needs:contract-review` is not a `pm:*` state label and is not
-//        in that reading.
-//
-// The ask is the director seat's, on #17040 (comment 5597753733, 2026-09-09,
-// leak sweep of every first-parent merge since 03:28Z), quoted verbatim: 「A
-// `check-half-states` row for a **closed card still carrying `pm:*` or a
-// carrier** (row 1 left #16231 closed with `pm:queue` + `needs:contract-review`;
-// row 2 left the carrier on a merged PR).」 The `pm:*` half of that sentence is
-// H22's and stays there; the CARRIER half is this row.
-//
-// ## The population, measured 2026-09-12 across both installs
-//
-// `GET /repos/{o}/{r}/issues?state=closed&labels=needs:contract-review`, one
-// page each, both complete (39 and 29 rows, under the 100-row page):
-//
-//   objectstack  39 = 23 merged PRs + 2 closed-UNMERGED PRs + 14 closed cards
-//   objectui     29 = 17 merged PRs +  0 closed-UNMERGED PRs + 12 closed cards
-//   ──────────────────────────────────────────────────────────────────────────
-//   both         68 = 40 merged PRs + 2 closed-UNMERGED PRs + 26 closed cards
-//
-// Oldest closure carrying the label: 2026-08-20T23:58Z (objectstack),
-// 2026-08-30T17:32Z (objectui). ⚠️ That is the whole standing backlog and it is
-// NOT what this row reports — see the window note below. The card that asked
-// for the row named three specimens (objectstack #16783 / #17036, objectui
-// #8779); the class is an order of magnitude larger, and stating the two
-// numbers apart is the point of this paragraph.
-//
-// ## Closed-UNMERGED PRs are EXCLUDED, and the exclusion is measured
-//
-// Two of the 68 (objectstack #16733, #14923; objectui 0 — 2.9%) are pull
-// requests CLOSED without merging, carrier still on. They are deliberately not
-// this row's subject and are ⛔ not folded into the merged count:
-//
-//   ① The harm model does not reach them. This row exists because a gate label
-//      on a LANDED increment tells a later reader a review is owed on work that
-//      is already in `main`; the post-merge tier audit is the consumer. A PR
-//      closed unmerged delivered nothing, owes no post-merge verdict, and is
-//      the shape H51's header already calls moot — 「载体不迁移」.
-//   ② The data path does not hold them. `listRecentlyMergedPullRequests`
-//      SELECTS on `merged_at` and its own header says why in as many words: an
-//      unmerged closed PR is an abandoned attempt, not a delivery. Widening
-//      that selector would change what H8 and H49 are handed, which is a change
-//      to two other rows' inputs and ⛔ not this row's business.
-//   ③ Size. 2 of 68 measured, both on one install, neither inside the window
-//      this row reads. A separate count rendered on every run for a class that
-//      contributes nothing to it is a number a reader has to learn to ignore.
-//
-// A reader who wants them has the one-line query above; this header carries it.
-//
-// ## What this row costs: NOTHING — both populations are already in hand
-//
-// ⛔ No new fetch, no new request class, no page bought. The sweep already
-// holds both halves by the time this row runs:
-//
-//   merged PRs    `seenMerged` / `mergedWindow`, from
-//                 `listRecentlyMergedPullRequests` — H8's 8-day window. List
-//                 rows carry `labels`, `merged_at` and `head.sha`, so the
-//                 carrier test, the stamp and the head all ride the row.
-//
-// ⚠️ The sha printed is `head.sha`, ⛔ never `merge_commit_sha`, and the two
-// were confused in this row's own dispatch. 载体纪律 says a clearing write cites
-// 「所判 head」 and H51 resolves a verdict against `pr.head.sha`, so the head is
-// the only sha a contract-review record can be matched on. Measured on the
-// three specimens that filed this row: #16783 head `47eea7a8` / merge commit
-// `854639b3`, #17036 head `530469ff` / merge commit `e4fd55d9`, objectui
-// #8779 head `a04441f7` / merge commit `6cc48c4e` — the three shas quoted on
-// the card are the merge commits, and a reader searching a thread for one of
-// them finds nothing.
-//   closed cards  `seenClosed`, from `listRecentlyClosedIssues` — H22's 3-day
-//                 window, already filtered to non-PR rows, carrying `labels`
-//                 and `closed_at`.
-//
-// ⚠️ So the row's REACH is those two windows and not the standing backlog: a
-// merged carrier is visible for 8 days after it lands, a closed-card carrier
-// for 3. At the patrol's 6-hour cadence that is ~32 and ~12 consecutive sweeps
-// respectively — every new carrier is seen, and seen repeatedly, which is what
-// the consumer asked for ("a list instead of a memory"). What ages out is the
-// long tail already on the board on the day this landed. ⛔ That is a
-// deliberate boundary, not an oversight: the alternative is a
-// `state=closed&labels=…` listing, which is a new fetch class AND a second
-// closed-card reader beside `pmLabelListingPath`, whose `state=open` scoping is
-// the entire mechanism by which maintainer ruling 批 #13 holds.
-//
-// ## The repo is NOT printed on the row
-//
-// Each install sweeps its OWN repository — `resolveSweepRepo` off the runner's
-// `GITHUB_REPOSITORY`, one token, one board, ⛔ no cross-repo credential
-// anywhere — so this row can never see more than one and a repo column would be
-// a constant. The two-install figures above are a HAND measurement taken for
-// this header, not something a run can reproduce.
-//
-// ## Band: `inventory`, and each of the other three is refused by its own test
-//
-// ⛔ Not `gate`: that band exists for the row that can tell a STRIPPED gate
-// from an ungated card — an ABSENCE reading as a green light. Here the carrier
-// is PRESENT and legible; nothing was removed, which is also why H35 is silent.
-// ⛔ Not `stall`: nothing is stopped. The increment merged. There is no forward
-// motion for a later sweep to free, and this row claims none.
-// ⛔ Not `state`: that band's own definition says a LIVE card, and every
-// subject here is merged or closed — ARCHIVE, in the word ruling 批 #13 uses
-// for exactly this population.
-// ⇒ `inventory` — the band's own word is 「residue」, which is the grading
-// comment's word for this class too (5624070035). Being first in line for the
-// body trim is CORRECT for it: a landed carrier is the least urgent thing on
-// the board, and the trim callout names the family and the omitted count rather
-// than dropping rows silently.
-//
-// ⚠️ The row text is deliberately SHORT for this file. A verbose row is right
-// where a family fires once or twice; this one fires per carrier, and 20 of the
-// 23 objectstack merged carriers measured above sit inside the 8-day window on
-// the day it lands. The reasoning that would pad each row lives up here, where
-// it is read once and costs the rendered body nothing.
-//
-// ## Report-only, and emphatically — the subject is a GATE
-//
-// ⛔ This script never writes a label, and least of all this one. Clearing a
-// carrier is 清标即落地: a seat's audited act, taken in the same write as the
-// provenance comment naming the record id and the head it judged. A sweeper
-// stripping a review gate would be issuing the verdict.
-// ---------------------------------------------------------------------------
-
-/**
- * Which MERGED pull requests this row can speak about at all.
- *
- * `labels` unreadable ⇒ OUT, never read as unlabelled — H31's rule, kept here
- * so an unread field can never manufacture a clean reading (#4690).
- *
- * A closed-UNMERGED PR is OUT by decision, measured in the header above.
- * `merged_at` is the test rather than `state`, which is the same field
- * `prMergedWithinWindow` selects on, so this row and H8 can never disagree
- * about what a merge is.
- */
-export function h61SpeaksAboutMergedPr(pr) {
-  if (!Number.isFinite(Date.parse(pr?.merged_at ?? ''))) return false;
-  if (!Array.isArray(pr?.labels)) return false;
-  return labelNames(pr).includes(CONTRACT_REVIEW_LABEL);
-}
-
-/**
- * Which CLOSED cards this row can speak about at all.
- *
- * TWO refusals stand between this leg and a pull request, because a PR reaches
- * it wearing two different disguises and only one of them was obvious:
- *
- *   `pull_request`  a PR as it appears on an ISSUES listing. This is the shape
- *                   `listRecentlyClosedIssues` already filters out, and the one
- *                   that would read a closed-unmerged PR back in by the side
- *                   door.
- *   `head`          a PR as it appears on a PULLS listing — where there is no
- *                   `pull_request` field at all, while `state` is `closed` and
- *                   `closed_at` is readable on a merged and an abandoned PR
- *                   alike. Without this refusal the card leg accepts every row
- *                   of `mergedWindow`, and a closed-UNMERGED PR — the one shape
- *                   this row EXCLUDES by decision — walks straight in. ⚠️ Caught
- *                   by the self-test case written for that exclusion, ⛔ not by
- *                   reading the sweep, where the two collections happen never
- *                   to cross. A population test that is only correct because of
- *                   its caller is one refactor from being wrong.
- *
- * A card list row carries neither field, so nothing legitimate is lost.
- */
-export function h61SpeaksAboutClosedCard(issue) {
-  if (issue?.pull_request) return false;
-  if (issue?.head) return false;
-  if (String(issue?.state ?? '') !== 'closed') return false;
-  if (!Number.isFinite(Date.parse(issue?.closed_at ?? ''))) return false;
-  if (!Array.isArray(issue?.labels)) return false;
-  return labelNames(issue).includes(CONTRACT_REVIEW_LABEL);
-}
-
-/**
- * H61 — null when the carrier is out of scope or clean, else the finding
- * sentence.
- *
- * One entry point over both shapes, because they are one duty: the stroke that
- * 载体纪律 calls 同笔剥双载体 clears BOTH carriers, so a reader handed two
- * differently-worded rows would have to work out that they name one unwritten
- * act.
- *
- * @param {{ number?: number, merged_at?: string|null, closed_at?: string|null,
- *   state?: string, labels?: any[], head?: { sha?: string },
- *   pull_request?: object }} row — a merged-PR list row (`mergedWindow`) or a
- *   closed-card list row (`seenClosed`). Both carry everything read here, so
- *   this row costs no request.
- */
-export function h61LandedCarrierStillGated(row) {
-  const merged = h61SpeaksAboutMergedPr(row);
-  const closed = !merged && h61SpeaksAboutClosedCard(row);
-  if (!merged && !closed) return null;
-
-  const head = String(row?.head?.sha ?? '');
-  const what = merged
-    ? `MERGED ${row.merged_at} (head \`${head ? head.slice(0, 10) : 'UNREAD'}\`)`
-    : `CLOSED ${row.closed_at}`;
-  const which = merged ? 'pull request' : 'card';
-
-  return (
-    `${what} and STILL carrying \`${CONTRACT_REVIEW_LABEL}\` — the gate outlived the increment it ` +
-    `was hung on. 载体纪律: 「开着的载体恒 = 真实待审」, so this ${which} still announces a real ` +
-    'pending contract review over work that is already landed or closed; a seat, a post-merge tier ' +
-    'audit or any candidate query that forgets to scope `state=open` reads it as a review still ' +
-    'owed. ⛔ Not a bypass: the queue guard\'s carrier leg refuses a gated PR at enqueue, so this ' +
-    'is RESIDUE behind a closed front end. Remedy — WHO and HOW: the seat that owns the landing, ' +
-    'with one write — 「清标即落地」, 同笔剥双载体 plus the provenance comment naming the record id ' +
-    'and the head it judged (`references/contract-review.md` 载体纪律). ⛔ Report-only: never a ' +
-    'label written from this script — striking a review gate from a sweeper would be issuing the ' +
-    'verdict. Boundaries: an OPEN carrier is H31/H51/H53\'s, a REMOVED one is H35\'s, `pm:*` ' +
-    'residue is H22\'s, and a PR closed UNMERGED is out of this row by decision (its header says ' +
-    'why, with the count).'
-  );
-}
-
-// ---------------------------------------------------------------------------
 // H62 (#17009) — a decision card whose FACE carries no machine-findable
 // four-facet block
 //
@@ -15116,7 +14039,7 @@ export function h61LandedCarrierStillGated(row) {
 //
 // OPEN cards carrying `GOVERNED_PR_DECISION_LABEL` — the constant H48 and H52
 // already own, ⛔ never a second spelling. The listing is the UNSCOPED open one
-// (H13/H18/H31's channel) for their reason: `needs-user-decision` is not a
+// (H13/H18's channel) for their reason: `needs-user-decision` is not a
 // member of `SEEN_LABEL_PAGES`, so a decision card carrying no `pm:*` state is
 // first visible there.
 //
@@ -15476,7 +14399,7 @@ export function staleFindingScreen(issue) {
 //
 // ## Population and cost
 //
-// The UNSCOPED open listing (H13/H18/H31's channel), because `finding` is not a
+// The UNSCOPED open listing (H13/H18's channel), because `finding` is not a
 // member of `SEEN_LABEL_PAGES` — a carrier holding no `pm:*` state at all is
 // first visible there. One label read on a row that listing already holds: no
 // request, no body, no thread.
@@ -15773,7 +14696,7 @@ export function h68ClassBWithoutSeamLine(issue) {
 // seat post is judged on the CURRENT page rather than on the oldest one the
 // page-less request returns. ⚠️ Declared residual, H44's and stated again
 // because it is this row's too: a PULL-REQUEST comment thread is not read here
-// — H48 and H51 buy those for a different population, and folding them in would
+// — H48 buys those for a different population, and folding them in would
 // make this row's corpus depend on which PRs happened to be governed or gated.
 //
 // One row per CARRIER for comments (H44's choice), naming the NEWEST offender
@@ -18048,28 +16971,13 @@ export const SWEEP_COUNT_KEYS = [
   'openQuestionCandidates',
   'openQuestionJudged',
   'openQuestionUnparsed',
-  // H51's coverage pair. `handoffCandidates` is how many GATED OPEN PRs the row
-  // could speak about and `handoffJudged` how many of those had a readable
-  // comment thread — this row BUYS that thread, so a shortfall means a failed or
-  // ceiling-bound walk rather than an unbought one, and either way a PR whose
-  // thread went unread must not render as one carrying no verdict.
-  'handoffCandidates',
-  'handoffJudged',
-  // H53's coverage pair. `carrierCandidates` is how many GATED OPEN CARDS the
-  // row could speak about and `carrierJudged` how many had a COMPLETE thread —
-  // this row BUYS that thread, because the measured population is unassigned by
-  // construction and H2 buys one only for an ASSIGNED card, so a cache-only
-  // reading would report the whole target shape UNJUDGED while looking healthy.
-  'carrierCandidates',
-  'carrierJudged',
-  'carrierPagesBought',
   'commits',
   'commitBindings',
   'commitBindingMessages',
   // H8's time-capped merged window (#13499). `mergedPages` is what the window
   // COST and `mergedWindowTruncated` is whether it reached its horizon — the
   // pair that keeps a ceiling-bound (i.e. short) window from reading as a
-  // complete one, the same discipline `eventWindowTruncated` carries.
+  // complete one, the same discipline every windowed read here carries.
   'mergedPages',
   'mergedWindowTruncated',
   'mergedRateObserved',
@@ -18323,21 +17231,6 @@ export function summaryLine(counts, findingCount) {
   // (a ruling) rather than a transient failure worth re-running.
   const crossRepoProbed = counts.crossRepoProbed ?? 0;
   const crossRepoUnreadable = counts.crossRepoUnreadable ?? 0;
-  // H35's event window (#11881). Reported as a pair for the same reason every
-  // pair above is: this is the file's only REPO-WIDE reader of event history
-  // (H59's one timeline page is per-card and answers a different question), so
-  // if the window came up short there is no second reader to notice. `truncated` means
-  // the page cap bound before the horizon was reached — the run saw less than
-  // its stated 12h and must not read as a board with no gate removals in it.
-  // The `unjudgeable` count is carried into the summary deliberately: it is the
-  // measured residue of this row (29 over the 3.41-day derivation corpus, against
-  // 0 half-writes), and burying it would let a quiet H35 section read as "the
-  // gate is watched" when most removals are structurally unwatchable.
-  const gateRemovals = counts.gateRemovals ?? 0;
-  const gateEventPages = counts.eventPages ?? 0;
-  const gateUnjudgeable = counts.gate_unjudgeable ?? 0;
-  const gateUndated = counts.gate_undated ?? 0;
-  const gateWindowTruncated = Boolean(counts.eventWindowTruncated);
   // H32's coverage pair — held, own-board seats and how many had their marker
   // thread read. A shortfall is not silent (an unread thread makes H32 DECLINE
   // to judge that seat, which is the quiet direction), so this is the only
@@ -18528,19 +17421,6 @@ export function summaryLine(counts, findingCount) {
     'lane is countable on THIS board — a seat held for a sibling repo\'s lane is out of scope here (its ' +
     'inventory is unreadable from this sweep, so an empty-looking queue would mean nothing), and an ' +
     'unread thread makes H32 decline to judge that seat rather than accuse it. ' +
-    `Gate-removal patrol (H35): ${gateRemovals} removal(s) of a gate-semantic label read from ` +
-    `${gateEventPages} page(s) of the repo-wide issue-event stream over the last ` +
-    `${H35_EVENT_WINDOW_HOURS}h — no per-card timeline fetch. ${gateUnjudgeable} of them are ` +
-    'UNJUDGEABLE (a gate that only ever had ONE carrier leaves 「双载体同笔清标」 no evidence in ' +
-    'either direction, so neither H31 nor H35 can say cleared-or-stripped)' +
-    `${gateUndated > 0 ? `, and ${gateUndated} more had no hang inside the window` : ''}` +
-    `${
-      gateWindowTruncated
-        ? ` ⚠️ The event window was TRUNCATED at the ${H35_EVENT_PAGE_CAP}-page cap before reaching ` +
-          `the ${H35_EVENT_WINDOW_HOURS}h horizon — this run saw LESS than its stated window, so a ` +
-          'quiet H35 section here is a short read, not a clean board.'
-        : '.'
-    } ` +
     `Shared-file holds (H36): changed-file page read on ${counts.sharedFileProbed ?? 0} of ` +
     `${counts.sharedFileCandidates ?? 0} open PR(s) — a pair needs both sides read, so a shortfall ` +
     'can only MISS a hold, never invent one. ' +
@@ -18701,25 +17581,6 @@ export function summaryLine(counts, findingCount) {
     'its own, so a shortfall is a thread no other row bought, or one still full at its first page, and such a ' +
     'card is UNJUDGED rather than clean. A CLOSED card is out of this population entirely, and the ' +
     'residual-question rule is what carries a question past its own card. ' +
-    // H51's coverage pair. UNCONDITIONAL like every other window's, and it
-    // carries the one purchase this row makes: an issue-comment thread per GATED
-    // open PR, on H48's cache, so a PR that row already bought costs nothing.
-    `Contract-review handoffs (H51): ${counts.handoffJudged ?? 0} of ` +
-    `${counts.handoffCandidates ?? 0} gated open PR(s) had a readable issue-comment thread to judge the ` +
-    `newest contract-review verdict against (at most ${H48_COMMENT_PAGE_CEILING} page(s) of ` +
-    `${H48_COMMENTS_PAGE_SIZE}, shared with H48's cache). A thread that failed or reached that ceiling is ` +
-    'UNJUDGED rather than clean, and a verdict naming an OLDER head is CLEAN rather than quiet — the head ' +
-    'moved, so the carrier is genuinely live again. ' +
-    // H53's coverage pair. UNCONDITIONAL like every other window's, and it
-    // carries the purchase this row makes and the bound on its PR leg.
-    `Carriers without increment (H53): ${counts.carrierJudged ?? 0} of ` +
-    `${counts.carrierCandidates ?? 0} gated open card(s) had a COMPLETE comment thread to judge for a ` +
-    `\`Claim:\` (${counts.carrierPagesBought ?? 0} extra comment page(s) bought completing full first ` +
-    'pages). It BUYS that thread rather than reading a cache: the population is unassigned by ' +
-    'construction and H2 buys one only for an ASSIGNED card, so a cache-only reading would report this ' +
-    'whole shape UNJUDGED while looking healthy. An incomplete or failed walk is UNJUDGED rather than ' +
-    "clean, since a full page may hide the newest claim. The PR leg is the open listing plus H8's " +
-    'bounded merged window, so a landing older than that window is as invisible here as it is to H8. ' +
     // H57's population reading (#17132). UNCONDITIONAL like every other
     // window's, and it carries every narrowing this row makes: how many of the
     // swept repo's workflows declare a schedule, how many of those were judged,
@@ -18917,7 +17778,6 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h19Blockers', 'Blocker liveness (H19): '],
   ['h20Dispatch', 'Dispatch liveness (H20 + H27): '],
   ['h32Seats', 'Seat liveness (H32): '],
-  ['h35GatePatrol', 'Gate-removal patrol (H35): '],
   ['h36SharedFiles', 'Shared-file holds (H36): '],
   ['h43GovernedReviews', 'Governed review requests (H43): '],
   ['h37Folds', 'Family folds (H37): '],
@@ -18931,8 +17791,6 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h49Partial', 'Partial landings (H49): '],
   ['h50ThreadRead', 'Thread-read fields (H50): '],
   ['h52OpenQuestions', 'Open questions (H52): '],
-  ['h51Handoff', 'Contract-review handoffs (H51): '],
-  ['h53Carrier', 'Carriers without increment (H53): '],
   ['h57Scheduled', 'Scheduled non-blocking workflows (H57): '],
   ['h58RulingMarkers', 'Queued ruling markers (H58): '],
   ['h59Linkage', 'Merged-PR closing linkage (H59): '],
@@ -19381,11 +18239,12 @@ export const UNREGISTERED_FAMILY_BAND = 'unregistered';
  *
  * The three anchors for the band calls, each traceable:
  *
- *   gate      H31/H35 — the two-carrier gate comparison and the gate-removal
- *             event. Their own headers say why: 「闸门被剥不是红灯是放行」, and
- *             「被剥」 and 「从未挂过」 are indistinguishable in the evidence.
- *             A row that is the only reader able to tell a stripped gate from
- *             an ungated card cannot be the row that arrival order eats.
+ *   gate      no live member: H31/H35 — the two-carrier comparison and the
+ *             gate-removal event of the retired `needs:contract-review` label
+ *             — left with it (ruling record 5770886272 on #19061). The band
+ *             and its rank stay, for the reason its members had: a row that is
+ *             the only reader able to tell a stripped gate from an ungated
+ *             card cannot be the row that arrival order eats.
  *   stall     the card is stopped and no later sweep frees it: a block that
  *             outlived or mis-names its blocker (H19/H26/H28), a dispatch that
  *             never reached a branch or whose claimant is gone (H20/H27/H33),
@@ -19403,9 +18262,6 @@ export const UNREGISTERED_FAMILY_BAND = 'unregistered';
  *             rather than the lowest-ranked row family.
  */
 export const HALF_STATE_FAMILY_BAND = Object.freeze({
-  H31: 'gate',
-  H35: 'gate',
-
   H4: 'stall',
   H12: 'stall',
   H16: 'stall',
@@ -19454,42 +18310,6 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // stopped, and it fires on a card whose dev may be working perfectly well;
   // what is broken is the READING, not the dispatch.
   H60: 'state',
-
-  // H61 is an `inventory`, and each of the other three bands is refused by its
-  // own criterion — the row's header carries the argument in full. In short:
-  // ⛔ not `gate`, which exists for a row that can tell a STRIPPED gate from an
-  // ungated card (here the carrier is PRESENT); ⛔ not `stall`, because nothing
-  // is stopped — the increment merged; ⛔ not `state`, whose own definition says
-  // a LIVE card, while every subject of this row is merged or closed, i.e.
-  // ARCHIVE in ruling 批 #13's own word for this population. What is left is the
-  // band whose word is 「residue」, which is also the grading comment's word for
-  // the class. Being first in line for the body trim is CORRECT: a landed
-  // carrier is the least urgent thing on the board, and the ledger's callout
-  // names the family and the omitted count rather than dropping rows silently.
-  H61: 'inventory',
-
-  // H51 is a `state` and ⛔ NOT a `gate`, and the distinction is the gate band's
-  // own criterion rather than the subject's vocabulary. That band exists for the
-  // row that can tell a STRIPPED gate from an ungated card — an absence reading
-  // as a green light, where 「被剥」 and 「从未挂过」 are indistinguishable in the
-  // evidence. H51 reads the opposite direction: a gate still PRESENT, outliving
-  // the verdict that should have struck it, with both carriers agreeing (so H31
-  // is clean) and the whole repair on the board. That is `state`'s definition —
-  // a live PR contradicting itself, an aged state — and it is H48's band, the
-  // row this one is the contract-review half of.
-  H51: 'state',
-
-  // H53 is a `state` for H51's reason, arrived at from the other side: its
-  // subject is a gate too, but the `gate` band is defined by an ABSENCE reading
-  // as a green light, and here the carrier is PRESENT while the review behind
-  // it is absent. The card contradicts itself on the board and the repair is on
-  // the board — a person strips the carrier with its provenance — which is
-  // `state`'s definition exactly. ⛔ Not `stall`: whether a card-side carrier
-  // actually blocks dispatch is UNMEASURED (the filing thread says so and
-  // declines to grade on it), so this row does not claim the card is stopped.
-  // ⛔ Not `inventory` either: it alarms about one card, not a population, even
-  // though the first census found fourteen at once.
-  H53: 'state',
 
   // H54 is a `state`, and each of the other three bands is refused for its own
   // stated criterion. ⛔ Not `gate`: that band exists for the row that can tell
@@ -19686,7 +18506,7 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // halves and H57 satisfies only the second: "the row's SUBJECT is a GATE that
   // may have been stripped or split" — and this row's population is defined by
   // the ruling as NOT blocking anything, so its subject is by construction not
-  // in the required set that H31/H35 are about. Reading `gate` off the second
+  // in the required set that the `gate` band is about. Reading `gate` off the second
   // half alone ("its absence reads as a green light") would make the band mean
   // "anything protective", which is the lenient-widening shape this file
   // refuses everywhere else; the band stays about the required set.
@@ -19740,7 +18560,7 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // and its silence reads as delivered. That band's criterion has two halves and
   // this row satisfies only the second — 「the row's SUBJECT is a GATE that may
   // have been stripped or split」 — and this row's subject is a CARD's state, not
-  // a required check. H31/H35 are about a gate that decides whether something may
+  // a required check. The `gate` band is about a gate that decides whether something may
   // land; nothing here decides that. Reading `gate` off the second half alone
   // would make the band mean 「anything protective」, which is H57's refusal taken
   // for H57's reason: the band stays about the required set.
@@ -21003,7 +19823,7 @@ async function rest(path) {
 // 76.9 days and `priority:p0`'s is 52.9. An 8-day horizon — the one H8's window
 // uses, and the obvious number to copy — would make a 52-day-old open P0 card
 // invisible to the entire patrol. A horizon is the right shape for a window over
-// a CLOSED, finished stream (H8, H22, H23, H35, all of which are recency reads
+// a CLOSED, finished stream (H8, H22, H23, all of which are recency reads
 // over events that already happened); it is the wrong shape for an INVENTORY of
 // what is still open, where completeness is the whole point.
 //
@@ -21467,8 +20287,8 @@ export const PATROL_CRON = '37 1,7,13,19 * * *';
  * order by `updated_at` while selecting on `merged_at` / `closed_at`, and both
  * are sound for the same monotonicity reason: merging or closing an issue
  * updates it, so `updated_at >= merged_at` and `updated_at >= closed_at` for
- * every row. H23 and H35 order by the very field they select on, so for them
- * the two coincide.
+ * every row. H23 orders by the very field it selects on, so for it the two
+ * coincide.
  *
  * ⚠️ A short page also stops paging — the stream is exhausted, so there are no
  * more rows to be missed — and the caller reports that as reaching the horizon.
@@ -21544,7 +20364,7 @@ export function reachedDate(ms) {
  *
  * Two kinds, because the file has two honest boundary shapes:
  *
- *   `time`        — the boundary IS a horizon (H8, H22, H23, H35). The ceiling
+ *   `time`        — the boundary IS a horizon (H8, H22, H23). The ceiling
  *                   is a quota backstop; binding it means the pass silently
  *                   became a page cap again.
  *   `exhaustive`  — the boundary is the END OF THE STREAM (the three open
@@ -21909,8 +20729,8 @@ export function classifyRatePremise(input = {}) {
  * merges ≈ 11 pages; the ceiling is 30, i.e. ~375 merges/day before it binds —
  * 2.7x the fastest the board has ever been. If it ever DOES bind, the window is
  * a page cap again and the run says so out loud rather than reporting a short
- * window as a complete one (#4690, and the same `truncated` discipline
- * `listRecentIssueEvents` already carries).
+ * window as a complete one (#4690, the same `truncated` discipline every
+ * windowed read here carries).
  */
 export const MERGED_WINDOW_DAYS = 8;
 
@@ -22655,48 +21475,6 @@ async function listRecentDefaultBranchCommits(stats = {}, nowMs = Date.now()) {
   stats.commitPages = Math.min(page, COMMIT_WINDOW_PAGE_CEILING);
   stats.commitWindowTruncated = !reachedHorizon;
   return out;
-}
-
-/**
- * H35's repo-wide issue-event window — the only REPO-WIDE reader of event
- * history in this file, and deliberately not a per-card timeline fetch (H35's
- * header carries the reasoning; H15 and H16 decline the per-card shape by name).
- * ⚠️ H59 does buy a per-card timeline page since #17466, for a bounded set of
- * cards a merged PR's body names; it reads a `closed` event and never a label
- * one, so nothing here may be answered from it.
- *
- * TIME-bounded with a PAGE cap behind it, rather than pages alone. The stream
- * is strictly newest-first, so the horizon is reached by reading until a row
- * predates it — on a quiet stretch that is two pages, and the cap only binds
- * when the board is busier than the corpus it was derived from. Both bounds are
- * reported: `eventPages` counts what was read and `eventWindowTruncated` says
- * the horizon was NOT reached, because a short window that reads as a clean one
- * is the #4690 direction this file refuses everywhere.
- *
- * PRs ride this endpoint too (a pull request is an issue to it), which is what
- * lets one window see BOTH carriers of a dual-carrier gate.
- */
-async function listRecentIssueEvents(stats = {}, nowMs = Date.now()) {
-  const horizon = nowMs - H35_EVENT_WINDOW_HOURS * 3_600_000;
-  const out = [];
-  let reachedHorizon = false;
-  let page = 1;
-  for (; page <= H35_EVENT_PAGE_CAP; page++) {
-    const batch = await rest(`/repos/${OWNER_REPO}/issues/events?per_page=100&page=${page}`);
-    out.push(...batch);
-    const oldest = Date.parse(batch[batch.length - 1]?.created_at ?? '');
-    if (batch.length < 100 || (Number.isFinite(oldest) && oldest <= horizon)) {
-      reachedHorizon = true;
-      break;
-    }
-  }
-  stats.eventPages = Math.min(page, H35_EVENT_PAGE_CAP);
-  stats.eventRows = out.length;
-  stats.eventWindowTruncated = !reachedHorizon;
-  return out.filter((e) => {
-    const at = Date.parse(e?.created_at ?? '');
-    return Number.isFinite(at) && at > horizon;
-  });
 }
 
 /**
@@ -23724,28 +22502,6 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     }
   }
 
-  // H51 — the contract-review verdict whose LABEL STROKE never happened.
-  //
-  // OUTSIDE the governed block above on purpose: this row's population is the
-  // GATED open PRs, and gated and governed are independent properties — a
-  // register that would not load silences H43 and H48 and must not silence
-  // this. It reads the same `prCommentCache`, whose header reserved exactly
-  // this: a later PR-comment reader pays nothing for a thread H48 already
-  // bought, and buys its own only for a gated PR that row never visited.
-  //
-  // The head-identity leg costs nothing at all: `head.sha` and `labels` both
-  // ride the open-PR LIST row this sweep already holds, so the question "is
-  // this verdict about the tree the PR is offering NOW" is answered without a
-  // request.
-  for (const pr of seenPrs.values()) {
-    if (!h51SpeaksAbout(pr)) continue;
-    stats.handoffCandidates = (stats.handoffCandidates ?? 0) + 1;
-    const rows = await prCommentRowsFor(pr.number);
-    if (rows !== null) stats.handoffJudged = (stats.handoffJudged ?? 0) + 1;
-    const unstruck = h51VerdictWithoutHandoff(pr, rows);
-    if (unstruck) findings.push([pr, 'H51', unstruck]);
-  }
-
   // H8 — one bounded merged-PR listing (window note at the helper), matched
   // against the already-collected open `pm:dispatched` cards; no per-card fetch.
   //
@@ -23794,31 +22550,6 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   }
   stats.closedFloor = CLOSED_FLOOR.raw;
 
-  // H61 (#17510) — the LANDED contract-review carrier, over BOTH windows this
-  // sweep already holds. Placed here because this is the first point at which
-  // both exist: `mergedWindow` was assembled for H8 above, `seenClosed` one
-  // line up. ⛔ No fetch, no page, no new request class — every field the row
-  // reads (`labels`, `merged_at`/`closed_at`, `head.sha`) rides a list row
-  // that was already bought.
-  //
-  // Two loops rather than one concatenation, so each leg's population test is
-  // the one its own predicate declares and a closed-UNMERGED PR cannot reach
-  // the card leg through an issues-shaped row (the header says why it is out).
-  // Counted as well as judged: a family that fires on nothing must be
-  // distinguishable from a family whose input was never read (#4690).
-  for (const pr of mergedWindow) {
-    if (!h61SpeaksAboutMergedPr(pr)) continue;
-    stats.landedCarriers = (stats.landedCarriers ?? 0) + 1;
-    const residue = h61LandedCarrierStillGated(pr);
-    if (residue) findings.push([pr, 'H61', residue]);
-  }
-  for (const card of seenClosed.values()) {
-    if (!h61SpeaksAboutClosedCard(card)) continue;
-    stats.landedCarriers = (stats.landedCarriers ?? 0) + 1;
-    const residue = h61LandedCarrierStillGated(card);
-    if (residue) findings.push([card, 'H61', residue]);
-  }
-
   // H23 — the commit-message surface (#10942). The counting is not incidental:
   // this row's measured yield is ~6 in 1,546, so a silent H23 is the normal
   // reading, and the summary line's coverage numbers are the only thing that
@@ -23865,16 +22596,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // all, so only the unscoped listing is guaranteed to see every carrier.
     const retriageAged = h18RetriageAged(issue);
     if (retriageAged) findings.push([issue, 'H18', retriageAged]);
-    // H31 — the contract-review gate's two carriers, compared. This listing
-    // rather than the label loop for the same reason H18 is here:
-    // `needs:contract-review` is not one of the labels that loop pages, so a
-    // gated card carrying no `pm:*` state at all is first visible HERE. The
-    // open-PR side is `openWindow`, already assembled above for H8 — no
-    // request, and the same `prDeliversCard` relation, so the two rows can
-    // never disagree about which PR delivers which card.
-    const gateSplit = h31ContractReviewCarrierSplit(issue, openWindow);
-    if (gateSplit) findings.push([issue, 'H31', gateSplit]);
-    // H62 (#17009) — the decision card's FACE. This listing for H31's reason
+    // H62 (#17009) — the decision card's FACE. This listing for H18's reason
     // one line up: `needs-user-decision` is not one of the labels the label
     // loop pages (`SEEN_LABEL_PAGES`), so a decision card carrying no `pm:*`
     // state at all is first visible HERE. Free — one label read and one body
@@ -23894,39 +22616,6 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // grade. Two body reads on a row already held — no request, no thread.
     const seamless = h68ClassBWithoutSeamLine(issue);
     if (seamless) findings.push([issue, 'H68', seamless]);
-  }
-
-  // H35 (#11881) — the EVENT behind the state H31 compares. One repo-wide
-  // window, no per-card fetch; the sibling resolver below is `prDeliversCard`
-  // over the two PR windows this sweep already holds, so H8, H31 and H35 read
-  // ONE delivery relation and can never disagree about which PR delivers which
-  // card. An unresolvable sibling returns null and the removal is judged
-  // against its own hang instead — never straight to a finding.
-  const prWindow = [...mergedWindow, ...openWindow];
-  const siblingNumbers = (event) => {
-    const number = Number(event?.issue?.number);
-    if (!Number.isFinite(number)) return null;
-    if (event?.issue?.pull_request) {
-      const pr = prWindow.find((p) => Number(p?.number) === number);
-      if (!pr) return null;
-      const cards = [...seenUnscoped.keys(), ...seen.keys()].filter((n) =>
-        prDeliversCard(pr, String(n)),
-      );
-      return cards.length > 0 ? cards : null;
-    }
-    const prs = prWindow.filter((p) => prDeliversCard(p, String(number))).map((p) => p.number);
-    return prs.length > 0 ? prs : null;
-  };
-  const eventWindow = await listRecentIssueEvents(stats);
-  const gateEvents = gateLabelEvents(eventWindow);
-  stats.gateLabelEvents = gateEvents.length;
-  const removals = gateEvents.filter((e) => e.event === 'unlabeled');
-  stats.gateRemovals = removals.length;
-  for (const removal of removals) {
-    const verdict = h35RemovalVerdict(removal, gateEvents, { siblingNumbers });
-    stats[`gate_${verdict.replace(/-/g, '_')}`] = (stats[`gate_${verdict.replace(/-/g, '_')}`] ?? 0) + 1;
-    const row = h35GateRemovalWithoutEvidence(removal, gateEvents, { siblingNumbers });
-    if (row) findings.push([removal.issue, 'H35', row]);
   }
 
   // H14 + H15 — the same unscoped listing, read a second way. It is the right
@@ -24650,43 +23339,6 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (unrouted) findings.push([issue, 'H52', unrouted]);
   }
 
-  // H53 — the contract-review carrier with no increment behind it.
-  //
-  // The population is the UNSCOPED open listing rather than the label pages, for
-  // H31's reason stated one row over: `needs:contract-review` is not one of the
-  // labels `SEEN_LABEL_PAGES` fetches, so a gated card carrying no `pm:*` state
-  // at all is first visible there. `seen` is unioned in so a gated card the
-  // unscoped listing truncated away is still judged if a label page held it.
-  //
-  // At the FOOT beside H52, and for the opposite reason to H52's: this row
-  // BUYS its thread, so it is placed where every free thread is already in the
-  // cache and its purchase is only ever the gated cards nobody else read.
-  const gatedCards = new Map();
-  for (const issue of [...seenUnscoped.values(), ...seen.values()]) {
-    if (h53SpeaksAbout(issue)) gatedCards.set(issue.number, issue);
-  }
-  for (const issue of gatedCards.values()) {
-    stats.carrierCandidates = (stats.carrierCandidates ?? 0) + 1;
-    let walk;
-    try {
-      walk = await completeCardThread(issue);
-    } catch {
-      // Per-card and never fatal, H16's posture inverted: this row's finding
-      // does not survive an unreadable thread, so the card drops out UNJUDGED
-      // and the coverage pair is what says so.
-      continue;
-    }
-    stats.carrierPagesBought = (stats.carrierPagesBought ?? 0) + walk.pagesBought;
-    if (walk.complete) stats.carrierJudged = (stats.carrierJudged ?? 0) + 1;
-    const bare = h53CarrierWithoutIncrement(
-      issue,
-      walk.complete ? walk.rows : null,
-      openWindow,
-      mergedWindow,
-    );
-    if (bare) findings.push([issue, 'H53', bare]);
-  }
-
   // H59 (#17466) — the merged window read a second way: not "did the card's
   // paired write land" (H8) but "did GitHub's closing linkage tell the truth
   // about this card at all", in both directions.
@@ -24695,8 +23347,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // not: the unscoped OPEN listing (the free answer to direction (b)), the
   // CLOSED window (the free `closed_at` that decides whether direction (a) is
   // worth a request), and the open-PR listing — and all three exist only after
-  // the passes above. Like H53 it BUYS a fetch, so the foot is where its
-  // purchase is provably the smallest: everything free has already been read.
+  // the passes above. It BUYS a fetch, so the foot is where its purchase is
+  // provably the smallest: everything free has already been read.
   const openCardNumbers = new Set([...seenUnscoped.keys(), ...seen.keys()]);
   const knownPrNumbers = new Set([...seenPrs.keys(), ...seenMerged.keys()]);
   // Distinct cards that survived every free narrowing, each with the PR whose
@@ -25214,7 +23866,7 @@ async function selfTest() {
   // H34's wrapper (the pattern this generalizes) stays beside its own block,
   // as do H8's `halvesRow` and H27's `dead27Row` — all three wrap a helper
   // that is itself declared locally, next to the fixtures it closes over.
-  // H29/H30/H31 use a different reader, `says()`, declared at those blocks:
+  // H29/H30 use a different reader, `says()`, declared at those blocks:
   // it returns a DESCRIBING string (`NO MESSAGE (null)`) rather than `''`, so
   // it also distinguishes "row fired without the needle" from "row went
   // silent" on a case whose expectation is `false`. Both shapes run to
@@ -26056,7 +24708,7 @@ async function selfTest() {
     t(`#16706 invariant (${label}): prDeliversCard === (deliveryEvidence !== null)`, prDeliversCard(row, card), deliveryEvidence(row, card) !== null);
   }
 
-  // -- #16706: the kind reaches each of the FIVE readers' printed rows -------
+  // -- #16706: the kind reaches each of the FOUR readers' printed rows -------
   // The docblock on `prDeliversCard` enumerates them; every one gets a reading.
 
   // READER 1 — H8's OPEN side.
@@ -26068,13 +24720,7 @@ async function selfTest() {
   t('#16706 reader prFullyDeliversCard: the merged side still fires on the inline match', h8Merged.includes('#8354'), true);
   t('#16706 reader prFullyDeliversCard: …and the merged row states the evidence beside the date', h8Merged.includes('⚠️ via `Part of` NOT at the declaration position'), true);
   t('#16706 reader prFullyDeliversCard: …while a closing keyword prints the strong phrase', String(h8MergedPrStillDispatched(dispatched(7760), [mergedPr(8354, body8354)], []) ?? '').includes('via a closing keyword'), true);
-  // READER 3 — H31's carrier comparison.
-  const h31Card = { ...issue([]), number: 7918, state: 'open' };
-  const h31Pr = { number: 8354, body: body8354, draft: true, merged_at: null, labels: [{ name: CONTRACT_REVIEW_LABEL }] };
-  const h31Row = String(h31ContractReviewCarrierSplit(h31Card, [h31Pr]) ?? '');
-  t('#16706 reader H31: the split row still fires', h31Row.length > 0, true);
-  t('#16706 reader H31: …and names the evidence the pairing rests on', h31Row.includes('#8354 (draft, ⚠️ via `Part of` NOT at the declaration position'), true);
-  // READER 4 — `claimDelivery`. Its only consumer (H27) fires on ZERO delivery,
+  // READER 3 — `claimDelivery`. Its only consumer (H27) fires on ZERO delivery,
   // so the count's whole effect is to SUPPRESS a row; the kinds ride on the
   // return shape, which is the only surface it has.
   const cd = claimDelivery(7918, [openInline], []);
@@ -26082,7 +24728,7 @@ async function selfTest() {
   t('#16706 reader claimDelivery: …and the suppression is attributable', cd.evidence[0].kind, 'part-of-inline');
   t('#16706 reader claimDelivery: …naming the PR it came from', cd.evidence[0].pr, 8354);
   t('#16706 reader claimDelivery: a merged delivery is attributed too', claimDelivery(7760, [], [mergedPr(8354, body8354)]).evidence[0].kind, 'closing-keyword');
-  // READER 5 is `derivePairs`/C1, which lives in `check-clause2-carriers.mjs`
+  // READER 4 is `derivePairs`/C1, which lives in `check-clause2-carriers.mjs`
   // and is pinned in that file's own self-test.
 
   // -- #16706: the `Refs` axis — the reading the ruling asked for -----------
@@ -28043,81 +26689,6 @@ async function selfTest() {
   t('⛔ H60: …and the blockquoted template spelling too', h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(1, '2026-09-01T00:00:00Z', 'Claim: PM loop\n> Branch: `claude/issue-6752-x`')])), null);
   t('H60 band: the row is registered as a `state`, beside H34\'s claim-shape row', familyBand('H60'), familyBand('H34'));
 
-  // -- H61: a LANDED carrier — a merged PR or a closed card still gated (#17510)
-  //
-  // The specimens are the three the card was filed on, quoted from the live
-  // board on 2026-09-12, plus the closed card the director seat named in
-  // 5597753733. ⚠️ The shas are the HEADS, ⛔ not the merge commits the card's
-  // own text quotes — see the row's header for the measurement of both.
-  const gated61 = (labels = [CONTRACT_REVIEW_LABEL]) => labels.map((name) => ({ name }));
-  const mergedPr61 = (extra = {}) => ({
-    number: 16783,
-    html_url: 'https://github.com/objectstack-ai/objectstack/pull/16783',
-    state: 'closed',
-    merged_at: '2026-09-09T06:36:36Z',
-    head: { sha: '47eea7a805763efa533cb22f1325d9df25db6413' },
-    labels: gated61(['documentation', 'size/xl', 'tests', 'tooling', CONTRACT_REVIEW_LABEL]),
-    ...extra,
-  });
-  const closedCard61 = (extra = {}) => ({
-    number: 16231,
-    html_url: 'https://github.com/objectstack-ai/objectstack/issues/16231',
-    state: 'closed',
-    closed_at: '2026-09-09T06:36:37Z',
-    labels: gated61([CONTRACT_REVIEW_LABEL, 'domain:engine', 'priority:p3']),
-    ...extra,
-  });
-  const row61 = (subject) => String(h61LandedCarrierStillGated(subject) ?? '');
-
-  // ── Direction 1: it FIRES, on both shapes ────────────────────────────────
-  t('H61: a MERGED PR still carrying the gate -> finding', typeof h61LandedCarrierStillGated(mergedPr61()), 'string');
-  t('H61: …and the row prints the merge stamp', row61(mergedPr61()).includes('MERGED 2026-09-09T06:36:36Z'), true);
-  t('H61: …and the HEAD sha, abbreviated', row61(mergedPr61()).includes('`47eea7a805`'), true);
-  t('H61: …⛔ and NOT the merge commit the card quoted', row61(mergedPr61()).includes('854639b3'), false);
-  t('H61: a CLOSED card still carrying the gate -> finding', typeof h61LandedCarrierStillGated(closedCard61()), 'string');
-  t('H61: …and the row prints the closure stamp', row61(closedCard61()).includes('CLOSED 2026-09-09T06:36:37Z'), true);
-  t('H61: …and says `card`, not `pull request`', row61(closedCard61()).includes('this card still announces'), true);
-  t('H61: objectui#8779 — the sibling install\'s specimen fires the same way', typeof h61LandedCarrierStillGated(mergedPr61({ number: 8779, merged_at: '2026-09-09T06:42:59Z', head: { sha: 'a04441f7' } })), 'string');
-
-  // ── Direction 2: it is SILENT everywhere it must be ──────────────────────
-  t('⛔ H61: an OPEN PR carrying the gate is NOT this row — H51 owns it', h61LandedCarrierStillGated({ ...mergedPr61(), state: 'open', merged_at: null }), null);
-  t('⛔ H61: …and H51 still speaks about exactly that PR, so nothing fell between them', h51SpeaksAbout({ ...mergedPr61(), state: 'open', merged_at: null }), true);
-  t('⛔ H61: …while H51 is silent on the merged one, which is the handover', h51SpeaksAbout(mergedPr61()), false);
-  t('⛔ H61: an OPEN card carrying the gate is NOT this row — H53\'s population', h61LandedCarrierStillGated({ ...closedCard61(), state: 'open', closed_at: null }), null);
-  t('⛔ H61: a MERGED PR WITHOUT the gate label is clean', h61LandedCarrierStillGated(mergedPr61({ labels: gated61(['documentation', 'size/xl']) })), null);
-  t('⛔ H61: a CLOSED card without it is clean too', h61LandedCarrierStillGated(closedCard61({ labels: gated61(['domain:engine']) })), null);
-  t('⛔ H61: a CLOSED-UNMERGED PR is out by decision (#16733), read as a pulls row', h61LandedCarrierStillGated({ ...mergedPr61(), number: 16733, merged_at: null, closed_at: '2026-09-08T06:17:13Z' }), null);
-  t('⛔ H61: …and out through the ISSUES-shaped row too, so it cannot enter by the card leg', h61LandedCarrierStillGated({ ...closedCard61(), number: 16733, pull_request: { merged_at: null }, closed_at: '2026-09-08T06:17:13Z' }), null);
-  t('⛔ H61: …nor can a MERGED PR reach the card leg by wearing a `pull_request` field', h61SpeaksAboutClosedCard({ ...closedCard61(), pull_request: { merged_at: '2026-09-09T06:36:36Z' } }), false);
-  t('⛔ H61: …nor by arriving from the PULLS listing, where there is no `pull_request` field to refuse', h61SpeaksAboutClosedCard(mergedPr61()), false);
-  t('⛔ H61: …which is exactly how the closed-UNMERGED PR would have entered', h61SpeaksAboutClosedCard({ ...mergedPr61(), number: 16733, merged_at: null, closed_at: '2026-09-08T06:17:13Z' }), false);
-  t('⛔ H61: an UNREADABLE `labels` is excluded, never read as unlabelled (H31\'s rule)', h61LandedCarrierStillGated(mergedPr61({ labels: undefined })), null);
-  t('⛔ H61: …on the card leg as well', h61LandedCarrierStillGated(closedCard61({ labels: undefined })), null);
-  t('⛔ H61: an unreadable `merged_at` is not a merge this row can place in time', h61LandedCarrierStillGated(mergedPr61({ merged_at: 'nope' })), null);
-  t('⛔ H61: an unreadable `closed_at` likewise', h61LandedCarrierStillGated(closedCard61({ closed_at: 'nope' })), null);
-  t('⛔ H61: a missing row does not crash', h61LandedCarrierStillGated(undefined), null);
-
-  // ── The row's text: the remedy, the spelling, the boundaries ─────────────
-  t('H61: the row names the invariant the carrier breaks', row61(mergedPr61()).includes('开着的载体恒 = 真实待审'), true);
-  t('H61: …and the clearing act by name', row61(mergedPr61()).includes('清标即落地'), true);
-  t('H61: …as a DOUBLE-carrier stroke, which is what 载体纪律 asks for', row61(mergedPr61()).includes('同笔剥双载体'), true);
-  t('H61: …plus the provenance comment the same write owes', row61(mergedPr61()).includes('provenance comment naming the record id'), true);
-  t('H61: …and WHO acts — a seat, not this script', row61(mergedPr61()).includes('the seat that owns the landing'), true);
-  t('H61: …and forbids a label written from this script', row61(mergedPr61()).includes('never a label written from this script'), true);
-  t('H61: …and calls the class RESIDUE behind a closed front end, ⛔ not a bypass', row61(mergedPr61()).includes('RESIDUE behind a closed front end'), true);
-  t('H61: …naming every neighbouring row so the reader never re-files one of theirs', ['H31/H51/H53', 'H35', 'H22'].every((code) => row61(mergedPr61()).includes(code)), true);
-  t('H61: the gate constant is the one H31 already owns, not a second spelling', CONTRACT_REVIEW_LABEL, 'needs:contract-review');
-  t('H61: …and the row prints THAT constant rather than a re-typed literal', row61(closedCard61()).includes(`\`${CONTRACT_REVIEW_LABEL}\``), true);
-  t('H61: …which the gate-label family also still shares (H35\'s pin, from this side)', GATE_SEMANTIC_LABELS.includes(CONTRACT_REVIEW_LABEL), true);
-
-  // ── Report-only: bands and exit codes are untouched by this row ──────────
-  t('H61: not a loud finding — it never escalates a sweep', isLoudFinding(h61LandedCarrierStillGated(mergedPr61())), false);
-  t('H61 band: registered as `inventory` — residue, ⛔ not a live-card `state`', familyBand('H61'), 'inventory');
-  t('H61 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H61'), true);
-  t('H61 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
-  t('⛔ H61: the prerequisite-refusal exit code is unchanged — this row adds none', EXIT_PREREQUISITE_NOT_MET, 3);
-  t('⛔ H61: and the band vocabulary is unchanged — `inventory` was already one of them', HALF_STATE_FAMILY_BANDS.map((band) => band.name).join(','), 'gate,unregistered,stall,state,inventory');
-
   // -- H62 (#17009): a decision card whose FACE carries no four-facet block ---
   //
   // The two spellings the declaration calls 等价, the three-valued prior-ruling
@@ -28675,7 +27246,7 @@ async function selfTest() {
   t('H64 adjacency: …and the same text under an App login stays in it too, because the ACCOUNT is not the test', h64SpeaksAbout(text64('card', noid64(9404, { user: APP64 }))), true);
   t('H64 adjacency: H2 still owns the claim MARKER — this row imports it rather than re-spelling it', CLAIM_COMMENT_MARKER.test(comment5652138683().body), true);
   t('H64 adjacency: H52 still owns the report marker', OS_DEV_REPORT_MARKER.test('os-dev-report\n{}'), true);
-  t('H64 adjacency: H51 still owns the review heading marker', CONTRACT_REVIEW_HEADING_MARKER.test('## Contract review — PASS'), true);
+  t('H64 adjacency: the record readers still own the review heading marker', CONTRACT_REVIEW_HEADING_MARKER.test('## Contract review — PASS'), true);
   t('H64 forms: the table is exercised whole — six forms', SEAT_SIGNATURE_FORMS.length, 6);
   t('H64 forms: the marker for a claim is the file\'s own, ⛔ not a second spelling', SEAT_SIGNATURE_FORMS[0].test('Claim: x') === CLAIM_COMMENT_MARKER.test('Claim: x'), true);
   t('H64 forms: …and the report marker likewise', sig64('os-dev-report\n\n```json\n{}\n```'), 'report');
@@ -28702,7 +27273,6 @@ async function selfTest() {
   t('H64 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H64 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H64 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H64 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H64'), true);
   t('H64: all twelve count keys ride the enumerated forwarding contract', ['seatSignedTexts', 'seatSignedSigned', 'seatSignedIdless', 'seatSignedJudged', 'seatSignedLegacy', 'seatSignedOldest', 'seatSignedRows', 'seatSignedUser', 'seatSignedLogins', 'seatSignedUserPat', 'seatSignedUserUnreadChannel', 'seatSignedUnreadAuthor'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   t('H64 summary: the corpus pair is reported', saidBy('h64SeatSigned', summaryLine({ seatSignedSigned: 197, seatSignedTexts: 526 }, 0)).includes('197 of 526 text(s) read'), true);
   t('H64 summary: …and how many of those name no session id', saidBy('h64SeatSigned', summaryLine({ seatSignedIdless: 42 }, 0)).includes('42 of those name no session id anywhere'), true);
@@ -29156,8 +27726,7 @@ async function selfTest() {
     holdProbed: 3, holdCandidates: 9, fallbackProbed: 24, fallbackCandidates: 26,
     restartProbed: 2, restartCandidates: 7, blockerResolved: 25, blockerTargets: 28,
     crossRepoProbed: 2, crossRepoUnreadable: 1, dispatchRefRead: 4, dispatchRefTargets: 5,
-    seatMarkersRead: 2, seatCandidates: 6, gateRemovals: 7, eventPages: 24,
-    gate_unjudgeable: 5, gate_undated: 1, eventWindowTruncated: true,
+    seatMarkersRead: 2, seatCandidates: 6,
     sharedFileProbed: 17, sharedFileCandidates: 19,
     liveFolds: 1, memberReadCandidates: 40, memberReadProbed: 0,
   }, 1);
@@ -29765,7 +28334,7 @@ async function selfTest() {
   t('#13947 registry: every emitted family carries a band', coverage.missing.join(','), '');
   t('#13947 registry: …and no band names a family the sweep never emits', coverage.extra.join(','), '');
   t('#13947 registry: the scan really found families (positive control)', coverage.emitted.length >= 30, true);
-  t('#13947 registry: …including the gate pair the ruling names', `${coverage.emitted.includes('H31')}/${coverage.emitted.includes('H35')}`, 'true/true');
+  t('#13947 registry: …and the retired gate pair is emitted by nothing (its label is gone)', `${coverage.emitted.includes('H31')}/${coverage.emitted.includes('H35')}`, 'false/false');
   t('#13947 registry: the SECTION families take no band — they are not rows', ['H17', 'H22', 'H39', 'H40'].some((c) => c in HALF_STATE_FAMILY_BAND), false);
   // ⚖️ #14072: the coverage scan is the mechanism that makes the fold stick.
   // H22 must be absent from BOTH sides of it — no push in the source, no band
@@ -29781,8 +28350,9 @@ async function selfTest() {
   t('#13947 registry: a source that pushes nothing reports nothing', familyRegistryCoverage('const x = 1;').emitted.length, 0);
 
   // ② The bands themselves, and the ordering the trim now consults.
-  t('#13947 band: H31 is gate-semantic', familyBand('H31'), 'gate');
-  t('#13947 band: …and H35, the gate-REMOVAL event, with it', familyBand('H35'), 'gate');
+  const bandRank = (name) => HALF_STATE_FAMILY_BANDS.find((band) => band.name === name).rank;
+  t('#13947 band: the `gate` band is still declared, first in rank, with no live member', bandRank('gate') === 0 && !Object.values(HALF_STATE_FAMILY_BAND).includes('gate'), true);
+  t('#13947 band: …and the retired gate rows carry no band', `${familyBand('H31')}/${familyBand('H35')}`, `${UNREGISTERED_FAMILY_BAND}/${UNREGISTERED_FAMILY_BAND}`);
   t("#13947 band: H14/H15/H5 are inventory — triage's own examples", `${familyBand('H14')}/${familyBand('H15')}/${familyBand('H5')}`, 'inventory/inventory/inventory');
   // ⚖️ #14072: H22 was triage's fourth inventory example and has left the
   // registry entirely, because it emits no row for a band to govern. Pinned in
@@ -29790,22 +28360,22 @@ async function selfTest() {
   // that re-banding it without restoring a push fails, and so does the reverse.
   t('#13947 band: ⚖️ H22 carries NO band since the fold', familyBand('H22'), UNREGISTERED_FAMILY_BAND);
   t('#13947 band: …and is not in the table at all', 'H22' in HALF_STATE_FAMILY_BAND, false);
-  t('#13947 band: ⭐ a gate family outranks an inventory one', familyRank('H31') < familyRank('H14'), true);
-  t('#13947 band: …and outranks a stall family', familyRank('H31') < familyRank('H19'), true);
+  t('#13947 band: ⭐ the gate band outranks the inventory band', bandRank('gate') < bandRank('inventory'), true);
+  t('#13947 band: …and outranks the stall band', bandRank('gate') < bandRank('stall'), true);
   t('#13947 band: a stall family outranks an inventory one', familyRank('H19') < familyRank('H14'), true);
   t('#13947 band: an unknown code is NAMED unregistered, never dropped', familyBand('H99'), UNREGISTERED_FAMILY_BAND);
   t('#13947 band: …and is PROTECTED, sorting above the ordinary bands', familyRank('H99') < familyRank('H19'), true);
-  t('#13947 band: …but never above a declared gate row', familyRank('H31') < familyRank('H99'), true);
+  t('#13947 band: …but never above the gate band', bandRank('gate') < familyRank('H99'), true);
   t('#13947 band: every band in the table is a declared band', Object.values(HALF_STATE_FAMILY_BAND).every((b) => HALF_STATE_FAMILY_BANDS.some((d) => d.name === b)), true);
 
   // ③ The ledger's accounting, asserted directly — including the contract that
   // `renderedCount` is a PREFIX of the SORTED rows, not a set membership test.
-  const led = familyLedger([finding(1, 'H14', 'a'), finding(2, 'H14', 'b'), finding(3, 'H31', 'c')], 2);
+  const led = familyLedger([finding(1, 'H14', 'a'), finding(2, 'H14', 'b'), finding(3, 'H12', 'c')], 2);
   t('#13947 ledger: computed counts every row', led.computed, 3);
   t('#13947 ledger: rendered counts the prefix that survived', led.rendered, 2);
-  t('#13947 ledger: the per-family split is exact, gate band first', led.families.map((e) => `${e.code}:${e.computed}/${e.rendered}`).join(','), 'H31:1/0,H14:2/2');
-  t('#13947 ledger: …and the trimmed set names only the short families', led.trimmed.map((e) => e.code).join(','), 'H31');
-  t('#13947 ledger: a family with rows is never in the computed-0 list', led.silent.includes('H14') || led.silent.includes('H31'), false);
+  t('#13947 ledger: the per-family split is exact, the higher band first', led.families.map((e) => `${e.code}:${e.computed}/${e.rendered}`).join(','), 'H12:1/0,H14:2/2');
+  t('#13947 ledger: …and the trimmed set names only the short families', led.trimmed.map((e) => e.code).join(','), 'H12');
+  t('#13947 ledger: a family with rows is never in the computed-0 list', led.silent.includes('H14') || led.silent.includes('H12'), false);
   // ⚖️ #14072: a code with no band is not silent either — it is not a row
   // family at all, so the ledger must never list it as "computed 0 rows".
   t('#13947 ledger: ⚖️ a folded family is absent from the ledger entirely', led.silent.includes('H22'), false);
@@ -29813,9 +28383,10 @@ async function selfTest() {
 
   // ④ ⭐ Severity beats arrival position — the case this card is about. The
   // inventory flood arrives FIRST and carries the LOWER card numbers, so under
-  // the flat positional trim the gate row was among the omitted.
+  // the flat positional trim the severe row was among the omitted. (The fixture
+  // family is a `stall` row now that the gate band has no live member.)
   const inventoryFlood = Array.from({ length: 900 }, (_, i) => finding(1000 + i, 'H14', 'the `pm:blocking` cache disagrees with the live blocker set — '.repeat(2)));
-  const lateGateRow = finding(99999, 'H31', 'the `needs:contract-review` gate is on the PR carrier and not the card');
+  const lateGateRow = finding(99999, 'H12', 'the delivering PR cannot land while the card reads dispatched');
   const ranked = renderMarkdown([...inventoryFlood, lateGateRow], counts);
   t('#13947 order: the flood really does trigger the trim', ranked.includes('further row(s) omitted'), true);
   t('#13947 order: ⭐ the LAST-arriving gate row survives it', ranked.includes('#99999'), true);
@@ -29824,7 +28395,7 @@ async function selfTest() {
   // exactly the regression this case exists to catch (measured while ablating
   // the sort key — the bare form stayed green with the gate row gone).
   t('#13947 order: …and is laid out FIRST, above every inventory row', ranked.indexOf('#99999') > 0 && ranked.indexOf('#99999') < ranked.indexOf('#1000'), true);
-  t('#13947 order: …and the ledger records it as fully rendered', ranked.includes('| `H31` | gate | 1 | 1 |'), true);
+  t('#13947 order: …and the ledger records it as fully rendered', ranked.includes('| `H12` | stall | 1 | 1 |'), true);
   t('#13947 order: …while the inventory family is the one that loses rows', ranked.includes('| `H14` | inventory | 900 |'), true);
   t('#13947 order: the body still fits the render budget', bodyBytes(ranked) <= MARKDOWN_BODY_BUDGET, true);
   t('#13947 order: …and the measured cap', bodyBytes(ranked) <= ISSUE_BODY_LIMIT, true);
@@ -29833,25 +28404,25 @@ async function selfTest() {
   // must survive this change rather than be re-litigated by it.
   const unjudgedInventory = finding(88888, 'H19', `${UNJUDGED_MARKER} a cross-repo target could not be resolved`);
   const banded = renderMarkdown([...inventoryFlood, lateGateRow, unjudgedInventory], counts);
-  t('#13947 order: an UNJUDGED row still outranks a gate row', banded.indexOf('#88888') > 0 && banded.indexOf('#88888') < banded.indexOf('#99999'), true);
+  t('#13947 order: an UNJUDGED row still outranks a banded row', banded.indexOf('#88888') > 0 && banded.indexOf('#88888') < banded.indexOf('#99999'), true);
   t('#13947 order: …and a loud row outranks both', renderMarkdown([lateGateRow, loudRow], counts).indexOf('#900') > 0 && renderMarkdown([lateGateRow, loudRow], counts).indexOf('#900') < renderMarkdown([lateGateRow, loudRow], counts).indexOf('#99999'), true);
 
-  // ⑤ ⭐⭐ The acceptance test: zero rendered H31 rows, read two ways. The loud
-  // band outranks every family band by design, so a P0 flood is the one shape
-  // that can still eat a gate family whole — and the ledger is what keeps that
+  // ⑤ ⭐⭐ The acceptance test: zero rendered rows of one family, read two ways.
+  // The loud band outranks every family band by design, so a P0 flood is the one
+  // shape that can still eat a family whole — and the ledger is what keeps that
   // legible instead of indistinguishable from a clean board.
   const loudFlood = Array.from({ length: 700 }, (_, i) => finding(30000 + i, 'H13', `${P0_SUSPECT_MARKER} the card self-declares P0. ${'x'.repeat(90)}`));
-  const h31Rows = Array.from({ length: 6 }, (_, i) => finding(40000 + i, 'H31', 'the gate is carried on one of its two carriers'));
-  const eaten = renderMarkdown([...loudFlood, ...h31Rows], counts);
-  t('#13947 H31: the flood trims the gate family away entirely', eaten.includes('#40000'), false);
-  t('#13947 H31: ⭐ …and the ledger says so, computed and rendered both', eaten.includes('| `H31` | gate | 6 | 0 |'), true);
-  t('#13947 H31: …and the callout names it above the table', eaten.includes('`H31` (0/6)'), true);
+  const h12Rows = Array.from({ length: 6 }, (_, i) => finding(40000 + i, 'H12', 'the delivering PR cannot land while the card reads dispatched'));
+  const eaten = renderMarkdown([...loudFlood, ...h12Rows], counts);
+  t('#13947 H12: the flood trims the stall family away entirely', eaten.includes('#40000'), false);
+  t('#13947 H12: ⭐ …and the ledger says so, computed and rendered both', eaten.includes('| `H12` | stall | 6 | 0 |'), true);
+  t('#13947 H12: …and the callout names it above the table', eaten.includes('`H12` (0/6)'), true);
   const noSplit = renderMarkdown([quietRow], counts);
-  t('#13947 H31: the OTHER reading — a family that computed nothing', noSplit.includes('Computed 0 row(s) this sweep'), true);
-  t('#13947 H31: …names H31 in that list', /Computed 0 row\(s\)[\s\S]*?`H31`/.test(noSplit), true);
-  t('#13947 H31: …and keeps it out of the table', noSplit.includes('| `H31` |'), false);
-  t('#13947 H31: ⭐⭐ so the two readings are textually distinct', eaten.includes('| `H31` | gate | 6 | 0 |') && !noSplit.includes('| `H31` |'), true);
-  t('#13947 H31: the disambiguating sentence states the contract in words', noSplit.includes('never ambiguous between the two readings'), true);
+  t('#13947 H12: the OTHER reading — a family that computed nothing', noSplit.includes('Computed 0 row(s) this sweep'), true);
+  t('#13947 H12: …names H12 in that list', /Computed 0 row\(s\)[\s\S]*?`H12`/.test(noSplit), true);
+  t('#13947 H12: …and keeps it out of the table', noSplit.includes('| `H12` |'), false);
+  t('#13947 H12: ⭐⭐ so the two readings are textually distinct', eaten.includes('| `H12` | stall | 6 | 0 |') && !noSplit.includes('| `H12` |'), true);
+  t('#13947 H12: the disambiguating sentence states the contract in words', noSplit.includes('never ambiguous between the two readings'), true);
 
   // ⑥ Unconditional by construction: reserved out of the budget BEFORE the
   // rows are laid out, exactly as the H17 index and the H40 section are.
@@ -29875,7 +28446,7 @@ async function selfTest() {
 
   // ⑧ The reservation is a BOUND, and it is PROVED rather than asserted: every
   // outcome the trim could produce is rendered and measured against it.
-  const boundRows = [...inventoryFlood.slice(0, 40), ...h31Rows, ...loudFlood.slice(0, 12)].sort(
+  const boundRows = [...inventoryFlood.slice(0, 40), ...h12Rows, ...loudFlood.slice(0, 12)].sort(
     (a, b) => familyRank(a[1]) - familyRank(b[1]) || a[0].number - b[0].number,
   );
   const boundText = (n) => {
@@ -29904,7 +28475,7 @@ async function selfTest() {
   t('#13947 cap: …and renders exactly the cap', overCapLedger.split('\n').filter((l) => /^\| `H\d/.test(l)).length, FAMILY_LEDGER_ROW_CAP);
 
   // ⑩ An unregistered family is LOUD, in the table and beside it.
-  const strange = renderFamilyLedger(familyLedger([finding(1, 'H31', 'g'), finding(2, 'H99', 'x')], 2)).join('\n');
+  const strange = renderFamilyLedger(familyLedger([finding(1, 'H12', 'g'), finding(2, 'H99', 'x')], 2)).join('\n');
   t('#13947 unregistered: the table flags it', strange.includes('| `H99` ⚠️ | unregistered | 1 | 1 |'), true);
   t('#13947 unregistered: …and a callout asks for it to be registered', strange.includes('carry NO band in `HALF_STATE_FAMILY_BAND`'), true);
   t('#13947 unregistered: …and it never lands in the computed-0 list', /Computed 0 row\(s\)[\s\S]*?`H99`/.test(strange), false);
@@ -30293,7 +28864,7 @@ async function selfTest() {
   t('vocabulary: a fresh awaiting park is still clean', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL], { created: daysAgo(2) }), NOW), null);
   t('vocabulary: an UNimportant awaiting card is not inventory', h11ImportantParked(parkedCard([AWAITING_MAINTAINER_LABEL]), NOW), null);
 
-  // -- H29 / H30 / H31: the half-state rule families of #11179 ---------------
+  // -- H29 / H30: the half-state rule families of #11179 ---------------------
   //
   // ⚠️ ASSERTION SHAPE. Every message assertion below goes through a helper
   // that checks `typeof` FIRST and returns a describing STRING when the
@@ -30407,154 +28978,8 @@ async function selfTest() {
   t('H30 adjacency: H18 is silent (no pm:retriage)', h18RetriageAged(queueCard(['pm:queue'], daysAgo(5)), NOW), null);
   t('H30 adjacency: H11 is silent (pm:queue is not a PARKED state)', h11ImportantParked({ ...queueCard(['bug', 'pm:queue'], daysAgo(5)), created_at: daysAgo(30) }, NOW), null);
 
-  // -- H31: the contract-review gate's two carriers ---------------------------
-  const gateCard = (labels, extra = {}) => ({
-    number: 11427,
-    state: 'open',
-    labels: labels.map((name) => ({ name })),
-    assignees: [],
-    body: '',
-    title: '',
-    ...extra,
-  });
-  const gatePr = (number, labels, extra = {}) => ({
-    number,
-    merged_at: null,
-    draft: true,
-    body: 'Fixes #11427',
-    head: { ref: `claude/issue-11427-x` },
-    labels: labels.map((name) => ({ name })),
-    ...extra,
-  });
-  const bare = gatePr(11844, ['documentation', 'size/l', 'tests']);
-  const gated = gatePr(11844, ['documentation', 'size/l', CONTRACT_REVIEW_LABEL]);
-  t('H31: gated card + a bare delivering PR -> finding', typeof h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL, 'pm:dispatched']), [bare]), 'string');
-  t('H31: …and it names the PR that is missing the carrier', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), '#11844 (draft,'), true);
-  t('H31: …and names both failure routes (hang never reached / PASS stopped half way)', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), 'already passed'), true);
-  t('H31: bare card + a gated delivering PR -> finding', typeof h31ContractReviewCarrierSplit(gateCard(['pm:dispatched']), [gated]), 'string');
-  t('H31: …and calls that the more dangerous half', says(h31ContractReviewCarrierSplit(gateCard([]), [gated]), 'more dangerous half'), true);
-  t('H31: …because a stripped gate reads as a green light', says(h31ContractReviewCarrierSplit(gateCard([]), [gated]), '闸门被剥不是红灯是放行'), true);
-  t('H31: both directions carry the read-back contract', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), 'READ-BACK'), true);
-  t('H31: report-only — never a label from this script', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), 'never a label written from this script'), true);
-  t('H31: …naming the rule that forbids it', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), '自查放行'), true);
-  t('H31: not a loud finding', isLoudFinding(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare])), false);
-  // Agreement, both ways, is clean.
-  t('H31: both carriers gated -> clean', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [gated]), null);
-  t('H31: neither carrier gated -> clean', h31ContractReviewCarrierSplit(gateCard(['pm:dispatched']), [bare]), null);
-  t('H31: one gated + one bare delivering PR still fires and names the bare one', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [gated, gatePr(11845, [])]), '#11845'), true);
-  // The protocol's own intermediate state, NOT a finding: card-side first.
-  t('H31: gated card with NO delivering open PR -> clean (card-side-first is legal)', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL, 'pm:blocked']), []), null);
-  t('H31: …and a PR that delivers some OTHER card does not start the comparison', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, body: 'Fixes #9999', head: { ref: 'claude/issue-9999-x' } }]), null);
-  // A merged carrier is a closed-out stroke, not a live half-write.
-  t('H31: a MERGED delivering PR is out of scope', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, merged_at: '2026-08-24T01:00:00Z' }]), null);
-  // #4690, in the direction that matters here: an unreadable carrier must not
-  // be read as a bare one, or a read failure manufactures a gate finding.
-  t('H31: a PR row whose labels could not be read is not judged as bare', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, labels: undefined }]), null);
-  t('H31: …and one readable bare PR alongside it still fires', typeof h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, labels: undefined }, gatePr(11845, [])]), 'string');
-  // The delivery relation is H8's, shared rather than re-derived.
-  t('H31: the branch-name fallback still produces a row for a body-silent PR', typeof h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, body: '' }]), 'string');
-  t('H31: …but it is the DECLINED one — a body that declared nothing does not close the card (#18229)', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, body: '' }]), 'DECLINES to judge'), true);
-  t('H31: …and H8 reads the same PR as delivering the same card', prDeliversCard({ ...bare, body: '' }, '11427'), true);
-  t('H31: a CLOSED card is out of scope', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL], { state: 'closed' }), [bare]), null);
-  t('H31: a missing issue does not crash', h31ContractReviewCarrierSplit(undefined, [bare]), null);
-  t('H31: an absent PR listing does not crash', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), undefined), null);
-  // The live specimen, 2026-08-24, byte-shaped: card #11427 gated, its
-  // delivering draft PR #11844 carrying every label EXCEPT the gate.
-  const live11427 = gateCard(['bug', 'pm:dispatched', 'domain:services', CONTRACT_REVIEW_LABEL]);
-  const live11844 = {
-    number: 11844,
-    merged_at: null,
-    draft: true,
-    body: 'Fixes #11427\n\nhydrate a tombstoned sys_file that still has a live holder',
-    head: { ref: 'claude/issue-11427-file-hydration-tombstone' },
-    labels: ['documentation', 'size/l', 'dependencies', 'tests', 'tooling'].map((name) => ({ name })),
-  };
-  t('H31 live: #11427 gated while its delivering PR #11844 is not -> finding', typeof h31ContractReviewCarrierSplit(live11427, [live11844]), 'string');
-  t('H31 live: …and the row names the PR', says(h31ContractReviewCarrierSplit(live11427, [live11844]), '#11844 (draft,'), true);
-  // …and #10025, the other live carrier: gated, `pm:blocked`, no open PR at
-  // all — the shape this row deliberately does NOT report.
-  t('H31 live: #10025 (gated, no PR carrier yet) -> clean', h31ContractReviewCarrierSplit({ ...gateCard(['domain:services', 'pm:blocked', CONTRACT_REVIEW_LABEL]), number: 10025 }, [live11844]), null);
-
-  // -- H31: which binding makes a CARRIER PAIR (#18229) -----------------------
-  // The defect, byte-shaped from anchor #9857's 2026-09-14T19:45Z sweep: PR
-  // #18212 carries `Fixes #18202` (its own card, gated) AND a `Part of #14122`
-  // line naming the epic tracker, and H31 read the second as a delivery — so a
-  // correctly gated sub-PR manufactured an action-shaped row against a card no
-  // PR will ever close.
-  const pr18212 = (labels = ['documentation', 'size/l', 'tests', 'tooling', CONTRACT_REVIEW_LABEL]) => ({
-    number: 18212,
-    merged_at: null,
-    draft: true,
-    body:
-      'Fixes #18202\n\nPart of #14122 — the epic tracking the one-artifact/N-packages family. ' +
-      'That tracker stays open.',
-    head: { ref: 'claude/issue-18202-crossref-dependency-aware' },
-    labels: labels.map((name) => ({ name })),
-  });
-  const card18229 = (number, labels) => ({
-    number,
-    state: 'open',
-    labels: labels.map((name) => ({ name })),
-    assignees: [],
-    body: '',
-    title: '',
-  });
-  const tracker14122 = card18229(14122, ['priority:p2', TRACKING_ANCHOR_LABEL, 'domain:spec']);
-  const delivered18202 = card18229(18202, ['bug', 'priority:p1', 'pm:dispatched', 'domain:spec']);
-
-  // The binding predicate itself, both directions on ONE body.
-  t('#18229: a closing keyword closes the card it names', bindingClosesCard(pr18212(), '18202'), true);
-  t('#18229: a `Part of` line on the SAME body does not', bindingClosesCard(pr18212(), '14122'), false);
-  t('#18229: nor an inline `Part of`', bindingClosesCard({ number: 1, body: 'see part of #7918 above' }, '7918'), false);
-  t('#18229: nor the branch-name fallback', bindingClosesCard({ number: 1, body: '', head: { ref: 'claude/issue-9834-x' } }, '9834'), false);
-  t('#18229: a keyword outranks an inline `Part of` for the SAME card, exactly as GitHub does', bindingClosesCard({ number: 1, body: 'Fixes #7918\n\nsee part of #7918 above' }, '7918'), true);
-  t('#18229: a PR bound to no card at all closes nothing', bindingClosesCard({ number: 1, body: 'no declaration' }, '9999'), false);
-  t('#18229: a missing PR does not crash', bindingClosesCard(undefined, '1'), false);
-  // ⛔ The SHARED relation is untouched — the narrowing is H31's own filter.
-  t('#18229: ⛔ `prDeliversCard` is NOT narrowed — the tracker is still a delivery to H8/H35/H53', prDeliversCard(pr18212(), '14122'), true);
-  t('#18229: …and the evidence kind H8 prints is unchanged', deliveryEvidence(pr18212(), '14122'), 'part-of');
-
-  // The PIN: the tracker's row no longer prescribes a write.
-  const row14122 = h31ContractReviewCarrierSplit(tracker14122, [pr18212()]);
-  t('#18229 pin: the `Part of`-only tracker still produces a row — ⛔ not a silent skip', typeof row14122, 'string');
-  t('#18229 pin: …and the row says it DECLINED rather than reporting clean', says(row14122, 'DECLINES to judge'), true);
-  t('#18229 pin: …naming the binding it read', says(row14122, '#18212 (draft, via a `Part of` declaration)'), true);
-  t('#18229 pin: …and why a tracker can never clear a gate', says(row14122, 'ruling-anchor state that stays OPEN by design'), true);
-  t('#18229 pin: …the row prescribes NOTHING', says(row14122, 'prescribes NOTHING'), true);
-  t('#18229 pin: …it is ⛔ NOT the action-shaped sentence any more', says(row14122, 'more dangerous half'), false);
-  t('#18229 pin: …nor does it ask anyone to hang the gate on the card', says(row14122, 'do not hang the gate on the'), true);
-  t('#18229 pin: a decline is not a LOUD row', isLoudFinding(row14122), false);
-  t('#18229 pin: …and ⛔ not an UNJUDGED-ranked one either — it must never sort ahead of a real split', isUnjudgedFinding(row14122), false);
-  t('#18229 pin: the decline still carries the dual-carrier contract', says(row14122, 'READ-BACK'), true);
-
-  // The CONTROL: the card that PR actually closes is judged exactly as before.
-  const row18202 = h31ContractReviewCarrierSplit(delivered18202, [pr18212()]);
-  t('#18229 control: a closing-keyword binding whose card lacks the gate — the row STANDS', typeof row18202, 'string');
-  t('#18229 control: …and it is the unchanged action-shaped sentence', says(row18202, 'more dangerous half'), true);
-  t('#18229 control: …which is ⛔ not a decline', says(row18202, 'DECLINES to judge'), false);
-  t('#18229 control: …and the gated card half agrees -> clean', h31ContractReviewCarrierSplit(card(18202, ['bug', CONTRACT_REVIEW_LABEL]), [pr18212()]), null);
-
-  // Agreement on a weak binding stays SILENT — a standing row per tracker per
-  // sweep is the disease this fix cures, not the cure.
-  t('#18229: weak binding, both carriers gated -> clean', h31ContractReviewCarrierSplit(card(14122, [TRACKING_ANCHOR_LABEL, CONTRACT_REVIEW_LABEL]), [pr18212()]), null);
-  t('#18229: weak binding, neither carrier gated -> clean', h31ContractReviewCarrierSplit(tracker14122, [pr18212(['documentation', 'size/l'])]), null);
-
-  // The decline is about the BINDING; the anchor clause is the extra the label
-  // buys. A weak-bound ordinary card still reports, without that clause.
-  const weakOrdinary = h31ContractReviewCarrierSplit(card18229(14122, ['priority:p2']), [pr18212()]);
-  t('#18229: a weak-bound card with NO `tracking` still reports the split', says(weakOrdinary, 'DECLINES to judge'), true);
-  t('#18229: …without the ruling-anchor clause, which the label is what buys', says(weakOrdinary, 'ruling-anchor state'), false);
-
-  // Precedence: an adjudicable split outranks a decline, and names only the PR
-  // that can actually close the card.
-  const mixedCard18229 = card18229(11427, ['pm:dispatched']);
-  const mixed18229 = h31ContractReviewCarrierSplit(mixedCard18229, [gatePr(11844, [CONTRACT_REVIEW_LABEL]), { ...pr18212(), body: 'Part of #11427' }]);
-  t('#18229 precedence: a real carrier split wins over a decline', says(mixed18229, 'more dangerous half'), true);
-  t('#18229 precedence: …and names the closing-bound PR', says(mixed18229, '#11844'), true);
-  t('#18229 precedence: …⛔ never the `Part of`-bound one', says(mixed18229, '#18212'), false);
-
-  // One spelling of the ruling-anchor state, two readers (H13's exemption list
-  // and H31's clause) — a second literal is the drift this constant prevents.
+  // One spelling of the ruling-anchor state — a second literal is the drift
+  // this constant prevents.
   t('#18229: the ruling-anchor label has ONE spelling', TRACKING_ANCHOR_LABEL, 'tracking');
   t("#18229: …and H13's exemption list reads that same constant", H13_EXEMPT_LABELS.includes(TRACKING_ANCHOR_LABEL), true);
 
@@ -31499,144 +29924,6 @@ async function selfTest() {
   // names, asserted here because this regex is exported and reused per line.
   t('H34: the near-miss marker carries no `g` flag', CLAIM_NEAR_MISS_MARKER.global, false);
   t('H34: …so repeated reads of one line agree', nearMissClaimSeparators(DASH_CLAIM).join() === nearMissClaimSeparators(DASH_CLAIM).join(), true);
-
-  // -- H35 — a gate label removed with no matching review-chain evidence -----
-  // -- (#11881). Fixtures are event rows in the repo-wide stream's shape.
-  const gateEvent = (over, { n, pr = false, actor = 'os-seat', at, labels = [] }) => ({
-    event: over,
-    label: { name: CONTRACT_REVIEW_LABEL },
-    actor: { login: actor },
-    created_at: at,
-    issue: {
-      number: n,
-      state: 'open',
-      labels: labels.map((name) => ({ name })),
-      pull_request: pr ? { url: 'x' } : undefined,
-      html_url: `https://example.invalid/${n}`,
-    },
-  });
-  // The delivery relation, stubbed: card 900 <-> PR 901.
-  const sib900 = (e) => (e.issue.pull_request ? [900] : [901]);
-  const o900 = { siblingNumbers: sib900 };
-  const h35row = (...args) => String(h35GateRemovalWithoutEvidence(...args) ?? '');
-
-  // The healthy shape: hung across both carriers, cleared across both.
-  const dualHang = [
-    gateEvent('labeled', { n: 900, at: '2026-08-26T10:00:00Z' }),
-    gateEvent('labeled', { n: 901, pr: true, at: '2026-08-26T10:00:02Z' }),
-  ];
-  const dualClear = [
-    gateEvent('unlabeled', { n: 900, at: '2026-08-26T12:00:00Z' }),
-    gateEvent('unlabeled', { n: 901, pr: true, at: '2026-08-26T12:00:03Z' }),
-  ];
-  const healthy = [...dualHang, ...dualClear];
-  t('H35: a dual-carrier clear is the review-chain evidence -> silent', h35RemovalVerdict(dualClear[0], healthy, o900), 'paired');
-  t('H35: …and emits no row', h35GateRemovalWithoutEvidence(dualClear[0], healthy, o900), null);
-  t('H35: …on the PR carrier too', h35RemovalVerdict(dualClear[1], healthy, o900), 'paired');
-
-  // ⭐ THE FINDING: hung in a dual stroke, cleared on ONE carrier only.
-  const halfWrite = [...dualHang, dualClear[0]];
-  t('H35: hung dual + cleared lone -> half-write', h35RemovalVerdict(dualClear[0], halfWrite, o900), 'half-write');
-  t('H35: …and the row fires', typeof h35GateRemovalWithoutEvidence(dualClear[0], halfWrite, o900), 'string');
-  t('H35: …naming the carrier it was removed from', h35row(dualClear[0], halfWrite, o900).includes('REMOVED from this CARD'), true);
-  t('H35: …and the actor', h35row(dualClear[0], halfWrite, o900).includes('`os-seat`'), true);
-  t('H35: …and the failure direction is toward release', h35row(dualClear[0], halfWrite, o900).includes('闸门被剥不是红灯是放行'), true);
-  t('H35: …and the remedy is a READ, not a re-hang', h35row(dualClear[0], halfWrite, o900).includes('Remedy is a READ, not a write'), true);
-  t('H35: …and it states the report-only posture', h35row(dualClear[0], halfWrite, o900).includes('never a label written from this script'), true);
-  // The half-write class is NOT narrowed to open carriers — a gate cleared half
-  // way on a PR that then merged is the bypass that already happened.
-  const closedCarrier = { ...dualClear[0], issue: { ...dualClear[0].issue, state: 'closed' } };
-  t('H35: a half-write on a CLOSED carrier still reports', typeof h35GateRemovalWithoutEvidence(closedCarrier, [...dualHang, closedCarrier], o900), 'string');
-
-  // The single-carrier gate — the measured majority shape, and NOT a finding.
-  const loneHang = gateEvent('labeled', { n: 900, at: '2026-08-26T10:00:00Z' });
-  const loneClear = gateEvent('unlabeled', { n: 900, at: '2026-08-26T12:00:00Z' });
-  const singleCarrier = [loneHang, loneClear];
-  t('H35: hung lone + cleared lone -> unjudgeable, never a violation', h35RemovalVerdict(loneClear, singleCarrier, o900), 'unjudgeable');
-  t('H35: …and the row says UNJUDGED rather than clean', h35row(loneClear, singleCarrier, o900).includes('UNJUDGED, not clean'), true);
-  t('H35: …and names both producer-side repairs', h35row(loneClear, singleCarrier, o900).includes('PR 一存在即挂'), true);
-  t('H35: …and refuses to parse the prose verdict', h35row(loneClear, singleCarrier, o900).includes('declines to parse it'), true);
-  // …but only while the carrier is live: the narrowing that keeps this class at
-  // ~0.22 rows/run instead of ~8.5 (header's measured figures).
-  const closedLone = { ...loneClear, issue: { ...loneClear.issue, state: 'closed' } };
-  t('H35: an unjudgeable clear on a CLOSED carrier emits no row', h35GateRemovalWithoutEvidence(closedLone, [loneHang, closedLone], o900), null);
-  t('H35: …though it still classifies as unjudgeable', h35RemovalVerdict(closedLone, [loneHang, closedLone], o900), 'unjudgeable');
-
-  // Re-hung: the read-back worked. Reporting it would call the control a defect.
-  const rehung = gateEvent('unlabeled', { n: 900, at: '2026-08-26T12:00:00Z', labels: [CONTRACT_REVIEW_LABEL] });
-  t('H35: a removal whose label is BACK -> rehung, silent', h35RemovalVerdict(rehung, [...dualHang, rehung], o900), 'rehung');
-  t('H35: …and emits no row', h35GateRemovalWithoutEvidence(rehung, [...dualHang, rehung], o900), null);
-
-  // Three input states, never two (#4690): no hang in the window = decline.
-  t('H35: a removal with no hang in the window -> undated, not a finding', h35RemovalVerdict(dualClear[0], [dualClear[0]], o900), 'undated');
-  t('H35: …and emits no row', h35GateRemovalWithoutEvidence(dualClear[0], [dualClear[0]], o900), null);
-  // An unresolvable sibling must not manufacture a finding: it degrades to the
-  // hang comparison, which for a lone hang is `unjudgeable`.
-  t('H35: an unresolvable sibling degrades, never accuses', h35RemovalVerdict(loneClear, singleCarrier, { siblingNumbers: () => null }), 'unjudgeable');
-
-  // Scope: only `unlabeled`, only gate-semantic labels.
-  t('H35: a `labeled` row is not applicable', h35RemovalVerdict(dualHang[0], healthy, o900), 'not-applicable');
-  const otherLabel = { ...loneClear, label: { name: 'size/l' } };
-  t('H35: a non-gate label is not applicable', h35RemovalVerdict(otherLabel, [otherLabel], o900), 'not-applicable');
-  t('H35: `needs-user-decision` is deliberately NOT in the family', isGateSemanticLabel('needs-user-decision'), false);
-  t('H35: the gate label IS', isGateSemanticLabel(CONTRACT_REVIEW_LABEL), true);
-  t('H35: the family and H31 share ONE constant', GATE_SEMANTIC_LABELS.includes(CONTRACT_REVIEW_LABEL), true);
-
-  // ⚠️ THE VACUITY GUARD. H35's half-write class measured ZERO over the 3.41-day
-  // derivation corpus — a true reading of a board where the dual-carrier
-  // discipline holds, and indistinguishable from a predicate that CANNOT fire.
-  // These two cases are the difference, and they must be read as a pair: the
-  // classifier reaches `half-write` on a constructed input, and a mutation that
-  // makes the row go permanently silent turns them red HERE rather than passing
-  // as a quiet board. ⛔ Do not delete either one to make an ablation quieter.
-  t('H35 vacuity guard: the half-write class is REACHABLE', h35RemovalVerdict(dualClear[0], halfWrite, o900) === 'half-write', true);
-  t('H35 vacuity guard: …and produces a non-empty row', h35row(dualClear[0], halfWrite, o900).length > 0, true);
-  // The stroke window is a threshold read out of an EMPTY region of the measured
-  // distribution (101s .. 275s), so these two pin both of its sides.
-  const slowPair = [
-    ...dualHang,
-    dualClear[0],
-    gateEvent('unlabeled', { n: 901, pr: true, at: '2026-08-26T12:01:30Z' }),
-  ];
-  t('H35: a 90s dual clear is still ONE stroke (inside the 120s window)', h35RemovalVerdict(dualClear[0], slowPair, o900), 'paired');
-  const hoursApart = [
-    ...dualHang,
-    dualClear[0],
-    gateEvent('unlabeled', { n: 901, pr: true, at: '2026-08-26T15:00:00Z' }),
-  ];
-  t('H35: a clear hours later is NOT the same stroke', h35RemovalVerdict(dualClear[0], hoursApart, o900), 'half-write');
-  // 「同笔」 is one actor's stroke — a different login is not the same write.
-  const otherActor = [
-    ...dualHang,
-    dualClear[0],
-    gateEvent('unlabeled', { n: 901, pr: true, actor: 'os-other', at: '2026-08-26T12:00:03Z' }),
-  ];
-  t('H35: a different actor is not 同笔', h35RemovalVerdict(dualClear[0], otherActor, o900), 'half-write');
-
-  // The window derivation, executable rather than prose (H8's `windowCoverageDays` shape).
-  t('H35: the horizon is TWO patrol cycles', H35_EVENT_WINDOW_HOURS / PATROL_CADENCE_HOURS, 2);
-  t('H35: 12h at the measured rate needs 24 pages', eventWindowPages(), 24);
-  t('H35: …and the cap leaves headroom above that', H35_EVENT_PAGE_CAP > eventWindowPages(), true);
-  t('H35: a zero rate cannot divide, and says so', eventWindowPages(12, 0), null);
-  t('H35: the stroke window sits inside the measured empty region', H35_SAME_STROKE_SECONDS > 101 && H35_SAME_STROKE_SECONDS < 275, true);
-  // The window filter is a TIME horizon; the page cap is only its backstop.
-  t('H35: gateLabelEvents keeps both verbs', gateLabelEvents(healthy).length, 4);
-  t('H35: …and drops non-gate labels', gateLabelEvents([...healthy, otherLabel]).length, 4);
-  t('H35: …and drops non-label events', gateLabelEvents([...healthy, { event: 'closed' }]).length, 4);
-
-  // The summary line carries the residue, so a quiet section cannot read as
-  // "the gate is watched" when most removals are structurally unwatchable.
-  const gateCounts = { gateRemovals: 7, eventPages: 24, gate_unjudgeable: 5, gate_undated: 1 };
-  t('H35 summary: the removal count is reported', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('7 removal(s) of a gate-semantic label'), true);
-  t('H35 summary: …with the pages read', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('24 page(s) of the repo-wide issue-event stream'), true);
-  t('H35 summary: …and states it made no per-card fetch', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('no per-card timeline fetch'), true);
-  t('H35 summary: …and carries the unjudgeable residue', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('5 of them are UNJUDGEABLE'), true);
-  t('H35 summary: …and the undated count', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('1 more had no hang inside the window'), true);
-  t('H35 summary: a truncated window is announced, never silent', saidBy('h35GatePatrol', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0)).includes('TRUNCATED'), true);
-  t('H35 summary: …and says a quiet section is a SHORT READ', saidBy('h35GatePatrol', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0)).includes('short read, not a clean board'), true);
-  t('H35 summary: an untruncated window makes no such claim', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('TRUNCATED'), false);
-  // Absent counts degrade to 0, never to `undefined` — H32's pair does the same.
-  t('H35 summary: absent counts degrade to 0', saidBy('h35GatePatrol', summaryLine({}, 0)).includes('0 removal(s) of a gate-semantic label'), true);
 
   // -- H36 — cross-lane same-file holds (report-only patrol input, #12286) ---
   const h36pr = (number, opts = {}) => ({
@@ -33783,9 +32070,10 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H52 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H52 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
   // ⚖️ This pin was the RESERVATION of H51 while #16836 held the number. The
-  // row has now landed, so the pin flips to its other side and keeps doing the
-  // same job: the number is not free, and nothing may re-use it.
-  t('H52 band: `H51` is the reserved row, now LANDED beside this one', HALF_STATE_FAMILY_BAND.H51, 'state');
+  // row landed beside this one and has since been retired with the gate label
+  // it patrolled (ruling record 5770886272 on #19061); the number stays spent,
+  // so the pin keeps doing the same job from its third side: nothing re-uses it.
+  t('H52 band: `H51` is a spent row number — retired, and never re-used', 'H51' in HALF_STATE_FAMILY_BAND, false);
   t('H52 band: a stall outranks a state row, so the trim eats this one last', familyRank('H52') < familyRank('H50'), true);
   t('H52: all three count keys ride the enumerated forwarding contract', ['openQuestionCandidates', 'openQuestionJudged', 'openQuestionUnparsed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   t('H52 summary: the coverage pair is reported', saidBy('h52OpenQuestions', summaryLine({ openQuestionJudged: 3, openQuestionCandidates: 4 }, 0)).includes('3 of 4 listed open card(s)'), true);
@@ -33796,227 +32084,25 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H52 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h52OpenQuestions', summaryLine({}, 0)).includes('0 of 0'), true);
   t('H52 summary: a bare line renders numbers, never `undefined`', saidBy('h52OpenQuestions', summaryLine({}, 0)).includes('undefined'), false);
 
-  // -- H51 — the contract-review verdict whose LABEL STROKE never happened ----
-  // The fixtures are SYNTHETIC (⛔ the self-test never touches GitHub), but every
-  // SHAPE in them was read off the live board first: four title dialects, the
-  // 7-to-40 hex spelling range, and both live negative cases (a verdict naming a
-  // head that had since moved, and a gated PR with no verdict at all).
+  // -- the contract-review RECORD readers, kept from the retired H51 row --------
+  // SYNTHETIC fixtures (⛔ the self-test never touches GitHub) whose SHAPES were
+  // read off the live board: two title dialects and the 7-to-40 hex spelling
+  // range. `latestContractReviewOnHead` is what the queue guard's recognisers
+  // reach through `check-clause2-carriers.mjs`, so its head-scoping stays pinned.
   const HEAD51 = 'ba3d95a4f3514243131a698f12589c23d49e6fcd';
   const OLDHEAD51 = 'de0bd50469a6c5f20102f67e0901c43fe316567c';
-  const pr51 = (labels = [CONTRACT_REVIEW_LABEL], extra = {}) => ({
-    number: 17090,
-    state: 'open',
-    draft: true,
-    merged_at: null,
-    labels: labels.map((name) => ({ name })),
-    head: { sha: HEAD51 },
-    body: '',
-    title: '',
-    ...extra,
-  });
   const cm51 = (id, body, at) => ({ id, body, created_at: at });
   const T51 = '2026-09-09T08:36:49Z';
-  const NOW51 = Date.parse('2026-09-09T12:10:00Z');
-  // Dialect ①: the filing card's cited form — sha in the heading after `@`.
   const DIALECT_A = (sha) =>
     `## Contract review (\`CONTRACT_REVIEW_TIER\`, isolated seat) — PR #17090 @ \`${sha}\`\n\n**Verdict: PASS WITH FINDINGS**`;
-  // Dialect ②: the same fact, `· head` as the separator.
   const DIALECT_B = (sha) =>
     `## Contract review (clause ②) — **PASS WITH FINDINGS**, no blocking item · head \`${sha}\`\n\nbody`;
-  // Dialect ③: NO sha in the heading — it is on the first body line.
-  const DIALECT_C = (sha) =>
-    `## Contract review at \`CONTRACT_REVIEW_TIER\` — **Verdict: PASS WITH FINDINGS** (audit reading)\n\nPR #17090 · head \`${sha}\` (re-read at posting; unchanged).`;
-  // Dialect ④: a director seat's ADOPTION RECORD — its own first line, the
-  // review's heading verbatim beneath it. 「逐字采纳」 is a legal act on a
-  // subagent verdict, so this shape is a verdict on the head.
-  const DIALECT_D = (sha) =>
-    `**Director seat adoption record** — the verdict below is adopted **verbatim**. Head re-read at posting = \`${sha}\`, unchanged.\n\n---\n\n${DIALECT_A(sha)}`;
-  const onHead51 = [cm51(5598904803, DIALECT_A(HEAD51), T51)];
-  const h51 = (rows, pr = pr51(), now = NOW51) => h51VerdictWithoutHandoff(pr, rows, now);
-
-  // ⭐ The four ruled cases — the filing card's acceptance口径, as fixtures.
-  t('H51 fires: gated PR + a review comment on the CURRENT head, aged', typeof h51(onHead51), 'string');
-  t('H51 clean: a review comment on an OLDER head — the head moved, re-review genuinely pending', h51([cm51(1, DIALECT_A(OLDHEAD51), T51)]), null);
-  t('H51 clean: a gated PR whose thread holds NO review comment at all', h51([cm51(1, 'Triage: routing only.', T51)]), null);
-  t('H51 clean: an UNGATED PR carrying the same verdict is not this row', h51(onHead51, pr51([])), null);
-
-  // The four measured title dialects, each a verdict on the head.
-  t('H51 dialect ①: sha in the heading after `@` (the card\'s cited form)', typeof h51([cm51(1, DIALECT_A(HEAD51), T51)]), 'string');
-  t('H51 dialect ②: `· head` as the separator, same heading', typeof h51([cm51(1, DIALECT_B(HEAD51), T51)]), 'string');
-  t('H51 dialect ③: NO sha in the heading — it is on the first body line', typeof h51([cm51(1, DIALECT_C(HEAD51), T51)]), 'string');
-  t('H51 dialect ④: ⭐ a director ADOPTION RECORD carrying the review verbatim below its own first line', typeof h51([cm51(1, DIALECT_D(HEAD51), T51)]), 'string');
-  t('H51 marker: …so it is LINE-anchored, which is what admits dialect ④', CONTRACT_REVIEW_HEADING_MARKER.test('adoption\n\n## Contract review (clause ②) — PASS'), true);
-  t('H51 marker: a blockquoted heading reads', CONTRACT_REVIEW_HEADING_MARKER.test('> ## Contract review at `T`'), true);
-  t('H51 marker: ⛔ a `###` sub-heading is not the artefact', CONTRACT_REVIEW_HEADING_MARKER.test('### Contract review notes'), false);
-  t('H51 marker: ⛔ nor a bare mention inside a paragraph', CONTRACT_REVIEW_HEADING_MARKER.test('the ## Contract review comment is missing'), false);
-  t('H51 marker: ⛔ case-sensitive — no shipped dialect to accommodate', CONTRACT_REVIEW_HEADING_MARKER.test('## contract review (clause ②)'), false);
-  t('H51 marker: ⛔ carries no `g` flag — a shared `lastIndex` is a state bug', CONTRACT_REVIEW_HEADING_MARKER.global, false);
-  t('H51 marker: it answers the same twice, so no caller poisons the next', CONTRACT_REVIEW_HEADING_MARKER.test('## Contract review x') && CONTRACT_REVIEW_HEADING_MARKER.test('## Contract review x'), true);
-  // ⭐ The looseness `m` admits is answered by the SECOND gate, not the regex.
-  t('H51: ⭐ a comment MENTIONING a review heading with no head sha is not a verdict on this head', h51([cm51(1, '## Contract review is what this PR still owes.', T51)]), null);
-
-  // The head-identity test — prefix, case-insensitive, ≥7 hex.
-  t('H51 sha: the 7-char abbreviation measured on the board matches', contractReviewHeadMatch('head `ba3d95a`', HEAD51), 'ba3d95a');
-  t('H51 sha: …and the full 40', contractReviewHeadMatch('head `' + HEAD51 + '`', HEAD51), HEAD51);
-  t('H51 sha: an UPPERCASE spelling still matches its head', contractReviewHeadMatch('head `BA3D95A4F3`', HEAD51), 'BA3D95A4F3');
-  t('H51 sha: ⛔ a 6-char span is below the floor and is not a sha here', contractReviewHeadMatch('code `ba3d95`', HEAD51), null);
-  t('H51 sha: ⛔ a DIFFERENT commit is not a prefix of this head', contractReviewHeadMatch('head `' + OLDHEAD51 + '`', HEAD51), null);
-  t('H51 sha: ⛔ an unquoted sha is not a code span', contractReviewHeadMatch('head ba3d95a4f351', HEAD51), null);
-  t('H51 sha: a later span is found when the first does not match', contractReviewHeadMatch('base `deadbeef` head `ba3d95a4`', HEAD51), 'ba3d95a4');
-  t('H51 sha: an unreadable head answers null rather than matching everything', contractReviewHeadMatch('head `ba3d95a`', ''), null);
-  t('H51 sha: …and a missing body does not crash', contractReviewHeadMatch(undefined, HEAD51), null);
-
-  // Newest-of, and the one place it is resolved.
-  t('H51 newest: the NEWER of two on-head verdicts is the one dated', latestContractReviewOnHead([cm51(1, DIALECT_A(HEAD51), '2026-09-09T08:00:00Z'), cm51(2, DIALECT_B(HEAD51), '2026-09-09T09:00:00Z')], HEAD51).id, 2);
-  t('H51 newest: an on-head verdict is found past an older-head one', latestContractReviewOnHead([cm51(1, DIALECT_A(HEAD51), T51), cm51(2, DIALECT_A(OLDHEAD51), '2026-09-09T09:00:00Z')], HEAD51).id, 1);
-  t('H51 newest: a thread with only OLDER-head verdicts answers null', latestContractReviewOnHead([cm51(1, DIALECT_A(OLDHEAD51), T51)], HEAD51), null);
-  t('H51 newest: a non-array thread answers null, never a crash', latestContractReviewOnHead(undefined, HEAD51), null);
-  t('H51 newest: it reports WHICH spelling matched, for the sentence', latestContractReviewOnHead([cm51(1, DIALECT_B('ba3d95a4f3'), T51)], HEAD51).sha, 'ba3d95a4f3');
-
-  // The threshold, from both sides.
-  t('H51 threshold: 60 minutes, the gap between a stroke and the measured misses', H51_HANDOFF_THRESHOLD_MINUTES, 60);
-  t('H51 threshold: a verdict INSIDE the window is clean — an ordinary hand-over', h51(onHead51, pr51(), Date.parse(T51) + 59 * 60_000), null);
-  t('H51 threshold: …and one exactly AT it is clean too, so the bound is not off by one', h51(onHead51, pr51(), Date.parse(T51) + 60 * 60_000), null);
-  t('H51 threshold: one minute past it fires', typeof h51(onHead51, pr51(), Date.parse(T51) + 61 * 60_000), 'string');
-  t('H51 threshold: an unreadable stamp must not read as LATE either', h51([cm51(1, DIALECT_A(HEAD51), 'not-a-date')]), null);
-
-  // Population — exported because a silently shrinking one makes a thin corpus read clean.
-  t('H51 population: a gated open DRAFT is IN — every measured instance was one', h51SpeaksAbout(pr51()), true);
-  t('H51 population: an ungated open PR is OUT', h51SpeaksAbout(pr51([])), false);
-  t('H51 population: a MERGED PR is out — the stroke is moot', h51SpeaksAbout(pr51([CONTRACT_REVIEW_LABEL], { merged_at: '2026-09-09T09:00:00Z' })), false);
-  t('H51 population: a CLOSED PR is out too', h51SpeaksAbout(pr51([CONTRACT_REVIEW_LABEL], { state: 'closed' })), false);
-  t('H51 population: an UNREADABLE `labels` is excluded, never read as unlabelled (H31\'s rule)', h51SpeaksAbout(pr51([CONTRACT_REVIEW_LABEL], { labels: undefined })), false);
-  t('H51 population: a missing PR is out, never a crash', h51SpeaksAbout(undefined), false);
-  t('H51: the gate constant is the one H31 already owns, not a second spelling', CONTRACT_REVIEW_LABEL, 'needs:contract-review');
-
-  // Three input states, never two (#4690).
-  t('H51: an unconsulted thread is UNJUDGED, never clean', h51VerdictWithoutHandoff(pr51(), undefined), null);
-  t('H51: an unreadable or ceiling-bound thread is UNJUDGED too', h51VerdictWithoutHandoff(pr51(), null), null);
-  t('H51: a missing PR does not crash', h51VerdictWithoutHandoff(undefined, onHead51), null);
-
-  // The sentence carries its own contract.
-  t('H51 row: it names the remedy the filing card wrote', h51(onHead51).includes('verdict recorded, handoff not written'), true);
-  t('H51 row: …and points at the FAIL end-state\'s single source', h51(onHead51).includes('`references/contract-review.md` 载体纪律'), true);
-  t('H51 row: it declares itself VERDICT-AGNOSTIC rather than reading the verdict', h51(onHead51).includes('Verdict-agnostic by construction'), true);
-  t('H51 row: …naming the rule that forbids a sweeper issuing one', h51(onHead51).includes('自查放行'), true);
-  t('H51 row: report-only — never a label from this script', h51(onHead51).includes('never a label written from this script'), true);
-  t('H51 row: it states the clean side in the sentence, so a reader is not left guessing', h51(onHead51).includes('A review naming an OLDER head is NOT this row'), true);
-  t('H51 row: it dates the verdict it found', h51(onHead51).includes(T51), true);
-  t('H51 row: not a loud finding', isLoudFinding(h51(onHead51)), false);
-
-  // Adjacency — the state H31 cannot see, said in one case.
-  t('H51 adjacency: ⭐ H31 is CLEAN on this PR — both carriers agree, which is the state H51 reads', h31ContractReviewCarrierSplit({ number: 16335, state: 'open', labels: [{ name: CONTRACT_REVIEW_LABEL }] }, [pr51([CONTRACT_REVIEW_LABEL], { body: 'Fixes #16335' })]), null);
-  t('H51 adjacency: H48 is silent on it (no `**ACCEPT**` verdict on the thread)', h48GovernedVerdictWithoutBrief(pr51(), [{ glob: '.claude/**', files: ['x'] }], onHead51), null);
-
-  // Registry, counters and the clause.
-  t('H51 band: registered as a STATE row — the repair is on the board', familyBand('H51'), 'state');
-  t('H51 band: ⛔ NOT `gate` — that band is for a gate whose ABSENCE reads green', familyBand('H51') === 'gate', false);
-  t('H51 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H51'), true);
-  t('H51 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
-  t('H51 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
-  t('H51 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H51 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H51'), true);
-  t('H51: both count keys ride the enumerated forwarding contract', ['handoffCandidates', 'handoffJudged'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
-  t('H51 summary: the coverage pair is reported', saidBy('h51Handoff', summaryLine({ handoffJudged: 5, handoffCandidates: 7 }, 0)).includes('5 of 7 gated open PR(s)'), true);
-  t('H51 summary: …and names the cache it shares rather than a second fetch class', saidBy('h51Handoff', summaryLine({}, 0)).includes("shared with H48's cache"), true);
-  t('H51 summary: …and says an unreadable thread is UNJUDGED, not clean', saidBy('h51Handoff', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
-  t('H51 summary: …and that an OLDER-head verdict is CLEAN rather than quiet', saidBy('h51Handoff', summaryLine({}, 0)).includes('CLEAN rather than quiet'), true);
-  t('H51 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h51Handoff', summaryLine({}, 0)).includes('0 of 0'), true);
-  t('H51 summary: a bare line renders numbers, never `undefined`', saidBy('h51Handoff', summaryLine({}, 0)).includes('undefined'), false);
-
-  // -- H53 — the contract-review carrier with NO increment behind it ---------
-  // The fixtures are SYNTHETIC (⛔ the self-test never touches GitHub); the
-  // shapes come from the fourteen carriers the filing card measured, and the
-  // live control is H31's own `#10025` case, which must stay CLEAN below.
-  const card53 = (labels = [CONTRACT_REVIEW_LABEL, 'pm:queue'], extra = {}) => ({
-    number: 16726,
-    state: 'open',
-    labels: labels.map((name) => ({ name })),
-    assignees: [],
-    body: '',
-    title: '',
-    ...extra,
-  });
-  const cmt53 = (body) => ({ id: 1, body, created_at: '2026-09-08T04:49:00Z' });
-  const TRIAGE53 = [cmt53('## 分诊:`domain:cli` · `Task` · `priority:p2` · `pm:queue`')];
-  const CLAIMED53 = [...TRIAGE53, cmt53('Claim: PM loop round 1\nBranch: `claude/issue-16726-x`')];
-  const pr53 = (body, extra = {}) => ({
-    number: 17001,
-    state: 'open',
-    draft: true,
-    merged_at: null,
-    labels: [],
-    body,
-    title: '',
-    head: { ref: 'claude/issue-16726-x' },
-    ...extra,
-  });
-  const h53 = (rows, issue = card53(), open53 = [], merged53 = []) =>
-    h53CarrierWithoutIncrement(issue, rows, open53, merged53);
-
-  // ⭐ The ruled fixture pair, plus both exclusions.
-  t('H53 fires: gated open card, no `Claim:` comment, no PR', typeof h53(TRIAGE53), 'string');
-  t('H53 clean: the same card once its thread carries a `Claim:`', h53(CLAIMED53), null);
-  t('H53 clean: …with an OPEN PR delivering it instead', h53(TRIAGE53, card53(), [pr53('Fixes #16726')]), null);
-  t('H53 clean: …with a MERGED PR delivering it', h53(TRIAGE53, card53(), [], [pr53('Fixes #16726', { merged_at: '2026-09-08T10:00:00Z' })]), null);
-  t('H53 clean: …and with BOTH a claim and a PR', h53(CLAIMED53, card53(), [pr53('Fixes #16726')]), null);
-  t('H53 clean: an UNGATED card with neither is not this row', h53(TRIAGE53, card53(['pm:queue'])), null);
-
-  // ⭐⭐ The boundary that keeps this row clear of the shape H31 DECLINED.
-  t('H53 boundary: ⭐ card-side-FIRST is legal, and the claim leg is what excludes it', h53(CLAIMED53), null);
-  t('H53 boundary: a `Claimed:` spelling is a claim too — one marker, one answer', h53([...TRIAGE53, cmt53('Claimed: PM loop round 1')]), null);
-  t('H53 boundary: …and a blockquoted claim, as SKILL.md\'s own template writes it', h53([...TRIAGE53, cmt53('> Claim: PM loop round 1')]), null);
-  t('H53 boundary: ⛔ prose containing the word "claim" is not a claim', typeof h53([cmt53('The seat will claim this next round.')]), 'string');
-  t('H53 boundary: a `Part of` at the declaration position counts as the increment', h53(TRIAGE53, card53(), [pr53('Part of #16726')]), null);
-  t('H53 boundary: ⛔ a PR whose `labels` this sweep could not read is excluded, never counted as delivering', typeof h53(TRIAGE53, card53(), [pr53('Fixes #16726', { labels: undefined })]), 'string');
-
-  // ⭐ H31's live case must stay CLEAN — 「gated, no PR carrier yet」 is its own
-  // documented silence, and this row must not have changed it.
-  t('H53 adjacency: ⭐ H31 is still silent on a gated card with no PR (its #10025 reading)', h31ContractReviewCarrierSplit(card53(), []), null);
-  t('H53 adjacency: …and H31 is INAPPLICABLE rather than clean, which the row says', h53(TRIAGE53).includes('H31 is not clean here but INAPPLICABLE'), true);
-  t('H53 adjacency: H31 still fires on the split it owns, unchanged', typeof h31ContractReviewCarrierSplit(card53(), [pr53('Fixes #16726', { labels: [] })]), 'string');
-  t('H53 adjacency: H35 reads REMOVAL events and nothing was removed here', typeof h53(TRIAGE53), 'string');
-
-  // Population.
-  t('H53 population: a gated open card is in', h53SpeaksAbout(card53()), true);
-  t('H53 population: an ungated one is out', h53SpeaksAbout(card53(['pm:queue'])), false);
-  t('H53 population: a CLOSED card is out — the carrier went with it', h53SpeaksAbout(card53([CONTRACT_REVIEW_LABEL], { state: 'closed' })), false);
-  t('H53 population: an unreadable `labels` is out, never read as unlabelled', h53SpeaksAbout(card53([CONTRACT_REVIEW_LABEL], { labels: undefined })), false);
-  t('H53 population: a missing card is out, never a crash', h53SpeaksAbout(undefined), false);
-  t('H53: the gate constant is the one H31 already owns, not a second spelling', CONTRACT_REVIEW_LABEL, 'needs:contract-review');
-
-  // Three input states, never two (#4690).
-  t('H53: an unconsulted thread is UNJUDGED, never clean', h53CarrierWithoutIncrement(card53(), undefined, [], []), null);
-  t('H53: an INCOMPLETE or unreadable thread is UNJUDGED too — a full page may hide the claim', h53CarrierWithoutIncrement(card53(), null, [], []), null);
-  t('H53: a missing card does not crash', h53CarrierWithoutIncrement(undefined, TRIAGE53, [], []), null);
-  t('H53: a card with no readable number is out', h53CarrierWithoutIncrement(card53([CONTRACT_REVIEW_LABEL], { number: 0 }), TRIAGE53, [], []), null);
-
-  // The sentence carries its own contract.
-  t('H53 row: it names the shape in the filing card\'s words', h53(TRIAGE53).includes('NO increment behind it'), true);
-  t('H53 row: …and quotes the invariant it patrols', h53(TRIAGE53).includes('开着的载体恒 = 真实待审'), true);
-  t('H53 row: …and the pre-hang prohibition', h53(TRIAGE53).includes('⛔ 不前瞻预挂'), true);
-  t('H53 row: ⭐ report-only, in H31\'s own register — the subject is a GATE', h53(TRIAGE53).includes("like H31 this row's subject is a GATE"), true);
-  t('H53 row: …and removal is a PERSON\'s audited act, never this script\'s', h53(TRIAGE53).includes("removal is a person's audited act"), true);
-  t('H53 row: …naming the rule that forbids a sweeper doing it', h53(TRIAGE53).includes('自查放行'), true);
-  t('H53 row: it states the card-side-first exclusion so a reader is not left guessing', h53(TRIAGE53).includes('A card-side-FIRST hang is NOT this row'), true);
-  t('H53 row: not a loud finding', isLoudFinding(h53(TRIAGE53)), false);
-
-  // Registry, counters and the clause.
-  t('H53 band: registered as a STATE row — the repair is on the board', familyBand('H53'), 'state');
-  t('H53 band: ⛔ NOT `stall` — whether a card-side carrier blocks dispatch is UNMEASURED', familyBand('H53') === 'stall', false);
-  t('H53 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H53'), true);
-  t('H53 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
-  t('H53 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
-  t('H53 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H53 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H53'), true);
-  t('H53: all three count keys ride the enumerated forwarding contract', ['carrierCandidates', 'carrierJudged', 'carrierPagesBought'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
-  t('H53 summary: the coverage pair is reported', saidBy('h53Carrier', summaryLine({ carrierJudged: 8, carrierCandidates: 9 }, 0)).includes('8 of 9 gated open card(s)'), true);
-  t('H53 summary: …and says it BUYS the thread rather than reading a cache', saidBy('h53Carrier', summaryLine({}, 0)).includes('It BUYS that thread rather than reading a cache'), true);
-  t('H53 summary: …and why — H2 buys one only for an ASSIGNED card', saidBy('h53Carrier', summaryLine({}, 0)).includes('H2 buys one only for an ASSIGNED card'), true);
-  t('H53 summary: …and says an incomplete walk is UNJUDGED, not clean', saidBy('h53Carrier', summaryLine({}, 0)).includes('UNJUDGED rather than'), true);
-  t('H53 summary: …and names the merged-window bound on its PR leg', saidBy('h53Carrier', summaryLine({}, 0)).includes('a landing older than that window is as invisible here as it is to H8'), true);
-  t('H53 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h53Carrier', summaryLine({}, 0)).includes('0 of 0'), true);
-  t('H53 summary: a bare line renders numbers, never `undefined`', saidBy('h53Carrier', summaryLine({}, 0)).includes('undefined'), false);
+  t('record reader: the NEWER of two on-head verdicts is the one dated', latestContractReviewOnHead([cm51(1, DIALECT_A(HEAD51), '2026-09-09T08:00:00Z'), cm51(2, DIALECT_B(HEAD51), '2026-09-09T09:00:00Z')], HEAD51).id, 2);
+  t('record reader: an on-head verdict is found past an older-head one', latestContractReviewOnHead([cm51(1, DIALECT_A(HEAD51), T51), cm51(2, DIALECT_A(OLDHEAD51), '2026-09-09T09:00:00Z')], HEAD51).id, 1);
+  t('record reader: a thread with only OLDER-head verdicts answers null', latestContractReviewOnHead([cm51(1, DIALECT_A(OLDHEAD51), T51)], HEAD51), null);
+  t('record reader: a non-array thread answers null, never a crash', latestContractReviewOnHead(undefined, HEAD51), null);
+  t('record reader: it reports WHICH spelling matched, for the sentence', latestContractReviewOnHead([cm51(1, DIALECT_B('ba3d95a4f3'), T51)], HEAD51).sha, 'ba3d95a4f3');
+  t('record reader: the span floor is seven hex, git\'s own abbreviation', H51_SHA_MIN_HEX, 7);
 
   // -- H54 — a `[Decision]`-titled card sitting in the DISPATCH pool (#16688) -
   // The fixtures are SYNTHETIC (⛔ the self-test never touches GitHub); their
@@ -34091,7 +32177,6 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H54 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H54 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H54 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H54 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H54'), true);
 
   // ⚖️ The reconciliation half. H26's deferred-target note said this shape was
   // 「deliberately NOT reported … a title heuristic would make this sweeper guess
@@ -34223,7 +32308,6 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H55 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H55 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H55 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H55 band: a gate row still outranks it', familyRank('H31') < familyRank('H55'), true);
 
   // Summary clause — the census renders on EVERY run, never `undefined`.
   const oldest55 = '#5828 (last touched 2026-08-29)';
@@ -34364,7 +32448,6 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H56 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H56 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H56 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H56 band: a gate row still outranks it', familyRank('H31') < familyRank('H56'), true);
 
 
   // -- H57 — a scheduled, NON-BLOCKING workflow whose latest `event=schedule`
@@ -34740,7 +32823,6 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H57 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H57 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H57 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H57 band: a gate row still outranks it', familyRank('H31') < familyRank('H57'), true);
   t('H57 band: …and it outranks an inventory row', familyRank('H57') < familyRank('H14'), true);
 
   // -- H58 — a `pm:queue` card whose own text declares it a RULING (#17417) ---
@@ -34907,7 +32989,6 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H58 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H58 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H58 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H58 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H58'), true);
   t('H58 band: …and it outranks an inventory row', familyRank('H58') < familyRank('H14'), true);
 
   // -- H59 — the merged PR whose closing linkage mis-states a card (#17466) ---
@@ -35088,7 +33169,6 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H59 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H59 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H59 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H59 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H59'), true);
   t('H59 band: …and it outranks an inventory row', familyRank('H59') < familyRank('H14'), true);
 
   // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
@@ -35230,7 +33310,6 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H65 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H65 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H65 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H65 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H65'), true);
   t('H65: all five count keys ride the enumerated forwarding contract', ['roundTierPosts', 'roundTierRead', 'roundTierComments', 'roundTierArtefacts', 'roundTierRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   const SUM65 = saidBy('h65RoundTier', summaryLine({ roundTierPosts: 1, roundTierRead: 1, roundTierComments: 16, roundTierArtefacts: 4, roundTierRows: 1 }, 0));
   t('H65 summary: the coverage pair is reported', SUM65.includes('NEWEST comment page of 1 of 1 triage seat post(s)'), true);
@@ -35572,7 +33651,6 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY66, 'H66 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   b(BATTERY66, 'H66 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   b(BATTERY66, 'H66 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  b(BATTERY66, 'H66 band: a gate row still outranks it', familyRank('H31') < familyRank('H66'), true);
   b(BATTERY66, 'H66 census: every count key rides the enumerated forwarding contract', ['queueReleaseCandidates', 'queueReleaseThreadRead', 'queueReleaseBought', 'queueReleaseCap', 'queueReleaseDeferred', 'queueReleaseUnjudged', 'queueReleaseRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   const SUM66 = saidBy('h66QueueRelease', summaryLine({ queueReleaseCandidates: 194, queueReleaseThreadRead: 7, queueReleaseBought: 100, queueReleaseCap: 100, queueReleaseDeferred: 87, queueReleaseUnjudged: 3, queueReleaseRows: 2 }, 0));
   b(BATTERY66, 'H66 summary: the QUADRUPLE — candidates…', SUM66.includes('194 open unassigned `pm:queue` card(s) could be spoken about'), true);
