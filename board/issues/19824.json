@@ -2,8 +2,8 @@
   "number": 19824,
   "kind": "issue",
   "title": "close-cards: one card = one write — pack comment → pm:* strip → close into ONE fleet-write write set (write-pace cap unchanged, closing throughput ×3)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,21 +12,22 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
-  "assignees": [
-    "os-zhuang"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T08:53:58Z",
-  "updated_at": "2026-09-23T13:14:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-23T15:12:25Z",
+  "closed_at": "2026-09-23T15:12:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19824",
   "body": "## 出处(三件)\n\n- **谁的指令**:维护者,2026-09-23,在分诊席(#6015,session `session_01Tw7jnJinGHvoGSi8aFkhPJ`)的会话里。\n- **原话**(逐字):先问「每小时40张是不是限制太严格了。」;分诊席给出甲 / 乙 / 丙三个选项后,维护者答:「**甲,先立一张开发工具卡**」。\n- **甲的内容**:`write-pace` 的每小时 40 次上限**不动**,改为把每张卡的三步写入打包成**一次**写入。乙(调高上限)、丙(维持现状)都没被选中。\n\n## 现状 —— 本地 `main` 上读到的\n\n- `scripts/pm/write-pace.mjs:230` `DEFAULT_HOURLY_MAX = 40`,按令牌计、滚动 60 分钟;每两次写入之间至少 3 秒。这个上限的来历写在该文件头注里:两个席位账号在批量处理卡片时被封号,维护者裁定「截流应该要加」(#19572)。⛔ 本卡不碰这个数。\n- `scripts/pm/close-cards.mjs` 把一张卡的关闭拆成三次写入,**每次都是一个独立的 fleet-write dispatch**:`post-stamped.mjs`(评论)→ `label-write.mjs`(摘 `pm:*`)→ 关闭。⇒ 每张卡算 **3 次**写入 ⇒ 每小时**最多约 13 张卡**。\n- 今天的实测:分诊席按维护者逐张回复关卡时,第三组 7 张卡用了 22 次写入。第四到第六组还排着约 54 次写入、约 18 张卡,仅这些就要约 1.5 小时。\n\n## fleet-write 本来就能做到\n\n- `scripts/pm/fleet-write/ops.mjs`:`OPS` 里已经有 `comment`、`labels_add`、`labels_remove`、`issue_patch`(改 state / state_reason);`MAX_ACTIONS = 20`,也就是一个 payload 最多可以带 20 个动作。\n- `scripts/pm/fleet-write/execute.mjs`:「The FIRST failure stops the run — later actions are NOT attempted」。⇒ 在**一个** dispatch 里按「评论 → 摘标签 → 关闭」的顺序排,「评论没落地就不摘标签、不关卡」这条保证**原样保住**,跟今天三次写入的效果相同。\n- `client_payload` 小于 64KB 的上限,在 `ops.mjs` 里已经钉住,打包的时候要检查。\n\n⇒ 每张卡打包成一个 dispatch,`write-pace` 里只算 **1 次**写入 ⇒ 上限不变,每小时约 **40 张**卡。此外,由用户账号令牌直接发出的请求也少了三分之二,对封号风险是**减少**,不是增加。\n\n## 要做的\n\n1. `close-cards.mjs` 支持**每张卡一个 dispatch**:`[comment, labels_remove(该卡当前的 pm:* 标签), issue_patch(state=closed, state_reason)]`,经 `fleet-write/dispatch.mjs` 发出。\n2. **每张卡用自己的评论文件**。今天 `--comment` 是整批共用一份,而维护者的常驻规则是 ⛔「never post the same comment text on many cards in a burst」,每张卡的裁定评论也本来就不一样。形状建议(不作裁定):`--plan FILE`,每行 `n|reason|comment-file`。\n3. **保留 `post-stamped` 的预检**:复用它导出的纯函数(`renderBody`、`claimKeyedLineRefusals`),`NOW` / `WAS` 盖章令牌的规则和拒绝逻辑照旧生效,在打包前各跑一次。⛔ 不要另写一套盖章逻辑。\n4. **保留 `label-write` 的四步核对**:① 读当前标签(席位侧读取)② 算出目标标签 ③ 写入(也就是 dispatch 里的 `labels_remove`)④ 运行结束后读回,必须 MATCHES 目标。⛔ 第 ④ 步不能因为打包而省掉。\n5. **保留 `close-cards` 现有的逐卡实时闸门**:打包之前逐卡检查,有负责人、有 `pm:retriage`、状态不符合 `--expect-state`、或者有开着的 PR 引用它,就跳过这张卡。\n6. (可选,同形状)「定级」模式:评论 + 加/摘标签,不关卡。\n\n## ⛔ 不做\n\n- ⛔ 不改 `DEFAULT_HOURLY_MAX`,也不改最小间隔。\n- ⛔ **不把多张卡塞进同一个 dispatch**。执行器遇到第一个失败就停,一张卡失败会连累同一批里的其他卡;一卡一包,每张卡的失败只影响它自己。\n- ⛔ 不另写第二套盖章或标签写入逻辑,复用已导出的那一半。\n\n## 验收\n\n- `--dry-run`:每张卡打印**一个** payload,里面恰好 3 个动作,顺序是 评论 → 摘标签 → 关闭。\n- `--self-test`(离线):必须覆盖三种情形 ——\n  - 评论被预检拒绝 ⇒ 这张卡**零写入**;\n  - payload 超过 64KB ⇒ 打包前拒绝;\n  - 负责人、`pm:retriage`、状态不符、有开着的 PR 引用 ⇒ 跳过这张卡,并在输出里写明原因。\n- 真实跑 1 张卡:`write-pace --status` 的计数只 +1;评论、标签、关闭三个效果都能读回;第 ④ 步读回结果是 MATCHES。\n\n## 路由与级别\n\n`scripts/pm/**` ⇒ `domain:skills`(同 #19572)。`tooling`。**`priority:p1`**:这张卡是维护者当面点名要立的,和它的前身 #19572(同样是维护者裁定的写入节流,p1)同级。⚠️ `docs/NORTH-STAR.md`「优先级」第 3 条在产品 P0/P1 开着时,不派 p2/p3 的工具卡;本卡按维护者的直接指令定为 p1。\n\nRelated: #19572(节流)· `scripts/pm/close-cards.mjs`(#19469)· `scripts/pm/fleet-write/{ops,dispatch,execute}.mjs`。"

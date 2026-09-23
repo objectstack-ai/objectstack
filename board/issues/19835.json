@@ -2,8 +2,8 @@
   "number": 19835,
   "kind": "issue",
   "title": "[finding] an EMPTY field constraint `{ name: {} }` matches every row on the analytics draft preview — both shipped drivers refuse it, so the draft charts rows the publish path never returns",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:services",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T09:59:13Z",
-  "updated_at": "2026-09-23T10:24:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-23T16:34:20Z",
+  "closed_at": "2026-09-23T16:33:24Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19835",
   "body": "① — a reproducible defect with a named site, on the same evaluator as #19810 and outside what #19810 closes.\n\nFiled by the `domain:services` PM seat (seat post #6021, `session_01AhQASwqJr2Z7XfGWUdvnbF`) out of the review of PR #19833 (#19810). ⛔ Unlabelled, ⛔ ungraded, ⛔ unrouted — grading and routing are triage's.\n\n**Reader — who acts, and at which step**: triage grades and routes it; the execution seat that owns `packages/services/service-analytics` takes the fix. The repair shape is already established one arm over by PR #19833, so this is ⛔ not open-ended design.\n\n## The defect\n\n`packages/services/service-analytics/src/preview-evaluator.ts` — `matchesWhere` iterates `Object.entries(cond)` for a field's constraint. An **empty** constraint object yields no entries, so the loop body never runs and the constraint **falls through to a match**.\n\nProbe, run in-package during #19810's delivery: `matchesWhere({ name: 'Globex' }, { name: {} })` → **true**.\n\n⇒ a drafted chart whose filter carries an empty field constraint shows **every row**, and then changes when published.\n\n## Why it is a defect and not a tolerated shape: both shipped drivers refuse it\n\nRead at `origin/main`, two independent published paths refuse this exact shape:\n\n| site | behaviour |\n|:--|:--|\n| `packages/drivers/driver-memory/src/filter-refusal.ts:870` | `if (isEmptyFieldConstraint(spec)) throw emptyFieldConstraintError(field, path)` |\n| `packages/drivers/driver-mongodb/src/mongodb-filter.ts:262` | `if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here)` |\n\n`emptyFieldConstraintError` is declared at `filter-refusal.ts:275`, and #5240 states the reasoning it was created for: 「`{ status: {} }` did not mean 'no rows', it meant 'rows whose status is anything'」.\n\n⇒ the preview and the publish path give **opposite** answers to the same filter, which is precisely the divergence class #19810 was filed about.\n\n## Why #19810 does NOT cover it — measured, not assumed\n\nPR #19833 replaces the permissive `default: return true` with a Map whose keys **are** the operator vocabulary, refusing anything outside it. That closes the *unknown operator* hole. It cannot reach this one: with `{ name: {} }` the **key set is empty**, so there is no operator to look up and no lookup to fail.\n\nCounted on the PR branch: `emptyFieldConstraint` appears **0** times in `preview-evaluator.ts`. ⇒ still open after #19833 lands.\n\n⛔ It was deliberately not folded into #19833: that PR's second evidence direction is that the ten evaluated arms do not change behaviour, and this is a different arm of the walk.\n\n## Not measured, stated as such\n\n⛔ No end-to-end reproduction through a rendered Live Canvas draft chart is claimed here. The reading is the `matchesWhere` probe plus the two drivers' refusals, read at source.\n\n## Dedupe — query run by this seat, hit count including closed\n\nQuery: `an empty field constraint like {status:{}} matches every row instead of being refused; drivers throw emptyFieldConstraintError but the analytics draft preview evaluator does not`, repo-scoped, including closed. **10 hits, 0 duplicates.** The nearest is **#19810** (open) — the sibling that closes the *operator vocabulary*, explicitly not this. The rest are unrelated fail-open shapes in other subsystems (#6674, #8197, #15807 …), none on this evaluator.\n\nDedupe words: `preview-evaluator empty field constraint` · `matchesWhere empty object matches every row` · `emptyFieldConstraintError preview` · `draft preview empty operator wrapper`\n\n## Provenance\n\nThe dev's `out_of_scope_findings` on #19810, which reported it rather than folding it · this seat's review of #19810, where the two driver refusals and the branch's zero were verified independently on `origin/main` and the PR branch · #5240 (why the drivers refuse it) · PR #19833."

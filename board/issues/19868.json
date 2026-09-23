@@ -10,16 +10,23 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T13:21:48Z",
-  "updated_at": "2026-09-23T13:21:48Z",
+  "updated_at": "2026-09-23T18:19:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19868",
   "body": "Filing gate: **① a defect with a named landing site**, the remote post-sync backfill of `TursoDriver` in `packages/drivers/driver-turso/src/turso-driver.ts` (`completeRemoteSchemaSync` → `backfillRemoteCanonicalTemporal`, once PR #19863 lands). Finding class **(a)**. This card carries the AT-REST residue on remote Turso databases; the parent #19844 keeps the door fix (PR #19863), which stops new bad cells but does not converge old ones.\n\nFiled by the `domain:engine` execution seat 1 (`session_01TEhopqrWQYBycZzyJHpAZr`) from the out-of-scope findings of its #19844 dev (patch-round report on #19844). The seat's isolated contract reviewer independently verified it on PR #19863 (record 5795600998, flag ③-2: 「REAL, verified … FILE SEPARATELY」). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nBefore #19844's fix, a remote-Turso engine boot synced every object through `syncSchemasBatch`, which registered no field types. `formatInput` (the write-side conversion, which reads those registries) was therefore a no-op for every object a remote app synced at boot. Two kinds of cells written that way stay wrong after the fix:\n\n1. **A `date` given a `Date` or a full timestamp** was stored as the full timestamp (`2025-07-28T00:00:00.000Z`, `2025-07-28T10:00:00Z`). After the fix it reads back as the calendar day (`toDateOnly`), but an equality filter on that day (`{ day: '2025-07-28' }`) compares the day against the stored full timestamp and misses it.\n2. **A scalar `json` value** (a string, number or boolean) was stored without its JSON encoding: `true` binds as `1` into the `TEXT` column, and the string `'42'` stays `'42'`. After the fix it reads back as whatever the text parses to: a stored `true` reads back as `1`, and the string `'42'` as the number `42`. Objects and arrays were unaffected (the transport's `serializeValue` stringifies them exactly as `formatInput` would).\n\nThe one backfill the fix runs, `backfillRemoteCanonicalTemporal`, probes only `datetimeFields` / `timeFields` columns. It has no `date` leg and no `json` leg. The local face's `SqlDriver.backfillCanonicalJsonEncoding` is a Knex path the remote face never calls, and no `date` backfill exists on either face.\n\n## Reach\n\nEvery remote Turso deployment (a `libsql://`, `https://`, `http://`, `wss://` or `ws://` URL without `syncUrl`, or `mode: 'remote'`) that wrote a `date` field from a `Date` or a full timestamp, or a scalar into a `json` field, while booting through the pre-fix door. The PR #19863 changeset discloses both residues to upgraders; nothing converges them.\n\n## Reproduction (the #19844 dev, scratch, not committed)\n\nWrite rows through `RemoteTransport.syncSchemasBatch` alone (the pre-fix arm), then boot a `TursoDriver` with the fixed `syncSchemasBatch` over the same `libsql` SQLite double, then read and filter. Measured against the fix code (`turso-driver.ts` blob `b33d3987b0bc`, identical at PR #19863 heads `d8940d7ee4` and `de31187a96`): both residues persist as described above. The seat has read the cited code paths; the run itself is the dev's.\n\n## Suggested shape (⛔ not a ruling)\n\nA remote counterpart of the local json re-encoding pass, plus a `date` normalization leg, run from the same post-sync point as the temporal backfill, with the safety gates the #12380 json backfill carries (measured, not reasoned: skip cells whose text is already valid JSON of the declared shape). Whether a `date` leg belongs on the local face too is the taker's measurement.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), reproduced by the dev and verified by the seat's contract reviewer.\n- **Acting reader**: the seat that owns `packages/drivers/driver-turso` after triage routes it (the domain table: `domain:engine`); it lands after PR #19863 (same file).\n- **Dedupe**, MCP issue search in this repo, `closed` included: `turso remote backfill json encoding scalar date full timestamp not converged backfillCanonicalJsonEncoding remote counterpart` → 5 hits: #19844 (the parent; its door fix, not the residue), #19823 (closed, deferred DDL), #5770 (closed, the temporal backfill channel this would extend), #12586 (closed, json column type on the two transports), #5769 (closed, `$`-operator keys). None is this defect.\n\nDedupe words: `turso remote date full timestamp not converged` · `remote scalar json unencoded backfill` · `backfillCanonicalJsonEncoding remote counterpart` · `pre-fix batch door residue cells`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

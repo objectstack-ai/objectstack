@@ -1,0 +1,32 @@
+{
+  "number": 19913,
+  "kind": "pull_request",
+  "title": "feat(spec): declare requiredPermissions on record:details / highlights / related_list with one true describe shared with record:quick_actions",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T17:48:04Z",
+  "updated_at": "2026-09-23T20:00:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19913",
+  "body": "Fixes #18159\n\nClause-②: yes\n\n<sub>Rewritten short by the `domain:spec#5` seat (2026-09-23T19:59Z). The dev reports are on #18159 (`5798750532`, `5800008407`, `5800978880`, `5801656924`); the earlier long body is in the edit history.</sub>\n\n`requiredPermissions` is now declared on `record:details`, `record:highlights` and `record:related_list`, with the shape `record:quick_actions` already has (`z.array(z.string()).optional()`). Ruling: batch #197 item 2, letter A (`5749268463`), after objectui#10058 became installable at `.objectui-sha` `62597c588072`.\n\n## One describe, four blocks (seat ruling `5798783314`)\n\nThe ruling asks for the same describe as `record:quick_actions`. That published describe said \"…every named permission **on this object**\", which is false for the renderer at the pin: the check is `hasCapabilities`, and the renderer's own comment says the capability \"is not object-scoped\". So all four blocks now share ONE describe, from one constant (`RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION`). **The published `record:quick_actions` describe changes; its shape does not.** The describe states:\n- the names are ADR-0066 capabilities, not object actions;\n- the user must hold all of them;\n- when one is missing, the block shows an insufficient-permissions notice instead of its content;\n- it is presentation only, and the data API still serves the data;\n- a client that cannot resolve the user's capabilities renders the block (fails open).\n\nThe renderer lines behind each clause are in the dev report `5800008407`.\n\n## Other changes\n\n- The texts that said the key is \"deliberately NOT declared\" are rewritten: the `RecordDetailsProps` family header, the related-list and highlights pointers, and the test header.\n- The absence pins are now accept pins: a parse probe and `.shape` enumeration per block, with `aria` and `fields` as lit controls, plus a pin that the four JSON Schemas of the key are identical. Removing the three declarations turns 11 of 25 pins red.\n- `authorable-surface/ui.json` and `component.mdx` are regenerated.\n\n## `Check Changeset` is red on purpose\n\nThe pending note `.changeset/18159-record-block-field-security-pair.md` (from PR #19185) said the third key \"is deliberately NOT declared\". This PR makes that false, so the PR corrects it. That is a DELIBERATE CORRECTION under `check-empty-changeset.mjs`: the check stays red, and the correction awaits the maintainer's written confirmation on this PR. The line to confirm is quoted verbatim in `5801679846`. `Check Changeset` is not a required context.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

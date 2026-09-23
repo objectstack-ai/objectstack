@@ -1,0 +1,34 @@
+{
+  "number": 19880,
+  "kind": "pull_request",
+  "title": "docs(permissions): a write widener reaches only rows the caller can read",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T14:41:47Z",
+  "updated_at": "2026-09-23T15:11:45Z",
+  "closed_at": "2026-09-23T15:11:44Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-09-23T15:11:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19880",
+  "body": "Closes #7401\nClause-②: no\n\nDocs-only. Zero code changes, zero `packages/spec` edits, nothing under `content/docs/releases/**`.\n\n## What changed\n\nThe maintainer ruled reading 1 on this card: a caller may not write a row they cannot read, even when an app-authored write policy admits it by predicate. The `plugin-security` by-id write pre-image gate keeps re-reading the target under the caller's own read scope. The docs said the opposite (\"widens exactly as written\"), so authors following them hit a 403 on `private` objects. This PR brings the four named spots onto the ruled behaviour.\n\n1. `content/docs/permissions/rls.mdx`: the \"widens exactly as written\" sentence now says it decides the update *filter* alone. A new paragraph states the read floor: a single-record `update` / `delete` re-reads its target under the caller's own read scope. On `private` OWD, an `update` widener therefore reaches only rows the caller can already read. A `warn` callout carries the known limitation and names the read grants that actually work.\n2. `content/docs/permissions/sharing-rules.mdx`: the recipe \"owners edit their own records, supervisors edit all\" now says it needs a matching read grant on `private` objects. It shows the paired spelling (object permission with `viewAllRecords` plus the `update` RLS policy in the same set), and it names a read-level sharing rule or record share as the alternative read half.\n3. The owed known-limitations note (\"app-authored wideners do not function on `private` OWD without a matching read grant\") is written into both pages above. It is not in release notes.\n4. `content/docs/permissions/permissions-matrix.mdx`: the bypass-posture paragraph now covers deployment posture too. Under the default wall-less `single` posture, `auto-org-admin-grant` gives org owners and admins `organization_admin_no_bypass` (ADR-0105 D4), not `organization_admin`. So on `single` an org admin is not short-circuited, even on a better-auth-managed object.\n\n## Verified against source (at base `b940f32a56`)\n\n- The pre-image gate is in `packages/plugins/plugin-security/src/security-plugin.ts`, step 2.7. It calls `this.ql.findOne(object, { where: { $and: [{ id }, ...writeParts] }, context: opCtx.context })` under the caller's context, and a null result throws `PermissionDeniedError`. The dogfood pin `packages/qa/dogfood/test/authored-row-write-scope.dogfood.test.ts` case `[E2E private]` asserts that 403.\n- The read scope on `private` comes from `packages/plugins/plugin-sharing/src/sharing-service.ts` `buildReadFilter`. It is owner-match at the caller's `__readScope` depth, OR record shares whose recipient is that user. It returns null when the read depth is `org`, and `permission-evaluator.ts` `getEffectiveScope('read')` answers `org` for `viewAllRecords` / `modifyAllRecords`. Sharing rules expand a position recipient to users (`sharing-rule-service.ts` `expandRecipient`).\n- Item 4 comes from `packages/plugins/plugin-security/src/objects/default-permission-sets.ts` `deriveWallLessOrgAdmin`, which strips both bits from the wildcard, and from `auto-org-admin-grant.ts` `orgAdminSetNameForPosture`, which returns the no-bypass set unless the posture enforces a wall. The posture defaults to `single` when no org-scoping service is registered (`security-plugin.ts`, the `tenancyPosture` field).\n\n## One deviation from the ruling's wording (please confirm)\n\nThe ruling lists three read grants as its examples: a `select` policy, `viewAllRecords`, or sharing. On a `private` object a `select` policy is **not** a read grant. The sharing read filter and the RLS read filter both AND into the query (`sharing-plugin.ts` read branch, `composeAnd`), and nothing defers the sharing read filter to an authored `select` policy. RLS only narrows, as `rls.mdx` already says in \"RLS narrows what the earlier layers already allowed; it never widens\". Documenting `select` as the fix would send authors into the same 403. So the pages name `viewAllRecords` or a `readScope` depth, or a read-level sharing rule or record share, and they say explicitly that an extra `select` policy does not work. The ruling's substance is unchanged: widen read to match.\n\n## Acceptance notes\n\n- Out of scope, per the ruling: #6736 (the batch-write half) remains open and on hold. #7497 is not addressed here. The new text describes single-record writes only and makes no claim about bulk writes.\n- Noted, not fixed (class a, a doc error reachable today): the same `permissions-matrix.mdx` callout still says \"The built-in `admin_full_access` / `organization_admin` sets therefore carry `allowExport: true`\". `default-permission-sets.ts` says neither set grants export any more (the `allowExport` comments on the admin wildcard and the org-admin set). It is left for a separate card so this PR stays within the ruled four items.\n\n## Tests\n\nLocal gates were derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at head `3fc2c9acc9`. There were 44 commands, all run, and all exit 0. `check:docs-transcript-drift` and `check:skill-examples` first refused with exit 3 (PREREQUISITE NOT MET) and were re-run green after building `@objectstack/lint...` and `@objectstack/client-react...` under the verify lock. `--ran` reconciliation: 44 derived, 44 run, 0 unrun. The page-relevant gates are `check:doc-anchors`, `check:doc-authoring`, `check:docs`, `check:doc-security-posture`, `check:docs-single-h1`, `check:nul-bytes` and `check:doc-frontmatter`, all green. Build Docs and the typecheck lanes are left to CI.\n\nNo changeset. `content/docs/**` ships only in the private `apps/docs` package, so this PR carries `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AhQASwqJr2Z7XfGWUdvnbF)_\n"
+}

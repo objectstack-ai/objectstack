@@ -1,0 +1,35 @@
+{
+  "number": 19899,
+  "kind": "pull_request",
+  "title": "feat(spec,runtime,service-automation): the flow doors state callerParamKeys, and the headless screen verdict reads it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T16:10:10Z",
+  "updated_at": "2026-09-23T17:19:08Z",
+  "closed_at": "2026-09-23T17:19:07Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-23T17:19:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19899",
+  "body": "Fixes #19846\n\nClause-②: yes\n\n<sub>Rewritten short by the `domain:spec#5` seat (2026-09-23T16:17Z). The dev report is on #19846; the earlier long body is in the edit history.</sub>\n\n`AutomationContext` gains an optional `callerParamKeys?: string[]` (`packages/spec`): the keys of the caller's own `params`. When it is present, the screen node's headless verdict reads it and never infers. When it is absent (an older producer), the inference from #15787 runs unchanged.\n\n## What changed\n\n- **Doors that fill it:**\n  - the action door, `dispatchFlowAction` (REST `POST /api/v1/actions/...`, MCP `run_action`);\n  - the trigger door, `buildAutomationContext` (`POST /automation/:name/trigger`, the legacy route, a declarative `type: 'flow'` endpoint).\n\n  Each door records the caller's keys before seeding anything. It leaves out its row-id keys: `recordId`, the camelCase object-id alias, and on the action door the action's `recordIdParam`.\n- **Producers that leave it absent (today's inference):** the record-change, schedule, time-relative and webhook triggers, and direct `engine.execute` callers.\n- **Child runs:** `subflow` and `map` drop the parent's list from the child run's context.\n- **Behaviour edge:** a caller that sends the action's `recordIdParam` key with a value other than the row id no longer answers a screen field of that name. The changeset says so.\n- **Docs:**\n  - `flows.mdx` and the changeset describe the signal;\n  - the `flows.mdx` \"known gap\" paragraph on durable resume is replaced, because it has been false since `4177ed3a84`.\n\n## Pins\n\n- Both boundary constructions from the card pause on the real engine (`screen-headless-caller-signal.test.ts`). Removing the signal read turns both red.\n- `screen-headless-satisfaction.test.ts` and `screen-headless-provenance-durable-resume.test.ts` are untouched and green; they now pin the absent path. The dev report names the fixtures in them that encode the inference rather than the contract.\n- One existing pin was edited: `endpoint-executor.test.ts` compares the whole context with `toEqual`, so it now includes `callerParamKeys: ['reason']`.\n\n## Not in this PR\n\n- The schedule trigger's own `params` can still answer a screen: filed as #19900.\n- #15705 stays open for the MCP resume verb.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 19901,
+  "kind": "pull_request",
+  "title": "fix(metadata): honour sortKeys in the typescript/javascript serializer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T16:24:24Z",
+  "updated_at": "2026-09-23T17:20:18Z",
+  "closed_at": "2026-09-23T17:20:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-23T17:20:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19901",
+  "body": "Fixes #19872\n\n## What\n\n`sortKeys` — a `MetadataSaveOptions` field already honoured by the `json` and `yaml` formats — is now honoured by the `typescript` / `javascript` formats too.\n\n## A1 — reproduced; `javascript` is affected the same way and fixed the same way\n\nSerializing an object with `sortKeys: true`: the `json` keys came out sorted, the `typescript` keys did not (`typescript-serializer.ts` never read `options.sortKeys`). `javascript` is the *same* `TypeScriptSerializer` class, routed through the same `renderModule()` — confirmed it silently ignored `sortKeys` too, and one fix (in `renderModule()`) covers both formats. Pinned separately for each.\n\n## A2 — `JSONSerializer`'s sort is deep (recursive), matched exactly\n\n`JSONSerializer.sortObjectKeys()` recurses into nested objects; arrays keep element order, only object keys sort. Extracted verbatim into `packages/metadata/src/serializers/sort-object-keys.ts` (package-internal, published from no `@objectstack/metadata` `exports` entry) so `TypeScriptSerializer`'s `renderModule()` reuses the *exact same* sort — no second implementation. `JSONSerializer` keeps its private `sortObjectKeys()` method, now a thin delegate to the shared function (see `.d.ts` note below for why it's kept rather than inlined away).\n\n## A3 — byte-identity when `sortKeys` is off/absent, pinned for `object` through the loader path\n\n`sortKeys` absent or `false` is byte-identical to `origin/main`, for every format, including through `FilesystemLoader.save()` → `serializeTypeScriptForMetadataType()`.\n\n## `.d.ts` diff (file-surface constraint honoured)\n\nBuilt `@objectstack/metadata` on `origin/main` (`dabf8d795e`) and on this branch's head; diffed every `exports` entry's emitted `.d.ts` (`.`, `./node`, `./migrations`, `./errors`, `./view-container`). Four of five identical byte-for-byte. `index.d.ts` (and `node.d.ts`, which re-exports it — also checked, identical) differs by exactly one added JSDoc comment block on `JSONSerializer`'s already-existing private `sortObjectKeys` member — no declaration line changed, nothing added or removed from the class's shape. That private method's *body* now delegates to the shared helper instead of holding its own copy of the sort; it's kept (not deleted) specifically so the emitted `.d.ts` stays byte-identical apart from the comment.\n\n## Tests\n\nNew `describe('sortKeys (#19872)')` in `packages/metadata/src/serializers/serializers.test.ts`:\n- `sortKeys: true` through the public `serialize()`, `serializeTypeScriptForMetadataType()`, and the `javascript` format — each asserted byte-identical to `JSONSerializer`'s own sorted output wrapped in the module text, using a fixture unsorted at both the top level and a nested level (proves the sort is deep, not top-level-only).\n- `sortKeys` absent/false: byte-identical to `origin/main`, both direct calls and through `FilesystemLoader.save()`.\n- Round trip (`serialize`/`serializeTypeScriptForMetadataType` → `deserialize`) with `sortKeys: true`, for `view` and `object`.\n- `FilesystemLoader.save()` honouring `sortKeys: true` for `object`, through the loader path (A3).\n\n**Ablation** (fix committed first): reverted only the two implementation files to `origin/main`'s version and removed the new shared-sort file, ran the new pins — 4 of 7 went red (every `sortKeys: true` pin), 3 stayed green (the byte-identity-when-off pins and the order-insensitive round trip) — exactly the expected split. Restored with `git checkout HEAD --`, verified `git diff HEAD` empty and `git hash-object` matches `HEAD:<path>` for all three touched/added files.\n\n## README\n\n`packages/metadata/README.md`'s `TypeScriptSerializer` paragraph is silent on which `SerializeOptions` it honours — no false claim about `sortKeys` to correct — so left unedited, per the file surface's own condition (\"only if it states which options the format honours\").\n\n## Gates\n\nRe-derived on the final commit with `node scripts/pm/dispatch-gates.mjs --commands`; every listed command run with its exit code captured before any pipe (full list in the report). The known `check:issue-citations` gap (the derived family runs only `--self-test`) is closed by also running the live verdict, `node scripts/check-issue-citations.mjs`, by hand.\n\nClause-②: no\n\n## Acceptance notes\n\nNo out-of-scope findings.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01TEhopqrWQYBycZzyJHpAZr)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 19875,
   "kind": "issue",
   "title": "`sys_user.role` field help text tells administrators to \"grant platform-admin standing with an unscoped `admin_full_access` assignment\" — false on a walled deployment since PR #19136 (split from #19145, carrier 4)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:engine",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T14:19:46Z",
-  "updated_at": "2026-09-23T14:19:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-23T16:15:08Z",
+  "closed_at": "2026-09-23T16:14:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19875",
   "body": "Split from #19145 (carrier 4) by the triage seat (`session_01Tw7jnJinGHvoGSi8aFkhPJ`, seat post #6015), at the `domain:devx` seat's request (#19145 comment `5796140596`): the carrier lives in `packages/platform-objects`, outside `domain:devx`'s packages.\n\nPath: access-security\n\n## The defect\n\n`packages/platform-objects/src/identity/sys-user.object.ts:704` (`origin/main` `b940f32a56`) — the `role` field's `description`:\n\n> Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2) — grant platform-admin standing with an unscoped `admin_full_access` assignment in `sys_user_permission_set`.\n\nThis is metadata, so it reaches the Setup / Studio UI as the field's help text — the surface an administrator is most likely to read while trying to do exactly this. Since PR #19136 (`74832b68f2`, merged 2026-09-19, #11663 L5), an unscoped `admin_full_access` assignment **no longer confers platform-admin standing under a walled posture**. On a walled deployment the help text prescribes a remedy that silently does nothing.\n\n## Constraints carried from #19145\n\n- ⛔ Do not pre-empt #11979 (Choice 4B) on the `single` posture: state the posture split as it ships today.\n- A description change on a platform object is a published-metadata text change — the taker checks which generated artefacts and pins carry the string and updates them through their generators.\n- #19145 comment `5737897826` warns the carrier set is not known to be complete — sweep `packages/platform-objects` for other descriptions that prescribe the unscoped grant.\n\n## Acceptance\n\nThe help text is true on every posture it is served on (or names no remedy); generated artefacts regenerated; any pin on the old string updated.\n\nRefs: #19145 (parent reading) · PR #19136 · #11663 · #11979 · ADR-0068 D2"

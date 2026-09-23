@@ -1,0 +1,34 @@
+{
+  "number": 19884,
+  "kind": "issue",
+  "title": "fleet-write: no op can transfer an issue to a sibling repo — add a `transfer` op (GraphQL `transferIssue`, token minted for source + target) and an `issue-transfer` door, so cards filed in the wrong repo move with their history instead of being rebuilt",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T14:49:22Z",
+  "updated_at": "2026-09-23T17:57:35Z",
+  "closed_at": "2026-09-23T17:53:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19884",
+  "body": "Filing-gate category: ③ direct dispatch from the session operator (`os-litant`), instruction quoted verbatim below.\nReader: the `domain:skills` execution seat. The first consumer is waiting now: session https://claude.ai/code/session_01X7HwfPLpQtCixDMrRGkSbe must move four `repo:objectui` cards (#18397, #18387, #18377, #14831) into `objectstack-ai/objectui` and will do it through this door once it lands.\nDedup (open + closed, MCP `search_issues`): the query \"transfer issue to another repository fleet-write relay op\" returned 5 hits, all closed fleet cards (#19641, #19701, #19739, #19762, #19774), none about transfer; the query \"issue transfer\" returned 0 hits. Control: \"objectstack-fleet write identity\" returned 5 hits including #19881, filed minutes earlier, so the channel is live.\n\n## Instruction (verbatim)\n\n> objectui 你负责迁移。fleet 中继不支持 GitHub 的 issue transfer, 应该立 skills 卡解决\n\n## What is missing\n\nRule 1 of `.claude/skills/pm-dispatch/references/cross-repo-coordination.md` says a card lives in the repo where its fix lands, and a card whose body still stands without objectstack moves on the spot. The same file's fallback line, 「transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved」, is the only route today, because the fleet relay cannot transfer:\n\n- `scripts/pm/fleet-write/ops.mjs` has a closed op table (`comment`, `comment_edit`, `labels_add`, `labels_remove`, `assign`, `unassign`, `issue_patch`, `issue_create`, `pr_create`, `pr_request_reviewers`, `pr_ready`, `pr_draft`, `automerge_enable`, `automerge_disable`). It has no transfer op.\n- `.github/workflows/fleet-write.yml` mints the App token with `repositories:` set to the one repo the payload names. GitHub's `transferIssue` mutation needs the actor to hold issues write on both the source and the target repository, so even a new op row would be refused with the token as minted today.\n- REST has no transfer endpoint; the transfer exists only as the GraphQL `transferIssue` mutation.\n\nRebuilding a card loses its comment thread, timeline, cross-references and reactions, and leaves a closed husk behind. A real transfer keeps all of them, and GitHub redirects the old URL.\n\n## Fix (suggested route; measurement wins)\n\n1. `ops.mjs`: add a `transfer` op. Required keys: the source issue number and the target repo name (a closed enum of sibling repos under `objectstack-ai`, not free text). Optional key: `create_labels_if_missing`, default false. It spends `issues: write` on both repos. It is refused for a pull request, for a target outside the enum, and for a target equal to the source.\n2. `fleet-write.yml`: for the `transfer` op only, mint the token for the source and target repositories. Every other op keeps the single-repo narrowing. `validate.mjs` emits the second repo name; the payload is never read again for it.\n3. `execute.mjs`: resolve the issue and target-repo node ids, run `transferIssue`, and return the new number and URL.\n4. A door script (for example `scripts/pm/issue-transfer.mjs`, or a mode of an existing door) that paces through `write-pace.mjs`. It reads back the card at its new location, then prints the old and new numbers. It supports `--dry-run` and `--self-test`, and it uses the same exit ladder as `issue-create`, including 6 UNCONFIRMED (never re-run blind).\n5. Update the fallback line in `cross-repo-coordination.md` to point at the door. Rebuild stays only for the cases GitHub refuses (for example, a target repo outside the organisation).\n\nOpen questions for the seat to measure before building:\n- Does the fleet App's installation cover `objectstack-ai/objectui`, `objectstack-ai/cloud` and `objectstack-ai/hotcrm`?\n- What happens to labels with no same-named label in the target? `repo:objectui` and every `domain:*` label have no meaning there.\n- Are assignees kept when the assignee has no access to the target?\n\n## Acceptance\n\n- `validate.mjs --self-test` pins three things: the `transfer` row, the refusal of a target outside the enum, and the refusal of a pull request.\n- The workflow still narrows every non-transfer op to one repository, and a test or self-test pins it.\n- One live transfer is read back at its new URL, and the old URL redirects. The first live use is one of the four cards listed above.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

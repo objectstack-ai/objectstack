@@ -1,0 +1,35 @@
+{
+  "number": 19896,
+  "kind": "pull_request",
+  "title": "fix(analytics): refuse a zero-operator field constraint on the draft preview",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-23T15:45:13Z",
+  "updated_at": "2026-09-23T16:33:24Z",
+  "closed_at": "2026-09-23T16:33:22Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-09-23T16:33:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19896",
+  "body": "Closes #19835\nClause-②: no\n\n## What\n\n`packages/services/service-analytics/src/preview-evaluator.ts`: the draft-data preview now **refuses** a field constraint with zero operators (`{ name: {} }`). Before this change it matched every row.\n\n**The defect.** `matchesWhere`'s per-field arm iterated `Object.entries(cond)`. An empty object has no entries, so the loop body never ran and the row fell through to the closing `return true`. The card's probe `matchesWhere({ name: 'Globex' }, { name: {} })` answered `true`. The operator-vocabulary refusal that PR #19833 added cannot reach this case: with no key there is nothing to look up. All three shipped drivers refuse the shape (`driver-memory` `filter-refusal.ts`, `driver-mongodb` `mongodb-filter.ts`, and `driver-sql` both at the top level and inside combinators). This package's own `where` door also refuses it (`filter-normalizer`'s wrapper arm). So the drafted chart showed every row for a filter that publish refuses outright.\n\n**The repair**, using the refusal plumbing PR #19833 added:\n\n- `isEmptyFieldConstraint`, **mirrored locally**. It matches a plain object with zero own keys. The prototype check keeps a `Date` / `RegExp` / class instance out of it, because those are comparands. The predicate has the same shape as the drivers' copies. The exported copy lives in `driver-memory`, which `service-analytics` does not depend on. The card says not to add a cross-package dependency for this, so none was added.\n- `previewEmptyFieldConstraintError`: the ADR-0112 `INVALID_FILTER` / 400 envelope through the existing `invalidFilterError`. No new error code and no new export. The wording follows `emptyFieldConstraintError`: it names the constraint and its position, and gives the two legal repairs (name an operator, or write a direct comparand). It carries the ruled reasoning that the shape means neither \"every row\" nor \"no rows\". Per `check:doc-authoring`, the runtime string has no tracker number.\n- **Where it fires.** (1) `assertPreviewCanEvaluate` is the row-independent gate that runs before any row is read, and it now walks the whole tree. It tracks the path (`where.$or[1].amount`), so `$and` / `$or` / `$not` nesting cannot route around it. This includes an `$or` arm that a matching row would short-circuit past, and a seed draft with zero rows. (2) `matchesWhere`'s field arm also refuses, so a direct caller gets the same answer. This mirrors the drivers, which judge the shape at every depth.\n- ⛔ The constraint is **not** read as \"matches zero rows\". That is the other silent reading, and the ruling behind the drivers declined it.\n\n## Evidence\n\nNew file `src/__tests__/preview-empty-field-constraint.test.ts`, 11 cases:\n\n- The card probe, top level, empty seed, `$and`, `$or` (the short-circuited arm), `$not`, deep nesting, and direct `matchesWhere` under `$and`. Each asserts `code: 'INVALID_FILTER'` + `status: 400`, never a bare `toThrow()`.\n- Unchanged cases: operator constraints, implicit equality, and an empty **node** (`where: {}` / `$and: [{}]`, which is the identity and not a field constraint).\n\n**Reverse verification** (fix committed first, at `3adb37d427`):\n\n- Mutation: the pre-fix `preview-evaluator.ts` from base `dabf8d795e` was written to disk, and the landing was proven by `grep -c isEmptyFieldConstraint` = 0.\n- Result: **8 failed | 3 passed (11)**, vitest exit 1. All 8 refusal cases went red. The 3 unchanged cases stayed green, as expected, since they pin behaviour that has not moved.\n- Restore was `git checkout HEAD -- path` inside a trap. It was proven by the blob hash `b4aeff76fa` equalling HEAD and by an empty `git diff HEAD`.\n- The test imports `src` by relative path, so no `dist` was involved.\n\n**Package runs at `3adb37d427`:**\n\n- `pnpm --filter @objectstack/service-analytics run test`: **115 files / 2453 tests passed**.\n- `typecheck` (`tsc --noEmit`): exit 0. `--listFiles` includes the new test file.\n- eslint `--no-inline-config --format json` on both touched `.ts` files: 2 files, 0 errors, 0 warnings.\n\n**Derived gate families**: `node scripts/pm/dispatch-gates.mjs` gave 60 derived. Reconciled with `--ran`: 57 exit 0, 3 NOT MEASURED, 0 unrun. The NOT MEASURED ones are `check:dual-build-cjs-loads`, `check:lean-entry-closure` and `check:type-check-debt`. Each exited 3 with `PREREQUISITE NOT MET` because it needs the whole-repo build. That narrowing is declared and left to CI. `check:where-matcher`, `check:doc-authoring`, `check:nul-bytes`, `check:test-source-alias` and `check:published-files` are all green.\n\n**Lint narrowing, declared.** The population is read from `eslint.config.mjs`: both files fall under the `packages/**/*.{ts,...}` objects, and neither is ignored (0 \"file ignored\" warnings). The count is 2 files from the JSON output. Invariance: the config never enables type-aware linting (no `parserOptions.project`), so this diff cannot move any verdict on an untouched file. The repo-wide `pnpm lint` belongs to CI.\n\n## What it costs\n\nA drafted chart whose `where` carries `{ field: {} }` now returns `400 INVALID_FILTER` in preview. Before, it rendered a number computed over every row, and that number changed at publish. To fix a filter, name the intended operator: `{ status: { $eq: 'open' } }` or `{ status: 'open' }`. Changeset: `patch` for `@objectstack/service-analytics`.\n\n## Acceptance notes\n\n1. **Not measured**: an end-to-end reproduction through a rendered Live Canvas draft chart. The evidence is the evaluator-level tests above, the same scope as the card.\n2. **Noted, not filed.** A `Date` in implicit-equality position has the same enumerate-to-nothing fall-through, and this PR leaves it alone. Probe: `matchesWhere({ d: 'zzz' }, { d: new Date('2026-05-01') })` answers `true`. The `Date` falls into the operator-map arm, and its zero entries become a match. It is deliberately outside this refusal, because the drivers treat a `Date` as a comparand, not a constraint. What it *should* answer (an instant equality through `compare`) is not pinned, and reachability through `queryDataset` (a JSON wire body) was not established. Owner: none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AhQASwqJr2Z7XfGWUdvnbF)_\n"
+}
