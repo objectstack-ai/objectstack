@@ -383,7 +383,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the arguments: one card, a source in the organization, a target from the governed roster that is not the source — judged by the relay's own validator": 11,
   'the pre-read: a pull request, a card already moved, or an unreadable card is refused before any write': 5,
   "the direct transport: the target's node id, then ONE paced mutation carrying both node ids — the relay row's own query": 7,
-  'the read-back: the old URL answers 301 to the new card, which answers from the target with the same title': 7,
+  'the read-back: the old URL answers 301 to the new card, which answers from the target with the same title': 8,
   'the relay transport: ONE dispatch carrying ONE transfer, the new number read from the redirect, a failed run names the remedy and is never fallen back from': 8,
   'dry-run: no request leaves, and the plan is printed': 3,
   'the wiring: both halves around the one write verb, on the roster': 4,
@@ -541,7 +541,11 @@ export async function selfTest() {
       t('a mutation that answered while the old URL still serves the card is exit 4', [stuck.exitCode, stuck.text.includes('the card did not move')], [EXIT_BOARD_DISAGREES, true]);
       const b404 = board();
       const gone = await drive({ answers: { ...b404.answers, [`GET /repos/${SRC}/issues/7`]: (init) => (init.redirect === 'manual' ? { status: 404, json: { message: 'Not Found' } } : b404.answers[`GET /repos/${SRC}/issues/7`](init)) } });
-      t('an old URL that answers neither 301 nor 200 is UNCONFIRMED (6), never a success', [gone.exitCode, gone.text.includes('UNCONFIRMED')], [EXIT_UNCONFIRMED, true]);
+      t('an old URL that answers neither 301 nor 200 is UNCONFIRMED (6), never a success', [gone.exitCode, gone.text.includes('UNCONFIRMED') && gone.text.includes('not the 301 a moved card answers')], [EXIT_UNCONFIRMED, true]);
+      // Only the PERMANENT redirect a moved card answers counts — a temporary one naming the same card is not that fact.
+      const b307 = board();
+      const temporary = await drive({ answers: { ...b307.answers, [`GET /repos/${SRC}/issues/7`]: (init) => (init.redirect === 'manual' && b307.state.moved ? { status: 307, json: { url: REDIRECT }, headers: { location: REDIRECT } } : b307.answers[`GET /repos/${SRC}/issues/7`](init)) } });
+      t('⛔ a 307 naming the new card is UNCONFIRMED too — only the 301 a moved card answers is read as the move', [temporary.exitCode, temporary.text.includes('HTTP 307')], [EXIT_UNCONFIRMED, true], temporary.text);
       const bo = board();
       bo.answers['POST /graphql'] = () => {
         bo.state.moved = true;
