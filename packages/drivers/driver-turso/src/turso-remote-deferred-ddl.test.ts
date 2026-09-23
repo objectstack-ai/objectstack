@@ -1,14 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Deferred schema DDL on the Turso REMOTE face — the MEASUREMENT.
+ * Deferred schema DDL on the Turso REMOTE face — refused loudly, measured first.
  *
  * `os migrate plan` / `apply` / `duplicates` / `account-issuer` /
  * `multi-value-columns` boot with `deferSchemaDdl: true`, which arms the
- * driver through the inherited `SqlDriver.setDeferredDdl(true)` and then reads
+ * driver through `setDeferredDdl(true)` and then reads
  * `previewDeferredSchemaWork()` for the plan. This file replays, against a
- * remote-mode `TursoDriver` over a real SQLite database wearing the
- * `@libsql/client` interface, the exact driver calls that boot makes:
+ * `TursoDriver` over a real SQLite database wearing the `@libsql/client`
+ * interface, the exact driver calls that boot makes:
  *
  *   1. `setDeferredDdl(true)` — `DeferSchemaDdlPlugin.init`;
  *   2. `syncSchemasBatch(...)` — `ObjectQLPlugin.start()`'s boot sync, which
@@ -22,7 +22,10 @@
  * Every statement the transport sends is recorded, so "did DDL run" and "did a
  * row get rewritten" are read off the wire and off the disk, not inferred.
  *
- * ## The three predictions, as measured on origin/main
+ * ## The three predictions, as measured BEFORE the refusal existed
+ *
+ * The first commit of this file pinned the unrefused behaviour as it stood on
+ * origin/main; the refusal then replaced those assertions with the ones below.
  *
  * | prediction | door | verdict |
  * |:--|:--|:--|
@@ -40,7 +43,23 @@ import { describe, it, expect } from 'vitest';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 
-/** A pre-existing remote table missing one declared column, holding a non-canonical datetime. */
+interface WireBearingError extends Error {
+  code?: string;
+  status?: number;
+}
+
+/**
+ * The refusal's opening sentence — the operator contract, since the CLI prints
+ * the driver's message verbatim. Spelled out here rather than imported: a test
+ * that imports the string it asserts pins nothing about the wording. The rest
+ * of the message is prose that may be improved without a test edit.
+ */
+const REFUSAL_FIRST_SENTENCE =
+  "Deferred schema DDL is not supported by the Turso REMOTE transport (this datasource's " +
+  'transport mode is `remote`), so a command that promises a dry run or a confirmation before ' +
+  'any schema change cannot keep that promise against it.';
+
+/** A pre-existing table missing one declared column, holding a non-canonical datetime. */
 const PROBE = {
   name: 'probe',
   fields: { at: { type: 'datetime' }, why: { type: 'string' } },
@@ -52,6 +71,8 @@ const FRESH = {
 };
 
 const NAIVE = '2025-07-28 00:00:00';
+const PROBE_DDL = `create table "probe" ("id" TEXT PRIMARY KEY, "created_at" TEXT, "updated_at" TEXT, "at" TEXT)`;
+const PROBE_ROW = `insert into probe (id, at) values ('naive', '${NAIVE}')`;
 
 const sqlOf = (stmt: unknown): string =>
   typeof stmt === 'string' ? stmt : String((stmt as { sql?: unknown }).sql ?? '');
@@ -93,12 +114,8 @@ function record(stub: LibsqlSqliteStub): Recorder {
 /** The remote database as it stands before the migration command runs. */
 function seededRemote(): LibsqlSqliteStub {
   const stub = makeLibsqlSqliteStub();
-  stub.raw
-    .prepare(
-      `create table "probe" ("id" TEXT PRIMARY KEY, "created_at" TEXT, "updated_at" TEXT, "at" TEXT)`,
-    )
-    .run();
-  stub.raw.prepare(`insert into probe (id, at) values ('naive', ?)`).run(NAIVE);
+  stub.raw.prepare(PROBE_DDL).run();
+  stub.raw.prepare(PROBE_ROW).run();
   return stub;
 }
 
@@ -120,7 +137,27 @@ async function remoteDriver(rec: Recorder): Promise<TursoDriver> {
   return driver;
 }
 
-describe('measured on origin/main: a deferred-DDL boot against a REMOTE TursoDriver', () => {
+/** The driver calls a deferred-DDL `os migrate` boot makes, in its order. */
+async function deferredBoot(driver: TursoDriver) {
+  driver.setDeferredDdl(true);
+  await driver.syncSchemasBatch([
+    { object: 'probe', schema: PROBE },
+    { object: 'fresh', schema: FRESH },
+  ]);
+  await driver.syncSchema('probe', PROBE);
+  return driver.previewDeferredSchemaWork();
+}
+
+async function failureOf(work: () => unknown): Promise<WireBearingError | null> {
+  try {
+    await work();
+    return null;
+  } catch (err) {
+    return err as WireBearingError;
+  }
+}
+
+describe('remote face — arming the deferral is refused loudly', () => {
   it('the engine boot sync takes the batch door on this driver', async () => {
     const stub = seededRemote();
     const driver = await remoteDriver(record(stub));
@@ -130,12 +167,57 @@ describe('measured on origin/main: a deferred-DDL boot against a REMOTE TursoDri
     stub.close();
   });
 
-  it('prediction (a) DDL — MEASURED: arming is accepted and the boot sync still issues CREATE/ALTER', async () => {
+  it('refuses with the NOT_IMPLEMENTED / 501 envelope and names the remote mode', async () => {
+    const stub = seededRemote();
+    const driver = await remoteDriver(record(stub));
+
+    const failure = await failureOf(() => driver.setDeferredDdl(true));
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure!.code).toBe('NOT_IMPLEMENTED');
+    expect(failure!.status).toBe(501);
+    expect(failure!.message.startsWith(REFUSAL_FIRST_SENTENCE)).toBe(true);
+    stub.close();
+  });
+
+  it('a deferred boot against remote pending schema work performs NOTHING', async () => {
     const stub = seededRemote();
     const rec = record(stub);
     const driver = await remoteDriver(rec);
 
-    expect(() => driver.setDeferredDdl(true)).not.toThrow();
+    const failure = await failureOf(() => deferredBoot(driver));
+
+    expect(failure?.code).toBe('NOT_IMPLEMENTED');
+    expect(failure?.status).toBe(501);
+    // Nothing reached the wire — so zero DDL and zero row writes by construction…
+    expect(rec.statements).toEqual([]);
+    expect(rec.ddl()).toEqual([]);
+    expect(rec.rowWrites()).toEqual([]);
+    // …and the database is exactly as the command found it.
+    expect(tablesOf(stub)).toEqual(['probe']);
+    expect(columnsOf(stub, 'probe')).toEqual(['id', 'created_at', 'updated_at', 'at']);
+    expect(atOf(stub)).toBe(NAIVE);
+    stub.close();
+  });
+
+  it('disarming is accepted and sends nothing', async () => {
+    const stub = seededRemote();
+    const rec = record(stub);
+    const driver = await remoteDriver(rec);
+
+    expect(() => driver.setDeferredDdl(false)).not.toThrow();
+    expect(rec.statements).toEqual([]);
+    stub.close();
+  });
+});
+
+describe('lit control — remote ordinary boot sync (deferral NOT armed) still performs its DDL and backfill', () => {
+  it('a refused arm leaves the driver un-armed: the batch door still creates and alters', async () => {
+    const stub = seededRemote();
+    const rec = record(stub);
+    const driver = await remoteDriver(rec);
+    expect((await failureOf(() => driver.setDeferredDdl(true)))?.code).toBe('NOT_IMPLEMENTED');
+
     await driver.syncSchemasBatch([
       { object: 'probe', schema: PROBE },
       { object: 'fresh', schema: FRESH },
@@ -150,66 +232,78 @@ describe('measured on origin/main: a deferred-DDL boot against a REMOTE TursoDri
     stub.close();
   });
 
-  it('prediction (b) backfill — batch door: REFUTED (no row rewrite on the engine boot path)', async () => {
+  it('the syncSchema door still runs the canonical backfill, rewriting the stored row', async () => {
     const stub = seededRemote();
     const rec = record(stub);
     const driver = await remoteDriver(rec);
 
-    driver.setDeferredDdl(true);
-    await driver.syncSchemasBatch([{ object: 'probe', schema: PROBE }]);
-
-    expect(rec.rowWrites()).toEqual([]);
-    expect(atOf(stub)).toBe(NAIVE);
-    stub.close();
-  });
-
-  it('prediction (b) backfill — syncSchema door: MEASURED (the coverage pass rewrites stored rows)', async () => {
-    const stub = seededRemote();
-    const rec = record(stub);
-    const driver = await remoteDriver(rec);
-
-    driver.setDeferredDdl(true);
     await driver.syncSchema('probe', PROBE);
 
     expect(rec.ddl()).toEqual(['ALTER TABLE "probe" ADD COLUMN "why" TEXT']);
     expect(rec.rowWrites().length).toBeGreaterThan(0);
     expect(rec.rowWrites().every((s) => /^\s*update "probe" set "at"/i.test(s))).toBe(true);
-    expect(atOf(stub)).not.toBe(NAIVE);
+    expect(atOf(stub)).toBe('2025-07-28T00:00:00.000Z');
     stub.close();
   });
+});
 
-  it('prediction (b) backfill — initObjects door: MEASURED', async () => {
-    const stub = seededRemote();
+describe.each([
+  {
+    mode: 'local',
+    make: (client: unknown) => {
+      void client;
+      return new TursoDriver({ url: ':memory:' });
+    },
+  },
+  {
+    mode: 'replica',
+    make: (client: unknown) =>
+      new TursoDriver({
+        url: ':memory:',
+        syncUrl: 'libsql://primary.turso.io',
+        authToken: 'token',
+        client: client as never,
+        sync: { onConnect: false },
+      }),
+  },
+])('lit control — the $mode face keeps deferring exactly as before', ({ mode, make }) => {
+  const tablesIn = async (driver: TursoDriver) =>
+    ((await driver.execute(`select name from sqlite_master where type='table'`)) as Array<{ name: string }>)
+      .map((r) => r.name);
+  const columnsIn = async (driver: TursoDriver, table: string) =>
+    ((await driver.execute(`pragma table_info("${table}")`)) as Array<{ name: string }>).map((r) => r.name);
+
+  it('arms, records instead of performing, previews the work, and flushes it on confirm', async () => {
+    const stub = makeLibsqlSqliteStub();
     const rec = record(stub);
-    const driver = await remoteDriver(rec);
+    const driver = make(rec.client);
+    expect(driver.transportMode).toBe(mode);
+    await driver.connect();
+    await driver.execute(PROBE_DDL);
+    await driver.execute(PROBE_ROW);
 
-    driver.setDeferredDdl(true);
-    await driver.initObjects([PROBE]);
+    const pending = await deferredBoot(driver);
 
-    expect(rec.ddl()).toEqual(['ALTER TABLE "probe" ADD COLUMN "why" TEXT']);
-    expect(rec.rowWrites().length).toBeGreaterThan(0);
-    expect(atOf(stub)).not.toBe(NAIVE);
-    stub.close();
-  });
+    // Recorded, not performed.
+    expect(driver.deferredSchemaObjectCount).toBe(2);
+    expect(await tablesIn(driver)).not.toContain('fresh');
+    expect(await columnsIn(driver, 'probe')).not.toContain('why');
+    expect(pending).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ table: 'fresh', kind: 'create_table', columns: ['label'] }),
+        expect.objectContaining({ table: 'probe', kind: 'add_columns', columns: ['why'] }),
+      ]),
+    );
 
-  it('prediction (c) no pending work — MEASURED: preview and flush both answer nothing', async () => {
-    const stub = seededRemote();
-    const rec = record(stub);
-    const driver = await remoteDriver(rec);
+    // `apply`, after the operator said yes.
+    const performed = await driver.flushDeferredSchemaDdl();
+    expect(performed).toEqual(pending);
+    expect(await tablesIn(driver)).toContain('fresh');
+    expect(await columnsIn(driver, 'probe')).toContain('why');
 
-    driver.setDeferredDdl(true);
-    await driver.syncSchemasBatch([
-      { object: 'probe', schema: PROBE },
-      { object: 'fresh', schema: FRESH },
-    ]);
-    await driver.syncSchema('probe', PROBE);
-
-    expect(driver.deferredSchemaObjectCount).toBe(0);
-    expect(await driver.previewDeferredSchemaWork()).toEqual([]);
-    // What `apply` reports as performed after its confirm prompt — the work
-    // it confirmed had already happened during boot.
-    expect(await driver.flushDeferredSchemaDdl()).toEqual([]);
-    expect(rec.ddl().length).toBeGreaterThan(0);
+    // These faces sync through Knex; the libsql client carried no schema work.
+    expect(rec.ddl()).toEqual([]);
+    await driver.disconnect();
     stub.close();
   });
 });

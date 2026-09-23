@@ -342,6 +342,66 @@ function refuseRemoteTransaction(door: string, detail: string): never {
   throw err;
 }
 
+// ── Remote deferred schema DDL: refused, never decorative ────────────────────
+
+/**
+ * [#19823] The Turso REMOTE face cannot defer schema DDL, and now says so when
+ * a caller tries to arm the deferral instead of accepting it and ignoring it.
+ *
+ * # The defect this replaces
+ *
+ * `SqlDriver.setDeferredDdl(true)` is how `os migrate plan` / `apply` /
+ * `duplicates` / `account-issuer` / `multi-value-columns` keep their dry-run or
+ * confirm-before-change promise: the Knex `initObjects` records the work in
+ * `deferredSchemaObjects` instead of performing it, `previewDeferredSchemaWork`
+ * renders it and `flushDeferredSchemaDdl` performs it after the operator says
+ * yes. This class inherited the setter, so the CLI's own loud refusal (it fires
+ * only when the method is absent) never fired — while every remote schema door
+ * (`syncSchemasBatch`, the engine's boot sync; `syncSchema` / `initObjects`)
+ * routes through `RemoteTransport`, which performs the DDL immediately, and the
+ * latter two also run the #5770 canonical temporal backfill, which rewrites
+ * stored rows. Measured (`turso-remote-deferred-ddl.test.ts`): the deferral was
+ * accepted, CREATE/ALTER ran on every door, the backfill rewrote rows on two of
+ * them, and preview and flush both answered `[]` — a dry run that changed the
+ * database and then reported no pending work.
+ *
+ * # Why a refusal rather than an implementation
+ *
+ * Honouring the deferral remotely means recording the objects and building a
+ * remote preview/flush — new capability with no measured pull. The refusal keeps
+ * every promise those commands make true today, in the envelope and for the
+ * reason {@link refuseRemoteTransaction} and {@link refuseRemoteAutonumber}
+ * record for their sibling gaps on this transport: the call is spelled correctly
+ * and the base class declares it, so the gap is the backend's —
+ * `NOT_IMPLEMENTED`/501, a {@link StandardErrorCode} member, no new code.
+ *
+ * # Why at the setter
+ *
+ * It is the one door every deferring caller passes through, and it runs before
+ * any schema work: a refused arm has sent nothing to the database, and the
+ * driver is left un-armed, so an ordinary boot sync on it is unchanged.
+ */
+function refuseRemoteDeferredDdl(): never {
+  const err = new Error(
+    'Deferred schema DDL is not supported by the Turso REMOTE transport (this datasource\'s ' +
+    'transport mode is `remote`), so a command that promises a dry run or a confirmation before ' +
+    'any schema change cannot keep that promise against it. Remote mode sends every CREATE TABLE ' +
+    'and ALTER TABLE through `RemoteTransport`, which performs it immediately and records nothing ' +
+    'a plan could preview, and a remote schema sync also rewrites stored datetime/time values to ' +
+    'their canonical spelling in place. Until this change arming the deferral was accepted: the ' +
+    'database was altered during the boot and the plan then reported no pending work. The call is ' +
+    'spelled correctly and `SqlDriver` declares it, so this is a capability gap of the remote ' +
+    'transport rather than a mistake in the request — which is why it answers NOT_IMPLEMENTED/501 ' +
+    'and not a 400. To preview schema work, run the command against a local SQLite copy of this ' +
+    'database (a `file:` URL) — the local and embedded-replica faces defer DDL; to apply it, an ' +
+    'ordinary boot against this datasource (`os serve` / `os start`) performs the additive schema ' +
+    'sync directly.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
 // ── Remote operation timeout ─────────────────────────────────────────────────
 
 /**
@@ -1937,6 +1997,18 @@ export class TursoDriver extends SqlDriver {
   // ===================================
   // Schema Management (remote mode overrides)
   // ===================================
+
+  /**
+   * Arm/disarm DDL deferral — refused on the REMOTE face when arming, see
+   * {@link refuseRemoteDeferredDdl}. None of the remote schema doors below reads
+   * the flag, so accepting it here would promise a dry run nothing keeps.
+   * Disarming is accepted (it is what the flag already is), and local / replica
+   * modes inherit the Knex deferral unchanged.
+   */
+  override setDeferredDdl(deferred: boolean): void {
+    if (deferred && this.isRemote) refuseRemoteDeferredDdl();
+    super.setDeferredDdl(deferred);
+  }
 
   override async syncSchema(object: string, schema: unknown, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'syncSchema');
