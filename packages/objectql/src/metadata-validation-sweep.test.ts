@@ -11,7 +11,9 @@
  *
  *   1. A spec-conformant payload  →  expect `success: true`.
  *   2. A deliberately broken payload (missing required field) →
- *      expect `invalid_metadata` + status 422 + structured `issues[]`.
+ *      expect `invalid_metadata` + status 422 + structured `issues[]`, and
+ *      (#19586) the refusal must be the SCHEMA's, naming the broken field —
+ *      never an author-time gate rule, which throws the same envelope.
  *
  * Types without a Zod schema in the central registry (today only
  * `rag_pipeline` among the URL-map kinds — `theme`/`webhook` and their
@@ -58,13 +60,19 @@ function makeProtocol() {
     // a report binding a dataset nobody declares is still refused, which is the
     // #19542 door working. The dimension and measure names are exactly what the
     // `report` fixture's `rows` / `values` select.
-    registry.registerItem('dataset', {
-        name: 'sweep_account_metrics',
-        label: 'Account Metrics',
-        object: 'sweep_account',
-        dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
-        measures: [{ name: 'amount_sum', label: 'Amount', aggregate: 'sum', field: 'amount' }],
-    });
+    //
+    // [#19586] The OBJECT that dataset is over joins it, for the same reason
+    // one door further on: since the dataset door opened (#19143) a dataset's
+    // `object` resolves against this universe, and with nothing registered the
+    // `dataset` fixture was refused `object-reference-unknown` on
+    // `datasets.sweep_account_metrics.object` — the refusal that kept this
+    // type's row at `no fixture (skipped)`. Both seeds are the `valid` fixtures
+    // themselves, cloned, so the tenant cannot drift from what the `object` and
+    // `dataset` rows publish: the rows judge a document, the seeds are the
+    // tenant it is judged in. ⛔ Still not a relaxation: a dataset over an object
+    // this tenant does not declare is refused exactly as before.
+    registry.registerObject(structuredClone(FIXTURES.object.valid));
+    registry.registerItem('dataset', structuredClone(FIXTURES.dataset.valid));
     const mockEngine: any = {
         registry,
         find: vi.fn().mockResolvedValue([]),
@@ -81,7 +89,11 @@ function makeProtocol() {
 interface Fixture {
     valid: any;
     invalid: any;
-    /** Field name the invalid payload removes (for human-readable assertion). */
+    /**
+     * The field the invalid payload breaks. ASSERTED, not just printed
+     * (#19586): the 422 counts only when the schema's own issue names this
+     * field, at the top level or as the last segment of a nested path.
+     */
     invalidatedField: string;
 }
 
@@ -176,9 +188,33 @@ const FIXTURES: Record<string, Fixture> = {
         invalid: { label: 'No name' },
         invalidatedField: 'name',
     },
+    // [#19586] Runtime-creatable since the #19143 door, and until this fixture
+    // its row printed `no fixture (skipped)`. The valid document is the
+    // tenant's own dataset over `sweep_account`. `makeProtocol` seeds that
+    // object, and seeds this dataset from this fixture for the `report`
+    // row. The invalid one is the same document minus `measures`, so the only
+    // thing the schema can refuse it for is `measures`, and `runOne` asserts
+    // that it is the schema refusing, never a gate rule on `object`.
+    dataset: {
+        valid: {
+            name: 'sweep_account_metrics',
+            label: 'Account Metrics',
+            object: 'sweep_account',
+            dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
+            measures: [{ name: 'amount_sum', label: 'Amount', aggregate: 'sum', field: 'amount' }],
+        },
+        invalid: {
+            name: 'sweep_account_metrics',
+            label: 'Account Metrics',
+            object: 'sweep_account',
+            dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
+        },
+        invalidatedField: 'measures',
+    },
     report: {
         // ADR-0021 single-form: a report binds a dataset + selects values by name.
-        // The bound dataset is the fixture directly above, and its dimension and
+        // The bound dataset is the fixture directly above (seeded from it into
+        // every harness's universe by `makeProtocol`), and its dimension and
         // measure names are what `rows` / `values` select.
         valid: {
             name: 'sweep_report',
@@ -311,7 +347,11 @@ const FIXTURES: Record<string, Fixture> = {
             tools: ['sweep_tool'],
         },
         invalid: { name: 'sweep_skill', label: 'Sweep' },
-        invalidatedField: 'description',
+        // [#19586] `tools`, not `description`: the payload drops both, but
+        // `description` is optional on a skill, and the schema's only issue is
+        // at `tools`. The label named a field whose absence refuses nothing,
+        // and nothing read it until the assertion above started to.
+        invalidatedField: 'tools',
     },
 };
 
@@ -358,7 +398,24 @@ async function runOne(type: string, fx: Fixture | undefined): Promise<Row> {
         invalidRejected = hasSchema ? 'fail' : 'ok';
     } catch (e: any) {
         if (e?.code === 'INVALID_METADATA' && e?.status === 422 && Array.isArray(e?.issues)) {
-            invalidRejected = 'ok';
+            // [#19586] The envelope alone cannot say WHICH door refused: the
+            // runtime author-time gate throws the very same `INVALID_METADATA` /
+            // 422 / `issues[]`. A broken fixture refused there — say for an
+            // `object-reference-unknown` in this harness's small universe —
+            // would read `ok` while proving nothing about the schema. So the
+            // refusal counts only when it is the SCHEMA's and names the field
+            // the fixture broke: a gate issue always carries its `rule` and a
+            // stack-rooted path (`datasets.NAME.object`), a schema issue carries
+            // neither.
+            const issues: any[] = e.issues;
+            const gateRules = issues.map((i) => i?.rule).filter(Boolean);
+            const named = issues.some(
+                (i) => !i?.rule
+                    && typeof i?.path === 'string'
+                    && (i.path === fx.invalidatedField || i.path.endsWith(`.${fx.invalidatedField}`)),
+            );
+            if (gateRules.length === 0 && named) invalidRejected = 'ok';
+            else invalidNote = `422 is not the schema refusing \`${fx.invalidatedField}\`: ${JSON.stringify(issues)}`;
         } else {
             invalidNote = `unexpected error: ${e?.code ?? 'unknown'} ${e?.status ?? ''} ${e?.message ?? ''}`;
         }
