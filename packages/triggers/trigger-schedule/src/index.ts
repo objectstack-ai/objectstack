@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 export { ScheduleTriggerPlugin } from './plugin.js';
+export type { ScheduleTriggerPluginOptions } from './plugin.js';
 export { ScheduleTrigger, normalizeSchedule } from './schedule-trigger.js';
 // `computeTickWindow`, `scheduleDispatchKey` and `TickWindow` are deliberately
 // NOT re-exported here: measured 0 consumers outside this package, they appear
@@ -18,9 +19,12 @@ export type {
     ScheduleDispatchLedger,
     ScheduleDispatchClaim,
     ScheduleDispatchOutcome,
+    ScheduledWorkPolicySource,
+    ScheduledWorkTriggerOptions,
 } from './schedule-trigger.js';
 
 export { TimeRelativeTriggerPlugin } from './time-relative-plugin.js';
+export type { TimeRelativeTriggerPluginOptions } from './time-relative-plugin.js';
 export {
     TimeRelativeTrigger,
     computeDateWindows,

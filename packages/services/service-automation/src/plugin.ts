@@ -13,7 +13,7 @@ import type {
 import { isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { AutomationEngine } from './engine.js';
-import type { RunSummaryLogLevel } from './engine.js';
+import type { AutomationEngineOptions, RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { resolveFlowPrecedence, renderFlowContender } from './flow-precedence.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
@@ -127,6 +127,13 @@ export interface AutomationServicePluginOptions {
      * — only its default-level narration is.
      */
     runSummaryLog?: RunSummaryLogLevel;
+    /**
+     * [#19834] This kernel's scheduled-work policy, forwarded to the engine
+     * unchanged — see {@link AutomationEngineOptions.scheduledWorkPolicy}.
+     * Absent, the deployment default (`OS_AUTOMATION_SCHEDULED_WORK_ENABLED`)
+     * applies exactly as before.
+     */
+    scheduledWorkPolicy?: AutomationEngineOptions['scheduledWorkPolicy'];
     /**
      * Per-flow cap on terminal run-history rows, enforced at write time (the
      * "or 100 runs/flow, whichever first" half of the #2585 retention
@@ -595,6 +602,7 @@ export class AutomationServicePlugin implements Plugin {
         this.engine = new AutomationEngine(ctx.logger, undefined, {
             maxLogSize: this.options.maxLogSize,
             runSummaryLog: this.options.runSummaryLog,
+            scheduledWorkPolicy: this.options.scheduledWorkPolicy,
         });
 
         // Register as global service — other plugins access via ctx.getService('automation')
