@@ -1178,7 +1178,7 @@ export const RecordDetailsProps = strictObject({
    * set, with the one describe it shares word for word with
    * `record:quick_actions` ({@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}
    * carries the renderer read points). Like this pair it is presentation
-   * only: it hides the whole block and authorises nothing.
+   * only: it authorises nothing.
    */
   enforceFieldSecurity: z.boolean().optional().describe(
     'Fold this block\'s field list through the caller\'s FIELD-read permissions before rendering, so a field the permission set denies leaves no empty row behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — with it off a denied field still arrives masked or stripped, and with it on the server still decides every value.',
