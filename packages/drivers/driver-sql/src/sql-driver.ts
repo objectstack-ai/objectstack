@@ -15399,7 +15399,16 @@ export class SqlDriver implements IDataDriver {
           // refusals (raised on the ORIGINAL nodes, eagerly) are unaffected.
           this.withWithheldFilterLog(root, () => this.applyFilterCondition(qb, negated, 'and', table, root));
         });
-      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      } else if (isFilterNode(value)) {
+        // [#19885] An OPERATOR MAP is a plain object — the walk's own reading
+        // ({@link isFilterNode}, which {@link classifyFilterKey} and the
+        // top-level `{ field: value }` loop in `compileFilters` agree with). This
+        // test used to be "any non-array object", so a `Date` or binary comparand
+        // landed here, `Object.entries` found nothing to emit, and the leaf was
+        // DROPPED: `{ $and: [{ d: <Date> }] }` answered every row on SQLite and
+        // Postgres while the same `{ d: <Date> }` at top level answered the one
+        // matching row. Such a value is a comparand, and it now takes the
+        // bare-value branch below, the same compilation the top-level loop gives it.
         const localField = this.mapSortField(key);
         const field = this.remoteColumn(table, key, localField);
         // Non-null only for a SQLite `Field.datetime`, whose two stored forms
@@ -15642,6 +15651,19 @@ export class SqlDriver implements IDataDriver {
         // one condition must not have two verdicts depending on its siblings.
         // [#8197] A bare comparand is usually a primitive, so `condition` — this
         // node, an ARM of the merge when one happened — is what carries the mark.
+        //
+        // [#19885] The comparand gate first, in the order the top-level loop
+        // runs its two: this branch is the third of the three positions
+        // {@link SqlDriver.assertOperatorAppliesToColumn}'s docblock names, and
+        // it carried the column gate without the comparand one. So an array in
+        // the equality slot passed here unrefused whenever the leaf sat under
+        // `$and` / `$or` / `$not` — or beside a sibling key that carries an
+        // operator, which routes the whole node here too. SQLite then refused
+        // the bind (a 500 `DATABASE_ERROR` for a filter the caller can fix) and
+        // Postgres bound the array as its array-literal text (`{"a"}`) and
+        // silently answered the wrong rows. Same gate, same `INVALID_FILTER` /
+        // 400, as the same leaf gets at top level.
+        assertCompilableComparand(field, '=', value, condition);
         this.assertOperatorAppliesToColumn(
           table, localField, field, '=', true, refusalSubtree(value, condition),
         );
