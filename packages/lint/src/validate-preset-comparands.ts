@@ -115,6 +115,16 @@ import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from 
  *   (`validate-flow-node-writes`), a templated `{…}` value skipped;
  * - `dataSource.object`, then `properties.object` / `properties.objectName`
  *   — page components (`validate-page-field-bindings`);
+ * - `interfaceConfig.source` — a list page's config, which names its object
+ *   `source` (the console queries exactly that object); read only at that
+ *   position, the page's own `interfaceConfig`, and falling through to the
+ *   page's `object` when absent — the binding `validate-page-field-bindings`
+ *   already makes there (#19791);
+ * - a lookup field's `lookupFilters` → that field's `reference`, else NOTHING:
+ *   the picker queries the REFERENCED object, so like the public-lookup picker
+ *   below it must never fall through to the object that owns the field (a
+ *   `relatedListFilter` on the same field keeps binding to the owner, whose
+ *   rows it filters) (#19791);
  * - `publicPicker.object`, else the enclosing form field's `reference`
  *   resolved on the view's object, else NOTHING — a form field's public-lookup
  *   picker (`FormFieldPublicPickerSchema`) queries the REFERENCED object, so
@@ -354,7 +364,10 @@ interface Ancestor {
  * the SAME `recordsOf` coercion `walkAuthoredFilters` applied to the
  * collection, so a map-form collection's injected `name` is visible here too.
  */
-function ancestorsOf(stack: AnyRec, path: string): { collection: string; chain: Ancestor[] } | null {
+function ancestorsOf(
+  stack: AnyRec,
+  path: string,
+): { collection: string; chain: Ancestor[]; filterKey: string | number } | null {
   const segments = pathSegments(path);
   if (!segments || segments.length < 3) return null;
   const [collection, index, ...rest] = segments;
@@ -373,7 +386,7 @@ function ancestorsOf(stack: AnyRec, path: string): { collection: string; chain: 
     if (isPlainObject(node)) chain.push({ key, node });
     else if (!Array.isArray(node)) break;
   }
-  return { collection, chain };
+  return { collection, chain, filterKey: rest[rest.length - 1] };
 }
 
 /**
@@ -384,6 +397,22 @@ function ancestorsOf(stack: AnyRec, path: string): { collection: string; chain: 
  * never on the form's own object.
  */
 const PUBLIC_PICKER_KEY = 'publicPicker';
+
+/**
+ * [#19791] The filter key of a lookup field's picker filter
+ * (`FieldSchema.lookupFilters`). The console lowers each `{ field, operator,
+ * value }` entry to a Mongo `$filter` on the REFERENCED object — the field's
+ * `reference` — and never on the object that owns the field. Every spelling of
+ * this key in the platform means that same picker filter, so the reader claims
+ * it by the filter key itself.
+ */
+const LOOKUP_FILTERS_KEY = 'lookupFilters';
+
+/**
+ * [#19791] The page key holding a list page's interface config
+ * (`InterfacePageConfigSchema`), which names its object `source`.
+ */
+const INTERFACE_CONFIG_KEY = 'interfaceConfig';
 
 /**
  * Bind one authored filter to the object its conditions address — the NEAREST
@@ -401,6 +430,21 @@ function boundObjectOf(
 ): string | undefined {
   const located = ancestorsOf(stack, path);
   if (!located) return undefined;
+
+  // [#19791] A lookup field's picker filter is a CLAIMING reader, for the
+  // #16106 B1 reason the public-lookup picker below is one: its conditions
+  // address the REFERENCED object, so the position binds to the enclosing
+  // field's literal `reference` and to NOTHING otherwise. Falling through to
+  // the owning object would be a false refusal wherever the two objects share
+  // a field name with differing types. Unbound leaves arm 2 silent on this
+  // subtree only; arm 1 still judges it.
+  if (located.filterKey === LOOKUP_FILTERS_KEY) {
+    const field = located.chain[located.chain.length - 1].node;
+    return Object.prototype.hasOwnProperty.call(field, LOOKUP_FILTERS_KEY)
+      ? literalObjectName(field.reference)
+      : undefined;
+  }
+
   return bindAncestors(located.collection, located.chain, located.chain.length - 1, datasets, graph);
 }
 
@@ -448,6 +492,16 @@ function bindAncestors(
       if (!formObject) return undefined;
       const verdict = resolveFieldPath(graph, formObject, formField);
       return verdict?.kind === 'ok' ? strName(verdict.meta?.reference) : undefined;
+    }
+
+    // [#19791] A list page's `interfaceConfig` names its object `source`. Read
+    // at that one position — the page's own config, directly under the
+    // `pages` item — and NOT claiming: without a `source` the search goes on
+    // outward to the page's `object`, the fallback
+    // `validate-page-field-bindings` applies to the same config.
+    if (collection === 'pages' && i === 1 && key === INTERFACE_CONFIG_KEY) {
+      const viaSource = literalObjectName(r.source);
+      if (viaSource) return viaSource;
     }
 
     const direct = literalObjectName(r.object) ?? literalObjectName(r.objectName);

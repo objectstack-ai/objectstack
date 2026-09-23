@@ -64,8 +64,27 @@ type AnyRec = Record<string, unknown>;
  * door already judges it at parse), and listing it here is what extends the
  * three walking rules — tokens, empty combinators, preset comparands — to the
  * new position instead of leaving a per-rule hole.
+ *
+ * `filterBy` and `lookupFilters` (#19791) are the two consumed RULE-ARRAY
+ * carriers that do not spell the key `filter` either: a list page's always-on
+ * base filter (`interfaceConfig.filterBy`, `z.array(ViewFilterRuleSchema)`,
+ * which the console spreads into the list query beside the view's own
+ * `filter`) and a lookup field's picker filter (`lookupFilters`, lowered by the
+ * console to a Mongo `$filter` on the REFERENCED object). Both values reach
+ * the engine's `where` verbatim. Their schemas carry no preset check, so
+ * before this entry an ordering preset in either parsed green, linted green,
+ * and was refused only at query time. What the entry changes per walking rule,
+ * measured: preset comparands and filter tokens now judge both carriers (the
+ * engine resolves the same two placeholder vocabularies there and refuses the
+ * same residue); empty combinators is unchanged, because both carriers are
+ * arrays and that rule judges Mongo-shape nodes only; the flow token rule is
+ * unchanged, because it walks `flows` alone and no flow schema declares
+ * either key. The binding half — which object a condition on each carrier
+ * addresses — is `validate-preset-comparands.ts`'s, not this walk's.
  */
-export const FILTER_KEYS: ReadonlySet<string> = new Set(['filter', 'filters', 'runtimeFilter', 'relatedListFilter']);
+export const FILTER_KEYS: ReadonlySet<string> = new Set([
+  'filter', 'filters', 'runtimeFilter', 'relatedListFilter', 'filterBy', 'lookupFilters',
+]);
 
 /** One stack collection a caller wants walked. */
 export interface FilterSurface {
